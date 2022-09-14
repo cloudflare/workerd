@@ -1,0 +1,50 @@
+# This is the Rust <-> workerd integration crate. It provides utilities implemented in Rust and
+# is exposed using cxx to avoid needing to build a C FFI binding manually in both Rust and C++.
+#
+# It also has some extra code to make sure loading multiple Rust libraries into workerd
+# is safe (specifically, lol-html). See
+# * https://github.com/adetaylor/cxx/blob/book/book/src/building.md#linking-the-c-and-rust-together
+# * https://github.com/rust-lang/rust/issues/73632
+# Basically we create a mega-crate that links in all our rust dependencies which is
+# the best that we can do right now to avoid linkage issues.
+
+[package]
+name = "rust-deps"
+version = "0.0.0"
+authors = ["Vitali Lovich <vlovich@cloudflare.com>", "Aaron Loyd <aloyd@cloudflare.com"]
+edition = "2018"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+anyhow = "1"
+cxx = "1"
+typed-arena = "2"
+libc = "0.2"
+lolhtml = { path = "DEPS_LOL_HTML/c-api" }
+backtrace = "0.3"
+
+[dependencies.addr2line]
+version = "0.14"
+default-features = false
+features = ["std", "rustc-demangle", "cpp_demangle", "fallible-iterator", "smallvec"]
+
+[dependencies.object]
+version = "0.23"
+default-features = false
+# Only need to be able to read ELF files.
+features = ["std", "read_core", "elf", "archive", "compression", "unaligned"]
+
+[build-dependencies]
+cxx-build = "1.0"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

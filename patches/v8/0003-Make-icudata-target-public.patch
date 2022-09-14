@@ -1,0 +1,25 @@
+From c1c2ff778334ace97d889cb486a48ae28c989fd0 Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@cloudflare.com>
+Date: Sat, 17 Sep 2022 11:11:15 -0500
+Subject: [PATCH 3/4] Make `:icudata` target public.
+
+Dependencies are required to load this file, so it ought to be exposed for them to use.
+---
+ bazel/BUILD.icu | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 2ae79a5784..4843ea09f9 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -5,6 +5,7 @@
+ filegroup(
+     name = "icudata",
+     srcs = ["common/icudtl.dat"],
++    visibility = ["//visibility:public"],
+ )
+ 
+ cc_library(
+-- 
+2.30.2
+

@@ -1,0 +1,3 @@
+This directory is used as the basis for a trivial BUILD file that just forwards elsewhere. We need
+an empty directory to feed into Bazel's new_local_repository rule. There is probably a better way
+to do this.

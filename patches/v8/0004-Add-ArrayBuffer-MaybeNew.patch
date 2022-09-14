@@ -1,0 +1,34 @@
+From ef1d0dc9dcd206fe658d63472556d197369f1149 Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@cloudflare.com>
+Date: Fri, 16 Sep 2022 21:41:45 -0500
+Subject: [PATCH 4/4] Add `ArrayBuffer::MaybeNew()`.
+
+In Cloudflare's edge runtime, this is part of a larger patch that allows graceful handling of allocations that exceed memory limits. `workerd` currently doesn't enforce any limits, so to reduce complexity we just forward to `New()`.
+
+(We would like to upstream our internal patch, just need to find the time...)
+---
+ include/v8-array-buffer.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/include/v8-array-buffer.h b/include/v8-array-buffer.h
+index bab840f82c..7fde9b6bd3 100644
+--- a/include/v8-array-buffer.h
++++ b/include/v8-array-buffer.h
+@@ -189,6 +189,14 @@ class V8_EXPORT ArrayBuffer : public Object {
+    */
+   size_t ByteLength() const;
+ 
++  /**
++   * Like `New()` but returns empty rather than crashing if allocation fails.
++   * At present this just forwards to New().
++   */
++  static MaybeLocal<ArrayBuffer> MaybeNew(Isolate* isolate, size_t byte_length) {
++    return New(isolate, byte_length);
++  }
++
+   /**
+    * Create a new ArrayBuffer. Allocate |byte_length| bytes.
+    * Allocated memory will be owned by a created ArrayBuffer and
+-- 
+2.30.2
+

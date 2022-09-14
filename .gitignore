@@ -1,0 +1,6 @@
+/rust-deps/target
+/rust-deps/Cargo.toml
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-workerd

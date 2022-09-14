@@ -1,0 +1,144 @@
+load("//:build/rust_cxx_bridge.bzl", "rust_cxx_bridge", "rust_cxx_include")
+load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
+load("@rules_rust//rust:defs.bzl", "rust_static_library")
+
+# TODO (before prod):
+# - arm64 build
+# - Move lolhtml back to submodule so update-deps works
+
+# Generates a repository containing all the crates we reference from our
+# rust workspace
+# To repin crates: bazel run //rust-deps:crates_vendor -- --repin
+crates_vendor(
+    name = "crates_vendor",
+    annotations = {
+        "lolhtml": [crate.annotation(
+            shallow_since = "1657163695 -0400",
+        )],
+        "lol_html": [crate.annotation(
+            shallow_since = "1657163695 -0400",
+        )],
+    },
+    cargo_bazel = "@cargo_bazel//file:downloaded",
+    mode = "remote",
+    packages = {
+        "anyhow": crate.spec(
+            features = ["default"],
+            version = "1",
+        ),
+        "cxx": crate.spec(
+            features = ["default"],
+            version = "1",
+        ),
+        "typed-arena": crate.spec(
+            version = "2",
+        ),
+        "libc": crate.spec(
+            version = "0.2",
+        ),
+        "addr2line": crate.spec(
+            default_features = False,
+            features = [
+                "std",
+                "rustc-demangle",
+                "cpp_demangle",
+                "fallible-iterator",
+                "smallvec",
+            ],
+            version = "0.14",
+        ),
+        "object": crate.spec(
+            default_features = False,
+            # Only need to be able to read ELF files.
+            features = [
+                "std",
+                "read_core",
+                "elf",
+                "archive",
+                "compression",
+                "unaligned",
+            ],
+            version = "0.23",
+        ),
+        "backtrace": crate.spec(
+            version = "0.3",
+        ),
+        "lolhtml": crate.spec(
+            git = "https://github.com/cloudflare/lol-html.git",
+            rev = "e0cc5131055033e443df1e756700b3b914b4c380",
+        ),
+    },
+    supported_platform_triples = [
+        "x86_64-unknown-linux-gnu",
+
+        # this is not used but its required to work around a bug in rules_rust where
+        # invalid select statements can get generated in vendored BUILD files
+        "wasm32-unknown-unknown",
+    ],
+)
+
+# To repin crates: bazel run //rust-deps:cxxbridge_vendor -- --repin
+crates_vendor(
+    name = "cxxbridge_vendor",
+    cargo_bazel = "@cargo_bazel//file:downloaded",
+    mode = "remote",
+    packages = {
+        "cxxbridge-cmd": crate.spec(
+            version = "1.0.72",
+        ),
+    },
+    # host toolchain only
+    supported_platform_triples = [
+        "x86_64-unknown-linux-gnu",
+    ],
+    vendor_path = "cxxbridge_crates",
+)
+
+rust_cxx_include(
+    name = "cxx/include",
+    include_prefix = "rust",
+    visibility = ["//visibility:public"],
+)
+
+rust_cxx_bridge(
+    name = "addr2line",
+    src = "src/addr2line.rs",
+    include_prefix = "workerd/rust",
+    strip_include_prefix = "src",
+    visibility = ["//visibility:public"],
+)
+
+rust_cxx_bridge(
+    name = "util",
+    src = "src/util.rs",
+    include_prefix = "workerd/rust",
+    strip_include_prefix = "src",
+    visibility = ["//visibility:public"],
+)
+
+rust_static_library(
+    name = "rust-deps",
+    srcs = glob(["**/*.rs"]),
+    stamp = -1, # default to bazel --stamp flag
+    # When stamping is enabled this will be replaced by the corresponding
+    # value in ./bazel-out/volatile-status.txt
+    rustc_env = {
+        "WORKERD_VERSION": "{WORKERD_VERSION}"
+    },
+    rustc_flags = [
+        "-C", "panic=abort"
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":addr2line",
+        ":util",
+        "@crates_vendor//:addr2line",
+        "@crates_vendor//:anyhow",
+        "@crates_vendor//:backtrace",
+        "@crates_vendor//:cxx",
+        "@crates_vendor//:libc",
+        "@crates_vendor//:lolhtml",
+        "@crates_vendor//:object",
+        "@crates_vendor//:typed-arena",
+    ],
+)
