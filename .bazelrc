@@ -4,8 +4,8 @@ build --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 
 build --action_env=BAZEL_COMPILER=clang
-build --action_env=CC=/usr/lib/llvm-15/bin/clang
-build --action_env=CXX=/usr/lib/llvm-15/bin/clang++
+build --action_env=CC=clang
+build --action_env=CXX=clang++
 
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:libdl=True
 
@@ -15,7 +15,6 @@ build --cxxopt='-Wextra' --host_cxxopt='-Wextra'
 build --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
 build --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
-build --cxxopt='-Wno-deprecated-experimental-coroutine' --host_cxxopt='-Wno-deprecated-experimental-coroutine'
 build --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 
@@ -23,4 +22,3 @@ build --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 # TODO(cleanup): Can we disable warnings altogether from our dependencies, without disabling them
 #   for workerd?
 build --cxxopt='-Wno-ambiguous-reversed-operator' --host_cxxopt='-Wno-ambiguous-reversed-operator'
-build --copt='-Wno-deprecated-non-prototype' --host_copt='-Wno-deprecated-non-prototype'

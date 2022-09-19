@@ -70,8 +70,8 @@ Windows users should run `workerd` under WSL2.
 To build `workerd`, you need:
 
 * [Bazel](https://bazel.build/)
-* Clang 15
-* libc++ 15
+* Clang 11+ (e.g. package `clang` on Debian Bullseye)
+* libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
 
 You may then build using:
 
