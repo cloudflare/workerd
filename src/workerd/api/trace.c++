@@ -192,7 +192,7 @@ double TraceLog::getTimestamp() {
 
 kj::StringPtr TraceLog::getLevel() {
   switch (log.logLevel) {
-    case LogLevel::DEBUG: return "debug"_kj;
+    case LogLevel::DEBUG_: return "debug"_kj;
     case LogLevel::INFO: return "info"_kj;
     case LogLevel::LOG: return "log"_kj;
     case LogLevel::WARN: return "warn"_kj;

@@ -113,7 +113,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
         });
       }
 
-      return result;
+      return kj::mv(result);
     }
 
     KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {

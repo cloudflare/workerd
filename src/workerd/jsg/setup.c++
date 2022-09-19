@@ -8,7 +8,7 @@
 #include <ucontext.h>
 
 #ifdef WORKERD_ICU_DATA_EMBED
-#include <icudata-embed.h>
+#include <icudata-embed.capnp.h>
 #include <unicode/udata.h>
 #endif
 
@@ -101,7 +101,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
   // containing the data.
   UErrorCode err = U_ZERO_ERROR;
-  udata_setCommonData(WORKERD_ICU_DATA_EMBED.begin(), &err);
+  udata_setCommonData(EMBEDDED_ICU_DATA_FILE->begin(), &err);
   udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
   KJ_ASSERT(err == U_ZERO_ERROR);
 #else

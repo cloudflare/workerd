@@ -1,12 +1,10 @@
-load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 
-wd_cc_embed(
+cc_capnp_library(
     name = "icudata-embed",
-    base_name = "icudata-embed",
+    srcs = ["icudata-embed.capnp"],
     strip_include_prefix = "",
-    defines = [
-        "WORKERD_ICU_DATA_EMBED=EMBED_com_googlesource_chromium_icu_common_icudtl_dat"
-    ],
-    data = ["@com_googlesource_chromium_icu//:icudata"],
     visibility = ["//visibility:public"],
+    data = ["@com_googlesource_chromium_icu//:icudata"],
+    defines = [ "WORKERD_ICU_DATA_EMBED" ],
 )
