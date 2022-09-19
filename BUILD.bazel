@@ -1,4 +1,5 @@
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 
 cc_capnp_library(
     name = "icudata-embed",
@@ -7,4 +8,8 @@ cc_capnp_library(
     visibility = ["//visibility:public"],
     data = ["@com_googlesource_chromium_icu//:icudata"],
     defines = [ "WORKERD_ICU_DATA_EMBED" ],
+)
+
+refresh_compile_commands(
+    name = "refresh_compile_commands",
 )
