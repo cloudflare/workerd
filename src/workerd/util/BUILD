@@ -1,0 +1,37 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/kj_test.bzl", "kj_test")
+
+wd_cc_library(
+    name = "util",
+    srcs = glob(
+        ["*.c++"],
+        exclude = ["*-test.c++", "capnp-mock.c++"],
+    ),
+    hdrs = glob(["*.h"], exclude = ["capnp-mock.h"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "test-util",
+    srcs = ["capnp-mock.c++"],
+    hdrs = glob(["capnp-mock.h"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+[kj_test(
+    src = f,
+    deps = [
+        ":util",
+    ],
+) for f in glob(["*-test.c++"])]

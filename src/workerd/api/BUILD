@@ -1,0 +1,45 @@
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/kj_test.bzl", "kj_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(
+        ["**/*.c++"],
+        exclude = [
+            "**/*test*.c++",
+            "**/*fuzzer*.c++",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "hdrs",
+    srcs = glob(
+        ["**/*.h"],
+        exclude = ["*test*.h"],
+    ),
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "r2-api_capnp",
+    srcs = ["r2-api.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "analytics-engine_capnp",
+    srcs = ["analytics-engine.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+[kj_test(
+    src = f,
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg:rtti",
+    ],
+) for f in glob(["**/*-test.c++"])]

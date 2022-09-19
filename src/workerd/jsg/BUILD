@@ -1,0 +1,55 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/kj_test.bzl", "kj_test")
+
+wd_cc_library(
+    name = "jsg",
+    srcs = glob(
+        ["*.c++"],
+        exclude = ["*-test.c++"],
+    ),
+    hdrs = glob(
+        ["*.h"],
+        exclude = ["rtti.h"],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+        "//src/workerd/util",
+    ],
+)
+
+wd_cc_capnp_library(
+    name = "rtti_capnp",
+    srcs = ["rtti.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "rtti",
+    hdrs = ["rtti.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rtti_capnp",
+        ":jsg",
+        # todo: move text encoding out
+        "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+[kj_test(
+    src = f,
+    deps = [
+        ":jsg",
+    ],
+) for f in glob(
+    ["*-test.c++"],
+    exclude = ["rtti-test.c++"],
+)]
+
+kj_test(
+    src = "rtti-test.c++",
+    tags = ["no-arm64"],
+    deps = [":rtti"],
+)

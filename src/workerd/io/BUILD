@@ -1,0 +1,56 @@
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+
+wd_cc_library(
+    name = "io",
+    # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
+    #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
+    #   depends on `io` but not vice versa.
+    # TODO(cleaunp): Fix this.
+    srcs = glob(
+        ["*.c++"],
+        exclude = ["*-test.c++"],
+    ) + ["//src/workerd/api:srcs"],
+    hdrs = glob(["*.h"]) + ["//src/workerd/api:hdrs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":capnp",
+        "@capnp-cpp//src/kj:kj-async",
+        "@com_cloudflare_lol_html//:lolhtml",
+        "//src:jaeger-model",
+        "//src/workerd/api:analytics-engine_capnp",
+        "//src/workerd/api:r2-api_capnp",
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_capnp_library(
+    name = "capnp",
+    srcs = [
+        "actor-storage.capnp",
+        "cdp.capnp",
+        "compatibility-date.capnp",
+        "jaeger.capnp",
+        "worker-interface.capnp",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":outcome_capnp",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
+    ],
+)
+
+wd_cc_capnp_library(
+    name = "outcome_capnp",
+    srcs = ["outcome.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+[kj_test(
+    src = f,
+    deps = [
+        ":io",
+        "//src/workerd/util:test-util",
+    ],
+) for f in glob(["*-test.c++"])]
