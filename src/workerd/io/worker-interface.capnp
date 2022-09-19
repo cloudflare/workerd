@@ -4,7 +4,8 @@
 
 @0xf7958855f6746344;
 
-$import "/capnp/c++.capnp".namespace("workerd::rpc");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::rpc");
 
 using import "/capnp/compat/http-over-capnp.capnp".HttpMethod;
 using import "/capnp/compat/http-over-capnp.capnp".HttpService;
@@ -17,7 +18,7 @@ struct Trace @0x8e8d911203762d34 {
 
     logLevel @1 :Level;
     enum Level {
-      debug @0;
+      debug @0 $Cxx.name("debug_");  # avoid collision with macro on Apple platforms
       info @1;
       log @2;
       warn @3;

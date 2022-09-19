@@ -624,7 +624,7 @@ struct Worker::Isolate::Impl {
           jsg::check(console.As<v8::Object>()->Set(context, methodStr, f));
         };
 
-        setHandler("debug", LogLevel::DEBUG);
+        setHandler("debug", LogLevel::DEBUG_);
         setHandler("error", LogLevel::ERROR);
         setHandler("info", LogLevel::INFO);
         setHandler("log", LogLevel::LOG);
