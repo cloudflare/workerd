@@ -26,6 +26,11 @@
 
 #if __linux__
 #include <sys/inotify.h>
+#elif __APPLE__ || __FreeBSD__ || __OpenBSD__ || __NetBSD__ || __DragonFly__
+#define WORKERD_USE_KQUEUE_FOR_FILE_WATCHER 1
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
 #endif
 
 #ifdef __GLIBC__
@@ -99,12 +104,14 @@ class FileWatcher {
 
 public:
   FileWatcher(kj::UnixEventPort& port)
-      : timer(port.getTimer()), inotifyFd(makeInotify()),
+      : inotifyFd(makeInotify()),
         observer(port, inotifyFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
 
   bool isSupported() { return true; }
 
-  void watch(kj::PathPtr path) {
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
+    // `file` is provided if available. The Linux implemnetation doesn't use it.
+
     auto pathStr = path.parent().toNativeString(true);
 
     int wd = watches.findOrCreate(pathStr, [&]() {
@@ -129,20 +136,9 @@ public:
       KJ_NONBLOCKING_SYSCALL(n = read(inotifyFd, buffer, sizeof(buffer)));
 
       if (n < 0) {
-        auto promise = observer.whenBecomesReadable().then([]() { return false; });
-        if (sawChange) {
-          promise = promise.exclusiveJoin(
-              timer.afterDelay(500 * kj::MILLISECONDS).then([]() { return true; }));
-        }
-        return promise.then([this](bool timeout) -> kj::Promise<void> {
-          if (timeout) {
-            // We've seen a change in the past, and then saw nothing change for a moment. We're
-            // done!
-            return kj::READY_NOW;
-          } else {
-            // There's new changes to read.
-            return onChange();
-          }
+        // No more data to read.
+        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
+          return onChange();
         });
       }
 
@@ -160,17 +156,8 @@ public:
         if (event.len > 0 && event.name[0] != '\0') {
           auto& watched = KJ_ASSERT_NONNULL(filesWatched.find(event.wd));
           if (watched.find(kj::StringPtr(event.name)) != nullptr) {
-            // HIT! Don't resolve yet, though. Let's wait for things to settle down.
-            if (!sawChange) {
-              // Let the user know we saw the config change.
-              // We don't include a newline but rather a carriage return so that when the next
-              // line is written, this line disappears, to reduce noise.
-              // TODO(cleanup): Writing directly to stderr is super-hacky.
-              kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
-              kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
-            }
-            sawChange = true;
-            return onChange();
+            // HIT! We saw a change.
+            return kj::READY_NOW;
           }
         }
       }
@@ -178,14 +165,11 @@ public:
   }
 
 private:
-  kj::Timer& timer;
   kj::AutoCloseFd inotifyFd;
   kj::UnixEventPort::FdObserver observer;
 
   kj::HashMap<kj::String, int> watches;
   kj::HashMap<int, kj::HashSet<kj::String>> filesWatched;
-
-  bool sawChange = false;
 
   static kj::AutoCloseFd makeInotify() {
     int fd;
@@ -194,7 +178,99 @@ private:
   }
 };
 
-#else  // #if __linux__
+#elif WORKERD_USE_KQUEUE_FOR_FILE_WATCHER
+
+class FileWatcher {
+  // Class which uses inotify to watch a set of files and alert when they change.
+  //
+  // This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
+  // to watching whole directory trees, since it must keep a file descriptor opne for each watched
+  // file. However, for our use case, we don't really want to watch a directory tree anyway, we
+  // want to watch the specific set of files which were opened while parsing the config. This is
+  // not so bad, probably.
+  //
+  // Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
+  // can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
+
+public:
+  FileWatcher(kj::UnixEventPort& port)
+      : kqueueFd(makeKqueue()),
+        observer(port, kqueueFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
+
+  bool isSupported() { return true; }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
+    KJ_IF_MAYBE(f, file) {
+      KJ_IF_MAYBE(fd, f->getFd()) {
+        // We need to duplicate the FD becasue the original will probably be closed later and
+        // closing the FD unregisters it from kqueue.
+        int duped;
+        KJ_SYSCALL(duped = dup(*fd));
+        watchFd(kj::AutoCloseFd(duped));
+        return;
+      }
+    }
+
+    // No existing file, open from disk.
+    int fd;
+    KJ_SYSCALL(fd = open(path.toNativeString(true).cStr(), O_RDONLY));
+    watchFd(kj::AutoCloseFd(fd));
+  }
+
+  kj::Promise<void> onChange() {
+    for (;;) {
+      struct kevent event;
+      struct timespec timeout;
+      memset(&event, 0, sizeof(event));
+      memset(&timeout, 0, sizeof(timeout));
+
+      int n;
+      KJ_SYSCALL(n = kevent(kqueueFd, nullptr, 0, &event, 1, &timeout));
+
+      if (n == 0) {
+        // No events, wait for the kqueue to become readable indicating an event has been
+        // delivered.
+        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
+          return onChange();
+        });
+      } else {
+        // We only pay attention to events that indicate changes in the first place, so there's
+        // no need to examine the event, it definitely means something changed.
+        return kj::READY_NOW;
+      }
+    }
+  }
+
+private:
+  kj::AutoCloseFd kqueueFd;
+  kj::UnixEventPort::FdObserver observer;
+  kj::Vector<kj::AutoCloseFd> filesWatched;
+
+  bool sawChange = false;
+
+  static kj::AutoCloseFd makeKqueue() {
+    int fd_;
+    KJ_SYSCALL(fd_ = kqueue());
+    auto fd = kj::AutoCloseFd(fd_);
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+    return kj::mv(fd);
+  }
+
+  void watchFd(kj::AutoCloseFd fd) {
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+
+    struct kevent change;
+    memset(&change, 0, sizeof(change));
+    change.ident = fd.get();
+    change.filter = EVFILT_VNODE;
+    change.flags = EV_ADD | EV_CLEAR;
+    change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
+    KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
+    filesWatched.add(kj::mv(fd));
+  }
+};
+
+#else
 
 class FileWatcher {
   // Dummy FileWatcher implementation for operating systems that aren't supported yet.
@@ -204,7 +280,7 @@ public:
 
   bool isSupported() { return false; }
 
-  void watch(kj::PathPtr path) {}
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
 
   void watch(const kj::ReadableFile& file) {}
 
@@ -235,11 +311,11 @@ public:
   SchemaFileImpl(const kj::Directory& root, kj::PathPtr current,
                  kj::Path fullPathParam, kj::PathPtr basePath,
                  kj::ArrayPtr<const kj::Path> importPath,
-                 kj::Own<const kj::ReadableFile> file,
+                 kj::Own<const kj::ReadableFile> fileParam,
                  kj::Maybe<FileWatcher&> watcher,
                  ErrorReporter& errorReporter)
       : root(root), current(current), fullPath(kj::mv(fullPathParam)), basePath(basePath),
-        importPath(importPath), file(kj::mv(file)), watcher(watcher),
+        importPath(importPath), file(kj::mv(fileParam)), watcher(watcher),
         errorReporter(errorReporter) {
     if (fullPath.startsWith(current)) {
       // Simplify display name by removing current directory prefix.
@@ -250,7 +326,7 @@ public:
     }
 
     KJ_IF_MAYBE(w, watcher) {
-      w->watch(fullPath);
+      w->watch(fullPath, *file);
     }
   }
 
@@ -597,7 +673,7 @@ public:
     }
 
     KJ_IF_MAYBE(e, exeInfo) {
-      w.watch(fs->getCurrentPath().eval(e->path));
+      w.watch(fs->getCurrentPath().eval(e->path), nullptr);
     } else {
       CLI_ERROR("Can't use --watch when we're unable to find our own executable.");
     }
@@ -773,7 +849,7 @@ public:
         // someone to fix the config.
         context.warning(
             "Can't start server due to config errors, waiting for config files to change...");
-        w->onChange().wait(io.waitScope);
+        waitForChanges(*w).wait(io.waitScope);
         reloadFromConfigChange();
       } else {
         // Errors were reported earlier, so context.exit() will exit with a non-zero status.
@@ -785,7 +861,7 @@ public:
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
       auto promise = server.run(v8System, config);
       KJ_IF_MAYBE(w, watcher) {
-        promise = promise.exclusiveJoin(w->onChange().then([this]() {
+        promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
           reloadFromConfigChange();
         }));
@@ -942,6 +1018,35 @@ private:
     }
 
     hadErrors = true;
+  }
+
+  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+    // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
+    // down, in case there's a bunch of changes all at once.
+
+    co_await watcher.onChange();
+
+    // Saw our first change!
+
+    // Let the user know we saw the config change.
+    // We don't include a newline but rather a carriage return so that when the next
+    // line is written, this line disappears, to reduce noise.
+    // TODO(cleanup): Writing directly to stderr is super-hacky.
+    kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
+    kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
+
+    for (;;) {
+      auto nextChange = watcher.onChange().then([]() { return false; });
+      auto timeout = io.provider->getTimer()
+          .afterDelay(500 * kj::MILLISECONDS).then([]() { return true; });
+      bool sawTimeout = co_await nextChange.exclusiveJoin(kj::mv(timeout));
+
+      // If we timed out, we end the loop. If we didn't time out, then we must have seen yet
+      // another change, so we loop again with a new timeout.
+      if (sawTimeout) break;
+    }
+
+    co_return;
   }
 };
 
