@@ -104,7 +104,9 @@ public:
 
   bool isSupported() { return true; }
 
-  void watch(kj::PathPtr path) {
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
+    // `file` is provided if available. The Linux implemnetation doesn't use it.
+
     auto pathStr = path.parent().toNativeString(true);
 
     int wd = watches.findOrCreate(pathStr, [&]() {
@@ -204,7 +206,7 @@ public:
 
   bool isSupported() { return false; }
 
-  void watch(kj::PathPtr path) {}
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
 
   void watch(const kj::ReadableFile& file) {}
 
@@ -235,11 +237,11 @@ public:
   SchemaFileImpl(const kj::Directory& root, kj::PathPtr current,
                  kj::Path fullPathParam, kj::PathPtr basePath,
                  kj::ArrayPtr<const kj::Path> importPath,
-                 kj::Own<const kj::ReadableFile> file,
+                 kj::Own<const kj::ReadableFile> fileParam,
                  kj::Maybe<FileWatcher&> watcher,
                  ErrorReporter& errorReporter)
       : root(root), current(current), fullPath(kj::mv(fullPathParam)), basePath(basePath),
-        importPath(importPath), file(kj::mv(file)), watcher(watcher),
+        importPath(importPath), file(kj::mv(fileParam)), watcher(watcher),
         errorReporter(errorReporter) {
     if (fullPath.startsWith(current)) {
       // Simplify display name by removing current directory prefix.
@@ -250,7 +252,7 @@ public:
     }
 
     KJ_IF_MAYBE(w, watcher) {
-      w->watch(fullPath);
+      w->watch(fullPath, *file);
     }
   }
 
@@ -597,7 +599,7 @@ public:
     }
 
     KJ_IF_MAYBE(e, exeInfo) {
-      w.watch(fs->getCurrentPath().eval(e->path));
+      w.watch(fs->getCurrentPath().eval(e->path), nullptr);
     } else {
       CLI_ERROR("Can't use --watch when we're unable to find our own executable.");
     }
