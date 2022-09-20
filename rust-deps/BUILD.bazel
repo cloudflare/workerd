@@ -1,6 +1,34 @@
 load("//:build/rust_cxx_bridge.bzl", "rust_cxx_bridge", "rust_cxx_include")
 load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+selects.config_setting_group(
+    name = "linux_x64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+selects.config_setting_group(
+    name = "macos_x64",
+    match_all = [
+        "@platforms//os:macos",
+        "@platforms//cpu:x86_64",
+    ],
+)
+selects.config_setting_group(
+    name = "macos_arm64",
+    match_all = [
+        "@platforms//os:macos",
+        "@platforms//cpu:aarch64",
+    ],
+)
+CARGO_BAZEL = select({
+    "//:linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
+    "//:macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
+    "//:macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
+})
 
 # TODO (before prod):
 # - arm64 build
@@ -19,7 +47,7 @@ crates_vendor(
             shallow_since = "1657163695 -0400",
         )],
     },
-    cargo_bazel = "@cargo_bazel//file:downloaded",
+    cargo_bazel = CARGO_BAZEL,
     mode = "remote",
     packages = {
         "anyhow": crate.spec(
@@ -81,7 +109,7 @@ crates_vendor(
 # To repin crates: bazel run //rust-deps:cxxbridge_vendor -- --repin
 crates_vendor(
     name = "cxxbridge_vendor",
-    cargo_bazel = "@cargo_bazel//file:downloaded",
+    cargo_bazel = CARGO_BAZEL,
     mode = "remote",
     packages = {
         "cxxbridge-cmd": crate.spec(
