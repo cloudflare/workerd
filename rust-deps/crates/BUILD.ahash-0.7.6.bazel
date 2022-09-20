@@ -90,6 +90,7 @@ rust_library(
     ] + select_with_or({
         # cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly", target_os = "solaris", target_os = "illumos", target_os = "fuchsia", target_os = "redox", target_os = "cloudabi", target_os = "haiku", target_os = "vxworks", target_os = "emscripten", target_os = "wasi"))
         (
+            "@rules_rust//rust/platform:aarch64-apple-darwin",
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps
@@ -100,6 +101,7 @@ rust_library(
         ],
         # cfg(not(all(target_arch = "arm", target_os = "none")))
         (
+            "@rules_rust//rust/platform:aarch64-apple-darwin",
             "@rules_rust//rust/platform:wasm32-unknown-unknown",
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [

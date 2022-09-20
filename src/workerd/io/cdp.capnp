@@ -13,7 +13,7 @@ $Cxx.namespace("workerd::cdp");
 
 enum LogType {
   log @0;
-  debug @1;
+  debug @1 $Cxx.name("debug_");  # avoid collision with macro on Apple platforms
   info @2;
   error @3;
   warning @4;

@@ -415,6 +415,17 @@ void reportStartupError(
   }
 }
 
+uint64_t getCurrentThreadId() {
+#if __linux__
+  return syscall(SYS_gettid);
+#else
+  // Assume MacOS or BSD
+  uint64_t tid;
+  pthread_threadid_np(NULL, &tid);
+  return tid;
+#endif
+}
+
 }  // namespace
 
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
@@ -430,7 +441,7 @@ public:
       auto& ioContext = IoContext::current();
       timePoint = ioContext.now();
     } else KJ_IF_MAYBE(info, inspectorTimerInfo) {
-      if (info->threadId == syscall(SYS_gettid)) {
+      if (info->threadId == getCurrentThreadId()) {
         // We're on an inspector-serving thread.
         timePoint = info->timer.now() + info->timerOffset
                   - kj::origin<kj::TimePoint>() + kj::UNIX_EPOCH;
@@ -448,14 +459,14 @@ public:
 
   void setInspectorTimerInfo(kj::Timer& timer, kj::Duration timerOffset) {
     // Helper for attachInspector().
-    inspectorTimerInfo = InspectorTimerInfo { timer, timerOffset, syscall(SYS_gettid) };
+    inspectorTimerInfo = InspectorTimerInfo { timer, timerOffset, getCurrentThreadId() };
   }
 
 private:
   struct InspectorTimerInfo {
     kj::Timer& timer;
     kj::Duration timerOffset;
-    long threadId;
+    uint64_t threadId;
   };
 
   kj::Maybe<InspectorTimerInfo> inspectorTimerInfo;

@@ -89,11 +89,29 @@ protobuf_deps()
 # workerd uses some Rust libraries, especially lolhtml for implementing HtmlRewriter.
 
 http_file(
-    name = "cargo_bazel",
+    name = "cargo_bazel_linux_x64",
     executable = True,
     sha256 = "a9f81a6fd356fc01e3da2483bdd1f9dfb080b0bdf5a128fa036c048e5b301562",
     urls = [
         "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-unknown-linux-gnu",
+    ],
+)
+
+http_file(
+    name = "cargo_bazel_macos_x64",
+    executable = True,
+    sha256 = "fb80acb9fcfd83674f73e98bf956bc65b33f31a4380ba72fbc1a6a9bf22c2f8c",
+    urls = [
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-apple-darwin",
+    ],
+)
+
+http_file(
+    name = "cargo_bazel_macos_arm64",
+    executable = True,
+    sha256 = "4104ea8edd3fccbcfc43265e4fa02dfc25b12b32250ff46456b829ab9cb78908",
+    urls = [
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 

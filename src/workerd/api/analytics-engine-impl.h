@@ -8,6 +8,8 @@
 
 namespace workerd::api {
 
+using kj::uint;
+
 constexpr uint MAX_INDEXES_LENGTH = 1;
 constexpr size_t MAX_INDEX_SIZE_IN_BYTES = 32;
 constexpr uint MAX_ARRAY_MEMBERS = 20;

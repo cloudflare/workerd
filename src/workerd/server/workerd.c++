@@ -32,6 +32,12 @@
 #include <sys/auxv.h>
 #endif
 
+#ifdef __APPLE__
+#include <libproc.h>
+#include <crt_externs.h>
+#define environ (*_NSGetEnviron())
+#endif
+
 namespace workerd::server {
 
 static kj::StringPtr getVersionString() {
@@ -885,7 +891,16 @@ private:
     }
   #endif
 
-    // TODO(launch): Fall back to searching $PATH. Or on Mac, maybe use _NSGetExecutablePath()?
+  #if __APPLE__
+    // https://astojanov.github.io/blog/2011/09/26/pid-to-absolute-path.html
+    pid_t pid = getpid();
+  	char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
+    if (proc_pidpath(pid, pathbuf, sizeof(pathbuf)) > 0) {
+      return tryOpenExe(pathbuf);
+    }
+  #endif
+
+    // TODO(launch): Fall back to searching $PATH.
     return nullptr;
   }
 

@@ -18,9 +18,9 @@ class WritableStreamDefaultController;
 class TransformStreamDefaultController;
 
 struct StreamQueuingStrategy {
-  using SizeAlgorithm = size_t(v8::Local<v8::Value>);
+  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
 
-  jsg::Optional<size_t> highWaterMark;
+  jsg::Optional<uint64_t> highWaterMark;
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
 
   JSG_STRUCT(highWaterMark, size);

@@ -13,6 +13,7 @@
 namespace workerd::api {
 
 using kj::byte;
+using kj::uint;
 
 class AnalyticsEngine: public jsg::Object {
   // Analytics Engine is a tool for customers to get telemetry about anything
