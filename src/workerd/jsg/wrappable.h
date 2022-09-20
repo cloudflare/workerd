@@ -17,6 +17,8 @@
 
 namespace workerd::jsg {
 
+using kj::uint;
+
 class GcVisitor;
 class HeapTracer;
 

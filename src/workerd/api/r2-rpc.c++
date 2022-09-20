@@ -170,7 +170,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
       }
     }
   } else {
-    expectedBodySize = 0ul;
+    expectedBodySize = uint64_t(0);
     KJ_REQUIRE(streamSize == nullptr);
   }
 

@@ -95,6 +95,7 @@ rust_library(
     ] + select_with_or({
         # cfg(not(target_os = "emscripten"))
         (
+            "@rules_rust//rust/platform:aarch64-apple-darwin",
             "@rules_rust//rust/platform:wasm32-unknown-unknown",
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
@@ -113,6 +114,7 @@ rust_library(
         #
         # cfg(unix)
         (
+            "@rules_rust//rust/platform:aarch64-apple-darwin",
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps

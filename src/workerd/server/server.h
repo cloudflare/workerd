@@ -21,6 +21,8 @@ namespace workerd::jsg {
 
 namespace workerd::server {
 
+using kj::uint;
+
 class Server: private kj::TaskSet::ErrorHandler {
   // Implements the single-tenant Workers Runtime server / CLI.
   //

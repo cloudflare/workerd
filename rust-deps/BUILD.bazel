@@ -70,6 +70,7 @@ crates_vendor(
     },
     supported_platform_triples = [
         "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
 
         # this is not used but its required to work around a bug in rules_rust where
         # invalid select statements can get generated in vendored BUILD files
@@ -90,6 +91,7 @@ crates_vendor(
     # host toolchain only
     supported_platform_triples = [
         "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
     ],
     vendor_path = "cxxbridge_crates",
 )

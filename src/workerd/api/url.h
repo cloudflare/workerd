@@ -11,6 +11,8 @@
 
 namespace workerd::api {
 
+using kj::uint;
+
 class URLSearchParams;
 
 class URL: public jsg::Object {

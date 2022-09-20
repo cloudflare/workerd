@@ -91,9 +91,9 @@ protobuf_deps()
 http_file(
     name = "cargo_bazel",
     executable = True,
-    sha256 = "a9f81a6fd356fc01e3da2483bdd1f9dfb080b0bdf5a128fa036c048e5b301562",
+    sha256 = "4104ea8edd3fccbcfc43265e4fa02dfc25b12b32250ff46456b829ab9cb78908",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 

@@ -2,6 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#if __APPLE__
+// We need to define `_XOPEN_SOURCE` to get `ucontext_t` on Mac.
+#define _XOPEN_SOURCE
+#endif
+
 #include "setup.h"
 #include <cxxabi.h>
 #include "libplatform/libplatform.h"
@@ -10,6 +15,10 @@
 #ifdef WORKERD_ICU_DATA_EMBED
 #include <icudata-embed.capnp.h>
 #include <unicode/udata.h>
+#endif
+
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <mach/mach.h>
 #endif
 
 namespace workerd::jsg {
@@ -542,11 +551,19 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
   v8::RegisterState state;
   auto& mcontext = reinterpret_cast<ucontext_t*>(ucontext)->uc_mcontext;
-#if __x86_64__
+#if defined(__APPLE__) && defined(__x86_64__)
+  state.pc = reinterpret_cast<void*>(mcontext->__ss.__rip);
+  state.sp = reinterpret_cast<void*>(mcontext->__ss.__rsp);
+  state.fp = reinterpret_cast<void*>(mcontext->__ss.__rbp);
+#elif defined(__APPLE__) && defined(__aarch64__)
+  state.pc = reinterpret_cast<void*>(arm_thread_state64_get_pc(mcontext->__ss));
+  state.sp = reinterpret_cast<void*>(arm_thread_state64_get_sp(mcontext->__ss));
+  state.fp = reinterpret_cast<void*>(arm_thread_state64_get_fp(mcontext->__ss));
+#elif defined(__linux__) && defined(__x86_64__)
   state.pc = reinterpret_cast<void*>(mcontext.gregs[REG_RIP]);
   state.sp = reinterpret_cast<void*>(mcontext.gregs[REG_RSP]);
   state.fp = reinterpret_cast<void*>(mcontext.gregs[REG_RBP]);
-#elif __aarch64__
+#elif defined(__linux__) && defined(__aarch64__)
   state.pc = reinterpret_cast<void*>(mcontext.pc);
   state.sp = reinterpret_cast<void*>(mcontext.sp);
   state.fp = reinterpret_cast<void*>(mcontext.regs[29]);

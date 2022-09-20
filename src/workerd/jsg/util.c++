@@ -6,7 +6,7 @@
 #include "setup.h"
 #include <cxxabi.h>
 #include <kj/debug.h>
-#include <malloc.h>
+#include <stdlib.h>
 
 #include <workerd/util/sentry.h>
 
