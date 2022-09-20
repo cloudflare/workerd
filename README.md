@@ -36,7 +36,6 @@ The config format may change in backwards-incompatible ways before `workerd` lea
 
 As of this writing, some major features are missing which we intend to fix shortly:
 
-* **MacOS** is not supported yet, but should be imminently. We've never tried to build this code on Mac in the past, but we expect it should only require minor tweaks. Most of the work is figuring out how to wrangle the build system. (Windows users, meanwhile, should use WSL2. A native Windows port would be a challenge and is not currently being worked on.)
 * **Binary Packages** for various distributions are not built yet. We intend to provide these once out of beta.
 * **Wrangler/Miniflare integration** is in progress. The [Wrangler CLI tool](https://developers.cloudflare.com/workers/wrangler/) and [Miniflare](https://miniflare.dev/) will soon support local testing using `workerd` (replacing the previous simulated environment on top of Node). Wrangler should also support generating `workerd` configuration directly from a Wrangler project.
 * **Multi-threading** is not implemented. `workerd` runs in a single-threaded event loop. For now, to utilize multiple cores, we suggest running multiple instances of `workerd` and balancing load across them. We will likely add some built-in functionality for this in the near future.
@@ -60,7 +59,7 @@ With that said, if you discover a bug that allows malicious code to break out of
 
 In theory, `workerd` should work on any POSIX system that is supported by V8.
 
-In practice, `workerd` is tested on Linux (TODO: and MacOS) under x86-64 and arm64 architectures.
+In practice, `workerd` is tested on Linux and macOS under x86-64 and arm64 architectures.
 On other platforms, you may have to do tinkering to make things work.
 
 Windows users should run `workerd` under WSL2.
