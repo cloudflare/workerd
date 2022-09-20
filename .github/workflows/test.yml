@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+    - 'doc/**'
+  push:
+    branches:
+    - main
+
+jobs:
+  Linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: install dependencies
+        run: |
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get install -y build-essential git clang libc++-dev
+      - name: bazel tests
+        run: |
+            bazel test --verbose_failures --show_timestamps --keep_going --test_output=errors //...
+  MacOS:
+    runs-on: macos-12
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: bazel tests
+        run: |
+            bazel test --verbose_failures --show_timestamps --keep_going --test_output=errors //...
