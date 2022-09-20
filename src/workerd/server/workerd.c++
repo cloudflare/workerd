@@ -99,7 +99,7 @@ class FileWatcher {
 
 public:
   FileWatcher(kj::UnixEventPort& port)
-      : timer(port.getTimer()), inotifyFd(makeInotify()),
+      : inotifyFd(makeInotify()),
         observer(port, inotifyFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
 
   bool isSupported() { return true; }
@@ -131,20 +131,9 @@ public:
       KJ_NONBLOCKING_SYSCALL(n = read(inotifyFd, buffer, sizeof(buffer)));
 
       if (n < 0) {
-        auto promise = observer.whenBecomesReadable().then([]() { return false; });
-        if (sawChange) {
-          promise = promise.exclusiveJoin(
-              timer.afterDelay(500 * kj::MILLISECONDS).then([]() { return true; }));
-        }
-        return promise.then([this](bool timeout) -> kj::Promise<void> {
-          if (timeout) {
-            // We've seen a change in the past, and then saw nothing change for a moment. We're
-            // done!
-            return kj::READY_NOW;
-          } else {
-            // There's new changes to read.
-            return onChange();
-          }
+        // No more data to read.
+        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
+          return onChange();
         });
       }
 
@@ -162,17 +151,8 @@ public:
         if (event.len > 0 && event.name[0] != '\0') {
           auto& watched = KJ_ASSERT_NONNULL(filesWatched.find(event.wd));
           if (watched.find(kj::StringPtr(event.name)) != nullptr) {
-            // HIT! Don't resolve yet, though. Let's wait for things to settle down.
-            if (!sawChange) {
-              // Let the user know we saw the config change.
-              // We don't include a newline but rather a carriage return so that when the next
-              // line is written, this line disappears, to reduce noise.
-              // TODO(cleanup): Writing directly to stderr is super-hacky.
-              kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
-              kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
-            }
-            sawChange = true;
-            return onChange();
+            // HIT! We saw a change.
+            return kj::READY_NOW;
           }
         }
       }
@@ -180,14 +160,11 @@ public:
   }
 
 private:
-  kj::Timer& timer;
   kj::AutoCloseFd inotifyFd;
   kj::UnixEventPort::FdObserver observer;
 
   kj::HashMap<kj::String, int> watches;
   kj::HashMap<int, kj::HashSet<kj::String>> filesWatched;
-
-  bool sawChange = false;
 
   static kj::AutoCloseFd makeInotify() {
     int fd;
@@ -775,7 +752,7 @@ public:
         // someone to fix the config.
         context.warning(
             "Can't start server due to config errors, waiting for config files to change...");
-        w->onChange().wait(io.waitScope);
+        waitForChanges(*w).wait(io.waitScope);
         reloadFromConfigChange();
       } else {
         // Errors were reported earlier, so context.exit() will exit with a non-zero status.
@@ -787,7 +764,7 @@ public:
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
       auto promise = server.run(v8System, config);
       KJ_IF_MAYBE(w, watcher) {
-        promise = promise.exclusiveJoin(w->onChange().then([this]() {
+        promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
           reloadFromConfigChange();
         }));
@@ -944,6 +921,35 @@ private:
     }
 
     hadErrors = true;
+  }
+
+  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+    // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
+    // down, in case there's a bunch of changes all at once.
+
+    co_await watcher.onChange();
+
+    // Saw our first change!
+
+    // Let the user know we saw the config change.
+    // We don't include a newline but rather a carriage return so that when the next
+    // line is written, this line disappears, to reduce noise.
+    // TODO(cleanup): Writing directly to stderr is super-hacky.
+    kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
+    kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
+
+    for (;;) {
+      auto nextChange = watcher.onChange().then([]() { return false; });
+      auto timeout = io.provider->getTimer()
+          .afterDelay(500 * kj::MILLISECONDS).then([]() { return true; });
+      bool sawTimeout = co_await nextChange.exclusiveJoin(kj::mv(timeout));
+
+      // If we timed out, we end the loop. If we didn't time out, then we must have seen yet
+      // another change, so we loop again with a new timeout.
+      if (sawTimeout) break;
+    }
+
+    co_return;
   }
 };
 
