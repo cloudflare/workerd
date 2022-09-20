@@ -3,7 +3,7 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 @0xe6afd26682091c01;
-# This file defines the schema for configuring the open-source Cloudflare Workers Runtime.
+# This file defines the schema for configuring the workerd runtime.
 #
 # A config file can be written as a `.capnp` file that imports this file and then defines a
 # constant of type `Config`. Alternatively, various higher-level tooling (e.g. wrangler) may
@@ -11,12 +11,12 @@
 #
 # To start a server with a config, do:
 #
-#     cfwrk serve my-config.capnp constantName
+#     workerd serve my-config.capnp constantName
 #
-# You can also build a new self-contained binary which combines the `cfwrk` binary with your
+# You can also build a new self-contained binary which combines the `workerd` binary with your
 # configuration and all your source code:
 #
-#     cfwrk bundle my-config.capnp constantName -o my-server-bin
+#     workerd compile my-config.capnp constantName -o my-server-bin
 #
 # This binary can then be run stand-alone.
 #
