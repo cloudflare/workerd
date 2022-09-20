@@ -26,6 +26,11 @@
 
 #if __linux__
 #include <sys/inotify.h>
+#elif __APPLE__ || __FreeBSD__ || __OpenBSD__ || __NetBSD__ || __DragonFly__
+#define WORKERD_USE_KQUEUE_FOR_FILE_WATCHER 1
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
 #endif
 
 #ifdef __GLIBC__
@@ -173,7 +178,99 @@ private:
   }
 };
 
-#else  // #if __linux__
+#elif WORKERD_USE_KQUEUE_FOR_FILE_WATCHER
+
+class FileWatcher {
+  // Class which uses inotify to watch a set of files and alert when they change.
+  //
+  // This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
+  // to watching whole directory trees, since it must keep a file descriptor opne for each watched
+  // file. However, for our use case, we don't really want to watch a directory tree anyway, we
+  // want to watch the specific set of files which were opened while parsing the config. This is
+  // not so bad, probably.
+  //
+  // Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
+  // can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
+
+public:
+  FileWatcher(kj::UnixEventPort& port)
+      : kqueueFd(makeKqueue()),
+        observer(port, kqueueFd, kj::UnixEventPort::FdObserver::OBSERVE_READ) {}
+
+  bool isSupported() { return true; }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
+    KJ_IF_MAYBE(f, file) {
+      KJ_IF_MAYBE(fd, f->getFd()) {
+        // We need to duplicate the FD becasue the original will probably be closed later and
+        // closing the FD unregisters it from kqueue.
+        int duped;
+        KJ_SYSCALL(duped = dup(*fd));
+        watchFd(kj::AutoCloseFd(duped));
+        return;
+      }
+    }
+
+    // No existing file, open from disk.
+    int fd;
+    KJ_SYSCALL(fd = open(path.toNativeString(true).cStr(), O_RDONLY));
+    watchFd(kj::AutoCloseFd(fd));
+  }
+
+  kj::Promise<void> onChange() {
+    for (;;) {
+      struct kevent event;
+      struct timespec timeout;
+      memset(&event, 0, sizeof(event));
+      memset(&timeout, 0, sizeof(timeout));
+
+      int n;
+      KJ_SYSCALL(n = kevent(kqueueFd, nullptr, 0, &event, 1, &timeout));
+
+      if (n == 0) {
+        // No events, wait for the kqueue to become readable indicating an event has been
+        // delivered.
+        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
+          return onChange();
+        });
+      } else {
+        // We only pay attention to events that indicate changes in the first place, so there's
+        // no need to examine the event, it definitely means something changed.
+        return kj::READY_NOW;
+      }
+    }
+  }
+
+private:
+  kj::AutoCloseFd kqueueFd;
+  kj::UnixEventPort::FdObserver observer;
+  kj::Vector<kj::AutoCloseFd> filesWatched;
+
+  bool sawChange = false;
+
+  static kj::AutoCloseFd makeKqueue() {
+    int fd_;
+    KJ_SYSCALL(fd_ = kqueue());
+    auto fd = kj::AutoCloseFd(fd_);
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+    return kj::mv(fd);
+  }
+
+  void watchFd(kj::AutoCloseFd fd) {
+    KJ_SYSCALL(fcntl(fd, F_SETFD, FD_CLOEXEC));
+
+    struct kevent change;
+    memset(&change, 0, sizeof(change));
+    change.ident = fd.get();
+    change.filter = EVFILT_VNODE;
+    change.flags = EV_ADD | EV_CLEAR;
+    change.fflags = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_RENAME;
+    KJ_SYSCALL(kevent(kqueueFd, &change, 1, nullptr, 0, nullptr));
+    filesWatched.add(kj::mv(fd));
+  }
+};
+
+#else
 
 class FileWatcher {
   // Dummy FileWatcher implementation for operating systems that aren't supported yet.
