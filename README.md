@@ -62,15 +62,18 @@ In theory, `workerd` should work on any POSIX system that is supported by V8.
 In practice, `workerd` is tested on Linux and macOS under x86-64 and arm64 architectures.
 On other platforms, you may have to do tinkering to make things work.
 
-Windows users should run `workerd` under WSL2.
+Windows users should run `workerd` under WSL (1 or 2).
 
 ### Building `workerd`
 
 To build `workerd`, you need:
 
 * [Bazel](https://bazel.build/)
-* Clang 11+ (e.g. package `clang` on Debian Bullseye)
-* libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
+* On Linux:
+  * Clang 11+ (e.g. package `clang` on Debian Bullseye)
+  * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
+* On macOS:
+  * full XCode 13+ installation
 
 You may then build using:
 
