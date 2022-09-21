@@ -11,10 +11,23 @@
       "request": "launch",
       "MIMode": "gdb",
       "program": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd",
-      "args": ["--help"],
+      "args": [
+        // A prompt will be displayed asking for the configuration
+        // arguments for the workerd process
+        "${input:debugargs}"
+      ],
       "cwd": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd.runfiles/workerd",
+
       "stopAtEntry": false,
       "externalConsole": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "debugargs",
+      "description": "workerd arguments",
+      "default": "--help",
+      "type": "promptString"
     }
   ]
 }
