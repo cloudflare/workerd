@@ -93,7 +93,7 @@ private:
   class HttpRewriter;
 
   kj::Own<Service> makeInvalidConfigService();
-  kj::Promise<kj::Own<Service>> makeExternalService(
+  kj::Own<Service> makeExternalService(
       kj::StringPtr name, config::ExternalServer::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Own<Service> makeNetworkService(config::Network::Reader conf);

@@ -389,6 +389,57 @@ kj::Own<Server::Service> Server::makeInvalidConfigService() {
   return { invalidConfigServiceSingleton.get(), kj::NullDisposer::instance };
 }
 
+class PromisedNetworkAddress final: public kj::NetworkAddress {
+  // A NetworkAddress whose connect() method waits for a Promise<NetworkAddress> and then forwards
+  // to it. Used by ExternalHttpService so that we don't have to wait for DNS lookup before the
+  // server can start.
+  //
+  // TODO(cleanup): kj::Network should be extended with a new version of parseAddress() which does
+  //   not do DNS lookup immediately, and therefore can return a NetworkAddress synchronously.
+  //   In fact, this version should be designed to redo the DNS lookup periodically to see if it
+  //   changed, which would be nice for workerd when the remote address may change over time.
+public:
+  PromisedNetworkAddress(kj::Promise<kj::Own<kj::NetworkAddress>> promise)
+      : promise(promise.then([this](kj::Own<kj::NetworkAddress> result) {
+          addr = kj::mv(result);
+        }).fork()) {}
+
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
+    KJ_IF_MAYBE(a, addr) {
+      return a->get()->connect();
+    } else {
+      return promise.addBranch().then([this]() {
+        return KJ_ASSERT_NONNULL(addr)->connect();
+      });
+    }
+  }
+
+  kj::Promise<kj::AuthenticatedStream> connectAuthenticated() override {
+    KJ_IF_MAYBE(a, addr) {
+      return a->get()->connectAuthenticated();
+    } else {
+      return promise.addBranch().then([this]() {
+        return KJ_ASSERT_NONNULL(addr)->connectAuthenticated();
+      });
+    }
+  }
+
+  // We don't use any other methods, and they seem kinda annoying to implement.
+  kj::Own<kj::ConnectionReceiver> listen() override {
+    KJ_UNIMPLEMENTED("PromisedNetworkAddress::listen() not implemented");
+  }
+  kj::Own<kj::NetworkAddress> clone() override {
+    KJ_UNIMPLEMENTED("PromisedNetworkAddress::clone() not implemented");
+  }
+  kj::String toString() override {
+    KJ_UNIMPLEMENTED("PromisedNetworkAddress::toString() not implemented");
+  }
+
+private:
+  kj::ForkedPromise<void> promise;
+  kj::Maybe<kj::Own<kj::NetworkAddress>> addr;
+};
+
 class Server::ExternalHttpService final: public Service {
   // Service used when the service's config is invalid.
 
@@ -481,7 +532,7 @@ private:
   };
 };
 
-kj::Promise<kj::Own<Server::Service>> Server::makeExternalService(
+kj::Own<Server::Service> Server::makeExternalService(
     kj::StringPtr name, config::ExternalServer::Reader conf,
     kj::HttpHeaderTable::Builder& headerTableBuilder) {
   kj::StringPtr addrStr = nullptr;
@@ -504,12 +555,9 @@ kj::Promise<kj::Own<Server::Service>> Server::makeExternalService(
       // We have to construct the rewriter upfront before waiting on any promises, since the
       // HeaderTable::Builder is only available synchronously.
       auto rewriter = kj::heap<HttpRewriter>(conf.getHttp(), headerTableBuilder);
-      return network.parseAddress(addrStr, 80)
-          .then([this, rewriter = kj::mv(rewriter)](kj::Own<kj::NetworkAddress> addr) mutable
-                -> kj::Own<Service> {
-        return kj::heap<ExternalHttpService>(
-            kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
-      });
+      auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
+      return kj::heap<ExternalHttpService>(
+          kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
     }
     case config::ExternalServer::HTTPS: {
       auto httpsConf = conf.getHttps();
@@ -518,12 +566,10 @@ kj::Promise<kj::Own<Server::Service>> Server::makeExternalService(
         certificateHost = httpsConf.getCertificateHost();
       }
       auto rewriter = kj::heap<HttpRewriter>(httpsConf.getOptions(), headerTableBuilder);
-      return makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443)
-          .then([this, rewriter = kj::mv(rewriter)](kj::Own<kj::NetworkAddress> addr) mutable
-                -> kj::Own<Service> {
-        return kj::heap<ExternalHttpService>(
-            kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
-      });
+      auto addr = kj::heap<PromisedNetworkAddress>(
+          makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443));
+      return kj::heap<ExternalHttpService>(
+          kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
     }
   }
   reportConfigError(kj::str(
