@@ -872,19 +872,24 @@ class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHan
                                    private LimitEnforcer {
 public:
   struct LinkedIoChannels {
-    kj::Array<kj::Own<Service>> subrequest;
+    kj::Array<Service*> subrequest;
   };
 
   WorkerService(ThreadContext& threadContext, kj::Own<const Worker> worker,
-                kj::HashSet<kj::String> namedEntrypoints,
+                kj::HashSet<kj::String> namedEntrypointsParam,
                 kj::Function<LinkedIoChannels()> linkCallback)
       : threadContext(threadContext), worker(kj::mv(worker)),
-        namedEntrypoints(kj::mv(namedEntrypoints)),
         ioChannels(kj::mv(linkCallback)),
-        waitUntilTasks(*this) {}
+        waitUntilTasks(*this) {
+    namedEntrypoints.reserve(namedEntrypointsParam.size());
+    for (auto& ep: namedEntrypointsParam) {
+      kj::StringPtr epPtr = ep;
+      namedEntrypoints.insert(kj::mv(ep), EntrypointService(*this, epPtr));
+    }
+  }
 
-  bool hasEntrypoint(kj::StringPtr name) {
-    return namedEntrypoints.contains(name);
+  kj::Maybe<Service&> getEntrypoint(kj::StringPtr name) {
+    return namedEntrypoints.find(name);
   }
 
   void link() override {
@@ -918,9 +923,24 @@ public:
   }
 
 private:
+  class EntrypointService final: public Service {
+  public:
+    EntrypointService(WorkerService& worker, kj::StringPtr entrypoint)
+        : worker(worker), entrypoint(entrypoint) {}
+
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata) override {
+      return worker.startRequest(kj::mv(metadata), entrypoint);
+    }
+
+  private:
+    WorkerService& worker;
+    kj::StringPtr entrypoint;
+  };
+
   ThreadContext& threadContext;
   kj::Own<const Worker> worker;
-  kj::HashSet<kj::String> namedEntrypoints;
+  kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
   kj::OneOf<kj::Function<LinkedIoChannels()>, LinkedIoChannels> ioChannels;
   kj::TaskSet waitUntilTasks;
 
@@ -1318,21 +1338,20 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   auto linkCallback =
       [this, name, conf, subrequestChannels = kj::mv(subrequestChannels)]() mutable {
-    auto services = kj::heapArrayBuilder<kj::Own<Service>>(subrequestChannels.size() +
+    auto services = kj::heapArrayBuilder<Service*>(subrequestChannels.size() +
               IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
 
-    auto globalService = lookupService(conf.getGlobalOutbound(),
+    Service& globalService = lookupService(conf.getGlobalOutbound(),
         kj::str("Worker \"", name, "\"'s globalOutbound"));
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
-    // legacy artifact that no one should be depending on.) Since all `subrequestChannels` will
-    // have the same lifetime, we can alias using a NullDisposer as a hack here.
+    // legacy artifact that no one should be depending on.)
     static_assert(IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT == 2);
-    services.add(kj::Own<Service>(globalService.get(), kj::NullDisposer::instance));
-    services.add(kj::mv(globalService));
+    services.add(&globalService);
+    services.add(&globalService);
 
     for (auto& channel: subrequestChannels) {
-      services.add(lookupService(channel.designator, kj::mv(channel.errorContext)));
+      services.add(&lookupService(channel.designator, kj::mv(channel.errorContext)));
     }
 
     return WorkerService::LinkedIoChannels {
@@ -1381,53 +1400,36 @@ void Server::taskFailed(kj::Exception&& exception) {
   fatalFulfiller->reject(kj::mv(exception));
 }
 
-class Server::WorkerEntrypointService final: public Service {
-public:
-  WorkerEntrypointService(WorkerService& worker, kj::StringPtr entrypoint)
-      : worker(worker), entrypoint(kj::str(entrypoint)) {}
-
-  kj::Own<WorkerInterface> startRequest(
-      IoChannelFactory::SubrequestMetadata metadata) override {
-    return worker.startRequest(kj::mv(metadata), entrypoint.asPtr());
-  }
-
-private:
-  WorkerService& worker;
-  kj::String entrypoint;
-};
-
-kj::Own<Server::Service> Server::lookupService(
+Server::Service& Server::lookupService(
     config::ServiceDesignator::Reader designator, kj::String errorContext) {
   kj::StringPtr targetName = designator.getName();
   Service* service = KJ_UNWRAP_OR(services.find(targetName), {
     reportConfigError(kj::str(
         errorContext, " refers to a service \"", targetName,
         "\", but no such service is defined."));
-    return makeInvalidConfigService();
+    return *invalidConfigServiceSingleton;
   });
 
   if (designator.hasEntrypoint()) {
     kj::StringPtr entrypointName = designator.getEntrypoint();
     if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-      if (worker->hasEntrypoint(entrypointName)) {
-        return kj::heap<WorkerEntrypointService>(*worker, entrypointName);
+      KJ_IF_MAYBE(ep, worker->getEntrypoint(entrypointName)) {
+        return *ep;
       } else {
         reportConfigError(kj::str(
             errorContext, " refers to service \"", targetName, "\" with a named entrypoint \"",
             entrypointName, "\", but \"", targetName, "\" has no such named entrypoint."));
-        return makeInvalidConfigService();
+        return *invalidConfigServiceSingleton;
       }
     } else {
       reportConfigError(kj::str(
           errorContext, " refers to service \"", targetName, "\" with a named entrypoint \"",
           entrypointName, "\", but \"", targetName, "\" is not a Worker, so does not have any "
           "named entrypoints."));
-      return makeInvalidConfigService();
+      return *invalidConfigServiceSingleton;
     }
   } else {
-    // The service pointer we looked up is valid for the lifetime of the server, so we can wrap it
-    // in a dummy Own.
-    return kj::Own<Service>(service, kj::NullDisposer::instance);
+    return *service;
   }
 }
 
@@ -1435,10 +1437,10 @@ kj::Own<Server::Service> Server::lookupService(
 
 class Server::HttpListener final: private kj::TaskSet::ErrorHandler {
 public:
-  HttpListener(kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service,
+  HttpListener(kj::Own<kj::ConnectionReceiver> listener, Service& service,
               kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter,
                kj::HttpHeaderTable& headerTable, kj::Timer& timer)
-      : listener(kj::mv(listener)), service(kj::mv(service)),
+      : listener(kj::mv(listener)), service(service),
         headerTable(headerTable), timer(timer),
         physicalProtocol(physicalProtocol),
         rewriter(kj::mv(rewriter)),
@@ -1492,7 +1494,7 @@ public:
 
 private:
   kj::Own<kj::ConnectionReceiver> listener;
-  kj::Own<Service> service;
+  Service& service;
   kj::HttpHeaderTable& headerTable;
   kj::Timer& timer;
   kj::StringPtr physicalProtocol;
@@ -1559,11 +1561,11 @@ private:
                 url, parent.physicalProtocol, headers, metadata.cfBlobJson), {
           return response.sendError(400, "Bad Request", parent.headerTable);
         });
-        auto worker = parent.service->startRequest(kj::mv(metadata));
+        auto worker = parent.service.startRequest(kj::mv(metadata));
         return worker->request(method, url, *rewrite.headers, requestBody, *wrappedResponse)
             .attach(kj::mv(rewrite), kj::mv(worker), kj::mv(ownResponse));
       } else {
-        auto worker = parent.service->startRequest(kj::mv(metadata));
+        auto worker = parent.service.startRequest(kj::mv(metadata));
         return worker->request(method, url, headers, requestBody, *wrappedResponse)
             .attach(kj::mv(worker), kj::mv(ownResponse));
       }
@@ -1585,9 +1587,9 @@ private:
 };
 
 kj::Promise<void> Server::listenHttp(
-    kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service,
+    kj::Own<kj::ConnectionReceiver> listener, Service& service,
     kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter) {
-  auto obj = kj::heap<HttpListener>(kj::mv(listener), kj::mv(service),
+  auto obj = kj::heap<HttpListener>(kj::mv(listener), service,
                                     physicalProtocol, kj::mv(rewriter),
                                     globalContext->headerTable, timer);
   return obj->run().attach(kj::mv(obj));
@@ -1649,7 +1651,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     kj::String ownAddrStr;
     kj::Maybe<kj::Own<kj::ConnectionReceiver>> listenerOverride;
 
-    auto service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
+    Service& service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
     KJ_IF_MAYBE(override, socketOverrides.findEntry(name)) {
       KJ_SWITCH_ONEOF(override->value) {
@@ -1718,9 +1720,9 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     tasks.add(listener
-        .then([this, service = kj::mv(service), rewriter = kj::mv(rewriter), physicalProtocol]
+        .then([this, &service, rewriter = kj::mv(rewriter), physicalProtocol]
               (kj::Own<kj::ConnectionReceiver> listener) mutable {
-      return listenHttp(kj::mv(listener), kj::mv(service), physicalProtocol, kj::mv(rewriter));
+      return listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
     }));
   }
 

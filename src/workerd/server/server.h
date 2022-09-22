@@ -102,11 +102,10 @@ private:
       config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
 
-  kj::Own<Service> lookupService(
-      config::ServiceDesignator::Reader designator, kj::String errorContext);
+  Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
   // Can only be called in the link stage.
 
-  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service,
+  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
                                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);
 
   class InvalidConfigService;
