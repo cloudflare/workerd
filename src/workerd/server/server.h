@@ -72,10 +72,7 @@ private:
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
-  kj::HashMap<kj::String, kj::ForkedPromise<Service*>> services;
-  // Initialized synchronously in run() (before it returns a promise).
-
-  kj::Vector<kj::Own<Service>> ownServices;
+  kj::HashMap<kj::String, kj::Own<Service>> services;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
@@ -100,14 +97,14 @@ private:
   kj::Own<Service> makeDiskDirectoryService(
       kj::StringPtr name, config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Promise<kj::Own<Service>> makeWorker(
-      kj::StringPtr name, config::Worker::Reader conf);
-  kj::Promise<kj::Own<Service>> makeService(
+  kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf);
+  kj::Own<Service> makeService(
       config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
 
-  kj::Promise<kj::Own<Service>> lookupService(
+  kj::Own<Service> lookupService(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
+  // Can only be called in the link stage.
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service,
                                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);

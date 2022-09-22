@@ -1036,6 +1036,63 @@ KJ_TEST("Server: capability bindings") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: cyclic bindings") {
+  TestServer test(R"((
+    services = [
+      ( name = "service1",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    if (request.url.endsWith("/done")) {
+                `      return new Response("!");
+                `    } else {
+                `      let resp2 = await env.service2.fetch(request);
+                `      let text = await resp2.text();
+                `      return new Response("Hello " + text);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "service2", service = "service2")]
+        )
+      ),
+      ( name = "service2",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let resp2 = await env.service1.fetch("http://foo/done");
+                `    let text = await resp2.text();
+                `    return new Response("World" + text);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "service1", service = "service1")]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "service1"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello World!");
+}
+
 KJ_TEST("Server: named entrypoints") {
   TestServer test(R"((
     services = [
@@ -1088,6 +1145,39 @@ KJ_TEST("Server: named entrypoints") {
     auto conn = test.connect("bar-addr");
     conn.httpGet200("/", "hello from bar entrypoint");
   }
+}
+
+KJ_TEST("Server: invalid entrypoint") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    return env.svc.fetch(request);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "svc", service = (name = "hello", entrypoint = "bar"))],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "alt1", address = "foo-addr", service = (name = "hello", entrypoint = "foo")),
+    ]
+  ))"_kj);
+
+  test.expectErrors(
+      "Worker \"hello\"'s binding \"svc\" refers to service \"hello\" with a named entrypoint "
+          "\"bar\", but \"hello\" has no such named entrypoint.\n"
+      "Socket \"alt1\" refers to service \"hello\" with a named entrypoint \"foo\", but \"hello\" "
+          "has no such named entrypoint.\n");
 }
 
 // =======================================================================================
