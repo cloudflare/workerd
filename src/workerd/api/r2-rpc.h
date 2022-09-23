@@ -8,6 +8,10 @@
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
+// NOTE: We don't currently actually use this as a structured object (hence the `kj::Own<R2Error>`
+// that we see pop up).
+// TODO(soon): Switch to structured objects and use jsg::Ref<R2Error> instead of kj::Own<R2Error>
+//   to maintain ownership.
 class R2Error: public jsg::Object {
 public:
   R2Error(uint v4Code, kj::String message): v4Code(v4Code), message(kj::mv(message)) {}

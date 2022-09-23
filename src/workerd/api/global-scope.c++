@@ -385,8 +385,9 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
       auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
       persistent.cancelDeferredAlarmDeletion();
 
-      if (!jsg::isDoNotLogException(e.getDescription())) {
-        KJ_LOG(ERROR, e);
+      if (auto desc = e.getDescription();
+          !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
+        LOG_EXCEPTION("alarmRun"_kj, e);
       }
       EventOutcome outcome = EventOutcome::EXCEPTION;
       KJ_IF_MAYBE(status, context.getLimitEnforcer().getLimitsExceeded()) {

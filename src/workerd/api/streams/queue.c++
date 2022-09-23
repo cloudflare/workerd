@@ -188,6 +188,16 @@ void ValueQueue::handleRead(
   }
 }
 
+bool ValueQueue::handleMaybeClose(
+    jsg::Lock&js,
+    ConsumerImpl::Ready& state,
+    ConsumerImpl& consumer,
+    QueueImpl& queue) {
+  // If the value queue is not yet empty we have to keep waiting for more reads to consume it.
+  // Return false to indicate that we cannot close yet.
+  return false;
+}
+
 size_t ValueQueue::getConsumerCount() { return impl.getConsumerCount(); }
 
 #pragma endregion ValueQueue
@@ -208,11 +218,23 @@ void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
 }  // namespace
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
-  pullInto.store.trim(pullInto.store.size() - pullInto.filled);
-  resolver.resolve(ReadResult {
-    .value = js.v8Ref(pullInto.store.createHandle(js)),
-    .done = true
-  });
+  if (pullInto.filled > 0) {
+    // There's been at least some data written, we need to respond but not
+    // set done to true since that's what the streams spec requires.
+    pullInto.store.trim(pullInto.store.size() - pullInto.filled);
+    resolver.resolve(ReadResult {
+      .value = js.v8Ref(pullInto.store.createHandle(js)),
+      .done = false
+    });
+  } else {
+    // Otherwise, we set the length to zero
+    pullInto.store.trim(pullInto.store.size());
+    KJ_ASSERT(pullInto.store.size() == 0);
+    resolver.resolve(ReadResult {
+      .value = js.v8Ref(pullInto.store.createHandle(js)),
+      .done = true
+    });
+  }
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
@@ -427,7 +449,9 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
 
 ByteQueue::ByteQueue(size_t highWaterMark) : impl(highWaterMark) {}
 
-void ByteQueue::close(jsg::Lock& js) { impl.close(js); }
+void ByteQueue::close(jsg::Lock& js) {
+  impl.close(js);
+}
 
 ssize_t ByteQueue::desiredSize() const { return impl.desiredSize(); }
 
@@ -688,7 +712,6 @@ void ByteQueue::handleRead(
       if (state.queueTotalSize > 0 && consume(state.queueTotalSize)) {
         return request.resolveAsDone(js);
       }
-
       return pendingRead();
     }
 
@@ -718,6 +741,162 @@ void ByteQueue::handleRead(
     // or errors.
     return pendingRead();
   }
+}
+
+bool ByteQueue::handleMaybeClose(
+    jsg::Lock&js,
+    ConsumerImpl::Ready& state,
+    ConsumerImpl& consumer,
+    QueueImpl& queue) {
+  // This is called when we know that we are closing and we still have data in
+  // the queue. We want to see if we can drain as much of it into pending reads
+  // as possible. If we're able to drain all of it, then yay! We can go ahead and
+  // close. Otherwise we stay open and wait for more reads to consume the rest.
+
+  // We should only be here if there is data remaining in the queue.
+  KJ_ASSERT(state.queueTotalSize > 0);
+
+  // We should also only be here if the consumer is closing.
+  KJ_ASSERT(consumer.isClosing());
+
+  const auto consume = [&] {
+    // Consume will copy as much of the remaining data in the buffer as possible
+    // to the next pending read. If the remaining data can fit into the remaining
+    // space in the read, awesome, we've consumed everything and we will return
+    // true. If the remaining data cannot fit into the remaining space in the read,
+    // then we'll return false to indicate that there's more data to consume. In
+    // either case, the pending read is popped off the pending queue and resolved.
+
+    KJ_ASSERT(!state.readRequests.empty());
+    auto& pending = state.readRequests.front();
+
+    while (!state.buffer.empty()) {
+      auto& next = state.buffer.front();
+      KJ_SWITCH_ONEOF(next) {
+        KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
+          // We've reached the end! queueTotalSize should be zero. We need to
+          // resolve and pop the current read and return true to indicate that
+          // we're all done.
+          //
+          // Technically, we really shouldn't get here but the case is covered
+          // just in case.
+          KJ_ASSERT(state.queueTotalSize == 0);
+          pending.resolve(js);
+          state.readRequests.pop_front();
+          return true;
+        }
+        KJ_CASE_ONEOF(entry, QueueEntry) {
+          auto sourcePtr = entry.entry->toArrayPtr();
+          auto sourceSize = sourcePtr.size() - entry.offset;
+
+          auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
+          auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
+
+          // There should be space available to copy into and data to copy from, or
+          // something else went wrong.
+          KJ_ASSERT(destAmount > 0);
+          KJ_ASSERT(sourceSize > 0);
+
+          // sourceSize is the amount of data remaining in the current entry to copy.
+          // destAmount is the amount of space remaining to be filled in the pending read.
+          auto amountToCopy = kj::min(sourceSize, destAmount);
+
+          auto sourceStart = sourcePtr.begin() + entry.offset;
+          auto sourceEnd = sourceStart + amountToCopy;
+
+          // It shouldn't be possible for sourceEnd to extend past the sourcePtr.end()
+          // but let's make sure just to be safe.
+          KJ_ASSERT(sourceEnd <= sourcePtr.end());
+
+          // Safely copy amountToCopy bytes from the source into the destination.
+          std::copy(sourceStart, sourceEnd, destPtr);
+
+          pending.pullInto.filled += amountToCopy;
+          state.queueTotalSize -= amountToCopy;
+          entry.offset += amountToCopy;
+
+          KJ_ASSERT(entry.offset <= sourcePtr.size());
+
+          if (sourceEnd == sourcePtr.end()) {
+            // If sourceEnd is equal to sourcePtr.end(), we've consumed the entire entry
+            // and we can free it.
+            auto released = kj::mv(next);
+            state.buffer.pop_front();
+
+            if (amountToCopy == destAmount) {
+              // If the amountToCopy is equal to destAmount, then we've completely filled
+              // this read request with the data remaining. Resolve the read request. If
+              // state.queueTotalSize happens to be zero, we can safely indicate that we
+              // have read the remaining data as this may have been the last actual value
+              // entry in the buffer.
+              pending.resolve(js);
+              state.readRequests.pop_front();
+
+              if (state.queueTotalSize == 0) {
+                // If the queueTotalSize is zero at this point, the next item in the queue
+                // must be a close and we can return true. All of the data has been consumed.
+                KJ_ASSERT(state.buffer.front().is<ConsumerImpl::Close>());
+                return true;
+              }
+
+              // Otherwise, there's still data to consume, return false here to move on
+              // to the next pending read (if any).
+              return false;
+            }
+
+            // We know that amountToCopy cannot be greater than destAmount because
+            // of the kj::min above.
+
+            // Continuing here means that our pending read still has space to fill
+            // and we might still have value entries to fill it. We'll iterate around
+            // and see where we get.
+            continue;
+          }
+
+          // This read did not consume everything in this entry but doesn't have
+          // any more space to fill. We will resolve this read and return false
+          // to indicate that the outer loop should continue with the next read
+          // request if there is one.
+
+          // At this point, it should be impossible for state.queueTotalSize to
+          // be zero because there is still data remaining to be consumed in this
+          // buffer.
+          KJ_ASSERT(state.queueTotalSize > 0);
+
+          pending.resolve(js);
+          state.readRequests.pop_front();
+          return false;
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+
+    return state.queueTotalSize == 0;
+  };
+
+  // We can only consume here if there are pending reads!
+  while (!state.readRequests.empty()) {
+    // We ignore the read request atLeast here since we are closing. Our goal is to
+    // consume as much of the data as possible.
+
+    if (consume()) {
+      // If consume returns true, we reached the end and have no more data to
+      // consume. That's a good thing! It means we can go ahead and close down.
+      return true;
+    }
+
+    // If consume() returns false, there is still data left to consume in the queue.
+    // We will loop around and try again so long as there are still read requests
+    // pending.
+  }
+
+  // At this point, we shouldn't have any read requests and there should be data
+  // left in the queue. We have to keep waiting for more reads to consume the
+  // remaining data.
+  KJ_ASSERT(state.queueTotalSize > 0);
+  KJ_ASSERT(state.readRequests.empty());
+
+  return false;
 }
 
 kj::Maybe<kj::Own<ByteQueue::ByobRequest>> ByteQueue::nextPendingByobReadRequest() {

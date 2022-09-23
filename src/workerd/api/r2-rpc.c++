@@ -81,7 +81,11 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
         response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers),
         context);
       auto metadataSize = atoi((metadata).cStr());
-      KJ_REQUIRE(metadataSize <= 256 * 1024, "R2 metadata size seems way too large");
+      // R2 itself will try to stick to a cap of 256 KiB of response here. However for listing
+      // sometimes our heuristics have corner cases. This way we're more lenient in case someone
+      // finds a corner case for the heuristic so that we don't fail the GET with an opaque
+      // internal error.
+      KJ_REQUIRE(metadataSize <= 1024 * 1024, "R2 metadata size seems way too large");
       auto metadataBuffer = kj::heapArray<char>(metadataSize);
       auto promise = stream->tryRead((void*)metadataBuffer.begin(),
           metadataBuffer.size(), metadataBuffer.size());

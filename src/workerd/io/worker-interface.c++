@@ -4,8 +4,95 @@
 
 #include "worker-interface.h"
 #include <kj/debug.h>
+#include <workerd/util/own-util.h>
 
 namespace workerd {
+
+class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
+  // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
+  // interface the promise resolved to.
+
+public:
+  PromisedWorkerInterface(kj::TaskSet& waitUntilTasks,
+                          kj::Promise<kj::Own<WorkerInterface>> promise)
+      : waitUntilTasks(waitUntilTasks),
+        promise(promise.then([this](kj::Own<WorkerInterface> result) {
+          worker = kj::mv(result);
+        }).fork()) {}
+
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, Response& response) override {
+    KJ_IF_MAYBE(w, worker) {
+      return w->get()->request(method, url, headers, requestBody, response);
+    } else {
+      return promise.addBranch().then([this,method,url,&headers,&requestBody,&response]() {
+        return KJ_ASSERT_NONNULL(worker)
+            ->request(method, url, headers, requestBody, response);
+      });
+    }
+  }
+
+  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
+    KJ_IF_MAYBE(w, worker) {
+      w->get()->sendTraces(kj::mv(traces));
+    } else {
+      waitUntilTasks.add(promise.addBranch().then([this, tracesCopy = mapAddRef(traces)]() mutable {
+        KJ_ASSERT_NONNULL(worker)->sendTraces(tracesCopy);
+      }).attach(kj::addRef(*this)));
+    }
+  }
+
+  void prewarm(kj::StringPtr url) override {
+    KJ_IF_MAYBE(w, worker) {
+      w->get()->prewarm(url);
+    } else {
+      waitUntilTasks.add(promise.addBranch().then([this, url=kj::str(url)]() mutable {
+        KJ_ASSERT_NONNULL(worker)->prewarm(url);
+      }).attach(kj::addRef(*this)));
+    }
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    KJ_IF_MAYBE(w, worker) {
+      return w->get()->runScheduled(scheduledTime, cron);
+    } else {
+      return promise.addBranch().then([this, scheduledTime, cron]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
+      });
+    }
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
+    KJ_IF_MAYBE(w, worker) {
+      return w->get()->runAlarm(scheduledTime);
+    } else {
+      return promise.addBranch().then([this, scheduledTime]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
+      });
+    }
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    KJ_IF_MAYBE(w, worker) {
+      return w->get()->customEvent(kj::mv(event));
+    } else {
+      return promise.addBranch().then([this, event = kj::mv(event)]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
+      });
+    }
+  }
+
+private:
+  kj::TaskSet& waitUntilTasks;
+  kj::ForkedPromise<void> promise;
+  kj::Maybe<kj::Own<WorkerInterface>> worker;
+};
+
+kj::Own<WorkerInterface> newPromisedWorkerInterface(
+    kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise) {
+  return kj::refcounted<PromisedWorkerInterface>(waitUntilTasks, kj::mv(promise));
+}
 
 kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
   return kj::newHttpClient(*workerInterface).attach(kj::mv(workerInterface));

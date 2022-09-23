@@ -1642,7 +1642,19 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
     }
   } else {
     auto report = [&](kj::Maybe<kj::StringPtr> name, api::ExportedHandler& exported) {
-      auto dict = js.toDict(exported.self.getHandle(js.v8Isolate));
+      auto handle = exported.self.getHandle(js.v8Isolate);
+      if (handle->IsArray()) {
+        // HACK: toDict() will throw a TypeError if given an array, because jsg::DictWrapper is
+        //   designed to treat arrays as not matching when a dict is expected. However,
+        //   StructWrapper has no such restriction, and therefore an exported array will
+        //   successfully produce an ExportedHandler (presumably with no handler functions), and
+        //   hence we will see it here. Rather than try to correct this inconsistency between
+        //   struct and dict handling (which could have unintended consequences), let's just
+        //   work around by ignoring arrays here.
+        return;
+      }
+
+      auto dict = js.toDict(handle);
       for (auto& field: dict.fields) {
         if (!ignoredHandlers.contains(field.name)) {
           errorReporter.addHandler(name, field.name);
