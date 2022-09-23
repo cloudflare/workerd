@@ -525,7 +525,7 @@ public:
   kj::MainFunc getMain() {
     if (config == nullptr) {
       return kj::MainBuilder(context, getVersionString(),
-            "Runs the Cloudflare Workers Runtime.")
+            "Runs the Workers JavaScript/Wasm runtime.")
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe),
               "run the server")
           .addSubCommand("compile", KJ_BIND_METHOD(*this, getCompile),
