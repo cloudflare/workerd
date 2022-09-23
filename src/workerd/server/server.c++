@@ -19,6 +19,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/api/actor-state.h>
 #include "workerd-api.h"
 
 namespace workerd::server {
@@ -102,6 +103,53 @@ static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
 
   return escaped;
 }
+
+class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
+  // An ActorStorage implementation which will always respond to reads as if the state is empty,
+  // and will fail any writes.
+public:
+  kj::Promise<void> get(GetContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> getMultiple(GetMultipleContext context) override {
+    return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
+        .send().ignoreResult();
+  }
+  kj::Promise<void> list(ListContext context) override {
+    return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
+        .send().ignoreResult();
+  }
+  kj::Promise<void> getAlarm(GetAlarmContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> txn(TxnContext context) override {
+    auto results = context.getResults(capnp::MessageSize {2, 1});
+    results.setTransaction(kj::heap<TransactionImpl>());
+    return kj::READY_NOW;
+  }
+
+private:
+  class TransactionImpl final: public rpc::ActorStorage::Stage::Transaction::Server {
+  protected:
+    kj::Promise<void> get(GetContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> getMultiple(GetMultipleContext context) override {
+      return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
+          .send().ignoreResult();
+    }
+    kj::Promise<void> list(ListContext context) override {
+      return context.getParams().getStream().endRequest(capnp::MessageSize {2, 0})
+          .send().ignoreResult();
+    }
+    kj::Promise<void> getAlarm(GetAlarmContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> commit(CommitContext context) override {
+      return kj::READY_NOW;
+    }
+  };
+};
 
 }  // namespace
 
@@ -871,13 +919,19 @@ class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHan
                                    private IoChannelFactory, private TimerChannel,
                                    private LimitEnforcer {
 public:
+  class ActorNamespace;
+
   struct LinkedIoChannels {
+    // I/O channels, delivered when link() is called.
     kj::Array<Service*> subrequest;
+    kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
   };
+  using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
   WorkerService(ThreadContext& threadContext, kj::Own<const Worker> worker,
                 kj::HashSet<kj::String> namedEntrypointsParam,
-                kj::Function<LinkedIoChannels()> linkCallback)
+                const kj::HashMap<kj::String, ActorConfig>& actorClasses,
+                LinkCallback linkCallback)
       : threadContext(threadContext), worker(kj::mv(worker)),
         ioChannels(kj::mv(linkCallback)),
         waitUntilTasks(*this) {
@@ -886,6 +940,12 @@ public:
       kj::StringPtr epPtr = ep;
       namedEntrypoints.insert(kj::mv(ep), EntrypointService(*this, epPtr));
     }
+
+    actorNamespaces.reserve(actorClasses.size());
+    for (auto& entry: actorClasses) {
+      ActorNamespace ns(*this, entry.key, entry.value);
+      actorNamespaces.insert(entry.key, kj::mv(ns));
+    }
   }
 
   kj::Maybe<Service&> getEntrypoint(kj::StringPtr name) {
@@ -893,10 +953,13 @@ public:
   }
 
   void link() override {
-    kj::Function<LinkedIoChannels()> callback =
-        kj::mv(KJ_REQUIRE_NONNULL(ioChannels.tryGet<kj::Function<LinkedIoChannels()>>(),
-                                  "already called link()"));
-    ioChannels = callback();
+    LinkCallback callback = kj::mv(KJ_REQUIRE_NONNULL(
+        ioChannels.tryGet<LinkCallback>(), "already called link()"));
+    ioChannels = callback(*this);
+  }
+
+  kj::Maybe<ActorNamespace&> getActorNamespace(kj::StringPtr name) {
+    return actorNamespaces.find(name);
   }
 
   kj::Own<WorkerInterface> startRequest(
@@ -905,12 +968,13 @@ public:
   }
 
   kj::Own<WorkerInterface> startRequest(
-      IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName) {
+      IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<kj::Own<Worker::Actor>> actor = nullptr) {
     return WorkerEntrypoint::construct(
         threadContext,
         kj::atomicAddRef(*worker),
         entrypointName,
-        nullptr,                   // actor -- TODO(launch): support preview actors
+        kj::mv(actor),
         kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},                        // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance),
@@ -921,6 +985,69 @@ public:
         nullptr,                   // tracer
         kj::mv(metadata.cfBlobJson));
   }
+
+  class ActorNamespace {
+  public:
+    ActorNamespace(WorkerService& service, kj::StringPtr className, const ActorConfig& config)
+        : service(service), className(className), config(config) {}
+
+    const ActorConfig& getConfig() { return config; }
+
+    kj::Own<IoChannelFactory::ActorChannel> getActor(Worker::Actor::Id id) {
+      // `getActor()` is often called with the calling isolate's lock held. We need to drop that
+      // lock and take a lock on the target isolate before constructing the actor. Even if these
+      // are the same isolate (as is commonly the case), we really don't want to do this stuff
+      // synchronously, so this has the effect of pushing off to a later turn of the event loop.
+      auto promise = service.worker->takeAsyncLockWithoutRequest(nullptr)
+          .then([this, id = kj::mv(id)](Worker::AsyncLock lock) mutable -> kj::Own<ActorChannel> {
+        kj::String idStr;
+        KJ_SWITCH_ONEOF(id) {
+          KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
+            KJ_REQUIRE(config.is<Durable>());
+            idStr = obj->toString();
+          }
+          KJ_CASE_ONEOF(str, kj::String) {
+            KJ_REQUIRE(config.is<Ephemeral>());
+            idStr = kj::str(str);
+          }
+        }
+
+        auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() {
+          auto persistent = config.tryGet<Durable>().map([&](const Durable& d) {
+            // TODO(someday): Implement some sort of actual durable storage. For now we force
+            //   `ActorCache` into `neverFlush` mode so that all state is kept in-memory.
+            return rpc::ActorStorage::Stage::Client(kj::heap<EmptyReadOnlyActorStorageImpl>());
+          });
+
+          auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
+                                ActorCache& actorCache)
+                            -> jsg::Ref<api::DurableObjectStorage> {
+            return jsg::alloc<api::DurableObjectStorage>(IoContext::current().addObject(actorCache));
+          };
+
+          TimerChannel& timerChannel = service;
+          auto newActor = kj::refcounted<Worker::Actor>(
+              *service.worker, kj::mv(id), true, kj::mv(persistent),
+              className, kj::mv(makeStorage), lock,
+              timerChannel, kj::refcounted<ActorObserver>());
+
+          return kj::HashMap<kj::String, kj::Own<Worker::Actor>>::Entry {
+            kj::mv(idStr), kj::mv(newActor)
+          };
+        }));
+
+        return kj::heap<ActorChannelImpl>(service, className, kj::mv(actor));
+      });
+
+      return kj::heap<PromisedActorChannel>(service.waitUntilTasks, kj::mv(promise));
+    }
+
+  private:
+    WorkerService& service;
+    kj::StringPtr className;
+    const ActorConfig& config;
+    kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
+  };
 
 private:
   class EntrypointService final: public Service {
@@ -941,8 +1068,51 @@ private:
   ThreadContext& threadContext;
   kj::Own<const Worker> worker;
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
-  kj::OneOf<kj::Function<LinkedIoChannels()>, LinkedIoChannels> ioChannels;
+  kj::HashMap<kj::StringPtr, ActorNamespace> actorNamespaces;
+  kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
   kj::TaskSet waitUntilTasks;
+
+  class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
+  public:
+    ActorChannelImpl(WorkerService& service, kj::StringPtr className, kj::Own<Worker::Actor> actor)
+        : service(service), className(className), actor(kj::mv(actor)) {}
+
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata) override {
+      return service.startRequest(kj::mv(metadata), className, kj::addRef(*actor));
+    }
+
+  private:
+    WorkerService& service;
+    kj::StringPtr className;
+    kj::Own<Worker::Actor> actor;
+  };
+
+  class PromisedActorChannel final: public IoChannelFactory::ActorChannel {
+  public:
+    PromisedActorChannel(kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<ActorChannel>> promise)
+        : waitUntilTasks(waitUntilTasks),
+          promise(promise.then([this](kj::Own<ActorChannel> result) {
+            channel = kj::mv(result);
+          }).fork()) {}
+
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata) override {
+      KJ_IF_MAYBE(c, channel) {
+        return c->get()->startRequest(kj::mv(metadata));
+      } else {
+        return newPromisedWorkerInterface(waitUntilTasks,
+            promise.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
+          return KJ_ASSERT_NONNULL(channel)->startRequest(kj::mv(metadata));
+        }));
+      }
+    }
+
+  private:
+    kj::TaskSet& waitUntilTasks;
+    kj::ForkedPromise<void> promise;
+    kj::Maybe<kj::Own<ActorChannel>> channel;
+  };
 
   // ---------------------------------------------------------------------------
   // implements kj::TaskSet::ErrorHandler
@@ -981,12 +1151,25 @@ private:
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id) override {
-    // TODO(launch): actors
-    KJ_FAIL_REQUIRE("no actor channels");
+    auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
+        "link() has not been called");
+
+    KJ_REQUIRE(channel < channels.actor.size(), "invalid actor channel number");
+    auto& ns = JSG_REQUIRE_NONNULL(channels.actor[channel], Error,
+        "Actor namespace configuration was invalid.");
+    KJ_REQUIRE(ns.getConfig().is<Durable>());  // should have been verified earlier
+    return ns.getActor(id.clone());
   }
 
   kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::String id) override {
-    KJ_FAIL_REQUIRE("no actor channels");
+    auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
+        "link() has not been called");
+
+    KJ_REQUIRE(channel < channels.actor.size(), "invalid actor channel number");
+    auto& ns = JSG_REQUIRE_NONNULL(channels.actor[channel], Error,
+        "Actor namespace configuration was invalid.");
+    KJ_REQUIRE(ns.getConfig().is<Ephemeral>());  // should have been verified earlier
+    return ns.getActor(kj::str(id));
   }
 
   // ---------------------------------------------------------------------------
@@ -1027,6 +1210,8 @@ private:
 };
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf) {
+  auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
+
   struct ErrorReporter: public Worker::ValidationErrorReporter {
     ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
 
@@ -1075,7 +1260,11 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
         .hardLimit = 128ull << 20,
         .staleTimeout = 30 * kj::SECONDS,
         .dirtyKeySoftLimit = 64,
-        .maxKeysPerRpc = 128
+        .maxKeysPerRpc = 128,
+
+        // For now, we use `neverFlush` to implement in-memory-only actors.
+        // See WorkerService::getActor().
+        .neverFlush = true
       };
     }
     kj::Own<void> enterStartupJs(
@@ -1118,6 +1307,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     kj::String errorContext;
   };
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
+
+  struct FutureActorChannel {
+    config::Worker::Binding::DurableObjectNamespaceDesignator::Reader designator;
+    kj::String errorContext;
+  };
+  kj::Vector<FutureActorChannel> actorChannels;
 
   auto confBindings = conf.getBindings();
   using Global = WorkerdApiIsolate::Global;
@@ -1272,8 +1467,54 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
         continue;
       }
 
-      case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE:
-        KJ_UNIMPLEMENTED("TODO(launch): durable object namespaces");
+      case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
+        auto actorBinding = binding.getDurableObjectNamespace();
+        const ActorConfig* actorConfig;
+        if (actorBinding.hasServiceName()) {
+          auto& svcMap = KJ_UNWRAP_OR(actorConfigs.find(actorBinding.getServiceName()), {
+            errorReporter.addError(kj::str(
+                errorContext, " refers to a service \"", actorBinding.getServiceName(),
+                "\", but no such service is defined."));
+            continue;
+          });
+
+          actorConfig = &KJ_UNWRAP_OR(svcMap.find(actorBinding.getClassName()), {
+            errorReporter.addError(kj::str(
+                errorContext, " refers to a Durable Object namespace named \"",
+                actorBinding.getClassName(), "\" in service \"", actorBinding.getServiceName(),
+                "\", but no such Durable Object namespace is defined by that service."));
+            continue;
+          });
+        } else {
+          actorConfig = &KJ_UNWRAP_OR(localActorConfigs.find(actorBinding.getClassName()), {
+            errorReporter.addError(kj::str(
+                errorContext, " refers to a Durable Object namespace named \"",
+                actorBinding.getClassName(), "\", but no such Durable Object namespace is defined "
+                "by this Worker."));
+            continue;
+          });
+        }
+
+        KJ_SWITCH_ONEOF(*actorConfig) {
+          KJ_CASE_ONEOF(durable, Durable) {
+            addGlobal(Global::DurableActorNamespace {
+              .actorChannel = (uint)actorChannels.size(),
+              .uniqueKey = durable.uniqueKey
+            });
+          }
+          KJ_CASE_ONEOF(_, Ephemeral) {
+            addGlobal(Global::EphemeralActorNamespace {
+              .actorChannel = (uint)actorChannels.size(),
+            });
+          }
+        }
+
+        actorChannels.add(FutureActorChannel {
+          actorBinding,
+          kj::mv(errorContext)
+        });
+        continue;
+      }
 
       case config::Worker::Binding::KV_NAMESPACE: {
         addGlobal(Global::KvNamespace {
@@ -1337,7 +1578,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   }
 
   auto linkCallback =
-      [this, name, conf, subrequestChannels = kj::mv(subrequestChannels)]() mutable {
+      [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
+       actorChannels = kj::mv(actorChannels)](WorkerService& workerService) mutable {
     auto services = kj::heapArrayBuilder<Service*>(subrequestChannels.size() +
               IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
 
@@ -1354,13 +1596,32 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       services.add(&lookupService(channel.designator, kj::mv(channel.errorContext)));
     }
 
+    auto actors = KJ_MAP(channel, actorChannels) -> kj::Maybe<WorkerService::ActorNamespace&> {
+      WorkerService* targetService = &workerService;
+      if (channel.designator.hasServiceName()) {
+        auto& svc = KJ_UNWRAP_OR(this->services.find(channel.designator.getServiceName()), {
+          // error was reported earlier
+          return nullptr;
+        });
+        targetService = dynamic_cast<WorkerService*>(svc.get());
+        if (targetService == nullptr) {
+          // error was reported earlier
+          return nullptr;
+        }
+      }
+
+      // (If getActorNamespace() returns null, an error was reported earlier.)
+      return targetService->getActorNamespace(channel.designator.getClassName());
+    };
+
     return WorkerService::LinkedIoChannels {
-      .subrequest = services.finish()
+      .subrequest = services.finish(),
+      .actor = kj::mv(actors)
     };
   };
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
-                                 kj::mv(errorReporter.namedEntrypoints),
+                                 kj::mv(errorReporter.namedEntrypoints), localActorConfigs,
                                  kj::mv(linkCallback));
 }
 
@@ -1608,6 +1869,55 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
   // ---------------------------------------------------------------------------
   // Configure services
 
+  // First pass: Extract actor namespace configs.
+  for (auto serviceConf: config.getServices()) {
+    kj::StringPtr name = serviceConf.getName();
+    kj::HashMap<kj::String, ActorConfig> serviceActorConfigs;
+
+    if (serviceConf.isWorker()) {
+      auto workerConf = serviceConf.getWorker();
+      bool hadDurable = false;
+      for (auto ns: workerConf.getDurableObjectNamespaces()) {
+        switch (ns.which()) {
+          case config::Worker::DurableObjectNamespace::UNIQUE_KEY:
+            hadDurable = true;
+            serviceActorConfigs.insert(kj::str(ns.getClassName()),
+                Durable { kj::str(ns.getUniqueKey()) });
+            continue;
+          case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
+            serviceActorConfigs.insert(kj::str(ns.getClassName()), Ephemeral {});
+            continue;
+        }
+        reportConfigError(kj::str(
+            "Encountered unknown DurableObjectNamespace type in service \"", name,
+            "\", class \"", ns.getClassName(), "\". Was the config compiled with a newer version "
+            "of the schema?"));
+      }
+
+      switch (workerConf.getDurableObjectStorage().which()) {
+        case config::Worker::DurableObjectStorage::NONE:
+          if (hadDurable) {
+            reportConfigError(kj::str(
+                "Worker service \"", name, "\" implements durable object classes but has "
+                "`durableObjectStorage` set to `none`."));
+          }
+          goto validDurableObjectStorage;
+        case config::Worker::DurableObjectStorage::IN_MEMORY:
+          goto validDurableObjectStorage;
+      }
+      reportConfigError(kj::str(
+          "Encountered unknown durableObjectStorage type in service \"", name,
+          "\". Was the config compiled with a newer version of the schema?"));
+    validDurableObjectStorage:
+      ;
+    }
+
+    actorConfigs.upsert(kj::str(name), kj::mv(serviceActorConfigs), [&](auto&&...) {
+      reportConfigError(kj::str("Config defines multiple services named \"", name, "\"."));
+    });
+  }
+
+  // Second pass: Build services.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
     auto service = makeService(serviceConf, headerTableBuilder);
@@ -1637,7 +1947,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     };
   });
 
-  // Now that all services are constructed, we can tell them to cross-link to each other.
+  // Third pass: Cross-link services.
   for (auto& service: services) {
     service.value->link();
   }

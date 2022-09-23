@@ -72,6 +72,15 @@ private:
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
+  struct Durable { kj::String uniqueKey; };
+  struct Ephemeral {};
+  using ActorConfig = kj::OneOf<Durable, Ephemeral>;
+
+  kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
+  // Information about all known actor namespaces. Maps serviceName -> className -> config.
+  // This needs to be populated in advance of constructing any services, in order to be able to
+  // correctly construct dependent services.
+
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
