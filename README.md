@@ -2,8 +2,7 @@
 
 ![Banner](/docs/assets/banner.png)
 
-`workerd` is a JavaScript / Wasm server runtime based on the same code that powers
-[Cloudflare Workers](https://workers.dev).
+`workerd` (pronounced: "worker-dee") is a JavaScript / Wasm server runtime based on the same code that powers [Cloudflare Workers](https://workers.dev).
 
 You might use it:
 
@@ -26,19 +25,20 @@ You might use it:
 
 * **Capability bindings:** `workerd` configuration uses capabilities instead of global namespaces to connect nanoservices to each other and external resources. The result is code that is more composable -- and immune to SSRF attacks.
 
-* **Always backwards compatible:** Updating `workerd` to a newer version will never break your JavaScript code.
+* **Always backwards compatible:** Updating `workerd` to a newer version will never break your JavaScript code. `workerd`'s version number is simply a date, corresponding to the maximum ["compatibility date"](https://developers.cloudflare.com/workers/platform/compatibility-dates/) supported by that version. You can always configure your worker to a past date, and `workerd` will emulate the API as it existed on that date.
 
-[Read the blog post to learn more about these principles.](TODO:link).
+[Read the blog post to learn more about these principles.](https://blog.cloudflare.com/workerd-open-source-workers-runtime/).
 
 ### WARNING: This is a beta. Work in progress.
 
-As of this writing, `workerd` is in beta. Expect rough edges. Deploy to production at your own risk, but please tell us what goes wrong.
+Although most of `workerd`'s code has been used in Cloudflare Workers for years, the `workerd` configuration format and top-level server code is brand new. We don't yet have much experience running this in production. As such, there will be rough edges, maybe even a few ridiculous bugs. Deploy to production at your own risk (but please tell us what goes wrong!).
 
 The config format may change in backwards-incompatible ways before `workerd` leaves beta, but should remain stable after that.
 
 As of this writing, some major features are missing which we intend to fix shortly:
 
-* **Binary Packages** for various distributions are not built yet. We intend to provide these once out of beta.
+* **General error logging** is awkward. Traditionally we have separated error logs into "application errors" (e.g. a Worker threw an exception from JavaScript) and "internal errors" (bugs in the implementation which the Workers team should address). We then sent these errors to completely different places. In the `workerd` world, the server admin wants to see both of these, so logging has become entirely different and, at the moment, is a bit ugly. For now, it may help to run `workerd` with the `--verbose` flag, which causes application errors to be written to standard error in the same way that internal errors are (but may also produce more noise). We'll be working on making this better out-of-the-box.
+* **Binary packages** for various distributions are not built yet. We intend to provide these once out of beta.
 * **Wrangler/Miniflare integration** is in progress. The [Wrangler CLI tool](https://developers.cloudflare.com/workers/wrangler/) and [Miniflare](https://miniflare.dev/) will soon support local testing using `workerd` (replacing the previous simulated environment on top of Node). Wrangler should also support generating `workerd` configuration directly from a Wrangler project.
 * **Multi-threading** is not implemented. `workerd` runs in a single-threaded event loop. For now, to utilize multiple cores, we suggest running multiple instances of `workerd` and balancing load across them. We will likely add some built-in functionality for this in the near future.
 * **Performance tuning** has not been done yet, and there is low-hanging fruit here. `workerd` performs decently as-is, but not spectacularly. Experiments suggest we can roughly double performance on a "hello world" load test with some tuning of compiler optimization flags and memory allocators.
@@ -48,6 +48,7 @@ As of this writing, some major features are missing which we intend to fix short
 * **Parameterized workers** are not implemented yet. This is a new feature specified in the config schema, which doesn't have any precedent on Cloudflare.
 * **Devtools inspection** is not supported yet, but this should be straightforward to hook up.
 * **Tests** for most APIs are conspicuously missing. This is because the testing harness we have used for the past five years is deeply tied to the internal version of the codebase. We need to develop a new test harness for `workerd` and revise our API tests to use it. For the time being, we will be counting on the internal tests to catch bugs. We understand this is not ideal for external contributors trying to test their changes.
+* **Documentation** is growing quickly but is definitely still a work in progress.
 
 ### WARNING: `workerd` is not a hardened sandbox
 
