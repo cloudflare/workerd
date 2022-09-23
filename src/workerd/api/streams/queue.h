@@ -549,10 +549,18 @@ private:
           // released it.
         }
       } else {
-        // Otherwise, if the buffer is empty isClosing() is true, resolve the
-        // remaining read promises with close indicators and update the state
-        // to closed. If the buffer is not empty, do nothing.
-        if (empty() && isClosing()) {
+        // Otherwise, if isClosing() is true...
+        if (isClosing()) {
+          if (!empty() && !Self::handleMaybeClose(js, *ready, *this, queue)) {
+            // If the queue is not empty, we'll have the implementation see
+            // if it can drain the remaining data into pending reads. If handleMaybeClose
+            // returns false, then it could not and we can't yet close. If it returns true,
+            // yay! Our queue is empty and we can continue closing down.
+            KJ_ASSERT(!empty()); // We're still not empty
+            return;
+          }
+
+          KJ_ASSERT(empty());
           KJ_REQUIRE(ready->buffer.size() == 1); // The close should be the only item remaining.
           for (auto& request : ready->readRequests) {
             request.resolveAsDone(js);
@@ -698,6 +706,10 @@ private:
                          ConsumerImpl& consumer,
                          QueueImpl& queue,
                          ReadRequest request);
+  static bool handleMaybeClose(jsg::Lock& js,
+                               ConsumerImpl::Ready& state,
+                               ConsumerImpl& consumer,
+                               QueueImpl& queue);
 
   friend ConsumerImpl;
 };
@@ -892,6 +904,10 @@ private:
                          ConsumerImpl& consumer,
                          QueueImpl& queue,
                          ReadRequest request);
+  static bool handleMaybeClose(jsg::Lock& js,
+                               ConsumerImpl::Ready& state,
+                               ConsumerImpl& consumer,
+                               QueueImpl& queue);
 
   friend ConsumerImpl;
   friend class Consumer;

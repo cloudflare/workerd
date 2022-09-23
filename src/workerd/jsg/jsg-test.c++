@@ -322,5 +322,41 @@ KJ_TEST("jsg::Lock logWarning") {
   KJ_ASSERT(called);
 }
 
+// ========================================================================================
+// JSG_CALLABLE Test
+struct CallableContext: public Object {
+  struct MyCallable: public Object {
+  public:
+    static Ref<MyCallable> constructor() { return alloc<MyCallable>(); }
+
+    bool foo() { return true; }
+
+    JSG_RESOURCE_TYPE(MyCallable) {
+      JSG_CALLABLE(foo);
+      JSG_METHOD(foo);
+    }
+  };
+
+  Ref<MyCallable> getCallable() { return alloc<MyCallable>(); }
+
+  JSG_RESOURCE_TYPE(CallableContext) {
+    JSG_METHOD(getCallable);
+    JSG_NESTED_TYPE(MyCallable);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(CallableIsolate, CallableContext, CallableContext::MyCallable);
+
+KJ_TEST("Test JSG_CALLABLE") {
+  Evaluator<CallableContext, CallableIsolate> e(v8System);
+
+  e.expectEval("let obj = getCallable(); obj.foo();", "boolean", "true");
+  e.expectEval("let obj = getCallable(); obj();", "boolean", "true");
+
+  e.expectEval("let obj = new MyCallable(); obj();", "boolean", "true");
+
+  // It's weird, but still accepted.
+  e.expectEval("let obj = getCallable(); new obj();", "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

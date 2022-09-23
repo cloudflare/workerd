@@ -692,6 +692,15 @@ struct ResourceTypeBuilder {
     constructor->Inherit(intrinsicPrototype);
   }
 
+  template <const char* name, typename Method, Method method>
+  inline void registerCallable() {
+    // Note that we set the call handler on the instance and not the prototype.
+    instance->SetCallAsFunctionHandler(
+        &MethodCallback<TypeWrapper, name, isContext,
+                        Self, Method, method,
+                        ArgumentIndexes<Method>>::callback);
+  }
+
   template<const char* name, typename Method, Method method>
   inline void registerMethod() {
     prototype->Set(isolate, name, v8::FunctionTemplate::New(isolate,

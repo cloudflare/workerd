@@ -155,8 +155,9 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   internalMessage = stripRemoteExceptionPrefix(internalMessage);
 
   bool isFromRemote = false;
-  // Remove `remote.` (if present).
-  if (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
+  // Remove `remote.` (if present). Note that there are cases where we return a tunneled error
+  // through multiple workers, so let's be paranoid and allow for multiple "remote." prefxies.
+  while (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
     isFromRemote = true;
     internalMessage = internalMessage.slice(ERROR_REMOTE_PREFIX.size());
   }
