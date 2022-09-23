@@ -37,10 +37,7 @@
 $import "/capnp/c++.capnp".namespace("workerd::server::config");
 
 struct Config {
-  # Top-level config file for the Open Source version of the Cloudflare Workers Runtime.
-  #
-  # (The internal version is integrated deep into Cloudflare's broader stack, so is configured
-  # differently.)
+  # Top-level configuration for a workerd instance.
 
   services @0 :List(Service);
   # List of named services defined by this server. These names are private; they are only used
