@@ -50,6 +50,9 @@ public:
   void overrideExternal(kj::String name, kj::String addr) {
     externalOverrides.upsert(kj::mv(name), kj::mv(addr));
   }
+  void enableInspector(kj::String addr) {
+    inspectorOverride = kj::mv(addr);
+  }
 
   kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf);
   // Runs the server using the given config.
@@ -70,6 +73,8 @@ private:
   //
   // String overrides are left as strings rather than parsed by the caller in order to reuse the
   // code that parses strings from the config file.
+
+  kj::Maybe<kj::String> inspectorOverride;
 
   struct GlobalContext;
   kj::Own<GlobalContext> globalContext;
@@ -130,6 +135,11 @@ private:
   class WorkerService;
   class WorkerEntrypointService;
   class HttpListener;
+
+  class InspectorService;
+
+  kj::Maybe<kj::Own<InspectorService>> maybeInspectorService;
+  kj::Own<InspectorService> makeInspectorService(kj::HttpHeaderTable::Builder& headerTableBuilder);
 };
 
 }  // namespace workerd::server
