@@ -8,6 +8,7 @@
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
+#include <kj/map.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker.h>
@@ -15,6 +16,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/uuid.h>
 #include <time.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
@@ -914,6 +916,154 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 }
 
 // =======================================================================================
+class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
+  // Implements the interface for the devtools inspector protocol.
+  //
+  // The InspectorService is created when workerd serve is called using the -i option
+  // to define the inspector socket.
+public:
+  InspectorService(
+      kj::TaskSet& tasks,
+      kj::Timer& timer,
+      kj::HttpHeaderTable::Builder& headerTableBuilder)
+      : tasks(tasks),
+        timer(timer),
+        headerTable(headerTableBuilder.getFutureTable()),
+        server(kj::heap<kj::HttpServer>(timer, headerTable, *this, kj::HttpServerSettings {
+          .errorHandler = *this
+        })) {}
+
+  kj::Promise<void> handleApplicationError(
+      kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
+    KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
+    KJ_IF_MAYBE(r, response) {
+      return r->sendError(500, "Internal Server Error", headerTable);
+    } else {
+      return kj::READY_NOW;
+    }
+  }
+
+  kj::Promise<void> request(
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    // The inspector protocol starts with the debug client sending ordinary HTTP GET requests
+    // to /json/version and then to /json or /json/list. These must respond with valid JSON
+    // documents that list the details of what isolates are available for inspection. Each
+    // isolate must be listed separately. In the advertisement for each isolate is a URL
+    // and a unique ID. The client will use the URL and ID to open a WebSocket request to
+    // actually connect the debug session.
+    kj::HttpHeaders responseHeaders(headerTable);
+    if (headers.isWebSocket()) {
+      KJ_IF_MAYBE(pos, url.findLast('/')) {
+        auto id = url.slice(*pos + 1);
+
+        KJ_IF_MAYBE(isolate, isolates.find(id)) {
+          // When using --verbose, we'll output some logging to indicate when the
+          // inspector client is attached/detached.
+          KJ_LOG(INFO, kj::str("Inspector client attaching [", id, "]"));
+          auto webSocket = response.acceptWebSocket(responseHeaders);
+          kj::Duration timerOffset = 0 * kj::MILLISECONDS;
+          return isolate->ptr->attachInspector(timer, timerOffset, *webSocket)
+              .attach(kj::mv(webSocket)).catch_([id=kj::str(id)](kj::Exception&& ex)
+                  -> kj::Promise<void> {
+            if (ex.getType() == kj::Exception::Type::DISCONNECTED) {
+              // This likely just means that the inspector client was closed.
+              // Nothing to do here but move along.
+              KJ_LOG(INFO, kj::str("Inspector client detached [", id, "]"));
+              return kj::READY_NOW;
+            } else {
+              // If it's any other kind of error, propagate it!
+              throw ex;
+            }
+          });
+        }
+
+        return response.sendError(404, "Unknown worker session", responseHeaders);
+      }
+
+      // No / in url!? That's weird
+      return response.sendError(400, "Invalid request", responseHeaders);
+    }
+
+    // If the request is not a WebSocket request, it must be a GET to fetch details
+    // about the implementation.
+    if (method != kj::HttpMethod::GET) {
+      return response.sendError(501, "Unsupported Operation", responseHeaders);
+    }
+
+    if (url.endsWith("/json/version")) {
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+      auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
+      auto out = response.send(200, "OK", responseHeaders, content.size());
+      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+    } else if (url.endsWith("/json") || url.endsWith("/json/list")) {
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+
+      auto baseWsUrl = KJ_UNWRAP_OR(headers.get(kj::HttpHeaderId::HOST), {
+        return response.sendError(400, "Bad Request", responseHeaders);
+      });
+
+      kj::Vector<kj::String> entries(isolates.size());
+      for (auto& entry : isolates) {
+        kj::Vector<kj::String> fields(9);
+        fields.add(kj::str("\"id\":\"", entry.key ,"\""));
+        fields.add(kj::str("\"title\":\"workerd: worker ", entry.value.name ,"\""));
+        fields.add(kj::str("\"type\":\"node\""));
+        fields.add(kj::str("\"description\":\"workerd worker\""));
+        fields.add(kj::str("\"webSocketDebuggerUrl\":\"ws://",
+                            baseWsUrl ,"/", entry.key ,"\""));
+        fields.add(kj::str("\"devtoolsFrontendUrl\":\"devtools://devtools/bundled/js_app.html?experiments=true&v8only=true&ws=", baseWsUrl ,"/\""));
+        fields.add(kj::str("\"devtoolsFrontendUrlCompat\":\"devtools://devtools/bundled/inspector.html?experiments=true&v8only=true&ws=", baseWsUrl ,"/\""));
+        fields.add(kj::str("\"faviconUrl\":\"https://workers.cloudflare.com/favicon.ico\""));
+        fields.add(kj::str("\"url\":\"https://workers.dev\""));
+        entries.add(kj::str('{', kj::strArray(fields, ",") ,'}'));
+      }
+      auto content = kj::str('[', kj::strArray(entries, ","), ']');
+
+      auto out = response.send(200, "OK", responseHeaders, content.size());
+      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+    }
+
+    return response.sendError(500, "Not yet implemented", responseHeaders);
+  }
+
+  void addIsolate(Worker::Isolate* isolate, kj::StringPtr name) {
+    isolates.insert(randomUUID(nullptr), IsolateInstance {
+      .name = kj::str(name),
+      .ptr = isolate,
+    });
+  }
+
+  kj::Promise<void> listenLoop(kj::Own<kj::ConnectionReceiver> listener) {
+    return listener->accept().then([this, listener = kj::mv(listener)]
+        (kj::Own<kj::AsyncIoStream> stream) mutable {
+      tasks.add(server->listenHttp(kj::mv(stream)).attach(kj::mv(stream)));
+      return listenLoop(kj::mv(listener));
+    });
+  }
+
+private:
+  struct IsolateInstance {
+    kj::String name;
+    Worker::Isolate* ptr;
+  };
+
+  kj::TaskSet& tasks;
+  kj::Timer& timer;
+  kj::HttpHeaderTable& headerTable;
+  kj::HashMap<kj::String, IsolateInstance> isolates;
+  kj::Own<kj::HttpServer> server;
+};
+
+kj::Own<Server::InspectorService> Server::makeInspectorService(
+    kj::HttpHeaderTable::Builder& headerTableBuilder) {
+  return kj::heap<InspectorService>(tasks, timer, headerTableBuilder);
+}
+
+// =======================================================================================
 
 class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHandler,
                                    private IoChannelFactory, private TimerChannel,
@@ -1290,6 +1440,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     void reportMetrics(IsolateObserver& isolateMetrics) const override {}
   };
 
+  // Check for the special inspector service.
+  kj::Maybe<InspectorService&> inspectorService;
+  KJ_IF_MAYBE(inspector, maybeInspectorService) {
+    inspectorService = kj::dynamicDowncastIfAvailable<InspectorService>(*inspector->get());
+  }
+
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
       featureFlags.asReader(), *limitEnforcer);
@@ -1298,7 +1454,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::atomicRefcounted<IsolateObserver>(),
       name,
       kj::mv(limitEnforcer),
-      false);  // allowInspector -- TODO(beta): support this
+      inspectorService != nullptr);
+
+  // If we are using the inspector, we need to register the Worker::Isolate
+  // with the inspector service.
+  KJ_IF_MAYBE(inspector, inspectorService) {
+    inspector->addIsolate(isolate.get(), name);
+  }
 
   auto script = isolate->newScript(name, WorkerdApiIsolate::extractSource(conf, errorReporter),
                                    IsolateObserver::StartType::COLD,
@@ -1867,6 +2029,39 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
 
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
+
+  // ---------------------------------------------------------------------------
+  // Configure inspector.
+
+  KJ_IF_MAYBE(inspector, inspectorOverride) {
+    // Create the special inspector service.
+    maybeInspectorService = makeInspectorService(headerTableBuilder);
+    auto& inspectorService = *KJ_ASSERT_NONNULL(maybeInspectorService);
+
+    // Configure and start the inspector socket.
+    static constexpr uint DEFAULT_PORT = 9229;
+    kj::Promise<kj::Own<kj::ConnectionReceiver>> inspectorListener = nullptr;
+    KJ_SWITCH_ONEOF(*inspector) {
+      KJ_CASE_ONEOF(addr, kj::String) {
+        inspectorListener = network.parseAddress(addr, DEFAULT_PORT)
+            .then([](kj::Own<kj::NetworkAddress> parsed) {
+          return parsed->listen();
+        });
+      }
+      KJ_CASE_ONEOF(receiver, kj::Own<kj::ConnectionReceiver>) {
+        inspectorListener = kj::mv(receiver);
+      }
+    }
+
+    capnp::MallocMessageBuilder messageBuilder;
+    auto httpOptionsBuilder = messageBuilder.initRoot<config::HttpOptions>();
+    auto rewriter = kj::heap<HttpRewriter>(httpOptionsBuilder.asReader(), headerTableBuilder);
+
+    tasks.add(inspectorListener.then([&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
+      KJ_LOG(INFO, "Inspector is listening");
+      return inspectorService.listenLoop(kj::mv(listener));
+    }));
+  }
 
   // ---------------------------------------------------------------------------
   // Configure services

@@ -273,6 +273,11 @@ public:
       kj::HttpHeaderId controlHeaderId) const;
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
 
+  kj::Promise<void> attachInspector(
+      kj::Timer& timer,
+      kj::Duration timerOffset,
+      kj::WebSocket& webSocket) const;
+
   void logWarning(kj::StringPtr description, Worker::Lock& lock);
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
   // Log a warning to the inspector if attached, and log an INFO severity message. logWarningOnce()

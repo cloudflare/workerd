@@ -2249,6 +2249,20 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::HttpHeaderId controlHeaderId) const {
   KJ_REQUIRE(impl->inspector != nullptr);
 
+  kj::HttpHeaders headers(headerTable);
+  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
+  auto webSocket = response.acceptWebSocket(headers);
+
+  return attachInspector(timer, timerOffset, *webSocket)
+      .attach(kj::mv(webSocket));
+}
+
+kj::Promise<void> Worker::Isolate::attachInspector(
+    kj::Timer& timer,
+    kj::Duration timerOffset,
+    kj::WebSocket& webSocket) const {
+  KJ_REQUIRE(impl->inspector != nullptr);
+
   Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(nullptr));
   auto& lock = *recordedLock.lock;
   auto& lockedSelf = const_cast<Worker::Isolate&>(*this);
@@ -2260,11 +2274,8 @@ kj::Promise<void> Worker::Isolate::attachInspector(
   // just not.
   lockedSelf.disconnectInspector();
 
-  kj::HttpHeaders headers(headerTable);
-  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
-  auto webSocket = response.acceptWebSocket(headers);
   auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
-      kj::atomicAddRef(*this), *webSocket);
+      kj::atomicAddRef(*this), webSocket);
   lockedSelf.currentInspectorSession = *channel;
 
   lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
@@ -2280,7 +2291,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
 
   return channel->incomingLoop()
       .exclusiveJoin(channel->outgoingLoop())
-      .attach(kj::mv(channel), kj::mv(webSocket));
+      .attach(kj::mv(channel));
 }
 
 void Worker::Isolate::disconnectInspector() {
