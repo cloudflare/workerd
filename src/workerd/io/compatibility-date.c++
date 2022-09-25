@@ -112,7 +112,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
-    case CompatibilityDateValidation::CODE_VERISON:
+    case CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL:
+    case CompatibilityDateValidation::CODE_VERSION:
       if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
         errorReporter.addError(kj::str(
             "This Worker requires compatibility date \"", parsedCompatDate, "\", but the newest "
@@ -194,6 +195,13 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
       // We don't consider it an error to specify a disable flag when the compatibility date makes
       // it redundant, because at a future date it won't be redundant, and someone could want to
       // set the flag early to make sure they don't forget later.
+    }
+    if (dateValidation == CompatibilityDateValidation::CODE_VERSION &&
+        enableByFlag && !enableByDate && enableDate == nullptr) {
+      errorReporter.addError(kj::str(
+          "The compatibility flag ", enableFlagName, " is experimental and may break or be "
+          "removed in a future version of workerd. To use this flag, you must pass --experimental "
+          "on the command line."));
     }
 
     dynamicOutput.set(field, enableByFlag || (enableByDate && !disableByFlag));

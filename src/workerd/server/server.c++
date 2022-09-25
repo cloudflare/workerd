@@ -1243,7 +1243,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
                               featureFlags, errorReporter,
-                              CompatibilityDateValidation::CODE_VERISON);
+                              experimental
+                                  ? CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL
+                                  : CompatibilityDateValidation::CODE_VERSION);
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibiltyDate."));
   }
@@ -1885,6 +1887,12 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
                 Durable { kj::str(ns.getUniqueKey()) });
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
+            if (!experimental) {
+              reportConfigError(kj::str(
+                  "Ephemeral objects (Durable Object namespaces with type 'ehpmeralLocal') are an "
+                  "experimental feature which may change or go away in the future. You must run "
+                  "workerd with `--experimental` to use this feature."));
+            }
             serviceActorConfigs.insert(kj::str(ns.getClassName()), Ephemeral {});
             continue;
         }
@@ -1908,8 +1916,13 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
       reportConfigError(kj::str(
           "Encountered unknown durableObjectStorage type in service \"", name,
           "\". Was the config compiled with a newer version of the schema?"));
+
     validDurableObjectStorage:
-      ;
+      if (workerConf.hasDurableObjectUniqueKeyModifier()) {
+        // This should be implemented along with parameterized workers. It's not relevant
+        // otherwise, but let's make sure no one sets it accidentally.
+        KJ_UNIMPLEMENTED("durableObjectUniqueKeyModifier is not implemented yet");
+      }
     }
 
     actorConfigs.upsert(kj::str(name), kj::mv(serviceActorConfigs), [&](auto&&...) {

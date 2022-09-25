@@ -1290,6 +1290,7 @@ KJ_TEST("Server: Ephemeral Objects") {
     ]
   ))"_kj);
 
+  test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
   conn.httpGet200("/",
