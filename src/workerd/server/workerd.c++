@@ -575,6 +575,9 @@ public:
         .addOption({'w', "watch"}, CLI_METHOD(watch),
                    "Watch configuration files (and server binary) and reload if they change. "
                    "Useful for development, but not recommended in production.")
+        .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
+                   "Permit the use of experimental features which may break backwards "
+                   "compatibility in a future release.")
         .callAfterParsing(CLI_METHOD(serve))
         .build();
   }

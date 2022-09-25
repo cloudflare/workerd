@@ -158,6 +158,16 @@ KJ_TEST("compatibility flag parsing") {
                "supported by this server binary is \"", SUPPORTED_COMPATIBILITY_DATE, "\".")},
       CompatibilityDateValidation::CODE_VERSION);
 
+  // Test experimental requirement using the durable_object_alarms flag since we know this flag
+  // is obsolete and will never have a date set.
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_alarms"_kj}, "(obsolete14 = true)",
+      {"The compatibility flag durable_object_alarms is experimental and may break or be removed "
+       "in a future version of workerd. To use this flag, you must pass --experimental on the "
+       "command line."_kj},
+      CompatibilityDateValidation::CODE_VERSION);
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_alarms"_kj}, "(obsolete14 = true)",
+      {}, CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL);
+
   // Multiple errors.
   expectCompileCompatibilityFlags("abcd",
       {"formdata_parser_supports_files"_kj, "fetch_refuses_unknown_protocols"_kj,

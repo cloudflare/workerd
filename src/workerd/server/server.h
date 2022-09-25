@@ -34,6 +34,10 @@ public:
          kj::EntropySource& entropySource, kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept(false);
 
+  void allowExperimental() { experimental = true; }
+  // Permit experimental features to be used. These features may break backwards compatibility
+  // in the future.
+
   void overrideSocket(kj::String name, kj::Own<kj::ConnectionReceiver> port) {
     socketOverrides.upsert(kj::mv(name), kj::mv(port));
   }
@@ -56,6 +60,8 @@ private:
   kj::Network& network;
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
+
+  bool experimental = false;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
