@@ -1,3 +1,14 @@
+// This protocol is used as part of Cloudflare Workers' internal observability infrastructure,
+// which uses Jaeger. This currently isn't actually used in workerd, but is included because we
+// haven't finished the work to abstract this out from the tracing system so that we can avoid the
+// depnedency.
+//
+// workerd users who want tracing should instead get it through Trace Workers, which allows more
+// flexibility to integrate with arbitrary tracing infrastructure.
+//
+// TODO(cleanup): Finish factoring this out. We can then eliminate the dependency on protobuf
+//   altogether!
+
 // OBTAINED FROM: https://github.com/jaegertracing/jaeger-idl/blob/d64c4eb/proto/api_v2/model.proto
 // ON: 2020-05-08
 //

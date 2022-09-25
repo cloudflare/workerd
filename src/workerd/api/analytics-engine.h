@@ -28,11 +28,7 @@ class AnalyticsEngine: public jsg::Object {
   // `blobs` and `doubles` fields are left up to applications submitting
   // messages.
   //
-  // This project's desing closely resembles that of its dual internal tool,
-  // Ready Analytics. See this Ready Analytics FAQ for more information:
-  // https://wiki.cfops.it/display/DATA/Ready+Analytics+-+FAQ
-  // Also, see this doc on how the two differ:
-  // https://wiki.cfops.it/display/~jpl/Understanding+Ready+Analytics+and+Workers+Analytics+Engine
+  // https://blog.cloudflare.com/workers-analytics-engine/
 
 public:
   explicit AnalyticsEngine(uint logfwdrChannel, kj::String dataset,

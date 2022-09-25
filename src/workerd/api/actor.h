@@ -3,6 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
+// "Actors" are the internal name for Durable Objects, because they implement a sort of actor
+// model. We ended up not calling the product "Actors" publicly because we found that people who
+// were familiar with actor-model programming were more confused than helped by it -- they tended
+// to expect something that looked more specifically like Erlang, whereas our actors are much more
+// abstractly related.
 
 #include <kj/async.h>
 #include <capnp/compat/byte-stream.h>
@@ -14,7 +19,7 @@
 namespace workerd::api {
 
 class ColoLocalActorNamespace: public jsg::Object {
-  // A capability to an Actor namespace.
+  // A capability to an ephemeral Actor namespace.
 
 public:
   ColoLocalActorNamespace(uint channel)
