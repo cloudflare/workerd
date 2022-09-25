@@ -112,7 +112,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
-    case CompatibilityDateValidation::CODE_VERISON:
+    case CompatibilityDateValidation::CODE_VERSION:
       if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
         errorReporter.addError(kj::str(
             "This Worker requires compatibility date \"", parsedCompatDate, "\", but the newest "

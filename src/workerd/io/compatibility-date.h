@@ -10,7 +10,7 @@
 namespace workerd {
 
 enum class CompatibilityDateValidation {
-  CODE_VERISON,
+  CODE_VERSION,
   // Allow dates up through the date specified by `supportedCompatibilityDate` in
   // `compatiility-date.capnp`.
 
@@ -20,7 +20,7 @@ enum class CompatibilityDateValidation {
   // This should ONLY be used by Cloudflare. If Cloudflare fails to deploy a compatibility flag
   // before its default-on date passes, then the flag's default-on date needs to be pushed back.
   //
-  // TODO(someday): We may want to consider eliminating this and using CODE_VERISON even for
+  // TODO(someday): We may want to consider eliminating this and using CODE_VERSION even for
   //   Cloudflare. Once people are testing their code using the open source runtime in wrangler,
   //   they will be forced to set a date no later than `supportedCompatibilityDate` anyway. If
   //   we make sure Cloudflare is updated before the runtime used locally by Wrangler is updated,

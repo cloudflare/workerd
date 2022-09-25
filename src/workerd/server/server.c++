@@ -1243,7 +1243,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
                               featureFlags, errorReporter,
-                              CompatibilityDateValidation::CODE_VERISON);
+                              CompatibilityDateValidation::CODE_VERSION);
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibiltyDate."));
   }

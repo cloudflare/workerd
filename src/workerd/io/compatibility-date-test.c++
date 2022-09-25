@@ -156,7 +156,7 @@ KJ_TEST("compatibility flag parsing") {
   expectCompileCompatibilityFlags("2252-04-01", {}, "()",
       {kj::str("This Worker requires compatibility date \"2252-04-01\", but the newest date "
                "supported by this server binary is \"", SUPPORTED_COMPATIBILITY_DATE, "\".")},
-      CompatibilityDateValidation::CODE_VERISON);
+      CompatibilityDateValidation::CODE_VERSION);
 
   // Multiple errors.
   expectCompileCompatibilityFlags("abcd",
