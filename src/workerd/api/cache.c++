@@ -364,7 +364,7 @@ jsg::Promise<void> Cache::put(
       };
 
       // A little funky: The process of "serializing" the cache entry payload means reading all the
-      // data from the payload body stream and writing it to cache. Bet, the payload body might
+      // data from the payload body stream and writing it to cache. But, the payload body might
       // originate from the app's own JavaScript, rather than being the response to some remote
       // request. If the stream is JS-backed, then we want to be careful to track "pending events".
       // Specifically, if the stream hasn't reported EOF yet, but JavaScript stops executing and

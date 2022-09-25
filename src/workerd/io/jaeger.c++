@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jaeger.h"
-#include <jaeger-model.pb.h>
+#include <workerd/io/jaeger-model.pb.h>
 #include <kj/debug.h>
 #include <kj/vector.h>
 #include <cstdlib>

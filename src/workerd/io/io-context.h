@@ -263,8 +263,6 @@ private:
 };
 
 class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler {
-  // TODO(cleanup): This class will soon be renamed to IoContext.
-  //
   // IoContext holds state associated with a single I/O context. For stateless requests, each
   // incoming request runs in a unique I/O context. For actors, each actor runs in a unique I/O
   // context (but all requests received by that actor run in the same context).

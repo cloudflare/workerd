@@ -3,7 +3,6 @@ From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: [PATCH 2/4] Allow manually setting ValueSerializer format version
 
-Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/overview
 ---
  include/v8-value-serializer.h   |  5 +++++
  src/api/api.cc                  |  4 ++++
