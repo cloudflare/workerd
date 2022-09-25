@@ -42,7 +42,6 @@ public:
   }
 
   CryptoKeyUsageSet() : set(0) {}
-  CryptoKeyUsageSet(const CryptoKeyUsageSet& copy) : set(copy.set) {}
 
   CryptoKeyUsageSet operator&(CryptoKeyUsageSet other) const { return set & other.set; }
   CryptoKeyUsageSet operator|(CryptoKeyUsageSet other) const { return set | other.set; }
