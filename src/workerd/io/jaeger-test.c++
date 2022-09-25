@@ -5,7 +5,7 @@
 #include <workerd/io/jaeger.h>
 #include <kj/test.h>
 #include <capnp/message.h>
-#include "jaeger-model.pb.h"
+#include <workerd/io/jaeger-model.pb.h>
 
 namespace workerd::tests {
 namespace {
