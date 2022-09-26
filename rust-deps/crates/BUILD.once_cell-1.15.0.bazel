@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "cxxbridge_flags",
+    name = "once_cell",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,14 +50,15 @@ rust_library(
         ],
     }),
     crate_features = [
-        "default",
+        "alloc",
+        "race",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -82,7 +83,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.75",
+    version = "1.15.0",
     deps = [
     ] + select_with_or({
         "//conditions:default": [

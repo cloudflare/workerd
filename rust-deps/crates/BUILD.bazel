@@ -35,7 +35,7 @@ alias(
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.64//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.65//:anyhow",
     tags = ["manual"],
 )
 
@@ -47,13 +47,13 @@ alias(
 
 alias(
     name = "cxx",
-    actual = "@crates_vendor__cxx-1.0.75//:cxx",
+    actual = "@crates_vendor__cxx-1.0.76//:cxx",
     tags = ["manual"],
 )
 
 alias(
     name = "libc",
-    actual = "@crates_vendor__libc-0.2.132//:libc",
+    actual = "@crates_vendor__libc-0.2.133//:libc",
     tags = ["manual"],
 )
 
