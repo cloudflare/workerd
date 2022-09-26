@@ -6,7 +6,7 @@
 
 $import "/capnp/c++.capnp".namespace("workerd");
 
-const supportedCompatibilityDate :Text = "2022-09-20";
+const supportedCompatibilityDate :Text = "2022-09-26";
 # Newest compatibility date that can safely be set using code compiled from this repo. Trying to
 # run a Worker with a newer compatibility date than this will fail.
 #
