@@ -81,7 +81,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.3",
+    version = "1.0.4",
     deps = [
     ] + select_with_or({
         "//conditions:default": [

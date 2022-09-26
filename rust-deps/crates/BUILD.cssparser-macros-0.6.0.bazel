@@ -86,7 +86,7 @@ rust_proc_macro(
     ] + select_with_or({
         "//conditions:default": [
             "@crates_vendor__quote-1.0.21//:quote",
-            "@crates_vendor__syn-1.0.99//:syn",
+            "@crates_vendor__syn-1.0.101//:syn",
         ],
     }),
 )

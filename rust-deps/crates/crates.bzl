@@ -9,10 +9,10 @@
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 
 # buildifier: disable=bzl-visibility
-load("@workerd//rust-deps/crates:defs.bzl", _crate_repositories = "crate_repositories")
+load("@rules_rust//crate_universe/private:crates_vendor.bzl", "crates_vendor_remote_repository")
 
 # buildifier: disable=bzl-visibility
-load("@rules_rust//crate_universe/private:crates_vendor.bzl", "crates_vendor_remote_repository")
+load("@workerd//rust-deps/crates:defs.bzl", _crate_repositories = "crate_repositories")
 
 def crate_repositories():
     maybe(

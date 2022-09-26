@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "cxx",
+    name = "syn",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,9 +54,16 @@ rust_library(
         ],
     }),
     crate_features = [
-        "alloc",
+        "clone-impls",
         "default",
-        "std",
+        "derive",
+        "extra-traits",
+        "fold",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "quote",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -67,7 +74,6 @@ rust_library(
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cxxbridge-macro-1.0.75//:cxxbridge_macro",
         ],
     }),
     rustc_env = {
@@ -89,19 +95,21 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.75",
+    version = "1.0.101",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cxx-1.0.75//:build_script_build",
-            "@crates_vendor__link-cplusplus-1.0.7//:link_cplusplus",
+            "@crates_vendor__proc-macro2-1.0.44//:proc_macro2",
+            "@crates_vendor__quote-1.0.21//:quote",
+            "@crates_vendor__syn-1.0.101//:build_script_build",
+            "@crates_vendor__unicode-ident-1.0.4//:unicode_ident",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "cxx_build_script",
+    name = "syn_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -120,9 +128,16 @@ cargo_build_script(
         ],
     }),
     crate_features = [
-        "alloc",
+        "clone-impls",
         "default",
-        "std",
+        "derive",
+        "extra-traits",
+        "fold",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "quote",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -131,7 +146,6 @@ cargo_build_script(
         ],
     }),
     edition = "2018",
-    links = "cxxbridge1",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -160,13 +174,11 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.75",
+    version = "1.0.101",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cc-1.0.73//:cc",
-            "@crates_vendor__cxxbridge-flags-1.0.75//:cxxbridge_flags",
         ],
     }),
 )
@@ -178,7 +190,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "cxx_build_script",
+    actual = "syn_build_script",
     tags = [
         "manual",
     ],

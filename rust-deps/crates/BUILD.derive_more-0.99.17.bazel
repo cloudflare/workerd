@@ -112,9 +112,9 @@ rust_proc_macro(
     ] + select_with_or({
         "//conditions:default": [
             "@crates_vendor__convert_case-0.4.0//:convert_case",
-            "@crates_vendor__proc-macro2-1.0.43//:proc_macro2",
+            "@crates_vendor__proc-macro2-1.0.44//:proc_macro2",
             "@crates_vendor__quote-1.0.21//:quote",
-            "@crates_vendor__syn-1.0.99//:syn",
+            "@crates_vendor__syn-1.0.101//:syn",
         ],
     }),
 )

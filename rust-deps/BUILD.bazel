@@ -11,6 +11,13 @@ selects.config_setting_group(
     ],
 )
 selects.config_setting_group(
+    name = "linux_arm64",
+    match_all = [
+        "@platforms//os:linux",
+        "@platforms//cpu:aarch64",
+    ],
+)
+selects.config_setting_group(
     name = "macos_x64",
     match_all = [
         "@platforms//os:macos",
@@ -26,6 +33,7 @@ selects.config_setting_group(
 )
 CARGO_BAZEL = select({
     ":linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
+    ":linux_arm64": "@cargo_bazel_linux_arm64//file:downloaded",
     ":macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
     ":macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
 })
@@ -99,6 +107,7 @@ crates_vendor(
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
 
         # this is not used but its required to work around a bug in rules_rust where
@@ -121,6 +130,7 @@ crates_vendor(
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
     ],
     vendor_path = "cxxbridge_crates",
