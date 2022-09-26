@@ -22,7 +22,7 @@ jsg::V8System v8System;
 // This can only be created once per process, so we have to put it at the top level.
 
 const bool verboseLog = ([]() {
-  // TODO(launch): Improve uncaught exception reporting so that we dontt have to do this.
+  // TODO(beta): Improve uncaught exception reporting so that we dontt have to do this.
   kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
   return true;
 })();
@@ -1839,7 +1839,7 @@ KJ_TEST("Server: disk service") {
     hello from qux.txt
   )"_blockquote);
 
-  // TODO(launch): Test listing a directory. Unfortunately it doesn't work against the in-memory
+  // TODO(beta): Test listing a directory. Unfortunately it doesn't work against the in-memory
   //   filesystem right now.
   //
   // conn.sendHttpGet("/");
@@ -2104,8 +2104,8 @@ KJ_TEST("Server: disk service allow dotfiles") {
 
 // =======================================================================================
 
-// TODO(launch): Test TLS (send and receive)
-// TODO(launch): Test CLI overrides
+// TODO(beta): Test TLS (send and receive)
+// TODO(beta): Test CLI overrides
 
 }  // namespace
 }  // namespace workerd::server
