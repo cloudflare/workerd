@@ -1,0 +1,33 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "workerd debug",
+      "preLaunchTask": "Bazel Build",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "gdb",
+      "program": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd",
+      "args": [
+        // A prompt will be displayed asking for the configuration
+        // arguments for the workerd process
+        "${input:debugargs}"
+      ],
+      "cwd": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd.runfiles/workerd",
+
+      "stopAtEntry": false,
+      "externalConsole": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "debugargs",
+      "description": "workerd arguments",
+      "default": "--help",
+      "type": "promptString"
+    }
+  ]
+}

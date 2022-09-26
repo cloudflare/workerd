@@ -228,7 +228,11 @@ kj::Promise<void> WorkerEntrypoint::request(
         // `jsg::isTunneledException(...)`. It would be lovely if we could simply store some type
         // instead of `loggedExceptionEarlier`. It would save use some work.
         auto description = jsg::stripRemoteExceptionPrefix(exception.getDescription());
-        exception.setDescription(kj::str("remote.", description));
+        if (!description.startsWith("remote.")) {
+          // If we already were annotated as remote from some other worker entrypoint, no point
+          // adding an additional prefix.
+          exception.setDescription(kj::str("remote.", description));
+        }
         return kj::mv(exception);
       }
 

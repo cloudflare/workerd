@@ -3,6 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
+// This file defines Event- and EventTarget-related APIs.
+//
+// TODO(cleanp): Rename to events.h?
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/canceler.h>

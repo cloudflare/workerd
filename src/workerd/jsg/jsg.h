@@ -268,6 +268,22 @@ private:
 // types must be constructable from a single "meta" configuration type, which is the type of the
 // configuration passed to the JSG isolate's constructor.
 
+#define JSG_CALLABLE(name) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerCallable<NAME, decltype(&Self::name), &Self::name>(); \
+  } while (false)
+// Use inside a JSG_RESOURCE_TYPE to declare that the resource type itself can be invoked as
+// a function.
+
+#define JSG_CALLABLE_NAMED(name, method) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerCallable<NAME, decltype(&Self::method), &Self::method>(); \
+  } while (false)
+// Use inside a JSG_RESOURCE_TYPE to declare that the instance of the resource type itself can
+// be invoked as a function.
+
 #define JSG_METHOD(name) \
   do { \
     static const char NAME[] = #name; \
@@ -907,6 +923,18 @@ class Object: private Wrappable {
 
 public:
   using jsgThis = Object;
+
+  // Objects that extend from jsg::Object should never be copied or moved
+  // independently of their owning jsg::Ref so we explicitly delete the
+  // copy and move constructors and assignment operators to be safe.
+  KJ_DISALLOW_COPY(Object);
+  Object(Object&&) = delete;
+  Object& operator=(Object&&) = delete;
+
+  // Since we explicitly delete the copy and move constructors, we have
+  // to explicitly declare the default constructor.
+  Object() = default;
+
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
 
   static constexpr bool jsgHasReflection = false;

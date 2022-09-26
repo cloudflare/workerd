@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
+// WebCrypto API
 
 #include <bit>
 #include <workerd/jsg/jsg.h>
@@ -41,7 +42,6 @@ public:
   }
 
   CryptoKeyUsageSet() : set(0) {}
-  CryptoKeyUsageSet(const CryptoKeyUsageSet& copy) : set(copy.set) {}
 
   CryptoKeyUsageSet operator&(CryptoKeyUsageSet other) const { return set & other.set; }
   CryptoKeyUsageSet operator|(CryptoKeyUsageSet other) const { return set | other.set; }

@@ -1036,6 +1036,63 @@ KJ_TEST("Server: capability bindings") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: cyclic bindings") {
+  TestServer test(R"((
+    services = [
+      ( name = "service1",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    if (request.url.endsWith("/done")) {
+                `      return new Response("!");
+                `    } else {
+                `      let resp2 = await env.service2.fetch(request);
+                `      let text = await resp2.text();
+                `      return new Response("Hello " + text);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "service2", service = "service2")]
+        )
+      ),
+      ( name = "service2",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let resp2 = await env.service1.fetch("http://foo/done");
+                `    let text = await resp2.text();
+                `    return new Response("World" + text);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "service1", service = "service1")]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "service1"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello World!");
+}
+
 KJ_TEST("Server: named entrypoints") {
   TestServer test(R"((
     services = [
@@ -1088,6 +1145,168 @@ KJ_TEST("Server: named entrypoints") {
     auto conn = test.connect("bar-addr");
     conn.httpGet200("/", "hello from bar entrypoint");
   }
+}
+
+KJ_TEST("Server: invalid entrypoint") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    return env.svc.fetch(request);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "svc", service = (name = "hello", entrypoint = "bar"))],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+      ( name = "alt1", address = "foo-addr", service = (name = "hello", entrypoint = "foo")),
+    ]
+  ))"_kj);
+
+  test.expectErrors(
+      "Worker \"hello\"'s binding \"svc\" refers to service \"hello\" with a named entrypoint "
+          "\"bar\", but \"hello\" has no such named entrypoint.\n"
+      "Socket \"alt1\" refers to service \"hello\" with a named entrypoint \"foo\", but \"hello\" "
+          "has no such named entrypoint.\n");
+}
+
+KJ_TEST("Server: Durable Objects") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    return await actor.fetch(request)
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.storage = state.storage;
+                `    this.id = state.id;
+                `  }
+                `  async fetch(request) {
+                `    let count = (await this.storage.get("foo")) || 0;
+                `    this.storage.put("foo", count + 1);
+                `    return new Response(this.id + ": " + request.url + " " + count);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 0");
+  conn.httpGet200("/",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 1");
+  conn.httpGet200("/",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 2");
+  conn.httpGet200("/bar",
+      "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 0");
+  conn.httpGet200("/bar",
+      "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 1");
+  conn.httpGet200("/",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 3");
+  conn.httpGet200("/bar",
+      "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
+}
+
+KJ_TEST("Server: Ephemeral Objects") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let actor = env.ns.get(request.url)
+                `    return await actor.fetch(request)
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    if (state.storage) throw new Error("storage shouldn't be present");
+                `    this.id = state.id;
+                `    this.count = 0;
+                `  }
+                `  async fetch(request) {
+                `    return new Response(this.id + ": " + request.url + " " + this.count++);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              ephemeralLocal = void,
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/",
+      "http://foo/: http://foo/ 0");
+  conn.httpGet200("/",
+      "http://foo/: http://foo/ 1");
+  conn.httpGet200("/",
+      "http://foo/: http://foo/ 2");
+  conn.httpGet200("/bar",
+      "http://foo/bar: http://foo/bar 0");
+  conn.httpGet200("/bar",
+      "http://foo/bar: http://foo/bar 1");
+  conn.httpGet200("/",
+      "http://foo/: http://foo/ 3");
+  conn.httpGet200("/bar",
+      "http://foo/bar: http://foo/bar 2");
 }
 
 // =======================================================================================

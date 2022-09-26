@@ -100,9 +100,24 @@ public:
         };
       }
     };
+    struct EphemeralActorNamespace {
+      uint actorChannel;
+
+      EphemeralActorNamespace clone() const {
+        return *this;
+      }
+    };
+    struct DurableActorNamespace {
+      uint actorChannel;
+      kj::StringPtr uniqueKey;
+
+      DurableActorNamespace clone() const {
+        return *this;
+      }
+    };
     kj::String name;
-    kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, kj::String,
-              kj::Array<byte>> value;
+    kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
+              DurableActorNamespace, kj::String, kj::Array<byte>> value;
 
     Global clone() const;
   };

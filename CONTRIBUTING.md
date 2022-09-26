@@ -40,6 +40,10 @@ watchexec --restart --watch src bazel test //src/...
 
 `workerd` is based on KJ, the C++ toolkit library underlying Cap'n Proto. Before writing code, we highly recommend you check out the [KJ style guide](https://github.com/capnproto/capnproto/blob/master/style-guide.md) and the [tour of KJ](https://github.com/capnproto/capnproto/blob/master/kjdoc/tour.md) to understand how to use KJ.
 
+### Using Visual Studio Code for development
+
+See [this guide](docs/vscode.md) for instructions on how to set up Visual Studio Code for development.
+
 TODO: Add more on tooling best practices, etc.
 
 ## Pull requests and code review

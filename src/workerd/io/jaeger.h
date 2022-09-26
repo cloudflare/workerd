@@ -3,6 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #pragma once
+// Similar to jaeger-model.proto, the code in this file relates to Cloudflare Workers' internal
+// tracing infrastructure, which uses Jaeger. This code is not used by `workerd` but is currenly
+// included because it is a dependency of the common trace APIs that also implement Trace Workers.
+// Eventually we would like to properly abstract trace collection and remove the Jaeger-specific
+// parts (or maybe make them available as an indepnedent library?). Long-term the right way for
+// `workerd` users to do tracing is through Trace Workers, which can integrate with arbitrary
+// tracing systems.
 
 #include <cstdint>
 #include <kj/string.h>

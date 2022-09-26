@@ -34,6 +34,10 @@ public:
          kj::EntropySource& entropySource, kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept(false);
 
+  void allowExperimental() { experimental = true; }
+  // Permit experimental features to be used. These features may break backwards compatibility
+  // in the future.
+
   void overrideSocket(kj::String name, kj::Own<kj::ConnectionReceiver> port) {
     socketOverrides.upsert(kj::mv(name), kj::mv(port));
   }
@@ -57,6 +61,8 @@ private:
   kj::EntropySource& entropySource;
   kj::Function<void(kj::String)> reportConfigError;
 
+  bool experimental = false;
+
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
   kj::HashMap<kj::String, kj::String> externalOverrides;
@@ -72,10 +78,16 @@ private:
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
-  kj::HashMap<kj::String, kj::ForkedPromise<Service*>> services;
-  // Initialized synchronously in run() (before it returns a promise).
+  struct Durable { kj::String uniqueKey; };
+  struct Ephemeral {};
+  using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
-  kj::Vector<kj::Own<Service>> ownServices;
+  kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
+  // Information about all known actor namespaces. Maps serviceName -> className -> config.
+  // This needs to be populated in advance of constructing any services, in order to be able to
+  // correctly construct dependent services.
+
+  kj::HashMap<kj::String, kj::Own<Service>> services;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
@@ -93,23 +105,22 @@ private:
   class HttpRewriter;
 
   kj::Own<Service> makeInvalidConfigService();
-  kj::Promise<kj::Own<Service>> makeExternalService(
+  kj::Own<Service> makeExternalService(
       kj::StringPtr name, config::ExternalServer::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Own<Service> makeNetworkService(config::Network::Reader conf);
   kj::Own<Service> makeDiskDirectoryService(
       kj::StringPtr name, config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Promise<kj::Own<Service>> makeWorker(
-      kj::StringPtr name, config::Worker::Reader conf);
-  kj::Promise<kj::Own<Service>> makeService(
+  kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf);
+  kj::Own<Service> makeService(
       config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
 
-  kj::Promise<kj::Own<Service>> lookupService(
-      config::ServiceDesignator::Reader designator, kj::String errorContext);
+  Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
+  // Can only be called in the link stage.
 
-  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service,
+  kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
                                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);
 
   class InvalidConfigService;

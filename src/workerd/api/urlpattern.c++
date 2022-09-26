@@ -72,8 +72,8 @@ namespace {
 
 using RegexAndNameList = std::pair<jsg::V8Ref<v8::RegExp>, kj::Array<jsg::UsvString>>;
 
-constexpr const char* SYNTAX_ERROR = "Syntax error in URLPattern.";
-constexpr const char* BASEURL_ERROR = "A baseURL is not allowed when input is an object";
+constexpr const char* SYNTAX_ERROR = "Syntax error in URLPattern";
+constexpr const char* BASEURL_ERROR = "A baseURL is not allowed when input is an object.";
 
 struct Common {
   jsg::UsvString DUMMY_PROTOCOL = jsg::usv('d', 'u', 'm', 'm', 'y');
@@ -387,19 +387,22 @@ Part::Modifier maybeTokenToModifier(kj::Maybe<Token&> modifierToken) {
 // ordered to make it so the *most likely* matches will be checked first.
 // TODO (later): Investigate whether there is a more efficient way to handle this.
 bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& component) {
-#define V(name)                                                                                  \
-  do {                                                                                           \
-    auto handle = component.regex.getHandle(js);                                                 \
-    auto result =                                                                                \
-      jsg::check(handle->Exec(js.v8Isolate->GetCurrentContext(),                                \
-                               jsg::v8Str(js.v8Isolate, #name)));                               \
-    if (!result->IsNullOrUndefined()) {                                                          \
-      return true;                                                                               \
-    }                                                                                            \
-  } while (false);
-   SPECIAL_SCHEME(V)
+  auto handle = component.regex.getHandle(js);
+  auto context = js.v8Isolate->GetCurrentContext();
+
+  const auto checkIt = [&handle, &js, &context](const char* name) {
+    return !jsg::check(handle->Exec(context, jsg::v8Str(js.v8Isolate, name)))->IsNullOrUndefined();
+  };
+
+  return js.tryCatch([&] {
+#define V(name) if (checkIt(#name)) return true;
+  SPECIAL_SCHEME(V)
 #undef V
-  return false;
+    return false;
+  }, [&](auto&& exception) {
+    // We ignore the exception here and just return false;
+    return false;
+  });
 }
 #undef SPECIAL_SCHEME
 
@@ -436,7 +439,7 @@ jsg::UsvString canonicalizeProtocol(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   auto result = JSG_REQUIRE_NONNULL(
       url::URL::parse(str, nullptr, dummyUrl),
       TypeError,
-      "Invalid protocol scheme");
+      "Invalid protocol scheme.");
 
   return kj::mv(result.scheme);
 }

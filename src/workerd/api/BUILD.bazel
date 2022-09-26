@@ -9,7 +9,6 @@ filegroup(
         ["**/*.c++"],
         exclude = [
             "**/*test*.c++",
-            "**/*fuzzer*.c++",
         ],
     ),
     visibility = ["//visibility:public"],

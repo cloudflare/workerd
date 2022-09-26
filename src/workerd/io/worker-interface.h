@@ -118,6 +118,14 @@ private:
   kj::Maybe<kj::Own<kj::HttpService>> adapterService;
 };
 
+kj::Own<WorkerInterface> newPromisedWorkerInterface(
+    kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise);
+// Given a Promise for a WorkerInterface, return a WorkerInterface whose methods will first wait
+// for the promise, then invoke the destination object.
+//
+// TODO(cleanup): `waitUntilTasks` is only needed to handle `sendTraces` and `prewarm` since they
+//   don't return promises. We should maybe change them to return promises?
+
 kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface);
 // Adapts WorkerInterface to HttpClient, including taking ownership.
 //

@@ -26,6 +26,33 @@ Specifically, the ["KJ Style Guide"][] introduces a differentiation between "Val
 JSG embraces these concepts and offers a C++-to-JavaScript type-mapping layer that is explicitly
 built around them.
 
+## jsg::Lock&
+
+In order to execute JavaScript on the current thread, a lock must be acquired on the `v8::Isolate`.
+The `jsg::Lock&` represents the current lock. It is passed as an argument to many methods that
+require access to the JavaScript isolate and context.
+
+The `jsg::Lock` interface itself provides access to basic JavaScript functionality, such as the
+ability to construct basic JavaScript values and call JavaScript functions.
+
+For Resource Types, all methods declared with `JSG_METHOD` and similar macros (described later)
+optionally take a `jsg::Lock&` as the first parameter, for instance:
+
+```cpp
+const Foo: public jsg::Object {
+public:
+  void foo(jsg::Lock& js, int x, int y) {
+    // ...
+  }
+
+  CFJS_RESOURCE_TYPE(Foo) {
+    JSG_METHOD(foo);
+  }
+};
+```
+
+Refer to the `jsg.h` header file for more detail on the specific methods available on the `jsg::Lock`.
+
 ## JSG Value Types
 
 Value Types in JSG include both primitives (e.g. strings, numbers, booleans, etc) and relatively
@@ -389,7 +416,7 @@ For the second bullet (taking a C++ lambda function and wrapping it), we can go 
 
 ```cpp
 jsg::Function<void(int)> getFunction() {
-  return jsg::Function<void(int)>([](jsg::Lock& lock, int val) {
+  return jsg::Function<void(int)>([](jsg::Lock& js, int val) {
     KJ_DBG(val);
   });
 }
@@ -423,6 +450,20 @@ promise.then(js, [&](jsg::Lock& js, int value) {
 ```
 
 TODO(soon): Lots more to add here.
+
+### Symbols with `jsg::Name`
+
+The `jsg::Name` type is a wrapper around values that can be used as property names in
+JavaScript (specifically, strings and symbols). It is used when an API needs to accept
+either and treat them the same.
+
+```cpp
+jsg::Name doSomething(jsg::Name name) {
+  // The name can be stored and used as a hashmap key, etc.
+  // When returned back to JavaScript, it will be the same type as was passed in.
+  return kj::mv(name);
+}
+```
 
 ### Reference types (`jsg::V8Ref<T>`, `jsg::Value`, `jsg::Ref<T>`)
 
@@ -1084,6 +1125,37 @@ const bar = new Foo.Bar();
 const baz = new Foo.Baz();
 ```
 
+#### Callable objects (`JSG_CALLABLE()` and `JSG_CALLABLE_NAMED()`)
+
+The `JSG_CALLABLE(name)` macro allows a Resource Type to be called as a function. For instance,
+given the following resource type:
+
+```cpp
+class MyAssert: public jsg::Object {
+public:
+  static jsg::Ref<MyAssert> constructor();
+
+  void ok(boolean condition) {
+    JSG_REQUIRE(condition, "jsg.Error: Condition failed!");
+  }
+
+  JSG_RESOURCE_TYPE(MyAssert) {
+    JSG_CALLABLE(ok);
+    JSG_METHOD(ok);
+  }
+};
+```
+
+The assertion test can be used in JavaScript as:
+
+```js
+const assert = new MyAssert();
+
+assert.ok(true); // No error
+
+assert(true);  // error
+```
+
 #### Additional configuration and compatibility flags
 
 TODO(soon): TBD
@@ -1122,13 +1194,90 @@ as a shortcut to make managing the list easier.
 
 The `JSG_DECLARE_ISOLATE_TYPE` macro should only be defined once in your application.
 
-## jsg::Lock&
-
-TODO(soon): TBD
-
 ## Garbage Collection and GC Visitation
 
-TODO(soon): TBD
+Garbage Collection can be a tricky topic to understand. We're not going to delve into the details here.
+Instead, we'll focus on the basics of how to implement GC visitation for your types and identify a few
+of the more important things to keep in mind.
+
+V8's garbage collector is a mark-and-sweep collector. It works by first marking all of the objects
+that are reachable from the root set. Then, it sweeps through the heap and frees all of the objects
+that were not marked. "Marking" here essentially means, "This object is reachable and in use, do not
+free it.".
+
+When using the `jsg::V8Ref<T>` type to hold a reference to a V8 JavaScript object, or when using the
+`jsg::Ref<T>` type to hold a reference to a JSG Resource Type, it is important to mark the objects
+that are reachable so that the V8 Garbage Collector knows how to handle them. We use a special class
+`jsg::GcVisitor` to implement this functionality.
+
+A Resource Type that contains `jsg::Ref<T>` or `jsg::V8Ref<T>` types (along with a handful of other
+visitable types) should implement a `void visitForGc(jsg::GcVisitor& visitor)` method. For example,
+
+```cpp
+class Bar: public jsg::Object {
+public:
+  static jsg::Ref<Bar> constructor();
+
+  JSG_RESOURCE_TYPE(Bar) {}
+};
+
+class Foo: public jsg::Object {
+public:
+  static jsg::Ref<Foo> constructor();
+
+  jsg::Ref<Bar> getBar();
+
+  JSG_RESOURCE_TYPE(Foo) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
+  }
+
+private:
+  jsg::Ref<Bar> bar;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(bar);
+  }
+};
+```
+
+The JSG mechanisms will automatically detect the `visitForGc()` implementation on a type and make use
+of it.
+
+If your Resource Type owns no ref types then implementing `visitForGc()` is not necessary. It's also
+not necessary to implement if you are not concerned about the possibility of reference cycles (e.g.
+object A referencing object B which references object A...).
+
+Because ref types are strong references, any ref type that is not explicitly visited will not be
+eligible for garbage collection, so failure to implement proper visitation may lead to memory leaks.
+As as best practice, it is recommended that you implement `visitForGc()` on all types that contain
+refs, regardless of whether or not you are concerned about reference cycles.
+
+For `jsg::Ref<T>`, garbage collection only applies to the JavaScript wrapper around the C++ object.
+From the perspective of C++, `jsg::Ref<T>` is a strong reference to a refcounted object. If you have
+an unreachable cycle of `jsg::Ref<T>` references, the JavaScript objects will be garbage collected,
+but the C++ objects will not be freed until the reference cycle is broken. It is critical to think
+about ownership and only hold `jsg::Ref<T>` from owner to owned objects; "backwards" references
+(from owned object to owner) should be regular C++ references or pointers. If it is possible for
+the reference from owned object to owner object to nulled out, use a `kj::Maybe<T&>` where `T` is
+the owning object type.
+
+Aside from the `jsg::Ref<T>` and `jsg::V8Ref<T>` types, there are a handful of other types that also
+support GC visitation. These types evolve over time so the list below may not be exhaustive:
+
+* `jsg::Ref<T>`
+* `jsg::V8Ref<T>` (and `jsg::Value`)
+* `jsg::HashableV8Ref<T>`
+* `jsg::Optional<T>` (when `T` is a GC-visitable type)
+* `jsg::LenientOptional<T>` (when `T` is a GC-visitable type)
+* `jsg::Name`
+* `jsg::Function<Signature>`
+* `jsg::Promise<T>`
+* `jsg::Promise<T>::Resolver`
+* `jsg::BufferSource`
+* `jsg::Sequence`
+* `jsg::Generator<T>`
+* `jsg::AsyncGenerator<T>`
+* `kj::Maybe<T>` (when `T` is a GC-visitable type)
 
 ## Utilities
 
