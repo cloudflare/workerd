@@ -124,7 +124,7 @@ addEventListener("fetch", event => {
 });
 ```
 
-[Complete reference documentation is provided by the comments in worker.capnp.](src/workerd/server/worker.capnp)
+[Complete reference documentation is provided by the comments in workerd.capnp.](src/workerd/server/workerd.capnp)
 
 [There is also a library of sample config files.](samples)
 
