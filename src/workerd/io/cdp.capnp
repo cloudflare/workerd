@@ -334,6 +334,38 @@ struct Profiler {
   }
 }
 
+struct HeapProfiler {
+  struct Command {
+    struct Enable {
+      struct Params {}
+      struct Result {}
+    }
+    struct Disable {
+      struct Params {}
+      struct Result {}
+    }
+    struct TakeHeapSnapshot {
+      struct Params {
+        reportProgress @0 : Bool;
+        captureNumericValue @1 : Bool;
+        exposeInternals @2 : Bool;
+      }
+      struct Result {}
+    }
+  }
+
+  struct Event {
+    struct AddHeapSnapshotChunk {
+      chunk @0 :Text;
+    }
+    struct ReportHeapSnapshotProgress {
+      done @0 : UInt32;
+      total @1 : UInt32;
+      finished @2 : Bool;
+    }
+  }
+}
+
 struct Error {
   code @0 :Int32;
   message @1 :Text;
@@ -358,6 +390,9 @@ struct Command $Json.discriminator(name = "method") {
     profilerEnable @6 :Method(Profiler.Command.Enable.Params, Profiler.Command.Enable.Result) $Json.name("Profiler.enable") $Json.flatten();
     profilerStart @7 :Method(Profiler.Command.Start.Params, Profiler.Command.Start.Result) $Json.name("Profiler.start") $Json.flatten();
     profilerStop @8 :Method(Profiler.Command.Stop.Params, Profiler.Command.Stop.Result) $Json.name("Profiler.stop") $Json.flatten();
+    heapProfilerEnable @9 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Enable.Result) $Json.name("HeapProfiler.enable") $Json.flatten();
+    heapProfilerDisable @10 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Disable.Result) $Json.name("HeapProfiler.disable") $Json.flatten();
+    takeHeapSnapshot @11 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
   }
 }
 
@@ -369,5 +404,8 @@ struct Event $Json.discriminator(name = "method", valueName = "params") {
     networkLoadingFinished @3 :Network.Event.LoadingFinished $Json.name("Network.loadingFinished"); # Fired when HTTP request has finished loading.
 
     runtimeConsoleApiCalled @4 :Runtime.Event.ConsoleApiCalled $Json.name("Runtime.consoleAPICalled");
+
+    addHeapSnapshotChunk @5 :HeapProfiler.Event.AddHeapSnapshotChunk $Json.name("HeapProfiler.addHeapSnapshotChunk");
+    reportHeapSnapshotProgress @6 :HeapProfiler.Event.ReportHeapSnapshotProgress $Json.name("HeapProfiler.reportHeapSnapshotProgress");
   }
 }
