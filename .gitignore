@@ -4,3 +4,7 @@ bazel-bin
 bazel-out
 bazel-testlogs
 bazel-workerd
+node_modules
+/npm/*/bin
+/npm/workerd/install.js
+/npm/workerd/lib/
