@@ -1,0 +1,21 @@
+{
+  "name": "workerd",
+  "version": "1.20220926.0",
+  "description": "👷 workerd, Cloudflare's JavaScript/Wasm Runtime",
+  "repository": "https://github.com/cloudflare/workerd",
+  "scripts": {},
+  "main": "lib/main.js",
+  "engines": {
+    "node": ">=16"
+  },
+  "bin": {
+    "workerd": "bin/workerd"
+  },
+  "optionalDependencies": {
+    "@cloudflare/workerd-darwin-arm64": "1.20220926.0",
+    "@cloudflare/workerd-darwin-64": "1.20220926.0",
+    "@cloudflare/workerd-linux-arm64": "1.20220926.0",
+    "@cloudflare/workerd-linux-64": "1.20220926.0"
+  },
+  "license": "Apache-2.0"
+}
