@@ -3,7 +3,6 @@
   "description": "👷 workerd for Linux ARM 64-bit, Cloudflare's JavaScript/Wasm Runtime",
   "repository": "https://github.com/cloudflare/workerd",
   "license": "Apache-2.0",
-  "private": true,
   "preferUnplugged": false,
   "engines": {
     "node": ">=16"
@@ -14,8 +13,5 @@
   "cpu": [
     "arm64"
   ],
-  "publishConfig": {
-    "registry": "https://registry-gateway.cloudflare-ui.workers.dev"
-  },
-  "version": "1.20220920.0"
+  "version": "1.20220926.0"
 }

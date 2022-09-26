@@ -2,6 +2,10 @@
 # TODO(cleanup): Convert to bazel rules/GitHub Actions
 set -euo pipefail
 
+if [ -z "${1-}" ]; then
+    echo "Please specify a command"
+    exit 1
+fi
 bazel build @capnp-cpp//src/capnp:capnp_tool
 
 export LATEST_COMPATIBILITY_DATE=$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)
@@ -60,5 +64,8 @@ clean)
     rm -rf npm/workerd/bin
     rm -rf npm/workerd/lib
     ;;
-*) ;;
+*)
+    echo "Invalid command"
+    exit 1
+    ;;
 esac

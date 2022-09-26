@@ -13,8 +13,5 @@
   "cpu": [
     "arm64"
   ],
-  "publishConfig": {
-    "registry": "https://registry-gateway.cloudflare-ui.workers.dev"
-  },
-  "version": "1.20220920.0"
+  "version": "1.20220926.0"
 }
