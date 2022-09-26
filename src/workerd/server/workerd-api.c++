@@ -175,7 +175,7 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader c
         }
       };
     case config::Worker::INHERIT:
-      // TODO(launch): Support inherit.
+      // TODO(beta): Support inherit.
       KJ_FAIL_ASSERT("inherit should have been handled earlier");
   }
 

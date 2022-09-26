@@ -175,7 +175,7 @@ struct Server::GlobalContext {
         httpOverCapnpFactory(byteStreamFactory, headerTableBuilder),
         threadContext(server.timer, server.entropySource,
             headerTableBuilder, httpOverCapnpFactory,
-            false /* isFiddle -- TODO(launch): support */),
+            false /* isFiddle -- TODO(beta): support */),
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
 
@@ -278,7 +278,7 @@ kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
 class Server::HttpRewriter {
   // Helper to apply config::HttpOptions.
   //
-  // TODO(launch): Do we want to automatically add `Date`, `Server` (to outgoing responses),
+  // TODO(beta): Do we want to automatically add `Date`, `Server` (to outgoing responses),
   //   `User-Agent` (to outgoing requests), etc.?
 
 public:
@@ -1137,7 +1137,7 @@ private:
   }
 
   kj::Own<CacheClient> getCache() override {
-    // TODO(launch): Cache API emulation.
+    // TODO(beta): Cache API emulation.
     KJ_FAIL_REQUIRE("jsg.Error: The cache API is not yet implemented.");
   }
 
@@ -1237,7 +1237,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   ErrorReporter errorReporter(*this, name);
 
   capnp::MallocMessageBuilder arena;
-  // TODO(launch): Factor out FeatureFlags from WorkerBundle.
+  // TODO(beta): Factor out FeatureFlags from WorkerBundle.
   auto featureFlags = arena.initRoot<CompatibilityFlags>();
 
   if (conf.hasCompatibilityDate()) {
@@ -1298,7 +1298,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::atomicRefcounted<IsolateObserver>(),
       name,
       kj::mv(limitEnforcer),
-      false);  // allowInspector -- TODO(launch): support this
+      false);  // allowInspector -- TODO(beta): support this
 
   auto script = isolate->newScript(name, WorkerdApiIsolate::extractSource(conf, errorReporter),
                                    IsolateObserver::StartType::COLD,
@@ -1336,7 +1336,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
         continue;
 
       case config::Worker::Binding::PARAMETER:
-        KJ_UNIMPLEMENTED("TODO(launch): parameters");
+        KJ_UNIMPLEMENTED("TODO(beta): parameters");
 
       case config::Worker::Binding::TEXT:
         addGlobal(kj::str(binding.getText()));
@@ -1570,7 +1570,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
             lock, globals, target, 1);
       },
       IsolateObserver::StartType::COLD,
-      nullptr,          // systemTracer -- TODO(launch): factor out
+      nullptr,          // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(nullptr),
       errorReporter);
 
