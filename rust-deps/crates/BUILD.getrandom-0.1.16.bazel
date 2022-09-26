@@ -97,6 +97,7 @@ rust_library(
         # cfg(unix)
         (
             "@rules_rust//rust/platform:aarch64-apple-darwin",
+            "@rules_rust//rust/platform:x86_64-apple-darwin",
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps
