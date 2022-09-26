@@ -25,9 +25,9 @@ selects.config_setting_group(
     ],
 )
 CARGO_BAZEL = select({
-    "//:linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
-    "//:macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
-    "//:macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
+    ":linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
+    ":macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
+    ":macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
 })
 
 # TODO (before prod):
