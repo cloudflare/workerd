@@ -2060,7 +2060,9 @@ public:
                   auto& lock = *recordedLock.lock;
                   v8::HandleScope handleScope(lock.v8Isolate);
                   auto profiler = lock.v8Isolate->GetHeapProfiler();
-                  if (profiler->StartSamplingHeapProfiler()) {
+                  if (profiler->StartSamplingHeapProfiler(
+                          cmd.getStartHeapSampling().getParams().getSamplingInterval(),
+                          128, v8::HeapProfiler::kSamplingForceGC)) {
                     maybeAllocationProfile = kj::Own(
                         profiler->GetAllocationProfile(),
                         AllocationProfileDisposer::instance);
@@ -2076,10 +2078,12 @@ public:
                   auto& lock = *recordedLock.lock;
                   v8::HandleScope handleScope(lock.v8Isolate);
                   auto profiler = lock.v8Isolate->GetHeapProfiler();
-                  profiler->StopSamplingHeapProfiler();
+
                   sendAllocationProfile(lock,
                       cmd.getStopHeapSampling().initResult(),
                       kj::mv(*allocationProfile));
+
+                  profiler->StopSamplingHeapProfiler();
                   maybeAllocationProfile = nullptr;
                 }
                 break;
