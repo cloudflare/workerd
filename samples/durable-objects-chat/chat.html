@@ -470,8 +470,12 @@ function addChatMessage(name, text) {
   // Append the new chat line, making sure that if the chatlog was scrolled to the bottom
   // before, it remains scrolled to the bottom, and otherwise the scroll position doesn't
   // change.
+  //
+  // TODO(bug): At some point this scrolling logic bitrotted and `isAtBottom` is apparently not
+  //   always true when it should be. No time to investigate now, so I'm hard-coding this to always
+  //   scroll to bottom on a new message so it doesn't look broken.
   chatlog.appendChild(p);
-  if (isAtBottom) {
+  if (isAtBottom || true) {
     chatlog.scrollBy(0, 1e8);
   }
 }
