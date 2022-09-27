@@ -1878,6 +1878,16 @@ private:
   kj::Maybe<kj::VectorOutputStream> inner;
 };
 
+class AllocationProfileDisposer final: public kj::Disposer {
+public:
+  virtual void disposeImpl(void* pointer) const override {
+    delete reinterpret_cast<v8::AllocationProfile*>(pointer);
+  }
+
+  static const AllocationProfileDisposer instance;
+};
+const AllocationProfileDisposer AllocationProfileDisposer::instance {};
+
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
 public:
   InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam,
@@ -2040,6 +2050,38 @@ public:
                 takeHeapSnapshot(lock,
                     params.getExposeInternals(),
                     params.getCaptureNumericValue());
+                break;
+              }
+              case cdp::Command::START_HEAP_SAMPLING: {
+                if (maybeAllocationProfile == nullptr) {
+                  auto state = this->state.lockExclusive();
+                  Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
+                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                  auto& lock = *recordedLock.lock;
+                  v8::HandleScope handleScope(lock.v8Isolate);
+                  auto profiler = lock.v8Isolate->GetHeapProfiler();
+                  if (profiler->StartSamplingHeapProfiler()) {
+                    maybeAllocationProfile = kj::Own(
+                        profiler->GetAllocationProfile(),
+                        AllocationProfileDisposer::instance);
+                  }
+                }
+                break;
+              }
+              case cdp::Command::STOP_HEAP_SAMPLING: {
+                KJ_IF_MAYBE(allocationProfile, maybeAllocationProfile) {
+                  auto state = this->state.lockExclusive();
+                  Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
+                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                  auto& lock = *recordedLock.lock;
+                  v8::HandleScope handleScope(lock.v8Isolate);
+                  auto profiler = lock.v8Isolate->GetHeapProfiler();
+                  profiler->StopSamplingHeapProfiler();
+                  sendAllocationProfile(lock,
+                      cmd.getStopHeapSampling().initResult(),
+                      kj::mv(*allocationProfile));
+                  maybeAllocationProfile = nullptr;
+                }
                 break;
               }
             }
@@ -2213,6 +2255,55 @@ private:
     snapshot->Serialize(&writer);
   }
 
+  void encodeAllocateProfileNode(
+      jsg::Lock& js,
+      cdp::HeapProfiler::SamplingHeapProfileNode::Builder root,
+      v8::AllocationProfile::Node* node) {
+    root.setId(node->node_id);
+    uint32_t selfSize = 0;
+    for (auto& allocation : node->allocations) {
+      selfSize += allocation.size * allocation.count;
+    }
+    root.setSelfSize(selfSize);
+
+    auto callFrame = root.initCallFrame();
+    callFrame.setColumnNumber(node->column_number);
+    callFrame.setLineNumber(node->line_number);
+    if (!node->name.IsEmpty()) {
+      callFrame.setFunctionName(kj::str(node->name));
+    } else {
+      callFrame.setFunctionName(""_kj);
+    }
+    callFrame.setScriptId(kj::str(node->script_id));
+    callFrame.setUrl(""_kj);
+
+    if (node->children.size()) {
+      auto children = root.initChildren(node->children.size());
+      int pos = 0;
+      for (auto& child : node->children) {
+        encodeAllocateProfileNode(js, children[pos++], child);
+      }
+    }
+  }
+
+  void sendAllocationProfile(
+      jsg::Lock& js,
+      cdp::HeapProfiler::Command::StopSampling::Result::Builder builder,
+      kj::Own<v8::AllocationProfile> profile) {
+    auto result = builder.initProfile();
+
+    encodeAllocateProfileNode(js, result.initHead(), profile->GetRootNode());
+
+    auto samples = result.initSamples(profile->GetSamples().size());
+    int pos = 0;
+    for (auto& sample : profile->GetSamples()) {
+      auto item = samples[pos++];
+      item.setNodeId(sample.node_id);
+      item.setOrdinal(sample.sample_id);
+      item.setSize(sample.size * sample.count);
+    }
+  }
+
   struct State {
     kj::Own<const Worker::Isolate> isolate;
     std::unique_ptr<v8_inspector::V8InspectorSession> session;
@@ -2300,6 +2391,8 @@ private:
 
   volatile bool networkEnabled = false;
   // Not under `state` lock due to lock ordering complications.
+
+  kj::Maybe<kj::Own<v8::AllocationProfile>> maybeAllocationProfile;
 
   kj::Promise<void> sendToWebsocket(kj::ArrayPtr<kj::String> messages) {
     if (messages.size() == 0) {

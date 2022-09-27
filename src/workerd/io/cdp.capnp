@@ -335,6 +335,23 @@ struct Profiler {
 }
 
 struct HeapProfiler {
+
+  struct SamplingHeapProfileNode {
+    callFrame @0 : Runtime.CallFrame;
+    selfSize @1 : UInt32;
+    id @2 : UInt32;
+    children @3 : List(SamplingHeapProfileNode);
+  }
+  struct SamplingHeapProfileSample {
+    size @0 : UInt32;
+    nodeId @1 : UInt32;
+    ordinal @2 : UInt32;
+  }
+  struct SamplingHeapProfile {
+    head @0 : SamplingHeapProfileNode;
+    samples @1 : List(SamplingHeapProfileSample);
+  }
+
   struct Command {
     struct Enable {
       struct Params {}
@@ -351,6 +368,20 @@ struct HeapProfiler {
         exposeInternals @2 : Bool;
       }
       struct Result {}
+    }
+    struct StartSampling {
+      struct Params {
+        samplingInterval @0 : UInt32;
+        includeObjectsCollectedByMajorGC @1 : Bool;
+        includeObjectsCollectedByMinorGC @2 : Bool;
+      }
+      struct Result {}
+    }
+    struct StopSampling {
+      struct Params {}
+      struct Result {
+        profile @0 : HeapProfiler.SamplingHeapProfile;
+      }
     }
   }
 
@@ -393,6 +424,8 @@ struct Command $Json.discriminator(name = "method") {
     heapProfilerEnable @9 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Enable.Result) $Json.name("HeapProfiler.enable") $Json.flatten();
     heapProfilerDisable @10 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Disable.Result) $Json.name("HeapProfiler.disable") $Json.flatten();
     takeHeapSnapshot @11 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
+    startHeapSampling @12 : Method(HeapProfiler.Command.StartSampling.Params, HeapProfiler.Command.StartSampling.Result) $Json.name("HeapProfiler.startSampling") $Json.flatten();
+    stopHeapSampling @13 : Method(HeapProfiler.Command.StopSampling.Params, HeapProfiler.Command.StopSampling.Result) $Json.name("HeapProfiler.stopSampling") $Json.flatten();
   }
 }
 
