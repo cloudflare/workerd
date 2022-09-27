@@ -135,8 +135,8 @@ struct BuiltinType {
     v8Function @7;
     # v8::Function
 
-    flags @8;
-    # CompatibilityFlags::Reader
+    configuration @8;
+    # api meta configuration object
 
     jsgLock @9;
     # jsg::Lock

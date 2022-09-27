@@ -10,6 +10,7 @@
 // compatibility etc.
 
 #include <capnp/message.h>
+#include <kj/table.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/rtti.capnp.h>
 
@@ -17,33 +18,39 @@ namespace workerd::jsg::rtti {
 
 namespace impl {
 
-template <typename T, typename Enable = void>
+template <typename Configuration, typename T, typename Enable = void>
 struct BuildRtti;
 // Struct for partial specialization.
 
 } // namespace impl
 
+template<typename MetaConfiguration>
 class Builder {
   // User's entry point into rtti.
   // Builder owns capnp builder for all the objects it returns, so usual capnp builder
   // rules apply.
 
 public:
+  const MetaConfiguration& config;
+
+  Builder(const MetaConfiguration& config) : config(config) {}
+
   template<typename T>
   Type::Reader type() {
     auto type = builder.initRoot<Type>();
-    impl::BuildRtti<T>::build(type);
+    impl::BuildRtti<MetaConfiguration, T>::build(type, *this);
     return type;
   }
 
-  template<typename T, typename MetaConfiguration>
-  Structure::Reader structure(MetaConfiguration&& config) {
+  template<typename T>
+  Structure::Reader structure() {
     auto structure = builder.initRoot<Structure>();
-    impl::BuildRtti<T>::build(structure, kj::fwd<MetaConfiguration>(config));
+    impl::BuildRtti<MetaConfiguration, T>::build(structure, *this);
     return structure;
   }
 
 private:
+  kj::TreeMap<kj::String, capnp::MallocMessageBuilder> symbols;
   capnp::MallocMessageBuilder builder;
 };
 
@@ -82,49 +89,50 @@ struct FunctionTraits<R(This::*)(Args...) const> {
   using ArgsTuple = std::tuple<Args...>;
 };
 
-template<typename Tuple>
+template<typename Configuration, typename Tuple>
 struct TupleRttiBuilder {
-  static inline void build(capnp::List<Type>::Builder builder) {
-    build(std::make_integer_sequence<size_t, std::tuple_size_v<Tuple>>{}, builder);
+  static inline void build(capnp::List<Type>::Builder builder, Builder<Configuration>& rtti) {
+    build(std::make_integer_sequence<size_t, std::tuple_size_v<Tuple>>{}, builder, rtti);
   }
 
 private:
   template<size_t...Indexes>
   static inline void build(std::integer_sequence<size_t, Indexes...> seq,
-                        capnp::List<Type>::Builder builder) {
-    ((buildIndex<Indexes>(builder)), ...);
+                           capnp::List<Type>::Builder builder, 
+                           Builder<Configuration>& rtti) {
+    ((buildIndex<Indexes>(builder, rtti)), ...);
   }
 
   template<size_t I>
-  static inline void buildIndex(capnp::List<Type>::Builder builder) {
-    BuildRtti<std::tuple_element_t<I, Tuple>>::build(builder[I]);
+  static inline void buildIndex(capnp::List<Type>::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, std::tuple_element_t<I, Tuple>>::build(builder[I], rtti);
   }
 };
 
 
 // Primitives
 
-template<>
-struct BuildRtti<void> {
-  static void build(Type::Builder builder) { builder.setVoidt(); }
+template<typename Configuration>
+struct BuildRtti<Configuration, void> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setVoidt(); }
 };
 
-template<>
-struct BuildRtti<bool> {
-  static void build(Type::Builder builder) { builder.setBoolt(); }
+template<typename Configuration>
+struct BuildRtti<Configuration, bool> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setBoolt(); }
 };
 
-template<>
-struct BuildRtti<v8::Value> {
-  static void build(Type::Builder builder) { builder.setUnknown(); }
+template<typename Configuration>
+struct BuildRtti<Configuration, v8::Value> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
 };
 
 // Numbers
 
 #define DECLARE_NUMBER_TYPE(T) \
-template<> \
-struct BuildRtti<T> { \
-  static void build(Type::Builder builder) { builder.initNumber().setName(#T); } \
+template<typename Configuration> \
+struct BuildRtti<Configuration, T> { \
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.initNumber().setName(#T); } \
 };
 
 #define FOR_EACH_NUMBER_TYPE(F) \
@@ -147,9 +155,9 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
 // Strings
 
 #define DECLARE_STRING_TYPE(T) \
-template<> \
-struct BuildRtti<T> { \
-  static void build(Type::Builder builder) { builder.initString().setName(#T); } \
+template<typename Configuration> \
+struct BuildRtti<Configuration, T> { \
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.initString().setName(#T); } \
 };
 
 #define FOR_EACH_STRING_TYPE(F) \
@@ -167,129 +175,161 @@ FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
 
 // Object Types
 
-template<>
-struct BuildRtti<v8::Object> {
-  static void build(Type::Builder builder) { builder.setObject(); }
+template<typename Configuration>
+struct BuildRtti<Configuration, v8::Object> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setObject(); }
 };
 
 // References
 
-template<typename T>
-struct BuildRtti<Ref<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, Ref<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<V8Ref<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, V8Ref<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<HashableV8Ref<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, HashableV8Ref<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<v8::Local<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, v8::Local<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<v8::Global<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, v8::Global<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<jsg::MemoizedIdentity<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::MemoizedIdentity<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<jsg::Identified<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Identified<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
 // Generic Types
 
-template<typename T>
-struct BuildRtti<kj::Maybe<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initMaybe().initValue()); }
-};
-
-template<typename T>
-struct BuildRtti<jsg::Optional<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initMaybe().initValue()); }
-};
-template<typename T>
-struct BuildRtti<kj::Array<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initArray().initElement()); }
-};
-
-template<typename T>
-struct BuildRtti<kj::ArrayPtr<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initArray().initElement()); }
-};
-
-template<typename T>
-struct BuildRtti<jsg::Sequence<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initArray().initElement()); }
-};
-
-template<typename K, typename V>
-struct BuildRtti<jsg::Dict<V, K>> {
-  static void build(Type::Builder builder) {
-    auto dict = builder.initDict();
-    BuildRtti<K>::build(dict.initKey());
-    BuildRtti<V>::build(dict.initValue());
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::Maybe<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initMaybe().initValue(), rtti); 
   }
 };
 
-template<typename...Variants>
-struct BuildRtti<kj::OneOf<Variants...>> {
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Optional<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initMaybe().initValue(), rtti); 
+  }
+};
+
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::Array<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti); 
+  }
+};
+
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::ArrayPtr<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti); 
+  }
+};
+
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Sequence<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti); 
+  }
+};
+
+template<typename Configuration, typename K, typename V>
+struct BuildRtti<Configuration, jsg::Dict<V, K>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    auto dict = builder.initDict();
+    BuildRtti<Configuration, K>::build(dict.initKey(), rtti);
+    BuildRtti<Configuration, V>::build(dict.initValue(), rtti);
+  }
+};
+
+template<typename Configuration, typename...Variants>
+struct BuildRtti<Configuration, kj::OneOf<Variants...>> {
   using Seq = std::index_sequence_for<Variants...>;
   using Tuple = std::tuple<Variants...>;
 
   template<size_t I>
-  static inline void buildVariant(capnp::List<Type>::Builder builder) {
-    BuildRtti<std::tuple_element_t<I, Tuple>>::build(builder[I]);
+  static inline void buildVariant(capnp::List<Type>::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, std::tuple_element_t<I, Tuple>>::build(builder[I], rtti);
   }
 
   template<size_t...Indexes>
   static inline void buildVariants(std::integer_sequence<size_t, Indexes...> seq,
-                                   capnp::List<Type>::Builder builder) {
-    ((buildVariant<Indexes>(builder)), ...);
+                                   capnp::List<Type>::Builder builder, 
+                                   Builder<Configuration>& rtti) {
+    ((buildVariant<Indexes>(builder, rtti)), ...);
   }
 
-  static void build(Type::Builder builder) {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     auto variants = builder.initOneOf().initVariants(Seq::size());
-    buildVariants(Seq{}, variants);
+    buildVariants(Seq{}, variants, rtti);
   }
 };
 
 // Promises
 
-template<typename T>
-struct BuildRtti<kj::Promise<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initPromise().initValue()); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::Promise<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initPromise().initValue(), rtti); 
+  }
 };
 
 
-template<typename T>
-struct BuildRtti<jsg::Promise<T>> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder.initPromise().initValue()); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Promise<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder.initPromise().initValue(), rtti); 
+  }
 };
 
-template<>
-struct BuildRtti<v8::Promise> {
-  static void build(Type::Builder builder) { builder.initPromise().initValue().setUnknown(); }
+template<typename Configuration>
+struct BuildRtti<Configuration, v8::Promise> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    builder.initPromise().initValue().setUnknown(); 
+  }
 };
 
 // Builtins
 
 #define DECLARE_BUILTIN_TYPE(T, V) \
-template<> \
-struct BuildRtti<T> { \
-  static void build(Type::Builder builder) { \
+template<typename Configuration> \
+struct BuildRtti<Configuration, T> { \
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { \
     builder.initBuiltin().setType(V); \
   } \
 };
@@ -310,25 +350,16 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
 #undef FOR_EACH_BUILTIN_TYPE
 #undef DECLARE_BUILTIN_TYPE
 
-#define JSG_RTTI_DECLARE_CONFIGURATION_TYPE(T) \
-  namespace workerd::jsg::rtti::impl { \
-    template<> \
-    struct BuildRtti<T> { \
-      static void build(Type::Builder builder) { \
-        builder.initBuiltin().setType(BuiltinType::Type::FLAGS); \
-      } \
-    }; \
+template<typename Configuration>
+struct BuildRtti<Configuration, Configuration> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.initBuiltin().setType(BuiltinType::Type::CONFIGURATION);
   }
-// Use this at the global scope to declare a configuration type before invoking RTTI. E.g.:
-//
-//   JSG_RTTI_DECLARE_CONFIGURATION_TYPE(workerd::CompatibilityFlags::Reader)
-//
-// TODO(cleanup): This should probably be done instead through a template parameter to
-//   `RttiBuilder` that gets passed down, but that's a deeper change.
+};
 
-template<typename T>
-struct BuildRtti<jsg::TypeHandler<T>> {
-  static void build(Type::Builder builder) {
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::TypeHandler<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     builder.initBuiltin().setType(BuiltinType::Type::JSG_TYPE_HANDLER);
   }
 };
@@ -336,37 +367,45 @@ struct BuildRtti<jsg::TypeHandler<T>> {
 
 // Functions
 
-template<typename Fn>
-struct BuildRtti<jsg::Function<Fn>> {
-  static void build(Type::Builder builder) {
+template<typename Configuration, typename Fn>
+struct BuildRtti<Configuration, jsg::Function<Fn>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     auto fn = builder.initFunction();
     using Traits = FunctionTraits<Fn>;
-    BuildRtti<typename Traits::ReturnType>::build(fn.initReturnType());
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(fn.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
-    TupleRttiBuilder<Args>::build(fn.initArgs(std::tuple_size_v<Args>));
+    TupleRttiBuilder<Configuration, Args>::build(fn.initArgs(std::tuple_size_v<Args>), rtti);
   }
 };
 
 // C++ modifiers
 
-template<typename T>
-struct BuildRtti<const T> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, const T> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<T&> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, T&> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<T&&> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, T&&> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
-template<typename T>
-struct BuildRtti<const T&> {
-  static void build(Type::Builder builder) { BuildRtti<T>::build(builder); }
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, const T&> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { 
+    BuildRtti<Configuration, T>::build(builder, rtti); 
+  }
 };
 
 // Structs
@@ -400,7 +439,7 @@ struct MemberCounter {
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() { ++count; }
-
+ 
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyInstanceProperty() { ++count; }
 
@@ -421,18 +460,19 @@ struct MemberCounter {
 
 template<typename Self, typename Configuration>
 struct MembersBuilder {
-  Configuration& configuration;
   Structure::Builder structure;
   capnp::List<Member>::Builder members;
+  Builder<Configuration>& rtti;
   int index = 0;
 
-  MembersBuilder(Configuration& configuration, Structure::Builder structure,
-      capnp::List<Member>::Builder members)
-    : configuration(configuration), structure(structure), members(members) { }
+  MembersBuilder(Structure::Builder structure,
+                 capnp::List<Member>::Builder members,
+                 Builder<Configuration>& rtti)
+    : structure(structure), members(members), rtti(rtti) { }
 
   template<typename Type>
   inline void registerInherit() {
-    BuildRtti<Type>::build(structure.initExtends());
+    BuildRtti<Configuration, Type>::build(structure.initExtends(), rtti);
   }
 
   template<const char* name>
@@ -443,7 +483,7 @@ struct MembersBuilder {
   template<typename Type, const char* name>
   inline void registerNestedType() {
     auto nested = members[index++].initNested();
-    BuildRtti<Type>::build(nested, configuration);
+    BuildRtti<Configuration, Type>::build(nested, rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -451,7 +491,7 @@ struct MembersBuilder {
     auto prop = members[index++].initProperty();
     prop.setName(name);
     using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<typename GetterTraits::ReturnType>::build(prop.initType());
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter>
@@ -460,7 +500,7 @@ struct MembersBuilder {
     prop.setName(name);
     prop.setReadonly(true);
     using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<typename GetterTraits::ReturnType>::build(prop.initType());
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>
@@ -470,7 +510,7 @@ struct MembersBuilder {
     prop.setReadonly(readOnly);
     prop.setLazy(true);
     using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<typename GetterTraits::ReturnType>::build(prop.initType());
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -479,7 +519,7 @@ struct MembersBuilder {
     prop.setName(name);
     prop.setPrototype(true);
     using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<typename GetterTraits::ReturnType>::build(prop.initType());
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter>
@@ -489,7 +529,7 @@ struct MembersBuilder {
     prop.setPrototype(true);
     prop.setReadonly(true);
     using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<typename GetterTraits::ReturnType>::build(prop.initType());
+    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename T>
@@ -497,14 +537,14 @@ struct MembersBuilder {
     auto constant = members[index++].initConstant();
     constant.setName(name);
     constant.setValue(value);
-    // BuildRtti<T>::build(constant.initType());
+    // BuildRtti<Configuration, T>::build(constant.initType());
   }
 
   template<const char* name, typename Property, Property Self::*property>
   void registerStructProperty() {
     auto prop = members[index++].initProperty();
     prop.setName(name);
-    BuildRtti<Property>::build(prop.initType());
+    BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Method, Method>
@@ -513,9 +553,9 @@ struct MembersBuilder {
 
     method.setName(name);
     using Traits = FunctionTraits<Method>;
-    BuildRtti<typename Traits::ReturnType>::build(method.initReturnType());
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
-    TupleRttiBuilder<Args>::build(method.initArgs(std::tuple_size_v<Args>));
+    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
   template<const char* name, typename Method, Method>
@@ -525,9 +565,9 @@ struct MembersBuilder {
     method.setName(name);
     method.setStatic(true);
     using Traits = FunctionTraits<Method>;
-    BuildRtti<typename Traits::ReturnType>::build(method.initReturnType());
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
-    TupleRttiBuilder<Args>::build(method.initArgs(std::tuple_size_v<Args>));
+    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
   template<const char* name, typename Method, Method method>
@@ -552,20 +592,19 @@ struct HasConstructor : std::false_type {};
 template <typename T>
 struct HasConstructor<T, decltype(T::constructor, 0)> : std::true_type { };
 
-template <typename T>
-struct BuildRtti<T, std::enable_if_t<HasRegisterMembers<T>::value>> {
-  using Configuration = DetectedOr<NullConfiguration, GetConfiguration, T>;
-
-  static void build(Type::Builder builder) {
-    builder.initStructure().setName(jsg::typeName(typeid(T)));
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    auto name = jsg::typeName(typeid(T));
+    builder.initStructure().setName(name);
   }
 
-  static void build(Structure::Builder builder, Configuration configuration) {
+  static void build(Structure::Builder builder, Builder<Configuration>& rtti) {
     builder.setName(jsg::typeName(typeid(T)));
 
     MemberCounter counter;
     if constexpr (isDetected<GetConfiguration, T>()) {
-      T::template registerMembers<decltype(counter), T>(counter, configuration);
+      T::template registerMembers<decltype(counter), T>(counter, rtti.config);
     } else {
       T::template registerMembers<decltype(counter), T>(counter);
     }
@@ -576,9 +615,9 @@ struct BuildRtti<T, std::enable_if_t<HasRegisterMembers<T>::value>> {
     }
 
     auto members = builder.initMembers(count);
-    MembersBuilder<T, Configuration> membersBuilder(configuration, builder, members);
+    MembersBuilder<T, Configuration> membersBuilder(builder, members, rtti);
     if constexpr (isDetected<GetConfiguration, T>()) {
-      T::template registerMembers<decltype(membersBuilder), T>(membersBuilder, configuration);
+      T::template registerMembers<decltype(membersBuilder), T>(membersBuilder, rtti.config);
     } else {
       T::template registerMembers<decltype(membersBuilder), T>(membersBuilder);
     }
@@ -587,7 +626,7 @@ struct BuildRtti<T, std::enable_if_t<HasRegisterMembers<T>::value>> {
       auto constructor = members[membersBuilder.index++].initConstructor();
       using Traits = FunctionTraits<decltype(T::constructor)>;
       using Args = typename Traits::ArgsTuple;
-      TupleRttiBuilder<Args>::build(constructor.initArgs(std::tuple_size_v<Args>));
+      TupleRttiBuilder<Configuration, Args>::build(constructor.initArgs(std::tuple_size_v<Args>), rtti);
     }
   }
 };

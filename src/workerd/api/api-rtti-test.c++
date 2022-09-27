@@ -8,19 +8,17 @@
 
 // Test building rtti for various APIs.
 
-JSG_RTTI_DECLARE_CONFIGURATION_TYPE(workerd::CompatibilityFlags::Reader);
-
 namespace workerd::api {
 namespace {
 
 KJ_TEST("WorkerGlobalScope") {
   CompatibilityFlags::Reader flags;
-  jsg::rtti::Builder().structure<WorkerGlobalScope>(flags);
+  jsg::rtti::Builder(flags).structure<WorkerGlobalScope>();
 }
 
 KJ_TEST("ServiceWorkerGlobalScope") {
   CompatibilityFlags::Reader flags;
-  jsg::rtti::Builder().structure<ServiceWorkerGlobalScope>(flags);
+  jsg::rtti::Builder(flags).structure<ServiceWorkerGlobalScope>();
 }
 
 } // namespace
