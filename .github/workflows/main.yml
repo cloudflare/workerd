@@ -12,6 +12,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+      
+      - name: Install dependencies
+        run: apt -y install libc++-dev libc++abi-dev
 
       - name: Build workerd
         run: bazel build -c opt //src/workerd/server:workerd
