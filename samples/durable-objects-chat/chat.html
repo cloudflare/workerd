@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<!--
+  THIS IS NOT THE INTERESTING FILE
+
+  This is just some UI code. There's nothing interesting and unique in this file. The interesting
+  thing about this demo is the server side, which is in chat.mjs.
+
+  WARNING: This was written by a systems engineer, not a web developer. It's probably bad.
+-->
+
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<!--===================================================================================-->
+<!-- Inline style to avoid an extra round trip before the page can render. -->
+<style type="text/css">
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+#chatlog {
+  position: fixed;
+  top: 0;
+  bottom: 32px;
+  left: 0;
+  right: 200px;
+  overflow-y: auto;
+  padding: 8px;
+  overflow-wrap: break-word;
+}
+#chatlog span.username {
+  font-weight: bold;
+}
+#spacer {
+  height: calc(100vh - 32px - 5em);
+}
+
+#roster {
+  font-weight: bold;
+  padding: 8px;
+}
+
+p {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+p:last-of-type {
+  margin: 0;
+}
+
+#roster {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 32px;
+  width: 200px;
+  border-left: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+@media(max-width:600px) {
+  #roster { display: none; }
+  #chatlog { right: 0; }
+}
+
+#chat-input {
+  position: fixed;
+  width: 100%;
+  height: 32px;
+  bottom: 0;
+  left: 0;
+  border: none;
+  border-top: none;
+  padding-left: 32px;
+  outline: none;
+}
+#chatroom::before {
+  z-index: 1;
+  display: block;
+  content: ">";
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  height: 32px;
+  line-height: 32px;
+  text-align: center;
+  font-weight: bold;
+  color: #888;
+  -webkit-text-stroke-width: 2px;
+}
+
+#name-form {
+  position: fixed;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: white;
+}
+
+#name-input {
+  position: fixed;
+  font-size: 200%;
+  top: calc(50% - 1em);
+  left: calc(50% - 8em);
+  width: 16em;
+  height: 2em;
+  margin: 0;
+  text-align: center;
+  border: 1px solid #bbb;
+}
+
+#name-form p {
+  position: fixed;
+  top: calc(50% + 3em);
+  width: 100%;
+  text-align: center;
+}
+
+#room-form {
+  position: fixed;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: white;
+  font-size: 200%;
+  margin-top: calc(50vh - 3em);
+  text-align: center;
+}
+
+#room-name {
+  font-size: inherit;
+  border: 1px solid #bbb;
+  height: 2em;
+  width: 16em;
+  padding-left: 1em;
+}
+
+#room-form button {
+  font-size: inherit;
+  border: 1px solid #bbb;
+  background-color: #eee;
+  height: 2em;
+}
+
+@media(max-width:660px) {
+  #name-input, #room-form { font-size: 150%; }
+  #name-form p { font-size: 75%; }
+}
+@media(max-width:500px) {
+  #name-input, #room-form { font-size: 100%; }
+  #name-form p { font-size: 50%; }
+}
+
+#go-public {
+  width: 4em;
+}
+#go-private {
+  width: 20em;
+}
+
+</style>
+
+<!--===================================================================================-->
+<!-- The actual HTML. There is not much of it. -->
+
+  </head>
+  <body>
+    <form id="name-form" action="/fake-form-action">
+      <input id="name-input" placeholder="your name">
+      <p>This chat runs entirely on the edge, powered by<br>
+        <a href="https://blog.cloudflare.com/introducing-workers-durable-objects" target="_blank">Cloudflare Workers Durable Objects</a></p>
+    </form>
+    <form id="room-form" action="/fake-form-action">
+      <p>Enter a public room:</p>
+      <input id="room-name" placeholder="room name"><button id="go-public">Go &raquo;</button>
+      <p>OR</p>
+      <button id="go-private">Create a Private Room &raquo;</button>
+    </form>
+    <form id="chatroom" action="/fake-form-action">
+      <div id="chatlog">
+        <div id="spacer"></div>
+      </div>
+      <div id="roster"></div>
+      <input id="chat-input">
+    </form>
+  </body>
+
+<!--===================================================================================-->
+<!-- Client-side JavaScript code for the app. -->
+
+<script type="text/javascript">
+let currentWebSocket = null;
+
+let nameForm = document.querySelector("#name-form");
+let nameInput = document.querySelector("#name-input");
+let roomForm = document.querySelector("#room-form");
+let roomNameInput = document.querySelector("#room-name");
+let goPublicButton = document.querySelector("#go-public");
+let goPrivateButton = document.querySelector("#go-private");
+let chatroom = document.querySelector("#chatroom");
+let chatlog = document.querySelector("#chatlog");
+let chatInput = document.querySelector("#chat-input");
+let roster = document.querySelector("#roster");
+
+// Is the chatlog scrolled to the bottom?
+let isAtBottom = true;
+
+let username;
+let roomname;
+
+let hostname = window.location.host;
+if (hostname == "") {
+  // Probably testing the HTML locally.
+  hostname = "edge-chat-demo.cloudflareworkers.com";
+}
+
+function startNameChooser() {
+  nameForm.addEventListener("submit", event => {
+    event.preventDefault();
+    username = nameInput.value;
+    if (username.length > 0) {
+      startRoomChooser();
+    }
+  });
+
+  nameInput.addEventListener("input", event => {
+    if (event.currentTarget.value.length > 32) {
+      event.currentTarget.value = event.currentTarget.value.slice(0, 32);
+    }
+  });
+
+  nameInput.focus();
+}
+
+function startRoomChooser() {
+  nameForm.remove();
+
+  if (document.location.hash.length > 1) {
+    roomname = document.location.hash.slice(1);
+    startChat();
+    return;
+  }
+
+  roomForm.addEventListener("submit", event => {
+    event.preventDefault();
+    roomname = roomNameInput.value;
+    if (roomname.length > 0) {
+      startChat();
+    }
+  });
+
+  roomNameInput.addEventListener("input", event => {
+    if (event.currentTarget.value.length > 32) {
+      event.currentTarget.value = event.currentTarget.value.slice(0, 32);
+    }
+  });
+
+  goPublicButton.addEventListener("click", event => {
+    roomname = roomNameInput.value;
+    if (roomname.length > 0) {
+      startChat();
+    }
+  });
+
+  goPrivateButton.addEventListener("click", async event => {
+    roomNameInput.disabled = true;
+    goPublicButton.disabled = true;
+    event.currentTarget.disabled = true;
+
+    let response = await fetch("https://" + hostname + "/api/room", {method: "POST"});
+    if (!response.ok) {
+      alert("something went wrong");
+      document.location.reload();
+      return;
+    }
+
+    roomname = await response.text();
+    startChat();
+  });
+
+  roomNameInput.focus();
+}
+
+function startChat() {
+  roomForm.remove();
+
+  // Normalize the room name a bit.
+  roomname = roomname.replace(/[^a-zA-Z0-9_-]/g, "").replace(/_/g, "-").toLowerCase();
+
+  if (roomname.length > 32 && !roomname.match(/^[0-9a-f]{64}$/)) {
+    addChatMessage("ERROR", "Invalid room name.");
+    return;
+  }
+
+  document.location.hash = "#" + roomname;
+
+  chatInput.addEventListener("keydown", event => {
+    if (event.keyCode == 38) {
+      // up arrow
+      chatlog.scrollBy(0, -50);
+    } else if (event.keyCode == 40) {
+      // down arrow
+      chatlog.scrollBy(0, 50);
+    } else if (event.keyCode == 33) {
+      // page up
+      chatlog.scrollBy(0, -chatlog.clientHeight + 50);
+    } else if (event.keyCode == 34) {
+      // page down
+      chatlog.scrollBy(0, chatlog.clientHeight - 50);
+    }
+  });
+
+  chatroom.addEventListener("submit", event => {
+    event.preventDefault();
+
+    if (currentWebSocket) {
+      currentWebSocket.send(JSON.stringify({message: chatInput.value}));
+      chatInput.value = "";
+
+      // Scroll to bottom whenever sending a message.
+      chatlog.scrollBy(0, 1e8);
+    }
+  });
+
+  chatInput.addEventListener("input", event => {
+    if (event.currentTarget.value.length > 256) {
+      event.currentTarget.value = event.currentTarget.value.slice(0, 256);
+    }
+  });
+
+  chatlog.addEventListener("scroll", event => {
+    isAtBottom = chatlog.scrollTop + chatlog.clientHeight >= chatlog.scrollHeight;
+  });
+
+  chatInput.focus();
+  document.body.addEventListener("click", event => {
+    // If the user clicked somewhere in the window without selecting any text, focus the chat
+    // input.
+    if (window.getSelection().toString() == "") {
+      chatInput.focus();
+    }
+  });
+
+  // Detect mobile keyboard appearing and disappearing, and adjust the scroll as appropriate.
+  if('visualViewport' in window) {
+    window.visualViewport.addEventListener('resize', function(event) {
+      if (isAtBottom) {
+        chatlog.scrollBy(0, 1e8);
+      }
+    });
+  }
+
+  join();
+}
+
+let lastSeenTimestamp = 0;
+let wroteWelcomeMessages = false;
+
+function join() {
+  // If we are running via wrangler dev, use ws:
+  const wss = document.location.protocol === "http:" ? "ws://" : "wss://";
+  let ws = new WebSocket(wss + hostname + "/api/room/" + roomname + "/websocket");
+  let rejoined = false;
+  let startTime = Date.now();
+
+  let rejoin = async () => {
+    if (!rejoined) {
+      rejoined = true;
+      currentWebSocket = null;
+
+      // Clear the roster.
+      while (roster.firstChild) {
+        roster.removeChild(roster.firstChild);
+      }
+
+      // Don't try to reconnect too rapidly.
+      let timeSinceLastJoin = Date.now() - startTime;
+      if (timeSinceLastJoin < 10000) {
+        // Less than 10 seconds elapsed since last join. Pause a bit.
+        await new Promise(resolve => setTimeout(resolve, 10000 - timeSinceLastJoin));
+      }
+
+      // OK, reconnect now!
+      join();
+    }
+  }
+
+  ws.addEventListener("open", event => {
+    currentWebSocket = ws;
+
+    // Send user info message.
+    ws.send(JSON.stringify({name: username}));
+  });
+
+  ws.addEventListener("message", event => {
+    let data = JSON.parse(event.data);
+
+    if (data.error) {
+      addChatMessage(null, "* Error: " + data.error);
+    } else if (data.joined) {
+      let p = document.createElement("p");
+      p.innerText = data.joined;
+      roster.appendChild(p);
+    } else if (data.quit) {
+      for (let child of roster.childNodes) {
+        if (child.innerText == data.quit) {
+          roster.removeChild(child);
+          break;
+        }
+      }
+    } else if (data.ready) {
+      // All pre-join messages have been delivered.
+      if (!wroteWelcomeMessages) {
+        wroteWelcomeMessages = true;
+        addChatMessage(null,
+            "* This is a demo app built with Cloudflare Workers Durable Objects. The source code " +
+            "can be found at: https://github.com/cloudflare/workers-chat-demo");
+        addChatMessage(null,
+            "* WARNING: Participants in this chat are random people on the internet. " +
+            "Names are not authenticated; anyone can pretend to be anyone. The people " +
+            "you are chatting with are NOT Cloudflare employees. Chat history is saved.");
+        if (roomname.length == 64) {
+          addChatMessage(null,
+              "* This is a private room. You can invite someone to the room by sending them the URL.");
+        } else {
+          addChatMessage(null,
+              "* Welcome to #" + roomname + ". Say hi!");
+        }
+      }
+    } else {
+      // A regular chat message.
+      if (data.timestamp > lastSeenTimestamp) {
+        addChatMessage(data.name, data.message);
+        lastSeenTimestamp = data.timestamp;
+      }
+    }
+  });
+
+  ws.addEventListener("close", event => {
+    console.log("WebSocket closed, reconnecting:", event.code, event.reason);
+    rejoin();
+  });
+  ws.addEventListener("error", event => {
+    console.log("WebSocket error, reconnecting:", event);
+    rejoin();
+  });
+}
+
+function addChatMessage(name, text) {
+  let p = document.createElement("p");
+  if (name) {
+    let tag = document.createElement("span");
+    tag.className = "username";
+    tag.innerText = name + ": ";
+    p.appendChild(tag);
+  }
+  p.appendChild(document.createTextNode(text));
+
+  // Append the new chat line, making sure that if the chatlog was scrolled to the bottom
+  // before, it remains scrolled to the bottom, and otherwise the scroll position doesn't
+  // change.
+  chatlog.appendChild(p);
+  if (isAtBottom) {
+    chatlog.scrollBy(0, 1e8);
+  }
+}
+
+startNameChooser();
+</script>
+<!--===================================================================================-->
+</html>
