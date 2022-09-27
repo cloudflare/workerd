@@ -39,7 +39,6 @@ As of this writing, some major features are missing which we intend to fix short
 
 * **General error logging** is awkward. Traditionally we have separated error logs into "application errors" (e.g. a Worker threw an exception from JavaScript) and "internal errors" (bugs in the implementation which the Workers team should address). We then sent these errors to completely different places. In the `workerd` world, the server admin wants to see both of these, so logging has become entirely different and, at the moment, is a bit ugly. For now, it may help to run `workerd` with the `--verbose` flag, which causes application errors to be written to standard error in the same way that internal errors are (but may also produce more noise). We'll be working on making this better out-of-the-box.
 * **Binary packages** for various distributions are not built yet. We intend to provide these once out of beta.
-* **Wrangler/Miniflare integration** is in progress. The [Wrangler CLI tool](https://developers.cloudflare.com/workers/wrangler/) and [Miniflare](https://miniflare.dev/) will soon support local testing using `workerd` (replacing the previous simulated environment on top of Node). Wrangler should also support generating `workerd` configuration directly from a Wrangler project.
 * **Multi-threading** is not implemented. `workerd` runs in a single-threaded event loop. For now, to utilize multiple cores, we suggest running multiple instances of `workerd` and balancing load across them. We will likely add some built-in functionality for this in the near future.
 * **Performance tuning** has not been done yet, and there is low-hanging fruit here. `workerd` performs decently as-is, but not spectacularly. Experiments suggest we can roughly double performance on a "hello world" load test with some tuning of compiler optimization flags and memory allocators.
 * **Durable Objects** are currently supported only in a mode that uses in-memory storage -- i.e., not actually "durable". This is useful for local testing of DO-based apps, but not for production. Durable Objects that are actually durable, or distributed across multiple machines, are a longer-term project. Cloudflare's internal implementation of this is heavily tied to the specifics of Cloudflare's network, so a new implementation needs to be developed for public consumption.
@@ -137,6 +136,16 @@ To serve your config, do:
 `workerd serve my-config.capnp`
 
 For more details about command-line usage, use `workerd --help`.
+
+Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
+
+### Local Worker development with `wrangler`
+
+[Wrangler](https://developers.cloudflare.com/workers/wrangler/) has experimental support for running Workers with `workerd`:
+
+`wrangler dev --experimental-local`
+
+This feature is under active development.
 
 ### Serving in production
 
