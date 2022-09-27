@@ -1304,8 +1304,8 @@ TODO(soon): TBD
 
 TODO(soon): TBD
 
-["KJ Style Guide"]: ../../../deps/capnproto/style-guide.md
-["KJ Tour"]: ../../../deps/capnproto/kjdoc/tour.md
+["KJ Style Guide"]: https://github.com/capnproto/capnproto/blob/master/style-guide.md
+["KJ Tour"]: https://github.com/capnproto/capnproto/blob/master/kjdoc/tour.md
 [ByteString]: https://webidl.spec.whatwg.org/#idl-ByteString
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
