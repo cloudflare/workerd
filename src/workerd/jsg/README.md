@@ -714,6 +714,14 @@ those here.
 The example illustrates all of the top-level pieces of defining a Resource Type but there are
 a range of details. We'll cover those next.
 
+// r: it feels like we're discussing jsg::Object only for use with Resource Types / as facilitating them,
+//    but don't they have other uses aside from that? It seems like jsg::Object should be discussed on
+//    its own, probably before introducing it as a vehicle for implementing Resource Types, because it
+//    contains a lot of the plumbing necessary for any kind of object that does a little more behind the
+//    scenes than just being a "dumb struct"...
+//    but maybe I'm just getting confused by the "Resource Type" moniker, and really I should just think
+//    of it as "smart object" (vs "dumb struct"), and then jsg::Object is of course exactly the right place
+//    to discuss it, because basically that's literally what "Resource Type" translates to in terms of C++
 ### `jsg::Object`
 
 All Resource Types must inherit from `jsg::Object`. This provides the necessary plumbing for
@@ -844,6 +852,13 @@ Foo.bar();
 Foo.delete();
 ```
 
+// r: this is the point where I was starting to feel like "but now the discussion should really return to
+//    'Resource Types' instead of teaching me everything that just generically applies to any a little more
+//    more interesting JS object I'd like to implement" -- the text is also starting to talk more and more
+//    just about "JavaScript objects" (totally makes sense!), and except for the "JSG_RESOURCE_TYPE" macro
+//    invocation we may have already forgotten this is part of the "Resource Types" discussion
+//    (hope this makes sense, just trying to clearly articulate feedback on the flow of this doc; I know
+//    it's hard to get this right, very much appreciate the effort + result!)
 #### Properties
 
 Properties on JavaScript objects are fairly complicated. There are a number of different types.
@@ -886,6 +901,12 @@ public:
 };
 ```
 
+// r: it would be super nice, if the read values of 'hello' and 123 were set somewhere in the C++
+//    code, or were passed into the constructor in JS (but I think the former is maybe preferable here?);
+//    like that they would feel a little more tangible, the sample would be a little more complete,
+//    even though the user still has to imagine the getter and setter implementations
+//    (my C++-fu as well as my JSG understanding is too weak, as of yet, to confidently suggest
+//    the necessary changes)
 ```js
 const foo = new Foo();
 // abc is read-only
@@ -960,6 +981,12 @@ class MyFoo extends Foo {
 
 ##### `JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getter)` and `JSG_LAZY_INSTANCE_PROPERTY(name, getter)`
 
+// r: do I understand correctly that these properties are only ever read from C++ if the user doesn't
+//    set them first before reading them? making them not quite adhere to the idea of how "lazy" types
+//    generally work?
+//    so in that sense it's more like a "stealth" property, or "fallback" or "default" property? that also
+//    happens to only ever get evaluated once and then cached "client-side" (on the JS side), but that's
+//    mostly a coincidence, since the only true use case of this type wants this as an optimization anyway?
 A lazy instance property is one that is only evaluated once and then cached. This is useful for cases
 where a default value is provided but there's no reason to reevaluate it, or we want the property to be
 easily overridable by users. This is typically only used to introduce new global properties when we
@@ -980,6 +1007,13 @@ public:
 };
 ```
 
+// r: the write to foo.abc feels a little out of place, because, of course, since it's any kind of read-only
+//    property (could be a normal instance or prototype prop), writes should not do anything -- that has been
+//    covered above already
+//    it feels like the more interesting and relevant aspect of this type of property is along the lines of
+//    the primary use case of this: easy to set by user, doesn't call C++ if set before read;
+//    or actually the sample could just be amended to show the above as well / at the same time?
+//    happy to suggest something concrete, just want to make sure first that I'm on the right track!
 ```js
 const foo = new Foo();
 // abc is read-only
@@ -1153,6 +1187,8 @@ const assert = new MyAssert();
 
 assert.ok(true); // No error
 
+// r: should this code sample not state that the line below is exactly what's being enabled
+//    by using JSG_CALLABLE(ok)?
 assert(true);  // error
 ```
 
