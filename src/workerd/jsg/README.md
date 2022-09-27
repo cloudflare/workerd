@@ -55,7 +55,7 @@ Refer to the `jsg.h` header file for more detail on the specific methods availab
 
 ## JSG Value Types
 
-Value Types in JSG include both primitives (e.g. strings, numbers, booleans, etc) and relatively
+Value Types in JSG include both primitives (e.g. strings, numbers, booleans, etc.) and relatively
 simple structured types that do nothing but convey data.
 
 At the time of writing this, the primitive value types currently supported by the JSG layer are:
@@ -153,7 +153,7 @@ TODO(soon): Open Question: What happens if you try `kj::OneOf<kj::Maybe<kj::Stri
 kj::Maybe<bool>>` and pass a `null`?
 
 TODO(soon): Open Question: What happens if you have a catch-all coercible like kj::String
-in the the list?
+in the list?
 
 ### Array types ('kj::Array<T>` and `kj::ArrayPtr<T>`)
 
@@ -219,7 +219,7 @@ For instance, in the example here,
 
 ```js
 const iterableObject = {
-  [Symbol.iterator]* () {
+  *[Symbol.iterator] () {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -366,7 +366,7 @@ uses multi-byte values (e.g. a `Uint32Array` would still be mapped to `kj::Array
 the fact that each member entry is 4-bytes.)
 
 When a `kj::Array<kj::byte>` is passed back *out* to JavaScript, it is always mapped into a *new*
-`ArrayBuffer` instance over the same memory (no copy of the data is made but ownershop of the
+`ArrayBuffer` instance over the same memory (no copy of the data is made but ownership of the
 memory is transferred to the `std::shared_ptr<v8::BackingStore>` instance that underlies the
 `ArrayBuffer`).
 
@@ -374,13 +374,13 @@ For many cases, this mapping behavior is just fine, but some APIs (such as Strea
 more nuanced type of mapping. For those cases, we provide `jsg::BufferSource`.
 
 A `jsg::BufferSource` wraps the v8 handle of a given `TypedArray` or `ArrayBuffer` and remembers
-it's type. When the `jsg::BufferSource` is passed back out to JavaScript, it will map to exactly
+its type. When the `jsg::BufferSource` is passed back out to JavaScript, it will map to exactly
 the same kind of object that was passed in (e.g. `Uint16Array` passed to `jsg::BufferSource` will
 produce a `Uint16Array` when passed back out to JavaScript.)
 
 The `jsg::BufferSource` also supports the ability to "detach" the backing store. What this does
 is separate the `v8::BackingStore` from the original `TypedArray`/`BufferSource` such that the
-original can no longer be used to read or mutate the data. This is important is cases where ownership
+original can no longer be used to read or mutate the data. This is important in cases where ownership
 of the data storage must transfer and cannot be shared.
 
 ### Functions (`jsg::Function<Ret(Args...)>`)
@@ -397,7 +397,7 @@ There are generally three ways of using `jsg::Function`:
 For the first item, imagine the following case:
 
 We have a C++ function that takes a callback argument. The callback argument takes a single `int`
-as an argument (Ignore the `jsg::Lock& js` part for now, we'll explain that in a bit). As soon
+as an argument (ignore the `jsg::Lock& js` part for now, we'll explain that in a bit). As soon
 as we get the callback, we invoke it as a function.
 
 ```cpp
@@ -469,7 +469,7 @@ jsg::Name doSomething(jsg::Name name) {
 
 #### `jsg::V8Ref<T>` (and `jsg::Value`, and `cjfs::HashableV8Ref<T>`)
 
-The `jsg::V8Ref<T>` type holds a persistent reference to a JavaScript type. The `T` must
+The `jsg::V8Ref<T>` type holds a persistent reference to a JavaScript value. The `T` must
 be one of the `v8` types (e.g. `v8::Object`, `v8::Function`, etc). A `jsg::V8Ref<T>` is used
 when storing references to JavaScript values that are not being translated to corresponding C++
 types.
@@ -614,13 +614,13 @@ struct Foo {
 
   JSG_STRUCT(abc, xyz, val);
 
-  int onlyInternal = 1;
+  int internalProperty = 1;
 };
 ```
 
 The `JSG_STRUCT` macro adds the necessary boilerplate to allow JSG to perform
 the necessary mapping between the C++ struct and the JavaScript object. Only the
-properties listed in the macro are mapped. (In this case, `onlyInternal` is not
+properties listed in the macro are mapped. (In this case, `internalProperty` is not
 included in the JavaScript object.)
 
 ```cpp
@@ -629,8 +629,8 @@ Foo someFunction(Foo foo) {
   KJ_IF_MAYBE(xyz, foo.xyz) {
     KJ_DBG(*xyz);  // true
   }
-  KJ_DBG(val); // [object Object]
-  KJ_DBG(onlyInternal); 1
+  KJ_DBG(foo.val); // [object Object]
+  KJ_DBG(foo.internalProperty); 1
 
   // Move semantics are required because kj::String and jsg::Value both
   // require move...
@@ -653,7 +653,7 @@ const foo = someFunction({
 console.log(foo.abc);  // a
 console.log(foo.xyz);  // true
 console.log(foo.val);  // { }
-console.log(onlyInternal);  // undefined
+console.log(foo.internalProperty);  // undefined
 ```
 
 When passing an instance of `Foo` from JavaScript into C++, any additional properties
@@ -708,8 +708,8 @@ the C++ class to the JavaScript implementation of it such that the constructor (
 is automatically routed to the static `Foo::constructor()` method, and the getter accessor for
 the `value` property is automatically routed to the `Foo::getValue()` method.
 
-JSG intentionally hides away most of the details of how this works so we're not going to cover
-that piece here.
+JSG intentionally hides away most of the details of how this works, so we're not going to cover
+those here.
 
 The example illustrates all of the top-level pieces of defining a Resource Type but there are
 a range of details. We'll cover those next.
@@ -717,7 +717,7 @@ a range of details. We'll cover those next.
 ### `jsg::Object`
 
 All Resource Types must inherit from `jsg::Object`. This provides the necessary plumbing for
-everything to work. The `jsg::Object` class must be publicly inherited but it does not add
+everything to work. The `jsg::Object` class must be publicly inherited, but it does not add
 any additional methods or properties that need to be directly used (it does add some but those
 are intended to be used via other JSG APIs).
 
@@ -730,9 +730,9 @@ error.
 
 ### `JSG_RESOURCE_TYPE(T)`
 
-All Resource Types must contain the `JSG_RESOURCE_TYPE(T)` macro. This provides the necessary
+All Resource Types must call the `JSG_RESOURCE_TYPE(T)` macro. This provides the necessary
 declarations that JSG uses to construct the `v8::FunctionTemplate` and `v8::ObjectTemplate` that
-underlying the automatic mapping to JavaScript.
+facilitate the automatic mapping to JavaScript.
 
 The `JSG_RESOURCE_TYPE(T)` is declared as a block, for instance:
 
@@ -790,7 +790,7 @@ const foo = new Foo();
 foo.delete();
 ```
 
-Importantly, the method in JavaScript is exposed on the prototype of the object instance so it is
+Importantly, the method in JavaScript is exposed on the prototype of the object instance, so it is
 possible to override the method in a subclass.
 
 ```js
@@ -851,12 +851,12 @@ Properties on JavaScript objects are fairly complicated. There are a number of d
 ##### Prototype vs. Instance Properties
 
 A Prototype property is one that is defined on the prototype of the JavaScript object. It is typically
-implemented as a getter (readonly) or getter/setter (readwrite) pair. The property definition is shared
+implemented as a getter (read-only) or getter/setter (read-write) pair. The property definition is shared
 by all instances of the object and can be overridden by subclasses (the value is still specific to the
 individual instance).
 
 An Instance property is one that is defined specifically as an own property of an individual instance.
-It can be implemented as a getter (readonly) or getter/setter (readwrite) pair. The property definition
+It can be implemented as a getter (read-only) or getter/setter (read-write) pair. The property definition
 is specific to the individual instance and cannot be overridden by subclasses.
 
 ##### Read-only vs. Read-write
@@ -912,7 +912,7 @@ class MyFoo extends Foo {
 
 ##### `JSG_READONLY_INSTANCE_PROPERTY(name, getter)` and `JSG_INSTANCE_PROPERTY(name, getter, setter)`
 
-These define readonly and read/write instance properties on the Resource Type.
+These define read-only and read-write instance properties on the Resource Type.
 
 ```cpp
 class Foo: public jsg::Object {
@@ -941,7 +941,7 @@ foo.xyz = 456;
 ```
 
 While these *appear* the same as the prototype properties, it is important to note that they are
-defined on the `this` object and not the prototype. This means that they cannot be overridden in subclasses.
+defined on the `this` object and not on the prototype. This means that they cannot be overridden in subclasses.
 
 ```js
 class MyFoo extends Foo {
@@ -961,7 +961,7 @@ class MyFoo extends Foo {
 ##### `JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getter)` and `JSG_LAZY_INSTANCE_PROPERTY(name, getter)`
 
 A lazy instance property is one that is only evaluated once and then cached. This is useful for cases
-where a default value is provided but there's no reason to reevaluate it or we want the property to be
+where a default value is provided but there's no reason to reevaluate it, or we want the property to be
 easily overridable by users. This is typically only used to introduce new global properties when we
 don't want to risk breaking user code.
 
@@ -1090,7 +1090,7 @@ foo instanceof Bar; // true
 
 #### Exposing nested Resource Types
 
-There are times where it is useful to expose the constructor of a nested Resource Type. We use this
+There are times when it is useful to expose the constructor of a nested Resource Type. We use this
 mechanism, for instance, to expose new constructors on the global scope.
 
 ```cpp
@@ -1166,9 +1166,8 @@ For all of the JSG type system to function, we need to declare the types that we
 Without diving into all of the internal details that make it happen, for now we'll focus on just
 the top level requirements.
 
-Somewhere in your application (e.g. see sserve/sserve-api.c++) you must include an instance of
-the `JSG_DECLARE_ISOLATE_TYPE` macro. This macro sets up the base isolate types and helpers that
-implement the entire type system.
+Somewhere in your application (e.g. see server/workerd-api.c++) you must call the `JSG_DECLARE_ISOLATE_TYPE`
+macro. This macro sets up the base isolate types and helpers that implement the entire type system.
 
 ```cpp
 JSG_DECLARE_ISOLATE_TYPE(MyIsolate, api::Foo, api::Bar)
@@ -1176,12 +1175,12 @@ JSG_DECLARE_ISOLATE_TYPE(MyIsolate, api::Foo, api::Bar)
 
 In this example, we define a `MyIsolate` base that includes `api::Foo` and `api::Bar` as
 supported resource types. Every resource type and JSG_STRUCT type that you wish to use must be
-listed in the `JSG_DECLARE_ISOLATE_TYPE` definition.
+listed in the `JSG_DECLARE_ISOLATE_TYPE` invocation.
 
 In our code, you will see a pattern like:
 
 ```cpp
-JSG_DECLARE_ISOLATE_TYPE(JsgSserveIsolate,
+JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_GLOBAL_SCOPE_ISOLATE_TYPES,
   EW_ACTOR_ISOLATE_TYPES,
   EW_ACTOR_STATE_ISOLATE_TYPES,
@@ -1192,7 +1191,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgSserveIsolate,
 Each of those `EW_*_ISOLATE_TYPES` macros are defined in their respective header files and act
 as a shortcut to make managing the list easier.
 
-The `JSG_DECLARE_ISOLATE_TYPE` macro should only be defined once in your application.
+The `JSG_DECLARE_ISOLATE_TYPE` macro should only be called once in your application.
 
 ## Garbage Collection and GC Visitation
 
@@ -1249,8 +1248,8 @@ object A referencing object B which references object A...).
 
 Because ref types are strong references, any ref type that is not explicitly visited will not be
 eligible for garbage collection, so failure to implement proper visitation may lead to memory leaks.
-As as best practice, it is recommended that you implement `visitForGc()` on all types that contain
-refs, regardless of whether or not you are concerned about reference cycles.
+As a best practice, it is recommended that you implement `visitForGc()` on all types that contain
+refs, regardless of whether you are concerned about reference cycles.
 
 For `jsg::Ref<T>`, garbage collection only applies to the JavaScript wrapper around the C++ object.
 From the perspective of C++, `jsg::Ref<T>` is a strong reference to a refcounted object. If you have
@@ -1258,7 +1257,7 @@ an unreachable cycle of `jsg::Ref<T>` references, the JavaScript objects will be
 but the C++ objects will not be freed until the reference cycle is broken. It is critical to think
 about ownership and only hold `jsg::Ref<T>` from owner to owned objects; "backwards" references
 (from owned object to owner) should be regular C++ references or pointers. If it is possible for
-the reference from owned object to owner object to nulled out, use a `kj::Maybe<T&>` where `T` is
+the reference from owned object to owner object to be nulled out, use a `kj::Maybe<T&>` where `T` is
 the owning object type.
 
 Aside from the `jsg::Ref<T>` and `jsg::V8Ref<T>` types, there are a handful of other types that also
