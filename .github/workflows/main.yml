@@ -1,20 +1,32 @@
-name: CI
+name: Tests
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+    paths-ignore:
+    - 'doc/**'
+  push:
+    branches:
+    - main
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  Linux:
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install dependencies
-        run: sudo apt-get -y install libc++-dev libc++abi-dev
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: install dependencies
+        run: |
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get install -y build-essential git clang libc++-dev
 
-      - name: Build workerd
-        run: bazel build -c opt //src/workerd/server:workerd
+      - name: build
+        run: |
+            bazel build -c opt //src/workerd/server:workerd
+  MacOS:
+    runs-on: macos-12
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: build
+        run: |
+            bazel build -c opt //src/workerd/server:workerd
