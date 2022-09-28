@@ -29,4 +29,4 @@ jobs:
 
       - name: build
         run: |
-            bazel build --disk_cache=~/bazel-cache @capnp-cpp//src/capnp:capnp_tool
+            bazel build --disk_cache=~/bazel-cache -c opt //src/workerd/server:workerd
