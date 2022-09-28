@@ -19,7 +19,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/bazel-cache
-          key: ${{ runner.os }}-{{ runner.arch }}-bazel-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bazel-cache
           
       - name: install dependencies
         run: |
