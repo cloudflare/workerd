@@ -30,3 +30,9 @@ jobs:
       - name: build
         run: |
             bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev -c opt //src/workerd/server:workerd
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v3.1.0
+        with:
+          name: ${{ runner.os }}-${{ runner.arch }}-binary
+          path: bazel-bin/src/workerd/server/workerd
+          
