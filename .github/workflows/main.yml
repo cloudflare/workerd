@@ -9,7 +9,7 @@ on:
     - main
 
 jobs:
-  Linux:
+  linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
@@ -30,9 +30,44 @@ jobs:
       - name: build
         run: |
             bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev -c opt //src/workerd/server:workerd
-      - name: Upload a Build Artifact
+      - name: Upload binary
         uses: actions/upload-artifact@v3.1.0
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/src/workerd/server/workerd
           
+  release:
+    # if: ${{ github.repository_owner == 'cloudflare' }}
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 16.13
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16.13
+          cache: "npm" # cache ~/.npm in case 'npm ci' needs to run
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Check the build
+        run: npm run build
+
+      - name: Check for other errors
+        run: npm run check
+
+      - name: Create Release
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          publish: bash 'echo PUBLISH'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#           NPM_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+#           NODE_ENV: "production"
+
