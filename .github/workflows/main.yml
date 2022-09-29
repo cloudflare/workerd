@@ -77,10 +77,10 @@ jobs:
           # Artifact name
           name: Linux-X64-binary
           # Destination path
-          path: /bin/workerd-linux-64
+          path: /tmp/workerd-linux-64
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "/bin/workerd-linux-64"
+          artifacts: "/tmp/workerd-linux-64"
           generateReleaseNotes: true
           token: ${{ secrets.YOUR_GITHUB_TOKEN }}
   
