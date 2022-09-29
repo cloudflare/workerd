@@ -65,16 +65,28 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Bump version and push tag
+      - name: Tag with compatibility date
         id: tag_version
         uses: mathieudutour/github-tag-action@v6.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ needs.version.outputs.version }}
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v3.0.0
+        with:
+          # Artifact name
+          name: Linux-X64-binary
+          # Destination path
+          path: /bin/workerd-linux-64
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "/bin/workerd-linux-64"
+          generateReleaseNotes: true
+          token: ${{ secrets.YOUR_GITHUB_TOKEN }}
   
           
           
-          
+      
           
           
           
