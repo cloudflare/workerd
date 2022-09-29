@@ -83,6 +83,7 @@ jobs:
           artifacts: "/tmp/workerd-linux-64"
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ needs.version.outputs.version }}
   
           
           
