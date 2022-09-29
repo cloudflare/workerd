@@ -49,5 +49,7 @@ jobs:
       - run: bash build-npm-package.sh build-shim
       - uses: butlerlogic/action-autotag@stable
         with:
+          strategy: package
+          root: "npm/workerd"
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
