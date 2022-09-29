@@ -7,7 +7,6 @@
 #include <workerd/jsg/rtti.h>
 
 struct MockConfig {};
-JSG_RTTI_DECLARE_CONFIGURATION_TYPE(MockConfig);
 
 namespace workerd::jsg::rtti {
 namespace {
@@ -15,7 +14,7 @@ namespace {
 template<typename T>
 kj::String tType() {
   // returns textual encoding of rtti.
-  Builder builder;
+  Builder<MockConfig> builder((MockConfig()));
   auto type = builder.type<T>();
   capnp::TextCodec codec;
   return codec.encode(type);
@@ -24,8 +23,8 @@ kj::String tType() {
 template<typename T>
 kj::String tStructure() {
   // returns textual encoding of structure.
-  Builder builder;
-  auto type = builder.structure<T>(MockConfig());
+  Builder<MockConfig> builder((MockConfig()));
+  auto type = builder.structure<T>();
   capnp::TextCodec codec;
   return codec.encode(type);
 }
@@ -111,7 +110,7 @@ KJ_TEST("builtins") {
   KJ_EXPECT(tType<v8::Isolate*>() == "(builtin = (type = v8Isolate))");
   KJ_EXPECT(tType<v8::Function>() == "(builtin = (type = v8Function))");
   KJ_EXPECT(tType<kj::Date>() == "(builtin = (type = kjDate))");
-  KJ_EXPECT(tType<MockConfig>() == "(builtin = (type = flags))");
+  KJ_EXPECT(tType<MockConfig>() == "(builtin = (type = configuration))");
   KJ_EXPECT(tType<jsg::TypeHandler<kj::Date>>() == "(builtin = (type = jsgTypeHandler))");
 }
 
