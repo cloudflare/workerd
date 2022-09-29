@@ -29,4 +29,4 @@ jobs:
 
       - name: build
         run: |
-            bazel build --disk_cache=~/bazel-cache -c opt //src/workerd/server:workerd
+            bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev -c opt //src/workerd/server:workerd
