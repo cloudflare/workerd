@@ -11,8 +11,7 @@ on:
 jobs:
   version: 
     outputs:
-      version: ${{ steps.vecho.outputs.version }}
-      date: ${{ steps.decho.outputs.date }}
+      date: ${{ steps.echo.outputs.date }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
@@ -26,13 +25,10 @@ jobs:
       - name: build capnp
         run: |
           bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev @capnp-cpp//src/capnp:capnp_tool
-      - id: vecho
+      - id: echo
         run: |
-          echo '::set-output name=version::$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)'
-      - id: decho
-        run: |
-          echo '::set-output name=date::1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d \'-\' | tr -d \'\"\').0'
- 
+          echo '::set-output name=date::$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)'
+
   linux:
     runs-on: ubuntu-22.04
     steps:
@@ -60,12 +56,26 @@ jobs:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/external/capnp-cpp/src/capnp/capnp_tool
           
-  tag:
+  release:
     # if: ${{ github.repository_owner == 'cloudflare' }}
     name: Release
+    needs: [version, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          custom_tag: compatibility-${{ needs.version.outputs.date }}
+  
+          
+          
+          
+          
+          
+          
