@@ -11,7 +11,7 @@ on:
 jobs:
   version: 
     outputs:
-      date: ${{ steps.echo.outputs.version }}
+      version: ${{ steps.echo.outputs.version }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v2
