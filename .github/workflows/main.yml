@@ -27,7 +27,7 @@ jobs:
           bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev @capnp-cpp//src/capnp:capnp_tool
       - id: echo
         run: |
-          echo '::set-output name=date::$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)'
+          echo "::set-output name=date::$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)"
 
   linux:
     runs-on: ubuntu-22.04
