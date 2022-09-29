@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+    - 'doc/**'
+  push:
+    branches:
+    - main
+
+jobs:
+  Linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/bazel
+          key: ${{ runner.os }}-${{ runner.arch }}-bazel-cache
+          
+      - name: install dependencies
+        run: |
+            mkdir -p ~/.cache/bazel
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get install -y build-essential git clang libc++-dev
+
+      - name: build
+        run: |
+            bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev -c opt //src/workerd/server:workerd
