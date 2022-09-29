@@ -19,6 +19,12 @@ bazel_build() {
 }
 
 case $1 in
+version)
+    echo $WORKERD_VERSION
+    ;;
+date)
+    echo $LATEST_COMPATIBILITY_DATE
+    ;;
 build-darwin-arm64)
     bazel_build npm/workerd-darwin-arm64
     ;;
