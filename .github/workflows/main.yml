@@ -9,6 +9,30 @@ on:
     - main
 
 jobs:
+  version: 
+    outputs:
+      version: ${{ steps.vecho.outputs.version }}
+      date: ${{ steps.decho.outputs.date }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/bazel
+          key: capnp-cache
+      - name: build capnp
+        run: |
+          bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev @capnp-cpp//src/capnp:capnp_tool
+      - id: vecho
+        run: |
+          echo '::set-output name=version::$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate)'
+      - id: decho
+        run: |
+          echo '::set-output name=date::1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d \'-\' | tr -d \'"\').0'
+ 
   linux:
     runs-on: ubuntu-22.04
     steps:
@@ -45,11 +69,3 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
-      - run: bash build-npm-package.sh build-shim
-      - uses: butlerlogic/action-autotag@stable
-        with:
-          strategy: package
-          root: "npm/workerd"
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-
