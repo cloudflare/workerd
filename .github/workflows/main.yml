@@ -29,12 +29,12 @@ jobs:
 
       - name: build
         run: |
-            bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev -c opt //src/workerd/server:workerd
+            bazel build --remote_timeout=5 --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.s.workers.dev @capnp-cpp//src/capnp:capnp_tool
       - name: Upload binary
         uses: actions/upload-artifact@v3.1.0
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
-          path: bazel-bin/src/workerd/server/workerd
+          path: bazel-bin/external/capnp-cpp/src/capnp/capnp_tool
           
   release:
     # if: ${{ github.repository_owner == 'cloudflare' }}
@@ -51,15 +51,6 @@ jobs:
         with:
           node-version: 16.13
           cache: "npm" # cache ~/.npm in case 'npm ci' needs to run
-
-      - name: Install NPM Dependencies
-        run: npm ci
-
-      - name: Check the build
-        run: npm run build
-
-      - name: Check for other errors
-        run: npm run check
 
       - name: Create Release
         id: changesets
