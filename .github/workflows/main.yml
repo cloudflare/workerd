@@ -28,7 +28,6 @@ jobs:
       - id: echo
         run: |
           echo "::set-output name=version::1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0"
-
   linux:
     runs-on: ubuntu-22.04
     steps:
