@@ -82,7 +82,7 @@ jobs:
         with:
           artifacts: "/tmp/workerd-linux-64"
           generateReleaseNotes: true
-          token: ${{ secrets.YOUR_GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
   
           
           
