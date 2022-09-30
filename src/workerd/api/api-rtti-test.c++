@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "src/workerd/api/actor.h"
 #include <kj/test.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/rtti.h>
@@ -12,13 +13,16 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("WorkerGlobalScope") {
-  CompatibilityFlags::Reader flags;
-  jsg::rtti::Builder(flags).structure<WorkerGlobalScope>();
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  builder.structure<WorkerGlobalScope>();
+  KJ_EXPECT(builder.structure("Event"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("ObviouslyWrongName"_kj) == nullptr);
 }
 
 KJ_TEST("ServiceWorkerGlobalScope") {
-  CompatibilityFlags::Reader flags;
-  jsg::rtti::Builder(flags).structure<ServiceWorkerGlobalScope>();
+  jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
+  builder.structure<ServiceWorkerGlobalScope>();
+  KJ_EXPECT(builder.structure("DurableObjectId"_kj) != nullptr);
 }
 
 } // namespace
