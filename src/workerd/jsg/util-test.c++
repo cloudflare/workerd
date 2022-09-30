@@ -4,6 +4,7 @@
 
 #include "jsg-test.h"
 
+#include "jsg.h"
 #include "dom-exception.h"
 
 namespace workerd::jsg::test {
@@ -147,7 +148,7 @@ KJ_TEST("throw internal error") {
 
 struct TunneledContext: public Object {
   void throwTunneledTypeError() {
-    KJ_FAIL_REQUIRE("jsg.TypeError: thrown from throwTunneledTypeError");
+    JSG_FAIL_REQUIRE(TypeError, "thrown from throwTunneledTypeError");
   }
   void throwTunneledTypeErrorWithoutMessage() {
     KJ_FAIL_REQUIRE("jsg.TypeError <unseen message>");
@@ -159,11 +160,11 @@ struct TunneledContext: public Object {
   }
   void throwTunneledTypeErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    KJ_REQUIRE(s.startsWith(";"), "jsg.TypeError: thrown from "
-                                  "throwTunneledTypeErrorWithExpectation");
+    JSG_REQUIRE(s.startsWith(";"), TypeError,
+                "thrown from throwTunneledTypeErrorWithExpectation");
   }
   void throwTunneledOperationError() {
-    KJ_FAIL_REQUIRE("jsg.DOMException(OperationError): thrown from throwTunneledOperationError");
+    JSG_FAIL_REQUIRE(DOMOperationError, "thrown from throwTunneledOperationError");
   }
   void throwTunneledOperationErrorWithoutMessage() {
     KJ_FAIL_REQUIRE("jsg.DOMException(OperationError) <unseen message>");
@@ -175,7 +176,7 @@ struct TunneledContext: public Object {
   }
   void throwTunneledOperationErrorWithExpectation() {
     auto s = kj::str("Hello, world!");
-    KJ_REQUIRE(s.startsWith(";"), "jsg.DOMException(OperationError): thrown from "
+    JSG_REQUIRE(s.startsWith(";"), DOMOperationError, "thrown from "
                                   "throwTunneledOperationErrorWithExpectation");
   }
   void throwTunneledInternalOperationError() {

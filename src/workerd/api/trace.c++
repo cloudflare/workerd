@@ -3,11 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "trace.h"
+
+#include <workerd/api/global-scope.h>
 #include <workerd/api/http.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
 #include <capnp/schema.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/own-util.h>
 
 namespace workerd::api {
 
@@ -230,6 +233,75 @@ TraceMetrics::TraceMetrics(uint cpuTime, uint wallTime) : cpuTime(cpuTime), wall
 
 jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Ref<TraceItem> item) {
   return jsg::alloc<TraceMetrics>(item->getCpuTime(), item->getWallTime());
+}
+
+namespace {
+kj::Promise<void> sendTracesToExportedHandler(
+    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    kj::ArrayPtr<kj::Own<Trace>> traces) {
+  // Mark the request as delivered because we're about to run some JS.
+  incomingRequest->delivered();
+
+  auto& context = incomingRequest->getContext();
+  auto& metrics = incomingRequest->getMetrics();
+
+  // Add the actual JS as a wait until because the handler may be an event listener which can't
+  // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
+  // and its members until this task completes.
+  auto entrypointName = entrypointNamePtr.map([](auto s) { return kj::str(s); });
+  try {
+    co_await context.run(
+        [&context, traces=mapAddRef(traces), entrypointName=kj::mv(entrypointName)]
+        (Worker::Lock& lock) mutable {
+      auto handler = lock.getExportedHandler(entrypointName, context.getActor());
+      lock.getGlobalScope().sendTraces(traces, lock, handler);
+    });
+  } catch (kj::Exception e) {
+    // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
+    //   event handler throws an exception; we do not consider waitUntil(). But all async work done
+    //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
+    //   change it so any waitUntil() failure counts as an error? For that matter, arguably *all*
+    //   event types should report failure if a waitUntil() throws?
+    metrics.reportFailure(e);
+
+    // Log JS exceptions (from the initial sendTraces() call) to the JS console, if fiddle is
+    // attached. This also has the effect of logging internal errors to syslog. (Note that
+    // exceptions that occur asynchronously while waiting for the context to drain will be
+    // logged elsewhere.)
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
+  };
+
+  co_await incomingRequest->drain();
+}
+}  // namespace
+
+auto TraceCustomEventImpl::run(
+    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr)
+    -> kj::Promise<Result> {
+  // Don't bother to wait around for the handler to run, just hand it off to the waitUntil tasks.
+  waitUntilTasks.add(
+      sendTracesToExportedHandler(kj::mv(incomingRequest), entrypointNamePtr, traces));
+
+  return Result {
+    .outcome = EventOutcome::OK,
+  };
+}
+
+auto TraceCustomEventImpl::sendRpc(
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::TaskSet& waitUntilTasks,
+      workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
+  auto req = dispatcher.sendTracesRequest();
+  auto out = req.initTraces(traces.size());
+  for (auto i: kj::indices(traces)) {
+    traces[i]->copyTo(out[i]);
+  }
+
+  waitUntilTasks.add(req.send().ignoreResult());
+
+  // As long as we sent it, we consider the result to be okay.
+  co_return Result {
+    .outcome = workerd::EventOutcome::OK,
+  };
 }
 
 }  // namespace workerd::api

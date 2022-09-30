@@ -126,8 +126,8 @@ InputGate::CriticalSection::~CriticalSection() noexcept(false) {
       // The initial wait() had better have been canceled... but we have no way to tell here.
       break;
     case RUNNING:
-      failed(KJ_EXCEPTION(FAILED,
-          "jsg.Error: A critical section within this Durable Object awaited a Promise that "
+      failed(JSG_KJ_EXCEPTION(FAILED, Error,
+          "A critical section within this Durable Object awaited a Promise that "
           "apparently will never complete. This could happen in particular if a critical section "
           "awaits a task that was initiated outside of the critical section. Since a critical "
           "section blocks all other tasks from completing, this leads to deadlock."));

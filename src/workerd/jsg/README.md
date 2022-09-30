@@ -1136,7 +1136,7 @@ public:
   static jsg::Ref<MyAssert> constructor();
 
   void ok(boolean condition) {
-    JSG_REQUIRE(condition, "jsg.Error: Condition failed!");
+    JSG_REQUIRE(condition, Error, "Condition failed!");
   }
 
   JSG_RESOURCE_TYPE(MyAssert) {

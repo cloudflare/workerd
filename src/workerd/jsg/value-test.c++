@@ -1204,7 +1204,7 @@ struct ExceptionContext: public Object {
       case 1:
         return JSG_KJ_EXCEPTION(FAILED, TypeError, "boom");
       case 2:
-        return KJ_EXCEPTION(FAILED, "jsg.DOMException(AbortError): boom");
+        return JSG_KJ_EXCEPTION(FAILED, DOMAbortError, "boom");
     }
     KJ_UNREACHABLE;
   }

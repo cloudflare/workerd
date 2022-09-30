@@ -39,7 +39,7 @@ struct GeneratorContext: public Object {
     uint count = 0;
     generator.forEach(js, [&count](auto& js, auto value, auto& context) {
       if (count == 1 && !context.isErroring()) {
-        js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: boom"));
+        js.throwException(JSG_KJ_EXCEPTION(FAILED, Error, "boom"));
       }
 
       KJ_ASSERT(value == "a" || value == "c");
@@ -88,7 +88,7 @@ struct GeneratorContext: public Object {
     uint count = 0;
     generator.forEach(js, [&count](auto& js, auto val, auto& context) -> Promise<void> {
       if (count == 1 && !context.isErroring()) {
-        js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: boom"));
+        js.throwException(JSG_KJ_EXCEPTION(FAILED, Error, "boom"));
       }
 
       KJ_ASSERT(val == "a" || val == "c");

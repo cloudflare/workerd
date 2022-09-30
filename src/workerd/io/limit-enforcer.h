@@ -90,6 +90,10 @@ public:
   // Called before starting a KV operation. Throws a JSG exception if the operation should be
   // blocked due to exceeding limits, such as the free tier daily operation limit.
 
+  virtual void newAnalyticsEngineRequest() = 0;
+  // Called before starting an attempt to write to the Analytics Engine. Throws
+  // a JSG exception if the operation should be blocked due to exceeding limits.
+
   virtual kj::Promise<void> limitDrain() = 0;
   // Applies a time limit to draining a request (i.e. waiting for `waitUntil()`s after the
   // response has been sent). Returns a promise that will resolve (without error) when the time

@@ -33,16 +33,6 @@ public:
     }
   }
 
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
-    KJ_IF_MAYBE(w, worker) {
-      w->get()->sendTraces(kj::mv(traces));
-    } else {
-      waitUntilTasks.add(promise.addBranch().then([this, tracesCopy = mapAddRef(traces)]() mutable {
-        KJ_ASSERT_NONNULL(worker)->sendTraces(tracesCopy);
-      }).attach(kj::addRef(*this)));
-    }
-  }
-
   void prewarm(kj::StringPtr url) override {
     KJ_IF_MAYBE(w, worker) {
       w->get()->prewarm(url);
@@ -212,10 +202,6 @@ RevocableWorkerInterface::RevocableWorkerInterface(WorkerInterface& worker,
     kj::Promise<void> revokeProm)
     : worker(worker), revokeProm(revokeProm.fork()) {}
 
-void RevocableWorkerInterface::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  worker.sendTraces(traces);
-}
-
 void RevocableWorkerInterface::prewarm(kj::StringPtr url) {
   worker.prewarm(url);
 }
@@ -251,10 +237,6 @@ public:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override {
-    kj::throwFatalException(kj::mv(exception));
-  }
-
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
     kj::throwFatalException(kj::mv(exception));
   }
 
@@ -299,15 +281,6 @@ kj::Promise<void> RpcWorkerInterface::request(
   auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));
-}
-
-void RpcWorkerInterface::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  auto req = dispatcher.sendTracesRequest();
-  auto out = req.initTraces(traces.size());
-  for (auto i: kj::indices(traces)) {
-    traces[i]->copyTo(out[i]);
-  }
-  waitUntilTasks.add(req.send().ignoreResult());
 }
 
 void RpcWorkerInterface::prewarm(kj::StringPtr url) {

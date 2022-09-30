@@ -10,11 +10,11 @@ namespace workerd::api {
 
 void AnalyticsEngine::writeDataPoint(jsg::Lock& js,
     jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent> event) {
-  auto& currReq = IoContext::current();
+  auto& context = IoContext::current();
 
-  currReq.decrementAnalyticsEngineWriteBudget();
+  context.getLimitEnforcer().newAnalyticsEngineRequest();
 
-  currReq.writeLogfwdr(logfwdrChannel, [&](capnp::AnyPointer::Builder ptr) {
+  context.writeLogfwdr(logfwdrChannel, [&](capnp::AnyPointer::Builder ptr) {
     api::AnalyticsEngineEvent::Builder aeEvent = ptr.initAs<api::AnalyticsEngineEvent>();
 
     aeEvent.setAccountId(static_cast<int64_t>(ownerId));

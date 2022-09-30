@@ -309,42 +309,6 @@ kj::Promise<void> WorkerEntrypoint::request(
   });
 }
 
-void WorkerEntrypoint::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
-                                "sendTraces() can only be called once"));
-  this->incomingRequest = nullptr;
-  incomingRequest->delivered();
-  auto& context = incomingRequest->getContext();
-
-  waitUntilTasks.add(context.run(
-      // We can't capture `this` because the `WorkerEntrypoint` can be destroyed as soon as
-      // `sendTraces()` returns, since it doesn't return a Promise.
-      [entrypointName = entrypointName.map([](auto s) { return kj::str(s); }),
-       &metrics = incomingRequest->getMetrics(),
-       cfBlobJson = kj::mv(cfBlobJson),
-       traces = mapAddRef(traces), &context]
-      (Worker::Lock& lock) mutable {
-    lock.getGlobalScope().sendTraces(traces, lock,
-        lock.getExportedHandler(entrypointName, context.getActor()));
-  }).catch_([&context, &metrics = incomingRequest->getMetrics()](kj::Exception&& e) {
-    // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
-    //   event handler throws an exception; we do not consider waitUntil(). But all async work done
-    //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
-    //   change it so any waitUntil() failure counts as an error? For that matter, arguably *all*
-    //   event types should report failure if a waitUntil() throws?
-    metrics.reportFailure(e);
-
-    // Log JS exceptions (from the initial sendTraces() call) to the JS console, if fiddle is
-    // attached. This also has the effect of logging internal errors to syslog. (Note that
-    // exceptions that occur asynchronously while waiting for the context to drain will be
-    // logged elsewhere.)
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
-  }).then([incomingRequest = kj::mv(incomingRequest)]() mutable {
-    // The request completed, but allow waitUntil() tasks to continue executing until the timeout.
-    return incomingRequest->drain().attach(kj::mv(incomingRequest));
-  }));
-}
-
 void WorkerEntrypoint::prewarm(kj::StringPtr url) {
   // Nothing to do, the worker is already loaded.
 
@@ -440,8 +404,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "customEvent() can only be called once"));
   this->incomingRequest = nullptr;
-  return event->run(*incomingRequest, entrypointName)
-      .attach(kj::mv(incomingRequest), kj::mv(event));
+  return event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
 }
 
 } // namespace workerd

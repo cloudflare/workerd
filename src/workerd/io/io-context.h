@@ -301,12 +301,6 @@ public:
   const Worker& getWorker() { return *worker; }
   Worker::Lock& getCurrentLock() { return KJ_REQUIRE_NONNULL(currentLock); }
 
-  uint32_t getAnalyticsEngineWriteBudget() { return analyticsEngineWriteBudget; };
-  void decrementAnalyticsEngineWriteBudget() {
-    JSG_REQUIRE(analyticsEngineWriteBudget > 0, Error, "writeDataPoint(dataPoint): Write limit reached.");
-    --analyticsEngineWriteBudget;
-  };
-
   kj::Maybe<Worker::Actor&> getActor() {
     return actor;
   }
@@ -840,9 +834,6 @@ private:
 
   capnp::CapabilityServerSet<capnp::DynamicCapability> localCapSet;
 
-  static constexpr uint32_t DEFAULT_ANALYTICS_ENGINE_WRITE_LIMIT = 25; // arbitrarily chosen limit
-  uint32_t analyticsEngineWriteBudget = DEFAULT_ANALYTICS_ENGINE_WRITE_LIMIT;
-
   bool failOpen = false;
 
   void* threadId;
@@ -1320,16 +1311,16 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Promise<T> jsPromi
       if (!isDone) {
         // The JavaScript resolver was garbage collected, i.e. JavaScript will never resolve
         // this promise.
-        fulfiller->reject(KJ_EXCEPTION(FAILED,
-            "jsg.Error: Promise will never complete."));
+        fulfiller->reject(
+            JSG_KJ_EXCEPTION(FAILED, Error, "Promise will never complete."));
       }
     }
 
   private:
     kj::Maybe<kj::StringPtr> finalize() override {
       if (!isDone) {
-        fulfiller->reject(KJ_EXCEPTION(FAILED,
-            "jsg.Error: Promise will never complete."));
+        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED,
+            Error, "Promise will never complete."));
         isDone = true;
         return "A hanging Promise was canceled. This happens when the worker runtime is waiting "
                 "for a Promise from JavaScript to resolve, but has detected that the Promise "
@@ -1547,11 +1538,11 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
       // Arrange to time out if the critical section runs more than 30 seconds, so that objects
       // won't be hung forever if they have a critical section that deadlocks.
       auto timeout = afterLimitTimeout(30 * kj::SECONDS)
-          .then([]() -> T {
-        kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
-            "jsg.Error: "
-            "A call to blockConcurrencyWhile() in a Durable Object waited for too long. "
-            "The call was canceled and the Durable Object was reset."));
+        .then([]() -> T {
+          kj::throwFatalException(JSG_KJ_EXCEPTION(
+              OVERLOADED, Error,
+              "A call to blockConcurrencyWhile() in a Durable Object waited for "
+              "too long. The call was canceled and the Durable Object was reset."));
       });
 
       return awaitJs(kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
