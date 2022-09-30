@@ -397,8 +397,8 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   // completes, whichever comes first.
 
   global.setTimeoutInternal([signal = signal.addRef()](jsg::Lock& js) mutable {
-    auto exception = js.exceptionToJs(KJ_EXCEPTION(FAILED,
-        "jsg.DOMException(TimeoutError): The operation was aborted due to timeout"));
+    auto exception = js.exceptionToJs(JSG_KJ_EXCEPTION(FAILED,
+        DOMTimeoutError, "The operation was aborted due to timeout"));
 
     signal->triggerAbort(js, exception.getHandle(js));
   }, delay);
@@ -500,8 +500,8 @@ kj::Promise<void> Scheduler::wait(
 }
 
 void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
-  KJ_REQUIRE(getIsTrusted(),
-      "jsg.DOMException(InvalidStateError): waitUntil() can only be called on trusted event.");
+  JSG_REQUIRE(getIsTrusted(), DOMInvalidStateError,
+             "waitUntil() can only be called on trusted event.");
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 

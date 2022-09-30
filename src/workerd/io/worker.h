@@ -160,7 +160,7 @@ private:
   class AsyncWaiter;
 
   static void handleLog(
-      LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info, v8::Isolate *isolate);
+      jsg::Lock& js, LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info);
 };
 
 class Worker::Script: public kj::AtomicRefcounted {
@@ -407,7 +407,6 @@ private:
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override;
-    void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override;
     void prewarm(kj::StringPtr url) override;
     kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
     kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;

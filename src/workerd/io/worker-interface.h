@@ -38,11 +38,6 @@ public:
   //   more resources to be dropped when merely proxying a request. However, it means we would no
   //   longer be immplementing kj::HttpService. But maybe that doesn't matter too much in practice.
 
-  virtual void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) = 0;
-  // Trigger a trace event with the given trace information.  Triggering is synchronous -- any
-  // asynchronous work needed should be queued in a "waitUntil" task set given at construction
-  // time.  No mechanism is provided to cancel or report failure for this asynchronous work.
-
   virtual void prewarm(kj::StringPtr url) = 0;
   // Hints that this worker will likely be invoked in the near future, so should be warmed up now.
   // This method should also call `prewarm()` on any subsequent pipeline stages that are expected
@@ -82,7 +77,7 @@ public:
     };
 
     virtual kj::Promise<Result> run(
-        IoContext_IncomingRequest& incomingRequest,
+        kj::Own<IoContext_IncomingRequest> incomingRequest,
         kj::Maybe<kj::StringPtr> entrypointName) = 0;
     // Deliver the event to an isolate in this process. `incomingRequest` has been newly-allocated
     // for this event.
@@ -99,7 +94,7 @@ public:
     // what types.
   };
 
-  virtual kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) = 0;
+  [[nodiscard]] virtual kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) = 0;
   // Allows delivery of a variety of event types by implementing a callback that delivers the
   // event to a particular isolate. If and when the event is delivered to an isolate,
   // `callback->run()` will be called inside a fresh IoContext::IncomingRequest to begin the
@@ -139,7 +134,6 @@ public:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override;
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
@@ -167,7 +161,6 @@ public:
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override;
 
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;

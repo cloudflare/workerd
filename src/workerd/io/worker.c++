@@ -630,7 +630,7 @@ struct Worker::Isolate::Impl {
 
           auto f = lock->wrapSimpleFunction(context,
               [level](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-            handleLog(level, info, js.v8Isolate);
+            handleLog(js, level, info);
           });
           jsg::check(console.As<v8::Object>()->Set(context, methodStr, f));
         };
@@ -881,8 +881,8 @@ struct Worker::Script::Impl {
               KJ_IF_MAYBE(limitError, maybeLimitError) {
                 kj::throwFatalException(kj::mv(*limitError));
               } else {
-                kj::throwFatalException(KJ_EXCEPTION(FAILED,
-                    "jsg.Error: Failed to load dynamic module."));
+                kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+                    "Failed to load dynamic module."));
               }
             }
             return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
@@ -1331,8 +1331,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           // const_cast OK because we hold the lock.
           auto& registry = KJ_ASSERT_NONNULL(const_cast<Script&>(*script).impl->getModuleRegistry());
           KJ_IF_MAYBE(entry, registry.resolve(mainModule)) {
-            KJ_REQUIRE(entry->maybeSynthetic == nullptr,
-                "jsg.TypeError: Main module must be an ES module.");
+            JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
+                        "Main module must be an ES module.");
             auto module = entry->module.Get(lock.v8Isolate);
 
             {
@@ -1384,7 +1384,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               }
             }
           } else {
-            KJ_FAIL_REQUIRE("jsg.TypeError: Main module name is not present in bundle.");
+            JSG_FAIL_REQUIRE(TypeError, "Main module name is not present in bundle.");
           }
         }
       }
@@ -1423,29 +1423,75 @@ Worker::~Worker() noexcept(false) {
   lock->push(kj::mv(impl));
 }
 
-void Worker::handleLog(LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info,
-                       v8::Isolate* isolate) {
+void Worker::handleLog(jsg::Lock& js, LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info) {
+  // The TryCatch is initialised here to catch cases where the v8 isolate's execution is
+  // terminating, usually as a result of an infinite loop. We need to perform the initialisation
+  // here because `message` is called multiple times.
+  v8::TryCatch tryCatch(js.v8Isolate);
   auto message = [&]() {
     int length = info.Length();
     kj::Vector<kj::String> stringified(length);
-    auto context = isolate->GetCurrentContext();
     for (auto i: kj::zeroTo(length)) {
       auto arg = info[i];
-      // v8::JSON::Stringify() can throw JS exceptions (e.g. for recursive objects) so we eat them
-      // here, to ensure logging and non-logging code have the same exception behavior.
-      v8::TryCatch tryCatch(isolate);
+      // serializeJson and v8::Value::ToString can throw JS exceptions
+      // (e.g. for recursive objects) so we eat them here, to ensure logging and non-logging code
+      // have the same exception behavior.
+      if (!tryCatch.CanContinue()) {
+        stringified.add(kj::str("{}"));
+        break;
+      }
+      // The following code checks the `arg` to see if it should be serialised to JSON.
+      //
+      // We use the following criteria: if arg is null, a number, a boolean, an array, a string, an
+      // object or it defines a `toJSON` property that is a function, then the arg gets serialised
+      // to JSON.
+      //
+      // Otherwise we stringify the argument.
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto context = js.v8Isolate->GetCurrentContext();
+      bool shouldSerialiseToJson = false;
+      if (arg->IsNull() || arg->IsNumber() || arg->IsArray() || arg->IsBoolean() || arg->IsString() ||
+          arg->IsUndefined()) { // This is special cased for backwards compatibility.
+        shouldSerialiseToJson = true;
+      }
+      if (arg->IsObject()) {
+        v8::Local<v8::Object> obj = arg.As<v8::Object>();
+        v8::Local<v8::Object> freshObj = v8::Object::New(js.v8Isolate);
+
+        // Determine whether `obj` is constructed using `{}` or `new Object()`. This ensures
+        // we don't serialise values like Promises to JSON.
+        if (
+          obj->GetPrototype()->SameValue(freshObj->GetPrototype()) || obj->GetPrototype()->IsNull()
+        ) {
+          shouldSerialiseToJson = true;
+        }
+
+        // Check if arg has a `toJSON` property which is a function.
+        auto toJSONStr = jsg::v8StrIntern(js.v8Isolate, "toJSON"_kj);
+        v8::MaybeLocal<v8::Value> toJSON = obj->GetRealNamedProperty(context, toJSONStr);
+        if (!toJSON.IsEmpty()) {
+          if (jsg::check(toJSON)->IsFunction()) {
+            shouldSerialiseToJson = true;
+          }
+        }
+      }
+
       KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
-        auto s = kj::str(jsg::check(v8::JSON::Stringify(context, arg)));
-        // v8::JSON::Stringify() returns the string "undefined" for some values (undefined,
-        // Symbols, functions).  We remap these values to null to ensure valid JSON output.
-        if (s == "undefined"_kj) {
-          stringified.add(kj::str("null"));
+        if (shouldSerialiseToJson) {
+          auto s = js.serializeJson(arg);
+          // serializeJson returns the string "undefined" for some values (undefined,
+          // Symbols, functions).  We remap these values to null to ensure valid JSON output.
+          if (s == "undefined"_kj) {
+            stringified.add(kj::str("null"));
+          } else {
+            stringified.add(kj::mv(s));
+          }
         } else {
-          stringified.add(kj::mv(s));
+          stringified.add(js.serializeJson(jsg::check(arg->ToString(context))));
         }
       })) {
         stringified.add(kj::str("{}"));
-      }
+      };
     }
     return kj::str("[", kj::delimited(stringified, ", "_kj), "]");
   };
@@ -3252,9 +3298,6 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
 }
 
 // TODO(someday): Log other kinds of subrequests?
-void Worker::Isolate::SubrequestClient::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
-  inner->sendTraces(traces);
-}
 void Worker::Isolate::SubrequestClient::prewarm(kj::StringPtr url) {
   inner->prewarm(url);
 }

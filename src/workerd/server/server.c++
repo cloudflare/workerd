@@ -431,7 +431,7 @@ class Server::InvalidConfigService final: public Service {
 
 public:
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    KJ_FAIL_ASSERT("jsg.Error: Service cannot handle requests because its config is invalid.");
+    JSG_FAIL_REQUIRE(Error, "Service cannot handle requests because its config is invalid.");
   }
 };
 
@@ -534,9 +534,6 @@ private:
       }
     }
 
-    void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
-      throwUnsupported();
-    }
     void prewarm(kj::StringPtr url) override {}
     kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
       throwUnsupported();
@@ -658,9 +655,6 @@ private:
     return serviceAdapter->request(method, url, headers, requestBody, response);
   }
 
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
-    throwUnsupported();
-  }
   void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
@@ -673,7 +667,7 @@ private:
   }
 
   [[noreturn]] void throwUnsupported() {
-    KJ_FAIL_REQUIRE("jsg.Error: External HTTP servers don't support this event type.");
+    JSG_FAIL_REQUIRE(Error, "External HTTP servers don't support this event type.");
   }
 };
 
@@ -855,9 +849,6 @@ private:
     }
   }
 
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces) override {
-    throwUnsupported();
-  }
   void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
@@ -870,7 +861,7 @@ private:
   }
 
   [[noreturn]] void throwUnsupported() {
-    KJ_FAIL_REQUIRE("jsg.Error: Disk directory services don't support this event type.");
+    JSG_FAIL_REQUIRE(Error, "Disk directory services don't support this event type.");
   }
 };
 
@@ -1138,7 +1129,7 @@ private:
 
   kj::Own<CacheClient> getCache() override {
     // TODO(beta): Cache API emulation.
-    KJ_FAIL_REQUIRE("jsg.Error: The cache API is not yet implemented.");
+    JSG_FAIL_REQUIRE(Error, "The cache API is not yet implemented.");
   }
 
   TimerChannel& getTimer() override {
@@ -1200,6 +1191,7 @@ private:
   void topUpActor() override {}
   void newSubrequest(bool isInHouse) override {}
   void newKvRequest(KvOpType op) override {}
+  void newAnalyticsEngineRequest() override {}
   kj::Promise<void> limitDrain() override { return kj::NEVER_DONE; }
   kj::Promise<void> limitScheduled() override { return kj::NEVER_DONE; }
   size_t getBufferingLimit() override { return kj::maxValue; }

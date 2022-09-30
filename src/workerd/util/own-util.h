@@ -24,4 +24,9 @@ inline auto mapAddRef(kj::ArrayPtr<kj::Own<T>>& array) -> kj::Array<kj::Own<T>> 
   return KJ_MAP(t, array) { return kj::addRef(*t); };
 }
 
+template <typename T>
+inline auto mapAddRef(kj::Array<kj::Own<T>>& array) -> kj::Array<kj::Own<T>> {
+  return KJ_MAP(t, array) { return kj::addRef(*t); };
+}
+
 }

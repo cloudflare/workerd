@@ -247,6 +247,31 @@ public:
   }
 };
 
+class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
+public:
+  TraceCustomEventImpl(
+      uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<Trace>> traces)
+    : typeId(typeId), waitUntilTasks(waitUntilTasks), traces(kj::mv(traces)) {}
+
+  kj::Promise<Result> run(
+      kj::Own<IoContext::IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName) override;
+
+  kj::Promise<Result> sendRpc(
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      kj::TaskSet& waitUntilTasks,
+      rpc::EventDispatcher::Client dispatcher) override;
+
+  uint16_t getType() override {
+    return typeId;
+  }
+
+private:
+  uint16_t typeId;
+  kj::TaskSet& waitUntilTasks;
+  kj::Array<kj::Own<workerd::Trace>> traces;
+};
+
 #define EW_TRACE_ISOLATE_TYPES                \
   api::TraceEvent,                            \
   api::TraceItem,                             \

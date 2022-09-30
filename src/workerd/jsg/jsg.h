@@ -83,6 +83,7 @@
 #define JSG_ERROR_DOMInvalidCharacterError JSG_DOM_EXCEPTION("InvalidCharacterError")
 #define JSG_ERROR_DOMNotSupportedError JSG_DOM_EXCEPTION("NotSupportedError")
 #define JSG_ERROR_DOMSyntaxError JSG_DOM_EXCEPTION("SyntaxError")
+#define JSG_ERROR_DOMTimeoutError JSG_DOM_EXCEPTION("TimeoutError")
 #define JSG_ERROR_DOMTypeMismatchError JSG_DOM_EXCEPTION("TypeMismatchError")
 #define JSG_ERROR_DOMQuotaExceededError JSG_DOM_EXCEPTION("QuotaExceededError")
 #define JSG_ERROR_DOMAbortError JSG_DOM_EXCEPTION("AbortError")

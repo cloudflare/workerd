@@ -597,11 +597,9 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
 
 auto IoContext::TimeoutManagerImpl::addState(
     TimeoutId::Generator& generator, TimeoutParameters params) -> IdAndIterator {
-  KJ_REQUIRE(
-      getTimeoutCount() < MAX_TIMEOUTS,
-      "jsg.DOMException(QuotaExceededError): "
-      "You have exceeded the number of timeouts you may set.",
-      MAX_TIMEOUTS);
+  JSG_REQUIRE(getTimeoutCount() < MAX_TIMEOUTS, DOMQuotaExceededError,
+              "You have exceeded the number of timeouts you may set.",
+              MAX_TIMEOUTS);
 
   auto id = generator.getNext();
   auto [it, wasEmplaced] = timeouts.try_emplace(id, *this, kj::mv(params));
@@ -932,15 +930,15 @@ void IoContext::checkFarGet(const DeleteQueue* expectedQueue) {
   if (expectedQueue == deleteQueue.get()) {
     // same request or same actor, success
   } else if (actor != nullptr) {
-    KJ_FAIL_REQUIRE(
-        "jsg.Error: Cannot perform I/O on behalf of a different Durable Object. I/O objects "
+    JSG_FAIL_REQUIRE(
+        Error, "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
         "(such as streams, request/response bodies, and others) created in the context of one "
         "Durable Object cannot be accessed from a different Durable Object in the same isolate. "
         "This is a limitation of Cloudflare Workers which allows us to improve overall "
         "performance.");
   } else {
-    KJ_FAIL_REQUIRE(
-        "jsg.Error: Cannot perform I/O on behalf of a different request. I/O objects (such as "
+    JSG_FAIL_REQUIRE(
+        Error, "Cannot perform I/O on behalf of a different request. I/O objects (such as "
         "streams, request/response bodies, and others) created in the context of one request "
         "handler cannot be accessed from a different request's handler. This is a limitation "
         "of Cloudflare Workers which allows us to improve overall performance.");
@@ -1207,8 +1205,8 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     // Don't bother fullfilling `abortFulfiller` if limits were exceeded because in that case the
     // abort promise will be fulfilled shortly anyway.
     if (limitEnforcer->getLimitsExceeded() == nullptr) {
-      abortFulfiller->reject(KJ_EXCEPTION(FAILED,
-          "jsg.Error: The script will never generate a response."));
+      abortFulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
+          "The script will never generate a response."));
     }
   }
 

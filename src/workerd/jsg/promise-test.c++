@@ -53,7 +53,7 @@ struct PromiseContext: public Object {
   }
 
   Promise<kj::String> makeRejectedKj(Lock& js) {
-    return js.rejectedPromise<kj::String>(KJ_EXCEPTION(FAILED, "jsg.TypeError: bar"));
+    return js.rejectedPromise<kj::String>(JSG_KJ_EXCEPTION(FAILED, TypeError, "bar"));
   }
 
   void testConsumeResolved(Lock& js) {
