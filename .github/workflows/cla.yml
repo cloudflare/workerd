@@ -22,5 +22,6 @@ jobs:
           path-to-signatures: 'signatures/version1/cla.json'
           path-to-document: 'https://www.cloudflare.com/cla/'
           # branch should not be protected
-          branch: 'main'
+          branch: 'cla-signatures'
           allowlist: dependabot
+          lock-pullrequest-aftermerge: false
