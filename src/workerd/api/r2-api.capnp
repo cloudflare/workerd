@@ -22,6 +22,10 @@ struct R2BindingRequest {
     createBucket @6 :R2CreateBucketRequest $Json.flatten();
     listBucket @7 :R2ListBucketRequest $Json.flatten();
     deleteBucket @8 :R2DeleteBucketRequest $Json.flatten();
+    createMultipartUpload @9 :R2CreateMultipartUploadRequest $Json.flatten();
+    uploadPart @10 :R2UploadPartRequest $Json.flatten();
+    completeMultipartUpload @11 :R2CompleteMultipartUploadRequest $Json.flatten();
+    abortMultipartUpload @12 :R2AbortMultipartUploadRequest $Json.flatten();
   }
 }
 
@@ -56,6 +60,11 @@ struct R2Checksums {
   sha512 @4 :Data $Json.hex $Json.name("4");
 }
 
+struct R2PublishedPart {
+  etag @0 :Text;
+  part @1 :UInt32;
+}
+
 struct R2HttpFields {
   contentType @0 :Text;
   contentLanguage @1 :Text;
@@ -86,6 +95,29 @@ struct R2PutRequest {
   sha256 @6 :Data $Json.hex;
   sha384 @7 :Data $Json.hex;
   sha512 @8 :Data $Json.hex;
+}
+
+struct R2CreateMultipartUploadRequest {
+  object @0 :Text;
+  customFields @1 :List(Record);
+  httpFields @2 :R2HttpFields;
+}
+
+struct R2UploadPartRequest {
+  object @0 :Text;
+  uploadId @1 :Text;
+  partNumber @2 :UInt32;
+}
+
+struct R2CompleteMultipartUploadRequest {
+  object @0 :Text;
+  uploadId @1 :Text;
+  parts @2 :List(R2PublishedPart);
+}
+
+struct R2AbortMultipartUploadRequest {
+  object @0 :Text;
+  uploadId @1 :Text;
 }
 
 struct R2ListRequest {
@@ -177,6 +209,22 @@ struct R2HeadResponse {
 using R2GetResponse = R2HeadResponse;
 
 using R2PutResponse = R2HeadResponse;
+
+struct R2CreateMultipartUploadResponse {
+  uploadId @0 :Text;
+  # The unique identifier of this object, required for subsequent operations on
+  # this multipart upload.
+}
+
+struct R2UploadPartResponse {
+  etag @0 :Text;
+  # The ETag the of the uploaded part.
+  # This ETag is required in order to complete the multipart upload.
+}
+
+using R2CompleteMultipartUploadResponse = R2PutResponse;
+
+struct R2AbortMultipartUploadResponse {}
 
 struct R2ListResponse {
   objects @0 :List(R2HeadResponse);
