@@ -492,7 +492,7 @@ private:
 };
 
 class Server::ExternalHttpService final: public Service {
-  // Service used when the service's config is invalid.
+  // Service used when the service is configured as external HTTP service.
 
 public:
   ExternalHttpService(kj::Own<kj::NetworkAddress> addrParam,
@@ -627,7 +627,7 @@ kj::Own<Server::Service> Server::makeExternalService(
 }
 
 class Server::NetworkService final: public Service, private WorkerInterface {
-  // Service used when the service's config is invalid.
+  // Service used when the service is configured as network service.
 
 public:
   NetworkService(kj::HttpHeaderTable& headerTable,
@@ -687,7 +687,7 @@ kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf
 }
 
 class Server::DiskDirectoryService final: public Service, private WorkerInterface {
-  // Service used when the service's config is invalid.
+  // Service used when the service is configured as disk directory service.
 
 public:
   DiskDirectoryService(config::DiskDirectory::Reader conf,
