@@ -499,7 +499,10 @@ public:
                       kj::Own<HttpRewriter> rewriter, kj::HttpHeaderTable& headerTable,
                       kj::Timer& timer, kj::EntropySource& entropySource)
       : addr(kj::mv(addrParam)),
-        inner(kj::newHttpClient(timer, headerTable, *addr, {.entropySource = entropySource})),
+        inner(kj::newHttpClient(timer, headerTable, *addr, {
+          .entropySource = entropySource,
+          .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION
+        })),
         serviceAdapter(kj::newHttpService(*inner)),
         rewriter(kj::mv(rewriter)) {}
 
@@ -635,8 +638,10 @@ public:
                  kj::Own<kj::Network> networkParam,
                  kj::Maybe<kj::Own<kj::Network>> tlsNetworkParam)
       : network(kj::mv(networkParam)), tlsNetwork(kj::mv(tlsNetworkParam)),
-        inner(kj::newHttpClient(timer, headerTable, *network, tlsNetwork,
-                                {.entropySource = entropySource})),
+        inner(kj::newHttpClient(timer, headerTable, *network, tlsNetwork, {
+          .entropySource = entropySource,
+          .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION
+        })),
         serviceAdapter(kj::newHttpService(*inner)) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
@@ -1764,7 +1769,8 @@ private:
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
         : parent(parent), cfBlobJson(kj::mv(cfBlobJson)),
           http(parent.timer, parent.headerTable, *this, kj::HttpServerSettings {
-            .errorHandler = *this
+            .errorHandler = *this,
+            .webSocketCompressionMode = kj::HttpServerSettings::MANUAL_COMPRESSION
           }) {}
 
     HttpListener& parent;
