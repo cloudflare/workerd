@@ -1203,7 +1203,8 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 }
 
 kj::Promise<DeferredProxy<void>> Response::send(
-    jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options) {
+    jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1231,6 +1232,23 @@ kj::Promise<DeferredProxy<void>> Response::send(
         "Worker tried to return a WebSocket in a response to a request "
         "which did not contain the header \"Upgrade: websocket\".");
 
+    if (outHeaders.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS) == nullptr) {
+      // Since workerd uses `MANUAL_COMPRESSION` mode for websocket compression, we need to
+      // pass the headers we want to support to `acceptWebSocket()`.
+      KJ_IF_MAYBE(config, (*ws)->getPreferredExtensions(kj::WebSocket::ExtensionsContext::RESPONSE)) {
+        // We try to get extensions for use in a response (i.e. for a server side websocket).
+        // This allows us to `optimizedPumpTo()` `webSocket`.
+        outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, *config);
+      } else {
+        // `webSocket` is not a WebSocketImpl, we want to support whatever valid config the client
+        // requested, so we'll just use the client's requested headers.
+        KJ_IF_MAYBE(reqHeaders, maybeReqHeaders) {
+          KJ_IF_MAYBE(value, reqHeaders->get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS)) {
+            outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, *value);
+          }
+        }
+      }
+    }
     auto clientSocket = outer.acceptWebSocket(outHeaders);
     return (*ws)->couple(kj::mv(clientSocket));
   } else KJ_IF_MAYBE(jsBody, getBody()) {

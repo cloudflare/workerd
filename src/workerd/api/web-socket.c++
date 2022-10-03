@@ -516,6 +516,24 @@ bool WebSocket::isReleased() {
   return farNative->state.is<Released>();
 }
 
+kj::Maybe<kj::String> WebSocket::getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx) {
+  KJ_SWITCH_ONEOF(farNative->state) {
+    KJ_CASE_ONEOF(ws, AwaitingConnection) {
+      return nullptr;
+    }
+    KJ_CASE_ONEOF(container, AwaitingAcceptanceOrCoupling) {
+      return container.ws->getPreferredExtensions(ctx);
+    }
+    KJ_CASE_ONEOF(container, Accepted) {
+      return container.ws->getPreferredExtensions(ctx);
+    }
+    KJ_CASE_ONEOF(container, Released) {
+      return nullptr;
+    }
+  }
+  return nullptr;
+}
+
 kj::Maybe<kj::StringPtr> WebSocket::getUrl() {
   return url.map([](kj::StringPtr value){ return value; });
 }

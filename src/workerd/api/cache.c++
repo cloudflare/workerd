@@ -277,7 +277,7 @@ jsg::Promise<void> Cache::put(
     // We need to send the response to our serializer immediately in order to fulfill Cache.put()'s
     // contract: the caller should be able to observe that the response body is disturbed as soon
     // as put() returns.
-    auto serializePromise = jsResponse->send(js, serializer, {});
+    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr);
     auto payload = serializer.getPayload();
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,

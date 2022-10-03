@@ -188,6 +188,12 @@ public:
   bool isAccepted();
   bool isReleased();
 
+  kj::Maybe<kj::String> getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx);
+  // For internal use only.
+  // We need to access the underlying KJ WebSocket so we can determine the compression configuration
+  // it uses (if any).
+
+
   kj::Maybe<kj::StringPtr> getUrl();
   kj::Maybe<kj::StringPtr> getProtocol();
   kj::Maybe<kj::StringPtr> getExtensions();
