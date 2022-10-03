@@ -166,7 +166,8 @@ public:
   // JS API.
 
   static jsg::Ref<WebSocket> constructor(jsg::Lock& js, kj::String url,
-      jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
+      jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols,
+      CompatibilityFlags::Reader flags);
   // Creates a new outbound WebSocket.
 
   void accept(jsg::Lock& js);

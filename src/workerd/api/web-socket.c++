@@ -121,7 +121,8 @@ bool validProtoToken(const kj::StringPtr protocol) {
 jsg::Ref<WebSocket> WebSocket::constructor(
     jsg::Lock& js,
     kj::String url,
-    jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols) {
+    jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols,
+    CompatibilityFlags::Reader flags) {
 
   auto& context = IoContext::current();
 
@@ -184,6 +185,14 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   }
 
   auto connUrl = urlRecord.toString();
+  auto ws = jsg::alloc<WebSocket>(kj::mv(url), Locality::REMOTE);
+
+  if (!flags.getWebSocketCompression()) {
+    // If we haven't enabled the websocket compression feature flag, strip the header from the
+    // subrequest.
+    headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
+  }
+
   auto prom = client->openWebSocket(connUrl, headers)
       .then([client = kj::mv(client), &context, wsErr = kj::mv(wsErr)]
             (kj::HttpClient::WebSocketResponse response) mutable -> kj::Promise<PackedWebSocket> {
@@ -222,7 +231,6 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     KJ_UNREACHABLE
   });
 
-  auto ws = jsg::alloc<WebSocket>(kj::mv(url), Locality::REMOTE);
 
   ws->initConnection(js, kj::mv(prom));
 

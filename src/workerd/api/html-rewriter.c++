@@ -1032,7 +1032,7 @@ jsg::Ref<Response> HTMLRewriter::transform(
   auto ts = IdentityTransformStream::constructor(js);
   auto bodySource = ts->getReadable()->removeSource(js);
   auto body = jsg::alloc<ReadableStream>(ioContext, kj::mv(bodySource));
-  response = Response::constructor(js, kj::Maybe(kj::mv(body)), kj::mv(response));
+  response = Response::constructor(js, kj::Maybe(kj::mv(body)), kj::mv(response), featureFlags);
 
   auto outputSink = ts->getWritable()->removeSink(js);
 
