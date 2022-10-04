@@ -395,6 +395,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
       }
       return WorkerInterface::AlarmResult {
         .retry = true,
+        .retryCountsAgainstLimit = !context.isOutputGateBroken(),
         .outcome = outcome
       };
     }).then([&context](WorkerInterface::AlarmResult result) -> kj::Promise<WorkerInterface::AlarmResult> {
@@ -411,6 +412,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
         }
         return WorkerInterface::AlarmResult {
           .retry = true,
+          .retryCountsAgainstLimit = false,
           .outcome = EventOutcome::EXCEPTION
         };
       });

@@ -302,6 +302,10 @@ kj::Promise<void> OutputGate::onBroken() {
   }
 }
 
+bool OutputGate::isBroken() {
+  return brokenState.is<kj::Exception>();
+}
+
 void END_OUTPUT_LOCK_CANCELATION_STACK_START_WAITER_STACK() {}
 
 kj::Exception OutputGate::makeUnfulfilledException() {
