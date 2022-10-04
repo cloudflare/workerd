@@ -82,17 +82,7 @@ public:
     JSG_STRUCT(contentType, contentLanguage, contentDisposition,
                 contentEncoding, cacheControl, cacheExpiry);
 
-    HttpMetadata clone() const {
-      auto cloneStr = [](const kj::String& str) { return kj::str(str); };
-      return {
-        .contentType = contentType.map(cloneStr),
-        .contentLanguage = contentLanguage.map(cloneStr),
-        .contentDisposition = contentDisposition.map(cloneStr),
-        .contentEncoding = contentEncoding.map(cloneStr),
-        .cacheControl = cacheControl.map(cloneStr),
-        .cacheExpiry = cacheExpiry,
-      };
-    }
+    HttpMetadata clone() const;
   };
 
   struct PutOptions {
