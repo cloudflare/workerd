@@ -12,9 +12,8 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-12]
+        os: [ubuntu-22.04]
     runs-on: ${{ matrix.os }}
-    if: ${{ github.repository_owner == 'cloudflare' }}
     steps:
       - uses: actions/checkout@v2
       - uses: bazelbuild/setup-bazelisk@v2
