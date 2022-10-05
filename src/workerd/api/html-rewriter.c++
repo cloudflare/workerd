@@ -272,6 +272,9 @@ void Rewriter::abort(kj::Exception reason) {
 }
 
 kj::Promise<void> Rewriter::finishWrite() {
+  // Finalise any remaining data that's in the write buffer.
+  writeFromBuffer(nullptr);
+
   maybeWaitScope = nullptr;
   auto checkException = [this]() -> kj::Promise<void> {
     KJ_ASSERT(writePromise == nullptr);
@@ -394,13 +397,21 @@ void Rewriter::output(const char* buffer, size_t size, void* userdata) {
   rewriter.outputImpl(buffer, size);
 }
 
-void Rewriter::outputImpl(const char* buffer, size_t size) {
-  if (isPoisoned()) {
-    // Handlers disabled due to exception or running in a destructor.
+void Rewriter::writeFromBuffer(kj::Maybe<kj::Array<char>> maybeData) {
+  auto size = maybeData.map([](kj::Array<char>& b) { return b.size(); }).orDefault(0);
+  auto totalSize = writeBufferPos + size;
+  if (totalSize == 0) {
     return;
   }
 
-  auto bufferCopy = kj::heapArray(buffer, size);
+  auto builder = kj::heapArrayBuilder<char>(totalSize);
+  builder.addAll(writeBuffer.slice(0, writeBufferPos));
+  KJ_IF_MAYBE(data, maybeData) {
+    builder.addAll(*data);
+  }
+  writeBufferPos = 0;
+  auto bufferCopy = builder.finish();
+
   KJ_IF_MAYBE(wp, writePromise) {
     *wp = wp->then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
       return inner->write(bufferCopy.begin(), bufferCopy.size()).attach(kj::mv(bufferCopy));
@@ -408,6 +419,24 @@ void Rewriter::outputImpl(const char* buffer, size_t size) {
   } else {
     writePromise = inner->write(bufferCopy.begin(), bufferCopy.size()).attach(kj::mv(bufferCopy));
   }
+}
+
+void Rewriter::outputImpl(const char* buffer, size_t size) {
+  if (isPoisoned()) {
+    // Handlers disabled due to exception or running in a destructor.
+    return;
+  }
+
+  // Determine whether we should buffer the data.
+  int newBufferedLen = writeBufferPos + size;
+  if (newBufferedLen < writeBuffer.size()) {
+    // The new data fits in the write buffer, so write it there.
+    std::copy(buffer, buffer + size, writeBuffer.begin() + writeBufferPos);
+    writeBufferPos += size;
+    return;
+  }
+
+  writeFromBuffer(kj::heapArray(buffer, size));
 }
 
 // =======================================================================================

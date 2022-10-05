@@ -240,7 +240,6 @@ public:
 
   // Exposed so we can use it in the stack overflow html-rewriter-test.
   void outputImpl(const char* buffer, size_t size);
-
 private:
   kj::Promise<void> finishWrite();
   // Wait for the write promise (if any) produced by our `output()` callback, then, if there is a
@@ -254,6 +253,7 @@ private:
 
   static void output(const char* buffer, size_t size, void* userdata);
 
+  void writeFromBuffer(kj::Maybe<kj::Array<char>> maybeBuffer);
 
   void tryHandleCancellation(int rc) {
     if (canceled) {
@@ -308,6 +308,8 @@ private:
   kj::Own<WritableStreamSink> inner;
 
   kj::Maybe<kj::Promise<void>> writePromise;
+  kj::Array<char> writeBuffer = kj::heapArray<char>(1024);
+  int writeBufferPos = 0;
 
   kj::Maybe<kj::Exception> maybeException;
 
