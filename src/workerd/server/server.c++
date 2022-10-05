@@ -8,6 +8,7 @@
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
+#include <kj/map.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker.h>
@@ -910,6 +911,177 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 }
 
 // =======================================================================================
+class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
+  // Implements the interface for the devtools inspector protocol.
+  //
+  // The InspectorService is created when workerd serve is called using the -i option
+  // to define the inspector socket.
+public:
+  InspectorService(
+      kj::Timer& timer,
+      kj::HttpHeaderTable::Builder& headerTableBuilder)
+      : timer(timer),
+        headerTable(headerTableBuilder.getFutureTable()),
+        server(timer, headerTable, *this, kj::HttpServerSettings {
+          .errorHandler = *this
+        }) {}
+
+  kj::Promise<void> handleApplicationError(
+      kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
+    KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
+    KJ_IF_MAYBE(r, response) {
+      return r->sendError(500, "Internal Server Error", headerTable);
+    } else {
+      return kj::READY_NOW;
+    }
+  }
+
+  kj::Promise<void> request(
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    // The inspector protocol starts with the debug client sending ordinary HTTP GET requests
+    // to /json/version and then to /json or /json/list. These must respond with valid JSON
+    // documents that list the details of what isolates are available for inspection. Each
+    // isolate must be listed separately. In the advertisement for each isolate is a URL
+    // and a unique ID. The client will use the URL and ID to open a WebSocket request to
+    // actually connect the debug session.
+    kj::HttpHeaders responseHeaders(headerTable);
+    if (headers.isWebSocket()) {
+      KJ_IF_MAYBE(pos, url.findLast('/')) {
+        auto id = url.slice(*pos + 1);
+
+        KJ_IF_MAYBE(isolate, isolates.find(id)) {
+          // If getting the strong ref doesn't work it means that the Worker::Isolate
+          // has already been cleaned up. We use a weak ref here in order to keep from
+          // having the Worker::Isolate itself having to know anything at all about the
+          // IsolateService and the registration process. So instead of having Isolate
+          // explicitly clean up after itself we lazily evaluate the weak ref and clean
+          // up when necessary.
+          KJ_IF_MAYBE(ref, (*isolate)->tryAddStrongRef()) {
+            // When using --verbose, we'll output some logging to indicate when the
+            // inspector client is attached/detached.
+            KJ_LOG(INFO, kj::str("Inspector client attaching [", id, "]"));
+            auto webSocket = response.acceptWebSocket(responseHeaders);
+            kj::Duration timerOffset = 0 * kj::MILLISECONDS;
+            return (*ref)->attachInspector(timer, timerOffset, *webSocket)
+                .attach(kj::mv(webSocket), kj::mv(*ref)).catch_([id=kj::str(id)](kj::Exception&& ex)
+                    -> kj::Promise<void> {
+              if (ex.getType() == kj::Exception::Type::DISCONNECTED) {
+                // This likely just means that the inspector client was closed.
+                // Nothing to do here but move along.
+                KJ_LOG(INFO, kj::str("Inspector client detached [", id, "]"));
+                return kj::READY_NOW;
+              } else {
+                // If it's any other kind of error, propagate it!
+                throw ex;
+              }
+            });
+          } else {
+            // If we can't get a strong ref to the isolate here, it's been cleaned
+            // up. The only thing we're going to do is clean up here and act like
+            // nothing happened.
+            isolates.erase(id);
+          }
+        }
+
+        return response.sendError(404, "Unknown worker session", responseHeaders);
+      }
+
+      // No / in url!? That's weird
+      return response.sendError(400, "Invalid request", responseHeaders);
+    }
+
+    // If the request is not a WebSocket request, it must be a GET to fetch details
+    // about the implementation.
+    if (method != kj::HttpMethod::GET) {
+      return response.sendError(501, "Unsupported Operation", responseHeaders);
+    }
+
+    if (url.endsWith("/json/version")) {
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+      auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
+      auto out = response.send(200, "OK", responseHeaders, content.size());
+      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+    } else if (url.endsWith("/json") || url.endsWith("/json/list")) {
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+
+      auto baseWsUrl = KJ_UNWRAP_OR(headers.get(kj::HttpHeaderId::HOST), {
+        return response.sendError(400, "Bad Request", responseHeaders);
+      });
+
+      kj::Vector<kj::String> entries(isolates.size());
+      kj::Vector<kj::String> toRemove;
+      for (auto& entry : isolates) {
+        // While we don't actually use the strong ref here we still attempt to acquire it
+        // in order to determine if the isolate is actually still around. If the isolate
+        // has been destroyed the weak ref will be cleared. We do it this way to keep from
+        // having the Worker::Isolate know anything at all about the InspectorService.
+        // We'll lazily clean up whenever we detect that the ref has been invalidated.
+        //
+        // TODO(cleanup): If we ever enable reloading of isolates for live services, we may
+        // want to refactor this such thatthe WorkerService holds a handle to the registration
+        // as opposed to using this lazy cleanup mechanism. For now, however, this is
+        // sufficient.
+        KJ_IF_MAYBE(ref, entry.value->tryAddStrongRef()) {
+          kj::Vector<kj::String> fields(9);
+          fields.add(kj::str("\"id\":\"", entry.key ,"\""));
+          fields.add(kj::str("\"title\":\"workerd: worker ", entry.key ,"\""));
+          fields.add(kj::str("\"type\":\"node\""));
+          fields.add(kj::str("\"description\":\"workerd worker\""));
+          fields.add(kj::str("\"webSocketDebuggerUrl\":\"ws://",
+                              baseWsUrl ,"/", entry.key ,"\""));
+          fields.add(kj::str("\"devtoolsFrontendUrl\":\"devtools://devtools/bundled/js_app.html?experiments=true&v8only=true&ws=", baseWsUrl ,"/\""));
+          fields.add(kj::str("\"devtoolsFrontendUrlCompat\":\"devtools://devtools/bundled/inspector.html?experiments=true&v8only=true&ws=", baseWsUrl ,"/\""));
+          fields.add(kj::str("\"faviconUrl\":\"https://workers.cloudflare.com/favicon.ico\""));
+          fields.add(kj::str("\"url\":\"https://workers.dev\""));
+          entries.add(kj::str('{', kj::strArray(fields, ",") ,'}'));
+        } else {
+          // If we're not able to get a reference to the isolate here, it's
+          // been cleaned up and we should remove it from the list. We do this
+          // after iterating to make sure we don't invalidate the iterator.
+          toRemove.add(kj::str(entry.key));
+        }
+      }
+      // Clean up if necessary
+      for (auto& key : toRemove) {
+        isolates.erase(key);
+      }
+
+      auto content = kj::str('[', kj::strArray(entries, ","), ']');
+
+      auto out = response.send(200, "OK", responseHeaders, content.size());
+      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+    }
+
+    return response.sendError(500, "Not yet implemented", responseHeaders);
+  }
+
+  kj::Promise<void> listen(kj::Own<kj::ConnectionReceiver> listener) {
+    return server.listenHttp(*listener).attach(kj::mv(listener));
+  }
+
+  void registerIsolate(kj::StringPtr name, Worker::Isolate* isolate) {
+    isolates.insert(kj::str(name), isolate->getWeakRef());
+  }
+
+private:
+  kj::Timer& timer;
+  kj::HttpHeaderTable& headerTable;
+  kj::HashMap<kj::String, kj::Own<const Worker::Isolate::WeakIsolateRef>> isolates;
+  kj::HttpServer server;
+
+  friend class Registration;
+};
+
+kj::Own<Server::InspectorService> Server::makeInspectorService(
+    kj::HttpHeaderTable::Builder& headerTableBuilder) {
+  return kj::heap<InspectorService>(timer, headerTableBuilder);
+}
+
+// =======================================================================================
 
 class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHandler,
                                    private IoChannelFactory, private TimerChannel,
@@ -1295,7 +1467,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::atomicRefcounted<IsolateObserver>(),
       name,
       kj::mv(limitEnforcer),
-      false);  // allowInspector -- TODO(beta): support this
+      maybeInspectorService != nullptr);
+
+  // If we are using the inspector, we need to register the Worker::Isolate
+  // with the inspector service.
+  KJ_IF_MAYBE(inspector, maybeInspectorService) {
+    (*inspector)->registerIsolate(name, isolate.get());
+  }
 
   auto script = isolate->newScript(name, WorkerdApiIsolate::extractSource(conf, errorReporter),
                                    IsolateObserver::StartType::COLD,
@@ -1865,6 +2043,29 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
 
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
+
+  // ---------------------------------------------------------------------------
+  // Configure inspector.
+
+  KJ_IF_MAYBE(inspector, inspectorOverride) {
+    // Create the special inspector service.
+    maybeInspectorService = makeInspectorService(headerTableBuilder);
+    auto& inspectorService = *KJ_ASSERT_NONNULL(maybeInspectorService);
+
+    // Configure and start the inspector socket.
+    static constexpr uint DEFAULT_PORT = 9229;
+
+    auto inspectorListener = network.parseAddress(*inspector, DEFAULT_PORT)
+        .then([](kj::Own<kj::NetworkAddress> parsed) {
+      return parsed->listen();
+    });
+
+    tasks.add(inspectorListener.then(
+        [&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
+      KJ_LOG(INFO, "Inspector is listening");
+      return inspectorService.listen(kj::mv(listener));
+    }));
+  }
 
   // ---------------------------------------------------------------------------
   // Configure services
