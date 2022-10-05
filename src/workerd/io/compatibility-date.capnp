@@ -211,4 +211,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   obsolete19 @19 :Bool
       $compatEnableFlag("durable_object_rename");
   # Obsolete flag. Has no effect.
+
+  webSocketCompression @20 :Bool
+      $compatEnableFlag("web_socket_compression");
+  # Enables WebSocket compression. Without this flag, all attempts to negotiate compression will
+  # be refused, so WebSockets will never use compression. With this flag, the system will
+  # automatically negotiate the use of the permesssage-deflate extension where appropriate.
+  # The Worker can also request specific compression settings by specifying a valid
+  # Sec-WebSocket-Extensions header, or setting the header to the empty string to explicitly
+  # request that no compression be used.
 }

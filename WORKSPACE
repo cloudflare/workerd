@@ -31,14 +31,14 @@ load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_depende
 rules_foreign_cc_dependencies()
 
 # ========================================================================================
-# Simple dependenciess
+# Simple dependencies
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "03494ebba861cbe6d141417232f5b306731a1317b81a8ff9830bdd52f60ba456",
-    strip_prefix = "capnproto-capnproto-54ce3da/c++",
+    sha256 = "0cb62c35736ab4202a3e2f245ef4ac34549b209cb79e070711e42293fc4daf1c",
+    strip_prefix = "capnproto-capnproto-253c18f/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/54ce3daa0ff43146bec861ec28747ee15222f032"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/253c18fc6d8e21bb1114c720ab778fc397115c41"],
 )
 
 http_archive(
@@ -154,7 +154,7 @@ load("//rust-deps/cxxbridge_crates:crates.bzl", cxxbridge_repositories = "crate_
 cxxbridge_repositories()
 
 # ========================================================================================
-# V8 and its depnedencies
+# V8 and its dependencies
 #
 # Note that googlesource does not generate tarballs deterministically, so we cannot use
 # http_archive: https://github.com/google/gitiles/issues/84

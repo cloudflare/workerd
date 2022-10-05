@@ -652,6 +652,7 @@ public:
 
   Response(int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+           CompatibilityFlags::Reader reader,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
            Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO)
@@ -662,7 +663,8 @@ public:
         cf(kj::mv(cf)),
         urlList(kj::mv(urlList)),
         webSocket(kj::mv(webSocket)),
-        bodyEncoding(bodyEncoding) {}
+        bodyEncoding(bodyEncoding),
+        hasEnabledWebSocketCompression(reader.getWebSocketCompression()) {}
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -687,7 +689,8 @@ public:
   static jsg::Ref<Response> constructor(
       jsg::Lock& js,
       jsg::Optional<kj::Maybe<Body::Initializer>> bodyInit,
-      jsg::Optional<Initializer> maybeInit);
+      jsg::Optional<Initializer> maybeInit,
+      CompatibilityFlags::Reader flags);
   // Response's constructor has two arguments: an optional, nullable body that defaults to null, and
   // an optional initializer property bag. Tragically, the only way to express the "optional,
   // nullable body that defaults to null" is with an Optional<Maybe<Body::Initializer>>. The reason
@@ -698,7 +701,7 @@ public:
   //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
 
   static jsg::Ref<Response> redirect(
-      jsg::Lock& js, kj::String url, jsg::Optional<int> status);
+      jsg::Lock& js, kj::String url, jsg::Optional<int> status, CompatibilityFlags::Reader flags);
   // Constructs a redirection response. `status` must be a redirect status if given, otherwise it
   // defaults to 302 (technically a non-conformity, but both Chrome and Firefox use this default).
   //
@@ -724,18 +727,20 @@ public:
   //    client. However, we were conserned about possible side-effects and incorrect
   //    error reporting.
 
-  jsg::Ref<Response> clone(jsg::Lock& js);
+  jsg::Ref<Response> clone(jsg::Lock& js, CompatibilityFlags::Reader flags);
 
   static jsg::Ref<Response> json_(
       jsg::Lock& js,
       v8::Local<v8::Value> any,
-      jsg::Optional<Initializer> maybeInit);
+      jsg::Optional<Initializer> maybeInit,
+      CompatibilityFlags::Reader flags);
 
   struct SendOptions {
     bool allowWebSocket = false;
   };
   kj::Promise<DeferredProxy<void>> send(
-      jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options);
+      jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
+      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
   // Helper not exposed to JavaScript.
 
   int getStatus();
@@ -822,6 +827,8 @@ private:
   // If this response is already encoded and the user don't want to encode the
   // body twice, they can specify encodeBody: "manual".
 
+  bool hasEnabledWebSocketCompression = false;
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, webSocket, cf);
   }
@@ -880,6 +887,7 @@ jsg::Ref<Response> makeHttpResponse(
     jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlList,
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
+    CompatibilityFlags::Reader flags,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = nullptr);
 

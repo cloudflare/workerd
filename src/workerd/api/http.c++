@@ -950,7 +950,8 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 jsg::Ref<Response> Response::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
-    jsg::Optional<Initializer> maybeInit) {
+    jsg::Optional<Initializer> maybeInit,
+    CompatibilityFlags::Reader flags) {
   auto bodyInit = kj::mv(optionalBodyInit).orDefault(nullptr);
   Initializer init = kj::mv(maybeInit).orDefault(InitializerDict());
 
@@ -1087,11 +1088,12 @@ jsg::Ref<Response> Response::constructor(
   }
 
   return jsg::alloc<Response>(statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)), kj::mv(headers),
-                              kj::mv(cf), kj::mv(body), nullptr, kj::mv(webSocket), bodyEncoding);
+                              kj::mv(cf), kj::mv(body), flags, nullptr, kj::mv(webSocket),
+                              bodyEncoding);
 }
 
 jsg::Ref<Response> Response::redirect(
-    jsg::Lock& js, kj::String url, jsg::Optional<int> status) {
+    jsg::Lock& js, kj::String url, jsg::Optional<int> status, CompatibilityFlags::Reader flags) {
   auto statusCode = status.orDefault(302);
   if (!isRedirectStatusCode(statusCode)) {
     JSG_FAIL_REQUIRE(RangeError,
@@ -1119,13 +1121,14 @@ jsg::Ref<Response> Response::redirect(
 
   auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
 
-  return jsg::alloc<Response>(statusCode, kj::str(statusText), kj::mv(headers), nullptr, nullptr);
+  return jsg::alloc<Response>(statusCode, kj::str(statusText), kj::mv(headers), nullptr, nullptr, flags);
 }
 
 jsg::Ref<Response> Response::json_(
     jsg::Lock& js,
     v8::Local<v8::Value> any,
-    jsg::Optional<Initializer> maybeInit) {
+    jsg::Optional<Initializer> maybeInit,
+    CompatibilityFlags::Reader flags) {
 
   const auto maybeSetContentType = [](auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
@@ -1180,10 +1183,10 @@ jsg::Ref<Response> Response::json_(
     };
   }
   kj::String json = js.serializeJson(any);
-  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit), flags);
 }
 
-jsg::Ref<Response> Response::clone(jsg::Lock& js) {
+jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader flags) {
   JSG_REQUIRE(webSocket == nullptr,
       TypeError, "Cannot clone a response to a WebSocket handshake.");
 
@@ -1199,11 +1202,12 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 
   return jsg::alloc<Response>(
       statusCode, kj::str(statusText), kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone),
-      kj::mv(urlListClone));
+      flags, kj::mv(urlListClone));
 }
 
 kj::Promise<DeferredProxy<void>> Response::send(
-    jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options) {
+    jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1230,6 +1234,32 @@ kj::Promise<DeferredProxy<void>> Response::send(
         options.allowWebSocket, TypeError,
         "Worker tried to return a WebSocket in a response to a request "
         "which did not contain the header \"Upgrade: websocket\".");
+
+    if (hasEnabledWebSocketCompression &&
+        outHeaders.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS) == nullptr) {
+      // Since workerd uses `MANUAL_COMPRESSION` mode for websocket compression, we need to
+      // pass the headers we want to support to `acceptWebSocket()`.
+      KJ_IF_MAYBE(config, (*ws)->getPreferredExtensions(kj::WebSocket::ExtensionsContext::RESPONSE)) {
+        // We try to get extensions for use in a response (i.e. for a server side websocket).
+        // This allows us to `optimizedPumpTo()` `webSocket`.
+        outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, *config);
+      } else {
+        // `webSocket` is not a WebSocketImpl, we want to support whatever valid config the client
+        // requested, so we'll just use the client's requested headers.
+        KJ_IF_MAYBE(reqHeaders, maybeReqHeaders) {
+          KJ_IF_MAYBE(value, reqHeaders->get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS)) {
+            outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, *value);
+          }
+        }
+      }
+    }
+
+    if (!hasEnabledWebSocketCompression) {
+      // While we guard against an origin server including `Sec-WebSocket-Extensions` in a Response
+      // (we don't send the extension in an offer, and if the server includes it in a response we
+      // will reject the connection), a Worker could still explicitly add the header to a Response.
+      outHeaders.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
+    }
 
     auto clientSocket = outer.acceptWebSocket(outHeaders);
     return (*ws)->couple(kj::mv(clientSocket));
@@ -1436,6 +1466,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
 
   if (headers.isWebSocket()) {
+    if (!featureFlags.getWebSocketCompression()) {
+      // If we haven't enabled the websocket compression feature flag, strip the header from the
+      // subrequest.
+      headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
+    }
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(signal, client->openWebSocket(url, headers)),
         [fetcher = kj::mv(fetcher), featureFlags, jsRequest = kj::mv(jsRequest),
@@ -1464,6 +1499,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
               response.statusCode, response.statusText, *response.headers,
               kj::heap<NullInputStream>(),
               jsg::alloc<WebSocket>(kj::mv(webSocket), WebSocket::REMOTE),
+              featureFlags,
               Response::BodyEncoding::AUTO,
               kj::mv(signal)));
         }
@@ -1580,7 +1616,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(
 
   auto result = makeHttpResponse(js, jsRequest->getMethodEnum(), kj::mv(urlList),
       response.statusCode, response.statusText, *response.headers,
-      kj::mv(response.body), nullptr, Response::BodyEncoding::AUTO,
+      kj::mv(response.body), nullptr, featureFlags, Response::BodyEncoding::AUTO,
       kj::mv(signal));
 
   return js.resolvedPromise(kj::mv(result));
@@ -1673,6 +1709,7 @@ jsg::Ref<Response> makeHttpResponse(
     jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlListParam,
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
+    CompatibilityFlags::Reader flags,
     Response::BodyEncoding bodyEncoding,
     kj::Maybe<jsg::Ref<AbortSignal>> signal) {
   auto responseHeaders = jsg::alloc<Headers>(headers, Headers::Guard::RESPONSE);
@@ -1701,7 +1738,7 @@ jsg::Ref<Response> makeHttpResponse(
   // TODO(someday): Fill response CF blob from somewhere?
   return jsg::alloc<Response>(
         statusCode, kj::str(statusText), kj::mv(responseHeaders),
-        nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket));
+        nullptr, kj::mv(responseBody), flags, kj::mv(urlList), kj::mv(webSocket));
 }
 
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(

@@ -166,7 +166,8 @@ public:
   // JS API.
 
   static jsg::Ref<WebSocket> constructor(jsg::Lock& js, kj::String url,
-      jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
+      jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols,
+      CompatibilityFlags::Reader flags);
   // Creates a new outbound WebSocket.
 
   void accept(jsg::Lock& js);
@@ -187,6 +188,12 @@ public:
 
   bool isAccepted();
   bool isReleased();
+
+  kj::Maybe<kj::String> getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx);
+  // For internal use only.
+  // We need to access the underlying KJ WebSocket so we can determine the compression configuration
+  // it uses (if any).
+
 
   kj::Maybe<kj::StringPtr> getUrl();
   kj::Maybe<kj::StringPtr> getProtocol();
