@@ -163,7 +163,7 @@ public:
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       for (auto& consumer : ready->consumers) {
-        consumer.ref->close(js);
+        consumer.get().close(js);
       }
       state.template init<Closed>();
     }
@@ -184,7 +184,7 @@ public:
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       for (auto& consumer : ready->consumers) {
-        consumer.ref->error(js, reason.addRef(js));
+        consumer.get().error(js, reason.addRef(js));
       }
       state = kj::mv(reason);
     }
@@ -197,7 +197,7 @@ public:
     totalQueueSize = 0;
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       for (auto& consumer : ready->consumers) {
-        totalQueueSize = kj::max(totalQueueSize, consumer.ref->size());
+        totalQueueSize = kj::max(totalQueueSize, consumer.get().size());
       }
     }
   }
@@ -215,40 +215,17 @@ public:
 
     for (auto& consumer : ready.consumers) {
       KJ_IF_MAYBE(skip, skipConsumer) {
-        if (consumer.ref == &(*skip)) {
+        if (&consumer.get() == &(*skip)) {
           continue;
         }
       }
 
-      consumer.ref->push(js, kj::addRef(*entry));
+      consumer.get().push(js, kj::addRef(*entry));
     }
   }
 
   size_t size() const { return totalQueueSize; }
   // The current size of consumer with the most stored data.
-
-  size_t getConsumerCount() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) { return 0; }
-      KJ_CASE_ONEOF(errored, Errored) { return 0; }
-      KJ_CASE_ONEOF(ready, Ready) { return ready.consumers.size(); }
-    }
-    KJ_UNREACHABLE;
-  }
-
-  bool wantsRead() const {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) { return false; }
-      KJ_CASE_ONEOF(errored, Errored) { return false; }
-      KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& consumer : ready.consumers) {
-          if (consumer.ref->hasReadRequests()) return true;
-        }
-        return false;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
 
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
     // Specific queue implementations may provide additional state that is attached
@@ -264,12 +241,14 @@ private:
   using Errored = jsg::Value;
 
   struct ConsumerRef {
-    ConsumerImpl* ref;
+    kj::Maybe<ConsumerImpl&> ref;
+    // The kj::Maybe here is used only to make ConsumerRef trivially movable.
     bool operator==(ConsumerRef& other) const {
       return hashCode() == other.hashCode();
     }
+    ConsumerImpl& get() const { return KJ_ASSERT_NONNULL(ref); }
     auto hashCode() const {
-      return kj::hashCode(ref);
+      return kj::hashCode(&get());
     }
   };
 
@@ -281,13 +260,13 @@ private:
   size_t totalQueueSize = 0;
   kj::OneOf<Ready, Closed, Errored> state = Ready();
 
-  void addConsumer(ConsumerImpl* consumer) {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.insert(ConsumerRef { .ref = consumer });
-    }
+  void addConsumer(ConsumerImpl& consumer) {
+    auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(),
+        "The queue is closed or errored.");
+    ready.consumers.insert(ConsumerRef { .ref = consumer });
   }
 
-  void removeConsumer(ConsumerImpl* consumer) {
+  void removeConsumer(ConsumerImpl& consumer) {
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       ready->consumers.eraseMatch(ConsumerRef { .ref = consumer });
       maybeUpdateBackpressure();
@@ -303,9 +282,8 @@ class ConsumerImpl final {
   // Provides the underlying implementation shared by ByteQueue::Consumer and ValueQueue::Consumer
 public:
   struct StateListener {
-    virtual void onConsumerClose(jsg::Lock& js) = 0;
-    virtual void onConsumerError(jsg::Lock& js, jsg::Value reason) = 0;
-    virtual void onConsumerWantsData(jsg::Lock& js) = 0;
+    virtual void onConsumerClose() = 0;
+    virtual void onConsumerError(jsg::Value reason) = 0;
   };
 
   using QueueImpl = QueueImpl<Self>;
@@ -326,9 +304,9 @@ public:
   using Entry = typename Self::Entry;
   using QueueEntry = typename Self::QueueEntry;
 
-  ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr)
+  ConsumerImpl(QueueImpl& queue, StateListener* stateListener = nullptr)
     : queue(queue), stateListener(stateListener) {
-    queue.addConsumer(this);
+    queue.addConsumer(*this);
   }
 
   ConsumerImpl(ConsumerImpl& other) = delete;
@@ -337,20 +315,7 @@ public:
   ConsumerImpl& operator=(ConsumerImpl&&) = delete;
 
   ~ConsumerImpl() noexcept(false) {
-    queue.removeConsumer(this);
-  }
-
-  void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {}
-      KJ_CASE_ONEOF(errored, Errored) {}
-      KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& request : ready.readRequests) {
-          request.resolveAsDone(js);
-        }
-        state.template init<Closed>();
-      }
-    }
+    queue.removeConsumer(*this);
   }
 
   void close(jsg::Lock& js) {
@@ -473,27 +438,7 @@ public:
       KJ_CASE_ONEOF(closed, Closed) { return false; }
       KJ_CASE_ONEOF(errored, Errored) { return false; }
       KJ_CASE_ONEOF(ready, Ready) {
-        return !ready.readRequests.empty();
-      }
-    }
-    KJ_UNREACHABLE;
-  }
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, Closed) {}
-      KJ_CASE_ONEOF(errored, Errored) {
-        visitor.visit(errored);
-      }
-      KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& entry : ready.buffer) {
-          KJ_IF_MAYBE(e, entry.template tryGet<QueueEntry>()) {
-            visitor.visit(*e);
-          }
-        }
-        for (auto& req : ready.readRequests) {
-          visitor.visit(req.resolver);
-        }
+        return ready.readRequests.empty();
       }
     }
   }
@@ -512,7 +457,7 @@ private:
 
   QueueImpl& queue;
   kj::OneOf<Ready, Closed, Errored> state = Ready();
-  kj::Maybe<ConsumerImpl::StateListener&> stateListener;
+  StateListener* stateListener;
 
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
@@ -541,12 +486,10 @@ private:
         for (auto& request : ready->readRequests) {
           request.reject(js, *reason);
         }
-        state = reason->addRef(js);
-        KJ_IF_MAYBE(listener, stateListener) {
-          listener->onConsumerError(js, kj::mv(*reason));
-          // After this point, we should not assume that this consumer can
-          // be safely used at all. It's most likely the stateListener has
-          // released it.
+        state = kj::mv(*reason);
+        if (stateListener != nullptr) {
+          stateListener->onConsumerError(reason->addRef(js));
+          stateListener = nullptr;
         }
       } else {
         // Otherwise, if the buffer is empty isClosing() is true, resolve the
@@ -558,11 +501,9 @@ private:
             request.resolveAsDone(js);
           }
           state.template init<Closed>();
-          KJ_IF_MAYBE(listener, stateListener) {
-            listener->onConsumerClose(js);
-            // After this point, we should not assume that this consumer can
-            // be safely used at all. It's most likely the stateListener has
-            // released it.
+          if (stateListener != nullptr) {
+            stateListener->onConsumerClose();
+            stateListener = nullptr;
           }
         }
       }
@@ -613,22 +554,16 @@ public:
   struct QueueEntry {
     kj::Own<Entry> entry;
     QueueEntry clone();
-
-    void visitForGc(jsg::GcVisitor& visitor) {
-      if (entry) visitor.visit(*entry);
-    }
   };
 
   class Consumer final {
   public:
-    Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
+    Consumer(ValueQueue& queue, ConsumerImpl::StateListener* stateListener = nullptr);
+    Consumer(QueueImpl& queue, ConsumerImpl::StateListener* stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
-
-    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
     void close(jsg::Lock& js);
 
@@ -644,14 +579,7 @@ public:
 
     size_t size();
 
-    kj::Own<Consumer> clone(jsg::Lock& js,
-                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-
-    bool hasReadRequests();
-
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    kj::Own<Consumer> clone(jsg::Lock& js, ConsumerImpl::StateListener* stateListener = nullptr);
 
   private:
     ConsumerImpl impl;
@@ -672,19 +600,6 @@ public:
   void push(jsg::Lock& js, kj::Own<Entry> entry);
 
   size_t size() const;
-
-  size_t getConsumerCount();
-
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
-
-  bool hasPartiallyFulfilledRead() {
-    // A ValueQueue can never have a partially fulfilled read.
-    return false;
-  }
-
-  void visitForGc(jsg::GcVisitor& visitor) {}
 
 private:
   QueueImpl impl;
@@ -711,16 +626,12 @@ public:
   using ConsumerImpl = ConsumerImpl<ByteQueue>;
   using QueueImpl = QueueImpl<ByteQueue>;
 
-  class ByobRequest;
+  class ByobReadRequest;
 
   struct ReadRequest final {
     enum class Type { DEFAULT, BYOB };
     jsg::Promise<ReadResult>::Resolver resolver;
-    kj::Maybe<ByobRequest&> byobReadRequest;
-    // The reference here should be cleared when the ByobRequest is invalidated,
-    // which happens either when respond(), respondWithNewView(), or invalidate()
-    // is called, or when the ByobRequest is destroyed, whichever comes first.
-
+    kj::Maybe<ByobReadRequest&> byobReadRequest;
     struct {
       jsg::BackingStore store;
       size_t filled = 0;
@@ -731,47 +642,27 @@ public:
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::Value& value);
-
-    kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
   };
 
-  class ByobRequest final {
-    // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
-    // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
-    //
-    // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
-    // the BYOB read request. Once either of those are called, or once invalidate() is called,
-    // the ByobRequest is no longer usable and should be discarded.
+  class ByobReadRequest final {
   public:
-    ByobRequest(
+    ByobReadRequest(
         ReadRequest& request,
         ConsumerImpl& consumer,
         QueueImpl& queue)
         : request(request),
           consumer(consumer),
-          queue(queue) {}
-
-    KJ_DISALLOW_COPY(ByobRequest);
-    ByobRequest(ByobRequest&&) = delete;
-    ByobRequest& operator=(ByobRequest&&) = delete;
-
-    ~ByobRequest() noexcept(false);
+          queue(queue) {
+      request.byobReadRequest = *this;
+    }
 
     ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
 
     void respond(jsg::Lock& js, size_t amount);
 
-    void respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
-
-    void invalidate();
-    // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
-    // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
+    inline void invalidate() { request = nullptr; }
 
     inline bool isInvalidated() const { return request == nullptr; }
-
-    size_t getAtLeast() const;
-
-    v8::Local<v8::Uint8Array> getView(jsg::Lock& js);
 
   private:
     kj::Maybe<ReadRequest&> request;
@@ -780,7 +671,7 @@ public:
   };
 
   struct State {
-    std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
+    std::deque<kj::Own<ByobReadRequest>> pendingByobReadRequests;
   };
 
   class Entry final: public kj::Refcounted {
@@ -804,20 +695,16 @@ public:
     size_t offset;
 
     QueueEntry clone();
-
-    void visitForGc(jsg::GcVisitor& visitor) {}
   };
 
   class Consumer {
   public:
-    Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
+    Consumer(ByteQueue& queue, ConsumerImpl::StateListener* stateListener = nullptr);
+    Consumer(QueueImpl& queue, ConsumerImpl::StateListener* stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
     Consumer& operator=(Consumer&) = delete;
-
-    void cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
     void close(jsg::Lock& js);
 
@@ -833,14 +720,7 @@ public:
 
     size_t size() const;
 
-    kj::Own<Consumer> clone(jsg::Lock& js,
-                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-
-    bool hasReadRequests();
-
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    kj::Own<Consumer> clone(jsg::Lock& js, ConsumerImpl::StateListener* stateListener = nullptr);
 
   private:
     ConsumerImpl impl;
@@ -860,15 +740,7 @@ public:
 
   size_t size() const;
 
-  size_t getConsumerCount();
-
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
-
-  bool hasPartiallyFulfilledRead();
-
-  kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
+  kj::Maybe<kj::Own<ByobReadRequest>> nextPendingByobReadRequest();
   // nextPendingByobReadRequest will be used to support the ReadableStreamBYOBRequest interface
   // that is part of ReadableByteStreamController. When user code calls the `controller.byobRequest`
   // API on a ReadableByteStreamController, they are going to get an instance of a
@@ -877,8 +749,6 @@ public:
   // that byobRequest long after it has been invalidated. We heap-allocate these just to allow
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
-
-  void visitForGc(jsg::GcVisitor& visitor) {}
 
 private:
   QueueImpl impl;

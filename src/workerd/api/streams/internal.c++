@@ -551,20 +551,18 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
       // Create two closed ReadableStreams.
       return Tee {
         .branch1 =
-            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
+            jsg::alloc<ReadableStream>(ReadableStreamInternalController(closed)),
         .branch2 =
-            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
+            jsg::alloc<ReadableStream>(ReadableStreamInternalController(closed)),
       };
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       // Create two errored ReadableStreams.
       return Tee {
         .branch1 =
-            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(
-                errored.addRef(js))),
+            jsg::alloc<ReadableStream>(ReadableStreamInternalController(errored.addRef(js))),
         .branch2 =
-            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(
-                errored.addRef(js))),
+            jsg::alloc<ReadableStream>(ReadableStreamInternalController(errored.addRef(js))),
       };
     }
     KJ_CASE_ONEOF(readable, Readable) {
