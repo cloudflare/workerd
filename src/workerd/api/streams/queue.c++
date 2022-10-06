@@ -60,13 +60,9 @@ ValueQueue::QueueEntry ValueQueue::QueueEntry::clone() {
 
 #pragma region ValueQueue::Consumer
 
-ValueQueue::Consumer::Consumer(
-    ValueQueue& queue,
-    ConsumerImpl::StateListener* stateListener) : impl(queue.impl, stateListener) {}
+ValueQueue::Consumer::Consumer(ValueQueue& queue) : impl(queue.impl) {}
 
-ValueQueue::Consumer::Consumer(
-    QueueImpl& impl,
-    ConsumerImpl::StateListener* stateListener) : impl(impl, stateListener) {}
+ValueQueue::Consumer::Consumer(QueueImpl& impl) : impl(impl) {}
 
 void ValueQueue::Consumer::close(jsg::Lock& js) { impl.close(js); };
 
@@ -88,10 +84,8 @@ void ValueQueue::Consumer::reset() { impl.reset(); };
 
 size_t ValueQueue::Consumer::size() { return impl.size(); }
 
-kj::Own<ValueQueue::Consumer> ValueQueue::Consumer::clone(
-    jsg::Lock& js,
-    ConsumerImpl::StateListener* stateListener) {
-  auto consumer = kj::heap<Consumer>(impl.queue, stateListener);
+kj::Own<ValueQueue::Consumer> ValueQueue::Consumer::clone(jsg::Lock& js) {
+  auto consumer = kj::heap<Consumer>(impl.queue);
   impl.cloneTo(js, consumer->impl);
   return kj::mv(consumer);
 }
@@ -240,11 +234,9 @@ ByteQueue::QueueEntry ByteQueue::QueueEntry::clone() {
 
 #pragma region ByteQueue::Consumer
 
-ByteQueue::Consumer::Consumer(ByteQueue& queue, ConsumerImpl::StateListener* stateListener)
-    : impl(queue.impl, stateListener) {}
+ByteQueue::Consumer::Consumer(ByteQueue& queue) : impl(queue.impl) {}
 
-ByteQueue::Consumer::Consumer(QueueImpl& impl, ConsumerImpl::StateListener* stateListener)
-    : impl(impl, stateListener) {}
+ByteQueue::Consumer::Consumer(QueueImpl& impl) : impl(impl) {}
 
 void ByteQueue::Consumer::close(jsg::Lock& js) { impl.close(js); }
 
@@ -266,10 +258,8 @@ void ByteQueue::Consumer::reset() { impl.reset(); }
 
 size_t ByteQueue::Consumer::size() const { return impl.size(); }
 
-kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(
-    jsg::Lock& js,
-    ConsumerImpl::StateListener* stateListener) {
-  auto consumer = kj::heap<Consumer>(impl.queue, stateListener);
+kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(jsg::Lock& js) {
+  auto consumer = kj::heap<Consumer>(impl.queue);
   impl.cloneTo(js, consumer->impl);
   return kj::mv(consumer);
 }
