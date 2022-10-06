@@ -1,0 +1,114 @@
+From e2d52f615073d4ce6af78f5c9bfd760f9e81fe9b Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@cloudflare.com>
+Date: Thu, 6 Oct 2022 17:26:48 -0500
+Subject: [PATCH] Extend Bazel files for FreeBSD.
+
+V8's codebase has FreeBSD support, but the Bazel files did not. This fixes
+that.
+
+The static function `StringToLong` in `platform-freebsd.c++` was unused,
+leading to a compiler warning which was promoted to an error, so I also
+removed it.
+
+---
+ BUILD.bazel                           | 7 +++++++
+ bazel/config/BUILD.bazel              | 8 ++++++++
+ bazel/defs.bzl                        | 1 +
+ src/base/platform/platform-freebsd.cc | 4 ----
+ 4 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 416fb05fdc..00a5499ed8 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -368,6 +368,9 @@ v8_config(
+             "V8_HAVE_TARGET_OS",
+             "V8_TARGET_OS_LINUX",
+         ],
++        "@v8//bazel/config:is_freebsd": [
++            # There is no TARGET_OS, live with unknown target.
++        ],
+         "@v8//bazel/config:is_macos": [
+             "V8_HAVE_TARGET_OS",
+             "V8_TARGET_OS_MACOS",
+@@ -697,6 +700,10 @@ filegroup(
+             "src/base/platform/platform-linux.cc",
+             "src/base/platform/platform-linux.h",
+         ],
++        "@v8//bazel/config:is_freebsd": [
++            "src/base/debug/stack_trace_posix.cc",
++            "src/base/platform/platform-freebsd.cc",
++        ],
+         "@v8//bazel/config:is_android": [
+             "src/base/debug/stack_trace_android.cc",
+             "src/base/platform/platform-linux.cc",
+diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
+index 448260de88..fbbaf5d6ee 100644
+--- a/bazel/config/BUILD.bazel
++++ b/bazel/config/BUILD.bazel
+@@ -133,6 +133,11 @@ config_setting(
+     constraint_values = ["@platforms//os:linux"],
+ )
+
++config_setting(
++    name = "is_freebsd",
++    constraint_values = ["@platforms//os:freebsd"],
++)
++
+ config_setting(
+     name = "is_android",
+     constraint_values = ["@platforms//os:android"],
+@@ -172,6 +177,7 @@ selects.config_setting_group(
+     name = "is_posix",
+     match_any = [
+         ":is_linux",
++        ":is_freebsd",
+         ":is_android",
+         ":is_macos",
+     ],
+@@ -182,6 +188,7 @@ selects.config_setting_group(
+     match_any = [
+         ":is_windows",
+         ":is_linux",
++        ":is_freebsd",
+         ":is_macos",
+     ]
+ )
+@@ -190,6 +197,7 @@ selects.config_setting_group(
+     name = "is_non_android_posix",
+     match_any = [
+         ":is_linux",
++        ":is_freebsd",
+         ":is_macos",
+     ],
+ )
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index e957c0fad3..9931eb1a1a 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -383,6 +383,7 @@ def _v8_target_cpu_transition_impl(settings, attr):
+         "k8": "x64",
+         "x86_64": "x64",
+         "darwin": "x64",
++        "freebsd": "x64",
+         "darwin_x86_64": "x64",
+         "x64_windows": "x64",
+         "x86": "ia32",
+diff --git a/src/base/platform/platform-freebsd.cc b/src/base/platform/platform-freebsd.cc
+index 55d600283f..b7023dc8da 100644
+--- a/src/base/platform/platform-freebsd.cc
++++ b/src/base/platform/platform-freebsd.cc
+@@ -43,10 +43,6 @@ TimezoneCache* OS::CreateTimezoneCache() {
+   return new PosixDefaultTimezoneCache();
+ }
+
+-static unsigned StringToLong(char* buffer) {
+-  return static_cast<unsigned>(strtol(buffer, nullptr, 16));
+-}
+-
+ std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
+   std::vector<SharedLibraryAddress> result;
+   int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_VMMAP, getpid()};
+--
+2.30.2
+

@@ -177,6 +177,7 @@ git_repository(
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
+        "//:patches/v8/0005-Extend-Bazel-files-for-FreeBSD.patch",
     ],
 )
 
