@@ -53,8 +53,6 @@ kj::Maybe<size_t> getChunkSize(
   return 1;
 }
 
-// ======================================================================================
-
 template <typename Controller>
 bool ReadableLockImpl<Controller>::lockReader(
     jsg::Lock& js,
@@ -162,17 +160,12 @@ void ReadableLockImpl<Controller>::PipeLocked::visitForGc(jsg::GcVisitor &visito
 template <typename Controller>
 kj::Maybe<ReadableStreamController::TeeController&> ReadableLockImpl<Controller>::tryTeeLock(
     Controller& self) {
-// TODO(stream-tee): There will be no more tee controller and we have to rethink tee lock.
-// Essentially, tee lock will mean the stream is effectively closed and no longer used because
-// the underlying controller references have been passed on to the branches.
   if (isLockedToReader()) {
     return nullptr;
   }
   state.template init<TeeLocked>(self);
   return state.template get<TeeLocked>();
 }
-
-// TODO(stream-tee): Everything relating to TeeLocked here goes away.
 
 template <typename Controller>
 void ReadableLockImpl<Controller>::TeeLocked::addBranch(Branch* branch) {
@@ -263,8 +256,6 @@ template <typename Controller>
 void ReadableLockImpl<Controller>::TeeLocked::visitForGc(jsg::GcVisitor &visitor) {
   visitor.visit(maybePulling);
 }
-
-// ======================================================================================
 
 template <typename Controller>
 bool WritableLockImpl<Controller>::isLockedToWriter() const {
@@ -400,8 +391,6 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
   return nullptr;
 }
 
-// ======================================================================================
-
 template <typename Self>
 jsg::Promise<void> ReadableImpl<Self>::cancel(
     jsg::Lock& js,
@@ -409,10 +398,6 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
     v8::Local<v8::Value> reason) {
   KJ_ASSERT(state.template is<Readable>());
   KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
-
-// TODO(stream-tee): This should only be called if the last consumer known to the queue
-// is canceling.
-
     // If we're already waiting for cancel to complete, just return the
     // already existing pending promise.
     return pendingCancel->promise.whenResolved();
@@ -435,8 +420,6 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
 
 template <typename Self>
 ReadRequest ReadableImpl<Self>::dequeueReadRequest() {
-// TODO(stream-tee): This goes away. The Queue::Consumer is responsible for tracking
-// read requests.
   KJ_ASSERT(!readRequests.empty());
   auto request = kj::mv(readRequests.front());
   readRequests.pop_front();
@@ -481,10 +464,6 @@ void ReadableImpl<Self>::doCancel(
 
 template <typename Self>
 void ReadableImpl<Self>::doClose(jsg::Lock& js) {
-// TODO(stream-tee): Closing and resetting the queue also needs to notify all of the
-// still-attached consumers that they should close and detach immediately. All still
-// pending reads should be closed out (if they are partially fulfilled) or canceled,
-// and the references holding this controller should be cleared.
   if (!state.template is<Readable>()) {
     return;
   }
@@ -506,9 +485,6 @@ void ReadableImpl<Self>::doClose(jsg::Lock& js) {
 
 template <typename Self>
 void ReadableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Error the queue, notify the consumers of the error. All still
-// pending reads should be rejected and all still connected consumers should detach,
-// keeping record of the error. All references holding this controller should be cleared.
   if (!state.template is<Readable>()) {
     return;
   }
@@ -532,7 +508,6 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
 
 template <typename Self>
 kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
-// TODO(stream-tee): Reimplemented by the queue
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return 0;
@@ -555,8 +530,6 @@ bool ReadableImpl<Self>::shouldCallPull() {
   if (!started) {
     return false;
   }
-// TODO(stream-tee): This will need to be reimplemented to see if any of the known
-// consumers want data.
   if (getOwner().isLocked() && readRequests.size() > 0) {
     return true;
   }
@@ -604,7 +577,6 @@ template <typename Self>
 void ReadableImpl<Self>::resolveReadRequest(
     ReadResult result,
     kj::Maybe<ReadRequest> maybeRequest) {
-// TODO(stream-tee): This goes away because consumers become responsible for resolving reads.
   if (maybeRequest != nullptr) {
     maybeResolvePromise(maybeRequest, kj::mv(result));
     return;
@@ -620,7 +592,6 @@ void ReadableImpl<Self>::setup(
     StreamQueuingStrategy queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
 
-// TODO(stream-tee): the highWaterMark is handled by the queue impl
   highWaterMark = queuingStrategy.highWaterMark.orDefault(isBytes ? 0 : 1);
 
   auto startAlgorithm = kj::mv(underlyingSource.start);
@@ -659,8 +630,6 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(algorithms, queue);
   visitor.visitAll(readRequests);
 }
-
-// ======================================================================================
 
 template <typename Self>
 WritableImpl<Self>::WritableImpl(WriterOwner& owner)
@@ -1119,9 +1088,6 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) {
 
 ReadableStreamDefaultController::ReadableStreamDefaultController(ReaderOwner& owner)
     : impl(owner) {}
-// TODO(stream-tee): The controller will no longer have any notion of a single owner. As long
-// as there are consumers known to the queue, the controller will be kept alive. State changes
-// are communicated via the consumer.
 
 void ReadableStreamDefaultController::setOwner(kj::Maybe<ReaderOwner&> owner) {
   impl.setOwner(owner);
@@ -1130,18 +1096,10 @@ void ReadableStreamDefaultController::setOwner(kj::Maybe<ReaderOwner&> owner) {
 jsg::Promise<void> ReadableStreamDefaultController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-// TODO(stream-tee): This cancel is triggered by the ReadableStreamJsController via the
-// ValueReadable or ByteReadable. Some of the functionality needs to be moved into those.
-// For instance, the individual consumer will be responsible for resolving its own
-// collection of read requests. The cancel algorithm will only be invoked when the
-// last consumer known to the queue is canceling.
   return impl.cancel(js, JSG_THIS, maybeReason.orDefault(js.v8Undefined()));
 }
 
 void ReadableStreamDefaultController::close(jsg::Lock& js) {
-// TODO(stream-tee): This close is triggered by user-call. It must result in the queue
-// being closed, which in turn will communicate the close to each of the consumers.
-// It will be the responsibility of the consumers to cancel their pending pull intos.
   JSG_REQUIRE(impl.canCloseOrEnqueue(),
                TypeError,
                "This ReadableStreamDefaultController is closed.");
@@ -1152,7 +1110,6 @@ void ReadableStreamDefaultController::close(jsg::Lock& js) {
 }
 
 void ReadableStreamDefaultController::doCancel(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Revisit this
   impl.doCancel(js, JSG_THIS, reason);
 }
 
@@ -1168,9 +1125,6 @@ void ReadableStreamDefaultController::enqueue(
 void ReadableStreamDefaultController::doEnqueue(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> chunk) {
-// TODO(stream-tee): Do we need the separate doEnqueue? The implementation here changes a bit.
-// the enqueue will push into the ValueQueue and the ValueQueue::Consumers will handle resolving
-// the reads.
   KJ_ASSERT(impl.canCloseOrEnqueue());
 
   auto value = chunk.orDefault(js.v8Undefined());
@@ -1196,8 +1150,6 @@ void ReadableStreamDefaultController::doEnqueue(
 }
 
 void ReadableStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Called by user-call. We need to notify the queue of the error and notify
-// all of the consumers about the error.
   if (impl.state.is<jscontroller::Readable>()) {
     impl.doError(js, reason);
   }
@@ -1208,17 +1160,10 @@ kj::Maybe<int> ReadableStreamDefaultController::getDesiredSize() {
 }
 
 bool ReadableStreamDefaultController::hasPendingReadRequests() {
-// TODO(stream-tee): Needs to be modified such that if any consumer has pending reads, this
-// returns true.
   return !impl.readRequests.empty();
 }
 
 void ReadableStreamDefaultController::pull(jsg::Lock& js, ReadRequest readRequest) {
-// TODO(stream-tee): Needs to be reimplemented in terms of the consumer. Essentially, the consumer
-// receives the read request. If the consumer doesn't have the data in it's own queue to serve
-// the request, it will ask the queue to get it. If there's no data in the queue, then we need
-// to pull from the underlying source.
-
   // This should only be called if the stream is readable
   KJ_ASSERT(impl.state.is<jscontroller::Readable>());
   if (!impl.queue.empty()) {
@@ -1262,11 +1207,6 @@ void ReadableStreamDefaultController::setup(
     StreamQueuingStrategy queuingStrategy) {
   impl.setup(js, JSG_THIS, kj::mv(underlyingSource), kj::mv(queuingStrategy));
 }
-
-// ======================================================================================
-
-// TODO(stream-tee): The ReadableStreamBYOBRequest needs to be modified to operate in
-// terms of the ByteQueue::Consumer model.
 
 ReadableStreamBYOBRequest::Impl::Impl(
       jsg::V8Ref<v8::Uint8Array> view,
@@ -1361,14 +1301,8 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
   impl.controller->respondInternal(js, impl.controller->updatePullInto(js, kj::mv(view)));
 }
 
-// ======================================================================================
-
 ReadableByteStreamController::ReadableByteStreamController(ReaderOwner& owner)
-    : impl(owner) {
-// TODO(stream-tee): The notion of a single owner for the controller goes away. The controller
-// will have one or more consumers. As long as there are consumers, the controller will be
-// available.
-}
+    : impl(owner) {}
 
 kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
   return impl.getDesiredSize();
@@ -1377,11 +1311,6 @@ kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
 jsg::Promise<void> ReadableByteStreamController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-// TODO(stream-tee): This cancel is triggered by the ReadableStreamJsController via the
-// ValueReadable or ByteReadable. Some of the functionality needs to be moved into those.
-// For instance, the individual consumer will be responsible for resolving its own
-// collection of read requests. The cancel algorithm will only be invoked when the
-// last consumer known to the queue is canceling.
   pendingPullIntos.clear();
   while (!impl.readRequests.empty()) {
     impl.dequeueReadRequest().resolve(ReadResult { .done = true });
@@ -1390,9 +1319,6 @@ jsg::Promise<void> ReadableByteStreamController::cancel(
 }
 
 void ReadableByteStreamController::close(jsg::Lock& js) {
-// TODO(stream-tee): This close is triggered by user-call. It must result in the queue
-// being closed, which in turn will communicate the close to each of the consumers.
-// It will be the responsibility of the consumers to cancel their pending pull intos.
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError,
                "This ReadableByteStreamController is closed.");
   if (!impl.queue.empty()) {
@@ -1412,7 +1338,6 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
 }
 
 void ReadableByteStreamController::commitPullInto(jsg::Lock& js, PendingPullInto pullInto) {
-// TODO(stream-tee): Responsibility here moves into the ByteQueue::Consumer implementation.
   bool done = false;
   if (impl.state.is<StreamStates::Closed>()) {
     KJ_ASSERT(pullInto.filled == 0);
@@ -1428,7 +1353,6 @@ void ReadableByteStreamController::commitPullInto(jsg::Lock& js, PendingPullInto
 
 ReadableByteStreamController::PendingPullInto
 ReadableByteStreamController::dequeuePendingPullInto() {
-// TODO(stream-tee): Responsibility here moves into the ByteQueue::Consumer implementation.
   KJ_ASSERT(!pendingPullIntos.empty());
   auto pullInto = kj::mv(pendingPullIntos.front());
   pendingPullIntos.pop_front();
@@ -1436,14 +1360,10 @@ ReadableByteStreamController::dequeuePendingPullInto() {
 }
 
 void ReadableByteStreamController::doCancel(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Re-evaluate...
   impl.doCancel(js, JSG_THIS, reason);
 }
 
 void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chunk) {
-// TODO(stream-tee): This is called by user-call. It must be modified to push data into the queue,
-// which will trigger the cascade of that data into the consumers, which will handle the majority
-// of the handling here.
   JSG_REQUIRE(chunk.size() > 0, TypeError, "Cannot enqueue a zero-length ArrayBuffer.");
   JSG_REQUIRE(chunk.canDetach(js), TypeError,
                "The provided ArrayBuffer must be detachable.");
@@ -1482,15 +1402,12 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): This is called by the user-call. It must error the queue and communicate to
-// each of the consumers that the readable stream is immediately shutting down because of error.
   if (impl.state.is<jscontroller::Readable>()) {
     impl.doError(js, reason);
   }
 }
 
 bool ReadableByteStreamController::fillPullInto(PendingPullInto& pullInto) {
-// TODO(stream-tee): Responsibility here moves into the ByteQueue::Consumer implementation.
   auto elementSize = pullInto.store.getElementSize();
   auto currentAlignedBytes = pullInto.filled - (pullInto.filled % elementSize);
   auto maxBytesToCopy = kj::min(impl.queue.size(), pullInto.store.size() - pullInto.filled);
@@ -1535,8 +1452,6 @@ bool ReadableByteStreamController::fillPullInto(PendingPullInto& pullInto) {
 
 kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> ReadableByteStreamController::getByobRequest(
     jsg::Lock& js) {
-// TODO(stream-tee): The ReadableStreamBYOBRequest mechanism needs to be reworked around
-// ByteQueue::Consumer's similar concept.
   JSG_REQUIRE(impl.state.is<jscontroller::Readable>(),
                TypeError,
                "This ReadableByteStreamController has been closed.");
@@ -1554,9 +1469,6 @@ kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> ReadableByteStreamController::get
 }
 
 bool ReadableByteStreamController::hasPendingReadRequests() {
-// TODO(stream-tee): Needs to be modified such that if any known consumer has a pending
-// read request this returns true. The controller itself will no longer track read requests
-// itself.
   return !impl.readRequests.empty();
 }
 
@@ -1565,7 +1477,6 @@ bool ReadableByteStreamController::isReadable() const {
 }
 
 void ReadableByteStreamController::pullIntoUsingQueue(jsg::Lock& js) {
-// TODO(stream-tee): Responsibility here moves into the ByteQueue::Consumer implementation.
   KJ_ASSERT(!impl.closeRequested);
   while (!pendingPullIntos.empty() && !impl.queue.empty()) {
     auto& pullInto = pendingPullIntos.front();
@@ -1576,10 +1487,6 @@ void ReadableByteStreamController::pullIntoUsingQueue(jsg::Lock& js) {
 }
 
 void ReadableByteStreamController::pull(jsg::Lock& js, ReadRequest readRequest) {
-// TODO(stream-tee): Triggers the pull algorithm to be called on this controller.
-// We will need to rework the impl.queue.empty() piece below. Is it even still
-// relevant with the new queue model?
-
   // This should only ever be called if the stream is readable
   KJ_ASSERT(impl.state.is<jscontroller::Readable>());
   if (!impl.queue.empty()) {
@@ -1609,10 +1516,6 @@ void ReadableByteStreamController::pull(jsg::Lock& js, ReadRequest readRequest) 
 }
 
 void ReadableByteStreamController::queueDrain(jsg::Lock& js) {
-// TODO(stream-tee): Need to re-evaluate this. Essentially, this is a graceful
-// close. If close has been requested and the queue is empty, we signal to all
-// consumers that we're done and they should disconnect, otherwise we try
-// pulling more data.
   if (impl.queue.size() == 0 && impl.closeRequested) {
     return impl.doClose(js);
   }
@@ -1622,8 +1525,7 @@ void ReadableByteStreamController::queueDrain(jsg::Lock& js) {
 jsg::Promise<ReadResult> ReadableByteStreamController::read(
     jsg::Lock& js,
     kj::Maybe<ReadableStreamController::ByobOptions> maybeByobOptions) {
-// TODO(stream-tee): This likely goes away. It will be up to the ByteQueue::Consumer
-// to handle this functionality.
+
   if (impl.state.is<StreamStates::Closed>()) {
     KJ_IF_MAYBE(byobOptions, maybeByobOptions) {
       // We're going to return an empty ArrayBufferView using the same underlying buffer but with
@@ -1701,7 +1603,6 @@ jsg::Promise<ReadResult> ReadableByteStreamController::read(
 }
 
 void ReadableByteStreamController::respondInternal(jsg::Lock& js, size_t bytesWritten) {
-// TODO(stream-tee): This likely goes away and is handled by the ByteQueue::Consumer.
   auto& pullInto = pendingPullIntos.front();
   KJ_DEFER(KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
     (*byobRequest)->invalidate(js);
@@ -1759,7 +1660,6 @@ void ReadableByteStreamController::setup(
 }
 
 size_t ReadableByteStreamController::updatePullInto(jsg::Lock& js, jsg::BufferSource view) {
-// TODO(stream-tee): This likely goes away and is handled by the ByteQueue::Consumer.
   auto& pullInto = pendingPullIntos.front();
   auto byteLength = view.size();
   JSG_REQUIRE(view.canDetach(js), TypeError,
@@ -1776,10 +1676,6 @@ size_t ReadableByteStreamController::updatePullInto(jsg::Lock& js, jsg::BufferSo
   pullInto.store = view.detach(js);
   return byteLength;
 }
-
-// ======================================================================================
-
-// TODO(stream-tee): Everything JsTeeController goes away
 
 ReadableStreamJsTeeController::Attached::Attached(
     jsg::Ref<ReadableStream> ref,
@@ -2181,8 +2077,6 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsTeeControll
   return lock.tryPipeLock(*this, kj::mv(destination));
 }
 
-// ======================================================================================
-
 ReadableStreamJsController::ReadableStreamJsController() {}
 
 ReadableStreamJsController::ReadableStreamJsController(StreamStates::Closed closed)
@@ -2210,19 +2104,9 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
       return js.rejectedPromise<void>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(controller, ByobController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
-//   return byteReadable->cancel(js, kj::mv(maybeReason));
-
       return controller->cancel(js, reason.getHandle(js));
     }
     KJ_CASE_ONEOF(controller, DefaultController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
-//   return valueReadable->cancel(js, kj::mv(maybeReason));
-
       return controller->cancel(js, reason.getHandle(js));
     }
   }
@@ -2231,9 +2115,6 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 }
 
 void ReadableStreamJsController::doCancel(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Likely not necessary to implement this with the new model?
-// This is intended to allow completion of canceling the controller which will be
-// done via the ByteReadable or ValueReadable when those are canceled.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return;
@@ -2252,11 +2133,6 @@ void ReadableStreamJsController::doCancel(jsg::Lock& js, v8::Local<v8::Value> re
 }
 
 void ReadableStreamJsController::detachFromController() {
-// TODO(stream-tee): With the new model, the ValueReadable or ByteReadable struct
-// will become the new owner of the relationship with the underlying controller.
-// There will no longer be a single owner known to the controller, only multiple
-// consumers. This function likely goes away entirely in favor of some mechanism
-// on the ValueReadable/ByteReadable.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
@@ -2270,15 +2146,6 @@ void ReadableStreamJsController::detachFromController() {
 }
 
 void ReadableStreamJsController::doClose() {
-// TODO(stream-tee): doClose() finalizes the closed state of this ReadableStream.
-// The connection to the underlying controller is released with no further action.
-// Importantly, this method is triggered by the underlying controller as a result
-// of that controller closing or being canceled. We detach ourselves from the
-// underlying controller by releasing the ValueReadable or ByteReadable in the
-// state and changing that to closed. We also clean up other state here.
-// Since the underlying controller will no longer have a single owner, we will
-// need to modify things such this signal is triggered by the ValueReadable or
-// ByteReadable.
   detachFromController();
   state.init<StreamStates::Closed>();
 
@@ -2298,7 +2165,6 @@ void ReadableStreamJsController::doClose() {
 }
 
 void ReadableStreamJsController::controllerClose(jsg::Lock& js) {
-// TODO(stream-tee): This is obsolete and no longer needed.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return; }
@@ -2315,7 +2181,6 @@ void ReadableStreamJsController::controllerClose(jsg::Lock& js) {
 void ReadableStreamJsController::controllerError(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-// TODO(stream-tee): This is obsolete and no longer needed.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return; }
@@ -2330,15 +2195,6 @@ void ReadableStreamJsController::controllerError(
 }
 
 void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): As with doClose(), doError() finalizes the error state of this
-// ReadableStream. The connection to the underlying controller is released with no
-// further action. This method is triggered by the underlying controller as a result
-// of that controller erroring or being canceled. We detach ourselves from the
-// underlying controller by releasing the ValueReadable or ByteReadable in the state
-// and changing that to errored. We also clean up other state here.
-// Since the underlying controller will no longer have a single owner, we will
-// need to modify things such that this signal is triggered by the ValueReadable or
-// ByteReadable.
   detachFromController();
   state.init<StreamStates::Errored>(js.v8Ref(reason));
 
@@ -2362,19 +2218,9 @@ bool ReadableStreamJsController::hasPendingReadRequests() {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return false; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return false; }
     KJ_CASE_ONEOF(controller, DefaultController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
-//   return valueReadable->consumer->hasPendingReadRequests();
-
       return controller->hasPendingReadRequests();
     }
     KJ_CASE_ONEOF(controller, ByobController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(byteReadable, kj::Own<ByteReadable>) {
-//   return byteReadable->consumer->hasPendingReadRequests();
-
       return controller->hasPendingReadRequests();
     }
   }
@@ -2382,8 +2228,6 @@ bool ReadableStreamJsController::hasPendingReadRequests() {
 }
 
 bool ReadableStreamJsController::isByteOriented() const {
-// TODO(stream-tee):
-// return state.is<kj::Own<ByteReadable>>();
   return state.is<ByobController>();
 }
 
@@ -2467,10 +2311,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       return js.rejectedPromise<ReadResult>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(controller, DefaultController) {
-
-// TODO(stream-tee): Read for both ValueReadable and ByteReadable must be updated
-// in terms of, e.g. valueReadable->consumer->read(...)
-
       // The ReadableStreamDefaultController does not support ByobOptions.
       // It should never happen, but let's make sure.
       KJ_ASSERT(maybeByobOptions == nullptr);
@@ -2503,13 +2343,6 @@ ReadableStreamJsController::removeSource(jsg::Lock& js) {
       kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(controller, ByobController) {
-
-// TODO(stream-tee): Removing the source here becomes as simple as transferring the
-// ValueReadable and ByteReadable from the ReadableStreamJsController to the
-// ReadableStreamJsSource that we're creating. All of the relevant state transfers
-// with it. We must, however, ensure that there is still a way for that to communicate
-// state changes (e.g. closed, errored) with whichever thing is currently owning it.
-
       KJ_DEFER(state.init<StreamStates::Closed>());
       return kj::refcounted<ReadableStreamJsSource>(kj::mv(controller));
     }
@@ -2522,9 +2355,6 @@ ReadableStreamJsController::removeSource(jsg::Lock& js) {
 }
 
 ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
-// TODO(stream-tee): Here, rather than creating new ReadableStreamJsTeeController-backed things,
-// we are going to just create new ReadableStreamJsController things that have their own
-// clones of this streams ValueReadable or ByteReadable.
   KJ_IF_MAYBE(teeController, lock.tryTeeLock(*this)) {
     disturbed = true;
 
@@ -2567,9 +2397,6 @@ void ReadableStreamJsController::setup(
 
   maybeTransformer = kj::mv(underlyingSource.maybeTransformer);
 
-// TODO(stream-tee): Here, we wrap create the underlying controllers but we need to
-// create the ValueReadable or ByteReadable and use that for the state instead.
-
   if (type == "bytes") {
     state = jsg::alloc<ReadableByteStreamController>(*this);
     state.get<ByobController>()->setup(
@@ -2600,19 +2427,9 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(error);
     }
     KJ_CASE_ONEOF(controller, DefaultController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(valueReadable, kj::Own<ValueReadable>) {
-//   visitor.visit(*valueReadable);
-
       visitor.visit(controller);
     }
     KJ_CASE_ONEOF(controller, ByobController) {
-
-// TODO(stream-tee):
-// KJ_CASE_ONEOF(byteReadable, kj::Own<byteReadable>) {
-//   visitor.visit(*byteReadable);
-
       visitor.visit(controller);
     }
   }
@@ -2620,10 +2437,6 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 };
 
 kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
-// TODO(stream-tee): This is used by the TransformStream implementation. This needs to be
-// implemented in terms of the underlying controllers backpressure, such that even if there
-// is no data waiting in this particular stream's buffer, backpressure is still being signalled
-// correctly through every consumer branch.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return nullptr; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
@@ -2644,8 +2457,6 @@ kj::Maybe<v8::Local<v8::Value>> ReadableStreamJsController::isErrored(jsg::Lock&
 }
 
 bool ReadableStreamJsController::canCloseOrEnqueue() {
-// TODO(stream-tee): This is used by the TransformStream implementation. The implementation
-// here won't need to change much.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return false; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return false; }
@@ -2660,8 +2471,6 @@ bool ReadableStreamJsController::canCloseOrEnqueue() {
 }
 
 bool ReadableStreamJsController::hasBackpressure() {
-// TODO(stream-tee): This is used by the TransformStream implementation. Need to determine
-// however if we can get rid of this and just use negative or zero desiredSize.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return false; }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return false; }
@@ -2678,23 +2487,15 @@ bool ReadableStreamJsController::hasBackpressure() {
 void ReadableStreamJsController::defaultControllerEnqueue(
     jsg::Lock& js,
     v8::Local<v8::Value> chunk) {
-// TODO(stream-tee): Is this necessary still?
   auto& controller = KJ_ASSERT_NONNULL(state.tryGet<DefaultController>(),
       "defaultControllerEnqueue() can only be called with a ReadableStreamDefaultController");
   controller->doEnqueue(js, chunk);
 }
 
-// ======================================================================================
-
 void ReadableStreamJsSource::cancel(kj::Exception reason) {
   const auto doCancel = [this](auto& controller, auto reason) {
     JSG_REQUIRE(!canceling, TypeError, "The stream has already been canceled.");
     canceling = true;
-
-// TODO(stream-tee): The change here will echo what is happening over in JsController.
-// Specifically, the JsSource will have either a ValueReadable or ByteReadable that
-// is one of several owning a reference to the underlying controller. When the last
-// one canceled is the one that actually triggers the underlying controller cancel.
 
     ioContext.addTask(ioContext.run([this, &controller, reason = kj::mv(reason)]
                                               (Worker::Lock& lock) mutable -> kj::Promise<void> {
@@ -2721,8 +2522,6 @@ void ReadableStreamJsSource::cancel(kj::Exception reason) {
 }
 
 void ReadableStreamJsSource::detachFromController() {
-// TODO(stream-tee): Since it will be the ValueReadable or ByteReadable that deals
-// with this now, hopefully we can remove this.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(errored, kj::Exception) {}
@@ -2736,13 +2535,11 @@ void ReadableStreamJsSource::detachFromController() {
 }
 
 void ReadableStreamJsSource::doClose() {
-// TODO(stream-tee): Similar change here as JsController::doClose
   detachFromController();
   state.init<StreamStates::Closed>();
 }
 
 void ReadableStreamJsSource::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-// TODO(stream-tee): Similar change here as JsController::doError
   detachFromController();
   state.init<kj::Exception>(js.exceptionToKj(js.v8Ref(reason)));
 }
@@ -2750,9 +2547,6 @@ void ReadableStreamJsSource::doError(jsg::Lock& js, v8::Local<v8::Value> reason)
 bool ReadableStreamJsSource::isLocked() const { return true; }
 
 bool ReadableStreamJsSource::isLockedReaderByteOriented() { return true; }
-
-// TODO(stream-tee): The read mechanisms below must be updated in terms of using
-// the ValueReadable or ByteReadable.
 
 jsg::Promise<size_t> ReadableStreamJsSource::readFromByobController(
     jsg::Lock& js,
@@ -3068,10 +2862,6 @@ jsg::Promise<void> ReadableStreamJsSource::pipeLoop(
   });
 }
 
-// ======================================================================================
-
-// TODO(stream-tee): Everything ReadableStreamJsTeeSource goes away.
-
 void ReadableStreamJsTeeSource::cancel(kj::Exception reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return; }
@@ -3343,8 +3133,6 @@ jsg::Promise<void> ReadableStreamJsTeeSource::pipeLoop(
     });
   });
 }
-
-// ======================================================================================
 
 WritableStreamDefaultController::WritableStreamDefaultController(WriterOwner& owner)
     : impl(owner) {}

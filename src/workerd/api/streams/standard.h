@@ -6,7 +6,6 @@
 
 #include "common.h"
 #include "internal.h"
-#include "queue.h"
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/buffersource.h>
 
@@ -1279,51 +1278,6 @@ public:
   }
 
 private:
-  struct ValueReadable final {
-    DefaultController controller;
-    kj::Own<ValueQueue::Consumer> consumer;
-
-    ValueReadable(DefaultController controller);
-    KJ_DISALLOW_COPY(ValueReadable);
-
-    kj::Own<ValueReadable> clone(jsg::Lock& js);
-    // A single ReadableStreamDefaultController can have multiple consumers.
-    // When the ValueReadable constructor is used, the new consumer is added
-    // and starts to receive new data that becomes enqueued. When clone
-    // is used, any state currently held by this consumer is copied to the
-    // new consumer.
-
-    jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
-    // When a ReadableStream is canceled, the expected behavior is that the underlying
-    // controller is notified and the cancel algorithm on the underlying source is
-    // called. When there are multiple ReadableStreams sharing consumption of a
-    // controller, however, it should act as a shared pointer of sorts, canceling
-    // the underlying controller only when the last reader is canceled.
-  };
-
-  struct ByteReadable final {
-    ByobController controller;
-    kj::Own<ByteQueue::Consumer> consumer;
-
-    ByteReadable(DefaultController controller);
-    KJ_DISALLOW_COPY(ByteReadable);
-
-    kj::Own<ByteReadable> clone(jsg::Lock& js);
-    // A single ReadableByteStreamController can have multiple consumers.
-    // When the ByteReadable constructor is used, the new consumer is added
-    // and starts to receive new data that becomes enqueued. When clone
-    // is used, any state currently held by this consumer is copied to the
-    // new consumer.
-
-    jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
-    // When a ReadableStream is canceled, the expected behavior is that the underlying
-    // controller is notified and the cancel algorithm on the underlying source is
-    // called. When there are multiple ReadableStreams sharing consumption of a
-    // controller, however, it should act as a shared pointer of sorts, canceling
-    // the underlying controller only when the last reader is canceled.
-  };
-
-
   bool hasPendingReadRequests();
   void detachFromController();
 
