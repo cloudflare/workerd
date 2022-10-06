@@ -2852,9 +2852,7 @@ kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime)
             auto& persistent = KJ_ASSERT_NONNULL(impl->actorCache);
             persistent.cancelDeferredAlarmDeletion();
 
-            if (!jsg::isDoNotLogException(e.getDescription())) {
-              KJ_LOG(ERROR, e);
-            }
+            LOG_EXCEPTION_IF_INTERNAL("alarmRetry", e);
 
             return WorkerInterface::AlarmResult {
               .retry = true,
