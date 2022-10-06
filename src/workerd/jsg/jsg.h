@@ -223,7 +223,6 @@ private:
 // - C++ kj::OneOf<T, U, ...> <-> JS T or U or ...
 // - C++ kj::Array<T> <-> JS Array of T
 // - C++ kj::Array<byte> <-> JS ArrayBuffer
-// - C++ kj::ArrayPtr<byte> <- JS ArrayBuffer, ArrayBufferView
 // - C++ jsg::Dict<T> <-> JS Object used as a map of strings to values of type T
 // - C++ jsg::Function<T(U, V, ...)> <-> JS Function
 // - C++ jsg::Promise<T> <-> JS Promise
