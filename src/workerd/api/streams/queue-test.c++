@@ -802,7 +802,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
   // there should only be two actual BYOB requests
   // processed by the queue, which will fulfill all four
   // reads.
-  MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
+  MustCall<void(ByteQueue::ByobReadRequest&)> respond([&](jsg::Lock&, auto& pending) {
     static uint counter = 0;
     auto& req = pending.getRequest();
     auto ptr = req.pullInto.store.asArrayPtr().begin();
@@ -812,7 +812,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
     KJ_ASSERT(pending.isInvalidated());
   }, 2);
 
-  kj::Maybe<kj::Own<ByteQueue::ByobRequest>> pendingByob;
+  kj::Maybe<kj::Own<ByteQueue::ByobReadRequest>> pendingByob;
   while ((pendingByob = queue.nextPendingByobReadRequest()) != nullptr) {
     auto& pending = KJ_ASSERT_NONNULL(pendingByob);
     if (pending->isInvalidated()) {
@@ -884,7 +884,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
   // there should only be two actual BYOB requests
   // processed by the queue, which will fulfill all four
   // reads.
-  MustCall<void(ByteQueue::ByobRequest&)> respond([&](jsg::Lock&, auto& pending) {
+  MustCall<void(ByteQueue::ByobReadRequest&)> respond([&](jsg::Lock&, auto& pending) {
     static uint counter = 0;
     auto& req = pending.getRequest();
     auto ptr = req.pullInto.store.asArrayPtr().begin();
@@ -894,7 +894,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
     KJ_ASSERT(pending.isInvalidated());
   }, 2);
 
-  kj::Maybe<kj::Own<ByteQueue::ByobRequest>> pendingByob;
+  kj::Maybe<kj::Own<ByteQueue::ByobReadRequest>> pendingByob;
   while ((pendingByob = queue.nextPendingByobReadRequest()) != nullptr) {
     auto& pending = KJ_ASSERT_NONNULL(pendingByob);
     if (pending->isInvalidated()) {
