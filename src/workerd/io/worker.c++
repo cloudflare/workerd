@@ -2067,6 +2067,27 @@ public:
                     CpuProfilerDisposer::instance);
                 break;
               }
+              case cdp::Command::HEAP_PROFILER_ENABLE: {
+                // There's nothing to do here but we don't want to report
+                // it as unknown.
+                break;
+              }
+              case cdp::Command::HEAP_PROFILER_DISABLE: {
+                // There's nothing to do here but we don't want to report
+                // it as unknown.
+                break;
+              }
+              case cdp::Command::TAKE_HEAP_SNAPSHOT: {
+                auto state = this->state.lockExclusive();
+                Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
+                Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                auto& lock = *recordedLock.lock;
+                auto params = cmd.getTakeHeapSnapshot().getParams();
+                takeHeapSnapshot(lock,
+                    params.getExposeInternals(),
+                    params.getCaptureNumericValue());
+                break;
+              }
             }
 
             if (!cmd.isUnknown()) {
@@ -2186,6 +2207,63 @@ public:
 private:
   kj::WebSocket& webSocket;
 
+  void takeHeapSnapshot(jsg::Lock& js, bool exposeInternals, bool captureNumericValue) {
+    struct Activity: public v8::ActivityControl {
+      InspectorChannelImpl& channel;
+      Activity(InspectorChannelImpl& channel) : channel(channel) {}
+
+      ControlOption ReportProgressValue(uint32_t done, uint32_t total) {
+        capnp::MallocMessageBuilder message;
+        auto event = message.initRoot<cdp::Event>();
+        auto params = event.initReportHeapSnapshotProgress();
+        params.setDone(done);
+        params.setTotal(total);
+        if (done == total) {
+          params.setFinished(true);
+        }
+        auto notification = getCdpJsonCodec().encode(event);
+        channel.sendNotification(kj::mv(notification));
+        return ControlOption::kContinue;
+      }
+    };
+
+    struct Writer: public v8::OutputStream {
+      InspectorChannelImpl& channel;
+
+      Writer(InspectorChannelImpl& channel) : channel(channel) {}
+      void EndOfStream() override {}
+
+      int GetChunkSize() override {
+        return 65536;  // big chunks == faster
+        // The chunk size here will determine the actual number of individual
+        // messages that are sent. The default is... rather small. Experience
+        // node and node-heapdump shows that this can be bumped up
+        // much higher to get better performance. Here we use the value
+        // that Node.js uses (see Node.js' FileOutputStream impl).
+      }
+
+      v8::OutputStream::WriteResult WriteAsciiChunk(char* data, int size) override {
+        capnp::MallocMessageBuilder message;
+        auto event = message.initRoot<cdp::Event>();
+
+        auto params = event.initAddHeapSnapshotChunk();
+        params.setChunk(kj::heapString(data, size));
+        auto notification = getCdpJsonCodec().encode(event);
+        channel.sendNotification(kj::mv(notification));
+
+        return v8::OutputStream::WriteResult::kContinue;
+      }
+    };
+
+    Activity activity(*this);
+    Writer writer(*this);
+
+    std::unique_ptr<const v8::HeapSnapshot> snapshot(
+        js.v8Isolate->GetHeapProfiler()->TakeHeapSnapshot(&activity, nullptr,
+            exposeInternals, captureNumericValue));
+    snapshot->Serialize(&writer);
+  }
+
   struct State {
     kj::Own<const Worker::Isolate> isolate;
     std::unique_ptr<v8_inspector::V8InspectorSession> session;
@@ -2295,6 +2373,20 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::HttpHeaderId controlHeaderId) const {
   KJ_REQUIRE(impl->inspector != nullptr);
 
+  kj::HttpHeaders headers(headerTable);
+  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
+  auto webSocket = response.acceptWebSocket(headers);
+
+  return attachInspector(timer, timerOffset, *webSocket)
+      .attach(kj::mv(webSocket));
+}
+
+kj::Promise<void> Worker::Isolate::attachInspector(
+    kj::Timer& timer,
+    kj::Duration timerOffset,
+    kj::WebSocket& webSocket) const {
+  KJ_REQUIRE(impl->inspector != nullptr);
+
   Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(nullptr));
   auto& lock = *recordedLock.lock;
   auto& lockedSelf = const_cast<Worker::Isolate&>(*this);
@@ -2306,11 +2398,8 @@ kj::Promise<void> Worker::Isolate::attachInspector(
   // just not.
   lockedSelf.disconnectInspector();
 
-  kj::HttpHeaders headers(headerTable);
-  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
-  auto webSocket = response.acceptWebSocket(headers);
   auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
-      kj::atomicAddRef(*this), *webSocket);
+      kj::atomicAddRef(*this), webSocket);
   lockedSelf.currentInspectorSession = *channel;
 
   lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
@@ -2326,7 +2415,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
 
   return channel->incomingLoop()
       .exclusiveJoin(channel->outgoingLoop())
-      .attach(kj::mv(channel), kj::mv(webSocket));
+      .attach(kj::mv(channel));
 }
 
 void Worker::Isolate::disconnectInspector() {

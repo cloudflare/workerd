@@ -770,6 +770,19 @@ R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js,
   return result;
 }
 
+R2Bucket::HttpMetadata R2Bucket::HttpMetadata::clone() const {
+  auto cloneStr = [](const kj::String& str) { return kj::str(str); };
+  return {
+    .contentType = contentType.map(cloneStr),
+    .contentLanguage = contentLanguage.map(cloneStr),
+    .contentDisposition = contentDisposition.map(cloneStr),
+    .contentEncoding = contentEncoding.map(cloneStr),
+    .cacheControl = cacheControl.map(cloneStr),
+    .cacheExpiry = cacheExpiry,
+  };
+}
+
+
 void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   JSG_REQUIRE(httpMetadata != nullptr, TypeError,
       "HTTP metadata unknown for key `", name,

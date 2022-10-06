@@ -572,6 +572,8 @@ public:
         .addOptionWithArg({'e', "external-addr"}, CLI_METHOD(overrideExternal), "<name>=<addr>",
                           "Override the external service named <name> to connect to the address "
                           "<addr> instead of the address specified in the config file.")
+        .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
+                          "Enable the inspector protocol to connect to the address <addr>.")
         .addOption({'w', "watch"}, CLI_METHOD(watch),
                    "Watch configuration files (and server binary) and reload if they change. "
                    "Useful for development, but not recommended in production.")
@@ -626,33 +628,34 @@ public:
     server.overrideSocket(kj::mv(name), kj::str(value));
   }
 
+  void validateSocketFd(uint fd, kj::StringPtr label) {
+    int acceptcon = 0;
+    socklen_t optlen = sizeof(acceptcon);
+    KJ_SYSCALL_HANDLE_ERRORS(getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &acceptcon, &optlen)) {
+      case EBADF:
+        CLI_ERROR("File descriptor is not open.");
+      case ENOTSOCK:
+        CLI_ERROR("File descriptor is not a socket.");
+      case ENOPROTOOPT:
+        // Some operating systems don't support SO_ACCEPTCONN; in that case just move on and
+        // assume it is listening.
+        break;
+      default:
+        KJ_FAIL_SYSCALL("getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN)", error);
+    } else {
+      if (!acceptcon) {
+        CLI_ERROR("Socket for ", label ," is not listening.");
+      }
+    }
+  }
+
   void overrideSocketFd(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
 
     int fd = KJ_UNWRAP_OR(value.tryParseAs<uint>(),
         CLI_ERROR("Socket value must be a file descriptor (non-negative integer)."));
 
-    // Validate the socket.
-    {
-      int acceptcon = 0;
-      socklen_t optlen = sizeof(acceptcon);
-      KJ_SYSCALL_HANDLE_ERRORS(getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &acceptcon, &optlen)) {
-        case EBADF:
-          CLI_ERROR("File descriptor is not open.");
-        case ENOTSOCK:
-          CLI_ERROR("File descriptor is not a socket.");
-        case ENOPROTOOPT:
-          // Some operating systems don't support SO_ACCEPTCONN; in that case just move on and
-          // assume it is listening.
-          break;
-        default:
-          KJ_FAIL_SYSCALL("getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN)", error);
-      } else {
-        if (!acceptcon) {
-          CLI_ERROR("Socket is not listening.");
-        }
-      }
-    }
+    validateSocketFd(fd, name);
 
     inheritedFds.add(fd);
     server.overrideSocket(kj::mv(name), io.lowLevelProvider->wrapListenSocketFd(
@@ -667,6 +670,10 @@ public:
   void overrideExternal(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
     server.overrideExternal(kj::mv(name), kj::str(value));
+  }
+
+  void enableInspector(kj::StringPtr param) {
+    server.enableInspector(kj::str(param));
   }
 
   void watch() {
