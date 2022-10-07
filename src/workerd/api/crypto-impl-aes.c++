@@ -5,6 +5,7 @@
 #include "crypto-impl.h"
 #include <algorithm>
 #include <cstdint>
+#include <limits.h>
 #include <openssl/aes.h>
 #include <openssl/bn.h>
 #include <openssl/err.h>
