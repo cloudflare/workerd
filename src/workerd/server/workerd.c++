@@ -43,6 +43,10 @@
 #define environ (*_NSGetEnviron())
 #endif
 
+#if __FreeBSD__
+extern char **environ;
+#endif
+
 namespace workerd::server {
 
 static kj::StringPtr getVersionString() {
@@ -245,8 +249,6 @@ private:
   kj::AutoCloseFd kqueueFd;
   kj::UnixEventPort::FdObserver observer;
   kj::Vector<kj::AutoCloseFd> filesWatched;
-
-  bool sawChange = false;
 
   static kj::AutoCloseFd makeKqueue() {
     int fd_;

@@ -563,6 +563,10 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   state.pc = reinterpret_cast<void*>(mcontext.gregs[REG_RIP]);
   state.sp = reinterpret_cast<void*>(mcontext.gregs[REG_RSP]);
   state.fp = reinterpret_cast<void*>(mcontext.gregs[REG_RBP]);
+#elif defined(__FreeBSD__) && defined(__x86_64__)
+  state.pc = reinterpret_cast<void*>(mcontext.mc_rip);
+  state.sp = reinterpret_cast<void*>(mcontext.mc_rsp);
+  state.fp = reinterpret_cast<void*>(mcontext.mc_rbp);
 #elif defined(__linux__) && defined(__aarch64__)
   state.pc = reinterpret_cast<void*>(mcontext.pc);
   state.sp = reinterpret_cast<void*>(mcontext.sp);

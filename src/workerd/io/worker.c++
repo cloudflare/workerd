@@ -29,6 +29,10 @@
 #include <sys/syscall.h>
 #include <numeric>
 
+#if __FreeBSD__
+#include <pthread_np.h>
+#endif
+
 namespace v8_inspector {
   kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
     if (view.is8Bit()) {
@@ -418,6 +422,8 @@ void reportStartupError(
 uint64_t getCurrentThreadId() {
 #if __linux__
   return syscall(SYS_gettid);
+#elif __FreeBSD__
+  return pthread_getthreadid_np();
 #else
   // Assume MacOS or BSD
   uint64_t tid;
