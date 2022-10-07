@@ -11,6 +11,13 @@ selects.config_setting_group(
     ],
 )
 selects.config_setting_group(
+    name = "freebsd_x64",
+    match_all = [
+        "@platforms//os:freebsd",
+        "@platforms//cpu:x86_64",
+    ],
+)
+selects.config_setting_group(
     name = "linux_arm64",
     match_all = [
         "@platforms//os:linux",
@@ -109,6 +116,7 @@ crates_vendor(
         "x86_64-apple-darwin",
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-freebsd",
 
         # this is not used but its required to work around a bug in rules_rust where
         # invalid select statements can get generated in vendored BUILD files
@@ -132,6 +140,7 @@ crates_vendor(
         "x86_64-apple-darwin",
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-freebsd",
     ],
     vendor_path = "cxxbridge_crates",
 )
