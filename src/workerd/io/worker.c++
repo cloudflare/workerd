@@ -2802,7 +2802,8 @@ bool Worker::Actor::hasAlarmHandler() {
 kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime) {
   auto& context = IoContext::current();
 
-  auto retry = coCapture([this, originalTime = scheduledTime](auto runAlarmFunc) -> kj::Promise<void> {
+  auto retry = kj::coCapture([this, originalTime = scheduledTime](auto runAlarmFunc)
+      -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
     for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
