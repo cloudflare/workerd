@@ -4,12 +4,12 @@
 
 #pragma once
 
-#include <kj/debug.h>
-#include <type_traits>
+#include <kj/common.h>
 
 namespace workerd {
 
 namespace _ {
+
 template<typename Functor>
 struct CaptureForCoroutine {
   kj::Maybe<Functor> maybeFunctor;
@@ -17,35 +17,35 @@ struct CaptureForCoroutine {
   explicit CaptureForCoroutine(Functor&& f) : maybeFunctor(kj::mv(f)) {}
 
   template<typename ...Args>
-  using ReturnType = std::invoke_result_t<Functor, Args...>;
-
-  template<typename ...Args>
-  static auto coInvoke(Functor functor, Args&&... args) -> ReturnType<Args&&...> {
+  static auto coInvoke(Functor functor, Args&&... args)
+      -> decltype(functor(kj::fwd<Args>(args)...)) {
     // Since the functor is now in the local scope and no longer a member variable, it will be
     // persisted in the coroutine state.
 
-    // Note that `co_await localFunctor(...)` can still return `void`. It just happens that
+    // Note that `co_await functor(...)` can still return `void`. It just happens that
     // `co_return voidReturn();` is explicitly allowed.
     co_return co_await functor(kj::fwd<Args>(args)...);
   }
 
   template<typename ...Args>
   auto operator()(Args&&... args) {
-    auto localFunctor = kj::mv(KJ_REQUIRE_NONNULL(
-        maybeFunctor, "Attempted to invoke CaptureForCoroutine functor multiple times"));
+    KJ_IREQUIRE(maybeFunctor != nullptr,
+        "Attempted to invoke CaptureForCoroutine functor multiple times");
+    auto localFunctor = kj::mv(*kj::_::readMaybe(maybeFunctor));
     maybeFunctor = nullptr;
     return coInvoke(kj::mv(localFunctor), kj::fwd<Args>(args)...);
   }
 };
+
 }  // namespace _
 
 template <typename Functor>
 auto coCapture(Functor&& f) {
-  // Wrap a functor with a lambda that stores it on the heap, invokes it, and then attaches the
-  // functor to the result promise.
+  // Assuming `f()` returns a Promise<T> `p`, wrap `f` in such a way that it will outlive its
+  // returned Promise. Note that the returned object may only be invoked once.
   //
   // This function is meant to help address this pain point with functors that return a coroutine:
-  // https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#cp51-do-not-use-capturing-lambdas-that-are-coroutines
+  // https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rcoro-capture
   //
   // The two most common patterns where this may be useful look like so:
   // ```

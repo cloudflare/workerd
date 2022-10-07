@@ -7,14 +7,8 @@
 #include <kj/async-io.h>
 #include <kj/test.h>
 
-#include <algorithm>
-#include <random>
-
 namespace workerd {
 namespace {
-
-std::random_device randomDevice;
-std::mt19937 randomIterator(randomDevice());
 
 KJ_TEST("Verify coCapture() functors can only be run once") {
   auto io = kj::setupAsyncIo();
