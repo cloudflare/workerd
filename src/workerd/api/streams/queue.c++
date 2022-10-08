@@ -642,8 +642,12 @@ void ByteQueue::handleRead(
       // Because ReadRequest is movable, and because the ByobRequest captures
       // a reference to the ReadRequest, we wait until after it is added to
       // state.readRequests to create the associated ByobRequest.
-      KJ_REQUIRE_NONNULL(queue.getState()).pendingByobReadRequests.push_back(
-          state.readRequests.back().makeByobReadRequest(consumer, queue));
+      // If the queue state is nullptr here, it means the queue has already
+      // been closed.
+      KJ_IF_MAYBE(queueState, queue.getState()) {
+        queueState->pendingByobReadRequests.push_back(
+            state.readRequests.back().makeByobReadRequest(consumer, queue));
+      }
     }
     KJ_IF_MAYBE(listener, consumer.stateListener) {
       listener->onConsumerWantsData(js);
@@ -868,7 +872,6 @@ bool ByteQueue::handleMaybeClose(
           return false;
         }
       }
-      KJ_UNREACHABLE;
     }
 
     return state.queueTotalSize == 0;
