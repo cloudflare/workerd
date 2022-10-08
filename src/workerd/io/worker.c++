@@ -15,7 +15,6 @@
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/util/wait-list.h>
-#include <workerd/util/co-capture.h>
 #include <capnp/compat/json.h>
 #include <capnp/schema-loader.h>
 #include <kj/compat/gzip.h>
