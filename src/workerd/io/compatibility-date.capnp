@@ -109,6 +109,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   streamsJavaScriptControllers @6 :Bool
       $compatEnableFlag("streams_enable_constructors")
+      $compatEnableDate("2022-11-30")
       $compatDisableFlag("streams_disable_constructors");
   # Controls the availability of the work in progress new ReadableStream() and
   # new WritableStream() constructors backed by JavaScript underlying sources
@@ -190,6 +191,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   transformStreamJavaScriptControllers @16 :Bool
       $compatEnableFlag("transformstream_enable_standard_constructor")
+      $compatEnableDate("2022-11-30")
       $compatDisableFlag("transformstream_disable_standard_constructor");
   # Controls whether the TransformStream constructor conforms to the stream standard or not.
   # Must be used in combination with the streamsJavaScriptControllers flag.
