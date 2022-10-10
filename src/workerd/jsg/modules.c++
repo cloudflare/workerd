@@ -31,7 +31,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
 
     kj::Path targetPath = referrerPath.parent().eval(kj::str(specifier));
 
-    result = JSG_REQUIRE_NONNULL(registry->resolve(targetPath), Error,
+    result = JSG_REQUIRE_NONNULL(registry->resolve(isolate, targetPath), Error,
         "No such module \"", targetPath.toString(),
         "\".\n  imported from \"", referrerPath.toString(), "\"")
         .module.Get(isolate);
@@ -56,7 +56,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 
   KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
     auto registry = getModulesForResolveCallback(isolate);
-    auto& entry = KJ_ASSERT_NONNULL(registry->resolve(module),
+    auto& entry = KJ_ASSERT_NONNULL(registry->resolve(isolate, module),
         "module passed to evaluateSyntheticModuleCallback isn't in modules table");
 
     // V8 doc comments say this callback must always return an already-resolved promise... I don't
@@ -172,7 +172,7 @@ v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Is
 
   kj::Path targetPath = path.parent().eval(specifier);
 
-  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(targetPath),
+  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(isolate, targetPath),
       Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
@@ -252,7 +252,7 @@ namespace {
 v8::Local<v8::Module> compileEsmModule(
     v8::Isolate* isolate,
     kj::StringPtr name,
-    kj::StringPtr content) {
+    kj::ArrayPtr<const char> content) {
   // Must pass true for `is_module`, but we can skip everything else.
   const int resourceLineOffset = 0;
   const int resourceColumnOffset = 0;
@@ -301,7 +301,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
 ModuleRegistry::ModuleInfo::ModuleInfo(
     v8::Isolate* isolate,
     kj::StringPtr name,
-    kj::StringPtr content)
+    kj::ArrayPtr<const char> content)
     : ModuleInfo(isolate, compileEsmModule(isolate, name, content)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
