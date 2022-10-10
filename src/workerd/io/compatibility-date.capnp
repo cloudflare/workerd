@@ -163,6 +163,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   captureThrowsAsRejections @12 :Bool
       $compatEnableFlag("capture_async_api_throws")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("do_not_capture_async_api_throws");
   # Many worker APIs that return JavaScript promises currently throw synchronous errors
   # when exceptions occur. Per the Web Platform API specs, async functions should never
