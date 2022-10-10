@@ -220,4 +220,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The Worker can also request specific compression settings by specifying a valid
   # Sec-WebSocket-Extensions header, or setting the header to the empty string to explicitly
   # request that no compression be used.
+
+  nodeCompatExperimental @21 :Bool
+        $compatEnableFlag("node_compat_experimental");
+  # Experimental, do not use.
+  # Enables node compat imports in the application.
 }
