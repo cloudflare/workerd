@@ -206,6 +206,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   exportCommonJsDefaultNamespace @18 :Bool
       $compatEnableFlag("export_commonjs_default")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("export_commonjs_namespace");
   # Unfortunately, when the CommonJsModule type was implemented, it mistakenly exported the
   # module namespace (an object like `{default: module.exports}`) rather than exporting only
