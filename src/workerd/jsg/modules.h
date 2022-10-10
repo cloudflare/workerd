@@ -171,9 +171,9 @@ public:
     ModuleInfo& operator=(ModuleInfo&&) = default;
   };
 
-  virtual kj::Maybe<ModuleInfo&> resolve(const kj::Path& specifier) = 0;
+  virtual kj::Maybe<ModuleInfo&> resolve(v8::Isolate* isolate, const kj::Path& specifier) = 0;
 
-  virtual kj::Maybe<ModuleInfo&> resolve(v8::Local<v8::Module> module) = 0;
+  virtual kj::Maybe<ModuleInfo&> resolve(v8::Isolate* isolate, v8::Local<v8::Module> module) = 0;
 
   virtual kj::Maybe<const kj::Path&> resolvePath(v8::Local<v8::Module> referrer)= 0;
 
@@ -198,17 +198,24 @@ public:
     entries.insert(Entry(specifier, kj::fwd<ModuleInfo>(info)));
   }
 
-  kj::Maybe<ModuleInfo&> resolve(const kj::Path& specifier) override {
+  void addOnDemand(const kj::Path& specifier, kj::StringPtr sourceCode) {
+    // Register new module accessible by a given importPath. The module is instantiated
+    // after first resolve attempt within application has failed, i.e. it is possible for
+    // application to override the module.
+    entries.insert(Entry(specifier, sourceCode));
+  }
+
+  kj::Maybe<ModuleInfo&> resolve(v8::Isolate* isolate, const kj::Path& specifier) override {
     // TODO(soon): Soon we will support prefixed imports of Workers built in types.
     KJ_IF_MAYBE(entry, entries.find(specifier)) {
-      return entry->info;
+      return entry->module(isolate);
     }
     return nullptr;
   }
 
-  kj::Maybe<ModuleInfo&> resolve(v8::Local<v8::Module> module) override {
+  kj::Maybe<ModuleInfo&> resolve(v8::Isolate* isolate, v8::Local<v8::Module> module) override {
     KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->info;
+      return entry->module(isolate);
     }
     return nullptr;
   }
@@ -223,7 +230,7 @@ public:
   size_t size() const { return entries.size(); }
 
   Promise<Value> resolveDynamicImport(v8::Isolate* isolate, kj::Path specifier) override {
-    KJ_IF_MAYBE(info, resolve(specifier)) {
+    KJ_IF_MAYBE(info, resolve(isolate, specifier)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
         auto handler = [&info = *info, isolate]() -> Value {
           auto module = info.module.Get(isolate);
@@ -252,12 +259,29 @@ private:
   // object by identity. We use a kj::Table!
   struct Entry {
     kj::Path specifier;
-    ModuleInfo info;
+    kj::OneOf<ModuleInfo, kj::String> info;
 
     Entry(kj::Path& specifier, ModuleInfo info)
         : specifier(specifier.clone()), info(kj::mv(info)) {}
+
+    Entry(kj::Path& specifier, kj::StringPtr src)
+        : specifier(specifier.clone()), info(kj::str(src)) {}
+
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
+
+    ModuleInfo& module(v8::Isolate* isolate) {
+      KJ_SWITCH_ONEOF(info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          return moduleInfo;
+        }
+        KJ_CASE_ONEOF(src, kj::String) {
+          info = ModuleInfo(isolate, specifier.basename()[0], src);
+          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
+        }
+      }
+      KJ_UNREACHABLE;
+    }
   };
 
   struct SpecifierHashCallbacks {
@@ -276,11 +300,12 @@ private:
     const Entry& keyForRow(const Entry& row) const { return row; }
 
     bool matches(const Entry& entry, const Entry& other) const {
-      return entry.info.hash == other.info.hash;
+      return hashCode(entry) == hashCode(other);
     }
 
     bool matches(const Entry& entry, v8::Local<v8::Module>& module) const {
-      return entry.info.hash == module->GetIdentityHash();
+      return entry.info.template is<ModuleInfo>() &&
+          entry.info.template get<ModuleInfo>().hash == module->GetIdentityHash();
     }
 
     uint hashCode(v8::Local<v8::Module>& module) const {
@@ -288,7 +313,15 @@ private:
     }
 
     uint hashCode(const Entry& entry) const {
-      return entry.info.hash;
+      KJ_SWITCH_ONEOF(entry.info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          return moduleInfo.hash;
+        }
+        KJ_CASE_ONEOF(src, kj::String) {
+          return kj::hashCode(src);
+        }
+      }
+      KJ_UNREACHABLE;
     }
   };
 
