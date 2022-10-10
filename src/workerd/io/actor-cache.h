@@ -197,6 +197,7 @@ public:
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush();
   // See ActorCacheInterface.
 
   struct DeleteAllResults {
@@ -494,6 +495,9 @@ private:
   // When flushScheduled is true, indicates whether the output gate is already waiting on said
   // flush. The first write that does *not* set `allowUnconfirmed` causes the output gate to be
   // applied.
+
+  size_t flushesEnqueued = 0;
+  // The count of the number of flushes that have been queued without yet resolving.
 
   struct DeleteAllState {
     kj::Vector<kj::Own<Entry>> deletedDirty;

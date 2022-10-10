@@ -660,6 +660,22 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
   });
 }
 
+jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
+  KJ_IF_MAYBE(p, cache->onNoPendingFlush()) {
+    // Note that we're not actually flushing since that will happen anyway once we go async. We're
+    // merely checking if we have any pending or in-flight operations, and providing a promise that
+    // resolves when they succeed. This promise only covers operations that were scheduled before
+    // this method was invoked. If the cache has to flush again later from future operations, this
+    // promise will resolve before they complete. If this promise were to reject, then the actor's
+    // output gate will be broken first and the isolate will not resume synchronous execution.
+
+    auto& context = IoContext::current();
+    return context.awaitIo(kj::mv(*p));
+  } else {
+    return js.resolvedPromise();
+  }
+}
+
 ActorCacheInterface& DurableObjectTransaction::getCache(OpName op) {
   JSG_REQUIRE(!rolledBack, Error, kj::str("Cannot ", op, " on rolled back transaction"));
   auto& result = *JSG_REQUIRE_NONNULL(cacheTxn, Error,

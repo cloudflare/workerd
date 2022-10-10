@@ -2116,7 +2116,10 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
     auto flushPromise = lastFlush.addBranch().then([this]() {
       flushScheduled = false;
       flushScheduledWithOutputGate = false;
-      return flushImpl();
+      ++flushesEnqueued;
+      return flushImpl().attach(kj::defer([this](){
+        --flushesEnqueued;
+      }));
     });
 
     if (options.allowUnconfirmed) {
@@ -2137,6 +2140,34 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
     lastFlush = gate.lockWhile(lastFlush.addBranch()).fork();
     flushScheduledWithOutputGate = true;
   }
+}
+
+kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
+  // This function returns a Maybe<Promise> because a falsy maybe allows the jsg interface to make
+  // a resolved jsg::Promise. This is meaningfully different from a ready kj::Promise because it
+  // allows the next continuation to run immediately on the microtask queue instead of returning to
+  // the kj event loop and fulfilling a resolver that enqueues the continuation.
+
+  if (lru.options.neverFlush) {
+    // We won't ever flush (usually because we're a preview session), so return a falsy maybe.
+    return nullptr;
+  }
+
+  if (flushScheduled) {
+    // There is a flush that is currently scheduled but not yet running, we need to wait for that
+    // flush to complete before resolving the jsg::Promise.
+    return lastFlush.addBranch();
+  }
+
+  if (flushesEnqueued > 0) {
+    // There is no flush that is scheduled but there is one running, we need to wait for that flush
+    // to complete before resolving the jsg::Promise.
+    return lastFlush.addBranch();
+  }
+
+  // There are no scheduled or in-flight flushes (and there may never have been any), we can return
+  // a false maybee.
+  return nullptr;
 }
 
 constexpr size_t bytesToWordsRoundUp(size_t bytes) {
@@ -2781,6 +2812,9 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
 
     // Now we must flush any writes that happened after the deleteAll(). (If there are none, this
     // will complete quickly.)
+    // TODO(soon) This will use the write options for the deleteAll() even if the options for future
+    // operations differ. This can mean that we will not wait for the output gate when we were asked
+    // to do so. We should fix this.
     return flushImpl();
   }, [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
