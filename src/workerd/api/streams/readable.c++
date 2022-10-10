@@ -291,7 +291,7 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStream::ReadableStream(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source)
-    : controller(ReadableStreamInternalController(ioContext.addObject(kj::mv(source)))) {
+    : controller(kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)))) {
   getController().setOwnerRef(*this);
 }
 
@@ -301,14 +301,11 @@ ReadableStream::ReadableStream(Controller controller) : controller(kj::mv(contro
 
 ReadableStreamController& ReadableStream::getController() {
   KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, ReadableStreamInternalController) {
-      return c;
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
+      return *c;
     }
-    KJ_CASE_ONEOF(c, ReadableStreamJsController) {
-      return c;
-    }
-    KJ_CASE_ONEOF(c, ReadableStreamJsTeeController) {
-      return c;
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
+      return *c;
     }
   }
   KJ_UNREACHABLE;
@@ -460,7 +457,7 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
 
-  auto stream = jsg::alloc<ReadableStream>(ReadableStreamJsController());
+  auto stream = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>());
   static_cast<ReadableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
