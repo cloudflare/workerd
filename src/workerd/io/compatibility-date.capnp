@@ -149,6 +149,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   specCompliantUrl @10 :Bool
       $compatEnableFlag("url_standard")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("url_original");
   # The original URL implementation based on kj::Url is not compliant with the
   # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
