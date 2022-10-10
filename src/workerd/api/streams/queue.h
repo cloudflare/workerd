@@ -281,6 +281,11 @@ template <typename Self>
 class ConsumerImpl final {
   // Provides the underlying implementation shared by ByteQueue::Consumer and ValueQueue::Consumer
 public:
+  struct StateListener {
+    virtual void onConsumerClose() = 0;
+    virtual void onConsumerError(jsg::Value reason) = 0;
+  };
+
   using QueueImpl = QueueImpl<Self>;
 
   struct UpdateBackpressureScope final {
@@ -299,7 +304,8 @@ public:
   using Entry = typename Self::Entry;
   using QueueEntry = typename Self::QueueEntry;
 
-  ConsumerImpl(QueueImpl& queue): queue(queue) {
+  ConsumerImpl(QueueImpl& queue, StateListener* stateListener = nullptr)
+    : queue(queue), stateListener(stateListener) {
     queue.addConsumer(*this);
   }
 
@@ -427,6 +433,16 @@ public:
     }
   }
 
+  bool hasReadRequests() const {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(closed, Closed) { return false; }
+      KJ_CASE_ONEOF(errored, Errored) { return false; }
+      KJ_CASE_ONEOF(ready, Ready) {
+        return ready.readRequests.empty();
+      }
+    }
+  }
+
 private:
   struct Close {};
   // A sentinel used in the buffer to signal that close() has been called.
@@ -441,6 +457,7 @@ private:
 
   QueueImpl& queue;
   kj::OneOf<Ready, Closed, Errored> state = Ready();
+  StateListener* stateListener;
 
   bool isClosing() {
     // Closing state is determined by whether there is a Close sentinel that has been
@@ -470,6 +487,10 @@ private:
           request.reject(js, *reason);
         }
         state = kj::mv(*reason);
+        if (stateListener != nullptr) {
+          stateListener->onConsumerError(reason->addRef(js));
+          stateListener = nullptr;
+        }
       } else {
         // Otherwise, if the buffer is empty isClosing() is true, resolve the
         // remaining read promises with close indicators and update the state
@@ -480,6 +501,10 @@ private:
             request.resolveAsDone(js);
           }
           state.template init<Closed>();
+          if (stateListener != nullptr) {
+            stateListener->onConsumerClose();
+            stateListener = nullptr;
+          }
         }
       }
     }
@@ -533,8 +558,8 @@ public:
 
   class Consumer final {
   public:
-    Consumer(ValueQueue& queue);
-    Consumer(QueueImpl& queue);
+    Consumer(ValueQueue& queue, ConsumerImpl::StateListener* stateListener = nullptr);
+    Consumer(QueueImpl& queue, ConsumerImpl::StateListener* stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -554,7 +579,7 @@ public:
 
     size_t size();
 
-    kj::Own<Consumer> clone(jsg::Lock& js);
+    kj::Own<Consumer> clone(jsg::Lock& js, ConsumerImpl::StateListener* stateListener = nullptr);
 
   private:
     ConsumerImpl impl;
@@ -674,8 +699,8 @@ public:
 
   class Consumer {
   public:
-    Consumer(ByteQueue& queue);
-    Consumer(QueueImpl& queue);
+    Consumer(ByteQueue& queue, ConsumerImpl::StateListener* stateListener = nullptr);
+    Consumer(QueueImpl& queue, ConsumerImpl::StateListener* stateListener = nullptr);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -695,7 +720,7 @@ public:
 
     size_t size() const;
 
-    kj::Own<Consumer> clone(jsg::Lock& js);
+    kj::Own<Consumer> clone(jsg::Lock& js, ConsumerImpl::StateListener* stateListener = nullptr);
 
   private:
     ConsumerImpl impl;
