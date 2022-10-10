@@ -843,20 +843,16 @@ public:
 //     (the kj::Array object holds a Global to the unwrapped ArrayBuffer)
 //   - ArrayBufferView -> kj::Array<kj::byte>
 //     (the kj::Array object holds a Global to the unwrapped ArrayBufferView's backing buffer)
-//   - ArrayBuffer -> kj::ArrayPtr<kj::byte>
-//   - ArrayBufferView -> kj::ArrayPtr<kj::byte>
 //
-// Note that there is no wrapping conversion from kj::ArrayPtr<kj::byte>, since it does not own its
-// own buffer -- fine in C++, but problematic in a GC language like JS. Since the JS object would
-// need to hold shared ownership of its buffer, but we don't know who owns the buffer viewed by an
-// ArrayPtr, we would need to create a copy of the buffer. You should probably make that copy
-// explicitly with a kj::heapArray() call, meaning we only need to wrap kj::ArrayPtr<kj::byte>s.
+// Note that there are no conversions for kj::ArrayPtr<kj::byte>, since it does not own its own
+// buffer -- fine in C++, but problematic in a GC language like JS. Restricting the interface to
+// only operate on owned arrays makes memory management simpler and safer in both directions.
 //
 // Logically a kj::Array<byte> could be considered analogous to a Uint8Array in JS, and for a time
 // that was the wrapping conversion implemented by this wrapper. However, the most common use cases
 // in web platform APIs involve accepting BufferSources for processing as immutable input and
 // returning ArrayBuffers. Since a kj::byte does not map to any JavaScript primitive, establishing
-// a mapping between ArrayBuffer/ArrayBufferView and Array<byte>/ArrayPtr<byte> is unambiguous and
+// a mapping between ArrayBuffer/ArrayBufferView and Array<byte> is unambiguous and
 // convenient. The few places where a specific TypedArray is expected (e.g. Uint8Array) can be
 // handled explicitly with a v8::Local<v8::Uint8Array> (or other appropriate TypedArray type).
 //
@@ -870,13 +866,13 @@ public:
 // This suggests the following rules of thumb:
 //
 // 1. If a BufferSource parameter is used as input to a:
-//   - synchronous method: accept a `kj::ArrayPtr<const kj::byte>`.
+//   - synchronous method: accept a `kj::Array<const kj::byte>`.
 //   - asynchronous method (user is allowed to re-use the buffer during processing): accept a
-//     `kj::ArrayPtr<const kj::byte>` and explicitly copy its bytes.
+//     `kj::Array<const kj::byte>` and explicitly copy its bytes.
 //
 // 2. If a method accepts an ArrayBufferView that it is expected to mutate:
 //   - accept a `v8::Local<v8::ArrayBufferView>` explicitly (handled by V8HandleWrapper in
-//     type-wrapper.h) rather than a `kj::ArrayPtr<kj::byte>` -- otherwise your method's contract
+//     type-wrapper.h) rather than a `kj::Array<kj::byte>` -- otherwise your method's contract
 //     will be wider than intended.
 //   - use `jsg::asBytes()` as a quick way to get a `kj::ArrayPtr<kj::byte>` view onto it.
 //
