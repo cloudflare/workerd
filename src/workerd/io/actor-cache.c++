@@ -208,8 +208,8 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
 
     // We want to break the OutputGate. We can't quite just do `gate.lockWhile(exception)` because
     // that returns a promise which we'd then have to put somewhere so that we don't immediately
-    // cancel it. Instead, we can ensure that a flush has been scheduled. `flush()`, when called,
-    // will throw an exception which breaks the gate.
+    // cancel it. Instead, we can ensure that a flush has been scheduled. `flushImpl()`, when
+    // called, will throw an exception which breaks the gate.
     ensureFlushScheduled(WriteOptions());
 
     kj::throwFatalException(kj::cp(exception));
@@ -2009,9 +2009,9 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
         // Entry may have `countedDelete` indicating we're still waiting to get a count from a
         // previous delete operation. If so, we'll need to inherit it in case that delete operation
         // fails and we end up retrying. Note that the new entry could be a positive entry rather
-        // than a negative one (a `put()` rather than a `delete()`). That is OK -- in `flush()` we
-        // will still see the presence of `countedDelete` and realize we have to issue a delete on
-        // the key before we issue a put, just for the sake of counting it.
+        // than a negative one (a `put()` rather than a `delete()`). That is OK -- in `flushImpl()`
+        // we will still see the presence of `countedDelete` and realize we have to issue a delete
+        // on the key before we issue a put, just for the sake of counting it.
         newEntry->countedDelete = kj::mv(slot->countedDelete);
         break;
       case CLEAN:
@@ -2116,7 +2116,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
     auto flushPromise = lastFlush.addBranch().then([this]() {
       flushScheduled = false;
       flushScheduledWithOutputGate = false;
-      return flush();
+      return flushImpl();
     });
 
     if (options.allowUnconfirmed) {
@@ -2171,7 +2171,7 @@ struct ActorCache::CountedBatch {
   CountedBatch(CountedDelete& countedDelete): countedDelete(countedDelete) {}
 };
 
-kj::Promise<void> ActorCache::flush(uint retryCount) {
+kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   requireNotOom();
 
   // Whenever we flush, we MUST write ALL dirty entries in a single transaction. This is necessary
@@ -2311,7 +2311,7 @@ kj::Promise<void> ActorCache::flush(uint retryCount) {
     if (r->deletedDirty.empty()) {
       // There were no dirty entries before deleteAll() was called, so we can move on to invoking
       // deleteAll() itself.
-      return flushDeleteAll();
+      return flushImplDeleteAll();
     }
 
     for (auto& entry: r->deletedDirty) {
@@ -2392,15 +2392,15 @@ kj::Promise<void> ActorCache::flush(uint retryCount) {
     if (deleteAllUpcoming) {
       // The writes we flushed were writes that had occurred before a deleteAll. Now that they are
       // written, we must perform the deleteAll() itself.
-      return flushDeleteAll();
+      return flushImplDeleteAll();
     }
 
     auto lock = lru.cleanList.lockExclusive();
 
     KJ_IF_MAYBE(r, requestedDeleteAll) {
       // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
-      // time that we were waiting for the flush(). We want to remove the `FLUSHING` entries from
-      // that vector now.
+      // time that we were waiting for the flushImpl(). We want to remove the `FLUSHING` entries
+      // from that vector now.
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
       auto dst = r->deletedDirty.begin();
       for (auto src = r->deletedDirty.begin(); src != r->deletedDirty.end(); ++src) {
@@ -2425,7 +2425,7 @@ kj::Promise<void> ActorCache::flush(uint retryCount) {
         // present. Note that if, during the flush, the entry was overwritten, then the new entry
         // will have inherited the `countedDelete`, and will still be DIRTY at this point. That is
         // OK, because the `countedDelete`'s fulfiller will have already been fulfilled, and
-        // therefore the next flush() will see that it is obsolete and discard it.
+        // therefore the next flushImpl() will see that it is obsolete and discard it.
         entry.countedDelete = nullptr;
 
         dirtyList.remove(entry);
@@ -2466,7 +2466,7 @@ kj::Promise<void> ActorCache::flush(uint retryCount) {
   }, [this,retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flush(retryCount + 1);
+      return flushImpl(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
                jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
@@ -2755,7 +2755,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   }));
 }
 
-kj::Promise<void> ActorCache::flushDeleteAll(uint retryCount) {
+kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
   // By this point, we've completed any writes that had originally been performed before
   // deleteAll() was called, and we're ready to perform the deleteAll() itself.
 
@@ -2781,11 +2781,11 @@ kj::Promise<void> ActorCache::flushDeleteAll(uint retryCount) {
 
     // Now we must flush any writes that happened after the deleteAll(). (If there are none, this
     // will complete quickly.)
-    return flush();
+    return flushImpl();
   }, [this, retryCount](kj::Exception&& e) -> kj::Promise<void> {
     static const size_t MAX_RETRIES = 4;
     if (e.getType() == kj::Exception::Type::DISCONNECTED && retryCount < MAX_RETRIES) {
-      return flushDeleteAll(retryCount + 1);
+      return flushImplDeleteAll(retryCount + 1);
     } else if (jsg::isTunneledException(e.getDescription()) ||
                jsg::isDoNotLogException(e.getDescription())) {
       // Before passing along the exception, give it the proper brokenness reason.
