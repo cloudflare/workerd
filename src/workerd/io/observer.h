@@ -112,6 +112,10 @@ public:
 
   class LockTiming {
   public:
+    virtual void waitingForOtherIsolate(kj::StringPtr id) {}
+    // Called by `Isolate::takeAsyncLock()` when it is blocked by a different isolate lock on the
+    // same thread.
+
     virtual void reportAsyncInfo(uint currentLoad, bool threadWaitingSameLock,
         uint threadWaitingDifferentLockCount) {}
     // Call if this is an async lock attempt, before constructing LockRecord.

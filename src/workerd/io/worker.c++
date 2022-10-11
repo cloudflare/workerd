@@ -1781,6 +1781,9 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
       // be released before we try to lock a different isolate.
       // TODO(perf): Use of ForkedPromise leads to thundering herd here. Should be minor in practice,
       //   but we could consider creating another linked list instead...
+      KJ_IF_MAYBE(lt, lockTiming) {
+        lt->get()->waitingForOtherIsolate(waiter->isolate->getId());
+      }
       co_await waiter->releasePromise.addBranch();
     }
   }
