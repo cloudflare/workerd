@@ -76,6 +76,12 @@ BackingStore::BackingStore(
               kj::str("byteLength must be a multiple of ", this->elementSize, "."));
 }
 
+bool BackingStore::operator==(const BackingStore& other) {
+  return backingStore == other.backingStore &&
+         byteLength == other.byteLength &&
+         byteOffset == other.byteOffset;
+}
+
 BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
     : handle(js.v8Ref(handle)),
       maybeBackingStore(BackingStore(

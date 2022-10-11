@@ -118,6 +118,8 @@ public:
 
   inline operator kj::ArrayPtr<kj::byte>() KJ_LIFETIMEBOUND { return asArrayPtr(); }
 
+  bool operator==(const BackingStore& other);
+
   inline const kj::ArrayPtr<const kj::byte> asArrayPtr() const KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
     return kj::ArrayPtr<kj::byte>(
@@ -145,6 +147,23 @@ public:
         backingStore,
         byteLength,
         byteOffset,
+        getBufferSourceElementSize<T>(),
+        construct<T>,
+        checkIsIntegerType<T>());
+  }
+
+  template <BufferSourceType T = v8::Uint8Array>
+  BackingStore getTypedViewSlice(size_t start, size_t end) {
+    KJ_ASSERT(start <= end);
+    auto length = end - start;
+    auto startOffset = byteOffset + start;
+    KJ_ASSERT(length <= byteLength);
+    KJ_ASSERT(startOffset <= backingStore->ByteLength());
+    KJ_ASSERT(startOffset + length <= backingStore->ByteLength());
+    return BackingStore(
+        backingStore,
+        length,
+        startOffset,
         getBufferSourceElementSize<T>(),
         construct<T>,
         checkIsIntegerType<T>());
