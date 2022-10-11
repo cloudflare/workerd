@@ -901,7 +901,7 @@ struct Worker::Script::Impl {
       //
       // We do not need to use limitEnforcer.enterDynamicImportJs() here because this should
       // already be covered by the startup resource limiter.
-      return jsg::resolvedPromise(lock.v8Isolate, handler());
+      return lock.resolvedPromise(handler());
     });
 
     moduleRegistry = kj::mv(modules);
