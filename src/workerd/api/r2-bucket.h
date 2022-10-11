@@ -11,14 +11,10 @@
 
 namespace workerd::api::public_beta {
 
-<<<<<<< HEAD
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
 
-||||||| parent of 235d555 (add implementation for R2 multipart bindings)
-=======
 class R2MultipartUpload;
 
->>>>>>> 235d555 (add implementation for R2 multipart bindings)
 class R2Bucket: public jsg::Object {
   // A capability to an R2 Bucket.
 
