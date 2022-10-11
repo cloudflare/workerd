@@ -14,8 +14,8 @@ class R2MultipartUpload: public jsg::Object {
     R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket):
       key(kj::mv(key)), uploadId(kj::mv(uploadId)), bucket(kj::mv(bucket)) {}
 
-    kj::String getKey() const { return kj::str(key); }
-    kj::String getUploadId() const { return kj::str(uploadId); }
+    kj::StringPtr getKey() const { return kj::StringPtr(key); }
+    kj::StringPtr getUploadId() const { return kj::StringPtr(uploadId); }
 
     jsg::Promise<R2Bucket::UploadedPart> uploadPart(
       jsg::Lock& js,
