@@ -74,6 +74,8 @@ struct Trace @0x8e8d911203762d34 {
 
   cpuTime @10 :UInt64;
   wallTime @11 :UInt64;
+
+  dispatchNamespace @12 :Text;
 }
 
 struct ScheduledRun @0xd98fc1ae5c8095d0 {
