@@ -221,8 +221,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Sec-WebSocket-Extensions header, or setting the header to the empty string to explicitly
   # request that no compression be used.
 
-  nodeCompatExperimental @21 :Bool
-        $compatEnableFlag("node_compat_experimental");
+  nodeJs18CompatExperimental @21 :Bool
+        $compatEnableFlag("nodejs_18_compat_experimental");
   # Experimental, do not use.
-  # Enables node compat imports in the application.
+  # Enables nodejs 18 compat imports in the application.
 }
