@@ -52,6 +52,11 @@ class R2MultipartUpload: public jsg::Object {
     kj::String key;
     kj::String uploadId;
     jsg::Ref<R2Bucket> bucket;
+
+  private:
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(bucket);
+    }
 };
 
 }
