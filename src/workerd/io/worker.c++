@@ -1330,7 +1330,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         KJ_CASE_ONEOF(mainModule, kj::Path) {
           // const_cast OK because we hold the lock.
           auto& registry = KJ_ASSERT_NONNULL(const_cast<Script&>(*script).impl->getModuleRegistry());
-          KJ_IF_MAYBE(entry, registry.resolve(mainModule)) {
+          KJ_IF_MAYBE(entry, registry.resolve(lock.v8Isolate, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");
             auto module = entry->module.Get(lock.v8Isolate);
