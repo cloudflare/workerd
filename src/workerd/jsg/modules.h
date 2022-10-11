@@ -198,10 +198,11 @@ public:
     entries.insert(Entry(specifier, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addOnDemand(const kj::Path& specifier, kj::StringPtr sourceCode) {
+  void addBuiltinModule(const kj::Path& specifier, kj::StringPtr sourceCode) {
     // Register new module accessible by a given importPath. The module is instantiated
     // after first resolve attempt within application has failed, i.e. it is possible for
     // application to override the module.
+    // The expectation is for this method to be called while building worker global context.
     entries.insert(Entry(specifier, sourceCode));
   }
 
@@ -276,7 +277,9 @@ private:
           return moduleInfo;
         }
         KJ_CASE_ONEOF(src, kj::String) {
-          info = ModuleInfo(isolate, specifier.basename()[0], src);
+          // strip all path prefixes from module name
+          kj::StringPtr moduleName = specifier.basename()[0];
+          info = ModuleInfo(isolate, moduleName, src);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
       }
