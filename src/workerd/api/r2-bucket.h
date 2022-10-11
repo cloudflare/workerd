@@ -285,9 +285,12 @@ public:
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
       kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(jsg::Lock& js,
-      kj::String key, jsg::Optional<MultipartOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
+    jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<MultipartOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
   jsg::Promise<UploadedPart> uploadPart(jsg::Lock& js,
       kj::String key, kj::String uploadId, int partNumber, R2PutValue value,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);

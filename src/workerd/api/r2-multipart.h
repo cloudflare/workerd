@@ -17,15 +17,28 @@ class R2MultipartUpload: public jsg::Object {
     kj::String getKey() const { return kj::str(key); }
     kj::String getUploadId() const { return kj::str(uploadId); }
 
-    jsg::Promise<R2Bucket::UploadedPart> uploadPart(jsg::Lock& js,
-        int partNumber, R2PutValue value,
-        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) { return bucket.get()->uploadPart(js, kj::str(key), kj::str(uploadId), partNumber, kj::mv(value), errorType); }
-    jsg::Promise<void> abort(jsg::Lock& js,
-        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType)
-          { return bucket.get()->abortMultipartUpload(js, kj::str(key), kj::str(uploadId), errorType); }
-    jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(jsg::Lock& js,
-        kj::Array<R2Bucket::UploadedPart> uploadedParts, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType)
-          { return bucket.get()->completeMultipartUpload(js, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts), errorType); }
+    jsg::Promise<R2Bucket::UploadedPart> uploadPart(
+      jsg::Lock& js,
+      int partNumber,
+      R2PutValue value,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+        return bucket.get()->uploadPart(
+          js, kj::str(key), kj::str(uploadId), partNumber, kj::mv(value), errorType
+        );
+    }
+    jsg::Promise<void> abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+      return bucket.get()->abortMultipartUpload(
+        js, kj::str(key), kj::str(uploadId), errorType
+      );
+    }
+    jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(
+      jsg::Lock& js,
+      kj::Array<R2Bucket::UploadedPart> uploadedParts,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+        return bucket.get()->completeMultipartUpload(
+          js, kj::str(key), kj::str(uploadId), kj::mv(uploadedParts), errorType
+        );
+    }
 
     JSG_RESOURCE_TYPE(R2MultipartUpload) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);
