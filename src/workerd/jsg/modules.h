@@ -198,11 +198,12 @@ public:
     entries.insert(Entry(specifier, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addOnDemand(const kj::Path& specifier, kj::ArrayPtr<const char> sourceCode) {
+  void addBuiltinModule(const kj::Path& specifier, kj::ArrayPtr<const char> sourceCode) {
     // Register new module accessible by a given importPath. The module is instantiated
     // after first resolve attempt within application has failed, i.e. it is possible for
     // application to override the module.
     // sourceCode has to exist while this ModuleRegistry exists.
+    // The expectation is for this method to be called during the assembly of worker global context.
     entries.insert(Entry(specifier, sourceCode));
   }
 
@@ -261,6 +262,7 @@ private:
   struct Entry {
     kj::Path specifier;
     kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>> info;
+    // Either instantiated module or module source code.
 
     Entry(const kj::Path& specifier, ModuleInfo info)
         : specifier(specifier.clone()), info(kj::mv(info)) {}
@@ -272,12 +274,14 @@ private:
     Entry& operator=(Entry&&) = default;
 
     ModuleInfo& module(v8::Isolate* isolate) {
+      // Lazily instantiate module from source code if needed
+
       KJ_SWITCH_ONEOF(info) {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return moduleInfo;
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(isolate, specifier.basename()[0], src);
+          info = ModuleInfo(isolate, specifier.toString(), src);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
       }
