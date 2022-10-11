@@ -99,7 +99,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::CommonJsModuleInfo) {
         v8::TryCatch catcher(isolate);
-        // const_cast is safe here because we're protected by the isolate lock.
+        // const_cast is safe here because we're protected by the isolate js.
         auto& commonjs = const_cast<ModuleRegistry::CommonJsModuleInfo&>(info);
         try {
           commonjs.evalFunc(js);
@@ -172,8 +172,8 @@ v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Is
   KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
 
   kj::Path targetPath = path.parent().eval(specifier);
-  auto& lock = Lock::from(isolate);
-  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(lock, targetPath),
+  auto& js = Lock::from(isolate);
+  auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath),
       Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
   // js stack that will include the parent module's name and location of the failed require().
@@ -215,18 +215,18 @@ void NonModuleScript::run(v8::Local<v8::Context> context) const {
   check(boundScript->Run(context));
 }
 
-NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& lock) {
+NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js) {
   // Create a dummy script origin for it to appear in Sources panel.
-  auto isolate = lock.v8Isolate;
+  auto isolate = js.v8Isolate;
   v8::ScriptOrigin origin(isolate, v8StrIntern(isolate, "worker.js"));
   v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
-  return NonModuleScript(lock,
+  return NonModuleScript(js,
       check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
 }
 
-void instantiateModule(jsg::Lock& lock, v8::Local<v8::Module>& module) {
+void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   KJ_ASSERT(!module.IsEmpty());
-  auto isolate = lock.v8Isolate;
+  auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   jsg::check(module->InstantiateModule(context, &resolveCallback));
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
@@ -253,7 +253,7 @@ void instantiateModule(jsg::Lock& lock, v8::Local<v8::Module>& module) {
 
 namespace {
 v8::Local<v8::Module> compileEsmModule(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content) {
   // Must pass true for `is_module`, but we can skip everything else.
@@ -264,61 +264,61 @@ v8::Local<v8::Module> compileEsmModule(
   const bool resourceIsOpaque = false;
   const bool isWasm = false;
   const bool isModule = true;
-  v8::ScriptOrigin origin(lock.v8Isolate,
-                          v8StrIntern(lock.v8Isolate, name),
+  v8::ScriptOrigin origin(js.v8Isolate,
+                          v8StrIntern(js.v8Isolate, name),
                           resourceLineOffset,
                           resourceColumnOffset,
                           resourceIsSharedCrossOrigin, scriptId, {},
                           resourceIsOpaque, isWasm, isModule);
-  v8::ScriptCompiler::Source source(jsg::v8Str(lock.v8Isolate, content), origin);
-  return jsg::check(v8::ScriptCompiler::CompileModule(lock.v8Isolate, &source));
+  v8::ScriptCompiler::Source source(jsg::v8Str(js.v8Isolate, content), origin);
+  return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 }
 
 v8::Local<v8::Module> createSyntheticModule(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     kj::StringPtr name,
     kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports) {
   std::vector<v8::Local<v8::String>> exportNames;
-  exportNames.push_back(v8StrIntern(lock.v8Isolate, "default"_kj));
+  exportNames.push_back(v8StrIntern(js.v8Isolate, "default"_kj));
   KJ_IF_MAYBE(exports, maybeExports) {
     for (auto& name : *exports) {
-      exportNames.push_back(v8StrIntern(lock.v8Isolate, name));
+      exportNames.push_back(v8StrIntern(js.v8Isolate, name));
     }
   }
   return v8::Module::CreateSyntheticModule(
-      lock.v8Isolate,
-      v8StrIntern(lock.v8Isolate, name),
+      js.v8Isolate,
+      v8StrIntern(js.v8Isolate, name),
       exportNames,
       &evaluateSyntheticModuleCallback);
 }
 }  // namespace
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     v8::Local<v8::Module> module,
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic)
-    : module(lock.v8Isolate, module),
+    : module(js.v8Isolate, module),
       hash(module->GetIdentityHash()),
       maybeSynthetic(kj::mv(maybeSynthetic)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content)
-    : ModuleInfo(lock, compileEsmModule(lock, name, content)) {}
+    : ModuleInfo(js, compileEsmModule(js, name, content)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     kj::StringPtr name,
     kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
     SyntheticModuleInfo synthetic)
-    : ModuleInfo(lock, createSyntheticModule(lock, name, maybeExports), kj::mv(synthetic)) {}
+    : ModuleInfo(js, createSyntheticModule(js, name, maybeExports), kj::mv(synthetic)) {}
 
 Ref<CommonJsModuleContext>
 ModuleRegistry::CommonJsModuleInfo::initModuleContext(
-    jsg::Lock& lock,
+    jsg::Lock& js,
     kj::StringPtr name) {
-  return jsg::alloc<jsg::CommonJsModuleContext>(lock.v8Isolate, kj::Path::parse(name));
+  return jsg::alloc<jsg::CommonJsModuleContext>(js.v8Isolate, kj::Path::parse(name));
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(

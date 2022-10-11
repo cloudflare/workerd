@@ -834,13 +834,13 @@ struct Worker::Script::Impl {
     return moduleRegistry;
   }
 
-  void setModuleRegistry(jsg::Lock& lock, kj::Own<jsg::ModuleRegistry> modules) {
+  void setModuleRegistry(jsg::Lock& js, kj::Own<jsg::ModuleRegistry> modules) {
     struct DynamicImportResult {
       jsg::Value value;
       bool isException = false;
     };
 
-    modules->setDynamicImportCallback([](jsg::Lock& lock, auto handler) mutable {
+    modules->setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
       if (IoContext::hasCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
@@ -886,7 +886,7 @@ struct Worker::Script::Impl {
             }
             return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
           });
-        }).attach(kj::atomicAddRef(worker)), [isolate=lock.v8Isolate](auto result) {
+        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](auto result) {
           if (result.isException) {
             return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
           }
@@ -901,7 +901,7 @@ struct Worker::Script::Impl {
       //
       // We do not need to use limitEnforcer.enterDynamicImportJs() here because this should
       // already be covered by the startup resource limiter.
-      return lock.resolvedPromise(handler());
+      return js.resolvedPromise(handler());
     });
 
     moduleRegistry = kj::mv(modules);

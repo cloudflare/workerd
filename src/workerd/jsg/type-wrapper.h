@@ -470,8 +470,6 @@ public:
 
   static constexpr const char* getName(v8::Isolate**) { return "Isolate"; }
 
-  static constexpr const char* getName(jsg::Lock*) { return "Lock"; }
-
   v8::Isolate* unwrap(v8::Local<v8::Context> context, v8::Isolate**) {
     return context->GetIsolate();
   }
