@@ -33,6 +33,10 @@ const chatWorker :Workerd.Worker = (
   # The Worker has two Durable Object classes, each of which needs an attached namespace.
   # The `uniqueKey`s can be any string, and are used to generate IDs. Keep the keys secret if you
   # don't want clients to be able to forge valid IDs -- or don't, if you don't care about that.
+  #
+  # In the example here, we've generated 32-character random hex keys, but again, the string can
+  # be anything. These were generated specifically for this demo config; we do not use thes
+  # values in production.
   durableObjectNamespaces = [
     (className = "ChatRoom", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
     (className = "RateLimiter", uniqueKey = "b37b1c65c4291f3170033b0e9dd30ee1"),
