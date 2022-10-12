@@ -220,4 +220,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The Worker can also request specific compression settings by specifying a valid
   # Sec-WebSocket-Extensions header, or setting the header to the empty string to explicitly
   # request that no compression be used.
+
+  nodeJs18CompatExperimental @21 :Bool
+        $compatEnableFlag("nodejs_18_compat_experimental");
+  # Experimental, do not use.
+  # Enables nodejs 18 compat imports in the application.
+  # This is currently a work in progress mechanism that is not yet available for use in workerd.
+  # WARNING: IT WILL BREAK in the future. Do not ignore this warning.
 }
