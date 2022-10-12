@@ -149,13 +149,6 @@ public:
     JSG_STRUCT(httpMetadata, customMetadata);
   };
 
-  struct UploadedPart {
-    int partNumber;
-    kj::String etag;
-
-    JSG_STRUCT(partNumber, etag);
-  };
-
   class HeadResult: public jsg::Object {
   public:
     HeadResult(kj::String name, kj::String version, double size,

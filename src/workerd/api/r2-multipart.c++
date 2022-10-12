@@ -16,7 +16,7 @@
 
 namespace workerd::api::public_beta {
 
-jsg::Promise<R2Bucket::UploadedPart> R2MultipartUpload::uploadPart(
+jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
   jsg::Lock& js,
   int partNumber,
   R2PutValue value,
@@ -60,7 +60,7 @@ jsg::Promise<R2Bucket::UploadedPart> R2MultipartUpload::uploadPart(
 
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::String etag = kj::str(responseBuilder.getEtag());
-      R2Bucket::UploadedPart uploadedPart = { partNumber, kj::mv(etag) };
+      UploadedPart uploadedPart = { partNumber, kj::mv(etag) };
       return uploadedPart;
     });
   });
@@ -68,7 +68,7 @@ jsg::Promise<R2Bucket::UploadedPart> R2MultipartUpload::uploadPart(
 
 jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
   jsg::Lock& js,
-  kj::Array<R2Bucket::UploadedPart> uploadedParts,
+  kj::Array<UploadedPart> uploadedParts,
   const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
@@ -86,7 +86,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
     completeMultipartUploadBuilder.setUploadId(uploadId);
 
     auto partsList = completeMultipartUploadBuilder.initParts(uploadedParts.size());
-    R2Bucket::UploadedPart* currentPart = uploadedParts.begin();
+    UploadedPart* currentPart = uploadedParts.begin();
     for (unsigned int i = 0; i < uploadedParts.size(); i++) {
       int partNumber = currentPart->partNumber;
       JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
