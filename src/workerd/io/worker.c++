@@ -834,13 +834,13 @@ struct Worker::Script::Impl {
     return moduleRegistry;
   }
 
-  void setModuleRegistry(jsg::Lock& lock, kj::Own<jsg::ModuleRegistry> modules) {
+  void setModuleRegistry(jsg::Lock& js, kj::Own<jsg::ModuleRegistry> modules) {
     struct DynamicImportResult {
       jsg::Value value;
       bool isException = false;
     };
 
-    modules->setDynamicImportCallback([](v8::Isolate* isolate, auto handler) mutable {
+    modules->setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
       if (IoContext::hasCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
@@ -886,7 +886,7 @@ struct Worker::Script::Impl {
             }
             return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
           });
-        }).attach(kj::atomicAddRef(worker)), [isolate](auto result) {
+        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](auto result) {
           if (result.isException) {
             return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
           }
@@ -901,7 +901,7 @@ struct Worker::Script::Impl {
       //
       // We do not need to use limitEnforcer.enterDynamicImportJs() here because this should
       // already be covered by the startup resource limiter.
-      return jsg::resolvedPromise(isolate, handler());
+      return js.resolvedPromise(handler());
     });
 
     moduleRegistry = kj::mv(modules);
@@ -1132,7 +1132,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
             // limit just to be safe. Don't add it to the rollover bank, though.
             auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
             impl->unboundScriptOrMainModule =
-                jsg::NonModuleScript::compile(script.mainScript, lock.v8Isolate);
+                jsg::NonModuleScript::compile(script.mainScript, lock);
           }
 
           break;
@@ -1330,7 +1330,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         KJ_CASE_ONEOF(mainModule, kj::Path) {
           // const_cast OK because we hold the lock.
           auto& registry = KJ_ASSERT_NONNULL(const_cast<Script&>(*script).impl->getModuleRegistry());
-          KJ_IF_MAYBE(entry, registry.resolve(lock.v8Isolate, mainModule)) {
+          KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");
             auto module = entry->module.Get(lock.v8Isolate);
@@ -1339,7 +1339,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               auto limitScope = script->isolate->getLimitEnforcer()
                   .enterStartupJs(lock, maybeLimitError);
 
-              jsg::instantiateModule(lock.v8Isolate, module);
+              jsg::instantiateModule(lock, module);
             }
 
             if (maybeLimitError != nullptr) {

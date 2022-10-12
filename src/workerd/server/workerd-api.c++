@@ -109,7 +109,7 @@ struct WorkerdApiIsolate::Impl {
     // compiles fast but runs slower.
     AllowV8BackgroundThreadsScope scope;
 
-    return jsg::compileWasmModule(lock.v8Isolate, reader);
+    return jsg::compileWasmModule(lock, reader);
   };
 
   static v8::Local<v8::Value> compileJsonGlobal(JsgWorkerdIsolate::Lock& lock,
@@ -236,10 +236,10 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 nullptr,
-                jsg::ModuleRegistry::TextModuleInfo(lock.v8Isolate,
+                jsg::ModuleRegistry::TextModuleInfo(lock,
                     Impl::compileTextGlobal(lock, module.getText()))));
         break;
       }
@@ -247,11 +247,11 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 nullptr,
                 jsg::ModuleRegistry::DataModuleInfo(
-                    lock.v8Isolate,
+                    lock,
                     Impl::compileDataGlobal(lock, module.getData()).As<v8::ArrayBuffer>())));
         break;
       }
@@ -259,10 +259,10 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 nullptr,
-                jsg::ModuleRegistry::WasmModuleInfo(lock.v8Isolate,
+                jsg::ModuleRegistry::WasmModuleInfo(lock,
                     Impl::compileWasmGlobal(lock, module.getWasm()))));
         break;
       }
@@ -270,10 +270,10 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 nullptr,
-                jsg::ModuleRegistry::JsonModuleInfo(lock.v8Isolate,
+                jsg::ModuleRegistry::JsonModuleInfo(lock,
                     Impl::compileJsonGlobal(lock, module.getJson()))));
         break;
       }
@@ -281,7 +281,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 module.getEsModule()));
         break;
@@ -290,7 +290,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         modules->add(
             path,
             jsg::ModuleRegistry::ModuleInfo(
-                lock.v8Isolate,
+                lock,
                 module.getName(),
                 nullptr,
                 jsg::ModuleRegistry::CommonJsModuleInfo(
@@ -305,7 +305,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     }
   }
 
-  jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock.v8Isolate, modules);
+  jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
 
   return modules;
 }
