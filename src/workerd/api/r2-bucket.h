@@ -294,6 +294,8 @@ public:
     jsg::Optional<MultipartOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> resumeMultipartUpload(jsg::Lock& js,
+      kj::String key, kj::String uploadId, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<void> delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
@@ -304,6 +306,7 @@ public:
     JSG_METHOD(get);
     JSG_METHOD(put);
     JSG_METHOD(createMultipartUpload);
+    JSG_METHOD(resumeMultipartUpload);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(list);
   }
