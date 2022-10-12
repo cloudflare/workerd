@@ -35,7 +35,7 @@ const chatWorker :Workerd.Worker = (
   # don't want clients to be able to forge valid IDs -- or don't, if you don't care about that.
   #
   # In the example here, we've generated 32-character random hex keys, but again, the string can
-  # be anything. These were generated specifically for this demo config; we do not use thes
+  # be anything. These were generated specifically for this demo config; we do not use these
   # values in production.
   durableObjectNamespaces = [
     (className = "ChatRoom", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
