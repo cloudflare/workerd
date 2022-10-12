@@ -36,7 +36,7 @@ class Builder {
   // interpret all types passed through a given builder.
 
 public:
-  const MetaConfiguration& config;
+  const MetaConfiguration config;
 
   Builder(const MetaConfiguration& config) : config(config) {}
 

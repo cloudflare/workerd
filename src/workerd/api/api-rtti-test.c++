@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "src/workerd/api/actor.h"
 #include <kj/test.h>
+#include <workerd/api/actor.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/rtti.h>
 
