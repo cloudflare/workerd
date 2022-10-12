@@ -14,6 +14,7 @@ namespace workerd::api::public_beta {
     api::R2Error, \
     api::public_beta::R2Bucket, \
     api::public_beta::R2MultipartUpload, \
+    api::public_beta::R2MultipartUpload::UploadedPart, \
     api::public_beta::R2Bucket::HeadResult, \
     api::public_beta::R2Bucket::GetResult, \
     api::public_beta::R2Bucket::Range, \
@@ -21,7 +22,6 @@ namespace workerd::api::public_beta {
     api::public_beta::R2Bucket::GetOptions, \
     api::public_beta::R2Bucket::PutOptions, \
     api::public_beta::R2Bucket::MultipartOptions, \
-    api::public_beta::R2Bucket::UploadedPart, \
     api::public_beta::R2Bucket::Checksums, \
     api::public_beta::R2Bucket::StringChecksums, \
     api::public_beta::R2Bucket::HttpMetadata, \
