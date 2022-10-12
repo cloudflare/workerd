@@ -130,7 +130,7 @@ struct ThenCatchPair {
   // the success and error callbacks share the same "data" object so that both underlying C++
   // callbacks are proactively destroyed after one of the runs. Otherwise, we'd only destroy the
   // function that was called, while the other one would have to wait for GC, which may mean
-  // keepnig around C++ resources longer than necessary.
+  // keeping around C++ resources longer than necessary.
 
   ThenFunc thenFunc;
   CatchFunc catchFunc;
