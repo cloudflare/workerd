@@ -175,6 +175,10 @@ kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
   return trace->scriptName;
 }
 
+jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
+  return trace->dispatchNamespace;
+}
+
 kj::StringPtr TraceItem::getOutcome() {
   // TODO(cleanup): Add to enumToStr() to capnp?
   auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();

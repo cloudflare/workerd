@@ -54,8 +54,8 @@ private:
 class NonModuleScript {
   // jsg::NonModuleScript wraps a v8::UnboundScript.
 public:
-  NonModuleScript(v8::Isolate* isolate, v8::Local<v8::UnboundScript> script)
-      : unboundScript(isolate, script) {}
+  NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
+      : unboundScript(js.v8Isolate, script) {}
 
   NonModuleScript(NonModuleScript&&) = default;
   NonModuleScript& operator=(NonModuleScript&&) = default;
@@ -64,28 +64,28 @@ public:
   // Running the script will create a v8::Script instance bound to the given
   // context then will run it to completion.
 
-  static jsg::NonModuleScript compile(kj::StringPtr code, v8::Isolate* isolate);
+  static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js);
 
 private:
   v8::Global<v8::UnboundScript> unboundScript;
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(v8::Isolate* isolate, auto&& reader) {
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js, auto&& reader) {
   return jsg::check(v8::WasmModuleObject::Compile(
-      isolate,
+      js.v8Isolate,
       v8::MemorySpan<const uint8_t>(reader.begin(), reader.size())));
 }
 
-void instantiateModule(v8::Isolate* isolate, v8::Local<v8::Module>& module);
+void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
 
 class ModuleRegistry {
   // The ModuleRegistry maintains the collection of modules known to a script that can be
   // required or imported.
 public:
 
-  static inline ModuleRegistry* from(v8::Isolate* isolate) {
+  static inline ModuleRegistry* from(jsg::Lock& js) {
     return static_cast<ModuleRegistry*>(
-        isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+        js.v8Isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
   }
 
   struct CapnpModuleInfo {
@@ -102,14 +102,14 @@ public:
     jsg::Function<void()> evalFunc;
 
     CommonJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
-        : moduleContext(initModuleContext(lock.v8Isolate, name)),
+        : moduleContext(initModuleContext(lock, name)),
           evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
 
     CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
     CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
 
     static Ref<CommonJsModuleContext> initModuleContext(
-        v8::Isolate* isolate,
+        jsg::Lock& js,
         kj::StringPtr name);
 
     static jsg::Function<void()> initEvalFunc(
@@ -134,7 +134,7 @@ public:
   struct ValueModuleInfo {
     jsg::V8Ref<T> value;
 
-    ValueModuleInfo(v8::Isolate* isolate, v8::Local<T> value) : value(isolate, value) {}
+    ValueModuleInfo(jsg::Lock& js, v8::Local<T> value) : value(js.v8Isolate, value) {}
 
     ValueModuleInfo(ValueModuleInfo&&) = default;
     ValueModuleInfo& operator=(ValueModuleInfo&&) = default;
@@ -157,13 +157,13 @@ public:
                                           JsonModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
 
-    ModuleInfo(v8::Isolate* isolate,
+  ModuleInfo(jsg::Lock& js,
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
-    ModuleInfo(v8::Isolate* isolate, kj::StringPtr name, kj::StringPtr content);
+    ModuleInfo(jsg::Lock& js, kj::StringPtr name, kj::ArrayPtr<const char> content);
 
-    ModuleInfo(v8::Isolate* isolate, kj::StringPtr name,
+    ModuleInfo(jsg::Lock& js, kj::StringPtr name,
                kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
                SyntheticModuleInfo synthetic);
 
@@ -171,15 +171,15 @@ public:
     ModuleInfo& operator=(ModuleInfo&&) = default;
   };
 
-  virtual kj::Maybe<ModuleInfo&> resolve(const kj::Path& specifier) = 0;
+  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, const kj::Path& specifier) = 0;
 
-  virtual kj::Maybe<ModuleInfo&> resolve(v8::Local<v8::Module> module) = 0;
+  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
 
   virtual kj::Maybe<const kj::Path&> resolvePath(v8::Local<v8::Module> referrer)= 0;
 
-  virtual Promise<Value> resolveDynamicImport(v8::Isolate* isolate, kj::Path specifier) = 0;
+  virtual Promise<Value> resolveDynamicImport(jsg::Lock& js, kj::Path specifier) = 0;
 
-  using DynamicImportCallback = Promise<Value>(v8::Isolate*, kj::Function<Value()> handler);
+  using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into
   // the callback is called to actually perform the instantiation of the module.
@@ -198,17 +198,26 @@ public:
     entries.insert(Entry(specifier, kj::fwd<ModuleInfo>(info)));
   }
 
-  kj::Maybe<ModuleInfo&> resolve(const kj::Path& specifier) override {
+  void addBuiltinModule(const kj::Path& specifier, kj::ArrayPtr<const char> sourceCode) {
+    // Register new module accessible by a given importPath. The module is instantiated
+    // after first resolve attempt within application has failed, i.e. it is possible for
+    // application to override the module.
+    // sourceCode has to exist while this ModuleRegistry exists.
+    // The expectation is for this method to be called during the assembly of worker global context.
+    entries.insert(Entry(specifier, sourceCode));
+  }
+
+  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, const kj::Path& specifier) override {
     // TODO(soon): Soon we will support prefixed imports of Workers built in types.
     KJ_IF_MAYBE(entry, entries.find(specifier)) {
-      return entry->info;
+      return entry->module(js);
     }
     return nullptr;
   }
 
-  kj::Maybe<ModuleInfo&> resolve(v8::Local<v8::Module> module) override {
+  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
     KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->info;
+      return entry->module(js);
     }
     return nullptr;
   }
@@ -222,23 +231,24 @@ public:
 
   size_t size() const { return entries.size(); }
 
-  Promise<Value> resolveDynamicImport(v8::Isolate* isolate, kj::Path specifier) override {
-    KJ_IF_MAYBE(info, resolve(specifier)) {
+  Promise<Value> resolveDynamicImport(jsg::Lock& js, kj::Path specifier) override {
+    KJ_IF_MAYBE(info, resolve(js, specifier)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
-        auto handler = [&info = *info, isolate]() -> Value {
+        auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
           auto module = info.module.Get(isolate);
-          instantiateModule(isolate, module);
+          auto& js = Lock::from(isolate);
+          instantiateModule(js, module);
           return Value(isolate, module->GetModuleNamespace());
         };
-        return (*func)(isolate, kj::mv(handler));
+        return (*func)(js, kj::mv(handler));
       }
 
       // If there is no dynamicImportHandler set, then we are going to handle that as if
       // the module does not exist and fall through to the rejected promise below.
     }
 
-    return rejectedPromise<Value>(isolate,
-        v8::Exception::Error(v8Str(isolate,
+    return rejectedPromise<Value>(js.v8Isolate,
+        v8::Exception::Error(v8Str(js.v8Isolate,
             kj::str("No such module \"", specifier.toString(), "\"."))));
   }
 
@@ -252,12 +262,32 @@ private:
   // object by identity. We use a kj::Table!
   struct Entry {
     kj::Path specifier;
-    ModuleInfo info;
+    kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>> info;
+    // Either instantiated module or module source code.
 
-    Entry(kj::Path& specifier, ModuleInfo info)
+    Entry(const kj::Path& specifier, ModuleInfo info)
         : specifier(specifier.clone()), info(kj::mv(info)) {}
+
+    Entry(const kj::Path& specifier, kj::ArrayPtr<const char> src)
+        : specifier(specifier.clone()), info(src) {}
+
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
+
+    ModuleInfo& module(jsg::Lock& js) {
+      // Lazily instantiate module from source code if needed
+
+      KJ_SWITCH_ONEOF(info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          return moduleInfo;
+        }
+        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
+          info = ModuleInfo(js, specifier.toString(), src);
+          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
+        }
+      }
+      KJ_UNREACHABLE;
+    }
   };
 
   struct SpecifierHashCallbacks {
@@ -276,11 +306,12 @@ private:
     const Entry& keyForRow(const Entry& row) const { return row; }
 
     bool matches(const Entry& entry, const Entry& other) const {
-      return entry.info.hash == other.info.hash;
+      return hashCode(entry) == hashCode(other);
     }
 
     bool matches(const Entry& entry, v8::Local<v8::Module>& module) const {
-      return entry.info.hash == module->GetIdentityHash();
+      return entry.info.template is<ModuleInfo>() &&
+          entry.info.template get<ModuleInfo>().hash == module->GetIdentityHash();
     }
 
     uint hashCode(v8::Local<v8::Module>& module) const {
@@ -288,7 +319,15 @@ private:
     }
 
     uint hashCode(const Entry& entry) const {
-      return entry.info.hash;
+      KJ_SWITCH_ONEOF(entry.info) {
+        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
+          return moduleInfo.hash;
+        }
+        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
+          return kj::hashCode(src);
+        }
+      }
+      KJ_UNREACHABLE;
     }
   };
 
@@ -303,7 +342,8 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
                                                   v8::Local<v8::String> specifier,
                                                   v8::Local<v8::FixedArray> import_assertions) {
   auto isolate = context->GetIsolate();
-  auto registry = ModuleRegistry::from(isolate);
+  auto& lock = Lock::from(isolate);
+  auto registry = ModuleRegistry::from(lock);
   auto& wrapper = TypeWrapper::from(isolate);
 
   const auto makeRejected = [&](auto reason) {
@@ -324,11 +364,12 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   // explicitly as rejected Promises.
   v8::TryCatch tryCatch(isolate);
   try {
+    auto& lock = jsg::Lock::from(isolate);
     auto what = kj::Path::parse(kj::str(resource_name)).parent().eval(kj::str(specifier));
     // TODO(soon): If kj::Path::parse fails it is most likely the application's fault and yet
     // we end up throwing an "internal error" here. We could handle this more gracefully
     // (and correctly) if kj::Path had a tryEval() variant.
-    return wrapper.wrap(context, nullptr, registry->resolveDynamicImport(isolate, kj::mv(what)));
+    return wrapper.wrap(context, nullptr, registry->resolveDynamicImport(lock, kj::mv(what)));
   } catch (JsExceptionThrown&) {
     if (!tryCatch.CanContinue()) {
       // There's nothing else we can reasonably do.
@@ -342,10 +383,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 }
 
 template <typename TypeWrapper>
-void setModulesForResolveCallback(v8::Isolate* isolate, ModuleRegistry* table) {
+void setModulesForResolveCallback(jsg::Lock& js, ModuleRegistry* table) {
   KJ_ASSERT(table != nullptr);
-  isolate->GetCurrentContext()->SetAlignedPointerInEmbedderData(2, table);
-  isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
+  js.v8Isolate->GetCurrentContext()->SetAlignedPointerInEmbedderData(2, table);
+  js.v8Isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
 }
 
 }  // namespace workerd::jsg

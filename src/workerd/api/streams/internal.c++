@@ -403,7 +403,10 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
     store = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, byteLength);
   }
 
-  auto bytes = kj::arrayPtr(static_cast<kj::byte*>(store->Data()), byteOffset + byteLength);
+  KJ_ASSERT(store->ByteLength() == byteOffset + byteLength);
+
+  auto ptr = static_cast<kj::byte*>(store->Data());
+  auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
   disturbed = true;
 
   KJ_SWITCH_ONEOF(state) {
@@ -551,18 +554,20 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
       // Create two closed ReadableStreams.
       return Tee {
         .branch1 =
-            jsg::alloc<ReadableStream>(ReadableStreamInternalController(closed)),
+            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
         .branch2 =
-            jsg::alloc<ReadableStream>(ReadableStreamInternalController(closed)),
+            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(closed)),
       };
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       // Create two errored ReadableStreams.
       return Tee {
         .branch1 =
-            jsg::alloc<ReadableStream>(ReadableStreamInternalController(errored.addRef(js))),
+            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(
+                errored.addRef(js))),
         .branch2 =
-            jsg::alloc<ReadableStream>(ReadableStreamInternalController(errored.addRef(js))),
+            jsg::alloc<ReadableStream>(kj::heap<ReadableStreamInternalController>(
+                errored.addRef(js))),
       };
     }
     KJ_CASE_ONEOF(readable, Readable) {

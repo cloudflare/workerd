@@ -9,6 +9,7 @@
 // Can be used to generate typescript type, dynamically invoke methods, fuzz, check backward
 // compatibility etc.
 
+#include <type_traits>
 #include <capnp/message.h>
 #include <kj/table.h>
 #include <workerd/jsg/jsg.h>
@@ -29,6 +30,10 @@ class Builder {
   // User's entry point into rtti.
   // Builder owns capnp builder for all the objects it returns, so usual capnp builder
   // rules apply.
+  // The rtti describes object structure and their types.
+  // All structure references in rtti are stored by name. The builder maintains a symbol table
+  // which can be used to resolve them. It is guaranteed that the table is full enough to
+  // interpret all types passed through a given builder.
 
 public:
   const MetaConfiguration& config;
@@ -44,14 +49,28 @@ public:
 
   template<typename T>
   Structure::Reader structure() {
-    auto structure = builder.initRoot<Structure>();
+    auto name = jsg::typeName(typeid(T));
+    KJ_IF_MAYBE(builder, symbols.find(name)) {
+      return (*builder)->template getRoot<Structure>();
+    }
+
+    auto& builder = symbols.insert(
+          kj::str(name), kj::heap<capnp::MallocMessageBuilder>()).value;
+    auto structure = builder->template initRoot<Structure>();
     impl::BuildRtti<MetaConfiguration, T>::build(structure, *this);
     return structure;
   }
 
+  kj::Maybe<Structure::Reader> structure(kj::StringPtr name) {
+    // lookup structure in the symbol table
+    return symbols.find(name).map([](kj::Own<capnp::MallocMessageBuilder>& builder) {
+      return builder->template getRoot<Structure>();
+    });
+  }
+
 private:
-  kj::TreeMap<kj::String, capnp::MallocMessageBuilder> symbols;
   capnp::MallocMessageBuilder builder;
+  kj::HashMap<kj::String, kj::Own<capnp::MallocMessageBuilder>> symbols;
 };
 
 namespace impl {
@@ -177,6 +196,11 @@ FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
 
 template<typename Configuration>
 struct BuildRtti<Configuration, v8::Object> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setObject(); }
+};
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::Object> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setObject(); }
 };
 
@@ -601,7 +625,6 @@ struct HasRegisterMembers : std::false_type {};
 template <typename T>
 struct HasRegisterMembers<T, decltype(T::template registerMembers<MemberCounter, T>, 0)> : std::true_type { };
 
-
 template <typename T, typename = int>
 struct HasConstructor : std::false_type {};
 // true when the T has constructor() function
@@ -614,6 +637,7 @@ struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     auto name = jsg::typeName(typeid(T));
     builder.initStructure().setName(name);
+    rtti.template structure<T>();
   }
 
   static void build(Structure::Builder builder, Builder<Configuration>& rtti) {

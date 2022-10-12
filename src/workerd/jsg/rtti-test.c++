@@ -58,8 +58,9 @@ KJ_TEST("string types") {
   KJ_EXPECT(tType<UsvStringPtr>() == "(string = (name = \"UsvStringPtr\"))");
 }
 
-KJ_TEST("string types") {
+KJ_TEST("object types") {
   KJ_EXPECT(tType<v8::Object>() == "(object = void)");
+  KJ_EXPECT(tType<jsg::Object>() == "(object = void)");
 }
 
 KJ_TEST("promises") {
@@ -225,6 +226,31 @@ KJ_TEST("struct structure") {
       "(property = (name = \"a\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false)), "
       "(property = (name = \"b\", type = (boolt = void), readonly = false, lazy = false, prototype = false))], "
       "iterable = false, asyncIterable = false)");
+}
+
+struct TestSymbolTable: public jsg::Object {
+  void acceptResource(const TestResource& resource) {};
+  void recursiveTypeFunction(const TestSymbolTable& table) { }
+
+  JSG_RESOURCE_TYPE(TestSymbolTable) {
+    JSG_METHOD(acceptResource);
+    JSG_METHOD(recursiveTypeFunction);
+  };
+};
+
+KJ_TEST("symbol table") {
+  Builder<MockConfig> builder((MockConfig()));
+  auto type = builder.structure<TestSymbolTable>();
+  capnp::TextCodec codec;
+
+  KJ_EXPECT(codec.encode(type) == "(name = \"TestSymbolTable\", members = ["
+      "(method = (name = \"acceptResource\", returnType = (voidt = void), args = [(structure = (name = \"TestResource\"))], static = false)), "
+      "(method = (name = \"recursiveTypeFunction\", returnType = (voidt = void), args = [(structure = (name = \"TestSymbolTable\"))], static = false))], "
+      "iterable = false, asyncIterable = false)");
+
+  KJ_EXPECT(builder.structure("TestSymbolTable"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("TestResource"_kj) != nullptr);
+  KJ_EXPECT(KJ_REQUIRE_NONNULL(builder.structure("TestResource"_kj)).getMembers().size() > 0);
 }
 
 } // namespace
