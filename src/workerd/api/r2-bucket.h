@@ -279,27 +279,34 @@ public:
     JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
   };
 
-  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js, kj::String key,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(
+      jsg::Lock& js, kj::String key,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
   jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> get(
       jsg::Lock& js, kj::String key, jsg::Optional<GetOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
       kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
-    jsg::Lock& js,
-    kj::String key,
-    jsg::Optional<MultipartOptions> options,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
-  jsg::Promise<jsg::Ref<R2MultipartUpload>> resumeMultipartUpload(jsg::Lock& js,
-      kj::String key, kj::String uploadId, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<void> delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
+      jsg::Lock& js, kj::String key, jsg::Optional<MultipartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> resumeMultipartUpload(
+      jsg::Lock& js, kj::String key, kj::String uploadId,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<void> delete_(
+      jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<ListResult> list(
+      jsg::Lock& js, jsg::Optional<ListOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
 
   JSG_RESOURCE_TYPE(R2Bucket) {
     JSG_METHOD(head);
