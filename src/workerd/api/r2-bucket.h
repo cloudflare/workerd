@@ -8,6 +8,9 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/http.h>
+#include <workerd/api/r2-api.capnp.h>
+#include <capnp/compat/json.h>
+#include <workerd/util/http-util.h>
 
 namespace workerd::api::public_beta {
 
@@ -312,13 +315,6 @@ public:
     jsg::Optional<MultipartOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
-  jsg::Promise<UploadedPart> uploadPart(jsg::Lock& js,
-      kj::String key, kj::String uploadId, int partNumber, R2PutValue value,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<void> abortMultipartUpload(jsg::Lock& js,
-      kj::String key, kj::String uploadId, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> completeMultipartUpload(jsg::Lock& js,
-      kj::String key, kj::String uploadId, kj::Array<UploadedPart> uploadedParts, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<void> delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
@@ -386,7 +382,135 @@ private:
   kj::Maybe<kj::String> adminBucket;
 
   friend class R2Admin;
+  friend class R2MultipartUpload;
 };
+
+enum class OptionalMetadata: uint16_t {
+  Http = static_cast<uint8_t>(R2ListRequest::IncludeField::HTTP),
+  Custom = static_cast<uint8_t>(R2ListRequest::IncludeField::CUSTOM),
+};
+
+template <typename T>
+concept HeadResultT = std::is_base_of_v<R2Bucket::HeadResult, T>;
+
+template <HeadResultT T, typename... Args>
+static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
+    kj::ArrayPtr<const OptionalMetadata> expectedOptionalFields, Args&&... args) {
+  // optionalFieldsExpected is initialized by default to HTTP + CUSTOM if the user doesn't specify
+  // anything. If they specify the empty array, then nothing is returned.
+  kj::Date uploaded =
+      kj::UNIX_EPOCH + responseReader.getUploadedMillisecondsSinceEpoch() * kj::MILLISECONDS;
+
+  jsg::Optional<R2Bucket::HttpMetadata> httpMetadata;
+  if (responseReader.hasHttpFields()) {
+    R2Bucket::HttpMetadata m;
+
+    auto httpFields = responseReader.getHttpFields();
+    if (httpFields.hasContentType()) {
+      m.contentType = kj::str(httpFields.getContentType());
+    }
+    if (httpFields.hasContentDisposition()) {
+      m.contentDisposition = kj::str(httpFields.getContentDisposition());
+    }
+    if (httpFields.hasContentEncoding()) {
+      m.contentEncoding = kj::str(httpFields.getContentEncoding());
+    }
+    if (httpFields.hasContentLanguage()) {
+      m.contentLanguage = kj::str(httpFields.getContentLanguage());
+    }
+    if (httpFields.hasCacheControl()) {
+      m.cacheControl = kj::str(httpFields.getCacheControl());
+    }
+    if (httpFields.getCacheExpiry() != 0xffffffffffffffff) {
+      m.cacheExpiry =
+          kj::UNIX_EPOCH + httpFields.getCacheExpiry() * kj::MILLISECONDS;
+    }
+
+    httpMetadata = kj::mv(m);
+  } else if (std::find(expectedOptionalFields.begin(), expectedOptionalFields.end(),
+      OptionalMetadata::Http) != expectedOptionalFields.end()) {
+    // HTTP metadata was asked for but the object didn't have anything.
+    httpMetadata = R2Bucket::HttpMetadata{};
+  }
+
+  jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+  if (responseReader.hasCustomFields()) {
+    customMetadata = jsg::Dict<kj::String> {
+      .fields = KJ_MAP(field, responseReader.getCustomFields()) {
+        jsg::Dict<kj::String>::Field item;
+        item.name = kj::str(field.getK());
+        item.value = kj::str(field.getV());
+        return item;
+      }
+    };
+  } else if (std::find(expectedOptionalFields.begin(), expectedOptionalFields.end(),
+      OptionalMetadata::Custom) != expectedOptionalFields.end()) {
+    // Custom metadata was asked for but the object didn't have anything.
+    customMetadata = jsg::Dict<kj::String>{};
+  }
+
+  jsg::Optional<R2Bucket::Range> range;
+
+  if (responseReader.hasRange()) {
+    auto rangeBuilder = responseReader.getRange();
+    range = R2Bucket::Range {
+      .offset = static_cast<double>(rangeBuilder.getOffset()),
+      .length = static_cast<double>(rangeBuilder.getLength()),
+    };
+  }
+
+  jsg::Ref<R2Bucket::Checksums> checksums = jsg::alloc<R2Bucket::Checksums>(nullptr, nullptr, nullptr, nullptr, nullptr);
+
+  if (responseReader.hasChecksums()) {
+    R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
+    if (checksumsBuilder.hasMd5()) {
+      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
+    }
+    if (checksumsBuilder.hasSha1()) {
+      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
+    }
+    if (checksumsBuilder.hasSha256()) {
+      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
+    }
+    if (checksumsBuilder.hasSha384()) {
+      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
+    }
+    if (checksumsBuilder.hasSha512()) {
+      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
+    }
+  }
+
+  return jsg::alloc<T>(kj::str(responseReader.getName()),
+      kj::str(responseReader.getVersion()), responseReader.getSize(),
+      kj::str(responseReader.getEtag()), kj::mv(checksums), uploaded, kj::mv(httpMetadata),
+      kj::mv(customMetadata), range, kj::fwd<Args>(args)...);
+}
+
+template <HeadResultT T, typename... Args>
+static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(kj::StringPtr action, R2Result& r2Result,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, Args&&... args) {
+  if (r2Result.objectNotFound()) {
+    return nullptr;
+  }
+  if (!r2Result.preconditionFailed()) {
+    r2Result.throwIfError(action, errorType);
+  }
+
+  // Non-list operations always return these.
+  std::array expectedFieldsOwned = { OptionalMetadata::Http, OptionalMetadata::Custom };
+  kj::ArrayPtr<OptionalMetadata> expectedFields = {
+    expectedFieldsOwned.data(), expectedFieldsOwned.size()
+  };
+
+  capnp::MallocMessageBuilder responseMessage;
+  capnp::JsonCodec json;
+  // Annoyingly our R2GetResponse alias isn't emitted.
+  json.handleByAnnotation<R2HeadResponse>();
+  auto responseBuilder = responseMessage.initRoot<R2HeadResponse>();
+  json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+
+  return parseObjectMetadata<T>(responseBuilder, expectedFields, kj::fwd<Args>(args)...);
+}
 
 }  // namespace workerd::api::public_beta
 
