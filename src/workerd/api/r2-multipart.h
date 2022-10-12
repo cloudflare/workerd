@@ -18,15 +18,14 @@ class R2MultipartUpload: public jsg::Object {
     kj::StringPtr getUploadId() const { return kj::StringPtr(uploadId); }
 
     jsg::Promise<R2Bucket::UploadedPart> uploadPart(
-      jsg::Lock& js,
-      int partNumber,
-      R2PutValue value,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+        jsg::Lock& js, int partNumber, R2PutValue value,
+        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+    );
     jsg::Promise<void> abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
     jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(
-      jsg::Lock& js,
-      kj::Array<R2Bucket::UploadedPart> uploadedParts,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+        jsg::Lock& js, kj::Array<R2Bucket::UploadedPart> uploadedParts,
+        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+    );
 
     JSG_RESOURCE_TYPE(R2MultipartUpload) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(key, getKey);
