@@ -225,4 +225,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
         $compatEnableFlag("nodejs_18_compat_experimental");
   # Experimental, do not use.
   # Enables nodejs 18 compat imports in the application.
+  # This is currently a work in progress mechanism that is not yet available for use in workerd.
+  # WARNING: IT WILL BREAK in the future. Do not ignore this warning.
 }
