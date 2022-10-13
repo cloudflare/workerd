@@ -109,6 +109,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   streamsJavaScriptControllers @6 :Bool
       $compatEnableFlag("streams_enable_constructors")
+      $compatEnableDate("2022-11-30")
       $compatDisableFlag("streams_disable_constructors");
   # Controls the availability of the work in progress new ReadableStream() and
   # new WritableStream() constructors backed by JavaScript underlying sources
@@ -148,6 +149,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   specCompliantUrl @10 :Bool
       $compatEnableFlag("url_standard")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("url_original");
   # The original URL implementation based on kj::Url is not compliant with the
   # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
@@ -161,6 +163,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   captureThrowsAsRejections @12 :Bool
       $compatEnableFlag("capture_async_api_throws")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("do_not_capture_async_api_throws");
   # Many worker APIs that return JavaScript promises currently throw synchronous errors
   # when exceptions occur. Per the Web Platform API specs, async functions should never
@@ -190,6 +193,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   transformStreamJavaScriptControllers @16 :Bool
       $compatEnableFlag("transformstream_enable_standard_constructor")
+      $compatEnableDate("2022-11-30")
       $compatDisableFlag("transformstream_disable_standard_constructor");
   # Controls whether the TransformStream constructor conforms to the stream standard or not.
   # Must be used in combination with the streamsJavaScriptControllers flag.
@@ -203,6 +207,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   exportCommonJsDefaultNamespace @18 :Bool
       $compatEnableFlag("export_commonjs_default")
+      $compatEnableDate("2022-10-31")
       $compatDisableFlag("export_commonjs_namespace");
   # Unfortunately, when the CommonJsModule type was implemented, it mistakenly exported the
   # module namespace (an object like `{default: module.exports}`) rather than exporting only
