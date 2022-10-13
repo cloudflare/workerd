@@ -52,6 +52,7 @@ public:
 
   struct AlarmResult {
     bool retry = true;
+    bool retryCountsAgainstLimit = true;
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 

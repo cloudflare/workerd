@@ -269,6 +269,8 @@ public:
   //
   // This method can only be called once.
 
+  bool isBroken();
+
 private:
   Hooks& hooks;
 

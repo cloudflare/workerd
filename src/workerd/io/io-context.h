@@ -352,6 +352,12 @@ public:
   //
   // Use the ...IoOwn() overload if you need to store this promise in a JS API object.
 
+  bool isOutputGateBroken();
+  // Check if the output gate (only used by actors) is currently broken. This indicates that there
+  // was a problem with committing storage writes.
+  //
+  // For non-actor requests, this always returns false.
+
   template <typename T>
   kj::Promise<T> lockOutputWhile(kj::Promise<T> promise);
   // Lock output until the given promise completes.

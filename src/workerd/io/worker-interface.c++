@@ -312,6 +312,7 @@ kj::Promise<WorkerInterface::AlarmResult> RpcWorkerInterface::runAlarm(kj::Date 
     auto respResult = resp.getResult();
     return WorkerInterface::AlarmResult {
       .retry = respResult.getRetry(),
+      .retryCountsAgainstLimit = respResult.getRetryCountsAgainstLimit(),
       .outcome = respResult.getOutcome()
     };
   });

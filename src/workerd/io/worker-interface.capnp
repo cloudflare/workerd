@@ -87,7 +87,8 @@ struct ScheduledRun @0xd98fc1ae5c8095d0 {
 struct AlarmRun @0xfa8ea4e97e23b03d {
   outcome @0 :EventOutcome;
 
-  retry @1 : Bool;
+  retry @1 :Bool;
+  retryCountsAgainstLimit @2 :Bool = true;
 }
 
 interface EventDispatcher @0xf20697475ec1752d {

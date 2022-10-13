@@ -318,6 +318,14 @@ kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOw
   });
 }
 
+bool IoContext::isOutputGateBroken() {
+  KJ_IF_MAYBE(a, actor) {
+    return a->getOutputGate().isBroken();
+  } else {
+    return false;
+  }
+}
+
 bool IoContext::isInspectorEnabled() {
   return worker->getIsolate().isInspectorEnabled();
 }
