@@ -1154,7 +1154,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
     return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
   }
 
-  void setOwner(ReadableStreamJsSource* newOwner) {
+  void setOwner(auto newOwner) {
     KJ_IF_MAYBE(s, state) { s->setOwner(newOwner); }
   }
 
@@ -1268,7 +1268,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
     return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
   }
 
-  void setOwner(ReadableStreamJsSource* newOwner) {
+  void setOwner(auto newOwner) {
     KJ_IF_MAYBE(s, state) { s->setOwner(newOwner); }
   }
 
@@ -1660,10 +1660,14 @@ ReadableStreamJsController::ReadableStreamJsController(
     : state(consumer.clone(js, this)) {}
 
 ReadableStreamJsController::ReadableStreamJsController(kj::Own<ValueReadable> consumer)
-    : state(kj::mv(consumer)) {}
+    : state(kj::mv(consumer)) {
+  state.get<kj::Own<ValueReadable>>()->setOwner(this);
+}
 
 ReadableStreamJsController::ReadableStreamJsController(kj::Own<ByteReadable> consumer)
-    : state(kj::mv(consumer)) {}
+    : state(kj::mv(consumer)) {
+  state.get<kj::Own<ByteReadable>>()->setOwner(this);
+}
 
 jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
   return KJ_REQUIRE_NONNULL(owner).addRef();
