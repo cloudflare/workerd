@@ -796,6 +796,8 @@ public:
 
   void pull(jsg::Lock& js);
 
+  bool isExpectingClose() { return closeExpected; }
+
   kj::Own<ByteQueue::Consumer> getConsumer(
       kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener);
 
@@ -810,8 +812,11 @@ public:
 private:
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
+  bool closeExpected = false;
 
   void visitForGc(jsg::GcVisitor& visitor);
+
+  void expectCloseOnNextPull();
 
   friend class ReadableStreamBYOBRequest;
   friend class ReadableStreamJsController;

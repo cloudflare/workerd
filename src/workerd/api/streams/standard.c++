@@ -1510,17 +1510,30 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
                                    TypeError,
                                    "This ReadableStreamBYOBRequest has been invalidated.");
   bool pull = false;
+
   if (!impl.controller->canCloseOrEnqueue()) {
     JSG_REQUIRE(bytesWritten == 0,
                  TypeError,
                  "The bytesWritten must be zero after the stream is closed.");
     KJ_ASSERT(impl.readRequest->isInvalidated());
   } else {
+    JSG_REQUIRE(!impl.controller->isExpectingClose(),
+                TypeError,
+                "Cannot respond with more bytes when expecting a close.");
     JSG_REQUIRE(bytesWritten > 0,
                  TypeError,
                  "The bytesWritten must be more than zero while the stream is open.");
+
+    size_t atLeast = impl.readRequest->getAtLeast();
+
     impl.readRequest->respond(js, bytesWritten);
     pull = true;
+
+    // If the bytesWritten are less than atLeast, then this should be the final chunk
+    // of data we process. The next call to pull should close or error the ReadableStream.
+    if (bytesWritten < atLeast) {
+      impl.controller->expectCloseOnNextPull();
+    }
   }
 
   KJ_DEFER(invalidate(js));
@@ -1539,10 +1552,23 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
                  TypeError,
                  "The view byte length must be zero after the stream is closed.");
   } else {
+    JSG_REQUIRE(!impl.controller->isExpectingClose(),
+                TypeError,
+                "Cannot respond with more bytes when expecting a close.");
     JSG_REQUIRE(view.size() > 0,
                  TypeError,
                  "The view byte length must be more than zero while the stream is open.");
+
+    size_t atLeast = impl.readRequest->getAtLeast();
+
     impl.readRequest->respondWithNewView(js, kj::mv(view));
+
+    // If the bytesWritten are less than atLeast, then this should be the final chunk
+    // of data we process. The next call to pull should close or error the ReadableStream.
+    if (view.size() < atLeast) {
+      impl.controller->expectCloseOnNextPull();
+    }
+
     pull = true;
   }
 
@@ -1594,6 +1620,7 @@ void ReadableByteStreamController::close(jsg::Lock& js) {
 }
 
 void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chunk) {
+  JSG_REQUIRE(!closeExpected, TypeError, "Cannot enqueue when expecting a close.");
   JSG_REQUIRE(chunk.size() > 0, TypeError, "Cannot enqueue a zero-length ArrayBuffer.");
   JSG_REQUIRE(chunk.canDetach(js), TypeError,
                "The provided ArrayBuffer must be detachable.");
@@ -1639,6 +1666,10 @@ void ReadableByteStreamController::pull(jsg::Lock& js) {
 kj::Own<ByteQueue::Consumer> ReadableByteStreamController::getConsumer(
     kj::Maybe<ByteQueue::ConsumerImpl::StateListener&> stateListener) {
   return impl.getConsumer(stateListener);
+}
+
+void ReadableByteStreamController::expectCloseOnNextPull() {
+  closeExpected = true;
 }
 
 // ======================================================================================
