@@ -197,6 +197,7 @@ public:
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush();
   // See ActorCacheInterface.
 
   struct DeleteAllResults {
@@ -386,12 +387,12 @@ private:
     // if no delete operations need a count from this entry.
     //
     // If an entry is overwritten, `countedDelete` needs to be inherited by the replacement entry,
-    // so that the delete is still counted upon `flush()`. (If the entry being replaced is already
-    // flushing, and that flush succeeds, then countedDelete->fulfiller will be fulfilled. In that
-    // case, it's no longer relevant to have `countedDelete` on the replacement entry, because
-    // it's already fulfilled and so will be ignored anyway. However, in the unlikely case that
-    // the flush failed, then it is actually important that the `countedDelete` has been moved to
-    // the replacement entry, so that it can be retried.)
+    // so that the delete is still counted upon `flushImpl()`. (If the entry being replaced is
+    // already flushing, and that flush succeeds, then countedDelete->fulfiller will be fulfilled.
+    // In that case, it's no longer relevant to have `countedDelete` on the replacement entry,
+    // because it's already fulfilled and so will be ignored anyway. However, in the unlikely case
+    // that the flush failed, then it is actually important that the `countedDelete` has been moved
+    // to the replacement entry, so that it can be retried.)
 
     kj::ListLink<Entry> link;
     // If CLEAN or STALE, the entry will be in the SharedLru's `cleanList`.
@@ -435,9 +436,9 @@ private:
     // When `countOutstanding` reaches zero, fulfill this with `countDeleted`.
 
     kj::Maybe<size_t> flushIndex;
-    // During `flush()`, when this CountedDelete is first encountered, `flushIndex` will be set to
-    // track this delete batch. It will be set back to `nullptr` before `flush()` returns. This
-    // field exists here to avoid the need for a HashMap<CountedDelete*, ...> in `flush()`.
+    // During `flushImpl()`, when this CountedDelete is first encountered, `flushIndex` will be set
+    // to track this delete batch. It will be set back to `nullptr` before `flushImpl()` returns.
+    // This field exists here to avoid the need for a HashMap<CountedDelete*, ...> in `flushImpl()`.
   };
 
   rpc::ActorStorage::Stage::Client storage;
@@ -495,6 +496,9 @@ private:
   // flush. The first write that does *not* set `allowUnconfirmed` causes the output gate to be
   // applied.
 
+  size_t flushesEnqueued = 0;
+  // The count of the number of flushes that have been queued without yet resolving.
+
   struct DeleteAllState {
     kj::Vector<kj::Own<Entry>> deletedDirty;
     // If deleteAll() was called since the last flush, these are all the dirty entries that existed
@@ -509,7 +513,7 @@ private:
 
 
   kj::ForkedPromise<void> lastFlush = kj::Promise<void>(kj::READY_NOW).fork();
-  // Promise for the completion of the previous flush. We can only execute one flush() at a time
+  // Promise for the completion of the previous flush. We can only execute one flushImpl() at a time
   // because we can't allow out-of-order writes.
   //
   // TODO(perf): If we could rely on e-order on the ActorStorage API, we could pipeline additional
@@ -585,8 +589,8 @@ private:
   // used for ordering, to make sure a write is not committed too early such that it interferes
   // with a previous read.
 
-  kj::Promise<void> flush(uint retryCount = 0);
-  kj::Promise<void> flushDeleteAll(uint retryCount = 0);
+  kj::Promise<void> flushImpl(uint retryCount = 0);
+  kj::Promise<void> flushImplDeleteAll(uint retryCount = 0);
 
   struct PutBatch;
   struct MutedDeleteBatch;

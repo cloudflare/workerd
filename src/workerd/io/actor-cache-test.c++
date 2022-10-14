@@ -4639,6 +4639,7 @@ KJ_TEST("ActorCache never-flush") {
 
   // Puts don't start a transaction.
   KJ_EXPECT(test.put("foo", "123") == nullptr);
+  KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
   mockStorage->expectNoActivity(ws);
 
   // Gets still see the put() value.
@@ -4853,6 +4854,212 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
       .thenReturn(CAPNP(scheduledTimeMs = 10));
 
     KJ_ASSERT(time.wait(ws) == 10 * kj::MILLISECONDS + kj::UNIX_EPOCH);
+  }
+}
+
+KJ_TEST("ActorCache can wait for flush") {
+  // This test confirms that `onNoPendingFlush()` will return a promise that resolves when any
+  // scheduled or in-flight flush completes.
+
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  struct InFlightRequest {
+    workerd::MockServer::ExpectedCall op;
+    kj::Maybe<kj::Own<workerd::MockServer>> maybeTxn;
+  };
+
+  // There is no pending flush since nothing has been done!
+  KJ_ASSERT(test.cache.onNoPendingFlush() == nullptr);
+
+  struct VerifyOptions {
+    bool skipSecondOperation;
+  };
+  size_t secondaryPutIndex = 0;
+  auto verify = [&](auto receiveRequest, auto sendResponse, VerifyOptions options) {
+    // We haven't sent our request yet, but we should have a promise now.
+    auto scheduledPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+
+    // We have sent our request, but it hasn't responded yet. We should still have a promise.
+    auto req = receiveRequest();
+    auto inFlightPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+
+    // Do an additional put to make a separate flush.
+    struct SecondOperation {
+      kj::String key;
+      kj::Promise<void> scheduledPromise;
+    };
+    kj::Maybe<SecondOperation> maybeSecondOperation;
+    if (!options.skipSecondOperation) {
+      auto key = kj::str("foo-", secondaryPutIndex++);
+      test.put(key, "bar");
+      auto secondPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+      KJ_ASSERT(!secondPromise.poll(ws));
+      maybeSecondOperation.emplace(SecondOperation{
+        .key = kj::mv(key),
+        .scheduledPromise = kj::mv(secondPromise),
+      });
+    }
+
+    // No promise should have resolved yet.
+    KJ_ASSERT(!scheduledPromise.poll(ws) && !inFlightPromise.poll(ws));
+
+    // Resolve the operations and confirm that the promises resolve.
+    sendResponse(kj::mv(req));
+    scheduledPromise.wait(ws);
+    inFlightPromise.wait(ws);
+
+    KJ_IF_MAYBE(secondOperation, maybeSecondOperation) {
+      // This promise is for a later flush, so it should not have resolved yet.
+      KJ_ASSERT(!secondOperation->scheduledPromise.poll(ws));
+
+      // Finish our secondary put and observe the second flush resolving.
+      auto params =
+          kj::str(R"((entries = [(key = ")", secondOperation->key, R"(", value = "bar")]))");
+      mockStorage->expectCall("put", ws).withParams(params).thenReturn(CAPNP());
+
+      secondOperation->scheduledPromise.wait(ws);
+    }
+
+    // We finished our flush, nothing left to do.
+    KJ_ASSERT(test.cache.onNoPendingFlush() == nullptr);
+  };
+
+  {
+    // Join in on a simple put.
+    test.put("foo", "bar");
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("put", ws)
+          .withParams(CAPNP(entries = [(key = "foo", value = "bar")])),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a delete.
+    test.delete_("foo");
+
+    verify([&](){
+      auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+      return InFlightRequest {
+        .op = mockTxn->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
+        .maybeTxn = kj::mv(mockTxn),
+      };
+    }, [&](auto req) {
+      auto& mockTxn = KJ_ASSERT_NONNULL(req.maybeTxn);
+      kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1));
+      mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+      mockTxn->expectDropped(ws);
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a simple put with allowUnconfirmed.
+    test.put("foo", "baz", ActorCacheWriteOptions{.allowUnconfirmed = true});
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("put", ws)
+          .withParams(CAPNP(entries = [(key = "foo", value = "baz")])),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a delete with allowUnconfirmed.
+    test.delete_("foo", ActorCacheWriteOptions{.allowUnconfirmed = true});
+
+    verify([&](){
+      auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+      return InFlightRequest {
+        .op = mockTxn->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
+        .maybeTxn = kj::mv(mockTxn),
+      };
+    }, [&](auto req) {
+      auto& mockTxn = KJ_ASSERT_NONNULL(req.maybeTxn);
+      kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1));
+      mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+      mockTxn->expectDropped(ws);
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a scheduled setAlarm.
+    test.setAlarm(1 * kj::MILLISECONDS + kj::UNIX_EPOCH);
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("setAlarm", ws).withParams(CAPNP(scheduledTimeMs = 1)),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a scheduled setAlarm with allowUnconfirmed.
+    test.setAlarm(
+        2 * kj::MILLISECONDS + kj::UNIX_EPOCH, ActorCacheWriteOptions{.allowUnconfirmed = true});
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("setAlarm", ws).withParams(CAPNP(scheduledTimeMs = 2)),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      .skipSecondOperation = false,
+    });
+  }
+
+  {
+    // Join in on a scheduled deleteAll.
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = false});
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("deleteAll", ws).withParams(CAPNP()),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      // We can't test the second operation because deleteAll immediately follows up with any puts
+      // that happened while it was in flight. This means that we invoke the mock twice in the same
+      // promise chain without being able to set up expections in time.
+      .skipSecondOperation = true,
+    });
+  }
+
+  {
+    // Join in on a scheduled deleteAll with allowUnconfirmed.
+    test.cache.deleteAll(ActorCacheWriteOptions{.allowUnconfirmed = true});
+
+    verify([&](){
+      return InFlightRequest {
+        .op = mockStorage->expectCall("deleteAll", ws).withParams(CAPNP()),
+      };
+    }, [&](auto req) {
+      kj::mv(req.op).thenReturn(CAPNP());
+    }, {
+      .skipSecondOperation = true,
+    });
   }
 }
 

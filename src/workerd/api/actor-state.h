@@ -187,6 +187,8 @@ public:
 
   jsg::Promise<void> deleteAll(jsg::Optional<PutOptions> options, v8::Isolate* isolate);
 
+  jsg::Promise<void> sync(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -197,6 +199,7 @@ public:
     JSG_METHOD(getAlarm);
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
+    JSG_METHOD(sync);
   }
 
 protected:
