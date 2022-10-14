@@ -220,7 +220,7 @@ KJ_TEST("can write span data") {
       kj::origin<kj::Date>() + 1 * kj::SECONDS);
 
   spanData.tags.insert("bool_tag"_kj, true);
-  spanData.tags.insert("int64_tag"_kj, 123l);
+  spanData.tags.insert("int64_tag"_kj, int64_t(123));
   spanData.tags.insert("float64_tag"_kj, 3.14159);
   spanData.tags.insert("string_tag"_kj, kj::str("string tag value"));
 
