@@ -164,6 +164,8 @@ struct BuildRtti<Configuration, T> { \
   F(unsigned int) \
   F(long) \
   F(unsigned long) \
+  F(long long) \
+  F(unsigned long long) \
   F(double)
 
 FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
