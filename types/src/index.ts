@@ -11,6 +11,7 @@ import ts from "typescript";
 import { generateDefinitions } from "./generator";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
+import { createIteratorTransformer } from "./transforms";
 
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
@@ -31,7 +32,7 @@ function printDefinitions(req: DefinitionGeneratorRequest): string {
   assert(sourceFile !== undefined);
 
   // Run post-processing transforms on program
-  const result = ts.transform(sourceFile, []);
+  const result = ts.transform(sourceFile, [createIteratorTransformer(checker)]);
   // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
   //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
   assert.strictEqual(result.transformed.length, 1);
