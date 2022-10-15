@@ -22,11 +22,17 @@ bool getCommonJsExportDefault(v8::Isolate* isolate) {
   return jsgIsolate.getCommonJsExportDefault();
 }
 
-kj::String typeName(const std::type_info& type) {
+kj::String fullyQualifiedTypeName(const std::type_info& type) {
   int status;
   char* buf = abi::__cxa_demangle(type.name(), nullptr, nullptr, &status);
   kj::String result = kj::str(buf == nullptr ? type.name() : buf);
   free(buf);
+
+  return kj::mv(result);
+}
+
+kj::String typeName(const std::type_info& type) {
+  auto result = fullyQualifiedTypeName(type);
 
   // Strip namespace, if any.
   KJ_IF_MAYBE(pos, result.findLast(':')) {

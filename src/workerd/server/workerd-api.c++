@@ -33,6 +33,10 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   // of the list is in alphabetical order for easier readability (the
   // actual order of the items is unimportant), followed by additional
   // types defined in worker.c++ or as part of jsg.
+  //
+  // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
+  // src/workerd/tools/api-encoder.c++ too, so it gets included in the
+  // TypeScript types.
   EW_GLOBAL_SCOPE_ISOLATE_TYPES,
 
   EW_ACTOR_ISOLATE_TYPES,
