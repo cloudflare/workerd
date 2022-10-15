@@ -1,0 +1,25 @@
+{
+  "name": "@cloudflare/workerd-root",
+  "private": true,
+  "scripts": {
+    "lint": "eslint types/src"
+  },
+  "dependencies": {
+    "capnp-ts": "^0.7.0",
+    "prettier": "^2.7.1",
+    "typescript": "~4.7.4"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.7",
+    "@types/node": "^18.7.18",
+    "@types/prettier": "^2.7.1",
+    "@typescript-eslint/eslint-plugin": "^5.37.0",
+    "@typescript-eslint/parser": "^5.37.0",
+    "capnpc-ts": "^0.7.0",
+    "esbuild": "^0.15.7",
+    "eslint": "^8.22.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-prettier": "^4.2.1"
+  }
+}

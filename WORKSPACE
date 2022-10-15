@@ -154,6 +154,58 @@ load("//rust-deps/cxxbridge_crates:crates.bzl", cxxbridge_repositories = "crate_
 cxxbridge_repositories()
 
 # ========================================================================================
+# Node.js bootstrap
+#
+# workerd uses Node.js scripts for generating TypeScript types.
+
+http_archive(
+    name = "aspect_rules_js",
+    sha256 = "b9fde0f20de6324ad443500ae738bda00facbd73900a12b417ce794856e01407",
+    strip_prefix = "rules_js-1.5.0",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.5.0.tar.gz",
+)
+
+http_archive(
+    name = "aspect_rules_ts",
+    sha256 = "743f0e988e4e3f1e25e52c79f9dc3da1ddd77507ae88787ae95b4e70c537872b",
+    strip_prefix = "rules_ts-1.0.0-rc4",
+    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.0.0-rc4.tar.gz",
+)
+
+load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
+
+rules_js_dependencies()
+
+load("@rules_nodejs//nodejs:repositories.bzl", "nodejs_register_toolchains")
+
+nodejs_register_toolchains(
+    name = "nodejs",
+    node_version = "18.10.0",
+)
+
+load("@aspect_rules_ts//ts:repositories.bzl", TS_LATEST_VERSION = "LATEST_VERSION", "rules_ts_dependencies")
+
+rules_ts_dependencies(ts_version = TS_LATEST_VERSION)
+
+load("@aspect_rules_js//npm:npm_import.bzl", "npm_translate_lock")
+
+npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//:pnpm-lock.yaml",
+    # Patches required for `capnp-ts` to type-check
+    patches = {
+        "capnp-ts@0.7.0": ["//:patches/capnp-ts@0.7.0.patch"],
+    },
+    patch_args = {
+        "capnp-ts@0.7.0": ["-p1"],
+    },
+)
+
+load("@npm//:repositories.bzl", "npm_repositories")
+
+npm_repositories()
+
+# ========================================================================================
 # V8 and its dependencies
 #
 # Note that googlesource does not generate tarballs deterministically, so we cannot use

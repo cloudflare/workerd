@@ -1,6 +1,8 @@
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/js_capnp_library.bzl", "js_capnp_library")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
+load("@aspect_rules_js//npm:defs.bzl", "npm_package")
 
 wd_cc_library(
     name = "jsg",
@@ -23,6 +25,18 @@ wd_cc_library(
 wd_cc_capnp_library(
     name = "rtti_capnp",
     srcs = ["rtti.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+js_capnp_library(
+    name = "rtti_capnp_js",
+    srcs = ["rtti.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+npm_package(
+    name = "jsg_js",
+    srcs = [":rtti_capnp_js"],
     visibility = ["//visibility:public"],
 )
 
