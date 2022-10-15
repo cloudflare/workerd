@@ -1,3 +1,6 @@
+.idea
+.DS_Store
+
 /rust-deps/target
 /rust-deps/Cargo.toml
 
