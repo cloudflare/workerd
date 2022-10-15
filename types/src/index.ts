@@ -11,7 +11,10 @@ import ts from "typescript";
 import { generateDefinitions } from "./generator";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
-import { createIteratorTransformer } from "./transforms";
+import {
+  createGlobalScopeTransformer,
+  createIteratorTransformer,
+} from "./transforms";
 
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
@@ -32,7 +35,12 @@ function printDefinitions(root: StructureGroups): string {
   assert(sourceFile !== undefined);
 
   // Run post-processing transforms on program
-  const result = ts.transform(sourceFile, [createIteratorTransformer(checker)]);
+  const result = ts.transform(sourceFile, [
+    // TODO(soon): when overrides are implemented, apply renames here
+    createIteratorTransformer(checker),
+    createGlobalScopeTransformer(checker),
+    // TODO(polish): maybe flatten union types?
+  ]);
   // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
   //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
   assert.strictEqual(result.transformed.length, 1);
