@@ -76,8 +76,6 @@ struct StructureType {
   # Structure types need to be resolved separately to prevent circular references with types
 
   name @0 :Text;
-
-  fullyQualifiedName @1 :Text;
 }
 
 struct StringType {
@@ -94,15 +92,11 @@ struct IntrinsicType {
 struct ArrayType {
   # Array like structure
   element @0 :Type;
-
-  name @1 :Text;
 }
 
 struct MaybeType {
-  # kj::Maybe, jsg::Optional, jsg::LenientOptional
+  # kj::Maybe or jsg::Optional
   value @0 :Type;
-
-  name @1 :Text;
 }
 
 struct DictType {
@@ -163,12 +157,6 @@ struct JsgImplType {
     jsgUnimplemented @4;
 
     jsgVarargs @5;
-
-    jsgSelfRef @6;
-
-    v8FunctionCallbackInfo @7;
-
-    v8PropertyCallbackInfo @8;
   }
 
   type @0 :Type;
@@ -180,9 +168,6 @@ struct Structure {
   name @0 :Text;
   # Structure name
 
-  fullyQualifiedName @5 :Text;
-  # Fully-qualified structure name including namespaces and parents
-
   members @1 :List(Member);
   # All members in declaration order
 
@@ -191,13 +176,9 @@ struct Structure {
 
   iterable @3 :Bool;
   # true if the structure is iterable
-  iterator @6 :Method;
-  # Method returning iterator if the structure is iterable
 
   asyncIterable @4 :Bool;
   # true if the structure is async iterable
-  asyncIterator @7 :Method;
-  # Method returning async iterator if the structure is async iterable
 }
 
 struct Member {
@@ -210,12 +191,7 @@ struct Member {
     property @1 :Property;
     # any kind of property
 
-    nested :group {
-      structure @2 :Structure;
-
-      name @5 :Text;
-      # For JSG_NESTED_TYPE_NAMED, if name is different to structure
-    }
+    nested @2 :Structure;
     # nested type
 
     constant @3 :Constant;
@@ -252,18 +228,4 @@ struct Constant {
 
 struct Constructor {
   args @0 :List(Type);
-}
-
-struct DefinitionGeneratorRequest {
-  # Collection of structure groups, consumed by TypeScript definitions generator
-
-  groups @0 :List(StructureGroup);
-
-  struct StructureGroup {
-    # Collection of related structures
-
-    name @0 :Text;
-
-    structures @1 :List(Structure);
-  }
 }
