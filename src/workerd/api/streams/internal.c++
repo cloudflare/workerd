@@ -883,7 +883,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
       KJ_ASSERT_NONNULL(source->getController().tryPipeLock(KJ_ASSERT_NONNULL(owner).addRef()));
 
   // Let's also acquire the destination pipe lock.
-  writeState = PipeLocked{ kj::mv(source) };
+  writeState = PipeLocked{ *source };
 
   // If the source has errored, the spec requires us to reject the pipe promise and, if preventAbort
   // is false, error the destination (Propagate error forward). The errored source will be unlocked
@@ -1300,9 +1300,10 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // Note that preventClose (below) means "don't close the writable side", i.e. don't
           // call end().
           request.source.close();
+          auto preventClose = request.preventClose;
           queue.pop_front();
 
-          if (!request.preventClose) {
+          if (!preventClose) {
             // Note: unlike a real Close request, it's not possible for us to have been aborted.
             return close(js, true);
           } else {
@@ -1314,7 +1315,6 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           auto handle = reason.getHandle(js);
           auto& request = check();
           maybeRejectPromise<void>(request.promise, handle);
-          queue.pop_front();
           // TODO(conform): Remember all those checks we performed in ReadableStream::pipeTo()?
           // We're supposed to perform the same checks continually, e.g., errored writes should
           // cancel the readable side unless preventCancel is truthy... This would require
@@ -1323,6 +1323,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           // side, rather than close (cancel) it, which is what the spec would have us do.
           // TODO(now): Warn on the console about this.
           request.source.error(js, handle);
+          queue.pop_front();
           if (!preventAbort) {
             return abort(js, handle);
           }
@@ -1335,6 +1336,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         return handlePromise(js, ioContext.awaitIo(
             AbortSignal::maybeCancelWrap(request.maybeSignal, kj::mv(*promise))));
       }
+
       // The ReadableStream is JavaScript-backed. We can still pipe the data but it's going to be
       // a bit slower because we will be relying on JavaScript promises when reading the data
       // from the ReadableStream, then waiting on kj::Promises to write the data. We will keep
@@ -1345,7 +1347,6 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     KJ_CASE_ONEOF(request, Close) {
       // writeLoop() is only called with the sink in the Writable state.
       auto& writable = state.get<Writable>();
-
       auto check = makeChecker(request);
 
       return ioContext.awaitIo(writable->end()).then(js,
@@ -1561,9 +1562,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       }
     }
   }
-  KJ_IF_MAYBE(locked, writeState.tryGet<PipeLocked>()) {
-    visitor.visit(locked->ref);
-  } else KJ_IF_MAYBE(locked, writeState.tryGet<WriterLocked>()) {
+  KJ_IF_MAYBE(locked, writeState.tryGet<WriterLocked>()) {
     visitor.visit(*locked);
   }
   visitor.visit(maybePendingAbort);
