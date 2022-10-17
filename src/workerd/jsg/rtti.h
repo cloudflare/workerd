@@ -49,7 +49,7 @@ public:
 
   template<typename T>
   Structure::Reader structure() {
-    auto name = jsg::fullyQualifiedTypeName(typeid(T));
+    auto name = jsg::typeName(typeid(T));
     KJ_IF_MAYBE(builder, symbols.find(name)) {
       return (*builder)->template getRoot<Structure>();
     }
@@ -257,58 +257,42 @@ struct BuildRtti<Configuration, jsg::Identified<T>> {
   }
 };
 
+// Generic Types
+
 template<typename Configuration, typename T>
-struct BuildRtti<Configuration, jsg::NonCoercible<T>> {
+struct BuildRtti<Configuration, kj::Maybe<T>> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
-    BuildRtti<Configuration, T>::build(builder, rtti);
+    BuildRtti<Configuration, T>::build(builder.initMaybe().initValue(), rtti);
   }
 };
 
-// Maybe Types
-
-#define DECLARE_MAYBE_TYPE(T) \
-template<typename Configuration, typename V> \
-struct BuildRtti<Configuration, T<V>> { \
-  static void build(Type::Builder builder, Builder<Configuration>& rtti) { \
-    auto maybe = builder.initMaybe(); \
-    BuildRtti<Configuration, V>::build(maybe.initValue(), rtti); \
-    maybe.setName(#T); \
-  } \
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Optional<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder.initMaybe().initValue(), rtti);
+  }
 };
 
-#define FOR_EACH_MAYBE_TYPE(F) \
-  F(kj::Maybe) \
-  F(jsg::Optional) \
-  F(jsg::LenientOptional)
-
-FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
-
-#undef FOR_EACH_MAYBE_TYPE
-#undef DECLARE_MAYBE_TYPE
-
-// Array Types
-
-#define DECLARE_ARRAY_TYPE(T) \
-template<typename Configuration, typename V> \
-struct BuildRtti<Configuration, T<V>> { \
-  static void build(Type::Builder builder, Builder<Configuration>& rtti) { \
-    auto array = builder.initArray(); \
-    BuildRtti<Configuration, V>::build(array.initElement(), rtti); \
-    array.setName(#T); \
-  } \
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::Array<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti);
+  }
 };
 
-#define FOR_EACH_ARRAY_TYPE(F) \
-  F(kj::Array) \
-  F(kj::ArrayPtr) \
-  F(jsg::Sequence)
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, kj::ArrayPtr<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti);
+  }
+};
 
-FOR_EACH_ARRAY_TYPE(DECLARE_ARRAY_TYPE)
-
-#undef FOR_EACH_ARRAY_TYPE
-#undef DECLARE_ARRAY_TYPE
-
-// Misc Generic Types
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Sequence<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder.initArray().initElement(), rtti);
+  }
+};
 
 template<typename Configuration, typename K, typename V>
 struct BuildRtti<Configuration, jsg::Dict<V, K>> {
@@ -400,12 +384,9 @@ struct BuildRtti<Configuration, T> { \
 
 #define FOR_EACH_JSG_IMPL_TYPE(F, ...) \
   F(jsg::Lock, JsgImplType::Type::JSG_LOCK) \
-  F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF) \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED) \
   F(jsg::Varargs, JsgImplType::Type::JSG_VARARGS) \
-  F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE) \
-  F(v8::FunctionCallbackInfo<v8::Value>, JsgImplType::Type::V8_FUNCTION_CALLBACK_INFO) \
-  F(v8::PropertyCallbackInfo<v8::Value>, JsgImplType::Type::V8_PROPERTY_CALLBACK_INFO)
+  F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE)
 
 FOR_EACH_JSG_IMPL_TYPE(DECLARE_JSG_IMPL_TYPE)
 
@@ -545,8 +526,7 @@ struct MembersBuilder {
   template<typename Type, const char* name>
   inline void registerNestedType() {
     auto nested = members[index++].initNested();
-    nested.setName(name);
-    BuildRtti<Configuration, Type>::build(nested.initStructure(), rtti);
+    BuildRtti<Configuration, Type>::build(nested, rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -633,29 +613,11 @@ struct MembersBuilder {
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
-  template<const char* name, typename Method, Method>
-  inline void registerIterable() {
-    structure.setIterable(true);
+  template<const char* name, typename Method, Method method>
+  inline void registerIterable() { structure.setIterable(true); }
 
-    auto method = structure.initIterator();
-    method.setName(name);
-    using Traits = FunctionTraits<Method>;
-    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
-    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
-  }
-
-  template<const char* name, typename Method, Method>
-  inline void registerAsyncIterable() {
-    structure.setAsyncIterable(true);
-
-    auto method = structure.initAsyncIterator();
-    method.setName(name);
-    using Traits = FunctionTraits<Method>;
-    BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
-    using Args = typename Traits::ArgsTuple;
-    TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
-  }
+  template<const char* name, typename Method, Method method>
+  inline void registerAsyncIterable() { structure.setAsyncIterable(true); }
 };
 
 template <typename T, typename = int>
@@ -675,15 +637,13 @@ struct HasConstructor<T, decltype(T::constructor, 0)> : std::true_type { };
 template <typename Configuration, typename T>
 struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value>> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
-    auto structure = builder.initStructure();
-    structure.setName(jsg::typeName(typeid(T)));
-    structure.setFullyQualifiedName(jsg::fullyQualifiedTypeName(typeid(T)));
+    auto name = jsg::typeName(typeid(T));
+    builder.initStructure().setName(name);
     rtti.template structure<T>();
   }
 
   static void build(Structure::Builder builder, Builder<Configuration>& rtti) {
     builder.setName(jsg::typeName(typeid(T)));
-    builder.setFullyQualifiedName(jsg::fullyQualifiedTypeName(typeid(T)));
 
     MemberCounter counter;
     if constexpr (isDetected<GetConfiguration, T>()) {

@@ -15,14 +15,14 @@ namespace {
 KJ_TEST("WorkerGlobalScope") {
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<WorkerGlobalScope>();
-  KJ_EXPECT(builder.structure("workerd::api::Event"_kj) != nullptr);
-  KJ_EXPECT(builder.structure("workerd::api::ObviouslyWrongName"_kj) == nullptr);
+  KJ_EXPECT(builder.structure("Event"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("ObviouslyWrongName"_kj) == nullptr);
 }
 
 KJ_TEST("ServiceWorkerGlobalScope") {
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<ServiceWorkerGlobalScope>();
-  KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("DurableObjectId"_kj) != nullptr);
 }
 
 } // namespace
