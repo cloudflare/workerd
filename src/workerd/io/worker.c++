@@ -1253,7 +1253,20 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     }
   });
 
+  auto maybeMakeSpan = [&](auto operationName) -> MaybeSpan {
+    if (auto span = systemTracer.makeSpan(operationName)) {
+      span.setTag("truncated_script_id"_kj, truncateScriptId(script->getId()));
+      return kj::mv(span);
+    } else {
+      return MaybeSpan();
+    }
+  };
+
+  MaybeSpan currentSpan = maybeMakeSpan("lw:new_startup_metrics"_kj);
+
   auto startupMetrics = metrics->startup(startType);
+
+  currentSpan = maybeMakeSpan("lw:new_context");
 
   // Create a stack-allocated handle scope.
   v8::HandleScope handleScope(lock.v8Isolate);
@@ -1264,6 +1277,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     // const_cast OK because guarded by `lock`.
     context = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(c)
         ->getHandle(lock.v8Isolate);
+    currentSpan.setTag("module_context", true);
   } else {
     // Create a new context.
     context = this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock))
@@ -1286,11 +1300,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
   try {
     try {
-      MaybeSpan instantiationSpan = systemTracer.makeSpan(
-          "lw:globals_instantiation"_kj, systemTracer.getSpanContext());
-      if (instantiationSpan != nullptr) {
-        instantiationSpan.setTag("truncated_script_id"_kj, truncateScriptId(script->getId()));
-      }
+      currentSpan = maybeMakeSpan("lw:globals_instantiation"_kj);
+
       v8::Local<v8::Object> bindingsScope;
       if (script->isModular()) {
         // Use `env` variable.
@@ -1317,11 +1328,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       compileBindings(lock, *script->isolate->apiIsolate, bindingsScope);
 
       // Execute script.
-      MaybeSpan executionSpan = systemTracer.makeSpan(
-          "lw:top_level_execution"_kj, systemTracer.getSpanContext());
-      if (executionSpan != nullptr) {
-        executionSpan.setTag("truncated_script_id"_kj, truncateScriptId(script->getId()));
-      }
+      currentSpan = maybeMakeSpan("lw:top_level_execution"_kj);
+
       KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
         KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
           auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);

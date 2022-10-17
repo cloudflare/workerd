@@ -301,6 +301,7 @@ public:
   };
 
   bool operator==(std::nullptr_t) { return span == nullptr; }
+  explicit operator bool() { return span != nullptr; }
 
   kj::Maybe<Jaeger::SpanContext> getSpanContext() {
     KJ_IF_MAYBE(s, span) {
