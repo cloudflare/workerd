@@ -1,5 +1,8 @@
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+load("@aspect_rules_js//npm:defs.bzl", "npm_link_package", "npm_package")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
 
 cc_capnp_library(
     name = "icudata-embed",
@@ -12,4 +15,17 @@ cc_capnp_library(
 
 refresh_compile_commands(
     name = "refresh_compile_commands",
+)
+
+npm_link_all_packages(name = "node_modules")
+
+npm_link_package(
+    name = "node_modules/@workerd/jsg",
+    src = "//src/workerd/jsg:jsg_js",
+    package = "@workerd/jsg",
+)
+
+capnpc_ts_bin.capnpc_ts_binary(
+    name = "capnpc_ts",
+    visibility = ["//visibility:public"],
 )

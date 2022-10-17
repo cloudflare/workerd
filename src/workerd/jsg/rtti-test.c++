@@ -81,13 +81,15 @@ KJ_TEST("generic types") {
   KJ_EXPECT(tType<v8::Local<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<jsg::Identified<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<jsg::MemoizedIdentity<v8::Object>>() == "(object = void)");
+  KJ_EXPECT(tType<jsg::NonCoercible<kj::String>>() == "(string = (name = \"kj::String\"))");
 
-  KJ_EXPECT(tType<kj::Array<int>>() == "(array = (element = (number = (name = \"int\"))))");
-  KJ_EXPECT(tType<kj::ArrayPtr<int>>() == "(array = (element = (number = (name = \"int\"))))");
-  KJ_EXPECT(tType<jsg::Sequence<int>>() == "(array = (element = (number = (name = \"int\"))))");
+  KJ_EXPECT(tType<kj::Array<int>>() == "(array = (element = (number = (name = \"int\")), name = \"kj::Array\"))");
+  KJ_EXPECT(tType<kj::ArrayPtr<int>>() == "(array = (element = (number = (name = \"int\")), name = \"kj::ArrayPtr\"))");
+  KJ_EXPECT(tType<jsg::Sequence<int>>() == "(array = (element = (number = (name = \"int\")), name = \"jsg::Sequence\"))");
 
-  KJ_EXPECT(tType<kj::Maybe<int>>() == "(maybe = (value = (number = (name = \"int\"))))");
-  KJ_EXPECT(tType<jsg::Optional<int>>() == "(maybe = (value = (number = (name = \"int\"))))");
+  KJ_EXPECT(tType<kj::Maybe<int>>() == "(maybe = (value = (number = (name = \"int\")), name = \"kj::Maybe\"))");
+  KJ_EXPECT(tType<jsg::Optional<int>>() == "(maybe = (value = (number = (name = \"int\")), name = \"jsg::Optional\"))");
+  KJ_EXPECT(tType<jsg::LenientOptional<int>>() == "(maybe = (value = (number = (name = \"int\")), name = \"jsg::LenientOptional\"))");
 
   KJ_EXPECT(tType<jsg::Dict<int>>() == "(dict = (key = (string = (name = \"kj::String\")), value = (number = (name = \"int\"))))");
   KJ_EXPECT((tType<jsg::Dict<int, double>>()) == "(dict = (key = (number = (name = \"double\")), value = (number = (name = \"int\"))))");
@@ -111,11 +113,14 @@ KJ_TEST("builtins") {
 
 KJ_TEST("jsgImpl") {
   KJ_EXPECT(tType<jsg::Lock>() == "(jsgImpl = (type = jsgLock))");
+  KJ_EXPECT(tType<jsg::SelfRef>() == "(jsgImpl = (type = jsgSelfRef))");
   KJ_EXPECT(tType<jsg::Unimplemented>() == "(jsgImpl = (type = jsgUnimplemented))");
   KJ_EXPECT(tType<jsg::Varargs>() == "(jsgImpl = (type = jsgVarargs))");
   KJ_EXPECT(tType<v8::Isolate*>() == "(jsgImpl = (type = v8Isolate))");
   KJ_EXPECT(tType<MockConfig>() == "(jsgImpl = (type = configuration))");
   KJ_EXPECT(tType<jsg::TypeHandler<kj::Date>>() == "(jsgImpl = (type = jsgTypeHandler))");
+  KJ_EXPECT(tType<v8::FunctionCallbackInfo<v8::Value>>() == "(jsgImpl = (type = v8FunctionCallbackInfo))");
+  KJ_EXPECT(tType<v8::PropertyCallbackInfo<v8::Value>>() == "(jsgImpl = (type = v8PropertyCallbackInfo))");
 }
 
 KJ_TEST("functions") {
@@ -162,11 +167,14 @@ struct TestResource: public Base {
 };
 
 KJ_TEST("resource reference") {
-  KJ_EXPECT(tType<TestResource>() == "(structure = (name = \"TestResource\"))");
+  KJ_EXPECT(tType<TestResource>() == "(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))");
 }
 
 KJ_TEST("resource structure") {
-  KJ_EXPECT(tStructure<Base>() == "(name = \"Base\", members = [], extends = (intrinsic = (name = \"v8::kIteratorPrototype\")), iterable = false, asyncIterable = false)");
+  KJ_EXPECT(tStructure<Base>() == "(name = \"Base\", members = [], "
+      "extends = (intrinsic = (name = \"v8::kIteratorPrototype\")), "
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")");
 
   KJ_EXPECT(tStructure<TestResource>() == "(name = \"TestResource\", members = ["
       "(method = (name = \"instanceMethod\", returnType = (voidt = void), args = [(number = (name = \"int\")), (number = (name = \"double\"))], static = false)), "
@@ -177,8 +185,10 @@ KJ_TEST("resource structure") {
       "(property = (name = \"lazyReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = true, prototype = false)), "
       "(property = (name = \"protoSize\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = true)), "
       "(property = (name = \"protoReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = true)), "
-      "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\"))))]))], "
-      "extends = (structure = (name = \"Base\")), iterable = false, asyncIterable = false)");
+      "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\")), name = \"jsg::Optional\"))]))], "
+      "extends = (structure = (name = \"Base\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")), "
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\")");
 }
 
 struct TestNested : jsg::Object {
@@ -186,9 +196,14 @@ struct TestNested : jsg::Object {
 };
 
 KJ_TEST("nested structure") {
-  KJ_EXPECT(tStructure<TestNested>() == "(name = \"TestNested\", members = ["
-    "(nested = (name = \"Base\", members = [], extends = (intrinsic = (name = \"v8::kIteratorPrototype\")), iterable = false, asyncIterable = false))], "
-    "iterable = false, asyncIterable = false)");
+  KJ_EXPECT(tStructure<TestNested>() == "(name = \"TestNested\", members = [(nested = ("
+    "name = \"Base\", members = [], "
+    "extends = (intrinsic = (name = \"v8::kIteratorPrototype\")), "
+    "iterable = false, asyncIterable = false, "
+    "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")"
+    ")], "
+    "iterable = false, asyncIterable = false, "
+    "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestNested\")");
 }
 
 struct TestConstant : jsg::Object {
@@ -208,7 +223,8 @@ KJ_TEST("constant members") {
   KJ_EXPECT(tStructure<TestConstant>() == "(name = \"TestConstant\", members = ["
     "(constant = (name = \"ENABLED\", value = 1)), "
     "(constant = (name = \"CIRCLE\", value = 2))], "
-    "iterable = false, asyncIterable = false)");
+    "iterable = false, asyncIterable = false, "
+    "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestConstant\")");
 }
 
 struct TestStruct {
@@ -218,14 +234,15 @@ struct TestStruct {
 };
 
 KJ_TEST("struct reference") {
-  KJ_EXPECT(tType<TestStruct>() == "(structure = (name = \"TestStruct\"))");
+  KJ_EXPECT(tType<TestStruct>() == "(structure = (name = \"TestStruct\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestStruct\"))");
 }
 
 KJ_TEST("struct structure") {
   KJ_EXPECT(tStructure<TestStruct>() == "(name = \"TestStruct\", members = ["
       "(property = (name = \"a\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false)), "
       "(property = (name = \"b\", type = (boolt = void), readonly = false, lazy = false, prototype = false))], "
-      "iterable = false, asyncIterable = false)");
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestStruct\")");
 }
 
 struct TestSymbolTable: public jsg::Object {
@@ -244,13 +261,14 @@ KJ_TEST("symbol table") {
   capnp::TextCodec codec;
 
   KJ_EXPECT(codec.encode(type) == "(name = \"TestSymbolTable\", members = ["
-      "(method = (name = \"acceptResource\", returnType = (voidt = void), args = [(structure = (name = \"TestResource\"))], static = false)), "
-      "(method = (name = \"recursiveTypeFunction\", returnType = (voidt = void), args = [(structure = (name = \"TestSymbolTable\"))], static = false))], "
-      "iterable = false, asyncIterable = false)");
+      "(method = (name = \"acceptResource\", returnType = (voidt = void), args = [(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))], static = false)), "
+      "(method = (name = \"recursiveTypeFunction\", returnType = (voidt = void), args = [(structure = (name = \"TestSymbolTable\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\"))], static = false))], "
+      "iterable = false, asyncIterable = false, "
+      "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\")");
 
-  KJ_EXPECT(builder.structure("TestSymbolTable"_kj) != nullptr);
-  KJ_EXPECT(builder.structure("TestResource"_kj) != nullptr);
-  KJ_EXPECT(KJ_REQUIRE_NONNULL(builder.structure("TestResource"_kj)).getMembers().size() > 0);
+  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestResource"_kj) != nullptr);
+  KJ_EXPECT(KJ_REQUIRE_NONNULL(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestResource"_kj)).getMembers().size() > 0);
 }
 
 } // namespace
