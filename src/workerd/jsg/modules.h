@@ -203,7 +203,13 @@ public:
     // after first resolve attempt within application has failed, i.e. it is possible for
     // application to override the module.
     // sourceCode has to exist while this ModuleRegistry exists.
-    // The expectation is for this method to be called during the assembly of worker global context.
+    // The expectation is for this method to be called during the assembly of worker global context
+    // after registering all user modules.
+
+    if (entries.find(specifier) != nullptr) {
+      return;
+    }
+
     entries.insert(Entry(specifier, sourceCode));
   }
 
