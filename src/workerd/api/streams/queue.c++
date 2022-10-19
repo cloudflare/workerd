@@ -389,6 +389,10 @@ void ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // those extra bytes and push them into the consumers queue so they can be picked
   // up by the next read.
   req.pullInto.filled += amount;
+
+  // There is no need to adjust the pullInto.atLeast here because we are resolving
+  // the read immediately.
+
   auto unaligned = req.pullInto.filled % req.pullInto.store.getElementSize();
   // It is possible that the request was partially filled already.
   req.pullInto.filled -= unaligned;
@@ -519,6 +523,7 @@ void ByteQueue::handlePush(
     if (amountAvailable < pending.pullInto.atLeast) {
       return bufferData(0);
     }
+
     // There might be at least some data in the buffer. If there is, it should
     // not be more than the current pending.pullInfo.atLeast or something went
     // wrong somewhere else.
@@ -557,12 +562,12 @@ void ByteQueue::handlePush(
           state.buffer.pop_front();
 
           pending.pullInto.filled += sourceSize;
+
+          // There is no reason to adjust the pullInto.atLeast here because we
+          // will be immediately resolving the read in the next step.
+
           state.queueTotalSize -= sourceSize;
           amountAvailable -= sourceSize;
-
-          // It shouldn't be possible for us to have already met the atLeast requirement
-          // for the pending read here!
-          KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.atLeast);
         }
       }
     }
@@ -572,9 +577,6 @@ void ByteQueue::handlePush(
 
     // And there should be data remaining in the pending pullInto destination.
     KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.store.size());
-
-    // And the pending.pullInfo.filled should still be below the pendingPullInto.atLeast.
-    KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.atLeast);
 
     // And the amountAvailable should be equal to the current push size.
     KJ_REQUIRE(amountAvailable == entrySize);
@@ -610,6 +612,9 @@ void ByteQueue::handlePush(
     amountAvailable -= amountToCopy;
     entryOffset += amountToCopy;
     pending.pullInto.filled += amountToCopy;
+
+    // We do not need to adjust the pullInto.atLeast here since we are immediately
+    // fulfilling the read at this point.
 
     pending.resolve(js);
     state.readRequests.pop_front();
@@ -680,6 +685,15 @@ void ByteQueue::handleRead(
           std::copy(sourcePtr, sourcePtr + amountToCopy, destPtr);
 
           request.pullInto.filled += amountToCopy;
+
+          // If pullInto.atLeast is greater than amountToCopy, let's adjust
+          // atLeast down by the number of bytes we've consumed, indicating
+          // a smaller minimum read requirement.
+          if (request.pullInto.atLeast > amountToCopy) {
+            request.pullInto.atLeast -= amountToCopy;
+          } else if (request.pullInto.atLeast == amountToCopy) {
+            request.pullInto.atLeast = 1;
+          }
           entry.offset += amountToCopy;
           amountToConsume -= amountToCopy;
           state.queueTotalSize -= amountToCopy;
@@ -814,8 +828,11 @@ bool ByteQueue::handleMaybeClose(
 
           // Safely copy amountToCopy bytes from the source into the destination.
           std::copy(sourceStart, sourceEnd, destPtr);
-
           pending.pullInto.filled += amountToCopy;
+
+          // We do not need to adjust down the atLeast here because, no matter what,
+          // the read is going to be resolved either here or in the next iteration.
+
           state.queueTotalSize -= amountToCopy;
           entry.offset += amountToCopy;
 
