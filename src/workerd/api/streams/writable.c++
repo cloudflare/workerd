@@ -187,7 +187,7 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
 WritableStream::WritableStream(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> sink)
-    : controller(WritableStreamInternalController(ioContext.addObject(kj::mv(sink)))) {
+    : controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)))) {
   getController().setOwnerRef(*this);
 }
 
@@ -197,11 +197,11 @@ WritableStream::WritableStream(Controller controller) : controller(kj::mv(contro
 
 WritableStreamController& WritableStream::getController() {
   KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, WritableStreamInternalController) {
-      return c;
+    KJ_CASE_ONEOF(c, kj::Own<WritableStreamInternalController>) {
+      return *c;
     }
-    KJ_CASE_ONEOF(c, WritableStreamJsController) {
-      return c;
+    KJ_CASE_ONEOF(c, kj::Own<WritableStreamJsController>) {
+      return *c;
     }
   }
   KJ_UNREACHABLE;
@@ -247,8 +247,7 @@ jsg::Ref<WritableStream> WritableStream::constructor(
                "To use the new WritableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
 
-  auto controller = WritableStreamJsController();
-  auto stream = jsg::alloc<WritableStream>(kj::mv(controller));
+  auto stream = jsg::alloc<WritableStream>(kj::heap<WritableStreamJsController>());
   static_cast<WritableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
