@@ -134,24 +134,24 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     };
   }
 
-  R2Bucket::Checksums checksums;
+  jsg::Ref<R2Bucket::Checksums> checksums = jsg::alloc<R2Bucket::Checksums>(nullptr, nullptr, nullptr, nullptr, nullptr);
 
   if (responseReader.hasChecksums()) {
     R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
     if (checksumsBuilder.hasMd5()) {
-      checksums.md5 = kj::heapArray(checksumsBuilder.getMd5());
+      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
     }
     if (checksumsBuilder.hasSha1()) {
-      checksums.sha1 = kj::heapArray(checksumsBuilder.getSha1());
+      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
     }
     if (checksumsBuilder.hasSha256()) {
-      checksums.sha256 = kj::heapArray(checksumsBuilder.getSha256());
+      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
     }
     if (checksumsBuilder.hasSha384()) {
-      checksums.sha384 = kj::heapArray(checksumsBuilder.getSha384());
+      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
     }
     if (checksumsBuilder.hasSha512()) {
-      checksums.sha512 = kj::heapArray(checksumsBuilder.getSha512());
+      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
     }
   }
 
@@ -882,15 +882,18 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
   });
 }
 
-R2Bucket::Checksums R2Bucket::Checksums::clone() const{
-  auto cloneArray = [](const kj::Array<kj::byte>& arr) { return kj::heapArray(arr.asPtr()); };
+R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
   return {
-    .md5 = this->md5.map(cloneArray),
-    .sha1 = this->sha1.map(cloneArray),
-    .sha256 = this->sha256.map(cloneArray),
-    .sha384 = this->sha384.map(cloneArray),
-    .sha512 = this->sha512.map(cloneArray),
+    .md5 = this->md5.map(kj::encodeHex),
+    .sha1 = this->sha1.map(kj::encodeHex),
+    .sha256 = this->sha256.map(kj::encodeHex),
+    .sha384 = this->sha384.map(kj::encodeHex),
+    .sha512 = this->sha512.map(kj::encodeHex),
   };
+}
+
+kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte> &arr) {
+  return kj::heapArray(arr.asPtr());
 }
 
 } // namespace workerd::api::public_beta

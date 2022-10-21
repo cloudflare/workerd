@@ -11,6 +11,8 @@
 
 namespace workerd::api::public_beta {
 
+kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
+
 class R2Bucket: public jsg::Object {
   // A capability to an R2 Bucket.
 
@@ -57,16 +59,53 @@ public:
     JSG_STRUCT(onlyIf, range);
   };
 
-  struct Checksums {
+  struct StringChecksums {
+    jsg::Optional<kj::String> md5;
+    jsg::Optional<kj::String> sha1;
+    jsg::Optional<kj::String> sha256;
+    jsg::Optional<kj::String> sha384;
+    jsg::Optional<kj::String> sha512;
+
+    JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
+  };
+
+  class Checksums: public jsg::Object {
+  public:
+    Checksums(
+      jsg::Optional<kj::Array<kj::byte>> md5,
+      jsg::Optional<kj::Array<kj::byte>> sha1,
+      jsg::Optional<kj::Array<kj::byte>> sha256,
+      jsg::Optional<kj::Array<kj::byte>> sha384,
+      jsg::Optional<kj::Array<kj::byte>> sha512
+    ):
+      md5(kj::mv(md5)),
+      sha1(kj::mv(sha1)),
+      sha256(kj::mv(sha256)),
+      sha384(kj::mv(sha384)),
+      sha512(kj::mv(sha512)) {}
+
+    jsg::Optional<kj::Array<kj::byte>> getMd5() const { return md5.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha1() const { return sha1.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha256() const { return sha256.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha384() const { return sha384.map(cloneByteArray); }
+    jsg::Optional<kj::Array<kj::byte>> getSha512() const { return sha512.map(cloneByteArray); }
+
+    StringChecksums toJSON();
+
+    JSG_RESOURCE_TYPE(Checksums) {
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(md5, getMd5);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha1, getSha1);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha256, getSha256);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha384, getSha384);
+      JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha512, getSha512);
+      JSG_METHOD(toJSON);
+    }
+
     jsg::Optional<kj::Array<kj::byte>> md5;
     jsg::Optional<kj::Array<kj::byte>> sha1;
     jsg::Optional<kj::Array<kj::byte>> sha256;
     jsg::Optional<kj::Array<kj::byte>> sha384;
     jsg::Optional<kj::Array<kj::byte>> sha512;
-
-    JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
-
-    Checksums clone() const;
   };
 
   struct HttpMetadata {
@@ -101,7 +140,7 @@ public:
   class HeadResult: public jsg::Object {
   public:
     HeadResult(kj::String name, kj::String version, double size,
-               kj::String etag, Checksums checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
+               kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
                jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range):
         name(kj::mv(name)), version(kj::mv(version)), size(size), etag(kj::mv(etag)),
         checksums(kj::mv(checksums)), uploaded(uploaded), httpMetadata(kj::mv(httpMetadata)),
@@ -112,7 +151,7 @@ public:
     double getSize() const { return size; }
     kj::String getEtag() const { return kj::str(etag); }
     kj::String getHttpEtag() const { return kj::str('"', etag, '"'); }
-    Checksums getChecksums() const { return checksums.clone(); }
+    jsg::Ref<Checksums> getChecksums() { return checksums.addRef();}
     kj::Date getUploaded() const { return uploaded; }
 
     jsg::Optional<HttpMetadata> getHttpMetadata() const {
@@ -155,7 +194,7 @@ public:
     kj::String version;
     double size;
     kj::String etag;
-    Checksums checksums;
+    jsg::Ref<Checksums> checksums;
     kj::Date uploaded;
     jsg::Optional<HttpMetadata> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
@@ -167,7 +206,7 @@ public:
   class GetResult: public HeadResult {
   public:
     GetResult(kj::String name, kj::String version, double size,
-              kj::String etag, Checksums checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
+              kj::String etag, jsg::Ref<Checksums> checksums, kj::Date uploaded, jsg::Optional<HttpMetadata> httpMetadata,
               jsg::Optional<jsg::Dict<kj::String>> customMetadata, jsg::Optional<Range> range,
               jsg::Ref<ReadableStream> body)
       : HeadResult(
@@ -277,6 +316,7 @@ private:
   api::public_beta::R2Bucket::GetOptions, \
   api::public_beta::R2Bucket::PutOptions, \
   api::public_beta::R2Bucket::Checksums, \
+  api::public_beta::R2Bucket::StringChecksums, \
   api::public_beta::R2Bucket::HttpMetadata, \
   api::public_beta::R2Bucket::ListOptions, \
   api::public_beta::R2Bucket::ListResult
