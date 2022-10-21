@@ -93,8 +93,8 @@ private:
 
 class WritableStream: public jsg::Object {
 public:
-  using Controller = kj::OneOf<WritableStreamInternalController,
-                               WritableStreamJsController>;
+  using Controller = kj::OneOf<kj::Own<WritableStreamInternalController>,
+                               kj::Own<WritableStreamJsController>>;
 
   explicit WritableStream(IoContext& ioContext,
                           kj::Own<WritableStreamSink> sink);
