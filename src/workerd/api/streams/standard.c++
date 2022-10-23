@@ -1512,6 +1512,9 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
                  "The bytesWritten must be zero after the stream is closed.");
     KJ_ASSERT(impl.readRequest->isInvalidated());
   } else {
+    JSG_REQUIRE(!impl.readRequest->isInvalidated(),
+                TypeError,
+                "This ReadableStreamBYOBRequest has been invalidated.");
     JSG_REQUIRE(bytesWritten > 0,
                  TypeError,
                  "The bytesWritten must be more than zero while the stream is open.");
