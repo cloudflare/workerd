@@ -1195,14 +1195,8 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
     KJ_IF_MAYBE(s, state) {
-      KJ_DEFER({
-        // Clear the references to the controller, free the consumer, and the
-        // owner state once this scope exits. This ValueReadable will no longer
-        // be usable once this is done.
-        auto released KJ_UNUSED = kj::mv(*s);
-      });
-
-      return s->cancel(js, kj::mv(maybeReason));
+      auto releaseMe = kj::mv(*s);
+      return releaseMe.cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
@@ -1433,6 +1427,8 @@ void ReadableStreamDefaultController::enqueue(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> chunk) {
   auto value = chunk.orDefault(js.v8Undefined());
+
+  JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "Unable to enqueue");
 
   size_t size = 1;
   bool errored = false;
