@@ -2067,6 +2067,14 @@ void ReadableStreamJsSource::cancel(kj::Exception reason) {
 }
 
 void ReadableStreamJsSource::doClose() {
+  if (readPending) {
+    // If we're closed in the middle of a read, we do not want to actually
+    // change the state yet we still have data to receive and process. Instead,
+    // we'll set a flag indicating that we are closing so that once the read
+    // completes, we'll process the close after all data is drained.
+    closePending = true;
+    return;
+  }
   state.init<StreamStates::Closed>();
 }
 
@@ -2134,6 +2142,12 @@ jsg::Promise<size_t> ReadableStreamJsSource::readFromByobController(
     doError(js, reason.getHandle(js));
     return js.rejectedPromise<size_t>(kj::mv(reason));
   });
+}
+
+void ReadableStreamJsSource::maybeDrainAndClose() {
+  if (closePending && queue.size() == 0) {
+    state.init<StreamStates::Closed>();
+  }
 }
 
 jsg::Promise<size_t> ReadableStreamJsSource::readFromDefaultController(
@@ -2290,9 +2304,11 @@ jsg::Promise<size_t> ReadableStreamJsSource::internalTryRead(
       return readFromDefaultController(js, buffer, minBytes, maxBytes)
           .then(js, [this](jsg::Lock& js, size_t amount) -> size_t {
         readPending = false;
+        maybeDrainAndClose();
         return amount;
       }, [this](jsg::Lock& js, jsg::Value reason) -> size_t {
         readPending = false;
+        maybeDrainAndClose();
         js.throwException(kj::mv(reason));
       });
     }
@@ -2303,9 +2319,11 @@ jsg::Promise<size_t> ReadableStreamJsSource::internalTryRead(
       return readFromByobController(js, buffer, minBytes, maxBytes)
           .then(js, [this](jsg::Lock& js, size_t amount) -> size_t {
         readPending = false;
+        maybeDrainAndClose();
         return amount;
       }, [this](jsg::Lock& js, jsg::Value reason) -> size_t {
         readPending = false;
+        maybeDrainAndClose();
         js.throwException(kj::mv(reason));
       });
     }
@@ -2339,12 +2357,19 @@ jsg::Promise<void> ReadableStreamJsSource::pipeLoop(
       // Although we have a captured reference to the ioContext already,
       // we should not assume that it is still valid here. Let's just grab
       // IoContext::current() to move things along.
+
       auto& ioContext = IoContext::current();
       if (amount == 0) {
         return end ? ioContext.awaitIo(output.end(), []() {}) : js.resolvedPromise();
       }
       return ioContext.awaitIo(js, output.write(bytes.begin(), amount),
           [this, &output, end, bytes = kj::mv(bytes)] (jsg::Lock& js) mutable {
+
+        if (state.is<StreamStates::Closed>()) {
+          auto& ioContext = IoContext::current();
+          return ioContext.awaitIo(output.end());
+        }
+
         return pipeLoop(js, output, end, kj::mv(bytes));
       });
     });

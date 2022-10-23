@@ -1025,6 +1025,8 @@ private:
       size_t maxBytes,
       size_t amount);
 
+  void maybeDrainAndClose();
+
   IoContext& ioContext;
   kj::OneOf<StreamStates::Closed,
             kj::Exception,
@@ -1032,6 +1034,7 @@ private:
             kj::Own<ByteReadable>> state;
   std::deque<kj::byte> queue;
   bool readPending = false;
+  bool closePending = false;
 };
 
 // =======================================================================================
