@@ -347,6 +347,18 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
 }
 
 template <typename Self>
+size_t ReadableImpl<Self>::consumerCount() {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return 0; }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return 0; }
+    KJ_CASE_ONEOF(queue, Queue) {
+      return queue.getConsumerCount();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+template <typename Self>
 jsg::Promise<void> ReadableImpl<Self>::cancel(
     jsg::Lock& js,
     jsg::Ref<Self> self,
@@ -1512,13 +1524,18 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
                  "The bytesWritten must be zero after the stream is closed.");
     KJ_ASSERT(impl.readRequest->isInvalidated());
   } else {
-    JSG_REQUIRE(!impl.readRequest->isInvalidated(),
-                TypeError,
-                "This ReadableStreamBYOBRequest has been invalidated.");
-    JSG_REQUIRE(bytesWritten > 0,
-                 TypeError,
-                 "The bytesWritten must be more than zero while the stream is open.");
-    impl.readRequest->respond(js, bytesWritten);
+    if (impl.readRequest->isInvalidated()) {
+      // While this particular request may be invalidated, there are still
+      // other branches we can push the data to. Let's do so.
+      jsg::BufferSource source(js, impl.view.getHandle(js));
+      auto entry = kj::refcounted<ByteQueue::Entry>(source.detach(js));
+      impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
+    } else {
+      JSG_REQUIRE(bytesWritten > 0,
+                  TypeError,
+                  "The bytesWritten must be more than zero while the stream is open.");
+      impl.readRequest->respond(js, bytesWritten);
+    }
     pull = true;
   }
 
@@ -1585,6 +1602,11 @@ void ReadableByteStreamController::visitForGc(jsg::GcVisitor& visitor) {
 jsg::Promise<void> ReadableByteStreamController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
+    if (impl.consumerCount() == 1) {
+      (*byobRequest)->invalidate(js);
+    }
+  }
   return impl.cancel(js, JSG_THIS, maybeReason.orDefault(js.v8Undefined()));
 }
 
@@ -1612,14 +1634,13 @@ void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> rea
 kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>>
 ReadableByteStreamController::getByobRequest(jsg::Lock& js) {
   if (maybeByobRequest == nullptr) {
-    auto& queue = JSG_REQUIRE_NONNULL(
-        impl.state.tryGet<ByteQueue>(),
-        TypeError,
-        "This ReadableByteStreamController has been closed.");
-
-    KJ_IF_MAYBE(pendingByob, queue.nextPendingByobReadRequest()) {
-      maybeByobRequest = jsg::alloc<ReadableStreamBYOBRequest>(js,
-          kj::mv(*pendingByob), JSG_THIS);
+    KJ_IF_MAYBE(queue, impl.state.tryGet<ByteQueue>()) {
+      KJ_IF_MAYBE(pendingByob, queue->nextPendingByobReadRequest()) {
+        maybeByobRequest = jsg::alloc<ReadableStreamBYOBRequest>(js,
+            kj::mv(*pendingByob), JSG_THIS);
+      }
+    } else {
+      return nullptr;
     }
   }
 
