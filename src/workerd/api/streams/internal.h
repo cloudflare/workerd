@@ -122,9 +122,8 @@ public:
   explicit ReadableStreamInternalController(Readable readable)
       : state(kj::mv(readable)) {}
 
-  KJ_DISALLOW_COPY(ReadableStreamInternalController);
-  ReadableStreamInternalController(ReadableStreamInternalController&& other) = delete;
-  ReadableStreamInternalController& operator=(ReadableStreamInternalController&& other) = delete;
+  ReadableStreamInternalController(ReadableStreamInternalController&& other) = default;
+  ReadableStreamInternalController& operator=(ReadableStreamInternalController&& other) = default;
 
   ~ReadableStreamInternalController() noexcept(false) override;
 

@@ -180,8 +180,9 @@ private:
       jsg::Optional<jsg::Value> value);
 
 public:
-  using Controller = kj::OneOf<kj::Own<ReadableStreamInternalController>,
-                               kj::Own<ReadableStreamJsController>>;
+  using Controller = kj::OneOf<ReadableStreamInternalController,
+                               ReadableStreamJsController,
+                               ReadableStreamJsTeeController>;
 
   explicit ReadableStream(IoContext& ioContext,
                           kj::Own<ReadableStreamSource> source);
