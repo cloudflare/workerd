@@ -1517,6 +1517,8 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(maybeImpl,
                                    TypeError,
                                    "This ReadableStreamBYOBRequest has been invalidated.");
+  JSG_REQUIRE(impl.view.getHandle(js)->ByteLength() > 0, TypeError,
+      "Cannot respond with a zero-length or detached view");
   bool pull = false;
   if (!impl.controller->canCloseOrEnqueue()) {
     JSG_REQUIRE(bytesWritten == 0,
@@ -1621,6 +1623,10 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "This ReadableByteStreamController is closed.");
 
   KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
+    KJ_IF_MAYBE(view, (*byobRequest)->getView(js)) {
+      JSG_REQUIRE(view->getHandle(js)->ByteLength() > 0, TypeError,
+          "The byobRequest.view is zero-length or was detached");
+    }
     (*byobRequest)->invalidate(js);
   }
 
