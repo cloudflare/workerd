@@ -65,7 +65,7 @@ function printDefinitions(root: StructureGroups): string {
 //
 // Input:
 //    Binary Cap’n Proto file path, defaults to reading from stdin if omitted
-async function main() {
+export async function main(args?: string[]) {
   const { values: options, positionals } = util.parseArgs({
     options: {
       output: { type: "string", short: "o" },
@@ -73,6 +73,7 @@ async function main() {
     },
     strict: true,
     allowPositionals: true,
+    args,
   });
   const maybeInputPath = positionals[0];
 

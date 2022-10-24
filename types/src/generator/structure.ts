@@ -110,7 +110,8 @@ function createNestedPartial(nested: Member_Nested): [string, ts.TypeNode] {
   const name = nested.getName();
   const targetName = getTypeName(nested.getStructure());
   const value = f.createTypeQueryNode(f.createIdentifier(targetName));
-  return [name, value];
+  // Custom `name` will be empty string if omitted, so `??` wouldn't work here
+  return [name || targetName, value];
 }
 
 function createConstantPartial(
@@ -172,14 +173,7 @@ function createInterfaceMemberNode(
         result
       );
     case Member_Which.CONSTANT:
-      const constant = member.getConstant();
-      [modifiers, name, result] = createConstantPartial(constant);
-      return f.createPropertySignature(
-        modifiers,
-        name,
-        /* questionToken */ undefined,
-        result
-      );
+      assert.fail("Unexpected constant inside interface");
     case Member_Which.CONSTRUCTOR:
       assert.fail("Unexpected constructor member inside interface");
     default:

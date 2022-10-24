@@ -22,6 +22,8 @@ $ bazel build //src/workerd/jsg:rtti_capnp_js
 $ pnpm install
 # Generates types to `../bazel-bin/types/api.d.ts`
 $ bazel build //types:types
+# Run tests
+$ bazel test //types:all
 ```
 
 ## Structure

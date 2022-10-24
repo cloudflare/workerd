@@ -1,12 +1,10 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
-load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary", "js_test")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
+load("//:build/wd_ts_test.bzl", "wd_ts_test")
 
-ts_project(
+wd_ts_project(
     name = "types_lib",
     srcs = glob(["src/**/*"]),
-    allow_js = True,
-    source_map = True,
-    tsconfig = "//types:tsconfig.json",
     deps = [
         "//:node_modules/@types",
         "//:node_modules/@workerd/jsg",
@@ -22,6 +20,7 @@ js_binary(
         ":types_lib",
     ],
     entry_point = "src/index.js",
+    node_options = ["--enable-source-maps"],
 )
 
 js_run_binary(
@@ -36,9 +35,15 @@ js_run_binary(
         "types/api.d.ts",
         "--format",
     ],
-    env = {
-        "NODE_OPTIONS": "--enable-source-maps",
-    },
     silent_on_success = False,  # Always enable logging for debugging
     tool = ":types_bin",
 )
+
+[
+    wd_ts_test(
+        src = src,
+        node_options = ["--enable-source-maps"],
+        deps = [":types_lib"],
+    )
+    for src in glob(["test/**/*.spec.ts"])
+]

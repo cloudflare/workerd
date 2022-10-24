@@ -12,12 +12,14 @@
     "baseUrl": ".",
     "rootDir": ".",
     "paths": {
-      "@workerd/*": ["../bazel-bin/src/workerd/*"],
+      "@workerd/*": ["../bazel-bin/src/workerd/*"]
     },
     "checkJs": true,
-    "allowJs": true
+    "allowJs": true,
+    "composite": true
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "test/**/*.ts"
   ]
 }
