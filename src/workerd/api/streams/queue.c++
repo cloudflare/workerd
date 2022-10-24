@@ -579,7 +579,7 @@ void ByteQueue::handlePush(
     KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.store.size());
 
     // And the amountAvailable should be equal to the current push size.
-    KJ_REQUIRE(amountAvailable == entrySize);
+    KJ_REQUIRE(amountAvailable == entrySize - entryOffset);
 
     // Now, we determine how much of the current entry we can copy into the
     // destination pullInto by taking the lesser of amountAvailable and
@@ -676,6 +676,13 @@ void ByteQueue::handleRead(
           auto entrySize = entry.entry->getSize();
           auto amountToCopy = kj::min(entrySize - entry.offset,
                                       request.pullInto.store.size() - request.pullInto.filled);
+          auto elementSize = request.pullInto.store.getElementSize();
+          if (amountToCopy > elementSize) {
+            amountToCopy -= amountToCopy % elementSize;
+          }
+          if (amountToConsume > elementSize) {
+            amountToConsume -= amountToConsume % elementSize;
+          }
 
           // Once we have the amount, we safely copy amountToCopy bytes from the
           // entry into the destination request, accounting properly for the offsets.
@@ -723,6 +730,7 @@ void ByteQueue::handleRead(
   if (state.readRequests.empty() && state.queueTotalSize > 0) {
     // If the available size is less than the read requests atLeast, then
     // push the read request into the pending so we can wait for more data...
+
     if (state.queueTotalSize < request.pullInto.atLeast) {
       // If there is anything in the consumers queue at this point, We need to
       // copy those bytes into the byob buffer and advance the filled counter
@@ -738,6 +746,7 @@ void ByteQueue::handleRead(
     // of the queue total size and the maximum amount of space in the request
     // pull into.
     if (consume(kj::min(state.queueTotalSize, request.pullInto.store.size()))) {
+
       // If consume returns true, the consumer hit the end and we need to
       // just resolve the request as done and return.
       return request.resolveAsDone(js);

@@ -460,6 +460,8 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor);
 
+  size_t consumerCount();
+
 private:
   struct Algorithms {
     kj::Maybe<jsg::Promise<void>> starting;
