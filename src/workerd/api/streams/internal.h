@@ -291,7 +291,7 @@ private:
   void finishError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   struct PipeLocked {
-    ReadableStream& ref;
+    jsg::Ref<ReadableStream> ref;
   };
 
   kj::Maybe<WritableStream&> owner;
