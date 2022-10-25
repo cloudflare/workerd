@@ -26,7 +26,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     // read from the transform stream, and the readable side does *not* support BYOB
     // reads.
     //
-    // Persistent references to the TransformStreamDeafultController are held by both
+    // Persistent references to the TransformStreamDefaultController are held by both
     // the readable and writable sides. The actual TransformStream object can be dropped
     // and allowed to be garbage collected.
     auto controller = jsg::alloc<TransformStreamDefaultController>(js);
