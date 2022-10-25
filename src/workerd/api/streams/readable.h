@@ -149,7 +149,7 @@ public:
 
     JSG_TS_OVERRIDE(ReadableStreamBYOBReader {
       read<T extends ArrayBufferView>(view: T): Promise<ReadableStreamReadResult<T>>;
-      readAtLeast<T extends ArrayBufferView>(minElements: number, view: T): Promise<ReadableStreamReadResult<T>>;
+      readAtLeast(minBytes: number, view: Uint8Array): Promise<ReadableStreamReadResult<Uint8Array>>;
     });
   }
 

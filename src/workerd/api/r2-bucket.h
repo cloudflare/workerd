@@ -273,11 +273,9 @@ public:
     jsg::Optional<kj::Array<jsg::NonCoercible<kj::String>>> include;
 
     JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
-    JSG_STRUCT_TS_OVERRIDE(type R2ListOptions = never);
-    // Delete the auto-generated ListOptions definition, we instead define it
-    // with R2Bucket so we can access compatibility flags. Note, even though
-    // we're deleting the definition, all definitions will still be renamed
-    // from `R2BucketListOptions` to `R2ListOptions`.
+    JSG_STRUCT_TS_OVERRIDE(R2ListOptions {
+      include?: ("httpMetadata" | "customMetadata")[];
+    });
   };
 
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js, kj::String key,
@@ -294,7 +292,7 @@ public:
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
-  JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(R2Bucket) {
     JSG_METHOD(head);
     JSG_METHOD(get);
     JSG_METHOD(put);
@@ -308,29 +306,6 @@ public:
 
       put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
     });
-    // Exclude `R2Object` from `get` return type if `onlyIf` not specified, and exclude `null` from `put` return type
-
-    // Rather than using the auto-generated R2ListOptions definition, we define
-    // it here so we can access compatibility flags from JSG_RESOURCE_TYPE.
-    if (flags.getR2ListHonorIncludeFields()) {
-      JSG_TS_DEFINE(interface R2ListOptions {
-        limit?: number;
-        prefix?: string;
-        cursor?: string;
-        delimiter?: string;
-        startAfter?: string;
-        include?: ("httpMetadata" | "customMetadata")[];
-      });
-    } else {
-      JSG_TS_DEFINE(interface R2ListOptions {
-        limit?: number;
-        prefix?: string;
-        cursor?: string;
-        delimiter?: string;
-        startAfter?: string;
-      });
-      // Omit `include` field if compatibility flag disabled as ignored
-    }
   }
 
   struct UnwrappedConditional {

@@ -67,7 +67,7 @@ struct UnderlyingSource {
     autoAllocateChunkSize?: number;
     start?: (controller: ReadableByteStreamController) => void | Promise<void>;
     pull?: (controller: ReadableByteStreamController) => void | Promise<void>;
-    cancel?: (reason: any) => void | Promise<void>;
+    cancel?: (param0: any) => void | Promise<void>;
   });
   JSG_STRUCT_TS_OVERRIDE(<R = any> {
     type?: "" | undefined;
