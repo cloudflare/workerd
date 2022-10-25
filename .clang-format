@@ -1,0 +1,7 @@
+WhitespaceSensitiveMacros:
+  # clang format doesn't understand TypeScript, so make sure it doesn't mangle
+  # overrides and additional definitions
+  - JSG_TS_OVERRIDE
+  - JSG_TS_DEFINE
+  - JSG_STRUCT_TS_OVERRIDE
+  - JSG_STRUCT_TS_DEFINE

@@ -43,11 +43,12 @@ test("generateDefinitions: only includes referenced types from roots", () => {
   // type
   const group = groups.get(1);
   group.setName("definitions");
-  const structures = group.initStructures(8);
+  const structures = group.initStructures(4);
 
   const root1 = structures.get(0);
-  root1.setName("ServiceWorkerGlobalScope");
-  root1.setFullyQualifiedName("workerd::api::ServiceWorkerGlobalScope");
+  root1.setName("Root1");
+  root1.setFullyQualifiedName("workerd::api::Root1");
+  root1.setTsRoot(true);
   {
     const members = root1.initMembers(7);
 
@@ -103,8 +104,9 @@ test("generateDefinitions: only includes referenced types from roots", () => {
   initAsNestedStructure(nested);
 
   const root2 = structures.get(2);
-  root2.setName("ExportedHandler");
-  root2.setFullyQualifiedName("workerd::api::ExportedHandler");
+  root2.setName("Root2");
+  root2.setFullyQualifiedName("workerd::api::Root2");
+  root2.setTsRoot(true);
   {
     const members = root2.initMembers(3);
 
@@ -128,23 +130,8 @@ test("generateDefinitions: only includes referenced types from roots", () => {
   initAsReferencedType(18, asyncIterator.initReturnType());
   initAsReferencedType(19, root2.initExtends());
 
-  // TODO(soon): remove these once we implement JSG_TS_ROOT macro
-  //  (right now roots are hardcoded and we need to be able to find them all)
-  const root3 = structures.get(3);
-  root3.setName("DurableObjectNamespace");
-  root3.setFullyQualifiedName("workerd::api::DurableObjectNamespace");
-  const root4 = structures.get(4);
-  root4.setName("AnalyticsEngine");
-  root4.setFullyQualifiedName("workerd::api::AnalyticsEngine");
-  const root5 = structures.get(5);
-  root5.setName("KvNamespace");
-  root5.setFullyQualifiedName("workerd::api::KvNamespace");
-  const root6 = structures.get(6);
-  root6.setName("R2Bucket");
-  root6.setFullyQualifiedName("workerd::api::public_beta::R2Bucket");
-
   // Types referenced by non-roots shouldn't be included
-  const nonRoot = structures.get(7);
+  const nonRoot = structures.get(3);
   nonRoot.setName("NonRoot");
   nonRoot.setFullyQualifiedName("workerd::api::NonRoot");
   const members = nonRoot.initMembers(1);
@@ -158,12 +145,10 @@ test("generateDefinitions: only includes referenced types from roots", () => {
   const nodes = generateDefinitions(root);
   assert.strictEqual(
     printNodeList(nodes),
-    `// referenced
-${referencedInterfaces}
+    `${referencedInterfaces}
 export declare abstract class Thing19 {
 }
-// definitions
-export interface ServiceWorkerGlobalScope {
+export interface Root1 {
     promise: Promise<Thing0>;
     structure: Thing1;
     array: Thing2[];
@@ -175,20 +160,12 @@ export interface ServiceWorkerGlobalScope {
 export declare abstract class Nested {
     nestedProp: Thing11;
 }
-export declare class ExportedHandler extends Thing19 {
+export declare class Root2 extends Thing19 {
     constructor(param0: Thing14);
     method(param0: Thing12): Thing13;
     Nested: typeof Nested;
     [Symbol.iterator](param0: Thing15): Thing16;
     [Symbol.asyncIterator](param0: Thing17): Thing18;
-}
-export interface DurableObjectNamespace {
-}
-export interface AnalyticsEngine {
-}
-export interface KvNamespace {
-}
-export interface R2Bucket {
 }
 `
   );
@@ -204,12 +181,12 @@ test("generateDefinitions: only generates classes if required", () => {
   // Generate group containing definitions with each possible class requirement
   const group = groups.get(1);
   group.setName("definitions");
-  const structures = group.initStructures(6);
+  const structures = group.initStructures(4);
 
-  // TODO(soon): rename these once we implement JSG_TS_ROOT macro
   const root1 = structures.get(0);
-  root1.setName("ServiceWorkerGlobalScope");
-  root1.setFullyQualifiedName("workerd::api::ServiceWorkerGlobalScope");
+  root1.setName("Root1");
+  root1.setFullyQualifiedName("workerd::api::Root1");
+  root1.setTsRoot(true);
   // Thing0 should be a class as it's a nested type
   {
     const members = root1.initMembers(1);
@@ -219,8 +196,9 @@ test("generateDefinitions: only generates classes if required", () => {
   }
 
   const root2 = structures.get(1);
-  root2.setName("ExportedHandler");
-  root2.setFullyQualifiedName("workerd::api::ExportedHandler");
+  root2.setName("Root2");
+  root2.setFullyQualifiedName("workerd::api::Root2");
+  root2.setTsRoot(true);
   {
     const members = root2.initMembers(1);
     // ExportedHandler should be a class as it's constructible
@@ -228,8 +206,9 @@ test("generateDefinitions: only generates classes if required", () => {
   }
 
   const root3 = structures.get(2);
-  root3.setName("DurableObjectNamespace");
-  root3.setFullyQualifiedName("workerd::api::DurableObjectNamespace");
+  root3.setName("Root3");
+  root3.setFullyQualifiedName("workerd::api::Root3");
+  root3.setTsRoot(true);
   {
     const members = root3.initMembers(1);
     const method = members.get(0).initMethod();
@@ -240,43 +219,29 @@ test("generateDefinitions: only generates classes if required", () => {
   }
 
   const root4 = structures.get(3);
-  root4.setName("AnalyticsEngine");
-  root4.setFullyQualifiedName("workerd::api::AnalyticsEngine");
+  root4.setName("Root4");
+  root4.setFullyQualifiedName("workerd::api::Root4");
+  root4.setTsRoot(true);
   // Thing1 should be a class as its inherited
   initAsReferencedType(1, root4.initExtends());
-
-  // TODO(soon): remove these once we implement JSG_TS_ROOT macro
-  //  (right now roots are hardcoded and we need to be able to find them all)
-  const root5 = structures.get(4);
-  root5.setName("KvNamespace");
-  root5.setFullyQualifiedName("workerd::api::KvNamespace");
-  const root6 = structures.get(5);
-  root6.setName("R2Bucket");
-  root6.setFullyQualifiedName("workerd::api::public_beta::R2Bucket");
 
   const nodes = generateDefinitions(root);
   assert.strictEqual(
     printNodeList(nodes),
-    `// referenced
-export declare abstract class Thing0 {
+    `export declare abstract class Thing0 {
 }
 export declare abstract class Thing1 {
 }
-// definitions
-export interface ServiceWorkerGlobalScope {
+export interface Root1 {
     Thing0: typeof Thing0;
 }
-export declare class ExportedHandler {
+export declare class Root2 {
     constructor();
 }
-export declare abstract class DurableObjectNamespace {
+export declare abstract class Root3 {
     static method(): void;
 }
-export interface AnalyticsEngine extends Thing1 {
-}
-export interface KvNamespace {
-}
-export interface R2Bucket {
+export interface Root4 extends Thing1 {
 }
 `
   );

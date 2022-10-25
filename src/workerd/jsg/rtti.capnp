@@ -198,6 +198,20 @@ struct Structure {
   # true if the structure is async iterable
   asyncIterator @7 :Method;
   # Method returning async iterator if the structure is async iterable
+
+  tsRoot @8 :Bool;
+  # See `JSG_TS_ROOT`'s documentation in the `## TypeScript` section of the JSG README.md.
+  # If `JSG_(STRUCT_)TS_ROOT` is declared for a type, this value will be `true`.
+
+  tsOverride @9 :Text;
+  # See `JSG_TS_OVERRIDE`'s documentation in the `## TypeScript` section of the JSG README.md.
+  # If `JSG_(STRUCT_)TS_OVERRIDE` is declared for a type, this value will be the contents of the
+  # macro declaration verbatim.
+
+  tsDefine @10 :Text;
+  # See `JSG_TS_DEFINE`'s documentation in the `## TypeScript` section of the JSG README.md.
+  # If `JSG_(STRUCT_)TS_DEFINE` is declared for a type, this value will be the contents of the
+  # macro declaration verbatim.
 }
 
 struct Member {

@@ -829,6 +829,14 @@ struct ResourceTypeBuilder {
     prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, (Type*)nullptr));
   }
 
+  inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
+
+  template<const char* tsOverride>
+  inline void registerTypeScriptOverride() { /* only needed for RTTI */ }
+
+  template<const char* tsDefine>
+  inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
+
 private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
