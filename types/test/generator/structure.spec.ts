@@ -189,7 +189,7 @@ test("createStructureNode: constant members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, true)),
     `export declare abstract class Constants {
-    static readonly THING: 42;
+    static readonly THING: number;
 }`
   );
 });
