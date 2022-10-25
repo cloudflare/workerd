@@ -6,7 +6,7 @@ interface MemorySourceFile {
   sourceFile: ts.SourceFile;
 }
 
-// Creates a TypeScript program from in-memory source files. Accepts a Map of
+// Creates a TypeScript program form in-memory source files. Accepts a Map of
 // fully-resolved "virtual" paths to source code.
 export function createMemoryProgram(sources: Map<string, string>): ts.Program {
   const options = ts.getDefaultCompilerOptions();
