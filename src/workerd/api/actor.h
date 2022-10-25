@@ -85,6 +85,14 @@ public:
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
+
+    JSG_TS_DEFINE(interface DurableObject {
+      fetch(request: Request): Response | Promise<Response>;
+      alarm?(): void | Promise<void>;
+    });
+    JSG_TS_OVERRIDE(DurableObjectStub);
+    // Rename this resource type to DurableObjectStub, and make DurableObject
+    // the interface implemented by users' Durable Object classes.
   }
 
 private:
@@ -132,6 +140,7 @@ public:
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
     JSG_METHOD(get);
+    JSG_TS_ROOT();
   }
 
 private:

@@ -46,9 +46,21 @@ public:
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
       JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
+
+      JSG_TS_OVERRIDE(<I = any, O = any> {
+        constructor(transformer?: Transformer<I, O>, writableStrategy?: QueuingStrategy<I>, readableStrategy?: QueuingStrategy<O>);
+        get readable(): ReadableStream<O>;
+        get writable(): WritableStream<I>;
+      });
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readable, getReadable);
       JSG_READONLY_INSTANCE_PROPERTY(writable, getWritable);
+
+      JSG_TS_OVERRIDE(<I = any, O = any> {
+        constructor(transformer?: Transformer<I, O>, writableStrategy?: QueuingStrategy<I>, readableStrategy?: QueuingStrategy<O>);
+        readonly readable: ReadableStream<O>;
+        readonly writable: WritableStream<I>;
+      });
     }
   }
 
@@ -73,6 +85,8 @@ public:
 
   JSG_RESOURCE_TYPE(IdentityTransformStream) {
     JSG_INHERIT(TransformStream);
+
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array>);
   }
 };
 

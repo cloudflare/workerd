@@ -109,6 +109,19 @@ public:
 
     JSG_METHOD(forEach);
     JSG_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE({
+      append(name: string, value: string): void;
+      append(name: string, value: Blob, filename?: string): void;
+
+      set(name: string, value: string): void;
+      set(name: string, value: Blob, filename?: string): void;
+
+      entries(): IterableIterator<[key: string, value: File | string]>;
+      [Symbol.iterator](): IterableIterator<[key: string, value: File | string]>;
+
+      forEach<This = unknown>(callback: (this: This, value: File | string, key: string, parent: FormData) => void, thisArg?: This): void;
+    });
   }
 
 private:
