@@ -2,7 +2,7 @@ import assert from "assert";
 import fs from "fs/promises";
 import { test } from "node:test";
 import path from "path";
-import { BuiltinType_Type, StructureGroups } from "@workerd/jsg/rtti.capnp.js";
+import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import { main } from "../src";
 
@@ -12,52 +12,14 @@ test("main: generates types", async () => {
   const groups = root.initGroups(1);
   const group = groups.get(0);
   group.setName("definitions");
-  const structures = group.initStructures(5);
+  const structures = group.initStructures(3);
 
-  const eventTarget = structures.get(0);
-  eventTarget.setName("EventTarget");
-  eventTarget.setFullyQualifiedName("workerd::api::EventTarget");
+  const root1 = structures.get(0);
+  root1.setName("ServiceWorkerGlobalScope");
+  root1.setFullyQualifiedName("workerd::api::ServiceWorkerGlobalScope");
+  root1.setTsRoot(true);
   {
-    const members = eventTarget.initMembers(2);
-    members.get(0).initConstructor();
-    const method = members.get(1).initMethod();
-    method.setName("addEventListener");
-    {
-      const args = method.initArgs(2);
-      args.get(0).initString().setName("kj::String");
-      args.get(1).initBuiltin().setType(BuiltinType_Type.V8FUNCTION);
-    }
-    method.initReturnType().setVoidt();
-  }
-  eventTarget.setTsOverride(`<EventMap extends Record<string, Event> = Record<string, Event>> {
-    addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
-  }`);
-
-  const workerGlobalScope = structures.get(1);
-  workerGlobalScope.setName("WorkerGlobalScope");
-  workerGlobalScope.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
-  let extendsStructure = workerGlobalScope.initExtends().initStructure();
-  extendsStructure.setName("EventTarget");
-  extendsStructure.setFullyQualifiedName("workerd::api::EventTarget");
-  workerGlobalScope.setTsDefine(`type WorkerGlobalScopeEventMap = {
-    fetch: Event;
-    scheduled: Event;
-  }`);
-  workerGlobalScope.setTsOverride(
-    "extends EventTarget<WorkerGlobalScopeEventMap>"
-  );
-
-  const serviceWorkerGlobalScope = structures.get(2);
-  serviceWorkerGlobalScope.setName("ServiceWorkerGlobalScope");
-  serviceWorkerGlobalScope.setFullyQualifiedName(
-    "workerd::api::ServiceWorkerGlobalScope"
-  );
-  extendsStructure = serviceWorkerGlobalScope.initExtends().initStructure();
-  extendsStructure.setName("WorkerGlobalScope");
-  extendsStructure.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
-  serviceWorkerGlobalScope.setTsRoot(true);
-  {
-    const members = serviceWorkerGlobalScope.initMembers(2);
+    const members = root1.initMembers(2);
 
     // Test that global extraction is performed after iterator processing
     const method = members.get(0).initMethod();
@@ -75,7 +37,7 @@ test("main: generates types", async () => {
     prop.initType().initPromise().initValue().initNumber().setName("int");
   }
 
-  const iterator = structures.get(3);
+  const iterator = structures.get(1);
   iterator.setName("ThingIterator");
   iterator.setFullyQualifiedName("workerd::api::ThingIterator");
   iterator.initExtends().initIntrinsic().setName("v8::kIteratorPrototype");
@@ -90,7 +52,7 @@ test("main: generates types", async () => {
     const iteratorMethod = iterator.initIterator();
     iteratorMethod.initReturnType().setUnknown();
   }
-  const iteratorNext = structures.get(4);
+  const iteratorNext = structures.get(2);
   iteratorNext.setName("ThingIteratorNext");
   iteratorNext.setFullyQualifiedName("workerd::api::ThingIteratorNext");
   {
@@ -104,6 +66,8 @@ test("main: generates types", async () => {
     valueType.setName("jsg::Optional");
     valueType.initValue().initString().setName("kj::String");
   }
+
+  // TODO: add another struct with defines/overrides
 
   // https://bazel.build/reference/test-encyclopedia#initial-conditions
   const tmpPath = process.env.TEST_TMPDIR;
@@ -119,21 +83,10 @@ test("main: generates types", async () => {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-export declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
-    constructor();
-    addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
-}
-export type WorkerGlobalScopeEventMap = {
-    fetch: Event;
-    scheduled: Event;
-};
-export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
-}
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+export interface ServiceWorkerGlobalScope {
     things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
-export declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
 `
@@ -146,27 +99,10 @@ export declare const prop: Promise<number>;
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-export declare class EventTarget<
-  EventMap extends Record<string, Event> = Record<string, Event>
-> {
-  constructor();
-  addEventListener<Type extends keyof EventMap>(
-    type: Type,
-    handler: (event: EventMap[Type]) => void
-  ): void;
-}
-export type WorkerGlobalScopeEventMap = {
-  fetch: Event;
-  scheduled: Event;
-};
-export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {}
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+export interface ServiceWorkerGlobalScope {
   things(param0: boolean): IterableIterator<string>;
   get prop(): Promise<number>;
 }
-export declare function addEventListener<
-  Type extends keyof WorkerGlobalScopeEventMap
->(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
 `
