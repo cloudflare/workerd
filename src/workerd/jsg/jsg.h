@@ -537,6 +537,176 @@ using HasGetTemplateOverload = decltype(
   }
 // Adds reflection to a resource type. See PropertyReflection<T> for usage.
 
+#define JSG_TS_ROOT() \
+  registry.registerTypeScriptRoot()
+// Use inside a JSG_RESOURCE_TYPE block to declare that this type should be considered a "root" for
+// the purposes of automatically generating TypeScript definitions. All "root" types and their
+// recursively referenced types (e.g. method parameter/return types, property types, inherits, etc)
+// will be included in the generated TypeScript. For example, the type `ServiceWorkerGlobalScope`
+// should be a "root", as should any non-global type that we'd like include (e.g. `ExportedHandler`
+// and capabilities such as `KvNamespace`).
+//
+// The reason we even have to define roots in the first place (as opposed to just generating TypeScript
+// definitions for all isolate types) is that some types should only be included when certain
+// compatibility flags are enabled. For example, we only want to include the `Navigator` and spec-
+// compliant URL implementation types if `global_navigator` and `url_standard` are enabled respectively.
+
+#define JSG_TS_OVERRIDE(...) \
+ do { \
+  static const char OVERRIDE[] = JSG_STRING_LITERAL(__VA_ARGS__); \
+  registry.template registerTypeScriptOverride<OVERRIDE>(); \
+ } while (false)
+// Use inside a JSG_RESOURCE_TYPE block to customise the generated TypeScript definition for this type.
+// This macro accepts a single override parameter containing a partial TypeScript statement definition.
+// Varargs are accepted so that overrides can contain `,` outside of balanced brackets. After trimming
+// whitespace from the override, the following rules are applied:
+//
+// (WARNING: there's a *lot* of magic here, ensure you understand the examples before writing overrides)
+//
+// 1) If an override starts with `export `, `declare `, `type `, `abstract `, `class `, `interface `,
+//    `enum `, `const `, `var ` or `function `, the generated definition will be replaced with the
+//    override. If the replacement is a `class`, `enum`, `const`, `var` or `function`, the `declare`
+//    modifier will be added if it's not already present. In the special case that the override is a
+//    `type`-alias to `never`, the generated definition will be deleted.
+//
+// 2) Otherwise, the override will be converted to a TypeScript class as follows: (where <name> is the
+//    unqualified C++ type name of this resource type)
+//      a) If an override starts with `extends `, `implements ` or `{`: `class <name> ` will be prepended
+//      b) If an override starts with `<`: `class <name>` will be prepended
+//      c) Otherwise, `class ` will be prepended
+//    After this, if the override doesn't end with `}`, ` {}` will be appended.
+//
+//    The class is then parsed and merged with the generated definition as follows: (note that even though
+//    we convert all non-replacement overrides to classes, this type classification is ignored when
+//    merging, classes just support all possible forms of override)
+//      a) If the override class has a different name to the generated type, the generated type is renamed
+//         and all references to it are updated. Note that the renaming happens after all overrides are
+//         applied, so you're able to reference original C++ names in other types' overrides.
+//      b) If the override class defines type parameters, they are copied to the generated type.
+//      c) If the override class defines heritage clauses (e.g. `extends`/`implements`), they replace the
+//         generated types'. Notably, these may include type arguments.
+//      d) If the override class defines members, those are merged with the generated type's members as
+//         follows:
+//           i) Members in the override but not in the generated type are inserted at the end
+//          ii) If the override has a member with the same name as a member in the generated type,
+//              the generated member is removed, and the override is inserted instead. Note that static
+//              and instance members belong to different namespaces for the purposes of this comparison.
+//         iii) If an override member property is declared type `never`, it is not inserted, but its
+//              presence may remove the generated member (as per ii).
+//
+// Note that overrides can only customise a single definition. To add additional, handwritten,
+// TypeScript-only defintions, use the JSG_TS_DEFINE macro.
+//
+// Here are some example overrides demonstrating these rules:
+//
+// - `KVNamespaceListOptions`
+//   Renames the generated type to `KVNamespaceListOptions` and updates all type references to the new name.
+//
+// - ```
+//   KVNamespace {
+//     get(key: string, type: "string"): Promise<string | null>;
+//     get(key: string, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
+//   }
+//   ```
+//   Renames the generated type to `KVNamespace` (updating all references), and replaces the `get()` method
+//   definition with two overloads. Leaves all other members untouched.
+//
+// - `{ json<T>(): Promise<T> }`
+//   Replaces the `json()` method definition so it's generic in type parameter `T`. Leaves all other
+//   members untouched.
+//
+// - `class Body { json<T>(): Promise<T> }`
+//   Because it starts with `class `, this override replaces the entire generated definition with
+//   `declare class Body { json<T>(): Promise<T> }`, removing all other members.
+//
+// - ```
+//   <R = any> {
+//     read(): Promise<ReadableStreamReadResult<R>>;
+//     tee(): [ReadableStream<R>, ReadableStream<R>];
+//   }
+//   ```
+//   Adds a type parameter `R` which defaults to `any` to the generated type, replacing the `read()` and
+//   `tee()` method definitions, leaving all other members untouched.
+//
+// - `{ actorState: never }`
+//   Removes the `actorState` member from the generated type, leaving all other members untouched.
+//
+// - `extends EventTarget<WorkerGlobalScopeEventMap>`
+//   Adds `WorkerGlobalScopeEventMap` as a type argument to the generated type's heritage. Leaves all
+//   members untouched.
+//
+// - ```
+//   extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
+//     constructor(format: "gzip" | "deflate");
+//   }
+//   ```
+//   Adds `ArrayBuffer | ArrayBufferView` and `Uint8Array` as type arguments to the generated type's
+//   heritage, then replaces the generated constructor definition, leaving all other members untouched.
+//
+// - ```
+//   const WebSocketPair: {
+//     new (): { 0: WebSocket; 1: WebSocket };
+//   }
+//   ```
+//   Replaces the generated `WebSocketPair` definition with `declare const WebSocketPair: { ... };`.
+//
+// - ```
+//   type ReadableStreamReadResult<R = any> =
+//     | { done: false; value: R; }
+//     | { done: true; value?: undefined; }
+//   ```
+//   Replaces the generated `ReadableStreamReadResult` definition with a type alias.
+//
+// - `type TransactionOptions = never`
+//   Removes the generated `TransactionOptions` definition from the output.
+
+#define JSG_TS_DEFINE(...) \
+ do { \
+  static const char DEFINE[] = JSG_STRING_LITERAL(__VA_ARGS__); \
+  registry.template registerTypeScriptDefine<DEFINE>(); \
+ } while (false)
+// Use inside a JSG_RESOURCE_TYPE block to insert additional TypeScript definitions next to the generated
+// TypeScript definition for this type. This macro accepts a single define parameter containing one or
+// more TypeScript definitions (e.g. interfaces, classes, type aliases, consts, ...). Varargs are accepted
+// so that defines can contain `,` outside of balanced brackets. This macro can only be used once per
+// JSG_RESOURCE_TYPE block. The `declare` modifier will be added to any `class`, `enum`, `const`, `var` or
+// `function` definitions if it's not already present.
+
+#define JSG_STRUCT_TS_ROOT() \
+  static constexpr bool _JSG_STRUCT_TS_ROOT_DO_NOT_USE_DIRECTLY = true
+// Like JSG_TS_ROOT but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT declaration,
+// inside the same `struct` definition.
+
+#define JSG_STRUCT_TS_OVERRIDE(...) \
+  static constexpr char _JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY[] = JSG_STRING_LITERAL(__VA_ARGS__)
+// Like JSG_TS_OVERRIDE but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT
+// declaration, inside the same `struct` definition.
+
+#define JSG_STRUCT_TS_DEFINE(...) \
+  static constexpr char _JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY[] = JSG_STRING_LITERAL(__VA_ARGS__)
+// Like JSG_TS_DEFINE but for use with JSG_STRUCT. Should be placed adjacent to the JSG_STRUCT
+// declaration, inside the same `struct` definition.
+
+namespace {
+  template <typename T, typename = int>
+  struct HasStructTypeScriptRoot : std::false_type {};
+  template <typename T>
+  struct HasStructTypeScriptRoot<T, decltype(T::_JSG_STRUCT_TS_ROOT_DO_NOT_USE_DIRECTLY, 0)> : std::true_type { };
+  // true when the T has _JSG_STRUCT_TS_ROOT_DO_NOT_USE_DIRECTLY field generated by JSG_STRUCT_TS_ROOT
+
+  template <typename T, typename = int>
+  struct HasStructTypeScriptOverride : std::false_type {};
+  template <typename T>
+  struct HasStructTypeScriptOverride<T, decltype(T::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY, 0)> : std::true_type { };
+  // true when the T has _JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY field generated by JSG_STRUCT_TS_OVERRIDE
+
+  template <typename T, typename = int>
+  struct HasStructTypeScriptDefine : std::false_type {};
+  template <typename T>
+  struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY, 0)> : std::true_type { };
+  // true when the T has _JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY field generated by JSG_STRUCT_TS_DEFINE
+}
+
 #define JSG_STRUCT(...) \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
       ::workerd::jsg::JsgKind::STRUCT; \
@@ -544,6 +714,15 @@ using HasGetTemplateOverload = decltype(
   template <typename Registry, typename Self> \
   static void registerMembers(Registry& registry) { \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__); \
+    if constexpr (::workerd::jsg::HasStructTypeScriptRoot<Self>::value) { \
+      registry.registerTypeScriptRoot(); \
+    } \
+    if constexpr (::workerd::jsg::HasStructTypeScriptOverride<Self>::value) { \
+      registry.template registerTypeScriptOverride<Self::_JSG_STRUCT_TS_OVERRIDE_DO_NOT_USE_DIRECTLY>(); \
+    } \
+    if constexpr (::workerd::jsg::HasStructTypeScriptDefine<Self>::value) { \
+      registry.template registerTypeScriptDefine<Self::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE_DIRECTLY>(); \
+    } \
   } \
   template <typename TypeWrapper, typename Self> \
   using JsgFieldWrappers = ::workerd::jsg::TypeTuple< \
