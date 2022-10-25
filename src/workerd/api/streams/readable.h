@@ -81,6 +81,10 @@ public:
     JSG_METHOD(cancel);
     JSG_METHOD(read);
     JSG_METHOD(releaseLock);
+
+    JSG_TS_OVERRIDE(<R = any> {
+      read(): Promise<ReadableStreamReadResult<R>>;
+    });
   }
 
   // Internal API
@@ -142,6 +146,11 @@ public:
 
     JSG_METHOD(readAtLeast);
     // Non-standard extension that should only apply to BYOB byte streams.
+
+    JSG_TS_OVERRIDE(ReadableStreamBYOBReader {
+      read<T extends ArrayBufferView>(view: T): Promise<ReadableStreamReadResult<T>>;
+      readAtLeast<T extends ArrayBufferView>(minElements: number, view: T): Promise<ReadableStreamReadResult<T>>;
+    });
   }
 
   // Internal API
@@ -227,6 +236,10 @@ public:
     jsg::Optional<kj::String> mode;  // can be "byob" or undefined
 
     JSG_STRUCT(mode);
+
+    JSG_STRUCT_TS_OVERRIDE({ mode: "byob" });
+    // Intentionally required, so we can use `GetReaderOptions` directly in the
+    // `ReadableStream#getReader()` overload.
   };
 
   Reader getReader(jsg::Lock& js, jsg::Optional<GetReaderOptions> options);
@@ -249,6 +262,10 @@ public:
     jsg::Ref<ReadableStream> readable;
 
     JSG_STRUCT(writable, readable);
+    JSG_STRUCT_TS_OVERRIDE(ReadableWritablePair<R = any, W = any> {
+      readable: ReadableStream<R>;
+      writable: WritableStream<W>;
+    });
   };
 
   jsg::Ref<ReadableStream> pipeThrough(
@@ -279,6 +296,29 @@ public:
     JSG_METHOD(values);
 
     JSG_ASYNC_ITERABLE(values);
+
+    JSG_TS_DEFINE(interface ReadableStream<R = any> {
+      cancel(reason?: any): Promise<void>;
+
+      getReader(): ReadableStreamDefaultReader<R>;
+      getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+
+      pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+      pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+
+      tee(): [ReadableStream<R>, ReadableStream<R>];
+
+      values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+      [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+    });
+    JSG_TS_OVERRIDE(const ReadableStream: {
+      prototype: ReadableStream;
+      new (underlyingSource: UnderlyingByteSource, strategy?: QueuingStrategy<Uint8Array>): ReadableStream<Uint8Array>;
+      new <R = any>(underlyingSource?: UnderlyingSource<R>, strategy?: QueuingStrategy<R>): ReadableStream<R>;
+    });
+    // Replace ReadableStream class with an interface and const, so we can have
+    // two constructors with differing type parameters for byte-oriented and
+    // value-oriented streams.
   }
 
 private:
@@ -315,6 +355,11 @@ public:
   JSG_RESOURCE_TYPE(ByteLengthQueuingStrategy) {
     JSG_READONLY_PROTOTYPE_PROPERTY(highWaterMark, getHighWaterMark);
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
+
+    JSG_TS_OVERRIDE(implements QueuingStrategy<ArrayBufferView> {
+      get size(): (chunk?: any) => number;
+    });
+    // QueuingStrategy requires the result of the size function to be defined
   }
 
 private:
@@ -340,6 +385,11 @@ public:
   JSG_RESOURCE_TYPE(CountQueuingStrategy) {
     JSG_READONLY_PROTOTYPE_PROPERTY(highWaterMark, getHighWaterMark);
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
+
+    JSG_TS_OVERRIDE(implements QueuingStrategy {
+      get size(): (chunk?: any) => number;
+    });
+    // QueuingStrategy requires the result of the size function to be defined
   }
 
 private:

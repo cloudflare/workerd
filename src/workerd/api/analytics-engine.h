@@ -58,6 +58,7 @@ public:
 
   JSG_RESOURCE_TYPE(AnalyticsEngine) {
     JSG_METHOD(writeDataPoint);
+    JSG_TS_ROOT();
   }
 
 private:

@@ -37,6 +37,10 @@ struct ReadResult {
   bool done;
 
   JSG_STRUCT(value, done);
+  JSG_STRUCT_TS_OVERRIDE(type ReadableStreamReadResult<R = any> =
+    | { done: false, value: R; }
+    | { done: true; value?: undefined; }
+  );
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(value);
@@ -50,6 +54,7 @@ struct PipeToOptions {
   jsg::Optional<jsg::Ref<AbortSignal>> signal;
 
   JSG_STRUCT(preventClose, preventAbort, preventCancel, signal);
+  JSG_STRUCT_TS_OVERRIDE(StreamPipeOptions);
 
   // An additional, internal only property that is used to indicate
   // when the pipe operation is used for a pipeThrough rather than

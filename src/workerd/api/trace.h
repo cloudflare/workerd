@@ -234,6 +234,8 @@ public:
   JSG_RESOURCE_TYPE(TraceMetrics) {
     JSG_READONLY_INSTANCE_PROPERTY(cpuTime, getCPUTime);
     JSG_READONLY_INSTANCE_PROPERTY(wallTime, getWallTime);
+
+    JSG_TS_ROOT();
   }
 private:
   uint cpuTime;
@@ -246,6 +248,8 @@ public:
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {
     JSG_METHOD(fromTrace);
+
+    JSG_TS_ROOT();
   }
 };
 

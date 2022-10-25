@@ -40,6 +40,11 @@ public:
     jsg::Optional<double> suffix;
 
     JSG_STRUCT(offset, length, suffix);
+    JSG_STRUCT_TS_OVERRIDE(type R2Range =
+      | { offset: number; length?: number }
+      | { offset?: number; length: number }
+      | { suffix: number }
+    );
   };
 
   struct Conditional {
@@ -50,6 +55,7 @@ public:
     jsg::Optional<bool> secondsGranularity;
 
     JSG_STRUCT(etagMatches, etagDoesNotMatch, uploadedBefore, uploadedAfter, secondsGranularity);
+    JSG_STRUCT_TS_OVERRIDE(R2Conditional);
   };
 
   struct GetOptions {
@@ -57,6 +63,7 @@ public:
     jsg::Optional<kj::OneOf<Range, jsg::Ref<Headers>>> range;
 
     JSG_STRUCT(onlyIf, range);
+    JSG_STRUCT_TS_OVERRIDE(R2GetOptions);
   };
 
   struct StringChecksums {
@@ -67,6 +74,7 @@ public:
     jsg::Optional<kj::String> sha512;
 
     JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
+    JSG_STRUCT_TS_OVERRIDE(R2StringChecksums);
   };
 
   class Checksums: public jsg::Object {
@@ -99,6 +107,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha384, getSha384);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(sha512, getSha512);
       JSG_METHOD(toJSON);
+      JSG_TS_OVERRIDE(R2Checksums);
     }
 
     jsg::Optional<kj::Array<kj::byte>> md5;
@@ -120,6 +129,7 @@ public:
 
     JSG_STRUCT(contentType, contentLanguage, contentDisposition,
                 contentEncoding, cacheControl, cacheExpiry);
+    JSG_STRUCT_TS_OVERRIDE(R2HTTPMetadata);
 
     HttpMetadata clone() const;
   };
@@ -135,6 +145,7 @@ public:
     jsg::Optional<kj::OneOf<kj::Array<kj::byte>, jsg::NonCoercible<kj::String>>> sha512;
 
     JSG_STRUCT(onlyIf, httpMetadata, customMetadata, md5, sha1, sha256, sha384, sha512);
+    JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
   class HeadResult: public jsg::Object {
@@ -187,6 +198,7 @@ public:
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(customMetadata, getCustomMetadata);
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(range, getRange);
       JSG_METHOD(writeHttpMetadata);
+      JSG_TS_OVERRIDE(R2Object);
     }
 
   protected:
@@ -235,6 +247,9 @@ public:
       JSG_METHOD(text);
       JSG_METHOD(json);
       JSG_METHOD(blob);
+      JSG_TS_OVERRIDE(R2ObjectBody {
+        json<T>(): Promise<T>;
+      });
     }
   private:
     jsg::Ref<ReadableStream> body;
@@ -247,6 +262,7 @@ public:
     kj::Array<kj::String> delimitedPrefixes;
 
     JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
+    JSG_STRUCT_TS_OVERRIDE(R2Objects);
   };
 
   struct ListOptions {
@@ -258,6 +274,11 @@ public:
     jsg::Optional<kj::Array<jsg::NonCoercible<kj::String>>> include;
 
     JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
+    JSG_STRUCT_TS_OVERRIDE(type R2ListOptions = never);
+    // Delete the auto-generated ListOptions definition, we instead define it
+    // with R2Bucket so we can access compatibility flags. Note, even though
+    // we're deleting the definition, all definitions will still be renamed
+    // from `R2BucketListOptions` to `R2ListOptions`.
   };
 
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js, kj::String key,
@@ -274,12 +295,43 @@ public:
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
-  JSG_RESOURCE_TYPE(R2Bucket) {
+  JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
     JSG_METHOD(head);
     JSG_METHOD(get);
     JSG_METHOD(put);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(list);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      get(key: string, options: R2GetOptions & { onlyIf: R2BucketConditional | Headers }): Promise<R2ObjectBody | R2Object | null>;
+      get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null>;
+
+      put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
+    });
+    // Exclude `R2Object` from `get` return type if `onlyIf` not specified, and exclude `null` from `put` return type
+
+    // Rather than using the auto-generated R2ListOptions definition, we define
+    // it here so we can access compatibility flags from JSG_RESOURCE_TYPE.
+    if (flags.getR2ListHonorIncludeFields()) {
+      JSG_TS_DEFINE(interface R2ListOptions {
+        limit?: number;
+        prefix?: string;
+        cursor?: string;
+        delimiter?: string;
+        startAfter?: string;
+        include?: ("httpMetadata" | "customMetadata")[];
+      });
+    } else {
+      JSG_TS_DEFINE(interface R2ListOptions {
+        limit?: number;
+        prefix?: string;
+        cursor?: string;
+        delimiter?: string;
+        startAfter?: string;
+      });
+      // Omit `include` field if compatibility flag disabled as ignored
+    }
   }
 
   struct UnwrappedConditional {

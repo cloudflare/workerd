@@ -68,6 +68,13 @@ public:
     JSG_METHOD(put);
     JSG_METHOD(matchAll);
     JSG_METHOD(keys);
+
+    JSG_TS_OVERRIDE({
+      delete(request: RequestInfo, options?: CacheQueryOptions): Promise<boolean>;
+      match(request: RequestInfo, options?: CacheQueryOptions): Promise<Response | undefined>;
+      put(request: RequestInfo, response: Response): Promise<void>;
+    });
+    // Use RequestInfo type alias to allow `URL`s as cache keys
   }
 
 private:
