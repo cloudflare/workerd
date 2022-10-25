@@ -122,8 +122,10 @@ function createConstantPartial(
     f.createToken(ts.SyntaxKind.ReadonlyKeyword),
   ];
   const name = constant.getName();
-  const value = constant.getValue().valueOf();
-  const valueNode = f.createLiteralTypeNode(f.createNumericLiteral(value));
+  // Rather than using the constant value as a literal type here, just type them
+  // as `number` to encourage people to use them as constants. This is also what
+  // TypeScript does in its official lib types.
+  const valueNode = f.createTypeReferenceNode("number");
   return [modifiers, name, valueNode];
 }
 

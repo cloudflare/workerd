@@ -12,6 +12,8 @@ import {
 import ts from "typescript";
 import { createStructureNode } from "./structure";
 
+export { getTypeName } from "./type";
+
 type StructureMap = Map<string, Structure>;
 // Builds a lookup table mapping type names to structures
 function collectStructureMap(root: StructureGroups): StructureMap {
@@ -142,6 +144,9 @@ export function generateDefinitions(root: StructureGroups): ts.Node[] {
   const included = collectIncluded(map);
   const classes = collectClasses(map);
 
+  // Record a list of ignored structures to make sure we haven't missed any
+  // `JSG_TS_ROOT()` macros
+  const ignored: string[] = [];
   // Can't use `flatMap()` here as `getGroups()` returns a `capnp.List`
   const nodes = root.getGroups().map((group) => {
     const structureNodes: ts.Node[] = [];
@@ -151,21 +156,22 @@ export function generateDefinitions(root: StructureGroups): ts.Node[] {
       if (included.has(name)) {
         const asClass = classes.has(name);
         structureNodes.push(createStructureNode(structure, asClass));
+      } else {
+        ignored.push(name);
       }
     });
 
-    // Add group label to first in group
-    if (structureNodes.length > 0) {
-      ts.addSyntheticLeadingComment(
-        structureNodes[0],
-        ts.SyntaxKind.SingleLineCommentTrivia,
-        ` ${group.getName()}`,
-        /* hasTrailingNewLine */ true
-      );
-    }
-
     return structureNodes;
   });
+
+  // Log ignored types to make sure we didn't forget anything
+  if (ignored.length > 0) {
+    console.warn(
+      "WARNING: The following types were not referenced from any `JSG_TS_ROOT()`ed type and have been omitted from the output. " +
+        "This could be because of disabled compatibility flags."
+    );
+    for (const name of ignored) console.warn(`- ${name}`);
+  }
 
   return nodes.flat();
 }
