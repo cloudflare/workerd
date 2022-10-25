@@ -56,6 +56,10 @@ public:
     JSG_METHOD(close);
     JSG_METHOD(write);
     JSG_METHOD(releaseLock);
+
+    JSG_TS_OVERRIDE(<W = any> {
+      write(chunk?: W): Promise<void>;
+    });
   }
 
   // Internal API
@@ -140,6 +144,10 @@ public:
     JSG_METHOD(abort);
     JSG_METHOD(close);
     JSG_METHOD(getWriter);
+
+    JSG_TS_OVERRIDE(<W = any> {
+      getWriter(): WritableStreamDefaultWriter<W>;
+    });
   }
 
 private:

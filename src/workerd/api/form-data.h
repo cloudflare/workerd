@@ -96,7 +96,7 @@ public:
       jsg::Optional<jsg::Value> thisArg,
       const jsg::TypeHandler<EntryType>& handler);
 
-  JSG_RESOURCE_TYPE(FormData) {
+  JSG_RESOURCE_TYPE(FormData, CompatibilityFlags::Reader flags) {
     JSG_METHOD(append);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(get);
@@ -109,6 +109,37 @@ public:
 
     JSG_METHOD(forEach);
     JSG_ITERABLE(entries);
+
+    if (flags.getFormDataParserSupportsFiles()) {
+      JSG_TS_OVERRIDE({
+        append(name: string, value: string): void;
+        append(name: string, value: Blob, filename?: string): void;
+
+        set(name: string, value: string): void;
+        set(name: string, value: Blob, filename?: string): void;
+
+        entries(): IterableIterator<[key: string, value: File | string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: File | string]>;
+
+        forEach<This = unknown>(callback: (this: This, value: File | string, key: string, parent: FormData) => void, thisArg?: This): void;
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        get(name: string): string | null;
+        getAll(name: string): string[];
+
+        append(name: string, value: string): void;
+        append(name: string, value: Blob, filename?: string): void;
+
+        set(name: string, value: string): void;
+        set(name: string, value: Blob, filename?: string): void;
+
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: FormData) => void, thisArg?: This): void;
+      });
+    }
   }
 
 private:

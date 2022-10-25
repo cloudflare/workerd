@@ -392,6 +392,7 @@ public:
       jsg::Optional<kj::String> t;
 
       JSG_STRUCT(r, d, t);
+      JSG_STRUCT_TS_OVERRIDE(RsaOtherPrimesInfo); // Rename from SubtleCryptoJsonWebKeyRsaOtherPrimesInfo
     };
 
     // The following fields are defined in Section 3.1 of JSON Web Key (RFC 7517).
@@ -424,6 +425,7 @@ public:
     jsg::Optional<kj::String> k;
 
     JSG_STRUCT(kty, use, key_ops, alg, ext, crv, x, y, d, n, e, p, q, dp, dq, qi, oth, k);
+    JSG_STRUCT_TS_OVERRIDE(JsonWebKey); // Rename from SubtleCryptoJsonWebKey
   };
 
   using ImportKeyData = kj::OneOf<kj::Array<kj::byte>, JsonWebKey>;
@@ -593,6 +595,8 @@ public:
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(digest, getDigest);
     }
+
+    JSG_TS_OVERRIDE(extends WritableStream<ArrayBuffer | ArrayBufferView>);
   }
 
 private:
@@ -629,6 +633,20 @@ public:
     JSG_METHOD(randomUUID);
 
     JSG_NESTED_TYPE(DigestStream);
+
+    JSG_TS_OVERRIDE({
+      getRandomValues<
+        T extends
+          | Int8Array
+          | Uint8Array
+          | Int16Array
+          | Uint16Array
+          | Int32Array
+          | Uint32Array
+          | BigInt64Array
+          | BigUint64Array
+      >(buffer: T): T;
+    });
   }
 
 private:

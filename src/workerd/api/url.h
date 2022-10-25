@@ -95,6 +95,11 @@ public:
 
     JSG_METHOD(toString);
     JSG_METHOD(toJSON);
+
+    JSG_TS_OVERRIDE({
+      constructor(url: string | URL, base?: string | URL);
+    });
+    // Allow URLs which get coerced to strings in either constructor parameter
   }
 
   explicit URL(kj::Url&& u);
@@ -169,7 +174,7 @@ public:
 
   kj::String toString();
 
-  JSG_RESOURCE_TYPE(URLSearchParams) {
+  JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
     JSG_METHOD(append);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(get);
@@ -187,6 +192,26 @@ public:
     JSG_ITERABLE(entries);
 
     JSG_METHOD(toString);
+
+    if (flags.getSpecCompliantUrl()) {
+      // This is a hack. The non-spec-compliant URLSearchParams type is used in
+      // the Response and Request constructors. This means that when the
+      // TypeScript generation scripts are visiting root types for inclusion,
+      // we'll always visit the non-spec-compliant type even if we have the
+      // "url-standard" flag enabled. Rather than updating those usages based
+      // on which flags are enabled, we just delete the non-spec complaint
+      // declaration in an override if "url-standard" is enabled.
+      JSG_TS_OVERRIDE(type URLSearchParams = never);
+    } else {
+      JSG_TS_OVERRIDE({
+        constructor(init?: URLSearchParams | string | Record<string, string> | [key: string, value: string][]);
+
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
+      });
+    }
   }
 
 private:

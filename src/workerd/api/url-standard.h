@@ -140,6 +140,14 @@ public:
     JSG_METHOD(forEach);
     JSG_METHOD(toString);
     JSG_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE(URLSearchParams {
+      entries(): IterableIterator<[key: string, value: string]>;
+      [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+      forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
+    });
+    // Rename from urlURLSearchParams
   }
 
 private:
@@ -295,6 +303,11 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(searchParams, getSearchParams);
     JSG_METHOD_NAMED(toJSON, getHref);
     JSG_METHOD_NAMED(toString, getHref);
+
+    JSG_TS_OVERRIDE(URL {
+      constructor(url: string | URL, base?: string | URL);
+    });
+    // Rename from urlURL, and allow URLs which get coerced to strings in either constructor parameter
   }
 
   static bool isSpecialScheme(jsg::UsvStringPtr scheme);

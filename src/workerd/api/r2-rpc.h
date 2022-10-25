@@ -32,6 +32,8 @@ public:
 
     JSG_READONLY_INSTANCE_PROPERTY(stack, getStack);
     // See getStack in dom-exception.h
+
+    JSG_TS_ROOT();
   }
 
 private:
