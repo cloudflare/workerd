@@ -20,6 +20,8 @@ public:
 
   JSG_RESOURCE_TYPE(TextEncoderStream) {
     JSG_INHERIT(TransformStream);
+
+    JSG_TS_OVERRIDE(extends TransformStream<string, Uint8Array>);
   }
 };
 
@@ -41,6 +43,8 @@ public:
 
   JSG_RESOURCE_TYPE(TextDecoderStream) {
     JSG_INHERIT(TransformStream);
+
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, string>);
   }
 };
 

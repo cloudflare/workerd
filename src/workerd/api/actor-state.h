@@ -42,6 +42,7 @@ public:
     }
 
     JSG_STRUCT(allowConcurrency, noCache);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectGetOptions); // Rename from DurableObjectStorageOperationsGetOptions
   };
 
   jsg::Promise<jsg::Value> get(
@@ -74,6 +75,7 @@ public:
     }
 
     JSG_STRUCT(start, startAfter, end, prefix, reverse, limit, allowConcurrency, noCache);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions); // Rename from DurableObjectStorageOperationsListOptions
   };
 
   jsg::Promise<jsg::Value> list(jsg::Optional<ListOptions> options, v8::Isolate* isolate);
@@ -91,6 +93,7 @@ public:
     }
 
     JSG_STRUCT(allowConcurrency, allowUnconfirmed, noCache);
+    JSG_STRUCT_TS_OVERRIDE(DurableObjectPutOptions); // Rename from DurableObjectStorageOperationsPutOptions
   };
 
   jsg::Promise<void> put(jsg::Lock& js,
@@ -179,6 +182,8 @@ public:
     jsg::Optional<bool> lowPriority;
 
     JSG_STRUCT(asOfTime, lowPriority);
+    JSG_STRUCT_TS_OVERRIDE(type TransactionOptions = never);
+    // Omit from definitions
   };
 
   jsg::Promise<jsg::Value> transaction(jsg::Lock& js,
@@ -200,6 +205,21 @@ public:
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
+
+    JSG_TS_OVERRIDE({
+      get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
+      get<T = unknown>(keys: string[], options?: DurableObjectGetOptions): Promise<Map<string, T>>;
+
+      list<T = unknown>(options?: DurableObjectListOptions): Promise<Map<string, T>>;
+
+      put<T>(key: string, value: T, options?: DurableObjectPutOptions): Promise<void>;
+      put<T>(entries: Record<string, T>, options?: DurableObjectPutOptions): Promise<void>;
+
+      delete(key: string, options?: DurableObjectPutOptions): Promise<boolean>;
+      delete(keys: string[], options?: DurableObjectPutOptions): Promise<number>;
+
+      transaction<T>(closure: (txn: DurableObjectTransaction) => Promise<T>): Promise<T>;
+    });
   }
 
 protected:
@@ -238,6 +258,21 @@ public:
     JSG_METHOD(getAlarm);
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
+
+    JSG_TS_OVERRIDE({
+      get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
+      get<T = unknown>(keys: string[], options?: DurableObjectGetOptions): Promise<Map<string, T>>;
+
+      list<T = unknown>(options?: DurableObjectListOptions): Promise<Map<string, T>>;
+
+      put<T>(key: string, value: T, options?: DurableObjectPutOptions): Promise<void>;
+      put<T>(entries: Record<string, T>, options?: DurableObjectPutOptions): Promise<void>;
+
+      delete(key: string, options?: DurableObjectPutOptions): Promise<boolean>;
+      delete(keys: string[], options?: DurableObjectPutOptions): Promise<number>;
+
+      deleteAll: never;
+    });
   }
 
 protected:
@@ -311,6 +346,14 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_METHOD(blockConcurrencyWhile);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      readonly id: DurableObjectId;
+      readonly storage: DurableObjectStorage;
+      blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+    });
+    // Make `storage` non-optional
   }
 
 private:
