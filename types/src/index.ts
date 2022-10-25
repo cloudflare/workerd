@@ -12,8 +12,10 @@ import { generateDefinitions } from "./generator";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
 import {
+  compileOverridesDefines,
   createGlobalScopeTransformer,
   createIteratorTransformer,
+  createOverrideDefineTransformer,
 } from "./transforms";
 
 const definitionsHeader = `/* eslint-disable */
@@ -24,26 +26,49 @@ function printDefinitions(root: StructureGroups): string {
   // Generate TypeScript nodes from capnp request
   const nodes = generateDefinitions(root);
 
-  // Build TypeScript program from nodes
-  const source = printNodeList(nodes);
-  // TODO(soon): when we switch to outputting a separate file per group, we'll
-  //  need to modify this function to accept multiple source files
-  //  (will probably need `program.getSourceFiles()`)
-  const [program, sourcePath] = createMemoryProgram(source);
-  const checker = program.getTypeChecker();
-  const sourceFile = program.getSourceFile(sourcePath);
+  // Assemble partial overrides and defines to valid TypeScript source files
+  const [sources, replacements] = compileOverridesDefines(root);
+  // Add source file containing generated nodes
+  const sourcePath = path.resolve(__dirname, "source.ts");
+  let source = printNodeList(nodes);
+  sources.set(sourcePath, source);
+
+  // Build TypeScript program from source files and overrides. Importantly,
+  // these are in the same program, so we can use nodes from one in the other.
+  let program = createMemoryProgram(sources);
+  let checker = program.getTypeChecker();
+  let sourceFile = program.getSourceFile(sourcePath);
   assert(sourceFile !== undefined);
 
   // Run post-processing transforms on program
-  const result = ts.transform(sourceFile, [
-    // TODO(soon): when overrides are implemented, apply renames here
+  let result = ts.transform(sourceFile, [
+    // Run iterator transformer before overrides so iterator-like interfaces are
+    // still removed if they're replaced in overrides
     createIteratorTransformer(checker),
+    createOverrideDefineTransformer(program, replacements),
+  ]);
+  assert.strictEqual(result.transformed.length, 1);
+
+  // We need the type checker to respect our updated definitions after applying
+  // overrides (e.g. to find the correct nodes when traversing heritage), so
+  // rebuild the program to re-run type checking.
+  // TODO: is there a way to re-run the type checker on an existing program?
+  source = printer.printFile(result.transformed[0]);
+  program = createMemoryProgram(new Map([[sourcePath, source]]));
+  checker = program.getTypeChecker();
+  sourceFile = program.getSourceFile(sourcePath);
+  assert(sourceFile !== undefined);
+
+  result = ts.transform(sourceFile, [
+    // Run global scope transformer after overrides so members added in
+    // overrides are extracted
     createGlobalScopeTransformer(checker),
     // TODO(polish): maybe flatten union types?
   ]);
+  assert.strictEqual(result.transformed.length, 1);
+
   // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
   //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
-  assert.strictEqual(result.transformed.length, 1);
 
   // Print program to string
   return definitionsHeader + printer.printFile(result.transformed[0]);

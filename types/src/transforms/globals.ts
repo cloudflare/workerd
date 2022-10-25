@@ -42,6 +42,29 @@ export function createGlobalScopeTransformer(
   };
 }
 
+// Copy type nodes everywhere they are referenced
+function createInlineVisitor(
+  ctx: ts.TransformationContext,
+  inlines: Map<string, ts.TypeNode>
+): ts.Visitor {
+  // If there's nothing to inline, just return identity visitor
+  if (inlines.size === 0) return (node) => node;
+
+  const visitor: ts.Visitor = (node) => {
+    // Recursively visit all nodes
+    node = ts.visitEachChild(node, visitor, ctx);
+
+    // Inline all matching type references
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+      const inline = inlines.get(node.typeName.text);
+      if (inline !== undefined) return inline;
+    }
+
+    return node;
+  };
+  return visitor;
+}
+
 export function createGlobalScopeVisitor(
   ctx: ts.TransformationContext,
   checker: ts.TypeChecker
@@ -75,6 +98,7 @@ export function createGlobalScopeVisitor(
       ts.isIdentifier(node.name)
     ) {
       assert(node.type !== undefined);
+      // Don't create global nodes for nested types, they'll already be there
       if (!ts.isTypeQueryNode(node.type)) {
         const modifiers: ts.Modifier[] = [
           ctx.factory.createToken(ts.SyntaxKind.ExportKeyword),
@@ -100,18 +124,37 @@ export function createGlobalScopeVisitor(
   // Called with each class/interface that should have its methods/properties
   // extracted into global functions/consts. Recursively visits superclasses.
   function extractGlobalNodes(
-    node: ts.InterfaceDeclaration | ts.ClassDeclaration
+    node: ts.InterfaceDeclaration | ts.ClassDeclaration,
+    typeArgs?: ts.NodeArray<ts.TypeNode>
   ): ts.Node[] {
     const nodes: ts.Node[] = [];
 
+    // If this declaration has type parameters, we'll need to inline them when
+    // extracting members.
+    const typeArgInlines = new Map<string, ts.TypeNode>();
+    if (node.typeParameters) {
+      assert(
+        node.typeParameters.length === typeArgs?.length,
+        `Expected ${node.typeParameters.length} type argument(s), got ${typeArgs?.length}`
+      );
+      node.typeParameters.forEach((typeParam, index) => {
+        typeArgInlines.set(typeParam.name.text, typeArgs[index]);
+      });
+    }
+    const inlineVisitor = createInlineVisitor(ctx, typeArgInlines);
+
     // Recursively extract from all superclasses
     if (node.heritageClauses !== undefined) {
-      for (const clause of node.heritageClauses) {
+      for (let clause of node.heritageClauses) {
+        // Handle case where type param appears in heritage clause:
+        // ```ts
+        // class A<T> {}     // ↓
+        // class B<T> extends A<T> {}
+        // class C extends B<string> {}
+        // ```
+        clause = ts.visitNode(clause, inlineVisitor);
+
         for (const superType of clause.types) {
-          // TODO(soon): when overrides are implemented, superclasses may
-          //  define type parameters (e.g. `EventTarget<WorkerGlobalScopeEventMap>`).
-          //  In these cases, we'll need to inline these type params in
-          //  extracted definitions. Type parameters are in `superType.typeArguments`.
           const superTypeSymbol = checker.getSymbolAtLocation(
             superType.expression
           );
@@ -123,7 +166,11 @@ export function createGlobalScopeVisitor(
             ts.isInterfaceDeclaration(superTypeDeclaration) ||
               ts.isClassDeclaration(superTypeDeclaration)
           );
-          nodes.push(...extractGlobalNodes(superTypeDeclaration));
+          nodes.push(
+            // Pass any defined type arguments for inlining in extracted nodes
+            // (e.g. `...extends EventTarget<WorkerGlobalScopeEventMap>`).
+            ...extractGlobalNodes(superTypeDeclaration, superType.typeArguments)
+          );
         }
       }
     }
@@ -131,7 +178,9 @@ export function createGlobalScopeVisitor(
     // Extract methods/properties
     for (const member of node.members) {
       const maybeNode = maybeExtractGlobalNode(member);
-      if (maybeNode !== undefined) nodes.push(maybeNode);
+      if (maybeNode !== undefined) {
+        nodes.push(ts.visitNode(maybeNode, inlineVisitor));
+      }
     }
 
     return nodes;
