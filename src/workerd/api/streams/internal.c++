@@ -1656,7 +1656,6 @@ kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
 
     total += amount;
     buffer = reinterpret_cast<char*>(buffer) + amount;
-    minBytes -= kj::min(minBytes, amount);
     maxBytes -= amount;
   }
 

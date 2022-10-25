@@ -771,15 +771,17 @@ public:
 
     ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
 
-    void respond(jsg::Lock& js, size_t amount);
+    bool respond(jsg::Lock& js, size_t amount);
 
-    void respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
+    bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
     void invalidate();
     // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
 
     inline bool isInvalidated() const { return request == nullptr; }
+
+    bool isPartiallyFulfilled();
 
     size_t getAtLeast() const;
 
