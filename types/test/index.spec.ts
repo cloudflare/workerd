@@ -12,12 +12,12 @@ test("main: generates types", async () => {
   const groups = root.initGroups(1);
   const group = groups.get(0);
   group.setName("definitions");
-  const structures = group.initStructures(8);
+  const structures = group.initStructures(3);
 
-  // TODO(soon): rename/remove these once we implement JSG_TS_ROOT macro
   const root1 = structures.get(0);
   root1.setName("ServiceWorkerGlobalScope");
   root1.setFullyQualifiedName("workerd::api::ServiceWorkerGlobalScope");
+  root1.setTsRoot(true);
   {
     const members = root1.initMembers(2);
 
@@ -37,23 +37,7 @@ test("main: generates types", async () => {
     prop.initType().initPromise().initValue().initNumber().setName("int");
   }
 
-  const root2 = structures.get(1);
-  root2.setName("ExportedHandler");
-  root2.setFullyQualifiedName("workerd::api::ExportedHandler");
-  const root3 = structures.get(2);
-  root3.setName("DurableObjectNamespace");
-  root3.setFullyQualifiedName("workerd::api::DurableObjectNamespace");
-  const root4 = structures.get(3);
-  root4.setName("AnalyticsEngine");
-  root4.setFullyQualifiedName("workerd::api::AnalyticsEngine");
-  const root5 = structures.get(4);
-  root5.setName("KvNamespace");
-  root5.setFullyQualifiedName("workerd::api::KvNamespace");
-  const root6 = structures.get(5);
-  root6.setName("R2Bucket");
-  root6.setFullyQualifiedName("workerd::api::public_beta::R2Bucket");
-
-  const iterator = structures.get(6);
+  const iterator = structures.get(1);
   iterator.setName("ThingIterator");
   iterator.setFullyQualifiedName("workerd::api::ThingIterator");
   iterator.initExtends().initIntrinsic().setName("v8::kIteratorPrototype");
@@ -68,7 +52,7 @@ test("main: generates types", async () => {
     const iteratorMethod = iterator.initIterator();
     iteratorMethod.initReturnType().setUnknown();
   }
-  const iteratorNext = structures.get(7);
+  const iteratorNext = structures.get(2);
   iteratorNext.setName("ThingIteratorNext");
   iteratorNext.setFullyQualifiedName("workerd::api::ThingIteratorNext");
   {
@@ -82,6 +66,8 @@ test("main: generates types", async () => {
     valueType.setName("jsg::Optional");
     valueType.initValue().initString().setName("kj::String");
   }
+
+  // TODO: add another struct with defines/overrides
 
   // https://bazel.build/reference/test-encyclopedia#initial-conditions
   const tmpPath = process.env.TEST_TMPDIR;
@@ -97,23 +83,12 @@ test("main: generates types", async () => {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-// definitions
 export interface ServiceWorkerGlobalScope {
     things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
-export interface ExportedHandler {
-}
-export interface DurableObjectNamespace {
-}
-export interface AnalyticsEngine {
-}
-export interface KvNamespace {
-}
-export interface R2Bucket {
-}
 `
   );
 
@@ -124,18 +99,12 @@ export interface R2Bucket {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-// definitions
 export interface ServiceWorkerGlobalScope {
   things(param0: boolean): IterableIterator<string>;
   get prop(): Promise<number>;
 }
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
-export interface ExportedHandler {}
-export interface DurableObjectNamespace {}
-export interface AnalyticsEngine {}
-export interface KvNamespace {}
-export interface R2Bucket {}
 `
   );
 });

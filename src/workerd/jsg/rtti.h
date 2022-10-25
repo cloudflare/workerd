@@ -517,6 +517,14 @@ struct MemberCounter {
   template<const char* name, typename Method, Method method>
   inline void registerStaticMethod() { ++count; }
 
+  inline void registerTypeScriptRoot() { /* not a member */ }
+
+  template<const char* tsOverride>
+  inline void registerTypeScriptOverride() { /* not a member */ }
+
+  template<const char* tsDefine>
+  inline void registerTypeScriptDefine() { /* not a member */ }
+
   size_t count = 0;
 };
 
@@ -655,6 +663,20 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  inline void registerTypeScriptRoot() {
+    structure.setTsRoot(true);
+  }
+
+  template<const char* tsOverride>
+  inline void registerTypeScriptOverride() {
+    structure.setTsOverride(tsOverride);
+  }
+
+  template<const char* tsDefine>
+  inline void registerTypeScriptDefine() {
+    structure.setTsDefine(tsDefine);
   }
 };
 

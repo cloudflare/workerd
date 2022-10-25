@@ -1310,3 +1310,170 @@ TODO(soon): TBD
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
 [USVString]: https://webidl.spec.whatwg.org/#idl-USVString
+
+## TypeScript
+
+TypeScript definitions are automatically generated from JSG RTTI using scripts in the `/types`
+directory. To control auto-generation, JSG provides 3 macros for use inside a `JSG_RESOURCE_TYPE`
+block: `JSG_TS_ROOT`, `JSG_TS_OVERRIDE`, `JSG_TS_DEFINE`. There are also struct variants of each
+macro (`JSG_STRUCT_TS_ROOT`, `JSG_STRUCT_TS_OVERRIDE` and `JSG_STRUCT_TS_DEFINE`), that should
+be placed adjacent to the `JSG_STRUCT` declaration, inside the same `struct` definition.
+
+### `JSG_TS_ROOT`/`JSG_STRUCT_TS_ROOT`
+
+Declares that this type should be considered a "root" for the purposes of automatically generating
+TypeScript definitions. All "root" types and their recursively referenced types (e.g. method
+parameter/return types, property types, inherits, etc) will be included in the generated
+TypeScript. For example, the type `ServiceWorkerGlobalScope` should be a "root", as should any non-
+global type that we'd like include (e.g. `ExportedHandler` and capabilities such as `KvNamespace`).
+
+The reason we even have to define roots in the first place (as opposed to just generating
+TypeScript definitions for all isolate types) is that some types should only be included when
+certain compatibility flags are enabled. For example, we only want to include the `Navigator` and
+spec-compliant URL implementation types if `global_navigator` and `url_standard` are enabled
+respectively.
+
+Note roots are visited before overrides, so if an override references a new type that wasn't
+already referenced by the original type or any other rooted type, the referenced type will itself
+need to be declared a root (e.g. `HTMLRewriter`'s HTML Content Tokens like `Element`).
+
+### `JSG_TS_OVERRIDE`/`JSG_STRUCT_TS_OVERRIDE`
+
+Customises the generated TypeScript definition for this type. This macro accepts a single override
+parameter containing a partial TypeScript statement definition. Varargs are accepted so that
+overrides can contain `,` outside of balanced brackets. After trimming whitespace from the override,
+the following rules are applied:
+
+> :warning:	**WARNING:** there's a _lot_ of magic here, ensure you understand the examples before
+> writing overrides
+
+1. If an override starts with `export `, `declare `, `type `, `abstract `, `class `, `interface `,
+   `enum `, `const `, `var ` or `function `, the generated definition will be replaced with the
+   override. If the replacement is a `class`, `enum`, `const`, `var` or `function`, the `declare`
+   modifier will be added if it's not already present. In the special case that the override is a
+   `type`-alias to `never`, the generated definition will be deleted.
+
+2. Otherwise, the override will be converted to a TypeScript class as follows: (where `<name>` is the
+   unqualified C++ type name of this resource type)
+
+   1. If an override starts with `extends `, `implements ` or `{`: `class <name> ` will be prepended
+   2. If an override starts with `<`: `class <name>` will be prepended
+   3. Otherwise, `class ` will be prepended
+
+   After this, if the override doesn't end with `}`, ` {}` will be appended.
+
+   The class is then parsed and merged with the generated definition as follows: (note that even
+   though we convert all non-replacement overrides to classes, this type classification is ignored
+   when merging, classes just support all possible forms of override)
+
+   1. If the override class has a different name to the generated type, the generated type is
+      renamed and all references to it are updated. Note that the renaming happens after all
+      overrides are applied, so you're able to reference original C++ names in other types'
+      overrides.
+   2. If the override class defines type parameters, they are copied to the generated type.
+   3. If the override class defines heritage clauses (e.g. `extends`/`implements`), they replace the
+      generated types'. Notably, these may include type arguments.
+   4. If the override class defines members, those are merged with the generated type's members as
+      follows:
+
+      1. Members in the override but not in the generated type are inserted at the end
+      2. If the override has a member with the same name as a member in the generated type, the
+         generated member is removed, and the override is inserted instead. Note that static and
+         instance members belong to different namespaces for the purposes of this comparison.
+      3. If an override member property is declared type `never`, it is not inserted, but its
+         presence may remove the generated member (as per 2).
+
+Note that overrides can only customise a single definition. To add additional, handwritten,
+TypeScript-only definitions, use the `JSG_(STRUCT_)TS_DEFINE` macros.
+
+These macros can also be called conditionally in `JSG_RESOURCE_TYPE` blocks based on compatibility
+flags. To define a compatibility-flag dependent `JSG_STRUCT` override, define a full-type
+replacement `struct` override to a `never` type alias (i.e. `JSG_STRUCT_TS_OVERRIDE(type MyStruct = never)`)
+to delete the original definition, then use `JSG_TS_DEFINE` in a nearby `JSG_RESOURCE_TYPE` block
+to define an `interface` for the `struct` conditionally.
+
+Here are some example overrides demonstrating these rules:
+
+- ```ts
+  KVNamespaceListOptions
+  ```
+  Renames the generated type to `KVNamespaceListOptions` and updates all type references to the new name.
+
+- ```ts
+  KVNamespace {
+    get(key: string, type: "string"): Promise<string | null>;
+    get(key: string, type: "arrayBuffer"): Promise<ArrayBuffer | null>;
+  }
+  ```
+  Renames the generated type to `KVNamespace` (updating all references), and replaces the `get()` method
+  definition with two overloads. Leaves all other members untouched.
+
+- ```ts
+  { json<T>(): Promise<T> }
+  ```
+  Replaces the `json()` method definition so it's generic in type parameter `T`. Leaves all other
+  members untouched.
+
+- ```ts
+  class Body { json<T>(): Promise<T> }
+  ```
+  Because it starts with `class `, this override replaces the entire generated definition with
+  `declare class Body { json<T>(): Promise<T> }`, removing all other members.
+
+- ```ts
+  <R = any> {
+    read(): Promise<ReadableStreamReadResult<R>>;
+    tee(): [ReadableStream<R>, ReadableStream<R>];
+  }
+  ```
+  Adds a type parameter `R` which defaults to `any` to the generated type, replacing the `read()` and
+  `tee()` method definitions, leaving all other members untouched.
+
+- ```ts
+  { actorState: never }
+  ```
+  Removes the `actorState` member from the generated type, leaving all other members untouched.
+
+- ```ts
+  extends EventTarget<WorkerGlobalScopeEventMap>
+  ```
+  Adds `WorkerGlobalScopeEventMap` as a type argument to the generated type's heritage. Leaves all
+  members untouched.
+
+- ```ts
+  extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
+    constructor(format: "gzip" | "deflate");
+  }
+  ```
+  Adds `ArrayBuffer | ArrayBufferView` and `Uint8Array` as type arguments to the generated type's
+  heritage, then replaces the generated constructor definition, leaving all other members untouched.
+
+- ```ts
+  const WebSocketPair: {
+    new (): { 0: WebSocket; 1: WebSocket };
+  }
+  ```
+  Replaces the generated `WebSocketPair` definition with `declare const WebSocketPair: { ... };`.
+
+- ```ts
+  type ReadableStreamReadResult<R = any> =
+    | { done: false; value: R; }
+    | { done: true; value?: undefined; }
+  ```
+  Replaces the generated `ReadableStreamReadResult` definition with a type alias.
+
+- ```ts
+  type TransactionOptions = never
+  ```
+  Removes the generated `TransactionOptions` definition from the output. Any references to
+  the type will be renamed to `TransactionOptions`. This is useful if you need declare a
+  compatibility-flag dependent override for a `JSG_STRUCT` in a nearby `JSG_RESOURCE_TYPE`.
+
+### `JSG_TS_DEFINE`/`JSG_STRUCT_TS_DEFINE`
+
+Inserts additional TypeScript definitions next to the generated TypeScript definition for this
+type. This macro accepts a single define parameter containing one or more TypeScript definitions
+(e.g. `interface`s, `class`es, `type` aliases, `const`s, ...). Varargs are accepted so that defines
+can contain `,` outside of balanced brackets. This macro can only be used once per
+`JSG_RESOURCE_TYPE` block/`JSG_STRUCT` definition. The `declare` modifier will be added to any
+`class`, `enum`, `const`, `var` or `function` definitions if it's not already present.
