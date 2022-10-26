@@ -1580,8 +1580,15 @@ kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
   }
 
   KJ_IF_MAYBE(n, name) {
-    return KJ_ASSERT_NONNULL(worker.impl->namedHandlers.find(*n),
-        "worker has no such named entrypoint", *n);
+    KJ_IF_MAYBE(h, worker.impl->namedHandlers.find(*n)){
+      return *h;
+    } else {
+      if (worker.impl->actorClasses.find(*n) != nullptr) {
+        KJ_FAIL_ASSERT("worker is not an actor but class name was requested", *n);
+      } else {
+        KJ_FAIL_ASSERT("worker has no such named entrypoint", *n);
+      }
+    }
   } else {
     return worker.impl->defaultHandler;
   }
