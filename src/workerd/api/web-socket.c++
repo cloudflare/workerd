@@ -187,6 +187,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   auto connUrl = urlRecord.toString();
   auto ws = jsg::alloc<WebSocket>(kj::mv(url), Locality::REMOTE);
 
+  headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
+  // By default, browsers set the compression extension header for `new WebSocket()`.
+
   if (!flags.getWebSocketCompression()) {
     // If we haven't enabled the websocket compression feature flag, strip the header from the
     // subrequest.
