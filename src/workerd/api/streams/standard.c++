@@ -721,8 +721,8 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::close(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(state.template is<Writable>() || state.template is<StreamStates::Erroring>());
-  KJ_ASSERT(!isCloseQueuedOrInFlight());
-
+  JSG_REQUIRE(!isCloseQueuedOrInFlight(), TypeError,
+      "Cannot close a writer that is already being closed");
   auto prp = js.newPromiseAndResolver<void>();
   closeRequest = kj::mv(prp.resolver);
 
