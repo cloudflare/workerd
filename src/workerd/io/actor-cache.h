@@ -179,6 +179,10 @@ public:
   class SharedLru;
   // Shared LRU for a whole isolate.
 
+  static constexpr auto SHUTDOWN_ERROR_MESSAGE =
+      "broken.ignored; jsg.Error: "
+      "Durable Object storage is no longer accessible."_kj;
+
   ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate);
   ~ActorCache() noexcept(false);
 
@@ -226,6 +230,8 @@ public:
   //
   // (This takes a Date rather than a TimePoint because it is based on Date.now(), to avoid
   // bypassing Spectre mitigations.)
+
+  void shutdown(kj::Maybe<const kj::Exception&> maybeException);
 
 private:
   class DeferredAlarmDeleter {
@@ -520,8 +526,8 @@ private:
   //   writes and not have to worry about this. However, at present, ActorStorage has automatic
   //   reconnect behavior at the supervisor layer which violates e-order.
 
-  kj::Maybe<kj::Exception> oomException;
-  // Did we ever hit the memory hard limit on this ActorCache? If so this is the exception that
+  kj::Maybe<kj::Exception> maybeTerminalException;
+  // Did we hit a problem that makes the ActorCache unusable? If so this is the exception that
   // describes the problem.
 
   kj::Canceler oomCanceler;
@@ -607,7 +613,7 @@ private:
   void clear(Lock& lock);
   // Drop the entire cache. Called during destructor and on OOM.
 
-  void requireNotOom();
+  void requireNotTerminal();
   // Throws OOM exception if `oom` is true.
 
   void evictOrOomIfNeeded(Lock& lock);

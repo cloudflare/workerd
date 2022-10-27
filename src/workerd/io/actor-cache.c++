@@ -185,34 +185,51 @@ kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   return nullptr;
 }
 
-void ActorCache::requireNotOom() {
-  KJ_IF_MAYBE(e, oomException) {
+void ActorCache::requireNotTerminal() {
+  KJ_IF_MAYBE(e, maybeTerminalException) {
+    if (!gate.isBroken()) {
+      // We've tried to use storage after shutdown, break the output gate via `flushImpl()` so that
+      // we don't let the worker return stale state. This isn't strictly necessary but it does
+      // mirror previous behavior wherein we would use disabled storage via `flushImpl()` and break
+      // the output gate.
+      ensureFlushScheduled({});
+    }
+
     kj::throwFatalException(kj::cp(*e));
   }
 }
 
 void ActorCache::evictOrOomIfNeeded(Lock& lock) {
   if (lru.evictIfNeeded(lock)) {
-    auto& exception = oomException.emplace(KJ_EXCEPTION(OVERLOADED,
+    auto exception = KJ_EXCEPTION(OVERLOADED,
         "broken.exceededMemory; jsg.Error: Durable Object's isolate exceeded its memory limit due to overflowing the "
         "storage cache. This could be due to writing too many values to storage without stopping "
         "to wait for writes to complete, or due to reading too many values in a single operation "
-        "(e.g. a large list()). All objects in the isolate were reset."));
+        "(e.g. a large list()). All objects in the isolate were reset.");
 
     // Add trace info sufficient to tell us which operation caused the failure.
     exception.addTraceHere();
     exception.addTrace(__builtin_return_address(0));
 
+    if (maybeTerminalException == nullptr) {
+      maybeTerminalException.emplace(kj::cp(exception));
+    } else {
+      // We've already experienced a terminal exception either from shutdown or oom. Note that we
+      // still schedule the flush since shutdown does not.
+    }
+
     clear(lock);
     oomCanceler.cancel(exception);
 
-    // We want to break the OutputGate. We can't quite just do `gate.lockWhile(exception)` because
-    // that returns a promise which we'd then have to put somewhere so that we don't immediately
-    // cancel it. Instead, we can ensure that a flush has been scheduled. `flushImpl()`, when
-    // called, will throw an exception which breaks the gate.
-    ensureFlushScheduled(WriteOptions());
+    if (!gate.isBroken()) {
+      // We want to break the OutputGate. We can't quite just do `gate.lockWhile(exception)` because
+      // that returns a promise which we'd then have to put somewhere so that we don't immediately
+      // cancel it. Instead, we can ensure that a flush has been scheduled. `flushImpl()`, when
+      // called, will throw an exception which breaks the gate.
+      ensureFlushScheduled(WriteOptions());
+    }
 
-    kj::throwFatalException(kj::cp(exception));
+    kj::throwFatalException(kj::mv(exception));
   }
 }
 
@@ -338,7 +355,7 @@ void ActorCache::verifyConsistencyForTest() {
 kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>>>
     ActorCache::get(Key key, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   auto lock = lru.cleanList.lockExclusive();
   KJ_IF_MAYBE(entry, findInCache(lock, key, options)) {
@@ -494,7 +511,7 @@ public:
 kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     ActorCache::get(kj::Array<Key> keys, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   std::sort(keys.begin(), keys.end());
 
@@ -829,7 +846,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     ActorCache::list(Key beginKey, kj::Maybe<Key> endKey,
                      kj::Maybe<uint> limit, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   // We start by scanning the cache for entries satisfying the list range. If we can fully satisfy
   // the list using these, then we're done! Otherwise, we make a storage request to get the rest.
@@ -1171,7 +1188,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     ActorCache::listReverse(Key beginKey, kj::Maybe<Key> endKey,
                             kj::Maybe<uint> limit, ReadOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   // Alas, everything needs to be done slightly differently when listing in reverse. This function
   // is an adjusted version of the previous function.
@@ -1763,7 +1780,7 @@ ActorCache::ReadCompletionChain::~ReadCompletionChain() noexcept(false) {
 
 kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
   {
     auto lock = lru.cleanList.lockExclusive();
     putImpl(lock, kj::mv(key), kj::mv(value), options, nullptr);
@@ -1774,7 +1791,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions 
 
 kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
   {
     auto lock = lru.cleanList.lockExclusive();
     for (auto& pair: pairs) {
@@ -1818,7 +1835,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTi
 
 kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   auto countedDelete = kj::refcounted<CountedDelete>();
   {
@@ -1855,7 +1872,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
 
 kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   auto countedDelete = kj::refcounted<CountedDelete>();
   {
@@ -1902,7 +1919,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   // committed in the wrong order with respect to the deleteAll().)
 
   options.noCache = options.noCache || lru.options.noCache;
-  requireNotOom();
+  requireNotTerminal();
 
   kj::Promise<uint> result { (uint)0 };
 
@@ -2113,11 +2130,15 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
 
   if (!flushScheduled) {
     flushScheduled = true;
-    auto flushPromise = lastFlush.addBranch().then([this]() {
+    auto flushPromise = lastFlush.addBranch().attach(kj::defer([this]() {
       flushScheduled = false;
       flushScheduledWithOutputGate = false;
+    })).then([this]() {
       ++flushesEnqueued;
-      return flushImpl().attach(kj::defer([this](){
+      return kj::evalNow([this](){
+        // `flushImpl()` can throw, so we need to wrap it in `evalNow()` to observe all pathways.
+        return flushImpl();
+      }).attach(kj::defer([this](){
         --flushesEnqueued;
       }));
     });
@@ -2170,6 +2191,40 @@ kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
   return nullptr;
 }
 
+void ActorCache::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
+  if (maybeTerminalException == nullptr) {
+    auto exception = [&]() {
+      KJ_IF_MAYBE(e, maybeException) {
+        // We were given an exception, use it.
+        return kj::cp(*e);
+      }
+
+      // Use the direct constructor so that we can reuse the constexpr message variable for testing.
+      auto exception = kj::Exception(
+          kj::Exception::Type::OVERLOADED, __FILE__, __LINE__,
+          kj::heapString(SHUTDOWN_ERROR_MESSAGE));
+
+      // Add trace info sufficient to tell us which operation caused the failure.
+      exception.addTraceHere();
+      exception.addTrace(__builtin_return_address(0));
+      return exception;
+    }();
+
+    // Any scheduled flushes will fail once `flushImpl()` is invoked and notices that
+    // `maybeTerminalException` has a value. Any in-flight flushes will continue to run in the
+    // background. Remember that these in-flight flushes may or may not be awaited by the worker,
+    // but they still hold the output lock as long as `allowUnconfirmed` wasn't used.
+    maybeTerminalException.emplace(kj::mv(exception));
+
+    // We explicitly do not schedule a flush to break the output gate. This means that if a request
+    // is ongoing after the actor cache is shutting down, the output gate is only broken if they
+    // had to send a flush after shutdown, either from a scheduled flush or a retry after failure.
+  } else {
+    // We've already experienced a terminal exception either from shutdown or oom, there should
+    // already be a flush scheduled that will break the output gate.
+  }
+}
+
 constexpr size_t bytesToWordsRoundUp(size_t bytes) {
   return (bytes + sizeof(capnp::word) - 1) / sizeof(capnp::word);
 }
@@ -2203,7 +2258,12 @@ struct ActorCache::CountedBatch {
 };
 
 kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
-  requireNotOom();
+  KJ_IF_MAYBE(e, maybeTerminalException) {
+    // If we have a terminal exception, throw here to break the output gate and prevent any calls
+    // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
+    // flushes.
+    kj::throwFatalException(kj::cp(*e));
+  }
 
   // Whenever we flush, we MUST write ALL dirty entries in a single transaction. This is necessary
   // because our cache design doesn't necessarily remember the order in which writes were

@@ -637,12 +637,18 @@ public:
   // This is used only for modules-syntax actors (which most are, since that's the only format we
   // support publicly).
 
-  void shutdown(uint16_t reasonCode);
+  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = nullptr);
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
   // IoContext objects prolong the lifetime of their Actor.
   //
   // `reasonCode` is passed back to the WorkerObserver.
+
+  void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
+  // Stops new work on behalf of the ActorCache. This does not cancel any ongoing flushes.
+  // TODO(soon) This should probably be folded into shutdown(). We'd need a piece that converts
+  // `error` to `reasonCode` in workerd to do this. There may also be opportunities to streamline
+  // interactions between `onAbort` and `onShutdown` promises.
 
   kj::Promise<void> onShutdown();
   // Get a promise that resolves when `shutdown()` has been called.
