@@ -13,9 +13,16 @@ class KvNamespace: public jsg::Object {
   // A capability to a KV namespace.
 
 public:
-  explicit KvNamespace(uint subrequestChannel): subrequestChannel(subrequestChannel) {}
+  struct AdditionalHeader {
+    kj::String name;
+    kj::String value;
+  };
+
+  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
+      : additionalHeaders(kj::mv(additionalHeaders)), subrequestChannel(subrequestChannel) {}
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
+  // `additionalHeaders` is what gets appended to every outbound request.
 
   struct GetOptions {
     jsg::Optional<kj::String> type;
@@ -90,6 +97,7 @@ public:
   }
 
 private:
+  kj::Array<AdditionalHeader> additionalHeaders;
   uint subrequestChannel;
 };
 

@@ -109,6 +109,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.add(FLPROD_405_HEADER, kj::str(urlStr));
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
 
   return context.awaitIo(js,
       client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -219,6 +222,9 @@ jsg::Promise<jsg::Value> KvNamespace::list(
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     headers.add(FLPROD_405_HEADER, kj::str(urlStr));
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
 
     return context.awaitIo(js,
         client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -320,6 +326,9 @@ jsg::Promise<void> KvNamespace::put(
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
     headers.add(FLPROD_405_HEADER, kj::str(urlStr));
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
 
     auto promise = context.waitForOutputLocks()
         .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
@@ -378,9 +387,13 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
     auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_delete"_kj);
     auto urlStr = kj::str("https://fake-host/", kj::encodeUriComponent(name), "?urlencoded=true");
     auto promise = context.waitForOutputLocks()
-        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
+        .then([this, &context, client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
       auto headers = kj::HttpHeaders(context.getHeaderTable());
       headers.add(FLPROD_405_HEADER, kj::str(urlStr));
+    for (const auto& header: additionalHeaders) {
+      headers.add(header.name.asPtr(), header.value.asPtr());
+    }
+
       return client->request(kj::HttpMethod::DELETE, urlStr, headers,
                             uint64_t(0))
           .response.then([](kj::HttpClient::Response&& response) mutable {
