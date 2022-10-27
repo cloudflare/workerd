@@ -748,6 +748,8 @@ public:
     // readAtLeast API.
   }
 
+  bool isPartiallyFulfilled();
+
 private:
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
@@ -760,6 +762,8 @@ private:
          : readRequest(kj::mv(readRequest)),
            controller(kj::mv(controller)),
            view(js.v8Ref(this->readRequest->getView(js))) {}
+
+    void updateView(jsg::Lock& js);
   };
 
   kj::Maybe<Impl> maybeImpl;

@@ -352,7 +352,13 @@ void ByteQueue::ByobRequest::invalidate() {
   }
 }
 
-void ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
+bool ByteQueue::ByobRequest::isPartiallyFulfilled() {
+  return !isInvalidated() &&
+         getRequest().pullInto.filled > 0 &&
+         getRequest().pullInto.store.getElementSize() > 1;
+}
+
+bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // So what happens here? The read request has been fulfilled directly by writing
   // into the storage buffer of the request. Unfortunately, this will only resolve
   // the data for the one consumer from which the request was received. We have to
@@ -375,10 +381,10 @@ void ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     // other consumers of the queue.
     auto entry = kj::refcounted<Entry>(jsg::BackingStore::alloc(js, amount));
 
+    auto start = sourcePtr.begin() + req.pullInto.filled;
+
     // Safely copy the data over into the entry.
-    std::copy(sourcePtr.begin(),
-              sourcePtr.begin() + amount,
-              entry->toArrayPtr().begin());
+    std::copy(start, start + amount, entry->toArrayPtr().begin());
 
     // Push the entry into the other consumers.
     queue.push(js, kj::mv(entry), consumer);
@@ -389,6 +395,18 @@ void ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // those extra bytes and push them into the consumers queue so they can be picked
   // up by the next read.
   req.pullInto.filled += amount;
+
+  if (amount < req.pullInto.atLeast) {
+    // The response has not yet met the minimal requirement of this byob read.
+    // In this case, we do not want to resolve the read yet, and we do not
+    // want the byob request to be invalidated. We don't need to worry about
+    // unaligned bytes yet. We're just going to return false to tell the caller
+    // not to invalidate and to update the view over this store.
+
+    // We do want to decrease the atLeast by the amount of bytes we received.
+    req.pullInto.atLeast -= amount;
+    return false;
+  }
 
   // There is no need to adjust the pullInto.atLeast here because we are resolving
   // the read immediately.
@@ -406,9 +424,11 @@ void ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     std::copy(start, start + unaligned, excess->toArrayPtr().begin());
     consumer.push(js, kj::mv(excess));
   }
+
+  return true;
 }
 
-void ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
+bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
   // The idea here is that rather than filling the view that the controller was given,
   // it chose to create it's own view and fill that, likely over the same ArrayBuffer.
   // What we do here is perform some basic validations on what we were given, and if
@@ -429,7 +449,7 @@ void ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
                "The view is not the correct length.");
 
   req.pullInto.store = view.detach(js);
-  respond(js, amount);
+  return respond(js, amount);
 }
 
 size_t ByteQueue::ByobRequest::getAtLeast() const {
@@ -945,7 +965,7 @@ bool ByteQueue::hasPartiallyFulfilledRead() {
   KJ_IF_MAYBE(state, impl.getState()) {
     if (!state->pendingByobReadRequests.empty()) {
       auto& pending = state->pendingByobReadRequests.front();
-      if (!pending->isInvalidated() && pending->getRequest().pullInto.filled > 0) {
+      if (pending->isPartiallyFulfilled()) {
         return true;
       }
     }

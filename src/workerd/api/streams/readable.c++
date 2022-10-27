@@ -108,12 +108,8 @@ jsg::Promise<ReadResult> ReaderImpl::read(
                   ") exceeds size of buffer (", options->byteLength, ").")));
         }
 
-        // TODO(conform): This should really be defined as the number of elements of the provided
-        // buffer view rather than a byte length for consistency with read().
-        // TODO(soon): This check is not valid for JS controllers, which support this no problem.
-        if (!options->bufferView.getHandle(js)->IsUint8Array()) {
-          KJ_LOG(WARNING, "Reading into non-Uint8Array isn't currently supported.");
-        }
+        jsg::BufferSource source(js, options->bufferView.getHandle(js));
+        options->atLeast = atLeast * source.getElementSize();
       }
 
       return KJ_ASSERT_NONNULL(stream->getController().read(js, kj::mv(byobOptions)));
