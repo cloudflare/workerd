@@ -1,0 +1,49 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary", "js_test")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
+load("//:build/wd_ts_test.bzl", "wd_ts_test")
+
+wd_ts_project(
+    name = "types_lib",
+    srcs = glob(["src/**/*"]),
+    deps = [
+        "//:node_modules/@types",
+        "//:node_modules/@workerd/jsg",
+        "//:node_modules/capnp-ts",
+        "//:node_modules/prettier",
+        "//:node_modules/typescript",
+    ],
+)
+
+js_binary(
+    name = "types_bin",
+    data = [
+        ":types_lib",
+    ],
+    entry_point = "src/index.js",
+    node_options = ["--enable-source-maps"],
+)
+
+js_run_binary(
+    name = "types",
+    srcs = [
+        "//src/workerd/tools:api_encoder",
+    ],
+    outs = ["api.d.ts"],  # TODO(soon) switch to out_dirs when generating multiple files
+    args = [
+        "src/workerd/tools/api.capnp.bin",
+        "--output",
+        "types/api.d.ts",
+        "--format",
+    ],
+    silent_on_success = False,  # Always enable logging for debugging
+    tool = ":types_bin",
+)
+
+[
+    wd_ts_test(
+        src = src,
+        node_options = ["--enable-source-maps"],
+        deps = [":types_lib"],
+    )
+    for src in glob(["test/**/*.spec.ts"])
+]

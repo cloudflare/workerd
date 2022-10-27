@@ -23,6 +23,7 @@ typedef unsigned int uint;
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getCommonJsExportDefault(v8::Isolate* isolate);
 
+kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
