@@ -513,6 +513,13 @@ export default async function main(
     node.modifiers = node.modifiers?.filter(
       (m) => m.kind !== ts.SyntaxKind.ExportKeyword
     );
+    if (!node.modifiers?.find((m) => m.kind == ts.SyntaxKind.DeclareKeyword)) {
+      // @ts-ignore next-line
+      node.modifiers = [
+        ts.factory.createModifier(ts.SyntaxKind.DeclareKeyword),
+        ...(node.modifiers ?? []),
+      ];
+    }
     out.ambient += `${types.workers.log(node)}\n`;
   }
   function exportable(node: ts.Node): void {
@@ -522,6 +529,12 @@ export default async function main(
         ts.factory.createModifier(ts.SyntaxKind.ExportKeyword),
         ...(node.modifiers ?? []),
       ];
+    }
+    if (ts.isInterfaceDeclaration(node)) {
+      // @ts-ignore next-line
+      node.modifiers = node.modifiers?.filter(
+        (m) => m.kind !== ts.SyntaxKind.DeclareKeyword
+      );
     }
     out.exportable += `${types.workers.log(node)}\n`;
   }
