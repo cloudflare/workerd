@@ -9,6 +9,7 @@ import { Message } from "capnp-ts";
 import prettier from "prettier";
 import ts from "typescript";
 import { generateDefinitions } from "./generator";
+import postProcess from "./postprocess/parse";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
 import {
@@ -17,7 +18,6 @@ import {
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
-
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 `;
@@ -109,17 +109,35 @@ export async function main(args?: string[]) {
   const message = new Message(buffer, /* packed */ false);
   const root = message.getRoot(StructureGroups);
 
-  let definitions = printDefinitions(root);
+  const definitions = printDefinitions(root);
+  const output = path.resolve("tmp.api.d.ts");
+  await mkdir(path.dirname(output), { recursive: true });
+  await writeFile(output, definitions);
+
+  let { ambient, exportable } = await postProcess(
+    output,
+
+    path.join(
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.d.ts"
+    ),
+    path.join(
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.iterable.d.ts"
+    )
+  );
   if (options.format) {
-    definitions = prettier.format(definitions, { parser: "typescript" });
+    ambient = prettier.format(ambient, { parser: "typescript" });
+    exportable = prettier.format(exportable, { parser: "typescript" });
   }
   if (options.output !== undefined) {
+    console.log(options.output);
     const output = path.resolve(options.output);
     await mkdir(path.dirname(output), { recursive: true });
-    await writeFile(output, definitions);
-  } else {
-    // Write to stdout without extra newline
-    process.stdout.write(definitions);
+    await writeFile(output, ambient);
+
+    const exportableFile = path.join(path.dirname(output), "api.ts");
+    await writeFile(exportableFile, exportable);
   }
 }
 
