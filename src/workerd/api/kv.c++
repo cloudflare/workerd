@@ -12,6 +12,9 @@
 
 namespace workerd::api {
 
+// As documented in Cloudflare's Worker KV limits.
+static constexpr size_t kMaxKeyLength = 512;
+
 static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Response& response) {
   if (response.statusCode < 200 || response.statusCode >= 300) {
     // Manually construct exception so that we can incorporate method and status into the text
@@ -22,10 +25,13 @@ static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Resp
   }
 }
 
-static void validateKeyName(kj::StringPtr name) {
+static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
   JSG_REQUIRE(name != "", TypeError, "Key name cannot be empty.");
   JSG_REQUIRE(name != ".", TypeError, "\".\" is not allowed as a key name.");
   JSG_REQUIRE(name != "..", TypeError, "\"..\" is not allowed as a key name.");
+  JSG_REQUIRE(name.size() <= kMaxKeyLength, Error, "KV ", method, " failed: ",
+      414, " Request-URI Too Large. UTF-8 encoded key length of ", name.size(),
+      " exceeds the 512 byte limit.");
 }
 
 static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) {
@@ -67,7 +73,7 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
 
 jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
-  validateKeyName(name);
+  validateKeyName("GET", name);
 
   auto& context = IoContext::current();
 
@@ -241,7 +247,7 @@ jsg::Promise<void> KvNamespace::put(
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<KvNamespace::PutSupportedTypes>& putTypeHandler) {
 
-  validateKeyName(name);
+  validateKeyName("PUT", name);
 
   auto& context = IoContext::current();
 
@@ -357,7 +363,7 @@ jsg::Promise<void> KvNamespace::put(
 }
 
 jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
-  validateKeyName(name);
+  validateKeyName("DELETE", name);
 
   auto& context = IoContext::current();
 
