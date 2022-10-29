@@ -26,11 +26,15 @@ public:
     // Lazily initialize actorChannel
     if (actorChannel == nullptr) {
       auto& context = IoContext::current();
-      actorChannel = context.getColoLocalActorChannel(channelId, kj::mv(actorId));
+      actorChannel = context.getColoLocalActorChannel(channelId, actorId);
     }
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-        [&](kj::Maybe<Tracer::Span&> span, IoChannelFactory& ioChannelFactory) {
+        [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
+      if (span.isObserved()) {
+        span.setTag("actor_id"_kj, kj::str(actorId));
+      }
+
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
         .cfBlobJson = kj::mv(cfStr),
         .parentSpan = span
@@ -68,7 +72,11 @@ public:
     }
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
-        [&](kj::Maybe<Tracer::Span&> span, IoChannelFactory& ioChannelFactory) {
+        [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
+      if (span.isObserved()) {
+        span.setTag("actor_id"_kj, id->toString());
+      }
+
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
         .cfBlobJson = kj::mv(cfStr),
         .parentSpan = span

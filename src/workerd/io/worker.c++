@@ -1241,7 +1241,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                       jsg::Lock& lock, const ApiIsolate& apiIsolate,
                       v8::Local<v8::Object> target)> compileBindings,
                IsolateObserver::StartType startType,
-               MaybeTracer systemTracer, LockType lockType,
+               SpanParent parentSpan, LockType lockType,
                kj::Maybe<ValidationErrorReporter&> errorReporter)
     : script(kj::mv(scriptParam)),
       metrics(kj::mv(metricsParam)),
@@ -1258,16 +1258,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     }
   });
 
-  auto maybeMakeSpan = [&](auto operationName) -> MaybeSpan {
-    if (auto span = systemTracer.makeSpan(operationName)) {
+  auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
+    auto span = parentSpan.newChild(operationName);
+    if (span.isObserved()) {
       span.setTag("truncated_script_id"_kj, truncateScriptId(script->getId()));
-      return kj::mv(span);
-    } else {
-      return MaybeSpan();
     }
+    return span;
   };
 
-  MaybeSpan currentSpan = maybeMakeSpan("lw:new_startup_metrics"_kj);
+  auto currentSpan = maybeMakeSpan("lw:new_startup_metrics"_kj);
 
   auto startupMetrics = metrics->startup(startType);
 
@@ -1754,8 +1753,8 @@ Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
 }
 
 kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockWithoutRequest(
-    MaybeTracer systemTracer) const {
-  auto lockTiming = getMetrics().tryCreateLockTiming(kj::mv(systemTracer));
+    SpanParent parentSpan) const {
+  auto lockTiming = getMetrics().tryCreateLockTiming(kj::mv(parentSpan));
   return takeAsyncLockImpl(kj::mv(lockTiming));
 }
 
@@ -1809,8 +1808,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
   }
 }
 
-kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWithoutRequest(MaybeTracer systemTracer) const {
-  return script->getIsolate().takeAsyncLockWithoutRequest(kj::mv(systemTracer));
+kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWithoutRequest(SpanParent parentSpan) const {
+  return script->getIsolate().takeAsyncLockWithoutRequest(kj::mv(parentSpan));
 }
 
 kj::Promise<Worker::AsyncLock> Worker::takeAsyncLock(RequestObserver& request) const {

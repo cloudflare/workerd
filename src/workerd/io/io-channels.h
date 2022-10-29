@@ -15,7 +15,7 @@ class CacheClient {
   // contain it.
 public:
   virtual kj::Own<kj::HttpClient> getDefault(
-      kj::Maybe<kj::String> cfBlobJson, kj::Maybe<Tracer::Span&> parentSpan) = 0;
+      kj::Maybe<kj::String> cfBlobJson, SpanParent parentSpan) = 0;
   // Get the default namespace, i.e. the one that fetch() will use for caching.
   //
   // The returned client is intended to be used for one request. `cfBlobJson` and `parentSpan` have
@@ -23,7 +23,7 @@ public:
 
   virtual kj::Own<kj::HttpClient> getNamespace(
       kj::StringPtr name, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<Tracer::Span&> parentSpan) = 0;
+      SpanParent parentSpan) = 0;
   // Get an HttpClient for the given cache namespace.
   //
   // The returned client is intended to be used for one request. `parentSpan` has the same meaning
@@ -125,15 +125,8 @@ public:
     kj::Maybe<kj::String> cfBlobJson;
     // The `request.cf` blob, JSON-encoded.
 
-    kj::Maybe<Tracer::Span&> parentSpan;
-    // If specified, and tracing is active, specifies the parent span for the subrequest.
-    //
-    // Note the referenced `Span` object is only guaranteed to exist until the factory callback
-    // returns. (In practice, it probably lives for the lifetime of the subrequest, but this
-    // shouldn't be assumed.)
-    //
-    // Design note: We use a `Tracer::Span` rather than a `Jaeger::SpanContext` here in order to
-    // try to keep tracing implementation details out of the IoContext / APIs layer.
+    SpanParent parentSpan = nullptr;
+    // Specifies the parent span for the subrequest for tracing purposes.
 
     kj::Maybe<kj::StringPtr> featureFlagsForFl;
     // Serialized JSON value to pass in ew_compat field of control header to FL. If this subrequest
@@ -192,7 +185,7 @@ public:
   // `ActorIdFactory` -- if it's from some other factory, the method will throw an appropriate
   // exception.
 
-  virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::String id) = 0;
+  virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id) = 0;
   // Get an actor stub from the given namespace for the actor with the given name.
 };
 

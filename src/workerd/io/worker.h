@@ -78,7 +78,7 @@ public:
                       jsg::Lock& lock, const ApiIsolate& apiIsolate,
                       v8::Local<v8::Object> target)> compileBindings,
                   IsolateObserver::StartType startType,
-                  MaybeTracer systemTracer, LockType lockType,
+                  SpanParent parentSpan, LockType lockType,
                   kj::Maybe<ValidationErrorReporter&> errorReporter = nullptr);
   // `compileBindings()` is a callback that constructs all of the bindings and adds them as
   // properties to `target`.
@@ -94,7 +94,7 @@ public:
   class Lock;
 
   class AsyncLock;
-  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(MaybeTracer systemTracer) const;
+  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver& request) const;
   // Places this thread into the queue of threads which are interested in locking this isolate,
   // and returns when it is this thread's turn. The thread must still obtain a `Worker::Lock`, but
@@ -102,7 +102,7 @@ public:
   // with many other threads, and all interested threads get their fair turn.
   //
   // The version accepting a `request` metrics object accumulates lock timing data and reports the
-  // data via `request`'s Jaeger span.
+  // data via `request`'s trace span.
 
   class Actor;
 
@@ -299,7 +299,7 @@ public:
   void completedRequest() const;
   // Called after each completed request. Does not require a lock.
 
-  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(MaybeTracer systemTracer) const;
+  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
   // See Worker::takeAsyncLock().
 

@@ -434,7 +434,7 @@ void IoContext::addTask(kj::Promise<void> promise) {
     // is not even executed in the actor case but I'm leaving the check in just in case that ever
     // changes.)
     auto& metrics = getMetrics();
-    KJ_IF_MAYBE(s, metrics.getSpan()) {
+    if (metrics.getSpan().isObserved()) {
       metrics.addedContextTask();
       promise = promise.attach(kj::defer([metrics = kj::addRef(metrics)]() mutable {
         metrics->finishedContextTask();
@@ -450,7 +450,7 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
-    KJ_IF_MAYBE(s, metrics.getSpan()) {
+    if (metrics.getSpan().isObserved()) {
       metrics.addedWaitUntilTask();
       promise = promise.attach(kj::defer([metrics = kj::addRef(metrics)]() mutable {
         metrics->finishedWaitUntilTask();
@@ -825,17 +825,14 @@ kj::Date IoContext::now() {
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
-    kj::FunctionParam<kj::Own<WorkerInterface>(kj::Maybe<Tracer::Span&>, IoChannelFactory&)> func,
+    kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
     SubrequestOptions options) {
-  kj::Maybe<Tracer::Span> span;
+  SpanBuilder span = nullptr;
   KJ_IF_MAYBE(n, options.operationName) {
-    KJ_IF_MAYBE(s, makeTraceSpan(*n)) {
-      span = kj::mv(*s);
-    }
+    span = makeTraceSpan(*n);
   }
 
-  auto ret = func(span.map([&](Tracer::Span& span) -> Tracer::Span& { return span; }),
-                  getIoChannelFactory());
+  auto ret = func(span, getIoChannelFactory());
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
@@ -844,15 +841,15 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  KJ_IF_MAYBE(s, span) {
-    ret = ret.attach(kj::mv(*s));
+  if (span.isObserved()) {
+    ret = ret.attach(kj::mv(span));
   }
 
   return kj::mv(ret);
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequest(
-    kj::FunctionParam<kj::Own<WorkerInterface>(kj::Maybe<Tracer::Span&>, IoChannelFactory&)> func,
+    kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   limitEnforcer->newSubrequest(options.inHouse);
   return getSubrequestNoChecks(kj::mv(func), options);
@@ -860,8 +857,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::StringPtr operationName) {
-  return getSubrequest([&](kj::Maybe<Tracer::Span&> span, IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
+  return getSubrequest([&](SpanBuilder& span, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
   }, SubrequestOptions {
     .inHouse = isInHouse,
     .wrapMetrics = !isInHouse,
@@ -872,9 +870,10 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<kj::StringPtr> operationName) {
-  return getSubrequestNoChecks([&](kj::Maybe<Tracer::Span&> span,
+  return getSubrequestNoChecks([&](SpanBuilder& span,
                                    IoChannelFactory& channelFactory) {
-    return getSubrequestChannelImpl(channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), span, channelFactory);
   }, SubrequestOptions {
     .inHouse = isInHouse,
     .wrapMetrics = !isInHouse,
@@ -884,7 +883,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelNoChecks(
 
 kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(
     uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-    kj::Maybe<Tracer::Span&> span, IoChannelFactory& channelFactory) {
+    SpanBuilder& span, IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata {
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = span,
@@ -918,8 +917,8 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   return getIoChannelFactory().getCache();
 }
 
-kj::Maybe<Tracer::Span> IoContext::makeTraceSpan(kj::StringPtr operationName) {
-  return mapMakeSpan(getMetrics().getSpan(), operationName);
+SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+  return getMetrics().getSpan().newChild(operationName);
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

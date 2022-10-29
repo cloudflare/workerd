@@ -735,15 +735,15 @@ public:
     // When true, the client is wrapped by metrics.wrapSubrequestClient() ensuring appropriate
     // metrics collection.
     kj::Maybe<kj::StringPtr> operationName;
-    // The name to use for the request's Jaeger span if Jaeger tracing is turned on.
+    // The name to use for the request's span if tracing is turned on.
   };
 
   kj::Own<WorkerInterface> getSubrequestNoChecks(
-      kj::FunctionParam<kj::Own<WorkerInterface>(kj::Maybe<Tracer::Span&>, IoChannelFactory&)> func,
+      kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
       SubrequestOptions options);
 
   kj::Own<WorkerInterface> getSubrequest(
-      kj::FunctionParam<kj::Own<WorkerInterface>(kj::Maybe<Tracer::Span&>, IoChannelFactory&)> func,
+      kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
       SubrequestOptions options);
   // If creating a new subrequest is permitted, calls the given factory function to create one.
 
@@ -766,8 +766,7 @@ public:
   //   request.
   // - In preview, in-house requests do not show up in the network tab.
   //
-  // `operationName` is the name to use for the request's Jaeger span, if Jaeger tracing is
-  // turned on.
+  // `operationName` is the name to use for the request's span, if tracing is turned on.
 
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
@@ -793,14 +792,14 @@ public:
         uint channel, const ActorIdFactory::ActorId& id, kj::Maybe<kj::String> locationHint) {
     return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint));
   }
-  kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(uint channel, kj::String id) {
-    return getIoChannelFactory().getColoLocalActor(channel, kj::mv(id));
+  kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(uint channel, kj::StringPtr id) {
+    return getIoChannelFactory().getColoLocalActor(channel, id);
   }
 
   kj::Own<CacheClient> getCacheClient();
   // Get an HttpClient to use for Cache API subrequests.
 
-  kj::Maybe<Tracer::Span> makeTraceSpan(kj::StringPtr operationName);
+  SpanBuilder makeTraceSpan(kj::StringPtr operationName);
   // Make a new trace span, if tracing is active. Returns null if tracing is not active.
 
   jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> makeCachePutStream(
@@ -970,7 +969,7 @@ private:
 
   kj::Own<WorkerInterface> getSubrequestChannelImpl(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<Tracer::Span&> span, IoChannelFactory& channelFactory);
+      SpanBuilder& span, IoChannelFactory& channelFactory);
 
   friend class IoContext_IncomingRequest;
   template <typename T> friend class IoOwn;

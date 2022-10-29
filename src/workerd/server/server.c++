@@ -1330,7 +1330,7 @@ private:
         : cacheService(cacheService), cacheNamespaceHeader(cacheNamespaceHeader) {}
 
     kj::Own<kj::HttpClient> getDefault(kj::Maybe<kj::String> cfBlobJson,
-                                       kj::Maybe<Tracer::Span&> parentSpan) override {
+                                       SpanParent parentSpan) override {
 
       return kj::heap<CacheHttpClientImpl>(
           cacheService, cacheNamespaceHeader, nullptr, kj::mv(cfBlobJson), kj::mv(parentSpan));
@@ -1338,10 +1338,11 @@ private:
 
     kj::Own<kj::HttpClient> getNamespace(kj::StringPtr cacheName,
                                          kj::Maybe<kj::String> cfBlobJson,
-                                         kj::Maybe<Tracer::Span&> parentSpan) override {
+                                         SpanParent parentSpan) override {
       auto encodedName = kj::encodeUriComponent(cacheName);
       return kj::heap<CacheHttpClientImpl>(
-          cacheService, cacheNamespaceHeader, kj::mv(encodedName), kj::mv(cfBlobJson), parentSpan);
+          cacheService, cacheNamespaceHeader, kj::mv(encodedName), kj::mv(cfBlobJson),
+          kj::mv(parentSpan));
     }
 
   private:
@@ -1354,8 +1355,8 @@ private:
   public:
     CacheHttpClientImpl(Service& parent, kj::HttpHeaderId cacheNamespaceHeader,
                         kj::Maybe<kj::String> cacheName, kj::Maybe<kj::String> cfBlobJson,
-                        kj::Maybe<Tracer::Span&> parentSpan)
-        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), parentSpan}))),
+                        SpanParent parentSpan)
+        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), kj::mv(parentSpan)}))),
           cacheName(kj::mv(cacheName)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
@@ -1411,7 +1412,7 @@ private:
     return ns.getActor(id.clone());
   }
 
-  kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::String id) override {
+  kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id) override {
     auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
         "link() has not been called");
 
