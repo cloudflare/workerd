@@ -220,12 +220,10 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(
     kj::Own<IoContext> contextParam,
     kj::Own<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-    kj::Maybe<kj::Own<Tracer>> tracer)
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
-      tracer(kj::mv(tracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)) {}
 
 void IoContext::IncomingRequest::delivered() {
@@ -917,7 +915,7 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 }
 
 kj::Maybe<Tracer::Span> IoContext::makeTraceSpan(kj::StringPtr operationName) {
-  return mapMakeSpan(getTracer(), operationName, getMetrics().getSpan());
+  return mapMakeSpan(getMetrics().getSpan(), operationName);
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

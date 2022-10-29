@@ -193,8 +193,7 @@ public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
                             kj::Own<IoChannelFactory> ioChannelFactory,
                             kj::Own<RequestObserver> metrics,
-                            kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-                            kj::Maybe<kj::Own<Tracer>> tracer);
+                            kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
   KJ_DISALLOW_COPY(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -236,13 +235,10 @@ public:
 
   kj::Maybe<WorkerTracer&> getWorkerTracer() { return workerTracer; }
 
-  kj::Maybe<Tracer&> getTracer() { return tracer; }
-
 private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
-  kj::Maybe<kj::Own<Tracer>> tracer;
   kj::Own<IoChannelFactory> ioChannelFactory;
 
   bool wasDelivered = false;
@@ -315,11 +311,6 @@ public:
   const kj::Maybe<WorkerTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return nullptr;
     return getCurrentIncomingRequest().getWorkerTracer();
-  }
-
-  const kj::Maybe<Tracer&> getTracer() {
-    if (incomingRequests.empty()) return nullptr;
-    return getCurrentIncomingRequest().tracer.map([](kj::Own<Tracer>& t) -> Tracer& { return *t; });
   }
 
   LimitEnforcer& getLimitEnforcer() { return *limitEnforcer; }

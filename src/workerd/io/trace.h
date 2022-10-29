@@ -283,6 +283,10 @@ kj::Maybe<Tracer::Span> mapMakeSpan(
 //
 // TODO(cleanup): Tracing suffers from Maybe-overload. There's probably a better interface design.
 
+kj::Maybe<Tracer::Span> mapMakeSpan(
+    kj::Maybe<Tracer::Span&> parent, kj::StringPtr operationName);
+// Like above but gets the `tracer` from `parent.getTracer()` (if parent is non-null).
+
 kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<kj::Own<Tracer>>& tracer);
 kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<Tracer&> tracer);
 // If tracer is non-null, return tracer->getParentSpanContext().
