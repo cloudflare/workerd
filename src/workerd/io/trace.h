@@ -299,6 +299,7 @@ class MaybeSpan {
 public:
   MaybeSpan() = default;
   explicit MaybeSpan(Tracer::Span span): span(kj::mv(span)) {}
+  MaybeSpan(kj::Maybe<Tracer::Span> span): span(kj::mv(span)) {}
   MaybeSpan& operator=(std::nullptr_t) {
     span = nullptr;
     return *this;
@@ -333,8 +334,14 @@ public:
     }
   }
 
+  MaybeSpan makeChild(kj::StringPtr operationName) {
+    return mapMakeSpan(span, operationName);
+  }
+
 private:
   kj::Maybe<Tracer::Span> span;
+
+  friend class MaybeTracer;
 };
 
 class MaybeTracer {
@@ -350,6 +357,7 @@ public:
   explicit MaybeTracer(kj::Maybe<kj::Own<Tracer>> tracer) : tracer(kj::mv(tracer)) {}
 
   explicit MaybeTracer(kj::Maybe<Tracer::Span&> span);
+  explicit MaybeTracer(MaybeSpan& span): MaybeTracer(span.span) {}
   // Convenience constructor from Tracer::Span& to make a MaybeTracer whose parent is that span.
 
   bool operator==(std::nullptr_t) { return tracer == nullptr; }
@@ -362,12 +370,8 @@ public:
     }
   }
 
-  MaybeTracer clone(kj::Maybe<Jaeger::SpanContext> overrideParent = nullptr) {
-    KJ_IF_MAYBE(t, tracer) {
-      return MaybeTracer((**t).makeSubtracer(overrideParent));
-    } else {
-      return {};
-    }
+  MaybeTracer addRef() {
+    return MaybeTracer(tracer.map([](kj::Own<Tracer>& t) { return kj::addRef(*t); }));
   }
 
   MaybeSpan makeSpan(kj::StringPtr operationName,
