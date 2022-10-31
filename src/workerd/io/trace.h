@@ -306,7 +306,12 @@ public:
   };
 
   bool operator==(std::nullptr_t) { return span == nullptr; }
+
   explicit operator bool() { return span != nullptr; }
+  // TODO(cleanup): Remove this, per KJ style people should always use `== nullptr`.
+
+  operator kj::Maybe<Tracer::Span&>() & { return span; }
+  // TODO(cleanup): Remove this. It's a temporary helper while refactoring.
 
   kj::Maybe<Jaeger::SpanContext> getSpanContext() {
     KJ_IF_MAYBE(s, span) {
