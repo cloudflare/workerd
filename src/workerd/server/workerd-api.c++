@@ -450,8 +450,7 @@ void WorkerdApiIsolate::compileGlobals(
       }
 
       KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::KvNamespace>(
-            kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
+        value = lock.wrap(context, jsg::alloc<api::KvNamespace>(ns.subrequestChannel));
       }
 
       KJ_CASE_ONEOF(r2, Global::R2Bucket) {
