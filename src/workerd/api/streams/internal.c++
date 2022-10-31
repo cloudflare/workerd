@@ -403,8 +403,6 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
     store = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, byteLength);
   }
 
-  KJ_ASSERT(store->ByteLength() == byteOffset + byteLength);
-
   auto ptr = static_cast<kj::byte*>(store->Data());
   auto bytes = kj::arrayPtr(ptr + byteOffset, byteLength);
   disturbed = true;
