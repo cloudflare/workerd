@@ -22,7 +22,7 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/bazel-disk-cache
-          key: ${{ runner.os }}-${{ runner.arch }}-bazel-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
       - run: mkdir -p ~/bazel-disk-cache
       - name: install dependencies
         if: ${{ runner.os == 'Linux' }}
