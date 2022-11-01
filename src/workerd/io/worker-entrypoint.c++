@@ -269,12 +269,10 @@ kj::Promise<void> WorkerEntrypoint::request(
                              metrics = kj::mv(metrics)]
                             (kj::Exception&& e) mutable {
         metrics->setFailedOpen(false);
-        if (e.getType() != kj::Exception::Type::DISCONNECTED &&
-            // Avoid logging recognized external errors here, such as invalid headers returned from
-            // the server.
-            !jsg::isTunneledException(e.getDescription()) &&
-            !jsg::isDoNotLogException(e.getDescription())) {
-          KJ_LOG(ERROR, "fail-open fallback failed", e);
+        if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+          // Avoid logging recognized external errors here, such as invalid headers returned from
+          // the server.
+          LOG_EXCEPTION_IF_INTERNAL("failOpenFallback", e);
         }
         if (!wrappedResponse->isSent()) {
           kj::HttpHeaders headers(threadContext.getHeaderTable());
