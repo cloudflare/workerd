@@ -11,6 +11,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/util/sentry.h>
+#include <workerd/io/io-context.h>
 
 namespace workerd {
 
