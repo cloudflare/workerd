@@ -146,8 +146,7 @@ public:
   using JsonModuleInfo = ValueModuleInfo<v8::Value>;
 
   struct ModuleInfo {
-    v8::Global<v8::Module> module;
-    int hash;
+    HashableV8Ref<v8::Module> module;
 
     using SyntheticModuleInfo = kj::OneOf<CapnpModuleInfo,
                                           CommonJsModuleInfo,
@@ -157,7 +156,7 @@ public:
                                           JsonModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
 
-  ModuleInfo(jsg::Lock& js,
+    ModuleInfo(jsg::Lock& js,
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
@@ -169,6 +168,8 @@ public:
 
     ModuleInfo(ModuleInfo&&) = default;
     ModuleInfo& operator=(ModuleInfo&&) = default;
+
+    uint hashCode() const { return module.hashCode(); }
   };
 
   virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, const kj::Path& specifier) = 0;
@@ -222,16 +223,32 @@ public:
   }
 
   kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
-    KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->module(js);
+    for (const Entry& entry : entries) {
+      // Unfortunately we cannot use entries.find(...) in here because the module info can
+      // be initialized lazily at any point after the entry is indexed, making the lookup
+      // by module a bit problematic. Iterating through the entries is slower but it works.
+      KJ_IF_MAYBE(info, entry.info.template tryGet<ModuleInfo>()) {
+        if (info->hashCode() == module->GetIdentityHash()) {
+          auto& i = *info;
+          return kj::Maybe<ModuleInfo&>(const_cast<ModuleInfo&>(i));
+        }
+      }
     }
     return nullptr;
   }
 
   kj::Maybe<const kj::Path&> resolvePath(v8::Local<v8::Module> module) override {
-    KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->specifier;
+    for (const Entry& entry : entries) {
+      // Unfortunately we cannot use entries.find(...) in here because the module info can
+      // be initialized lazily at any point after the entry is indexed, making the lookup
+      // by module a bit problematic. Iterating through the entries is slower but it works.
+      KJ_IF_MAYBE(info, entry.info.template tryGet<ModuleInfo>()) {
+        if (info->hashCode() == module->GetIdentityHash()) {
+          return entry.specifier;
+        }
+      }
     }
+
     return nullptr;
   }
 
@@ -241,7 +258,7 @@ public:
     KJ_IF_MAYBE(info, resolve(js, specifier)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
         auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
-          auto module = info.module.Get(isolate);
+          auto module = info.module.getHandle(isolate);
           auto& js = Lock::from(isolate);
           instantiateModule(js, module);
           return Value(isolate, module->GetModuleNamespace());
@@ -267,8 +284,9 @@ private:
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
+    using Info = kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>>;
     kj::Path specifier;
-    kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>> info;
+    Info info;
     // Either instantiated module or module source code.
 
     Entry(const kj::Path& specifier, ModuleInfo info)
@@ -308,37 +326,7 @@ private:
     }
   };
 
-  struct InfoHashCallbacks {
-    const Entry& keyForRow(const Entry& row) const { return row; }
-
-    bool matches(const Entry& entry, const Entry& other) const {
-      return hashCode(entry) == hashCode(other);
-    }
-
-    bool matches(const Entry& entry, v8::Local<v8::Module>& module) const {
-      return entry.info.template is<ModuleInfo>() &&
-          entry.info.template get<ModuleInfo>().hash == module->GetIdentityHash();
-    }
-
-    uint hashCode(v8::Local<v8::Module>& module) const {
-      return kj::hashCode(module->GetIdentityHash());
-    }
-
-    uint hashCode(const Entry& entry) const {
-      KJ_SWITCH_ONEOF(entry.info) {
-        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
-          return moduleInfo.hash;
-        }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          return kj::hashCode(src);
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  };
-
-  kj::Table<Entry, kj::HashIndex<SpecifierHashCallbacks>,
-                   kj::HashIndex<InfoHashCallbacks>> entries;
+  kj::Table<Entry, kj::HashIndex<SpecifierHashCallbacks>> entries;
 };
 
 template <typename TypeWrapper>

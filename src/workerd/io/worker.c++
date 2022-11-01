@@ -1341,7 +1341,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");
-            auto module = entry->module.Get(lock.v8Isolate);
+            auto module = entry->module.getHandle(lock);
 
             {
               auto limitScope = script->isolate->getLimitEnforcer()

@@ -35,7 +35,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath), Error,
         "No such module \"", targetPath.toString(),
         "\".\n  imported from \"", referrerPath.toString(), "\"")
-        .module.Get(isolate);
+        .module.getHandle(js);
 
   })) {
     isolate->ThrowException(makeInternalError(isolate, kj::mv(*exception)));
@@ -181,7 +181,7 @@ v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Is
   JSG_REQUIRE_NONNULL(info.maybeSynthetic, TypeError,
       "Cannot use require() to import an ES Module.");
 
-  auto module = info.module.Get(isolate);
+  auto module = info.module.getHandle(js);
   auto context = isolate->GetCurrentContext();
 
   check(module->InstantiateModule(context, &resolveCallback));
@@ -298,7 +298,6 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
     v8::Local<v8::Module> module,
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic)
     : module(js.v8Isolate, module),
-      hash(module->GetIdentityHash()),
       maybeSynthetic(kj::mv(maybeSynthetic)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
