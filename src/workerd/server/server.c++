@@ -1157,7 +1157,7 @@ public:
   class ActorNamespace {
   public:
     struct LocalActor {
-      kj::Own<Worker::Actor::Impl> actor;
+      kj::Own<Worker::ActorImpl> actor;
 
       kj::Maybe<Worker::Actor*> hibernationTaskOrActor;
     };
@@ -1214,7 +1214,7 @@ public:
 
           TimerChannel& timerChannel = service;
           auto workerLock = Worker::Lock(*service.worker, lock);
-          auto newActorImpl = kj::heap<Worker::Actor::Impl>(
+          auto newActorImpl = kj::heap<Worker::ActorImpl>(
               workerLock, kj::mv(id), true, kj::mv(persistent),
               className, kj::mv(makeStorage),
               timerChannel, kj::refcounted<ActorObserver>());

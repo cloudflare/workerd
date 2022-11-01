@@ -105,6 +105,9 @@ public:
   // data via `request`'s Jaeger span.
 
   class Actor;
+  // TODO(now): rename to `Worker::TimedActorRef`
+  struct ActorImpl;
+  // TODO(now): rename to `Worker::Actor`
 
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(kj::Date now, Actor& actor,
       RequestObserver& request) const;
@@ -621,14 +624,9 @@ class Worker::Actor final: public kj::Refcounted {
   // after some time.
 
 public:
-  // TODO(now): Rename to Worker::Actor (not as subtype, move to toplevel).
-  struct Impl;
-  // Represents actor state within a Worker instance. This object tracks the JavaScript heap
-  // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
-
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
-  Actor(Impl& impl, kj::Own<void> attachments) : impl(impl), attachments(kj::mv(attachments)) {}
+  Actor(ActorImpl& impl, kj::Own<void> attachments) : impl(impl), attachments(kj::mv(attachments)) {}
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
 
@@ -699,7 +697,7 @@ public:
   // isn't a duplicate alarm, func will be called to run the alarm.
 
 private:
-  Impl& impl;
+  ActorImpl& impl;
 
   kj::Own<void> attachments;
 

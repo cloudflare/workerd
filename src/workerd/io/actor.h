@@ -6,7 +6,10 @@
 
 namespace workerd {
 
-struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
+// TODO(now): Rename to Worker::Actor
+struct Worker::ActorImpl final: public kj::TaskSet::ErrorHandler {
+  // Represents actor state within a Worker instance. This object tracks the JavaScript heap
+  // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
   kj::Own<const Worker> worker;
   Actor::Id actorId;
   using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
@@ -33,7 +36,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   static kj::OneOf<NoClass, DurableObjectConstructor*>
       buildClassInstance(Worker& worker, kj::Maybe<kj::StringPtr> className);
-    // Used by the Worker::Actor::Impl constructor to initialize the classInstance.
+    // Used by the Worker::ActorImpl constructor to initialize the classInstance.
 
   class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks {
   public:
@@ -109,7 +112,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   bool hasCalledOnBroken = false;
 
-  Impl(Worker::Lock& lock, Actor::Id actorId,
+  ActorImpl(Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
        kj::Maybe<kj::StringPtr> className,
        MakeStorageFunc makeStorage, TimerChannel& timerChannel,
