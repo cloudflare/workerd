@@ -637,7 +637,7 @@ public:
   // This is used only for modules-syntax actors (which most are, since that's the only format we
   // support publicly).
 
-  void shutdown(uint16_t reasonCode);
+  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> maybeError = nullptr);
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
   // IoContext objects prolong the lifetime of their Actor.
