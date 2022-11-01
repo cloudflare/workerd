@@ -2604,12 +2604,9 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
     kj::Date scheduledTime;
   };
 
-  struct RunningAlarm : public Alarm {
-    kj::Maybe<Alarm> queuedAlarm;
-  };
-
   kj::TaskSet deletedAlarmTasks;
-  kj::Maybe<RunningAlarm> runningAlarm;
+  kj::Maybe<Alarm> runningAlarm;
+  kj::Maybe<Alarm> queuedAlarm;
   // Used to handle deduplication of alarm requests
 
   Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
@@ -2741,7 +2738,7 @@ Worker::Actor::~Actor() noexcept(false) {
   impl = nullptr;
 }
 
-void Worker::Actor::shutdown(uint16_t reasonCode) {
+void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> maybeError) {
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -2752,6 +2749,28 @@ void Worker::Actor::shutdown(uint16_t reasonCode) {
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.
+  }
+
+  KJ_IF_MAYBE(alarm, impl->runningAlarm) {
+    // Reject any alarms we have running or queued.
+    auto e = [&maybeError]() {
+      KJ_IF_MAYBE(e, maybeError) {
+        return kj::cp(*e);
+      } else {
+        auto exception = KJ_EXCEPTION(FAILED, "Cannot run alarm due to Actor shutdown");
+
+        // Add trace info sufficient to tell us which operation caused the failure.
+        exception.addTraceHere();
+        exception.addTrace(__builtin_return_address(0));
+
+        return exception;
+      }
+    }();
+
+    KJ_IF_MAYBE(queued, impl->queuedAlarm) {
+      queued->fulfiller->reject(kj::cp(e));
+    }
+    alarm->fulfiller->reject(kj::mv(e));
   }
 
   impl->shutdownFulfiller->fulfill();
@@ -2913,15 +2932,13 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
     }, [&](kj::Exception&& e) {
       fulfiller.reject(kj::mv(e));
     }).then([this]() {
-      auto& running = KJ_ASSERT_NONNULL(impl->runningAlarm);
+      auto running = KJ_ASSERT_NONNULL(kj::mv(impl->runningAlarm));
+      impl->runningAlarm = kj::mv(impl->queuedAlarm);
+      impl->queuedAlarm = nullptr;
 
       // We can't overwrite runningAlarm before moving ourselves out of it, as a promise cannot
       // delete itself.
       impl->deletedAlarmTasks.add(kj::mv(running.alarmTask));
-
-      impl->runningAlarm = running.queuedAlarm.map([](auto& alarm) -> Impl::RunningAlarm {
-        return Impl::RunningAlarm { Impl::Alarm { kj::mv(alarm) } };
-      });
     }).eagerlyEvaluate([](kj::Exception&& e) {
       LOG_EXCEPTION("runQueuedAlarm", e);
     });
@@ -2929,22 +2946,21 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
 
   auto makeQueuedAlarm = [&, scheduledTime](auto runningProm) mutable {
     auto [prom, fulfiller] = kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>();
-    auto& fulfillerRef = *fulfiller;
-
     return Impl::Alarm {
-      runningProm.then([runAlarmImpl = kj::mv(runAlarmImpl), &fulfillerRef]() mutable {
+      .alarmTask = runningProm.then(
+          [runAlarmImpl = kj::mv(runAlarmImpl), &fulfillerRef = *fulfiller]() mutable {
         return runAlarmImpl(fulfillerRef);
       }),
-      prom.fork(),
-      kj::mv(fulfiller),
-      scheduledTime
+      .alarm = prom.fork(),
+      .fulfiller = kj::mv(fulfiller),
+      .scheduledTime = scheduledTime,
     };
   };
 
   KJ_IF_MAYBE(r, impl->runningAlarm) {
     if (r->scheduledTime == scheduledTime) {
       return r->alarm.addBranch();
-    } else KJ_IF_MAYBE(q, r->queuedAlarm) {
+    } else KJ_IF_MAYBE(q, impl->queuedAlarm) {
       if (q->scheduledTime == scheduledTime) {
         return q->alarm.addBranch();
       } else {
@@ -2956,26 +2972,24 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
 
         // now we can replace the queued alarm with a new one. we exclusiveJoin with the paf promise
         // to allow for future overwrites
-        return r->queuedAlarm
+        return impl->queuedAlarm
           .emplace(makeQueuedAlarm(r->alarm.addBranch().ignoreResult()))
           .alarm.addBranch();
       }
     } else {
       // there's not a queued alarm already, so we're safe to just go ahead and set it.
-      return r->queuedAlarm
+      return impl->queuedAlarm
         .emplace(makeQueuedAlarm(r->alarm.addBranch().ignoreResult()))
         .alarm.addBranch();
     }
   } else {
     auto [prom, fulfiller] = kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>();
     auto& fulfillerRef = *fulfiller;
-    auto& running = impl->runningAlarm.emplace(Impl::RunningAlarm {
-      Impl::Alarm {
-        runAlarmImpl(fulfillerRef),
-        prom.fork(),
-        kj::mv(fulfiller),
-        scheduledTime
-      }
+    auto& running = impl->runningAlarm.emplace(Impl::Alarm {
+      .alarmTask = runAlarmImpl(fulfillerRef),
+      .alarm = prom.fork(),
+      .fulfiller = kj::mv(fulfiller),
+      .scheduledTime = scheduledTime,
     });
     return running.alarm.addBranch();
   }
