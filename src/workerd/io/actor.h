@@ -7,6 +7,7 @@
 namespace workerd {
 
 struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
+  kj::Own<const Worker> worker;
   Actor::Id actorId;
   using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
       jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCache& actorCache)>;
@@ -29,6 +30,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   > classInstance;
   // If the actor is backed by a class, this field tracks the instance through its stages. The
   // instance is constructed as part of the first request to be delivered.
+
+  static kj::OneOf<NoClass, DurableObjectConstructor*>
+      buildClassInstance(Worker& worker, kj::Maybe<kj::StringPtr> className);
+    // Used by the Worker::Actor::Impl constructor to initialize the classInstance.
 
   class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks {
   public:
@@ -102,14 +107,43 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   kj::Maybe<RunningAlarm> runningAlarm;
   // Used to handle deduplication of alarm requests
 
-  Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
+  bool hasCalledOnBroken = false;
+
+  Impl(Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
+       kj::Maybe<kj::StringPtr> className,
        MakeStorageFunc makeStorage, TimerChannel& timerChannel,
        kj::Own<ActorObserver> metricsParam,
        kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>());
 
   void taskFailed(kj::Exception&& e) override {
     LOG_EXCEPTION("deletedAlarmTaskFailed", e);
+  }
+
+  kj::Promise<void> onBroken() {
+    // Get a promise that rejects when this actor becomes broken in some way. See doc comments for
+    // WorkerRuntime.makeActor() in worker.capnp for a discussion of actor brokenness.
+    // Note that this doesn't cover every cause of actor brokenness -- some of them are fulfilled
+    // in worker-set or process-sandbox code, in particular code updates and exceeded memory.
+    // This method can only be called once.
+    // TODO(soon): Detect and report other cases of brokenness, as described in worker.capnp.
+
+    KJ_REQUIRE(!hasCalledOnBroken, "onBroken() can only be called once!");
+    kj::Promise<void> abortPromise = nullptr;
+
+    KJ_IF_MAYBE(rc, ioContext) {
+      abortPromise = rc->get()->onAbort();
+    } else {
+      auto paf = kj::newPromiseAndFulfiller<kj::Promise<void>>();
+      abortPromise = kj::mv(paf.promise);
+      abortFulfiller = kj::mv(paf.fulfiller);
+    }
+
+    return abortPromise
+      // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
+      // not.
+      .exclusiveJoin(outputGate.onBroken())
+      .exclusiveJoin(kj::mv(constructorFailedPaf.promise));
   }
 };
 

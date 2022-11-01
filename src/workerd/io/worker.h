@@ -612,24 +612,25 @@ private:
   friend class Worker::AsyncWaiter;
 };
 
+// TODO(now): rename to Worker::TimedActorRef.
 class Worker::Actor final: public kj::Refcounted {
+  // (comment uses new naming above)
+  // Each kj::Own<Worker::TimedActorRef> is a reference to a Worker::Actor for a single ongoing request.
+  // When no requests are running for an Actor, Worker::TimedActorRef's refcount should drop to 0
+  // and its destructor will change the entry in ActorMap to a task that will delete the map entry
+  // after some time.
+
+public:
+  // TODO(now): Rename to Worker::Actor (not as subtype, move to toplevel).
+  struct Impl;
   // Represents actor state within a Worker instance. This object tracks the JavaScript heap
   // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
 
-public:
-  using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
-      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCache& actorCache)>;
-
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
-  Actor(const Worker& worker, Id actorId,
-        bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
-        kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, LockType lockType,
-        TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
+  Actor(Impl& impl, kj::Own<void> attachments) : impl(impl), attachments(kj::mv(attachments)) {}
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
-
-  ~Actor() noexcept(false);
 
   void ensureConstructed(IoContext&);
   // Call when starting any new request, to ensure that the actor object's constructor has run.
@@ -687,7 +688,7 @@ public:
   //   some more information to the place where `Actor` is created, which might be uglier than it's
   //   worth.
 
-  const Worker& getWorker() { return *worker; }
+  const Worker& getWorker();
 
   bool hasAlarmHandler();
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
@@ -698,9 +699,9 @@ public:
   // isn't a duplicate alarm, func will be called to run the alarm.
 
 private:
-  kj::Own<const Worker> worker;
-  struct Impl;
-  kj::Own<Impl> impl;
+  Impl& impl;
+
+  kj::Own<void> attachments;
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;

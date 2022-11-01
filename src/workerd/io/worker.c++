@@ -2519,13 +2519,15 @@ void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
 
 // =======================================================================================
 
-Worker::Actor::Impl::Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
+Worker::Actor::Impl::Impl(Worker::Lock& lock, Actor::Id actorId,
       bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
-      MakeStorageFunc makeStorage, TimerChannel& timerChannel,
+      kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, TimerChannel& timerChannel,
       kj::Own<ActorObserver> metricsParam,
       kj::PromiseFulfillerPair<void> paf)
-    : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
+    : worker(kj::atomicAddRef(lock.getWorker())),
+      actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
       metrics(kj::mv(metricsParam)),
+      classInstance(buildClassInstance(lock.getWorker(), className)),
       hooks(timerChannel, *metrics),
       inputGate(hooks), outputGate(hooks),
       timerChannel(timerChannel),
@@ -2539,8 +2541,20 @@ Worker::Actor::Impl::Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id act
   }
 
   KJ_IF_MAYBE(p, persistent) {
-    actorCache.emplace(kj::mv(*p), self.worker->getIsolate().impl->actorCacheLru,
-                        outputGate);
+    actorCache.emplace(kj::mv(*p), worker->getIsolate().impl->actorCacheLru, outputGate);
+  }
+}
+
+kj::OneOf<Worker::Actor::Impl::NoClass, DurableObjectConstructor*>
+    Worker::Actor::Impl::buildClassInstance(Worker& worker, kj::Maybe<kj::StringPtr> className) {
+  KJ_IF_MAYBE(c, className) {
+    KJ_IF_MAYBE(cls, worker.impl->actorClasses.find(*c)) {
+      return &(*cls);
+    } else {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", *c));
+    }
+  } else {
+    return NoClass();
   }
 }
 
@@ -2549,7 +2563,7 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
   auto lockTiming = getIsolate().getMetrics()
       .tryCreateLockTiming(kj::Maybe<RequestObserver&>(request));
 
-  KJ_IF_MAYBE(c, actor.impl->actorCache) {
+  KJ_IF_MAYBE(c, actor.impl.actorCache) {
     KJ_IF_MAYBE(p, c->evictStale(now)) {
       // Got backpressure, wait for it.
       // TODO(someday): Count this time period differently in lock timing data?
@@ -2562,35 +2576,14 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
   return getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
 }
 
-Worker::Actor::Actor(const Worker& worker, Actor::Id actorId,
-    bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
-    kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, LockType lockType,
-    TimerChannel& timerChannel,
-    kj::Own<ActorObserver> metrics)
-    : worker(kj::atomicAddRef(worker)) {
-  Worker::Lock lock(worker, lockType);
-  impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(persistent),
-                        kj::mv(makeStorage), timerChannel, kj::mv(metrics));
-
-  KJ_IF_MAYBE(c, className) {
-    KJ_IF_MAYBE(cls, lock.getWorker().impl->actorClasses.find(*c)) {
-      impl->classInstance = &(*cls);
-    } else {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", *c));
-    }
-  } else {
-    impl->classInstance = Impl::NoClass();
-  }
-}
-
 void Worker::Actor::ensureConstructed(IoContext& context) {
-  KJ_IF_MAYBE(cls, impl->classInstance.tryGet<DurableObjectConstructor*>()) {
+  KJ_IF_MAYBE(cls, impl.classInstance.tryGet<DurableObjectConstructor*>()) {
     context.addWaitUntil(context.run([this, &cls = **cls](Worker::Lock& lock) {
       auto isolate = lock.getIsolate();
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
-      KJ_IF_MAYBE(c, impl->actorCache) {
-        storage = impl->makeStorage(lock, *worker->getIsolate().apiIsolate, *c);
+      KJ_IF_MAYBE(c, impl.actorCache) {
+        storage = impl.makeStorage(lock, *impl.worker->getIsolate().apiIsolate, *c);
       }
       auto handler = cls(lock,
           jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
@@ -2603,7 +2596,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       handler.env = jsg::Value(isolate, v8::Undefined(isolate));
       handler.ctx = nullptr;
 
-      impl->classInstance = kj::mv(handler);
+      impl.classInstance = kj::mv(handler);
     }).catch_([this](kj::Exception&& e) {
       auto msg = e.getDescription();
 
@@ -2614,34 +2607,35 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
         e.setDescription(kj::mv(description));
       }
 
-      impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
-      impl->classInstance = kj::mv(e);
+      impl.constructorFailedPaf.fulfiller->reject(kj::cp(e));
+      impl.classInstance = kj::mv(e);
     }));
 
-    impl->classInstance = Impl::Initializing();
+    impl.classInstance = Impl::Initializing();
   }
 }
 
-Worker::Actor::~Actor() noexcept(false) {
-  // TODO(someday) Each IoContext contains a strong reference to its Actor, so a IoContext
-  // object must be destroyed before their Actor. However, IoContext has its lifetime extended
-  // by the IoContext::drain() promise which is stored in waitUntilTasks.
-  // IoContext::drain() may hang if Actor::onShutdown() never resolves/rejects, which means the
-  // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
-  // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
-  // implement that once we have tests that invoke the Actor dtor.
+// TODO(now): We need to destroy Worker::Actor::Impl under lock now
+// Worker::Actor::~Actor() noexcept(false) {
+//   // TODO(someday) Each IoContext contains a strong reference to its Actor, so a IoContext
+//   // object must be destroyed before their Actor. However, IoContext has its lifetime extended
+//   // by the IoContext::drain() promise which is stored in waitUntilTasks.
+//   // IoContext::drain() may hang if Actor::onShutdown() never resolves/rejects, which means the
+//   // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
+//   // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
+//   // implement that once we have tests that invoke the Actor dtor.
 
-  // Destroy under lock.
-  //
-  // TODO(perf): In principle it could make sense to defer destruction of the actor until an async
-  //   lock can be obtained. But, actor destruction is not terribly common and is not done when
-  //   the actor is idle (so, no one is waiting), so it's not a huge deal. The runtime does
-  //   potentially colocate multiple actors on the same thread, but they are always from the same
-  //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
-  //   other actors could be running while we wait for this lock.
-  Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(nullptr));
-  impl = nullptr;
-}
+//   // Destroy under lock.
+//   //
+//   // TODO(perf): In principle it could make sense to defer destruction of the actor until an async
+//   //   lock can be obtained. But, actor destruction is not terribly common and is not done when
+//   //   the actor is idle (so, no one is waiting), so it's not a huge deal. The runtime does
+//   //   potentially colocate multiple actors on the same thread, but they are always from the same
+//   //   namespace and hence would be locking the same isolate anyway -- it's not like one of the
+//   //   other actors could be running while we wait for this lock.
+//   Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(nullptr));
+//   impl = nullptr;
+// }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
   // We're officially canceling all background work and we're going to destruct the Actor as soon
@@ -2649,8 +2643,8 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   // periodic messages, and that's good because we might care about that information. That said,
   // we're officially "broken" from this point because we cannot service background work and our
   // capability server should have triggered this (potentially indirectly) via its destructor.
-  KJ_IF_MAYBE(r, impl->ioContext) {
-    impl->metrics->shutdown(reasonCode, r->get()->getLimitEnforcer());
+  KJ_IF_MAYBE(r, impl.ioContext) {
+    impl.metrics->shutdown(reasonCode, r->get()->getLimitEnforcer());
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.
@@ -2658,11 +2652,11 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
 
   shutdownActorCache(error);
 
-  impl->shutdownFulfiller->fulfill();
+  impl.shutdownFulfiller->fulfill();
 }
 
 void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
-  KJ_IF_MAYBE(ac, impl->actorCache) {
+  KJ_IF_MAYBE(ac, impl.actorCache) {
     ac->shutdown(error);
   } else {
     // The actor was aborted before the actor cache was constructed, nothing to do.
@@ -2670,35 +2664,19 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
 }
 
 kj::Promise<void> Worker::Actor::onShutdown() {
-  return impl->shutdownPromise.addBranch();
+  return impl.shutdownPromise.addBranch();
 }
 
 kj::Promise<void> Worker::Actor::onBroken() {
-  // TODO(soon): Detect and report other cases of brokenness, as described in worker.capnp.
-
-  kj::Promise<void> abortPromise = nullptr;
-
-  KJ_IF_MAYBE(rc, impl->ioContext) {
-    abortPromise = rc->get()->onAbort();
-  } else {
-    auto paf = kj::newPromiseAndFulfiller<kj::Promise<void>>();
-    abortPromise = kj::mv(paf.promise);
-    impl->abortFulfiller = kj::mv(paf.fulfiller);
-  }
-
-  return abortPromise
-    // inputGate.onBroken() is covered by IoContext::onAbort(), but outputGate.onBroken() is
-    // not.
-    .exclusiveJoin(impl->outputGate.onBroken())
-    .exclusiveJoin(kj::mv(impl->constructorFailedPaf.promise));
+  return impl.onBroken();
 }
 
 const Worker::Actor::Id& Worker::Actor::getId() {
-  return impl->actorId;
+  return impl.actorId;
 }
 
 Worker::Actor::Id Worker::Actor::cloneId() {
-  KJ_SWITCH_ONEOF(impl->actorId) {
+  KJ_SWITCH_ONEOF(impl.actorId) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return kj::str(coloLocalId);
     }
@@ -2710,18 +2688,18 @@ Worker::Actor::Id Worker::Actor::cloneId() {
 }
 
 kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
-  KJ_REQUIRE(&lock.getWorker() == worker.get());
-  return impl->transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
+  KJ_REQUIRE(&lock.getWorker() == impl.worker.get());
+  return impl.transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
 }
 
 kj::Maybe<ActorCache&> Worker::Actor::getPersistent() {
-  return impl->actorCache;
+  return impl.actorCache;
 }
 
 kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
     Worker::Actor::makeStorageForSwSyntax(Worker::Lock& lock) {
-  return impl->actorCache.map([&](ActorCache& cache) {
-    return impl->makeStorage(lock, *worker->getIsolate().apiIsolate, cache);
+  return impl.actorCache.map([&](ActorCache& cache) {
+    return impl.makeStorage(lock, *impl.worker->getIsolate().apiIsolate, cache);
   });
 }
 
@@ -2737,14 +2715,14 @@ kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime)
     kj::Date scheduledTime = originalTime;
 
     for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
-      auto result = co_await impl->timerChannel.atTime(scheduledTime)
+      auto result = co_await impl.timerChannel.atTime(scheduledTime)
           .then([originalTime, &runAlarmFunc]() {
         return runAlarmFunc(originalTime);
       });
 
       if (result.outcome != EventOutcome::OK && result.retry) {
         auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-        auto& timeContext = this->impl->timerChannel;
+        auto& timeContext = this->impl.timerChannel;
         scheduledTime = timeContext.now() + delay;
       } else {
         break;
@@ -2754,7 +2732,7 @@ kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime)
 
   auto runAlarm = [this, &context](kj::Date scheduledTime)
       -> kj::Promise<WorkerInterface::AlarmResult> {
-    auto& persistent = KJ_ASSERT_NONNULL(impl->actorCache);
+    auto& persistent = KJ_ASSERT_NONNULL(impl.actorCache);
 
     auto maybeDeferredDelete = persistent.armAlarmHandler(scheduledTime);
 
@@ -2780,7 +2758,7 @@ kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime)
               .outcome = EventOutcome::OK,
             };
           }, [this](kj::Exception&& e) {
-            auto& persistent = KJ_ASSERT_NONNULL(impl->actorCache);
+            auto& persistent = KJ_ASSERT_NONNULL(impl.actorCache);
             persistent.cancelDeferredAlarmDeletion();
 
             LOG_EXCEPTION_IF_INTERNAL("alarmRetry", e);
@@ -2825,13 +2803,13 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
     }, [&](kj::Exception&& e) {
       fulfiller.reject(kj::mv(e));
     }).then([this]() {
-      auto& running = KJ_ASSERT_NONNULL(impl->runningAlarm);
+      auto& running = KJ_ASSERT_NONNULL(impl.runningAlarm);
 
       // We can't overwrite runningAlarm before moving ourselves out of it, as a promise cannot
       // delete itself.
-      impl->deletedAlarmTasks.add(kj::mv(running.alarmTask));
+      impl.deletedAlarmTasks.add(kj::mv(running.alarmTask));
 
-      impl->runningAlarm = running.queuedAlarm.map([](auto& alarm) -> Impl::RunningAlarm {
+      impl.runningAlarm = running.queuedAlarm.map([](auto& alarm) -> Impl::RunningAlarm {
         return Impl::RunningAlarm { Impl::Alarm { kj::mv(alarm) } };
       });
     }).eagerlyEvaluate([](kj::Exception&& e) {
@@ -2853,7 +2831,7 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
     };
   };
 
-  KJ_IF_MAYBE(r, impl->runningAlarm) {
+  KJ_IF_MAYBE(r, impl.runningAlarm) {
     if (r->scheduledTime == scheduledTime) {
       return r->alarm.addBranch();
     } else KJ_IF_MAYBE(q, r->queuedAlarm) {
@@ -2881,7 +2859,7 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
   } else {
     auto [prom, fulfiller] = kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>();
     auto& fulfillerRef = *fulfiller;
-    auto& running = impl->runningAlarm.emplace(Impl::RunningAlarm {
+    auto& running = impl.runningAlarm.emplace(Impl::RunningAlarm {
       Impl::Alarm {
         runAlarmImpl(fulfillerRef),
         prom.fork(),
@@ -2894,7 +2872,7 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
 }
 
 kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
-  KJ_SWITCH_ONEOF(impl->classInstance) {
+  KJ_SWITCH_ONEOF(impl.classInstance) {
     KJ_CASE_ONEOF(_, Impl::NoClass) {
       return nullptr;
     }
@@ -2918,33 +2896,37 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
   KJ_UNREACHABLE;
 }
 
+const Worker& Worker::Actor::getWorker() {
+  return *impl.worker;
+}
+
 ActorObserver& Worker::Actor::getMetrics() {
-  return *impl->metrics;
+  return *impl.metrics;
 }
 
 InputGate& Worker::Actor::getInputGate() {
-  return impl->inputGate;
+  return impl.inputGate;
 }
 
 OutputGate& Worker::Actor::getOutputGate() {
-  return impl->outputGate;
+  return impl.outputGate;
 }
 
 kj::Maybe<IoContext&> Worker::Actor::getIoContext() {
-  return impl->ioContext.map([](kj::Own<IoContext>& rc) -> IoContext& {
+  return impl.ioContext.map([](kj::Own<IoContext>& rc) -> IoContext& {
     return *rc;
   });
 }
 
 void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
-  KJ_REQUIRE(impl->ioContext == nullptr);
-  KJ_IF_MAYBE(f, impl->abortFulfiller) {
+  KJ_REQUIRE(impl.ioContext == nullptr);
+  KJ_IF_MAYBE(f, impl.abortFulfiller) {
     f->get()->fulfill(context->onAbort());
-    impl->abortFulfiller = nullptr;
+    impl.abortFulfiller = nullptr;
   }
   auto& limitEnforcer = context->getLimitEnforcer();
-  impl->ioContext = kj::mv(context);
-  impl->metricsFlushLoopTask = impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
+  impl.ioContext = kj::mv(context);
+  impl.metricsFlushLoopTask = impl.metrics->flushLoop(impl.timerChannel, limitEnforcer)
       .eagerlyEvaluate([](kj::Exception&& e) {
     LOG_EXCEPTION("actorMetricsFlushLoop", e);
   });
