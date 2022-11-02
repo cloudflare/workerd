@@ -159,6 +159,15 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
           // leave 'result' empty to propagate the JS exception
         }
       }
+      KJ_CASE_ONEOF(info, ModuleRegistry::ObjectModuleInfo) {
+        if (module->SetSyntheticModuleExport(isolate,
+                                             v8StrIntern(isolate, "default"_kj),
+                                             info.value.getHandle(isolate)).IsJust()) {
+          result = makeResolvedPromise();
+        } else {
+          // leave 'result' empty to propagate the JS exception
+        }
+      }
     }
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.

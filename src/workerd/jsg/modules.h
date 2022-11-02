@@ -157,6 +157,7 @@ public:
   using TextModuleInfo = ValueModuleInfo<v8::String>;
   using WasmModuleInfo = ValueModuleInfo<v8::WasmModuleObject>;
   using JsonModuleInfo = ValueModuleInfo<v8::Value>;
+  using ObjectModuleInfo = ValueModuleInfo<v8::Object>;
 
   struct ModuleInfo {
     HashableV8Ref<v8::Module> module;
@@ -166,7 +167,8 @@ public:
                                           DataModuleInfo,
                                           TextModuleInfo,
                                           WasmModuleInfo,
-                                          JsonModuleInfo>;
+                                          JsonModuleInfo,
+                                          ObjectModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
 
     ModuleInfo(jsg::Lock& js,
@@ -220,7 +222,7 @@ public:
     entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addBuiltinModule(const kj::Path& specifier,
+  void addBuiltinModule(kj::StringPtr specifier,
                         kj::ArrayPtr<const char> sourceCode,
                         Type type = Type::BUILTIN) {
     // Register new module accessible by a given importPath. The module is instantiated
@@ -234,11 +236,38 @@ public:
 
     // We need to make sure there is not an existing worker bundle module with the same
     // name if type == Type::BUILTIN
-    if (type == Type::BUILTIN && entries.find(Key(specifier, Type::BUNDLE)) != nullptr) {
+    auto path = kj::Path::parse(specifier);
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
       return;
     }
 
-    entries.insert(Entry(specifier, type, sourceCode));
+    entries.insert(Entry(path, type, sourceCode));
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+                        kj::Function<ModuleInfo(Lock&)> factory,
+                        Type type = Type::BUILTIN) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    using Key = typename Entry::Key;
+
+    auto path = kj::Path::parse(specifier);
+
+    // We need to make sure there is not an existing worker bundle module with the same
+    // name if type == Type::BUILTIN
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
+      return;
+    }
+
+    entries.insert(Entry(path, type, kj::mv(factory)));
+  }
+
+  template <typename T>
+  void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
+    addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
+      auto& wrapper = TypeWrapper::from(js.v8Isolate);
+      auto wrap = wrapper.wrap(js.v8Isolate->GetCurrentContext(), nullptr, alloc<T>());
+      return ModuleInfo(js, specifier, nullptr, ObjectModuleInfo(js, wrap));
+    }, type);
   }
 
   kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
@@ -325,17 +354,21 @@ private:
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
-    using Info = kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>>;
+    using Info = kj::OneOf<ModuleInfo,
+                           kj::ArrayPtr<const char>,
+                           kj::Function<ModuleInfo(Lock&)>>;
 
     struct Key {
       const kj::Path& specifier;
-      Type type = Type::BUNDLE;
+      const Type type = Type::BUNDLE;
+      uint hash;
 
-      Key(const kj::Path& specifier, Type type) : specifier(specifier), type(type) {}
+      Key(const kj::Path& specifier, Type type)
+          : specifier(specifier),
+            type(type),
+            hash(kj::hashCode(specifier, type)) {}
 
-      uint hashCode() const {
-        return kj::hashCode(specifier, type);
-      }
+      uint hashCode() const { return hash; }
     };
 
     kj::Path specifier;
@@ -353,6 +386,11 @@ private:
           type(type),
           info(src) {}
 
+    Entry(const kj::Path& specifier, Type type, kj::Function<ModuleInfo(Lock&)> factory)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(factory)) {}
+
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
 
@@ -365,6 +403,10 @@ private:
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
           info = ModuleInfo(js, specifier.toString(), src);
+          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
+        }
+        KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {
+          info = src(js);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
       }
