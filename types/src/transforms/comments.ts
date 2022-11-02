@@ -1,5 +1,5 @@
 import assert from "assert";
-import { ParsedTypeDefinition, TypeDefinition } from "src";
+import { ParsedTypeDefinition } from "src";
 import ts from "typescript";
 
 function attachComments(

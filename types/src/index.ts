@@ -19,6 +19,9 @@ import {
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
+import { createAmbientTransformer } from "./transforms/ambient";
+import { createExportableTransformer } from "./transforms/exportable";
+import { writeFileSync } from "fs";
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 `;
@@ -95,6 +98,38 @@ async function collateStandards(
     parsed,
   };
 }
+function checkDiagnostics(sources: Map<string, string>) {
+  const host = ts.createCompilerHost({}, /* setParentNodes */ true);
+
+  host.getDefaultLibLocation = () =>
+    path.dirname(require.resolve("typescript"));
+  const program = createMemoryProgram(sources, host, {
+    lib: ["lib.esnext.d.ts"],
+  });
+  const emitResult = program.emit();
+
+  const allDiagnostics = ts
+    .getPreEmitDiagnostics(program)
+    .concat(emitResult.diagnostics);
+
+  allDiagnostics.forEach((diagnostic) => {
+    if (diagnostic.file) {
+      const { line, character } = ts.getLineAndCharacterOfPosition(
+        diagnostic.file,
+        diagnostic.start!
+      );
+      const message = ts.flattenDiagnosticMessageText(
+        diagnostic.messageText,
+        "\n"
+      );
+      console.log(`(${line + 1},${character + 1}): ${message}`);
+    } else {
+      console.log(
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+      );
+    }
+  });
+}
 function transform(
   sources: Map<string, string>,
   sourcePath: string,
@@ -114,7 +149,7 @@ function transform(
 function printDefinitions(
   root: StructureGroups,
   standards: ParsedTypeDefinition
-): string {
+): { ambient: string; exportable: string } {
   // Generate TypeScript nodes from capnp request
   const nodes = generateDefinitions(root);
 
@@ -145,15 +180,26 @@ function printDefinitions(
       // overrides are extracted
       createGlobalScopeTransformer(checker),
       createCommentsTransformer(standards),
+      createAmbientTransformer(),
       // TODO(polish): maybe flatten union types?
     ]
   );
 
-  // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
-  //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
+  checkDiagnostics(new Map([[sourcePath, source]]));
+
+  const exportable = transform(
+    new Map([[sourcePath, source]]),
+    sourcePath,
+    () => [createExportableTransformer()]
+  );
+
+  checkDiagnostics(new Map([[sourcePath, exportable]]));
 
   // Print program to string
-  return definitionsHeader + source;
+  return {
+    ambient: definitionsHeader + source,
+    exportable: definitionsHeader + exportable,
+  };
 }
 
 // Generates TypeScript types from a binary Cap’n Proto file containing encoded
@@ -202,7 +248,7 @@ export async function main(args?: string[]) {
     )
   );
 
-  let definitions = printDefinitions(root, standards);
+  let { ambient, exportable } = printDefinitions(root, standards);
   // const output = path.resolve("tmp.api.d.ts");
   // await mkdir(path.dirname(output), { recursive: true });
   // await writeFile(output, definitions);
@@ -220,17 +266,17 @@ export async function main(args?: string[]) {
   //   )
   // );
   if (options.format) {
-    definitions = prettier.format(definitions, { parser: "typescript" });
-    // exportable = prettier.format(exportable, { parser: "typescript" });
+    ambient = prettier.format(ambient, { parser: "typescript" });
+    exportable = prettier.format(exportable, { parser: "typescript" });
   }
   if (options.output !== undefined) {
     console.log(options.output);
     const output = path.resolve(options.output);
     await mkdir(path.dirname(output), { recursive: true });
-    await writeFile(output, definitions);
+    await writeFile(output, ambient);
 
-    // const exportableFile = path.join(path.dirname(output), "api.ts");
-    // await writeFile(exportableFile, exportable);
+    const exportableFile = path.join(path.dirname(output), "api.ts");
+    await writeFile(exportableFile, exportable);
   }
 }
 

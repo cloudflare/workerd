@@ -1,3 +1,4 @@
+import { assert } from "console";
 import path from "path";
 import ts from "typescript";
 
@@ -8,9 +9,16 @@ interface MemorySourceFile {
 
 // Creates a TypeScript program form in-memory source files. Accepts a Map of
 // fully-resolved "virtual" paths to source code.
-export function createMemoryProgram(sources: Map<string, string>): ts.Program {
+export function createMemoryProgram(
+  sources: Map<string, string>,
+  compilerHost?: ts.CompilerHost,
+  tsOptions?: ts.CompilerOptions
+): ts.Program {
   const options = ts.getDefaultCompilerOptions();
-  const host = ts.createCompilerHost(options, true);
+  const host =
+    compilerHost !== undefined
+      ? compilerHost
+      : ts.createCompilerHost(options, true);
 
   const sourceFiles = new Map<string, MemorySourceFile>();
   for (const [sourcePath, source] of sources) {
@@ -45,5 +53,5 @@ export function createMemoryProgram(sources: Map<string, string>): ts.Program {
   patchHostMethod("getSourceFile", ({ sourceFile }) => sourceFile);
 
   const rootNames = [...sourceFiles.keys()];
-  return ts.createProgram(rootNames, options, host);
+  return ts.createProgram(rootNames, tsOptions ?? options, host);
 }
