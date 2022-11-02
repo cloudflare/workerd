@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "assert";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { arrayBuffer } from "stream/consumers";
 import util from "util";
@@ -14,6 +14,7 @@ import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
 import {
   compileOverridesDefines,
+  createCommentsTransformer,
   createGlobalScopeTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
@@ -21,8 +22,99 @@ import {
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 `;
+export interface TypeDefinition {
+  program: ts.Program;
+  source: ts.SourceFile;
+  checker: ts.TypeChecker;
+}
 
-function printDefinitions(root: StructureGroups): string {
+export interface ParsedTypeDefinition extends TypeDefinition {
+  parsed: {
+    functions: Map<string, ts.FunctionDeclaration>;
+    interfaces: Map<string, ts.InterfaceDeclaration>;
+    vars: Map<string, ts.VariableDeclaration>;
+    types: Map<string, ts.TypeAliasDeclaration>;
+    classes: Map<string, ts.ClassDeclaration>;
+  };
+}
+
+// Collate standards (to support lib.(dom|webworker).iterable.d.ts being defined separately)
+async function collateStandards(
+  ...standardTypes: string[]
+): Promise<ParsedTypeDefinition> {
+  const STANDARDS_PATH = "./tmp.standards.d.ts";
+  await writeFile(STANDARDS_PATH, "");
+  await Promise.all(
+    standardTypes.map(
+      async (s) =>
+        await appendFile(
+          STANDARDS_PATH,
+          // Remove the Microsoft copyright notices from the file, to prevent them being copied in as TS comments
+          (await readFile(s, "utf-8")).split(`/////////////////////////////`)[2]
+        )
+    )
+  );
+  const program = ts.createProgram(
+    [STANDARDS_PATH],
+    {},
+    ts.createCompilerHost({}, true)
+  );
+  const source = program.getSourceFile(STANDARDS_PATH)!;
+  const checker = program.getTypeChecker();
+  const parsed = {
+    functions: new Map<string, ts.FunctionDeclaration>(),
+    interfaces: new Map<string, ts.InterfaceDeclaration>(),
+    vars: new Map<string, ts.VariableDeclaration>(),
+    types: new Map<string, ts.TypeAliasDeclaration>(),
+    classes: new Map<string, ts.ClassDeclaration>(),
+  };
+  ts.forEachChild(source, (node) => {
+    let name = "";
+    if (node && ts.isFunctionDeclaration(node)) {
+      name = node.name?.text ?? "";
+      parsed.functions.set(name, node);
+    } else if (ts.isVariableStatement(node)) {
+      name = node.declarationList.declarations[0].name.getText(source);
+      assert(node.declarationList.declarations.length === 1);
+      parsed.vars.set(name, node.declarationList.declarations[0]);
+    } else if (ts.isInterfaceDeclaration(node)) {
+      name = node.name.text;
+      parsed.interfaces.set(name, node);
+    } else if (ts.isTypeAliasDeclaration(node)) {
+      name = node.name.text;
+      parsed.types.set(name, node);
+    } else if (ts.isClassDeclaration(node)) {
+      name = node.name?.text ?? "";
+      parsed.classes.set(name, node);
+    }
+  });
+  return {
+    program,
+    source,
+    checker,
+    parsed,
+  };
+}
+function transform(
+  sources: Map<string, string>,
+  sourcePath: string,
+  transforms: (
+    program: ts.Program,
+    checker: ts.TypeChecker
+  ) => ts.TransformerFactory<ts.SourceFile>[]
+) {
+  const program = createMemoryProgram(sources);
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(sourcePath);
+  assert(sourceFile !== undefined);
+  const result = ts.transform(sourceFile, transforms(program, checker));
+  assert.strictEqual(result.transformed.length, 1);
+  return printer.printFile(result.transformed[0]);
+}
+function printDefinitions(
+  root: StructureGroups,
+  standards: ParsedTypeDefinition
+): string {
   // Generate TypeScript nodes from capnp request
   const nodes = generateDefinitions(root);
 
@@ -33,45 +125,35 @@ function printDefinitions(root: StructureGroups): string {
   let source = printNodeList(nodes);
   sources.set(sourcePath, source);
 
-  // Build TypeScript program from source files and overrides. Importantly,
-  // these are in the same program, so we can use nodes from one in the other.
-  let program = createMemoryProgram(sources);
-  let checker = program.getTypeChecker();
-  let sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
-
   // Run post-processing transforms on program
-  let result = ts.transform(sourceFile, [
+  source = transform(sources, sourcePath, (program, checker) => [
     // Run iterator transformer before overrides so iterator-like interfaces are
     // still removed if they're replaced in overrides
     createIteratorTransformer(checker),
     createOverrideDefineTransformer(program, replacements),
   ]);
-  assert.strictEqual(result.transformed.length, 1);
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
   // rebuild the program to re-run type checking.
   // TODO: is there a way to re-run the type checker on an existing program?
-  source = printer.printFile(result.transformed[0]);
-  program = createMemoryProgram(new Map([[sourcePath, source]]));
-  checker = program.getTypeChecker();
-  sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
-
-  result = ts.transform(sourceFile, [
-    // Run global scope transformer after overrides so members added in
-    // overrides are extracted
-    createGlobalScopeTransformer(checker),
-    // TODO(polish): maybe flatten union types?
-  ]);
-  assert.strictEqual(result.transformed.length, 1);
+  source = transform(
+    new Map([[sourcePath, source]]),
+    sourcePath,
+    (program, checker) => [
+      // Run global scope transformer after overrides so members added in
+      // overrides are extracted
+      createGlobalScopeTransformer(checker),
+      createCommentsTransformer(standards),
+      // TODO(polish): maybe flatten union types?
+    ]
+  );
 
   // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
   //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
 
   // Print program to string
-  return definitionsHeader + printer.printFile(result.transformed[0]);
+  return definitionsHeader + source;
 }
 
 // Generates TypeScript types from a binary Cap’n Proto file containing encoded
@@ -109,14 +191,7 @@ export async function main(args?: string[]) {
   const message = new Message(buffer, /* packed */ false);
   const root = message.getRoot(StructureGroups);
 
-  const definitions = printDefinitions(root);
-  const output = path.resolve("tmp.api.d.ts");
-  await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, definitions);
-
-  let { ambient, exportable } = await postProcess(
-    output,
-
+  const standards = await collateStandards(
     path.join(
       path.dirname(require.resolve("typescript")),
       "lib.webworker.d.ts"
@@ -126,18 +201,36 @@ export async function main(args?: string[]) {
       "lib.webworker.iterable.d.ts"
     )
   );
+
+  let definitions = printDefinitions(root, standards);
+  // const output = path.resolve("tmp.api.d.ts");
+  // await mkdir(path.dirname(output), { recursive: true });
+  // await writeFile(output, definitions);
+
+  // let { ambient, exportable } = await postProcess(
+  //   output,
+
+  //   path.join(
+  //     path.dirname(require.resolve("typescript")),
+  //     "lib.webworker.d.ts"
+  //   ),
+  //   path.join(
+  //     path.dirname(require.resolve("typescript")),
+  //     "lib.webworker.iterable.d.ts"
+  //   )
+  // );
   if (options.format) {
-    ambient = prettier.format(ambient, { parser: "typescript" });
-    exportable = prettier.format(exportable, { parser: "typescript" });
+    definitions = prettier.format(definitions, { parser: "typescript" });
+    // exportable = prettier.format(exportable, { parser: "typescript" });
   }
   if (options.output !== undefined) {
     console.log(options.output);
     const output = path.resolve(options.output);
     await mkdir(path.dirname(output), { recursive: true });
-    await writeFile(output, ambient);
+    await writeFile(output, definitions);
 
-    const exportableFile = path.join(path.dirname(output), "api.ts");
-    await writeFile(exportableFile, exportable);
+    // const exportableFile = path.join(path.dirname(output), "api.ts");
+    // await writeFile(exportableFile, exportable);
   }
 }
 
