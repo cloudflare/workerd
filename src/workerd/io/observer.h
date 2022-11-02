@@ -74,7 +74,7 @@ public:
 
 class IsolateObserver: public kj::AtomicRefcounted {
 public:
-  virtual void created(kj::StringPtr id) {};
+  virtual void created() {};
   // Called when Worker::Isolate is created.
 
   virtual void evicted() {}

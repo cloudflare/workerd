@@ -977,7 +977,7 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, allowInspector)),
       weakIsolateRef(kj::atomicRefcounted<WeakIsolateRef>(this)) {
-  metrics->created(id);
+  metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   auto lock = apiIsolate->lock();
   auto features = apiIsolate->getFeatureFlags();
