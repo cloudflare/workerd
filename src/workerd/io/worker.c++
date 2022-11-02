@@ -2741,7 +2741,7 @@ Worker::Actor::~Actor() noexcept(false) {
   impl = nullptr;
 }
 
-void Worker::Actor::shutdown(uint16_t reasonCode) {
+void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
   // periodic messages, and that's good because we might care about that information. That said,
@@ -2754,7 +2754,17 @@ void Worker::Actor::shutdown(uint16_t reasonCode) {
     // written.
   }
 
+  shutdownActorCache(error);
+
   impl->shutdownFulfiller->fulfill();
+}
+
+void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
+  KJ_IF_MAYBE(ac, impl->actorCache) {
+    ac->shutdown(error);
+  } else {
+    // The actor was aborted before the actor cache was constructed, nothing to do.
+  }
 }
 
 kj::Promise<void> Worker::Actor::onShutdown() {

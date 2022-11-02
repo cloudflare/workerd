@@ -164,38 +164,49 @@ IoContext::IoContext(ThreadContext& thread,
       timeoutManager(kj::heap<TimeoutManagerImpl>()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
+  auto localAbortPromise = kj::mv(paf.promise);
 
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
-  auto limitsPromise = limitEnforcer->onLimitsExceeded();
-  if (isInspectorEnabled()) {
-    // Arrange to report the problem to the inspector in addition to aborting.
-    limitsPromise = limitsPromise.catch_([this](kj::Exception&& exception) {
-      return worker->takeAsyncLockWithoutRequest(nullptr)
-          .then([this, exception = kj::mv(exception)]
-                (Worker::AsyncLock asyncLock) mutable -> kj::Promise<void> {
-        Worker::Lock lock(*worker, asyncLock);
-        lock.logUncaughtException(
-            jsg::extractTunneledExceptionDescription(exception.getDescription()));
-        return kj::mv(exception);
+  auto makeLimitsPromise = [this](){
+    auto promise = limitEnforcer->onLimitsExceeded();
+    if (isInspectorEnabled()) {
+      // Arrange to report the problem to the inspector in addition to aborting.
+      promise = promise.catch_([this](kj::Exception&& exception) {
+        return worker->takeAsyncLockWithoutRequest(nullptr)
+            .then([this, exception = kj::mv(exception)]
+                  (Worker::AsyncLock asyncLock) mutable -> kj::Promise<void> {
+          Worker::Lock lock(*worker, asyncLock);
+          lock.logUncaughtException(
+              jsg::extractTunneledExceptionDescription(exception.getDescription()));
+          return kj::mv(exception);
+        });
       });
-    });
-  }
+    }
 
-  // Arrange to complain if the input gate is broken, which indicates a critical section failed
-  // and the actor can no longer be used.
-  kj::Promise<void> inputGateBrokenPromise = nullptr;
+    return promise;
+  };
+
+  localAbortPromise = localAbortPromise.exclusiveJoin(makeLimitsPromise());
+
   KJ_IF_MAYBE(a, actor) {
-    inputGateBrokenPromise = a->getInputGate().onBroken();
-  } else {
-    inputGateBrokenPromise = kj::NEVER_DONE;
+    // Arrange to complain if the input gate is broken, which indicates a critical section failed
+    // and the actor can no longer be used.
+    localAbortPromise = localAbortPromise.exclusiveJoin(a->getInputGate().onBroken());
+
+    // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
+    // or unintentional async work
+    localAbortPromise = localAbortPromise.catch_([this](kj::Exception&& e) -> kj::Promise<void> {
+      KJ_IF_MAYBE(a, actor) {
+        a->shutdownActorCache(e);
+      }
+
+      return kj::mv(e);
+    });
   }
 
   // Abort when the time limit expires, the isolate is terminated, the input gate is broken, or
   // `abortFulfiller` is fulfilled for some other reason.
-  abortPromise = paf.promise
-      .exclusiveJoin(kj::mv(limitsPromise))
-      .exclusiveJoin(kj::mv(inputGateBrokenPromise))
-      .fork();
+  abortPromise = localAbortPromise.fork();
 
   // We don't construct `tasks` for actor requests because we put all tasks into `waitUntilTasks`
   // in that case.

@@ -5063,5 +5063,166 @@ KJ_TEST("ActorCache can wait for flush") {
   }
 }
 
+
+KJ_TEST("ActorCache can shutdown") {
+  // This test confirms that `shutdown()` stops scheduled flushes but does not stop in-flight
+  // flushes. It also confirms that `shutdown()` prevents future operations.
+
+  struct InFlightRequest {
+    MockServer::ExpectedCall op;
+    kj::Promise<void> promise;
+  };
+
+  struct BeforeShutdownResult {
+    kj::Maybe<InFlightRequest> maybeReq;
+    bool shouldBreakOutputGate;
+  };
+
+  struct VerifyOptions {
+    kj::Maybe<const kj::Exception&> maybeError;
+  };
+  auto verifyWithOptions = [&](auto&& beforeShutdown, auto&& afterShutdown, VerifyOptions options) {
+    auto test = ActorCacheTest({.monitorOutputGate = false});
+    auto& ws = test.ws;
+
+    BeforeShutdownResult res = beforeShutdown(test);
+
+    // Shutdown and observe the pending flush to break the io gate.
+    test.cache.shutdown(options.maybeError);
+    auto maybeShutdownPromise = test.cache.onNoPendingFlush();
+
+    afterShutdown(test, kj::mv(res.maybeReq));
+
+    auto errorMessage = options.maybeError.map([](const kj::Exception& e){
+      return e.getDescription();
+    }).orDefault(ActorCache::SHUTDOWN_ERROR_MESSAGE);
+
+    if (res.shouldBreakOutputGate) {
+      // We expected the output gate to break async after shutdown.
+      auto& shutdownPromise = KJ_REQUIRE_NONNULL(maybeShutdownPromise);
+      KJ_EXPECT_THROW_MESSAGE(errorMessage, shutdownPromise.wait(ws));
+      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
+      KJ_EXPECT_THROW_MESSAGE(errorMessage, test.gate.wait().wait(ws));
+    } else KJ_IF_MAYBE(promise, maybeShutdownPromise) {
+      // The in-flight flush should resolve cleanly without any follow on or breaking the output
+      // gate.
+      promise->wait(ws);
+      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
+      test.gate.wait().wait(ws);
+    }
+
+    // Puts and deletes, even with allowedUnconfirmed, should throw.
+    KJ_EXPECT_THROW_MESSAGE(errorMessage, test.put("foo", "baz"));
+    KJ_EXPECT_THROW_MESSAGE(errorMessage, test.put("foo", "bat", {.allowUnconfirmed = true}));
+    KJ_EXPECT_THROW_MESSAGE(errorMessage, test.delete_("foo"));
+    KJ_EXPECT_THROW_MESSAGE(errorMessage, test.delete_("foo", {.allowUnconfirmed = true}));
+
+    if (!res.shouldBreakOutputGate) {
+      // We tried to use storage after shutdown, we should now be breaking the output gate.
+      auto afterShutdownPromise = KJ_ASSERT_NONNULL(test.cache.onNoPendingFlush());
+      KJ_EXPECT_THROW_MESSAGE(errorMessage, afterShutdownPromise.wait(ws));
+      KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
+      KJ_EXPECT_THROW_MESSAGE(errorMessage, test.gate.wait().wait(ws));
+    }
+  };
+
+  auto verify = [&](auto&& beforeShutdown, auto&& afterShutdown) {
+    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = nullptr});
+    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = KJ_EXCEPTION(FAILED, "Nope.")});
+  };
+
+  verify([](ActorCacheTest& test){
+    // Do nothing and expect nothing!
+    return BeforeShutdownResult{
+      .maybeReq = nullptr,
+      .shouldBreakOutputGate = false,
+    };
+  }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){
+    // Nothing should have made it to storage.
+    test.mockStorage->expectNoActivity(test.ws);
+  });
+
+  verify([](ActorCacheTest& test){
+    // Do a confirmed put (which schedules a flush).
+    test.put("foo", "bar", {.allowUnconfirmed = false});
+
+    // Expect the put to be cancelled and break the gate.
+    return BeforeShutdownResult{
+      .maybeReq = nullptr,
+      .shouldBreakOutputGate = true,
+    };
+  }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){
+    // Nothing should have made it to storage.
+    test.mockStorage->expectNoActivity(test.ws);
+  });
+
+  verify([](ActorCacheTest& test){
+    // Do an unconfirmed put (which schedules a flush).
+    test.put("foo", "bar", {.allowUnconfirmed = true});
+
+    // Expect the put to be cancelled and break the gate.
+    return BeforeShutdownResult{
+      .maybeReq = nullptr,
+      .shouldBreakOutputGate = true,
+    };
+  }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){
+    // Nothing should have made it to storage.
+    test.mockStorage->expectNoActivity(test.ws);
+  });
+
+  verify([](ActorCacheTest& test) {
+    // Do a confirmed put and wait for it to be in-flight.
+    test.put("foo", "bar", {.allowUnconfirmed = false});
+
+    auto op = test.mockStorage->expectCall("put", test.ws)
+        .withParams(CAPNP(entries = [(key = "foo", value = "bar")]));
+    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
+    KJ_EXPECT(!promise.poll(test.ws));
+
+    return BeforeShutdownResult{
+      .maybeReq = InFlightRequest{
+        .op = kj::mv(op),
+        .promise = kj::mv(promise),
+      },
+      .shouldBreakOutputGate = false,
+    };
+  }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest> maybeReq){
+    // Finish the storage response and wait to see our pre-shutdown in-flight flush finish.
+    auto req = KJ_ASSERT_NONNULL(kj::mv(maybeReq));
+    kj::mv(req.op).thenReturn(CAPNP());
+    req.promise.wait(test.ws);
+
+    // Nothing else should have made it to storage.
+    test.mockStorage->expectNoActivity(test.ws);
+  });
+
+
+  verify([](ActorCacheTest& test) {
+    // Do an unconfirmed put and wait for it to be in-flight.
+    test.put("foo", "bar", {.allowUnconfirmed = true});
+
+    auto op = test.mockStorage->expectCall("put", test.ws)
+        .withParams(CAPNP(entries = [(key = "foo", value = "bar")]));
+    auto promise = KJ_REQUIRE_NONNULL(test.cache.onNoPendingFlush());
+    KJ_EXPECT(!promise.poll(test.ws));
+
+    return BeforeShutdownResult{
+      .maybeReq = InFlightRequest{
+        .op = kj::mv(op),
+        .promise = kj::mv(promise),
+      },
+      .shouldBreakOutputGate = false,
+    };
+  }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest> maybeReq){
+    // Finish the storage response and wait to see our pre-shutdown in-flight flush finish.
+    auto req = KJ_ASSERT_NONNULL(kj::mv(maybeReq));
+    kj::mv(req.op).thenReturn(CAPNP());
+    req.promise.wait(test.ws);
+
+    // Nothing else should have made it to storage.
+    test.mockStorage->expectNoActivity(test.ws);
+  });
+}
+
 }  // namespace
 }  // namespace workerd
