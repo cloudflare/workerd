@@ -424,6 +424,9 @@ struct Worker {
   # Where should the global "fetch" go to? The default is the service called "internet", which
   # should usually be configured to talk to the public internet.
 
+  cacheApiOutbound @11 :ServiceDesignator;
+  # Where should cache API (i.e. caches.default and caches.open(...)) requests go?
+
   durableObjectNamespaces @7 :List(DurableObjectNamespace);
   # List of durable object namespaces in this Worker.
 

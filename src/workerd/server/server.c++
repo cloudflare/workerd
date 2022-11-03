@@ -1094,6 +1094,7 @@ public:
     // I/O channels, delivered when link() is called.
     kj::Array<Service*> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
+    kj::Maybe<Service&> cache;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
@@ -1303,10 +1304,70 @@ private:
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_REQUIRE("no capability channels");
   }
+  class CacheClientImpl final: public CacheClient {
+  public:
+    CacheClientImpl(Service& cacheService, kj::HttpHeaderId cacheNamespaceHeader)
+        : cacheService(cacheService), cacheNamespaceHeader(cacheNamespaceHeader) {}
+
+    kj::Own<kj::HttpClient> getDefault(kj::Maybe<kj::String> cfBlobJson,
+                                       kj::Maybe<Tracer::Span&> parentSpan) override {
+
+      return kj::heap<CacheHttpClientImpl>(
+          cacheService, cacheNamespaceHeader, nullptr, kj::mv(cfBlobJson), kj::mv(parentSpan));
+    }
+
+    kj::Own<kj::HttpClient> getNamespace(kj::StringPtr cacheName,
+                                         kj::Maybe<kj::String> cfBlobJson,
+                                         kj::Maybe<Tracer::Span&> parentSpan) override {
+      auto encodedName = kj::encodeUriComponent(cacheName);
+      return kj::heap<CacheHttpClientImpl>(
+          cacheService, cacheNamespaceHeader, kj::mv(encodedName), kj::mv(cfBlobJson), parentSpan);
+    }
+
+  private:
+    Service& cacheService;
+    kj::HttpHeaderId cacheNamespaceHeader;
+
+  };
+
+  class CacheHttpClientImpl final: public kj::HttpClient {
+  public:
+    CacheHttpClientImpl(Service& parent, kj::HttpHeaderId cacheNamespaceHeader,
+                        kj::Maybe<kj::String> cacheName, kj::Maybe<kj::String> cfBlobJson,
+                        kj::Maybe<Tracer::Span&> parentSpan)
+        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), parentSpan}))),
+          cacheName(kj::mv(cacheName)),
+          cacheNamespaceHeader(cacheNamespaceHeader) {}
+
+    Request request(kj::HttpMethod method, kj::StringPtr url,
+                    const kj::HttpHeaders &headers,
+                    kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+
+      return client->request(method, url, addCacheNameHeader(headers, cacheName),
+                             expectedBodySize);
+    }
+
+  private:
+    kj::Own<kj::HttpClient> client;
+    kj::Maybe<kj::String> cacheName;
+    kj::HttpHeaderId cacheNamespaceHeader;
+
+    kj::HttpHeaders addCacheNameHeader(const kj::HttpHeaders& headers,
+                                       kj::Maybe<kj::StringPtr> cacheName) {
+      auto headersCopy = headers.cloneShallow();
+      KJ_IF_MAYBE (name, cacheName) {
+        headersCopy.set(cacheNamespaceHeader, *name);
+      }
+
+      return headersCopy;
+    }
+  };
 
   kj::Own<CacheClient> getCache() override {
-    // TODO(beta): Cache API emulation.
-    JSG_FAIL_REQUIRE(Error, "The cache API is not yet implemented.");
+    auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
+                                        "link() has not been called");
+    auto& cache = JSG_REQUIRE_NONNULL(channels.cache, Error, "No Cache was configured");
+    return kj::heap<CacheClientImpl>(cache, threadContext.getHeaderIds().cfCacheNamespace);
   }
 
   TimerChannel& getTimer() override {
@@ -1791,10 +1852,22 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       return targetService->getActorNamespace(channel.designator.getClassName());
     };
 
-    return WorkerService::LinkedIoChannels {
-      .subrequest = services.finish(),
-      .actor = kj::mv(actors)
-    };
+    if (conf.hasCacheApiOutbound()) {
+      Service& cacheApi = lookupService(conf.getCacheApiOutbound(),
+                                        kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
+
+      return WorkerService::LinkedIoChannels{
+          .subrequest = services.finish(),
+          .actor = kj::mv(actors),
+          .cache = &cacheApi
+      };
+    } else {
+      return WorkerService::LinkedIoChannels{
+          .subrequest = services.finish(),
+          .actor = kj::mv(actors)
+      };
+    }
+
   };
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),

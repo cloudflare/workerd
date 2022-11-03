@@ -2103,6 +2103,155 @@ KJ_TEST("Server: disk service allow dotfiles") {
   KJ_EXPECT(test.root->openFile(kj::Path({"secret"}))->readAllText() == "this is super-secret");
 }
 
+
+KJ_TEST("Cache: If no cache service is defined, access to the cache API should error") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "test.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    try {
+          `      return new Response(await caches.default.match(request))
+          `    } catch (e) {return new Response(e.message)}
+          `
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/",
+      "No Cache was configured");
+
+}
+
+
+KJ_TEST("Cache: cached response") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = caches.default;
+                `    let response = await cache.match(request);
+                `    return response ?? new Response('not cached');
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("cache-host");
+    subreq.recv(R"(
+      GET / HTTP/1.1
+      Host: foo
+      Cache-Control: only-if-cached
+
+    )"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      CF-Cache-Status: HIT
+      Content-Length: 6
+
+      cached)"_blockquote);
+  }
+
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 6
+    CF-Cache-Status: HIT
+
+    cached)"_blockquote);
+
+}
+
+
+KJ_TEST("Cache: cache name is passed through to service") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = await caches.open('test-cache');
+                `    let response = await cache.match(request);
+                `    return response ?? new Response('not cached');
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("cache-host");
+    subreq.recv(R"(
+      GET / HTTP/1.1
+      Host: foo
+      Cache-Control: only-if-cached
+      CF-Cache-Namespace: test-cache
+
+    )"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      CF-Cache-Status: HIT
+      Content-Length: 6
+
+      cached)"_blockquote);
+  }
+
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 6
+    CF-Cache-Status: HIT
+
+    cached)"_blockquote);
+
+}
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)
