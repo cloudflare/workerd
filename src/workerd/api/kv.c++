@@ -67,7 +67,7 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
     IoContext& context,
     kj::HttpHeaders& headers,
     kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrUnknown,
-    kj::String urlStr) {
+    kj::StringPtr urlStr) {
   const auto operationName = [&] {
     KJ_SWITCH_ONEOF(opTypeOrUnknown) {
       KJ_CASE_ONEOF(name, kj::StringPtr) {
@@ -145,7 +145,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, kj::str(urlStr));
+  auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, urlStr);
 
   return context.awaitIo(js,
       client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -251,7 +251,7 @@ jsg::Promise<jsg::Value> KvNamespace::list(
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
-    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, kj::str(urlStr));
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr);
 
     return context.awaitIo(js,
         client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -348,7 +348,7 @@ jsg::Promise<void> KvNamespace::put(
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 
-    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, kj::str(urlStr));
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr);
 
     auto promise = context.waitForOutputLocks()
         .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
@@ -405,7 +405,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     kj::HttpHeaders headers(context.getHeaderTable());
 
-    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, kj::str(urlStr));
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr);
 
     auto promise = context.waitForOutputLocks()
         .then([headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {

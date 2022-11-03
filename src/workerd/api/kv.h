@@ -102,11 +102,13 @@ protected:
       IoContext& context,
       kj::HttpHeaders& headers,
       kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrName,
-      kj::String urlStr
+      kj::StringPtr urlStr
   );
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
   // the limiter for that op type to be checked. If a string is used, that's used as the operation
   // name for the HttpClient without any limiter enforcement.
+  // NOTE: The urlStr is added to the headers as a non-owning reference and thus must outlive
+  // the usage of the headers.
 
 private:
   kj::Array<AdditionalHeader> additionalHeaders;
