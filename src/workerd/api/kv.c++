@@ -5,6 +5,7 @@
 #include "kv.h"
 #include "util.h"
 #include "system-streams.h"
+#include "workerd/io/limit-enforcer.h"
 #include <workerd/util/http-util.h>
 #include <workerd/io/io-context.h>
 #include <kj/encoding.h>
@@ -62,6 +63,46 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) 
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 
+kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
+    IoContext& context,
+    kj::HttpHeaders& headers,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrUnknown,
+    kj::StringPtr urlStr) {
+  const auto operationName = [&] {
+    KJ_SWITCH_ONEOF(opTypeOrUnknown) {
+      KJ_CASE_ONEOF(name, kj::StringPtr) {
+        return name;
+      }
+      KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
+        // Check if we've hit KV usage limits. (This will throw if we have.)
+        context.getLimitEnforcer().newKvRequest(opType);
+
+        switch (opType) {
+          case LimitEnforcer::KvOpType::GET:
+            return "kv_get"_kj;
+          case LimitEnforcer::KvOpType::PUT:
+            return "kv_put"_kj;
+          case LimitEnforcer::KvOpType::LIST:
+            return "kv_list"_kj;
+          case LimitEnforcer::KvOpType::DELETE:
+            return "kv_delete"_kj;
+        }
+      }
+    }
+
+    KJ_UNREACHABLE;
+  }();
+
+  auto client = context.getHttpClient(subrequestChannel, true, nullptr, operationName);
+  headers.add(FLPROD_405_HEADER, urlStr);
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
+
+  return client;
+}
+
+
 jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
   return js.evalNow([&] {
@@ -77,11 +118,6 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   validateKeyName("GET", name);
 
   auto& context = IoContext::current();
-
-  // Check if we've hit KV usage limits. (This will throw if we have.)
-  context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::GET);
-
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_get"_kj);
 
   kj::Url url;
   url.scheme = kj::str("https");
@@ -107,11 +143,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   }
 
   auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-  for (const auto& header: additionalHeaders) {
-    headers.add(header.name.asPtr(), header.value.asPtr());
-  }
+  auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, urlStr);
 
   return context.awaitIo(js,
       client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -193,11 +227,6 @@ jsg::Promise<jsg::Value> KvNamespace::list(
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    // Check if we've hit KV usage limits. (This will throw if we have.)
-    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::LIST);
-
-    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_list"_kj);
-
     kj::Url url;
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
@@ -220,11 +249,9 @@ jsg::Promise<jsg::Value> KvNamespace::list(
     }
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+
     auto headers = kj::HttpHeaders(context.getHeaderTable());
-    headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-  for (const auto& header: additionalHeaders) {
-    headers.add(header.name.asPtr(), header.value.asPtr());
-  }
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr);
 
     return context.awaitIo(js,
         client->request(kj::HttpMethod::GET, urlStr, headers).response,
@@ -259,11 +286,6 @@ jsg::Promise<void> KvNamespace::put(
     validateKeyName("PUT", name);
 
     auto& context = IoContext::current();
-
-    // Check if we've hit KV usage limits. (This will throw if we have.)
-    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::PUT);
-
-    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_put"_kj);
 
     kj::Url url;
     url.scheme = kj::str("https");
@@ -325,10 +347,8 @@ jsg::Promise<void> KvNamespace::put(
     }
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
-    headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-  for (const auto& header: additionalHeaders) {
-    headers.add(header.name.asPtr(), header.value.asPtr());
-  }
+
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr);
 
     auto promise = context.waitForOutputLocks()
         .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
@@ -381,19 +401,14 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     auto& context = IoContext::current();
 
-    // Check if we've hit KV usage limits. (This will throw if we have.)
-    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::DELETE);
-
-    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_delete"_kj);
     auto urlStr = kj::str("https://fake-host/", kj::encodeUriComponent(name), "?urlencoded=true");
-    auto promise = context.waitForOutputLocks()
-        .then([this, &context, client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
-      auto headers = kj::HttpHeaders(context.getHeaderTable());
-      headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-    for (const auto& header: additionalHeaders) {
-      headers.add(header.name.asPtr(), header.value.asPtr());
-    }
 
+    kj::HttpHeaders headers(context.getHeaderTable());
+
+    auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr);
+
+    auto promise = context.waitForOutputLocks()
+        .then([headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
       return client->request(kj::HttpMethod::DELETE, urlStr, headers,
                             uint64_t(0))
           .response.then([](kj::HttpClient::Response&& response) mutable {
