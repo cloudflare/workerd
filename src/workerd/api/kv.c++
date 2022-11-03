@@ -5,6 +5,7 @@
 #include "kv.h"
 #include "util.h"
 #include "system-streams.h"
+#include "workerd/io/limit-enforcer.h"
 #include <workerd/util/http-util.h>
 #include <workerd/io/io-context.h>
 #include <kj/encoding.h>
@@ -61,6 +62,45 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) 
 }
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
+
+kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
+    IoContext& context,
+    kj::HttpHeaders& headers,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrUnknown,
+    kj::String urlStr) {
+  const auto operationName = [&] {
+    KJ_SWITCH_ONEOF(opTypeOrUnknown) {
+      KJ_CASE_ONEOF(name, kj::StringPtr) {
+        return name;
+      }
+      KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
+        // Check if we've hit KV usage limits. (This will throw if we have.)
+        context.getLimitEnforcer().newKvRequest(opType);
+
+        switch (opType) {
+          case LimitEnforcer::KvOpType::GET:
+            return "kv_get"_kj;
+          case LimitEnforcer::KvOpType::PUT:
+            return "kv_put"_kj;
+          case LimitEnforcer::KvOpType::LIST:
+            return "kv_list"_kj;
+          case LimitEnforcer::KvOpType::DELETE:
+            return "kv_delete"_kj;
+        }
+      }
+    }
+
+    KJ_UNREACHABLE;
+  }();
+
+  auto client = context.getHttpClient(subrequestChannel, true, nullptr, operationName);
+  headers.add(FLPROD_405_HEADER, urlStr);
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
+
+  return client;
+}
 
 jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {

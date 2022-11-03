@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include "http.h"
+#include "workerd/io/io-context.h"
 
 namespace workerd::api {
 
@@ -95,6 +96,17 @@ public:
     JSG_METHOD(getWithMetadata);
     JSG_METHOD_NAMED(delete, delete_);
   }
+
+protected:
+  kj::Own<kj::HttpClient> getHttpClient(
+      IoContext& context,
+      kj::HttpHeaders& headers,
+      kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrName,
+      kj::String urlStr
+  );
+  // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
+  // the limiter for that op type to be checked. If a string is used, that's used as the operation
+  // name for the HttpClient without any limiter enforcement.
 
 private:
   kj::Array<AdditionalHeader> additionalHeaders;
