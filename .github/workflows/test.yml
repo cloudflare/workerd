@@ -5,6 +5,8 @@ on:
     paths-ignore:
     - 'doc/**'
   push:
+    branches:
+    - main
 
 jobs:
   test:
