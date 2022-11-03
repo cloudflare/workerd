@@ -12,6 +12,9 @@
 
 namespace workerd::api {
 
+// As documented in Cloudflare's Worker KV limits.
+static constexpr size_t kMaxKeyLength = 512;
+
 static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Response& response) {
   if (response.statusCode < 200 || response.statusCode >= 300) {
     // Manually construct exception so that we can incorporate method and status into the text
@@ -22,10 +25,12 @@ static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Resp
   }
 }
 
-static void validateKeyName(kj::StringPtr name) {
+static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
   JSG_REQUIRE(name != "", TypeError, "Key name cannot be empty.");
   JSG_REQUIRE(name != ".", TypeError, "\".\" is not allowed as a key name.");
   JSG_REQUIRE(name != "..", TypeError, "\"..\" is not allowed as a key name.");
+  JSG_REQUIRE(name.size() <= kMaxKeyLength, Error, "KV ", method, " failed: ",
+      414, " UTF-8 encoded length of ", name.size(), " exceeds key length limit of ", kMaxKeyLength, ".");
 }
 
 static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) {
@@ -59,15 +64,17 @@ constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 
 jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
-  auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
-  return resp.then([](KvNamespace::GetWithMetadataResult result) {
-    return kj::mv(result.value);
+  return js.evalNow([&] {
+    auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
+    return resp.then([](KvNamespace::GetWithMetadataResult result) {
+      return kj::mv(result.value);
+    });
   });
 }
 
 jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
-  validateKeyName(name);
+  validateKeyName("GET", name);
 
   auto& context = IoContext::current();
 
@@ -180,56 +187,58 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
 
 jsg::Promise<jsg::Value> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
-  auto& context = IoContext::current();
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
 
-  // Check if we've hit KV usage limits. (This will throw if we have.)
-  context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::LIST);
+    // Check if we've hit KV usage limits. (This will throw if we have.)
+    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::LIST);
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_list"_kj);
+    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_list"_kj);
 
-  kj::Url url;
-  url.scheme = kj::str("https");
-  url.host = kj::str("fake-host");
-  KJ_IF_MAYBE(o, options) {
-    KJ_IF_MAYBE(limit, o->limit) {
-      if (*limit > 0) {
-        url.query.add(kj::Url::QueryParam { kj::str("key_count_limit"), kj::str(*limit) });
+    kj::Url url;
+    url.scheme = kj::str("https");
+    url.host = kj::str("fake-host");
+    KJ_IF_MAYBE(o, options) {
+      KJ_IF_MAYBE(limit, o->limit) {
+        if (*limit > 0) {
+          url.query.add(kj::Url::QueryParam { kj::str("key_count_limit"), kj::str(*limit) });
+        }
+      }
+      KJ_IF_MAYBE(maybePrefix, o->prefix) {
+        KJ_IF_MAYBE(prefix, *maybePrefix) {
+          url.query.add(kj::Url::QueryParam { kj::str("prefix"), kj::str(*prefix) });
+        }
+      }
+      KJ_IF_MAYBE(maybeCursor, o->cursor) {
+        KJ_IF_MAYBE(cursor, *maybeCursor) {
+          url.query.add(kj::Url::QueryParam { kj::str("cursor"), kj::str(*cursor) });
+        }
       }
     }
-    KJ_IF_MAYBE(maybePrefix, o->prefix) {
-      KJ_IF_MAYBE(prefix, *maybePrefix) {
-        url.query.add(kj::Url::QueryParam { kj::str("prefix"), kj::str(*prefix) });
-      }
-    }
-    KJ_IF_MAYBE(maybeCursor, o->cursor) {
-      KJ_IF_MAYBE(cursor, *maybeCursor) {
-        url.query.add(kj::Url::QueryParam { kj::str("cursor"), kj::str(*cursor) });
-      }
-    }
-  }
 
-  auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
-  auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-
-  return context.awaitIo(js,
-      client->request(kj::HttpMethod::GET, urlStr, headers).response,
-      [&context, client = kj::mv(client)]
-      (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-          -> jsg::Promise<jsg::Value> {
-
-    checkForErrorStatus("GET", response);
-
-    auto stream = newSystemStream(
-        response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers));
+    auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+    auto headers = kj::HttpHeaders(context.getHeaderTable());
+    headers.add(FLPROD_405_HEADER, kj::str(urlStr));
 
     return context.awaitIo(js,
-        stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
-            .attach(kj::mv(stream)),
-        [](jsg::Lock& js, kj::String text) {
-      auto result = js.parseJson(text);
-      parseListMetadata(js, result.getHandle(js.v8Isolate));
-      return result;
+        client->request(kj::HttpMethod::GET, urlStr, headers).response,
+        [&context, client = kj::mv(client)]
+        (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
+            -> jsg::Promise<jsg::Value> {
+
+      checkForErrorStatus("GET", response);
+
+      auto stream = newSystemStream(
+          response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers));
+
+      return context.awaitIo(js,
+          stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
+              .attach(kj::mv(stream)),
+          [](jsg::Lock& js, kj::String text) {
+        auto result = js.parseJson(text);
+        parseListMetadata(js, result.getHandle(js.v8Isolate));
+        return result;
+      });
     });
   });
 }
@@ -240,144 +249,147 @@ jsg::Promise<void> KvNamespace::put(
     KvNamespace::PutBody body,
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<KvNamespace::PutSupportedTypes>& putTypeHandler) {
+  return js.evalNow([&] {
+    validateKeyName("PUT", name);
 
-  validateKeyName(name);
+    auto& context = IoContext::current();
 
-  auto& context = IoContext::current();
+    // Check if we've hit KV usage limits. (This will throw if we have.)
+    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::PUT);
 
-  // Check if we've hit KV usage limits. (This will throw if we have.)
-  context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::PUT);
+    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_put"_kj);
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_put"_kj);
+    kj::Url url;
+    url.scheme = kj::str("https");
+    url.host = kj::str("fake-host");
+    url.path.add(kj::mv(name));
+    url.query.add(kj::Url::QueryParam { kj::str("urlencoded"), kj::str("true") });
 
-  kj::Url url;
-  url.scheme = kj::str("https");
-  url.host = kj::str("fake-host");
-  url.path.add(kj::mv(name));
-  url.query.add(kj::Url::QueryParam { kj::str("urlencoded"), kj::str("true") });
+    kj::HttpHeaders headers(context.getHeaderTable());
 
-  kj::HttpHeaders headers(context.getHeaderTable());
-
-  // If any optional parameters were specified by the client, append them to
-  // the URL's query parameters.
-  KJ_IF_MAYBE(o, options) {
-    KJ_IF_MAYBE(expiration, o->expiration) {
-      url.query.add(kj::Url::QueryParam { kj::str("expiration"), kj::str(*expiration) });
-    }
-    KJ_IF_MAYBE(expirationTtl, o->expirationTtl) {
-      url.query.add(kj::Url::QueryParam { kj::str("expiration_ttl"), kj::str(*expirationTtl) });
-    }
-    KJ_IF_MAYBE(maybeMetadata, o->metadata) {
-      KJ_IF_MAYBE(metadata, *maybeMetadata) {
-        kj::String json = js.serializeJson(*metadata);
-        headers.set(context.getHeaderIds().cfKvMetadata, kj::mv(json));
+    // If any optional parameters were specified by the client, append them to
+    // the URL's query parameters.
+    KJ_IF_MAYBE(o, options) {
+      KJ_IF_MAYBE(expiration, o->expiration) {
+        url.query.add(kj::Url::QueryParam { kj::str("expiration"), kj::str(*expiration) });
+      }
+      KJ_IF_MAYBE(expirationTtl, o->expirationTtl) {
+        url.query.add(kj::Url::QueryParam { kj::str("expiration_ttl"), kj::str(*expirationTtl) });
+      }
+      KJ_IF_MAYBE(maybeMetadata, o->metadata) {
+        KJ_IF_MAYBE(metadata, *maybeMetadata) {
+          kj::String json = js.serializeJson(*metadata);
+          headers.set(context.getHeaderIds().cfKvMetadata, kj::mv(json));
+        }
       }
     }
-  }
 
-  PutSupportedTypes supportedBody;
+    PutSupportedTypes supportedBody;
 
-  KJ_SWITCH_ONEOF(body) {
-    KJ_CASE_ONEOF(text, kj::String) {
-      supportedBody = kj::mv(text);
+    KJ_SWITCH_ONEOF(body) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        supportedBody = kj::mv(text);
+      }
+      KJ_CASE_ONEOF(object, v8::Local<v8::Object>) {
+        supportedBody = JSG_REQUIRE_NONNULL(putTypeHandler.tryUnwrap(js, object),
+            TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
+            "ReadableStreams as values.");
+        JSG_REQUIRE(!supportedBody.is<kj::String>(),
+            TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
+            "ReadableStreams as values.");
+        // TODO(someday): replace this with logic to do something smarter with Objects
+      }
     }
-    KJ_CASE_ONEOF(object, v8::Local<v8::Object>) {
-      supportedBody = JSG_REQUIRE_NONNULL(putTypeHandler.tryUnwrap(js, object),
-          TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
-          "ReadableStreams as values.");
-      JSG_REQUIRE(!supportedBody.is<kj::String>(),
-          TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
-          "ReadableStreams as values.");
-      // TODO(someday): replace this with logic to do something smarter with Objects
-    }
-  }
 
-  kj::Maybe<uint64_t> expectedBodySize;
-  kj::Own<ReadableStreamSource> streamSource;
+    kj::Maybe<uint64_t> expectedBodySize;
+    kj::Own<ReadableStreamSource> streamSource;
 
-  KJ_SWITCH_ONEOF(supportedBody) {
-    KJ_CASE_ONEOF(text, kj::String) {
-      headers.set(kj::HttpHeaderId::CONTENT_TYPE, "text/plain;charset=UTF-8");
-      expectedBodySize = uint64_t(text.size());
-    }
-    KJ_CASE_ONEOF(data, kj::Array<byte>) {
-      expectedBodySize = uint64_t(data.size());
-    }
-    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-      streamSource = stream->removeSource(js);
-      expectedBodySize = streamSource->tryGetLength(StreamEncoding::IDENTITY);
-    }
-  }
-
-  auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
-  headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-
-  auto promise = context.waitForOutputLocks()
-      .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
-             expectedBodySize, supportedBody = kj::mv(supportedBody),
-             streamSource = kj::mv(streamSource)]() mutable {
-    auto innerReq = client->request(
-        kj::HttpMethod::PUT, urlStr,
-        headers, expectedBodySize);
-    struct RefcountedWrapper: public kj::Refcounted {
-      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-      kj::Own<kj::HttpClient> client;
-    };
-    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-    // TODO(perf): More efficient to explicitly attach rcClient below?
-    auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
-
-    kj::Promise<void> writePromise = nullptr;
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
-        writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
+        headers.set(kj::HttpHeaderId::CONTENT_TYPE, "text/plain;charset=UTF-8");
+        expectedBodySize = uint64_t(text.size());
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
+        expectedBodySize = uint64_t(data.size());
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        auto dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context);
-        writePromise = context.waitForDeferredProxy(streamSource->pumpTo(*dest, true))
-            .attach(kj::mv(streamSource), kj::mv(dest));
+        streamSource = stream->removeSource(js);
+        expectedBodySize = streamSource->tryGetLength(StreamEncoding::IDENTITY);
       }
     }
 
-    return writePromise.attach(kj::mv(req.body))
-        .then([resp = kj::mv(req.response)]() mutable {
-      return resp.then([](kj::HttpClient::Response&& response) mutable {
-        checkForErrorStatus("PUT", response);
+    auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+    headers.add(FLPROD_405_HEADER, kj::str(urlStr));
 
-        // Read and discard response body, otherwise we might burn the HTTP connection.
-        return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
+    auto promise = context.waitForOutputLocks()
+        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
+              expectedBodySize, supportedBody = kj::mv(supportedBody),
+              streamSource = kj::mv(streamSource)]() mutable {
+      auto innerReq = client->request(
+          kj::HttpMethod::PUT, urlStr,
+          headers, expectedBodySize);
+      struct RefcountedWrapper: public kj::Refcounted {
+        explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
+        kj::Own<kj::HttpClient> client;
+      };
+      auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
+      // TODO(perf): More efficient to explicitly attach rcClient below?
+      auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+
+      kj::Promise<void> writePromise = nullptr;
+      KJ_SWITCH_ONEOF(supportedBody) {
+        KJ_CASE_ONEOF(text, kj::String) {
+          writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
+        }
+        KJ_CASE_ONEOF(data, kj::Array<byte>) {
+          writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
+        }
+        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+          auto dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context);
+          writePromise = context.waitForDeferredProxy(streamSource->pumpTo(*dest, true))
+              .attach(kj::mv(streamSource), kj::mv(dest));
+        }
+      }
+
+      return writePromise.attach(kj::mv(req.body))
+          .then([resp = kj::mv(req.response)]() mutable {
+        return resp.then([](kj::HttpClient::Response&& response) mutable {
+          checkForErrorStatus("PUT", response);
+
+          // Read and discard response body, otherwise we might burn the HTTP connection.
+          return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
+        });
       });
     });
-  });
 
-  return context.awaitIo(js, kj::mv(promise));
+    return context.awaitIo(js, kj::mv(promise));
+  });
 }
 
 jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
-  validateKeyName(name);
+  return js.evalNow([&] {
+    validateKeyName("DELETE", name);
 
-  auto& context = IoContext::current();
+    auto& context = IoContext::current();
 
-  // Check if we've hit KV usage limits. (This will throw if we have.)
-  context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::DELETE);
+    // Check if we've hit KV usage limits. (This will throw if we have.)
+    context.getLimitEnforcer().newKvRequest(LimitEnforcer::KvOpType::DELETE);
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_delete"_kj);
-  auto urlStr = kj::str("https://fake-host/", kj::encodeUriComponent(name), "?urlencoded=true");
-  auto promise = context.waitForOutputLocks()
-      .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
-    auto headers = kj::HttpHeaders(context.getHeaderTable());
-    headers.add(FLPROD_405_HEADER, kj::str(urlStr));
-    return client->request(kj::HttpMethod::DELETE, urlStr, headers,
-                          uint64_t(0))
-        .response.then([](kj::HttpClient::Response&& response) mutable {
-      checkForErrorStatus("DELETE", response);
-    }).attach(kj::mv(client));
+    auto client = context.getHttpClient(subrequestChannel, true, nullptr, "kv_delete"_kj);
+    auto urlStr = kj::str("https://fake-host/", kj::encodeUriComponent(name), "?urlencoded=true");
+    auto promise = context.waitForOutputLocks()
+        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
+      auto headers = kj::HttpHeaders(context.getHeaderTable());
+      headers.add(FLPROD_405_HEADER, kj::str(urlStr));
+      return client->request(kj::HttpMethod::DELETE, urlStr, headers,
+                            uint64_t(0))
+          .response.then([](kj::HttpClient::Response&& response) mutable {
+        checkForErrorStatus("DELETE", response);
+      }).attach(kj::mv(client));
+    });
+
+    return context.awaitIo(js, kj::mv(promise));
   });
-
-  return context.awaitIo(js, kj::mv(promise));
 }
 
 }  // namespace workerd::api
