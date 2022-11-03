@@ -27,15 +27,20 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     auto registry = getModulesForResolveCallback(isolate);
     KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
 
-    auto& referrerPath = KJ_ASSERT_NONNULL(registry->resolvePath(referrer),
+    auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
         "referrer passed to resolveCallback isn't in modules table");
 
-    kj::Path targetPath = referrerPath.parent().eval(kj::str(specifier));
+    kj::Path targetPath = ref.specifier.parent().eval(kj::str(specifier));
 
-    result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath), Error,
+    // If the referrer module is a built-in, it is only permitted to resolve
+    // internal modules. If the worker bundle provided an override for a builtin,
+    // then internalOnly will be false.
+    bool internalOnly = ref.type == ModuleRegistry::Type::BUILTIN;
+
+    result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath, internalOnly), Error,
         "No such module \"", targetPath.toString(),
-        "\".\n  imported from \"", referrerPath.toString(), "\"")
-        .module.Get(isolate);
+        "\".\n  imported from \"", ref.specifier.toString(), "\"")
+        .module.getHandle(js);
 
   })) {
     isolate->ThrowException(makeInternalError(isolate, kj::mv(*exception)));
@@ -57,7 +62,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 
   KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
     auto registry = getModulesForResolveCallback(isolate);
-    auto& entry = KJ_ASSERT_NONNULL(registry->resolve(js, module),
+    auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, module),
         "module passed to evaluateSyntheticModuleCallback isn't in modules table");
 
     // V8 doc comments say this callback must always return an already-resolved promise... I don't
@@ -75,7 +80,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       return resolver->GetPromise();
     };
 
-    auto& synthetic = KJ_REQUIRE_NONNULL(entry.maybeSynthetic, "Not a synthetic module.");
+    auto& synthetic = KJ_REQUIRE_NONNULL(ref.module.maybeSynthetic, "Not a synthetic module.");
 
     KJ_SWITCH_ONEOF(synthetic) {
       KJ_CASE_ONEOF(info, ModuleRegistry::CapnpModuleInfo) {
@@ -154,6 +159,15 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
           // leave 'result' empty to propagate the JS exception
         }
       }
+      KJ_CASE_ONEOF(info, ModuleRegistry::ObjectModuleInfo) {
+        if (module->SetSyntheticModuleExport(isolate,
+                                             v8StrIntern(isolate, "default"_kj),
+                                             info.value.getHandle(isolate)).IsJust()) {
+          result = makeResolvedPromise();
+        } else {
+          // leave 'result' empty to propagate the JS exception
+        }
+      }
     }
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
@@ -173,6 +187,10 @@ v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Is
 
   kj::Path targetPath = path.parent().eval(specifier);
   auto& js = Lock::from(isolate);
+
+  // require() is only exposed to worker bundle modules so the resolve here is only
+  // permitted to require worker bundle or built-in modules. Internal modules are
+  // excluded.
   auto& info = JSG_REQUIRE_NONNULL(modulesForResolveCallback->resolve(js, targetPath),
       Error, "No such module \"", targetPath.toString(), "\".");
   // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
@@ -181,7 +199,7 @@ v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Is
   JSG_REQUIRE_NONNULL(info.maybeSynthetic, TypeError,
       "Cannot use require() to import an ES Module.");
 
-  auto module = info.module.Get(isolate);
+  auto module = info.module.getHandle(js);
   auto context = isolate->GetCurrentContext();
 
   check(module->InstantiateModule(context, &resolveCallback));
@@ -298,7 +316,6 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
     v8::Local<v8::Module> module,
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic)
     : module(js.v8Isolate, module),
-      hash(module->GetIdentityHash()),
       maybeSynthetic(kj::mv(maybeSynthetic)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(

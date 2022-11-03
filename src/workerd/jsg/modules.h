@@ -82,6 +82,19 @@ class ModuleRegistry {
   // The ModuleRegistry maintains the collection of modules known to a script that can be
   // required or imported.
 public:
+  enum class Type {
+    // BUNDLE is for modules provided by the worker bundle.
+    // BUILTIN is for modules that are provided by the runtime and can be
+    // imported by the worker bundle. These can be overridden by modules
+    // in the worker bundle.
+    // INTERNAL is for BUILTIN modules that can only be imported by other
+    // BUILTIN modules. These cannot be overriden by modules in the worker
+    // bundle.
+
+    BUNDLE,
+    BUILTIN,
+    INTERNAL,
+  };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
     return static_cast<ModuleRegistry*>(
@@ -144,20 +157,21 @@ public:
   using TextModuleInfo = ValueModuleInfo<v8::String>;
   using WasmModuleInfo = ValueModuleInfo<v8::WasmModuleObject>;
   using JsonModuleInfo = ValueModuleInfo<v8::Value>;
+  using ObjectModuleInfo = ValueModuleInfo<v8::Object>;
 
   struct ModuleInfo {
-    v8::Global<v8::Module> module;
-    int hash;
+    HashableV8Ref<v8::Module> module;
 
     using SyntheticModuleInfo = kj::OneOf<CapnpModuleInfo,
                                           CommonJsModuleInfo,
                                           DataModuleInfo,
                                           TextModuleInfo,
                                           WasmModuleInfo,
-                                          JsonModuleInfo>;
+                                          JsonModuleInfo,
+                                          ObjectModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
 
-  ModuleInfo(jsg::Lock& js,
+    ModuleInfo(jsg::Lock& js,
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
@@ -169,15 +183,25 @@ public:
 
     ModuleInfo(ModuleInfo&&) = default;
     ModuleInfo& operator=(ModuleInfo&&) = default;
+
+    uint hashCode() const { return module.hashCode(); }
   };
 
-  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, const kj::Path& specifier) = 0;
+  struct ModuleRef {
+    const kj::Path& specifier;
+    Type type;
+    ModuleInfo& module;
+  };
 
-  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
+  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
+                                         const kj::Path& specifier,
+                                         bool internalOnly = false) = 0;
 
-  virtual kj::Maybe<const kj::Path&> resolvePath(v8::Local<v8::Module> referrer)= 0;
+  virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
 
-  virtual Promise<Value> resolveDynamicImport(jsg::Lock& js, kj::Path specifier) = 0;
+  virtual Promise<Value> resolveDynamicImport(jsg::Lock& js,
+                                              const kj::Path& specifier,
+                                              const kj::Path& referrer) = 0;
 
   using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
   // The dynamic import callback is provided by the embedder to set up any context necessary
@@ -195,53 +219,116 @@ public:
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
-    entries.insert(Entry(specifier, kj::fwd<ModuleInfo>(info)));
+    entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addBuiltinModule(const kj::Path& specifier, kj::ArrayPtr<const char> sourceCode) {
+  void addBuiltinModule(kj::StringPtr specifier,
+                        kj::ArrayPtr<const char> sourceCode,
+                        Type type = Type::BUILTIN) {
     // Register new module accessible by a given importPath. The module is instantiated
     // after first resolve attempt within application has failed, i.e. it is possible for
     // application to override the module.
     // sourceCode has to exist while this ModuleRegistry exists.
     // The expectation is for this method to be called during the assembly of worker global context
     // after registering all user modules.
+    KJ_ASSERT(type != Type::BUNDLE);
+    using Key = typename Entry::Key;
 
-    if (entries.find(specifier) != nullptr) {
+    // We need to make sure there is not an existing worker bundle module with the same
+    // name if type == Type::BUILTIN
+    auto path = kj::Path::parse(specifier);
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
       return;
     }
 
-    entries.insert(Entry(specifier, sourceCode));
+    entries.insert(Entry(path, type, sourceCode));
   }
 
-  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, const kj::Path& specifier) override {
-    // TODO(soon): Soon we will support prefixed imports of Workers built in types.
-    KJ_IF_MAYBE(entry, entries.find(specifier)) {
-      return entry->module(js);
+  void addBuiltinModule(kj::StringPtr specifier,
+                        kj::Function<ModuleInfo(Lock&)> factory,
+                        Type type = Type::BUILTIN) {
+    KJ_ASSERT(type != Type::BUNDLE);
+    using Key = typename Entry::Key;
+
+    auto path = kj::Path::parse(specifier);
+
+    // We need to make sure there is not an existing worker bundle module with the same
+    // name if type == Type::BUILTIN
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
+      return;
+    }
+
+    entries.insert(Entry(path, type, kj::mv(factory)));
+  }
+
+  template <typename T>
+  void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
+    addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
+      auto& wrapper = TypeWrapper::from(js.v8Isolate);
+      auto wrap = wrapper.wrap(js.v8Isolate->GetCurrentContext(), nullptr, alloc<T>());
+      return ModuleInfo(js, specifier, nullptr, ObjectModuleInfo(js, wrap));
+    }, type);
+  }
+
+  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
+                                 const kj::Path& specifier,
+                                 bool internalOnly = false) override {
+    using Key = typename Entry::Key;
+    if (internalOnly) {
+      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
+        return entry->module(js);
+      }
+    } else {
+      // First, we try to resolve a worker bundle version of the module.
+      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
+        return entry->module(js);
+      }
+      // Then we look for a built-in version of the module.
+      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+        return entry->module(js);
+      }
     }
     return nullptr;
   }
 
-  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
-    KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->module(js);
-    }
-    return nullptr;
-  }
-
-  kj::Maybe<const kj::Path&> resolvePath(v8::Local<v8::Module> module) override {
-    KJ_IF_MAYBE(entry, entries.template find<1>(module)) {
-      return entry->specifier;
+  kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
+    for (const Entry& entry : entries) {
+      // Unfortunately we cannot use entries.find(...) in here because the module info can
+      // be initialized lazily at any point after the entry is indexed, making the lookup
+      // by module a bit problematic. Iterating through the entries is slower but it works.
+      KJ_IF_MAYBE(info, entry.info.template tryGet<ModuleInfo>()) {
+        if (info->hashCode() == module->GetIdentityHash()) {
+          return ModuleRef {
+            .specifier = entry.specifier,
+            .type = entry.type,
+            .module = const_cast<ModuleInfo&>(*info),
+          };
+        }
+      }
     }
     return nullptr;
   }
 
   size_t size() const { return entries.size(); }
 
-  Promise<Value> resolveDynamicImport(jsg::Lock& js, kj::Path specifier) override {
-    KJ_IF_MAYBE(info, resolve(js, specifier)) {
+  Promise<Value> resolveDynamicImport(jsg::Lock& js,
+                                      const kj::Path& specifier,
+                                      const kj::Path& referrer) override {
+    // Here, we first need to determine if the referrer is a built-in module
+    // or not. If it is a built-in, then we are only permitted to resolve
+    // internal modules. If the worker bundle provided an override for the
+    // built-in module, then the built-in was never registered and won't
+    // be found.
+    using Key = typename Entry::Key;
+    bool internalOnly = false;
+    KJ_IF_MAYBE(entry, entries.find(Key(referrer, Type::BUILTIN))) {
+      internalOnly = true;
+    }
+
+    KJ_IF_MAYBE(info, resolve(js, specifier, internalOnly)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
         auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
-          auto module = info.module.Get(isolate);
+          auto module = info.module.getHandle(isolate);
           auto& js = Lock::from(isolate);
           instantiateModule(js, module);
           return Value(isolate, module->GetModuleNamespace());
@@ -267,15 +354,42 @@ private:
   // we need to be able to search it by path (filename) as well as search for a specific module
   // object by identity. We use a kj::Table!
   struct Entry {
+    using Info = kj::OneOf<ModuleInfo,
+                           kj::ArrayPtr<const char>,
+                           kj::Function<ModuleInfo(Lock&)>>;
+
+    struct Key {
+      const kj::Path& specifier;
+      const Type type = Type::BUNDLE;
+      uint hash;
+
+      Key(const kj::Path& specifier, Type type)
+          : specifier(specifier),
+            type(type),
+            hash(kj::hashCode(specifier, type)) {}
+
+      uint hashCode() const { return hash; }
+    };
+
     kj::Path specifier;
-    kj::OneOf<ModuleInfo, kj::ArrayPtr<const char>> info;
+    Type type;
+    Info info;
     // Either instantiated module or module source code.
 
-    Entry(const kj::Path& specifier, ModuleInfo info)
-        : specifier(specifier.clone()), info(kj::mv(info)) {}
+    Entry(const kj::Path& specifier, Type type, ModuleInfo info)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(info)) {}
 
-    Entry(const kj::Path& specifier, kj::ArrayPtr<const char> src)
-        : specifier(specifier.clone()), info(src) {}
+    Entry(const kj::Path& specifier, Type type, kj::ArrayPtr<const char> src)
+        : specifier(specifier.clone()),
+          type(type),
+          info(src) {}
+
+    Entry(const kj::Path& specifier, Type type, kj::Function<ModuleInfo(Lock&)> factory)
+        : specifier(specifier.clone()),
+          type(type),
+          info(kj::mv(factory)) {}
 
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
@@ -291,54 +405,30 @@ private:
           info = ModuleInfo(js, specifier.toString(), src);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
+        KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {
+          info = src(js);
+          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
+        }
       }
       KJ_UNREACHABLE;
     }
   };
 
   struct SpecifierHashCallbacks {
-    const kj::Path& keyForRow(const Entry& row) const { return row.specifier; }
+    using Key = typename Entry::Key;
 
-    bool matches(const Entry& row, const kj::Path& specifier) const {
-      return row.specifier == specifier;
+    const Key keyForRow(const Entry& row) const { return Key(row.specifier, row.type); }
+
+    bool matches(const Entry& row, Key key) const {
+      return row.specifier == key.specifier && row.type == key.type;
     }
 
-    uint hashCode(const kj::Path& specifier) const {
-      return specifier.hashCode();
-    }
-  };
-
-  struct InfoHashCallbacks {
-    const Entry& keyForRow(const Entry& row) const { return row; }
-
-    bool matches(const Entry& entry, const Entry& other) const {
-      return hashCode(entry) == hashCode(other);
-    }
-
-    bool matches(const Entry& entry, v8::Local<v8::Module>& module) const {
-      return entry.info.template is<ModuleInfo>() &&
-          entry.info.template get<ModuleInfo>().hash == module->GetIdentityHash();
-    }
-
-    uint hashCode(v8::Local<v8::Module>& module) const {
-      return kj::hashCode(module->GetIdentityHash());
-    }
-
-    uint hashCode(const Entry& entry) const {
-      KJ_SWITCH_ONEOF(entry.info) {
-        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
-          return moduleInfo.hash;
-        }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          return kj::hashCode(src);
-        }
-      }
-      KJ_UNREACHABLE;
+    uint hashCode(Key key) const {
+      return key.hashCode();
     }
   };
 
-  kj::Table<Entry, kj::HashIndex<SpecifierHashCallbacks>,
-                   kj::HashIndex<InfoHashCallbacks>> entries;
+  kj::Table<Entry, kj::HashIndex<SpecifierHashCallbacks>> entries;
 };
 
 template <typename TypeWrapper>
@@ -370,12 +460,14 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   // explicitly as rejected Promises.
   v8::TryCatch tryCatch(isolate);
   try {
-    auto& lock = jsg::Lock::from(isolate);
-    auto what = kj::Path::parse(kj::str(resource_name)).parent().eval(kj::str(specifier));
+    auto& js = jsg::Lock::from(isolate);
+    auto referrerPath = kj::Path::parse(kj::str(resource_name));
+    auto specifierPath = referrerPath.parent().eval(kj::str(specifier));
     // TODO(soon): If kj::Path::parse fails it is most likely the application's fault and yet
     // we end up throwing an "internal error" here. We could handle this more gracefully
     // (and correctly) if kj::Path had a tryEval() variant.
-    return wrapper.wrap(context, nullptr, registry->resolveDynamicImport(lock, kj::mv(what)));
+    return wrapper.wrap(context, nullptr,
+        registry->resolveDynamicImport(js, specifierPath, referrerPath));
   } catch (JsExceptionThrown&) {
     if (!tryCatch.CanContinue()) {
       // There's nothing else we can reasonably do.
