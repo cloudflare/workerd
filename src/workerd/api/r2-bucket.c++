@@ -625,13 +625,9 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
   });
 }
 
-jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
+jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
       kj::String key, kj::String uploadId, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
-    auto& context = IoContext::current();
-    auto promise = kj::Promise<jsg::Ref<R2MultipartUpload>>(jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS));
-    return context.awaitIo(js, kj::mv(promise));
-  });
+    return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
 }
 
 jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,

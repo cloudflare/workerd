@@ -309,7 +309,7 @@ public:
       jsg::Lock& js, kj::String key, jsg::Optional<MultipartOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
-  jsg::Promise<jsg::Ref<R2MultipartUpload>> resumeMultipartUpload(
+  jsg::Ref<R2MultipartUpload> resumeMultipartUpload(
       jsg::Lock& js, kj::String key, kj::String uploadId,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
