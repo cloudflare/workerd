@@ -1093,6 +1093,7 @@ public:
     // I/O channels, delivered when link() is called.
     kj::Array<Service*> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
+    Service* cache;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
@@ -1303,10 +1304,79 @@ private:
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_REQUIRE("no capability channels");
   }
+  class CacheClientImpl final: public CacheClient {
+  public:
+    CacheClientImpl(Service& parent)
+        : parent(parent) {
+    }
+
+    kj::Own<kj::HttpClient> getDefault(kj::Maybe<kj::String> cfBlobJson,
+                                       kj::Maybe<Tracer::Span&> parentSpan) override {
+
+      return kj::heap<CacheHttpClientImpl>(
+          parent, nullptr, kj::mv(cfBlobJson), kj::mv(parentSpan));
+    }
+
+    kj::Own<kj::HttpClient> getNamespace(
+        kj::StringPtr cacheName, kj::Maybe<kj::String> cfBlobJson,
+        kj::Maybe<Tracer::Span&> parentSpan) override {
+
+      auto encodedName = kj::encodeUriComponent(cacheName);
+
+      return kj::heap<CacheHttpClientImpl>(
+          parent,  kj::mv(encodedName), kj::mv(cfBlobJson), parentSpan);
+    }
+
+  private:
+    Service& parent;
+  };
+
+  class CacheHttpClientImpl final: public kj::HttpClient {
+  public:
+    CacheHttpClientImpl(Service& parent,
+                        kj::Maybe<kj::String> cacheName, kj::Maybe<kj::String> cfBlobJson,
+                        kj::Maybe<Tracer::Span&> parentSpan)
+        : cacheName(kj::mv(cacheName)),
+          cfBlobJson(kj::mv(cfBlobJson)), parentSpan(kj::mv(parentSpan)) {
+      client = asHttpClient(parent.startRequest({kj::mv(cfBlobJson), parentSpan}));
+    }
+
+    Request request(kj::HttpMethod method, kj::StringPtr url,
+                    const kj::HttpHeaders &headers,
+                    kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+
+      return client->request(method, url, addCacheNameHeader(headers, cacheName),
+                           expectedBodySize);
+    }
+
+  private:
+    kj::Own<kj::HttpClient> client;
+    kj::Maybe<kj::String> cacheName;
+    kj::Maybe<kj::String> cfBlobJson;
+    kj::Maybe<Tracer::Span&> parentSpan;
+
+    kj::HttpHeaders addCacheNameHeader(const kj::HttpHeaders& headers,
+       kj::Maybe<kj::StringPtr> cacheName) {
+      kj::ArrayPtr<const char> spliceParts[3];
+      uint spliceCount = 0;
+      auto headersCopy = headers.cloneShallow();
+      KJ_IF_MAYBE(name, cacheName) {
+        spliceParts[spliceCount++] = "{\"namespace\":\""_kj;
+        spliceParts[spliceCount++] = *name;
+        spliceParts[spliceCount++] = "\"}"_kj;
+      } else {
+        spliceParts[spliceCount++] = "{}"_kj;
+      }
+      headersCopy.set(IoContext::current().getHeaderIds().cfCacheMetadata, kj::strArray(kj::arrayPtr(spliceParts, spliceCount), ""));
+      return headersCopy;
+    }
+  };
+
 
   kj::Own<CacheClient> getCache() override {
-    // TODO(beta): Cache API emulation.
-    JSG_FAIL_REQUIRE(Error, "The cache API is not yet implemented.");
+     auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
+        "link() has not been called");
+    return kj::heap<CacheClientImpl>(*channels.cache);
   }
 
   TimerChannel& getTimer() override {
@@ -1791,9 +1861,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       return targetService->getActorNamespace(channel.designator.getClassName());
     };
 
+    Service& cacheApi = lookupService(conf.getCacheOutbound(),
+        kj::str("Worker \"", name, "\"'s cacheOutbound"));
+
     return WorkerService::LinkedIoChannels {
       .subrequest = services.finish(),
-      .actor = kj::mv(actors)
+      .actor = kj::mv(actors),
+      .cache = &cacheApi
     };
   };
 
