@@ -1304,45 +1304,43 @@ private:
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_REQUIRE("no capability channels");
   }
-  class CacheClientImpl final : public CacheClient {
+  class CacheClientImpl final: public CacheClient {
   public:
-    CacheClientImpl(Service &cacheService) : cacheService(cacheService) {}
+    CacheClientImpl(Service& cacheService)
+        : cacheService(cacheService) {}
 
-    kj::Own<kj::HttpClient>
-    getDefault(kj::Maybe<kj::String> cfBlobJson,
-               kj::Maybe<Tracer::Span &> parentSpan) override {
+    kj::Own<kj::HttpClient> getDefault(kj::Maybe<kj::String> cfBlobJson,
+                                       kj::Maybe<Tracer::Span&> parentSpan) override {
 
       return kj::heap<CacheHttpClientImpl>(
           cacheService, nullptr, kj::mv(cfBlobJson), kj::mv(parentSpan));
     }
 
-    kj::Own<kj::HttpClient>
-    getNamespace(kj::StringPtr cacheName, kj::Maybe<kj::String> cfBlobJson,
-                 kj::Maybe<Tracer::Span &> parentSpan) override {
+    kj::Own<kj::HttpClient> getNamespace(kj::StringPtr cacheName,
+                                         kj::Maybe<kj::String> cfBlobJson,
+                                         kj::Maybe<Tracer::Span&> parentSpan) override {
 
-      return kj::heap<CacheHttpClientImpl>(cacheService, kj::str(cacheName),
-                                           kj::mv(cfBlobJson), parentSpan);
+      return kj::heap<CacheHttpClientImpl>(
+          cacheService, kj::str(cacheName), kj::mv(cfBlobJson), parentSpan);
     }
 
   private:
-    Service &cacheService;
+    Service& cacheService;
   };
 
-  class CacheHttpClientImpl final : public kj::HttpClient {
+  class CacheHttpClientImpl final: public kj::HttpClient {
   public:
-    CacheHttpClientImpl(Service &parent, kj::Maybe<kj::String> cacheName,
-                        kj::Maybe<kj::String> cfBlobJson,
-                        kj::Maybe<Tracer::Span &> parentSpan)
-        : client(asHttpClient(
-              parent.startRequest({kj::mv(cfBlobJson), parentSpan}))),
+    CacheHttpClientImpl(Service& parent,
+                        kj::Maybe<kj::String> cacheName, kj::Maybe<kj::String> cfBlobJson,
+                        kj::Maybe<Tracer::Span&> parentSpan)
+        : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), parentSpan}))),
           cacheName(kj::mv(cacheName)) {}
 
     Request request(kj::HttpMethod method, kj::StringPtr url,
                     const kj::HttpHeaders &headers,
                     kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
 
-      return client->request(method, url,
-                             addCacheNameHeader(headers, cacheName),
+      return client->request(method, url, addCacheNameHeader(headers, cacheName),
                              expectedBodySize);
     }
 
@@ -1350,7 +1348,7 @@ private:
     kj::Own<kj::HttpClient> client;
     kj::Maybe<kj::String> cacheName;
 
-    kj::HttpHeaders addCacheNameHeader(const kj::HttpHeaders &headers,
+    kj::HttpHeaders addCacheNameHeader(const kj::HttpHeaders& headers,
                                        kj::Maybe<kj::StringPtr> cacheName) {
       auto headersCopy = headers.cloneShallow();
       KJ_IF_MAYBE (name, cacheName) {
@@ -1365,10 +1363,9 @@ private:
   };
 
   kj::Own<CacheClient> getCache() override {
-    auto &channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
+    auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
                                         "link() has not been called");
-    auto &cache =
-        JSG_REQUIRE_NONNULL(channels.cache, Error, "No Cache was configured");
+    auto& cache = JSG_REQUIRE_NONNULL(channels.cache, Error, "No Cache was configured");
     return kj::heap<CacheClientImpl>(cache);
   }
 
@@ -1855,16 +1852,19 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     };
 
     if (conf.getCacheApiOutbound().getName() != nullptr) {
-      Service &cacheApi =
-          lookupService(conf.getCacheApiOutbound(),
-                        kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
+      Service& cacheApi = lookupService(conf.getCacheApiOutbound(),
+                                        kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
 
-      return WorkerService::LinkedIoChannels{.subrequest = services.finish(),
-                                             .actor = kj::mv(actors),
-                                             .cache = &cacheApi};
+      return WorkerService::LinkedIoChannels{
+          .subrequest = services.finish(),
+          .actor = kj::mv(actors),
+          .cache = &cacheApi
+      };
     } else {
-      return WorkerService::LinkedIoChannels{.subrequest = services.finish(),
-                                             .actor = kj::mv(actors)};
+      return WorkerService::LinkedIoChannels{
+          .subrequest = services.finish(),
+          .actor = kj::mv(actors)
+      };
     }
 
   };
