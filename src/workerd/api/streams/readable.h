@@ -221,6 +221,11 @@ public:
   // We use v8::Local<v8::Object>'s here instead of jsg structs because we need
   // to preserve the object references within the implementation.
 
+  static jsg::Ref<ReadableStream> from(
+      jsg::Lock& js,
+      kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> generator,
+      CompatibilityFlags::Reader flags);
+
   bool isLocked() { return getController().isLockedToReader(); }
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
@@ -296,6 +301,7 @@ public:
     JSG_METHOD(values);
 
     JSG_ASYNC_ITERABLE(values);
+    JSG_STATIC_METHOD(from);
 
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_TS_DEFINE(interface ReadableStream<R = any> {
@@ -313,6 +319,8 @@ public:
 
         values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
         [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+
+        static from<T>(iterable: AsyncIterable<T> | Iterable<T>): ReadableStream<T>;
       });
     } else {
       JSG_TS_DEFINE(interface ReadableStream<R = any> {
@@ -330,6 +338,8 @@ public:
 
         values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
         [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+
+        static from<T>(iterable: AsyncIterable<T> | Iterable<T>): ReadableStream<T>;
       });
     }
     JSG_TS_OVERRIDE(const ReadableStream: {

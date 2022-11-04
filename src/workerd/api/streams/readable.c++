@@ -473,4 +473,79 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
   return nullptr;
 }
 
+namespace {
+struct AsyncGeneratorWrapper: public kj::Refcounted {
+  kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> inner;
+  kj::Maybe<jsg::Value> pendingCancel;
+  kj::Maybe<jsg::Promise<void>> running;
+  AsyncGeneratorWrapper(kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> gen)
+      : inner(kj::mv(gen)) {}
+};
+}  // namespace
+
+jsg::Ref<ReadableStream> ReadableStream::from(
+    jsg::Lock& js,
+    kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> generator,
+    CompatibilityFlags::Reader flags) {
+  KJ_SWITCH_ONEOF(generator) {
+    KJ_CASE_ONEOF(gen, jsg::AsyncGenerator<jsg::Value>) {
+      auto wrapper = kj::refcounted<AsyncGeneratorWrapper>(kj::mv(gen));
+      return ReadableStream::constructor(js, UnderlyingSource {
+        .start = jsg::Function<UnderlyingSource::StartAlgorithm>(
+            [wrapper = kj::addRef(*wrapper)](jsg::Lock& js, auto controller) mutable {
+          auto& c = controller.template get<jsg::Ref<ReadableStreamDefaultController>>();
+          auto& g = wrapper->inner.get<jsg::AsyncGenerator<jsg::Value>>();
+          wrapper->running = g.forEach(js,
+              [&c=*c,&w=*wrapper](auto& js, auto value, auto& context) {
+            KJ_IF_MAYBE(cancel, w.pendingCancel) {
+              context.return_(js, kj::mv(*cancel));
+            } else {
+              c.enqueue(js, value.getHandle(js));
+            }
+            return js.resolvedPromise();
+          }).then(js, [w = kj::addRef(*wrapper), c = c.addRef()](auto& js, auto ignored) mutable {
+            c->close(js);
+          }).catch_(js, [c = c.addRef()](auto& js, auto reason) mutable {
+            c->error(js, reason.getHandle(js));
+          });
+
+          return js.resolvedPromise();
+        }),
+        .cancel = jsg::Function<UnderlyingSource::CancelAlgorithm>(
+            [wrapper = kj::mv(wrapper)](jsg::Lock& js, auto reason) mutable {
+          wrapper->pendingCancel = js.v8Ref(reason);
+          return js.resolvedPromise();
+        }),
+      }, nullptr, flags);
+    }
+    KJ_CASE_ONEOF(gen, jsg::Generator<jsg::Value>) {
+      auto wrapper = kj::refcounted<AsyncGeneratorWrapper>(kj::mv(gen));
+      return ReadableStream::constructor(js, UnderlyingSource {
+        .start = jsg::Function<UnderlyingSource::StartAlgorithm>(
+            [wrapper = kj::addRef(*wrapper)](jsg::Lock& js, auto controller) mutable {
+          // This form is completely synchronous. We are going to consume the generator
+          // immediately on start to fill the buffer and that's it.
+          auto& c = controller.template get<jsg::Ref<ReadableStreamDefaultController>>();
+          js.tryCatch([&] {
+            auto& g = wrapper->inner.get<jsg::Generator<jsg::Value>>();
+            g.forEach(js, [&](auto& js, auto value, auto& context) {
+              c->enqueue(js, value.getHandle(js));
+            });
+            c->close(js);
+          }, [&](auto reason) {
+            c->error(js, reason.getHandle(js));
+          });
+          return js.resolvedPromise();
+        }),
+        .cancel = jsg::Function<UnderlyingSource::CancelAlgorithm>(
+            [wrapper = kj::mv(wrapper)](jsg::Lock& js, auto reason) mutable {
+          wrapper->pendingCancel = js.v8Ref(reason);
+          return js.resolvedPromise();
+        }),
+      }, nullptr, flags);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api
