@@ -264,6 +264,20 @@ struct BuildRtti<Configuration, jsg::NonCoercible<T>> {
   }
 };
 
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::AsyncGenerator<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.initIntrinsic().setName("v8::kAsyncIteratorPrototype"_kj);
+  }
+};
+
+template <typename Configuration, typename T>
+struct BuildRtti<Configuration, jsg::Generator<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    builder.initIntrinsic().setName("v8::IteratorPrototype"_kj);
+  }
+};
+
 // Maybe Types
 
 #define DECLARE_MAYBE_TYPE(T) \
