@@ -362,7 +362,8 @@ private:
 
             // If result.done is true, we set the impl.returnValue, set impl to finished,
             // and return a resolved promise.
-            if (impl.processResultMaybeDone(js, func, result)) {
+            if (result.done) {
+              impl.setFinished(kj::mv(result.value));
               return js.resolvedPromise();
             }
 
