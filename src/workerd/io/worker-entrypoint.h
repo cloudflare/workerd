@@ -32,7 +32,6 @@ public:
                    kj::TaskSet& waitUntilTasks,
                    bool tunnelExceptions,
                    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-                   kj::Maybe<kj::Own<Tracer>> tracer,
                    kj::Maybe<kj::String> cfBlobJson);
   // Call this instead of the constructor. It actually adds a wrapper object around the
   // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
@@ -79,8 +78,7 @@ private:
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-      kj::Maybe<kj::Own<Tracer>> tracer);
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
 
 public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,

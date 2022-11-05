@@ -1150,7 +1150,6 @@ public:
         waitUntilTasks,
         true,                      // tunnelExceptions
         nullptr,                   // workerTracer
-        nullptr,                   // tracer
         kj::mv(metadata.cfBlobJson));
   }
 

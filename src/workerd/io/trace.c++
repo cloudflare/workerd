@@ -564,6 +564,19 @@ kj::Maybe<Tracer::Span> mapMakeSpan(
   return nullptr;
 }
 
+kj::Maybe<Tracer::Span> mapMakeSpan(
+    kj::Maybe<Tracer::Span&> parent,
+    kj::StringPtr operationName) {
+  KJ_IF_MAYBE(p, parent) {
+    // Only return a Jaeger span if this Tracer has a parent span -- i.e., we're actually being
+    // Jaeger traced.
+    if (p->getTracer().getParentSpanContext() != nullptr) {
+      return p->getTracer().makeSpan(operationName, parent);
+    }
+  }
+  return nullptr;
+}
+
 kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<kj::Own<Tracer>>& tracer) {
   KJ_IF_MAYBE(t, tracer) {
     return t->get()->getParentSpanContext();

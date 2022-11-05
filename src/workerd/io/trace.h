@@ -283,6 +283,10 @@ kj::Maybe<Tracer::Span> mapMakeSpan(
 //
 // TODO(cleanup): Tracing suffers from Maybe-overload. There's probably a better interface design.
 
+kj::Maybe<Tracer::Span> mapMakeSpan(
+    kj::Maybe<Tracer::Span&> parent, kj::StringPtr operationName);
+// Like above but gets the `tracer` from `parent.getTracer()` (if parent is non-null).
+
 kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<kj::Own<Tracer>>& tracer);
 kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<Tracer&> tracer);
 // If tracer is non-null, return tracer->getParentSpanContext().
@@ -295,13 +299,19 @@ class MaybeSpan {
 public:
   MaybeSpan() = default;
   explicit MaybeSpan(Tracer::Span span): span(kj::mv(span)) {}
+  MaybeSpan(kj::Maybe<Tracer::Span> span): span(kj::mv(span)) {}
   MaybeSpan& operator=(std::nullptr_t) {
     span = nullptr;
     return *this;
   };
 
   bool operator==(std::nullptr_t) { return span == nullptr; }
+
   explicit operator bool() { return span != nullptr; }
+  // TODO(cleanup): Remove this, per KJ style people should always use `== nullptr`.
+
+  operator kj::Maybe<Tracer::Span&>() & { return span; }
+  // TODO(cleanup): Remove this. It's a temporary helper while refactoring.
 
   kj::Maybe<Jaeger::SpanContext> getSpanContext() {
     KJ_IF_MAYBE(s, span) {
@@ -329,8 +339,14 @@ public:
     }
   }
 
+  MaybeSpan makeChild(kj::StringPtr operationName) {
+    return mapMakeSpan(span, operationName);
+  }
+
 private:
   kj::Maybe<Tracer::Span> span;
+
+  friend class MaybeTracer;
 };
 
 class MaybeTracer {
@@ -346,6 +362,7 @@ public:
   explicit MaybeTracer(kj::Maybe<kj::Own<Tracer>> tracer) : tracer(kj::mv(tracer)) {}
 
   explicit MaybeTracer(kj::Maybe<Tracer::Span&> span);
+  explicit MaybeTracer(MaybeSpan& span): MaybeTracer(span.span) {}
   // Convenience constructor from Tracer::Span& to make a MaybeTracer whose parent is that span.
 
   bool operator==(std::nullptr_t) { return tracer == nullptr; }
@@ -358,12 +375,8 @@ public:
     }
   }
 
-  MaybeTracer clone(kj::Maybe<Jaeger::SpanContext> overrideParent = nullptr) {
-    KJ_IF_MAYBE(t, tracer) {
-      return MaybeTracer((**t).makeSubtracer(overrideParent));
-    } else {
-      return {};
-    }
+  MaybeTracer addRef() {
+    return MaybeTracer(tracer.map([](kj::Own<Tracer>& t) { return kj::addRef(*t); }));
   }
 
   MaybeSpan makeSpan(kj::StringPtr operationName,
