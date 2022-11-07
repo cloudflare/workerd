@@ -10,23 +10,21 @@ namespace workerd::jsg {
 
 Ref<DOMException> DOMException::constructor(
     Lock& js,
-    Optional<V8Ref<v8::String>> message,
+    Optional<kj::String> message,
     Optional<kj::String> name) {
-  V8Ref<v8::String> errMessage = kj::mv(message).orDefault([&] {
-    return js.v8Ref(v8StrIntern(js.v8Isolate, ""));
-  });
+  kj::String errMessage = kj::mv(message).orDefault([&] { return kj::String(); });
   return jsg::alloc<DOMException>(
       kj::mv(errMessage),
-      kj::mv(name).orDefault([] { return kj::str(""); }),
-      js.v8Ref(v8::Exception::Error(errMessage.getHandle(js)).As<v8::Object>()));
+      kj::mv(name).orDefault([] { return kj::str("Error"); }),
+      js.v8Ref(v8::Exception::Error(v8Str(js.v8Isolate, errMessage)).As<v8::Object>()));
 }
 
 kj::StringPtr DOMException::getName() {
   return name;
 }
 
-v8::Local<v8::String> DOMException::getMessage(Lock& js) {
-  return message.getHandle(js);
+kj::StringPtr DOMException::getMessage() {
+  return message;
 }
 
 int DOMException::getCode() {
@@ -49,7 +47,7 @@ v8::Local<v8::Value> DOMException::getStack(Lock& js) {
 }
 
 void DOMException::visitForGc(GcVisitor& visitor) {
-  visitor.visit(message, errorForStack);
+  visitor.visit(errorForStack);
 }
 
 }  // namespace workerd::jsg

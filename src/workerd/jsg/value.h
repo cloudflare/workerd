@@ -1305,7 +1305,7 @@ public:
                                                 parentObject)) {
       return KJ_EXCEPTION(FAILED,
           kj::str("jsg.DOMException(", domException->getName(), "): ",
-                  domException->getMessage(js)));
+                  domException->getMessage()));
     } else {
 
       static const constexpr kj::StringPtr PREFIXES[] = {

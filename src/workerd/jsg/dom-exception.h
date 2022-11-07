@@ -50,7 +50,7 @@ class DOMException: public Object {
   // "DOMException".
 
 public:
-  DOMException(V8Ref<v8::String> message,
+  DOMException(kj::String message,
                kj::String name,
                V8Ref<v8::Object> errorForStack)
       : message(kj::mv(message)),
@@ -60,14 +60,11 @@ public:
   // JS API
 
   static Ref<DOMException> constructor(Lock& js,
-                                       Optional<V8Ref<v8::String>> message,
+                                       Optional<kj::String> message,
                                        Optional<kj::String> name);
-  // We take `message` by v8::String because our dummy Error object will need access to the message
-  // as a v8::Local. We take `name` as a kj::String because we need to look its value up in a map to
-  // get the legacy error code.
 
   kj::StringPtr getName();
-  v8::Local<v8::String> getMessage(Lock& js);
+  kj::StringPtr getMessage();
   int getCode();
 
   v8::Local<v8::Value> getStack(Lock& js);
@@ -83,6 +80,11 @@ public:
   JSG_RESOURCE_TYPE(DOMException) {
     JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
 
+    // TODO(conform): Per the spec, these should be prototype properties
+    // and not instance properties. Fixing this does require use of the
+    // flags.getJsgPropertyOnPrototypeTemplate() compatibility flag.
+    // The standard definition of DOMException can be found here:
+    // https://webidl.spec.whatwg.org/#idl-DOMException
     JSG_READONLY_INSTANCE_PROPERTY(message, getMessage);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
@@ -106,7 +108,7 @@ public:
 #undef JSG_DOM_EXCEPTION_CONSTANT_JS
 
 private:
-  V8Ref<v8::String> message;
+  kj::String message;
   kj::String name;
 
   V8Ref<v8::Object> errorForStack;
