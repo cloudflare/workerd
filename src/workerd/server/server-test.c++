@@ -2177,22 +2177,79 @@ KJ_TEST("Cache: cached response") {
     subreq.send(R"(
       HTTP/1.1 200 OK
       CF-Cache-Status: HIT
-      Content-Size: 6
+      Content-Length: 6
 
       cached)"_blockquote);
   }
 
   conn.recv(R"(
     HTTP/1.1 200 OK
-    Transfer-Encoding: chunked
+    Content-Length: 6
     CF-Cache-Status: HIT
-    Content-Size: 6
 
-    6
-    cached
-    0
+    cached)"_blockquote);
 
-  )"_blockquote);
+}
+
+
+KJ_TEST("Cache: cache name is passed through to service") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          cacheApiOutbound = "cache-outbound",
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const cache = await caches.open('test-cache');
+                `    let response = await cache.match(request);
+                `    return response ?? new Response('not cached');
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "cache-outbound", external = "cache-host" ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+
+  {
+    auto subreq = test.receiveSubrequest("cache-host");
+    subreq.recv(R"(
+      GET / HTTP/1.1
+      Host: foo
+      Cache-Control: only-if-cached
+      CF-Cache-Namespace: test-cache
+
+    )"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      CF-Cache-Status: HIT
+      Content-Length: 6
+
+      cached)"_blockquote);
+  }
+
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 6
+    CF-Cache-Status: HIT
+
+    cached)"_blockquote);
 
 }
 // =======================================================================================
