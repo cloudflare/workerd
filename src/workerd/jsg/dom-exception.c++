@@ -8,17 +8,19 @@
 
 namespace workerd::jsg {
 
-Ref<DOMException> DOMException::constructor(Optional<v8::Global<v8::String>> message,
-                                               Optional<kj::String> name, v8::Isolate* isolate) {
+Ref<DOMException> DOMException::constructor(
+    Lock& js,
+    Optional<v8::Global<v8::String>> message,
+    Optional<kj::String> name) {
   v8::Global<v8::String> errMessage;
   KJ_IF_MAYBE(m, message) {
     errMessage = kj::mv(*m);
   } else {
-    errMessage = v8::Global<v8::String>(isolate, v8::String::Empty(isolate));
+    errMessage = v8::Global<v8::String>(js.v8Isolate, v8::String::Empty(js.v8Isolate));
   }
-  auto errorForStack = v8::Exception::Error(errMessage.Get(isolate)).As<v8::Object>();
+  auto errorForStack = v8::Exception::Error(errMessage.Get(js.v8Isolate)).As<v8::Object>();
   return jsg::alloc<DOMException>(kj::mv(errMessage), kj::mv(name),
-                                  v8::Global<v8::Object>(isolate, errorForStack));
+                                  v8::Global<v8::Object>(js.v8Isolate, errorForStack));
 }
 
 kj::String DOMException::getName() {
@@ -28,8 +30,8 @@ kj::String DOMException::getName() {
   return kj::str("Error");
 }
 
-v8::Local<v8::String> DOMException::getMessage(v8::Isolate* isolate) {
-  return message.Get(isolate);
+v8::Local<v8::String> DOMException::getMessage(Lock& js) {
+  return message.Get(js.v8Isolate);
 }
 
 int DOMException::getCode() {
@@ -47,9 +49,10 @@ int DOMException::getCode() {
   return 0;
 }
 
-v8::Local<v8::Value> DOMException::getStack(v8::Isolate* isolate) {
-  auto stackString = v8Str(isolate, "stack", v8::NewStringType::kInternalized);
-  return check(errorForStack.Get(isolate)->Get(isolate->GetCurrentContext(), stackString));
+v8::Local<v8::Value> DOMException::getStack(Lock& js) {
+  auto stackString = v8StrIntern(js.v8Isolate, "stack");
+  return check(errorForStack.Get(js.v8Isolate)->Get(
+      js.v8Isolate->GetCurrentContext(), stackString));
 }
 
 }  // namespace workerd::jsg

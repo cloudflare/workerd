@@ -56,17 +56,18 @@ public:
 
   // JS API
 
-  static Ref<DOMException> constructor(Optional<v8::Global<v8::String>> message,
-                                       Optional<kj::String> name, v8::Isolate* isolate);
+  static Ref<DOMException> constructor(Lock& js,
+                                       Optional<v8::Global<v8::String>> message,
+                                       Optional<kj::String> name);
   // We take `message` by v8::String because our dummy Error object will need access to the message
   // as a v8::Local. We take `name` as a kj::String because we need to look its value up in a map to
   // get the legacy error code.
 
   kj::String getName();
-  v8::Local<v8::String> getMessage(v8::Isolate* isolate);
+  v8::Local<v8::String> getMessage(Lock& js);
   int getCode();
 
-  v8::Local<v8::Value> getStack(v8::Isolate* isolate);
+  v8::Local<v8::Value> getStack(Lock& js);
 
 #define JSG_DOM_EXCEPTION_CONSTANT_CXX(name, code, friendlyName) \
     static constexpr int name = code;
