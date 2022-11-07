@@ -50,20 +50,23 @@ class DOMException: public Object {
   // "DOMException".
 
 public:
-  DOMException(v8::Global<v8::String> message, Optional<kj::String> name,
-               v8::Global<v8::Object> errorForStack)
-      : message(kj::mv(message)), name(kj::mv(name)), errorForStack(kj::mv(errorForStack)) {}
+  DOMException(V8Ref<v8::String> message,
+               kj::String name,
+               V8Ref<v8::Object> errorForStack)
+      : message(kj::mv(message)),
+        name(kj::mv(name)),
+        errorForStack(kj::mv(errorForStack)) {}
 
   // JS API
 
   static Ref<DOMException> constructor(Lock& js,
-                                       Optional<v8::Global<v8::String>> message,
+                                       Optional<V8Ref<v8::String>> message,
                                        Optional<kj::String> name);
   // We take `message` by v8::String because our dummy Error object will need access to the message
   // as a v8::Local. We take `name` as a kj::String because we need to look its value up in a map to
   // get the legacy error code.
 
-  kj::String getName();
+  kj::StringPtr getName();
   v8::Local<v8::String> getMessage(Lock& js);
   int getCode();
 
@@ -84,7 +87,7 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
 
-    JSG_READONLY_INSTANCE_PROPERTY(stack, getStack);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(stack, getStack);
     // V8 gives Error objects a non-standard (but widely known) `stack` property, and Web IDL
     // requires that DOMException get any non-standard properties that Error gets. Chrome honors
     // this requirement only for runtime-generated DOMExceptions -- script-generated DOMExceptions
@@ -103,12 +106,14 @@ public:
 #undef JSG_DOM_EXCEPTION_CONSTANT_JS
 
 private:
-  v8::Global<v8::String> message;
-  Optional<kj::String> name;
+  V8Ref<v8::String> message;
+  kj::String name;
 
-  v8::Global<v8::Object> errorForStack;
+  V8Ref<v8::Object> errorForStack;
   // We implement the `stack` property in a similarly hacky way as Chrome: store an Error object
   // and use its `stack`.
+
+  void visitForGc(GcVisitor& visitor);
 };
 
 }  // namespace::jsg

@@ -10,28 +10,23 @@ namespace workerd::jsg {
 
 Ref<DOMException> DOMException::constructor(
     Lock& js,
-    Optional<v8::Global<v8::String>> message,
+    Optional<V8Ref<v8::String>> message,
     Optional<kj::String> name) {
-  v8::Global<v8::String> errMessage;
-  KJ_IF_MAYBE(m, message) {
-    errMessage = kj::mv(*m);
-  } else {
-    errMessage = v8::Global<v8::String>(js.v8Isolate, v8::String::Empty(js.v8Isolate));
-  }
-  auto errorForStack = v8::Exception::Error(errMessage.Get(js.v8Isolate)).As<v8::Object>();
-  return jsg::alloc<DOMException>(kj::mv(errMessage), kj::mv(name),
-                                  v8::Global<v8::Object>(js.v8Isolate, errorForStack));
+  V8Ref<v8::String> errMessage = kj::mv(message).orDefault([&] {
+    return js.v8Ref(v8StrIntern(js.v8Isolate, ""));
+  });
+  return jsg::alloc<DOMException>(
+      kj::mv(errMessage),
+      kj::mv(name).orDefault([] { return kj::str(""); }),
+      js.v8Ref(v8::Exception::Error(errMessage.getHandle(js)).As<v8::Object>()));
 }
 
-kj::String DOMException::getName() {
-  KJ_IF_MAYBE(n, name) {
-    return kj::str(*n);
-  }
-  return kj::str("Error");
+kj::StringPtr DOMException::getName() {
+  return name;
 }
 
 v8::Local<v8::String> DOMException::getMessage(Lock& js) {
-  return message.Get(js.v8Isolate);
+  return message.getHandle(js);
 }
 
 int DOMException::getCode() {
@@ -40,19 +35,21 @@ int DOMException::getCode() {
     JSG_DOM_EXCEPTION_FOR_EACH_ERROR_NAME(MAP_ENTRY)
 #undef MAP_ENTRY
   };
-  KJ_IF_MAYBE(n, name) {
-    auto code = legacyCodes.find(*n);
-    if (code != legacyCodes.end()) {
-      return code->second;
-    }
+  auto code = legacyCodes.find(name);
+  if (code != legacyCodes.end()) {
+    return code->second;
   }
   return 0;
 }
 
 v8::Local<v8::Value> DOMException::getStack(Lock& js) {
-  auto stackString = v8StrIntern(js.v8Isolate, "stack");
-  return check(errorForStack.Get(js.v8Isolate)->Get(
-      js.v8Isolate->GetCurrentContext(), stackString));
+  return check(errorForStack.getHandle(js)->Get(
+      js.v8Isolate->GetCurrentContext(),
+      v8StrIntern(js.v8Isolate, "stack")));
+}
+
+void DOMException::visitForGc(GcVisitor& visitor) {
+  visitor.visit(message, errorForStack);
 }
 
 }  // namespace workerd::jsg
