@@ -138,7 +138,7 @@ public:
 
   template <typename Func, typename =
       decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<Args>()...))>
-  Function(Func&& func)
+  Function(Lock& js, Func&& func)
       : impl(Ref<NativeFunction>(
           alloc<WrappableFunctionImpl<Ret(Args...), Func>>(kj::fwd<Func>(func)))) {}
   // Construct jsg::Function wrapping a C++ function. The parameter can be a lambda or anything
@@ -312,7 +312,11 @@ public:
         // produces exactly the same JavaScript handle. So... screw it.
         data = *h;
       } else {
+#ifdef WORKERD_USE_OILPAN
+        data = ref->jsgAttachOpaqueWrapper(context, ref->needsGcTracing);
+#else
         data = ref->attachOpaqueWrapper(context, ref->needsGcTracing);
+#endif
       }
 
       // TODO(conform): Correctly set `length` on all functions. Probably doesn't need a compat flag

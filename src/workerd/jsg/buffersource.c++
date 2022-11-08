@@ -53,7 +53,7 @@ Value createHandle(Lock& js, BackingStore& backingStore) {
 
 }  // namespace
 
-void GcVisitor::visit(BufferSource& value)  {
+void GcVisitor::visit(const BufferSource& value) const {
   visit(value.handle);
 }
 

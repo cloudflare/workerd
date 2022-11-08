@@ -69,7 +69,7 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
 };
 
 template <typename T>
-v8::Local<v8::Value> wrapOpaque(v8::Local<v8::Context> context, T&& t) {
+v8::Local<v8::Value> wrapOpaque(Lock& js, T&& t) {
   // Create a JavaScript value that wraps `t` in an opaque way. JS code will see this as an empty
   // object, as if created by `{}`, but C++ code can unwrap the handle with `unwrapOpaque()`.
   //
@@ -89,8 +89,13 @@ v8::Local<v8::Value> wrapOpaque(v8::Local<v8::Context> context, T&& t) {
   static_assert(!isV8Ref<T>(), "no need to opaque-wrap regular JavaScript values");
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
 
-  auto wrapped = kj::refcounted<OpaqueWrappable<T>>(kj::mv(t));
+  auto context = js.v8Isolate->GetCurrentContext();
+  auto wrapped = JSG_ALLOC(js, OpaqueWrappable<T>, kj::mv(t));
+#ifdef WORKERD_USE_OILPAN
+  return wrapped->jsgAttachOpaqueWrapper(context);
+#else
   return wrapped->attachOpaqueWrapper(context, isGcVisitable<T>());
+#endif
 }
 
 template <typename T>
@@ -152,6 +157,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   // function to eoxecute, and we want to produce an opaque-wrapped output or Promise.
   liftKj(args, [&]() {
     auto isolate = args.GetIsolate();
+    auto& js = Lock::from(isolate);
 #ifdef KJ_DEBUG
     // In debug mode only, we verify that the function hasn't captured any KJ heap objects without
     // a IoOwn. We don't bother with this check in release mode because it's pretty deterministic,
@@ -164,7 +170,6 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
 #endif
     auto callFunc = [&]() -> Output {
       if constexpr (passLock) {
-        auto& js = Lock::from(isolate);
         if constexpr (isCatch) {
           // Exception from V8 is not expected to be opaque-wrapped. It's just a Value.
           return funcPair.catchFunc(js, Value(isolate, args[0]));
@@ -203,7 +208,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
     } else if constexpr (isV8Ref<Output>()) {
       return callFunc().getHandle(isolate);
     } else {
-      return wrapOpaque(isolate->GetCurrentContext(), callFunc());
+      return wrapOpaque(js, callFunc());
     }
   });
 }
@@ -333,7 +338,7 @@ public:
       if constexpr (isV8Ref<U>()) {
         handle = value.getHandle(isolate);
       } else {
-        handle = wrapOpaque(isolate->GetCurrentContext(), kj::mv(value));
+        handle = wrapOpaque(js, kj::mv(value));
       }
       check(v8Resolver.getHandle(isolate)->Resolve(isolate->GetCurrentContext(), handle));
     }
@@ -448,7 +453,7 @@ private:
     if constexpr (isV8Ref<U>()) {
       handle = value.getHandle(isolate);
     } else {
-      handle = wrapOpaque(context, kj::mv(value));
+      handle = wrapOpaque(js, kj::mv(value));
     };
     check(resolver->Resolve(context, handle));
     v8Promise.emplace(isolate, resolver->GetPromise());
@@ -473,7 +478,7 @@ private:
     v8::HandleScope scope(js.v8Isolate);
     auto context = js.v8Isolate->GetCurrentContext();
 
-    auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
+    auto funcPairHandle = wrapOpaque(js, kj::mv(funcPair));
 
     auto then = check(v8::Function::New(
         context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
@@ -632,11 +637,11 @@ template <typename TypeWrapper, typename Output>
 void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
   // Continuation function that converts a promised JavaScript value into a C++ value.
   liftKj(args, [&]() {
-    v8::Isolate* isolate = args.GetIsolate();
-    auto& wrapper = TypeWrapper::from(isolate);
-    auto context = isolate->GetCurrentContext();
-    return wrapOpaque(context, wrapper.template unwrap<Output>(context, args[0],
-        TypeErrorContext::promiseResolution()));
+    Lock& js = Lock::from(args.GetIsolate());
+    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    return wrapOpaque(js,
+        wrapper.template unwrap<Output>(
+            js.v8Isolate->GetCurrentContext(), args[0], TypeErrorContext::promiseResolution()));
   });
 }
 

@@ -8,6 +8,7 @@
 // Any files declaring an API to export to JavaScript will need to include this header.
 
 #include <kj/common.h>
+#include <kj/debug.h>
 #include <kj/string.h>
 #include <kj/function.h>
 #include <kj/exception.h>
@@ -713,9 +714,11 @@ private:
   // The isolate with which the handles below are associated.
 
 #ifdef WORKERD_USE_OILPAN
-  kj::OneOf<v8::TracedReference<v8::Data>, v8::Global<v8::Data>> handle;
+  mutable kj::OneOf<v8::TracedReference<v8::Data>, v8::Global<v8::Data>> handle;
   // When the Data is first created, it will be set as a v8::Global.
   // When the Data is traced, it will be changed to a v8::TracedReference.
+  // Marked mutable because the value is changed while performing Tracing, which
+  // is a const function.
 
 #else
   TraceableHandle handle;
@@ -976,7 +979,11 @@ constexpr bool resourceNeedsGcTracing();
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
+#if WORKERD_USE_OILPAN
+class Object: public Wrappable {
+#else
 class Object: private Wrappable {
+#endif
   // All resource types must inherit from this.
 
 public:
@@ -1064,7 +1071,7 @@ public:
           "moving a traced jsg::Ref is unsupported");
     }
   }
-  explicit Ref(cppgc::Persistent<T> persistent): inner(kj::mv(persistent)) {}
+  Ref(cppgc::Persistent<T> persistent): inner(kj::mv(persistent)) {}
   // Upgrade a cppgc::Persistent to a Ref.
 
   template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
@@ -1165,15 +1172,15 @@ public:
     KJ_IF_MAYBE(i, inner) {
       KJ_SWITCH_ONEOF(*i) {
         KJ_CASE_ONEOF(member, cppgc::Member<T>) {
-          return Ref(cppgc::Persistent<T>(member.get()));
+          return Ref(cppgc::Persistent<T>(member.Get()));
         }
         KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
-          return Ref(cppgc::Persistent<T>(persistent.get()));
+          return Ref(cppgc::Persistent<T>(persistent.Get()));
         }
       }
       KJ_UNREACHABLE;
     }
-    return Ref();
+    return Ref(nullptr);
   }
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
@@ -1246,7 +1253,7 @@ public:
 
 private:
 #ifdef WORKERD_USE_OILPAN
-  kj::Maybe<kj::OneOf<cppgc::Member<T>, cppgc::Persistent<T>>> inner;
+  mutable kj::Maybe<kj::OneOf<cppgc::Member<T>, cppgc::Persistent<T>>> inner;
   // When the Ref is first created, the T is held by a cppgc::Persistent, making it a strong
   // reference. The first time the ref is traced, this will be changed to a cppgc::Member<T>.
 #else
@@ -1267,10 +1274,12 @@ private:
     KJ_IF_MAYBE(i, inner) {
       KJ_SWITCH_ONEOF(*i) {
         KJ_CASE_ONEOF(member, cppgc::Member<T>) {
-          member->maybeDeferDestruction(kj::mv(member));
+          member->jsgMaybeDeferDestruction(
+              cppgc::Persistent<Wrappable>(kj::mv(member)));
         }
         KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
-          persistent->maybeDeferDestruction(kj::mv(persistent));
+          persistent->jsgMaybeDeferDestruction(
+              cppgc::Persistent<Wrappable>(kj::mv(persistent)));
         }
       }
       inner = nullptr;
@@ -1613,7 +1622,7 @@ public:
     KJ_IF_MAYBE(inner, ref.inner) {
       KJ_SWITCH_ONEOF(*inner) {
         KJ_CASE_ONEOF(member, cppgc::Member<T>) {
-          inner->Trace(member);
+          this->inner->Trace(member);
         }
         KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
           ref.inner = cppgc::Member<T>(persistent.Get());
@@ -1635,14 +1644,15 @@ public:
 
   template <typename T>
   void visit(const V8Ref<T>& value) const {
-    visit(static_cast<Data&>(value));
+    visit(static_cast<const Data&>(value));
   }
 
   void visit(const BufferSource& bufferSource) const;
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(const T& supportsVisit) const {
-    supportsVisit.visitForGc(this);
+    const GcVisitor& visitor = *this;
+    supportsVisit.visitForGc(const_cast<GcVisitor&>(visitor));
   }
 
   void visit() const {}
@@ -1650,11 +1660,11 @@ public:
   template <typename T, typename U, typename... Args>
   void visit(const T& t, const U& u, const Args&... remaining) const {
     visit(t);
-    visit(u, kj::fwd<Args&>(remaining)...);
+    visit(u, kj::fwd<const Args&>(remaining)...);
   }
 
   void visitAll(const auto& collection) {
-    for (auto& item : collection) {
+    for (const auto& item : collection) {
       visit(item);
     }
   }
@@ -1681,8 +1691,9 @@ public:
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(const kj::Maybe<T>& maybeSupportsVisit) const {
+    const GcVisitor& visitor = *this;
     KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
-      supportsVisit->visitForGc(*this);
+      supportsVisit->visitForGc(const_cast<GcVisitor&>(visitor));
     }
   }
 

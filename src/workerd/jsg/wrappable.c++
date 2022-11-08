@@ -89,11 +89,11 @@ void Wrappable::jsgMaybeDeferDestruction(kj::OneOf<cppgc::Persistent<Wrappable>,
 
 GcVisitor::GcVisitor(cppgc::Visitor* visitor) : inner(visitor) {}
 
-void GcVisitor::visit(v8::TracedReference<v8::Data>& ref) const {
+void GcVisitor::visit(const v8::TracedReference<v8::Data>& ref) const {
   inner->Trace(ref);
 }
 
-void GcVisitor::visit(Data& value) {
+void GcVisitor::visit(const Data& value) const {
   KJ_SWITCH_ONEOF(value.handle) {
     KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
       if (!global.IsEmpty()) {
