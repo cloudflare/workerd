@@ -1,0 +1,35 @@
+name: Tests
+
+on:
+  pull_request:
+    paths-ignore:
+    - 'doc/**'
+  push:
+    branches:
+    - main
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/bazel-disk-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
+      - run: mkdir -p ~/bazel-disk-cache
+      - name: install dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get install -y build-essential git clang libc++-dev
+      - name: bazel tests
+        run: |
+            bazel test --remote_timeout=5 --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.workers.dev --verbose_failures --show_timestamps --keep_going --test_output=errors //...
+
