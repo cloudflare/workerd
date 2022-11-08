@@ -176,6 +176,7 @@ struct Server::GlobalContext {
         httpOverCapnpFactory(byteStreamFactory, headerTableBuilder),
         threadContext(server.timer, server.entropySource,
             headerTableBuilder, httpOverCapnpFactory,
+            byteStreamFactory,
             false /* isFiddle -- TODO(beta): support */),
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
