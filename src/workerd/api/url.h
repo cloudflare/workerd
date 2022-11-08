@@ -19,7 +19,7 @@ class URL: public jsg::Object {
   // Implements the URL interface as prescribed by: https://url.spec.whatwg.org/#api
 
 public:
-  static jsg::Ref<URL> constructor(kj::String url, jsg::Optional<kj::String> base);
+  static jsg::Ref<URL> constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base);
 
   kj::String getHref();
   void setHref(const v8::PropertyCallbackInfo<void>& info, kj::String value);
@@ -52,7 +52,7 @@ public:
   kj::String getSearch();
   void setSearch(kj::String value);
 
-  jsg::Ref<URLSearchParams> getSearchParams();
+  jsg::Ref<URLSearchParams> getSearchParams(jsg::Lock& js);
 
   kj::String getHash();
   void setHash(kj::String value);
@@ -98,7 +98,7 @@ public:
   }
 
   explicit URL(kj::Url&& u);
-  // Treat as private -- needs to be public for jsg::alloc<T>()...
+  // Treat as private -- needs to be public for JSG_ALLOC...
 
 private:
   friend class URLSearchParams;
@@ -138,7 +138,7 @@ public:
   using Initializer = kj::OneOf<jsg::Ref<URLSearchParams>, kj::String, jsg::Dict<kj::String>,
                                 kj::Array<kj::Array<kj::String>>>;
 
-  static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init);
+  static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
   void append(kj::String name, kj::String value);
   void delete_(kj::String name);

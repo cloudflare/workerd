@@ -620,7 +620,7 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
     jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> callback,
     jsg::Optional<TransactionOptions> options) {
   auto& context = IoContext::current();
-  auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(
+  auto txn = JSG_ALLOC(js, DurableObjectTransaction, context.addObject(
         kj::heap<ActorCache::Transaction>(*cache)));
 
   struct TxnResult {
@@ -720,13 +720,13 @@ ActorState::ActorState(Worker::Actor::Id actorId,
     kj::Maybe<jsg::Value> transient, kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent)
     : id(kj::mv(actorId)), transient(kj::mv(transient)), persistent(kj::mv(persistent)) {}
 
-kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId() {
+kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return coloLocalId.asPtr();
     }
     KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
-      return jsg::alloc<DurableObjectId>(globalId->clone());
+      return JSG_ALLOC(js, DurableObjectId, globalId->clone());
     }
   }
   KJ_UNREACHABLE;
@@ -740,13 +740,13 @@ void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId() {
+kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return coloLocalId.asPtr();
     }
     KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
-      return jsg::alloc<DurableObjectId>(globalId->clone());
+      return JSG_ALLOC(js, DurableObjectId, globalId->clone());
     }
   }
   KJ_UNREACHABLE;

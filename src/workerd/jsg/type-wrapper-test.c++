@@ -11,7 +11,9 @@ V8System v8System;
 
 struct InfoContext: public Object {
   struct WantInfo: public Object {
-    static Ref<WantInfo> constructor() { return jsg::alloc<WantInfo>(); }
+    static Ref<WantInfo> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, WantInfo);
+    }
 
     double method(const v8::FunctionCallbackInfo<v8::Value>& info, double d) {
       return d + info.Length();
@@ -266,8 +268,8 @@ struct UnimplementedContext: public Object {
   class UnimplementedConstructorParam: public Object {
   public:
     UnimplementedConstructorParam(int i): i(i) {}
-    static Ref<UnimplementedConstructorParam> constructor(int i, Unimplemented) {
-      return jsg::alloc<UnimplementedConstructorParam>(i);
+    static Ref<UnimplementedConstructorParam> constructor(jsg::Lock& js, int i, Unimplemented) {
+      return JSG_ALLOC(js, UnimplementedConstructorParam, i);
     }
     int getI() { return i; }
     int i;
@@ -291,8 +293,8 @@ struct UnimplementedContext: public Object {
 
   class UnimplementedProperties: public Object {
   public:
-    static Ref<UnimplementedProperties> constructor() {
-      return jsg::alloc<UnimplementedProperties>();
+    static Ref<UnimplementedProperties> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, UnimplementedProperties);
     }
 
     int getNumber() { return 123; }

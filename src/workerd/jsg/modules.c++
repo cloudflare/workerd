@@ -335,7 +335,7 @@ Ref<CommonJsModuleContext>
 ModuleRegistry::CommonJsModuleInfo::initModuleContext(
     jsg::Lock& js,
     kj::StringPtr name) {
-  return jsg::alloc<jsg::CommonJsModuleContext>(js.v8Isolate, kj::Path::parse(name));
+  return JSG_ALLOC(js, jsg::CommonJsModuleContext, js.v8Isolate, kj::Path::parse(name));
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(

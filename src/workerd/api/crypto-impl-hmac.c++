@@ -104,6 +104,7 @@ void zeroOutTrailingKeyBits(kj::Array<kj::byte>& keyDataArray, int keyBitLength)
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(
+      jsg::Lock& js,
       kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages) {
@@ -129,7 +130,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(
   auto keyAlgorithm = CryptoKey::HmacKeyAlgorithm{normalizedName, {normalizedHashName},
                                                   static_cast<uint16_t>(length)};
 
-  return jsg::alloc<CryptoKey>(kj::heap<HmacKey>(kj::mv(keyDataArray),
+  return JSG_ALLOC(js, CryptoKey, kj::heap<HmacKey>(kj::mv(keyDataArray),
       kj::mv(keyAlgorithm), extractable, usages));
 }
 

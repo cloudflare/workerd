@@ -143,14 +143,14 @@ kj::String kjUrlToString(const kj::Url& url) {
 // =======================================================================================
 // URL
 
-jsg::Ref<URL> URL::constructor(kj::String url, jsg::Optional<kj::String> base) {
+jsg::Ref<URL> URL::constructor(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> base) {
   KJ_IF_MAYBE(b, base) {
     auto baseUrl = JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(*b)),
         TypeError, "Invalid base URL string.");
-    return jsg::alloc<URL>(JSG_REQUIRE_NONNULL(baseUrl.tryParseRelative(kj::mv(url)),
+    return JSG_ALLOC(js, URL, JSG_REQUIRE_NONNULL(baseUrl.tryParseRelative(kj::mv(url)),
         TypeError, "Invalid relative URL string."));
   }
-  return jsg::alloc<URL>(JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(url)),
+  return JSG_ALLOC(js, URL, JSG_REQUIRE_NONNULL(kj::Url::tryParse(kj::mv(url)),
       TypeError, "Invalid URL string."));
 }
 
@@ -450,11 +450,11 @@ void URL::setSearch(kj::String value) {
   }
 }
 
-jsg::Ref<URLSearchParams> URL::getSearchParams() {
+jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
   KJ_IF_MAYBE(usp, searchParams) {
     return usp->addRef();
   } else {
-    searchParams.emplace(jsg::alloc<URLSearchParams>(kj::addRef(*url)));
+    searchParams.emplace(JSG_ALLOC(js, URLSearchParams, kj::addRef(*url)));
     return KJ_ASSERT_NONNULL(searchParams).addRef();
   }
 }
@@ -485,8 +485,9 @@ kj::String URL::toJSON() {
 URLSearchParams::URLSearchParams(kj::Own<URL::RefcountedUrl> url): url(kj::mv(url)) {}
 
 jsg::Ref<URLSearchParams> URLSearchParams::constructor(
+    jsg::Lock& js,
     jsg::Optional<URLSearchParams::Initializer> init) {
-  auto searchParams = jsg::alloc<URLSearchParams>(kj::refcounted<URL::RefcountedUrl>());
+  auto searchParams = JSG_ALLOC(js, URLSearchParams, kj::refcounted<URL::RefcountedUrl>());
 
   KJ_IF_MAYBE(i, init) {
     KJ_SWITCH_ONEOF(*i) {
@@ -611,16 +612,16 @@ void URLSearchParams::forEach(
   }
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock& js) {
+  return JSG_ALLOC(js, EntryIterator, IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock& js) {
+  return JSG_ALLOC(js, KeyIterator, IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock& js) {
+  return JSG_ALLOC(js, ValueIterator, IteratorState { JSG_THIS });
 }
 
 kj::String URLSearchParams::toString() {

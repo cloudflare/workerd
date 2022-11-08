@@ -266,7 +266,7 @@ public:
   ActorState(Worker::Actor::Id actorId, kj::Maybe<jsg::Value> transient,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<v8::Local<v8::Value>> getTransient(v8::Isolate* isolate) {
     return transient.map([&](jsg::Value& v) { return v.getHandle(isolate); });
@@ -297,7 +297,7 @@ public:
 
   void waitUntil(kj::Promise<void> promise);
 
-  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
+  kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getStorage() {
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });

@@ -100,8 +100,8 @@ struct NumberBox: public Object {
   explicit NumberBox(double value): value(value) {}
   NumberBox() = default;
 
-  static Ref<NumberBox> constructor(double value) {
-    return jsg::alloc<NumberBox>(value);
+  static Ref<NumberBox> constructor(jsg::Lock& js, double value) {
+    return JSG_ALLOC(js, NumberBox, value);
   }
 
   void increment() { value += 1; }
@@ -110,7 +110,9 @@ struct NumberBox: public Object {
 
   double add(double other) { return value + other; }
   double addBox(NumberBox& other) { return value + other.value; }
-  Ref<NumberBox> addReturnBox(double other) { return jsg::alloc<NumberBox>(value + other); }
+  Ref<NumberBox> addReturnBox(jsg::Lock& js, double other) {
+    return JSG_ALLOC(js, NumberBox, value + other);
+  }
   double addMultiple(NumberBox& a, double b, NumberBox& c) {
     return value + a.value + b + c.value;
   }
@@ -118,13 +120,15 @@ struct NumberBox: public Object {
   double getValue() { return value; }
   void setValue(double newValue) { value = newValue; }
 
-  Ref<NumberBox> getBoxed() { return jsg::alloc<NumberBox>(value); }
+  Ref<NumberBox> getBoxed(jsg::Lock& js) {
+    return JSG_ALLOC(js, NumberBox, value);
+  }
   void setBoxed(NumberBox& newValue) { value = newValue.value; }
 
   v8::Local<v8::Value> getBoxedFromTypeHandler(
       jsg::Lock& js, v8::Isolate*, const TypeHandler<Ref<NumberBox>>& numberBoxTypeHandler) {
     // This function takes an Isolate just to prove it can take multiple value-less parameters.
-    return numberBoxTypeHandler.wrap(js, alloc<NumberBox>(value));
+    return numberBoxTypeHandler.wrap(js, JSG_ALLOC(js, NumberBox, value));
   }
 
   JSG_RESOURCE_TYPE(NumberBox) {
@@ -153,8 +157,8 @@ public:
 
   Ref<NumberBox> inner;
 
-  static Ref<BoxBox> constructor(NumberBox& inner, double add) {
-    return jsg::alloc<BoxBox>(jsg::alloc<NumberBox>(inner.value + add));
+  static Ref<BoxBox> constructor(jsg::Lock& js, NumberBox& inner, double add) {
+    return JSG_ALLOC(js, BoxBox, JSG_ALLOC(js, NumberBox, inner.value + add));
   }
 
   Ref<NumberBox> getInner() { return inner.addRef(); }
@@ -170,8 +174,8 @@ private:
 };
 
 struct ExtendedNumberBox: public NumberBox {
-  static Ref<ExtendedNumberBox> constructor(double value, kj::String text) {
-    auto result = jsg::alloc<ExtendedNumberBox>();
+  static Ref<ExtendedNumberBox> constructor(jsg::Lock& js, double value, kj::String text) {
+    auto result = JSG_ALLOC(js, ExtendedNumberBox);
     result->value = value;
     result->text = kj::mv(text);
     return result;

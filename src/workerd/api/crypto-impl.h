@@ -114,6 +114,7 @@ public:
   static ImportFunc importRsaRaw;
 
   using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(
+      jsg::Lock& js,
       kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);

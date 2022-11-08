@@ -87,8 +87,8 @@ struct InheritsMixin: public Object, public Mixin {
   }
 };
 struct InheritsMixinContext: public Object {
-  Ref<InheritsMixin> makeInheritsMixin(int i) {
-    return jsg::alloc<InheritsMixin>(i);
+  Ref<InheritsMixin> makeInheritsMixin(jsg::Lock& js, int i) {
+    return JSG_ALLOC(js, InheritsMixin, i);
   }
 
   JSG_RESOURCE_TYPE(InheritsMixinContext) {
@@ -205,8 +205,8 @@ struct NonConstructibleContext: public Object {
     }
   };
 
-  Ref<NonConstructible> getNonConstructible(double x) {
-    return jsg::alloc<NonConstructible>(x);
+  Ref<NonConstructible> getNonConstructible(jsg::Lock& js, double x) {
+    return JSG_ALLOC(js, NonConstructible, x);
   }
 
   JSG_RESOURCE_TYPE(NonConstructibleContext) {
@@ -237,7 +237,9 @@ KJ_TEST("non-constructible types can't be constructed") {
 struct IterableContext: public Object {
   class Iterable: public Object {
   public:
-    static Ref<Iterable> constructor() { return jsg::alloc<Iterable>(); }
+    static Ref<Iterable> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, Iterable);
+    }
 
     class Iterator: public Object {
     public:
@@ -274,8 +276,8 @@ struct IterableContext: public Object {
       int* cursor;
     };
 
-    Ref<Iterator> entries(const v8::FunctionCallbackInfo<v8::Value>& info) {
-      return jsg::alloc<Iterator>(JSG_THIS);
+    Ref<Iterator> entries(jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      return JSG_ALLOC(js, Iterator, JSG_THIS);
     }
 
     JSG_RESOURCE_TYPE(Iterable) {
@@ -326,7 +328,9 @@ KJ_TEST("Iterables can be iterated") {
 
 struct StaticContext: public Object {
   struct StaticConstants: public Object {
-    static Ref<StaticConstants> constructor() { return jsg::alloc<StaticConstants>(); }
+    static Ref<StaticConstants> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, StaticConstants);
+    }
 
     static constexpr double        DOUBLE = 1.5;
     static constexpr int           INT = 123;
@@ -342,7 +346,9 @@ struct StaticContext: public Object {
   };
 
   struct StaticMethods: public Object {
-    static Ref<StaticMethods> constructor() { return jsg::alloc<StaticMethods>(); }
+    static Ref<StaticMethods> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, StaticMethods);
+    }
 
     static v8::Local<v8::Value> passThrough(v8::Local<v8::Value> arg) { return arg; }
     static v8::Local<v8::Value> passThroughWithInfo(const v8::FunctionCallbackInfo<v8::Value>& info,
@@ -517,12 +523,12 @@ struct ReflectionContext: public Object {
   };
 
   struct Reflector: public Super {
-    static jsg::Ref<Reflector> constructor(v8::Isolate* isolate) {
-      auto result = jsg::alloc<Reflector>();
+    static jsg::Ref<Reflector> constructor(jsg::Lock& js) {
+      auto result = JSG_ALLOC(js, Reflector);
 
       // Check reflection returns null when wrapper isn't allocated.
-      KJ_EXPECT(result->intReflector.get(isolate, "foo") == nullptr);
-      KJ_EXPECT(result->stringReflector.get(isolate, "foo") == nullptr);
+      KJ_EXPECT(result->intReflector.get(js.v8Isolate, "foo") == nullptr);
+      KJ_EXPECT(result->stringReflector.get(js.v8Isolate, "foo") == nullptr);
 
       return result;
     }
@@ -545,12 +551,12 @@ struct ReflectionContext: public Object {
     JSG_REFLECTION(intReflector, stringReflector);
   };
 
-  jsg::Ref<Reflector> makeReflector() {
-    return jsg::alloc<Reflector>();
+  jsg::Ref<Reflector> makeReflector(jsg::Lock& js) {
+    return JSG_ALLOC(js, Reflector);
   }
 
-  jsg::Ref<Super> makeSuper() {
-    return jsg::alloc<Reflector>();
+  jsg::Ref<Super> makeSuper(jsg::Lock& js) {
+    return JSG_ALLOC(js, Reflector);
   }
 
   JSG_RESOURCE_TYPE(ReflectionContext) {

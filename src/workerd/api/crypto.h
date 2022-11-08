@@ -219,7 +219,7 @@ public:
   // HACK: Needs to be public so derived classes can inherit from it.
 
   explicit CryptoKey(kj::Own<Impl> impl);
-  // Treat as private -- needs to be public for jsg::alloc<T>()...
+  // Treat as private -- needs to be public for JSG_ALLOC...
 
 private:
   kj::Own<Impl> impl;
@@ -578,7 +578,7 @@ public:
       kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller,
       jsg::Promise<kj::Array<kj::byte>> promise);
 
-  static jsg::Ref<DigestStream> constructor(Algorithm algorithm);
+  static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
   jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>>& getDigest() { return promise; }
 
@@ -611,6 +611,7 @@ class Crypto: public jsg::Object {
   // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 
 public:
+  Crypto(jsg::Lock& js) : subtle(JSG_ALLOC(js, SubtleCrypto)) {}
   v8::Local<v8::ArrayBufferView> getRandomValues(v8::Local<v8::ArrayBufferView> buffer);
 
   kj::String randomUUID();
@@ -632,7 +633,7 @@ public:
   }
 
 private:
-  jsg::Ref<SubtleCrypto> subtle = jsg::alloc<SubtleCrypto>();
+  jsg::Ref<SubtleCrypto> subtle;
 };
 
 #define EW_CRYPTO_ISOLATE_TYPES                       \

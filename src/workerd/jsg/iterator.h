@@ -951,7 +951,7 @@ private:
 //   }
 //
 //   jsg::Ref<MyApiTypeIterator> entries(jsg::Lock& js) {
-//     return jsg::alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
+//     return JSG_ALLOC(js, MyApiTypeIterator, IteratorState { /* any necessary state init */ });
 //   }
 // };
 //
@@ -1033,7 +1033,7 @@ private:
 //   }
 //
 //   jsg::Ref<MyApiTypeIterator> entries(jsg::Lock& js) {
-//     return jsg::alloc<MyApiTypeIterator>(IteratorState { /* any necessary state init */ });
+//     return JSG_ALLOC(js, MyApiTypeIterator, IteratorState { /* any necessary state init */ });
 //   }
 // };
 //

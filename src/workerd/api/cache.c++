@@ -517,8 +517,8 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
 // =======================================================================================
 // CacheStorage
 
-CacheStorage::CacheStorage()
-    : default_(jsg::alloc<Cache>(nullptr)) {}
+CacheStorage::CacheStorage(jsg::Lock& js)
+    : default_(JSG_ALLOC(js, Cache, nullptr)) {}
 
 jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cacheName) {
   // Set some reasonable limit to prevent scripts from blowing up our control header size.
@@ -535,7 +535,7 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
   }
 
-  return js.resolvedPromise(jsg::alloc<Cache>(kj::mv(cacheName)));
+  return js.resolvedPromise(JSG_ALLOC(js, Cache, kj::mv(cacheName)));
 }
 
 }  // namespace workerd::api

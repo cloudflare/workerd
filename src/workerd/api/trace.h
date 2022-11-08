@@ -21,7 +21,7 @@ class TraceLog;
 
 class TraceEvent final: public ExtendableEvent {
 public:
-  explicit TraceEvent(kj::ArrayPtr<kj::Own<Trace>> traces);
+  explicit TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<Trace>> traces);
 
   static jsg::Ref<TraceEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor?
@@ -54,12 +54,12 @@ public:
   explicit TraceItem(kj::Own<Trace> trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>, jsg::Ref<AlarmEventInfo>> EventInfo;
-  kj::Maybe<EventInfo> getEvent();
+  kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   // TODO(someday): support more event types (trace, queue) via kj::OneOf.
   kj::Maybe<double> getEventTimestamp();
 
-  kj::Array<jsg::Ref<TraceLog>> getLogs();
-  kj::Array<jsg::Ref<TraceException>> getExceptions();
+  kj::Array<jsg::Ref<TraceLog>> getLogs(jsg::Lock& js);
+  kj::Array<jsg::Ref<TraceException>> getExceptions(jsg::Lock& js);
   kj::Maybe<kj::StringPtr> getScriptName();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   kj::StringPtr getOutcome();
@@ -98,8 +98,8 @@ public:
   explicit FetchEventInfo(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo,
                           kj::Maybe<const Trace::FetchResponseInfo&> responseInfo);
 
-  jsg::Ref<Request> getRequest();
-  jsg::Optional<jsg::Ref<Response>> getResponse();
+  jsg::Ref<Request> getRequest(jsg::Lock& js);
+  jsg::Optional<jsg::Ref<Response>> getResponse(jsg::Lock& js);
 
   // TODO(cleanup) Use struct types more?
   JSG_RESOURCE_TYPE(FetchEventInfo) {
@@ -122,7 +122,7 @@ public:
   kj::StringPtr getMethod();
   kj::String getUrl();
 
-  jsg::Ref<Request> getUnredacted();
+  jsg::Ref<Request> getUnredacted(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Request) {
     JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
@@ -242,7 +242,7 @@ private:
 
 class UnsafeTraceMetrics final: public jsg::Object {
 public:
-  jsg::Ref<TraceMetrics> fromTrace(jsg::Ref<TraceItem>);
+  jsg::Ref<TraceMetrics> fromTrace(jsg::Lock& js, jsg::Ref<TraceItem>);
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {
     JSG_METHOD(fromTrace);

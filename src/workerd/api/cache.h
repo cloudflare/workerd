@@ -82,7 +82,7 @@ private:
 
 class CacheStorage: public jsg::Object {
 public:
-  CacheStorage();
+  CacheStorage(jsg::Lock& js);
 
   jsg::Promise<jsg::Ref<Cache>> open(jsg::Lock& js, kj::String cacheName);
 

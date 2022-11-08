@@ -52,7 +52,7 @@ public:
   Headers(Headers&&) = delete;
   Headers& operator=(Headers&&) = delete;
 
-  jsg::Ref<Headers> clone() const;
+  jsg::Ref<Headers> clone(jsg::Lock& js) const;
   // Make a copy of this Headers object, and preserve the guard. The normal copy constructor sets
   // the copy's guard to NONE.
 

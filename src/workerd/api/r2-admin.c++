@@ -13,7 +13,7 @@
 
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
-  return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(bucketName),
+  return JSG_ALLOC(js, R2Bucket, featureFlags, subrequestChannel, kj::mv(bucketName),
       R2Bucket::friend_tag_t{});
 }
 
@@ -37,11 +37,11 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
                                     kj::mv(requestJson), nullptr);
 
-  return context.awaitIo(kj::mv(promise),
+  return context.awaitIo(js, kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType]
-      (R2Result r2Result) mutable {
+      (jsg::Lock& js, R2Result r2Result) mutable {
     r2Result.throwIfError("createBucket", errorType);
-    return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(name),
+    return JSG_ALLOC(js, R2Bucket, featureFlags, subrequestChannel, kj::mv(name),
         R2Bucket::friend_tag_t{});
   });
 }
@@ -90,7 +90,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 
     auto buckets = v8::Map::New(isolate);
     for(auto b: responseBuilder.getBuckets()) {
-      auto bucket = jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel,
+      auto bucket = JSG_ALLOC(js, RetrievedBucket, featureFlags, subrequestChannel,
           kj::str(b.getName()),
           kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
       jsg::check(buckets->Set(

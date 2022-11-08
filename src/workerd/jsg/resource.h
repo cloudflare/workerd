@@ -41,7 +41,11 @@ constexpr bool resourceNeedsGcTracing<Object>() {
 }
 
 template <typename T>
+#ifdef WORKERD_USE_OILPAN
+inline void visitSubclassForGc(const T* obj, GcVisitor& visitor) {
+#else
 inline void visitSubclassForGc(T* obj, GcVisitor& visitor) {
+#endif
   // Call obj->visitForGc() if and only if T defines its own `visitForGc()` method -- do not call
   // the parent class's `visitForGc()`.
   if constexpr (&T::visitForGc != &T::jsgSuper::visitForGc) {
@@ -922,7 +926,8 @@ public:
     v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
     auto global = context->Global();
 
-    auto ptr = jsg::alloc<T>(kj::fwd<Args>(args)...);
+    auto ptr = JSG_ALLOC(jsg::Lock::from(isolate), T, kj::fwd<Args>(args)...);
+
     if constexpr (T::jsgHasReflection) {
       ptr->jsgInitReflection(static_cast<TypeWrapper&>(*this));
     }

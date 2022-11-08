@@ -415,7 +415,8 @@ Decoder& TextDecoder::getImpl() {
 }
 
 jsg::Ref<TextDecoder>
-TextDecoder::constructor(jsg::Optional<kj::String> maybeLabel,
+TextDecoder::constructor(jsg::Lock& js,
+                         jsg::Optional<kj::String> maybeLabel,
                          jsg::Optional<ConstructorOptions> maybeOptions) {
   static constexpr ConstructorOptions DEFAULT_OPTIONS;
   auto options = maybeOptions.orDefault(DEFAULT_OPTIONS);
@@ -435,10 +436,10 @@ TextDecoder::constructor(jsg::Optional<kj::String> maybeLabel,
   }
 
   if (encoding == Encoding::Windows_1252) {
-    return jsg::alloc<TextDecoder>(AsciiDecoder(), options);
+    return JSG_ALLOC(js, TextDecoder, AsciiDecoder(), options);
   }
 
-  return jsg::alloc<TextDecoder>(
+  return JSG_ALLOC(js, TextDecoder,
       JSG_REQUIRE_NONNULL(IcuDecoder::create(encoding, options.fatal, options.ignoreBOM),
                            RangeError,
                            errorMessage(getEncodingId(encoding))),
@@ -479,8 +480,8 @@ kj::Maybe<v8::Local<v8::String>> TextDecoder::decodePtr(
 // =======================================================================================
 // TextEncoder implementation
 
-jsg::Ref<TextEncoder> TextEncoder::constructor() {
-  return jsg::alloc<TextEncoder>();
+jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
+  return JSG_ALLOC(js, TextEncoder);
 }
 
 v8::Local<v8::Uint8Array> TextEncoder::encode(jsg::Optional<v8::Local<v8::String>> input,

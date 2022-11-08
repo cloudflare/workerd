@@ -14,10 +14,10 @@
 
 namespace workerd::api {
 
-TraceEvent::TraceEvent(kj::ArrayPtr<kj::Own<Trace>> traces)
+TraceEvent::TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<Trace>> traces)
     : ExtendableEvent("trace"),
       traces(KJ_MAP(t, traces) -> jsg::Ref<TraceItem> {
-        return jsg::alloc<TraceItem>(kj::addRef(*t));
+        return JSG_ALLOC(js, TraceItem, kj::addRef(*t));
       }) {}
 
 kj::Array<jsg::Ref<TraceItem>> TraceEvent::getTraces() {
@@ -26,17 +26,18 @@ kj::Array<jsg::Ref<TraceItem>> TraceEvent::getTraces() {
 
 TraceItem::TraceItem(kj::Own<Trace> trace) : trace(kj::mv(trace)) {}
 
-kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent() {
+kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
   KJ_IF_MAYBE(e, trace->eventInfo) {
     KJ_SWITCH_ONEOF(*e) {
       KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
-        return kj::Maybe(jsg::alloc<FetchEventInfo>(kj::addRef(*trace), fetch, trace->fetchResponseInfo));
+        return kj::Maybe(JSG_ALLOC(js, FetchEventInfo, kj::addRef(*trace),
+                                   fetch, trace->fetchResponseInfo));
       }
       KJ_CASE_ONEOF(scheduled, Trace::ScheduledEventInfo) {
-        return kj::Maybe(jsg::alloc<ScheduledEventInfo>(kj::addRef(*trace), scheduled));
+        return kj::Maybe(JSG_ALLOC(js, ScheduledEventInfo, kj::addRef(*trace), scheduled));
       }
       KJ_CASE_ONEOF(alarm, Trace::AlarmEventInfo) {
-        return kj::Maybe(jsg::alloc<AlarmEventInfo>(kj::addRef(*trace), alarm));
+        return kj::Maybe(JSG_ALLOC(js, AlarmEventInfo, kj::addRef(*trace), alarm));
       }
     }
   }
@@ -55,15 +56,15 @@ kj::Maybe<double> TraceItem::getEventTimestamp() {
   }
 }
 
-kj::Array<jsg::Ref<TraceLog>> TraceItem::getLogs() {
+kj::Array<jsg::Ref<TraceLog>> TraceItem::getLogs(jsg::Lock& js) {
   return KJ_MAP(x, trace->logs) -> jsg::Ref<TraceLog> {
-    return jsg::alloc<TraceLog>(kj::addRef(*trace), x);
+    return JSG_ALLOC(js, TraceLog, kj::addRef(*trace), x);
   };
 }
 
-kj::Array<jsg::Ref<TraceException>> TraceItem::getExceptions() {
+kj::Array<jsg::Ref<TraceException>> TraceItem::getExceptions(jsg::Lock& js) {
   return KJ_MAP(x, trace->exceptions) -> jsg::Ref<TraceException> {
-    return jsg::alloc<TraceException>(kj::addRef(*trace), x);
+    return JSG_ALLOC(js, TraceException, kj::addRef(*trace), x);
   };
 }
 
@@ -79,13 +80,14 @@ TraceItem::FetchEventInfo::FetchEventInfo(kj::Own<Trace> trace, const Trace::Fet
                                           kj::Maybe<const Trace::FetchResponseInfo&> responseInfo)
     : trace(kj::mv(trace)), eventInfo(eventInfo), responseInfo(responseInfo) {}
 
-jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::getRequest() {
-  return jsg::alloc<Request>(kj::addRef(*trace), eventInfo);
+jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::getRequest(jsg::Lock& js) {
+  return JSG_ALLOC(js, Request, kj::addRef(*trace), eventInfo);
 }
 
-jsg::Optional<jsg::Ref<TraceItem::FetchEventInfo::Response>> TraceItem::FetchEventInfo::getResponse() {
+jsg::Optional<jsg::Ref<TraceItem::FetchEventInfo::Response>>
+TraceItem::FetchEventInfo::getResponse(jsg::Lock& js) {
   KJ_IF_MAYBE(response, responseInfo) {
-    return jsg::alloc<Response>(kj::addRef(*trace), *response);
+    return JSG_ALLOC(js, Response, kj::addRef(*trace), *response);
   } else {
     return nullptr;
   }
@@ -141,8 +143,9 @@ kj::String TraceItem::FetchEventInfo::Request::getUrl() {
   return (redacted ? redactUrl(url) : kj::str(url));
 }
 
-jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request::getUnredacted() {
-  auto request = jsg::alloc<Request>(kj::addRef(*trace), eventInfo);
+jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request::getUnredacted(
+    jsg::Lock& js) {
+  auto request = JSG_ALLOC(js, Request, kj::addRef(*trace), eventInfo);
   request->redacted = false;
   return kj::mv(request);
 }
@@ -235,8 +238,8 @@ kj::StringPtr TraceException::getName() {
 
 TraceMetrics::TraceMetrics(uint cpuTime, uint wallTime) : cpuTime(cpuTime), wallTime(wallTime) {}
 
-jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Ref<TraceItem> item) {
-  return jsg::alloc<TraceMetrics>(item->getCpuTime(), item->getWallTime());
+jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Lock& js, jsg::Ref<TraceItem> item) {
+  return JSG_ALLOC(js, TraceMetrics, item->getCpuTime(), item->getWallTime());
 }
 
 namespace {

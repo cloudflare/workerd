@@ -72,8 +72,8 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     reportError(js, kj::mv(e));
 
     dispatchEventImpl(js,
-        jsg::alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"),
-                                false));
+        JSG_ALLOC(js, CloseEvent, 1006, kj::str("Failed to establish websocket connection"),
+                  false));
   });
   // Note that in this attach we pass a strong reference to the WebSocket. The reference will be
   // dropped when either the connection promise completes or the IoContext is torn down,
@@ -185,7 +185,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   }
 
   auto connUrl = urlRecord.toString();
-  auto ws = jsg::alloc<WebSocket>(kj::mv(url), Locality::REMOTE);
+  auto ws = JSG_ALLOC(js, WebSocket, kj::mv(url), Locality::REMOTE);
 
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
@@ -401,7 +401,7 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
     KJ_IF_MAYBE(e, maybeError) {
       if (!native.closedIncoming && e->getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
-        dispatchEventImpl(js, jsg::alloc<CloseEvent>(
+        dispatchEventImpl(js, JSG_ALLOC(js, CloseEvent,
             1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
         if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
@@ -558,7 +558,7 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
 }
 
 void WebSocket::dispatchOpen(jsg::Lock& js) {
-  dispatchEventImpl(js, jsg::alloc<Event>("open"));
+  dispatchEventImpl(js, JSG_ALLOC(js, Event, "open"));
 }
 
 void WebSocket::ensurePumping(jsg::Lock& js) {
@@ -689,15 +689,16 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
       auto& native = *farNative;
       KJ_SWITCH_ONEOF(message) {
         KJ_CASE_ONEOF(text, kj::String) {
-          dispatchEventImpl(lock, jsg::alloc<MessageEvent>(isolate, lock.wrapString(text)));
+          dispatchEventImpl(lock, JSG_ALLOC(lock, MessageEvent, isolate, lock.wrapString(text)));
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           dispatchEventImpl(lock,
-              jsg::alloc<MessageEvent>(isolate, lock.wrapBytes(kj::mv(data))));
+              JSG_ALLOC(lock, MessageEvent, isolate, lock.wrapBytes(kj::mv(data))));
         }
         KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
           native.closedIncoming = true;
-          dispatchEventImpl(lock, jsg::alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
+          dispatchEventImpl(lock, JSG_ALLOC(lock, CloseEvent, close.code,
+                                            kj::mv(close.reason), true));
           if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
             // Native WebSocket no longer needed; release.
             KJ_ASSERT(native.state.is<Accepted>());
@@ -712,11 +713,11 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
   });
 }
 
-jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
+jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
   auto pipe = kj::newWebSocketPipe();
-  return jsg::alloc<WebSocketPair>(
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[0]), WebSocket::LOCAL),
-      jsg::alloc<WebSocket>(kj::mv(pipe.ends[1]), WebSocket::LOCAL));
+  return JSG_ALLOC(js, WebSocketPair,
+      JSG_ALLOC(js, WebSocket, kj::mv(pipe.ends[0]), WebSocket::LOCAL),
+      JSG_ALLOC(js, WebSocket, kj::mv(pipe.ends[1]), WebSocket::LOCAL));
 }
 
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
@@ -734,7 +735,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::Value err) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
-    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(kj::mv(msg), kj::mv(err), js.v8Isolate));
+    dispatchEventImpl(js, JSG_ALLOC(js, ErrorEvent, kj::mv(msg), kj::mv(err), js.v8Isolate));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag

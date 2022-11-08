@@ -31,17 +31,21 @@ public:
 
   typedef kj::Array<kj::OneOf<kj::Array<const byte>, kj::String, jsg::Ref<Blob>>> Bits;
 
-  static jsg::Ref<Blob> constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options);
+  static jsg::Ref<Blob> constructor(jsg::Lock& js,
+                                    jsg::Optional<Bits> bits,
+                                    jsg::Optional<Options> options);
 
   int getSize() { return data.size(); }
   kj::StringPtr getType() { return type; }
 
-  jsg::Ref<Blob> slice(jsg::Optional<int> start, jsg::Optional<int> end,
-                        jsg::Optional<kj::String> type);
+  jsg::Ref<Blob> slice(jsg::Lock& js,
+                       jsg::Optional<int> start,
+                       jsg::Optional<int> end,
+                      jsg::Optional<kj::String> type);
 
   jsg::Promise<kj::Array<kj::byte>> arrayBuffer(v8::Isolate* isolate);
   jsg::Promise<kj::String> text(v8::Isolate* isolate);
-  jsg::Ref<ReadableStream> stream(v8::Isolate* isolate);
+  jsg::Ref<ReadableStream> stream(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
@@ -86,8 +90,10 @@ public:
     JSG_STRUCT(type, lastModified, endings);
   };
 
-  static jsg::Ref<File> constructor(jsg::Optional<Bits> bits,
-      kj::String name, jsg::Optional<Options> options);
+  static jsg::Ref<File> constructor(jsg::Lock& js,
+                                    jsg::Optional<Bits> bits,
+                                    kj::String name,
+                                    jsg::Optional<Options> options);
 
   kj::StringPtr getName() { return name; }
   double getLastModified() { return lastModified; }

@@ -370,9 +370,9 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<CompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+  return JSG_ALLOC(js, CompressionStream,
+    JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(readableSide)),
+    JSG_ALLOC(js, WritableStream, ioContext, kj::mv(writableSide)));
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(
@@ -386,9 +386,9 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<DecompressionStream>(
-    jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-    jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+  return JSG_ALLOC(js, DecompressionStream,
+    JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(readableSide)),
+    JSG_ALLOC(js, WritableStream, ioContext, kj::mv(writableSide)));
 }
 
 }  // namespace workerd::api

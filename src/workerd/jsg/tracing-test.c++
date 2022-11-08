@@ -20,8 +20,8 @@ public:
 
   Ref<NumberBox> inner;
 
-  static Ref<NumberBoxHolder> constructor(Ref<NumberBox> inner) {
-    return jsg::alloc<NumberBoxHolder>(kj::mv(inner));
+  static Ref<NumberBoxHolder> constructor(jsg::Lock& js, Ref<NumberBox> inner) {
+    return JSG_ALLOC(js, NumberBoxHolder, kj::mv(inner));
   }
 
   Ref<NumberBox> getInner() { return inner.addRef(); }

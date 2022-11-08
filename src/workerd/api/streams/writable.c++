@@ -23,7 +23,7 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
     jsg::Ref<WritableStream> stream) {
   JSG_REQUIRE(!stream->isLocked(), TypeError,
                "This WritableStream is currently locked to a writer.");
-  auto writer = jsg::alloc<WritableStreamDefaultWriter>();
+  auto writer = JSG_ALLOC(js, WritableStreamDefaultWriter);
   writer->lockToStream(js, *stream);
   return kj::mv(writer);
 }
@@ -247,7 +247,7 @@ jsg::Ref<WritableStream> WritableStream::constructor(
                "To use the new WritableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
 
-  auto stream = jsg::alloc<WritableStream>(kj::heap<WritableStreamJsController>());
+  auto stream = JSG_ALLOC(js, WritableStream, kj::heap<WritableStreamJsController>());
   static_cast<WritableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);

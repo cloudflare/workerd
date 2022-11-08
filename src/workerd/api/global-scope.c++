@@ -134,11 +134,13 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
   }
 
-  auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
+  jsg::Lock& js = lock;
+
+  auto jsHeaders = JSG_ALLOC(js, Headers, headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
   auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-  auto jsStream = jsg::alloc<ReadableStream>(ioContext, kj::mv(b));
+  auto jsStream = JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(b));
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -167,16 +169,15 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     body = Body::ExtractedBody(jsStream.addRef());
   }
 
-  auto jsRequest = jsg::alloc<Request>(
+  auto jsRequest = JSG_ALLOC(js, Request,
       method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-      jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL,
-                           Fetcher::RequiresHostAndProtocol::YES),
+      JSG_ALLOC(js, Fetcher, IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
       nullptr /** AbortSignal **/, kj::mv(cf), kj::mv(body));
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
-  auto event = jsg::alloc<FetchEvent>(kj::mv(jsRequest));
+  auto event = JSG_ALLOC(js, FetchEvent, kj::mv(jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
 
@@ -283,11 +284,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   }
 }
 
-void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
-    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+void ServiceWorkerGlobalScope::sendTraces(
+    kj::ArrayPtr<kj::Own<Trace>> traces,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
   auto isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
 
-  auto event = jsg::alloc<TraceEvent>(traces);
+  auto event = JSG_ALLOC(js, TraceEvent, js, traces);
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->trace) {
@@ -310,18 +314,20 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
 void ServiceWorkerGlobalScope::startScheduled(
     kj::Date scheduledTime,
     kj::StringPtr cron,
-    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
   auto& context = IoContext::current();
 
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
-  auto event = jsg::alloc<ScheduledEvent>(eventTime, cron);
-
   auto isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
+
+  auto event = JSG_ALLOC(js, ScheduledEvent, eventTime, cron);
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->scheduled) {
-      auto promise = (*f)(lock, jsg::alloc<ScheduledController>(event.addRef()),
+      auto promise = (*f)(lock, JSG_ALLOC(js, ScheduledController, event.addRef()),
                           h->env.addRef(isolate), h->getCtx(isolate));
       event->waitUntil(kj::mv(promise));
     } else {

@@ -161,7 +161,7 @@ jsg::Ref<ReadableStreamDefaultReader> ReadableStreamDefaultReader::constructor(
     jsg::Ref<ReadableStream> stream) {
   JSG_REQUIRE(!stream->isLocked(), TypeError,
                 "This ReadableStream is currently locked to a reader.");
-  auto reader = jsg::alloc<ReadableStreamDefaultReader>();
+  auto reader = JSG_ALLOC(js, ReadableStreamDefaultReader);
   reader->lockToStream(js, *stream);
   return kj::mv(reader);
 }
@@ -217,7 +217,7 @@ jsg::Ref<ReadableStreamBYOBReader> ReadableStreamBYOBReader::constructor(
                 "This ReadableStream does not support BYOB reads.");
   }
 
-  auto reader = jsg::alloc<ReadableStreamBYOBReader>();
+  auto reader = JSG_ALLOC(js, ReadableStreamBYOBReader);
   reader->lockToStream(js, *stream);
   return kj::mv(reader);
 }
@@ -351,7 +351,7 @@ jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js,
     jsg::Optional<ValuesOptions> options) {
   static auto defaultOptions = ValuesOptions {};
-  return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState {
+  return JSG_ALLOC(js, ReadableStreamAsyncIterator, AsyncIteratorState {
     .reader = ReadableStreamDefaultReader::constructor(js, JSG_THIS),
     .preventCancel = options.orDefault(defaultOptions).preventCancel.orDefault(false)
   });
@@ -453,7 +453,7 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
 
-  auto stream = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>());
+  auto stream = JSG_ALLOC(js, ReadableStream, kj::heap<ReadableStreamJsController>());
   static_cast<ReadableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);

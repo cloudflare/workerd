@@ -69,8 +69,11 @@ template <typename T>
 concept HeadResultT = std::is_base_of_v<R2Bucket::HeadResult, T>;
 
 template <HeadResultT T, typename... Args>
-static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
-    kj::ArrayPtr<const OptionalMetadata> expectedOptionalFields, Args&&... args) {
+static jsg::Ref<T> parseObjectMetadata(
+    jsg::Lock& js,
+    R2HeadResponse::Reader responseReader,
+    kj::ArrayPtr<const OptionalMetadata> expectedOptionalFields,
+    Args&&... args) {
   // optionalFieldsExpected is initialized by default to HTTP + CUSTOM if the user doesn't specify
   // anything. If they specify the empty array, then nothing is returned.
   kj::Date uploaded =
@@ -134,7 +137,8 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     };
   }
 
-  jsg::Ref<R2Bucket::Checksums> checksums = jsg::alloc<R2Bucket::Checksums>(nullptr, nullptr, nullptr, nullptr, nullptr);
+  jsg::Ref<R2Bucket::Checksums> checksums =
+      JSG_ALLOC(js, R2Bucket::Checksums, nullptr, nullptr, nullptr, nullptr, nullptr);
 
   if (responseReader.hasChecksums()) {
     R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
@@ -155,15 +159,19 @@ static jsg::Ref<T> parseObjectMetadata(R2HeadResponse::Reader responseReader,
     }
   }
 
-  return jsg::alloc<T>(kj::str(responseReader.getName()),
+  return JSG_ALLOC(js, T, kj::str(responseReader.getName()),
       kj::str(responseReader.getVersion()), responseReader.getSize(),
       kj::str(responseReader.getEtag()), kj::mv(checksums), uploaded, kj::mv(httpMetadata),
       kj::mv(customMetadata), range, kj::fwd<Args>(args)...);
 }
 
 template <HeadResultT T, typename... Args>
-static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(kj::StringPtr action, R2Result& r2Result,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, Args&&... args) {
+static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(
+    jsg::Lock& js,
+    kj::StringPtr action,
+    R2Result& r2Result,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+    Args&&... args) {
   if (r2Result.objectNotFound()) {
     return nullptr;
   }
@@ -184,7 +192,7 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(kj::StringPtr action, R2Result
   auto responseBuilder = responseMessage.initRoot<R2HeadResponse>();
   json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
 
-  return parseObjectMetadata<T>(responseBuilder, expectedFields, kj::fwd<Args>(args)...);
+  return parseObjectMetadata<T>(js, responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
 template <typename Builder, typename Options>
@@ -300,8 +308,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(
     auto bucket = adminBucket.map([](const auto& b) { return kj::str(b); });
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), kj::mv(bucket));
 
-    return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) {
-      return parseObjectMetadata<HeadResult>("head", r2Result, errorType);
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType](jsg::Lock& js, R2Result r2Result) {
+      return parseObjectMetadata<HeadResult>(js, "head", r2Result, errorType);
     });
   });
 }
@@ -336,20 +345,21 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
     auto bucket = adminBucket.map([](const auto& b) { return kj::str(b); });
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), kj::mv(bucket));
 
-    return context.awaitIo(kj::mv(promise), [&context, &errorType](R2Result r2Result)
+    return context.awaitIo(js, kj::mv(promise),
+        [&context, &errorType](jsg::Lock& js, R2Result r2Result)
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
       if (r2Result.preconditionFailed()) {
-        result = KJ_ASSERT_NONNULL(parseObjectMetadata<HeadResult>("get", r2Result, errorType));
+        result = KJ_ASSERT_NONNULL(parseObjectMetadata<HeadResult>(js, "get", r2Result, errorType));
       } else {
         jsg::Ref<ReadableStream> body = nullptr;
 
         KJ_IF_MAYBE (s, r2Result.stream) {
-          body = jsg::alloc<ReadableStream>(context, kj::mv(*s));
+          body = JSG_ALLOC(js, ReadableStream, context, kj::mv(*s));
           r2Result.stream = nullptr;
         }
-        result = parseObjectMetadata<GetResult>("get", r2Result, errorType, kj::mv(body));
+        result = parseObjectMetadata<GetResult>(js, "get", r2Result, errorType, kj::mv(body));
       }
       return result;
     });
@@ -878,7 +888,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     kj::String contentType = KJ_REQUIRE_NONNULL(httpMetadata).contentType
         .map([](const auto& str) { return kj::str(str); })
         .orDefault(nullptr);
-    return jsg::alloc<Blob>(kj::mv(buffer), kj::mv(contentType));
+    return JSG_ALLOC(js, Blob, kj::mv(buffer), kj::mv(contentType));
   });
 }
 

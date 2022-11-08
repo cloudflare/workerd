@@ -8,14 +8,6 @@
 
 namespace workerd::api {
 
-namespace {
-class TextEncoderStreamController: public kj::Refcounted {
-public:
-private:
-  jsg::Ref<TextEncoder> encoder = jsg::alloc<TextEncoder>();
-};
-}  // namespace
-
 jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(
     jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
@@ -48,7 +40,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(
     StreamQueuingStrategy {},
     kj::mv(flags));
 
-  return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
+  return JSG_ALLOC(js, TextEncoderStream, transformer->getReadable(), transformer->getWritable());
 }
 
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
@@ -93,7 +85,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     StreamQueuingStrategy {},
     kj::mv(flags));
 
-  return jsg::alloc<TextDecoderStream>(transformer->getReadable(), transformer->getWritable());
+  return JSG_ALLOC(js, TextDecoderStream, transformer->getReadable(), transformer->getWritable());
 }
 
 }  // namespace workerd::api

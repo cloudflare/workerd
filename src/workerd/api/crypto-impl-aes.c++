@@ -665,6 +665,7 @@ CryptoKeyUsageSet validateAesUsages(CryptoKeyUsageSet::Context ctx, kj::StringPt
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
+      jsg::Lock& js,
       kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages) {
@@ -702,7 +703,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
     JSG_FAIL_REQUIRE(DOMNotSupportedError, normalizedName, " key generation not supported.");
   }
 
-  return jsg::alloc<CryptoKey>(kj::mv(keyImpl));
+  return JSG_ALLOC(js, CryptoKey, kj::mv(keyImpl));
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(

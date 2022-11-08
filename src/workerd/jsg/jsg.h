@@ -149,6 +149,23 @@ private:
 // =======================================================================================
 // Macros for declaring type glue.
 
+#ifdef WORKERD_USE_OILPAN
+#define JSG_RESOURCE_TYPE(Type, ...) \
+  static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
+      ::workerd::jsg::JsgKind::RESOURCE; \
+  using jsgSuper = jsgThis; \
+  using jsgThis = Type; \
+  template <typename T> \
+  friend void ::workerd::jsg::visitSubclassForGc( \
+      const T* obj, ::workerd::jsg::GcVisitor& visitor); \
+  inline void jsgTrace(::workerd::jsg::GcVisitor& visitor) const override { \
+    jsgSuper::jsgTrace(visitor); \
+    ::workerd::jsg::visitSubclassForGc<Type>(this, visitor); \
+  } \
+  static void jsgConfiguration(__VA_ARGS__); \
+  template <typename Registry, typename Self> \
+  static void registerMembers(Registry& registry, ##__VA_ARGS__)
+#else
 #define JSG_RESOURCE_TYPE(Type, ...) \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = \
       ::workerd::jsg::JsgKind::RESOURCE; \
@@ -166,6 +183,7 @@ private:
   static void jsgConfiguration(__VA_ARGS__); \
   template <typename Registry, typename Self> \
   static void registerMembers(Registry& registry, ##__VA_ARGS__)
+#endif
 // Begins a block nested inside a C++ class to declare how that class should be accessible in
 // JavaScript. JSG_RESOURCE_TYPE declares that the class is a "resource type" in KJ parlance.
 //
@@ -987,8 +1005,13 @@ private:
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
   friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
+#ifdef WORKERD_USE_OILPAN
+  template <typename T>
+  friend void visitSubclassForGc(const T* obj, GcVisitor& visitor);
+#else
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
+#endif
   template <typename T>
   friend class Ref;
   friend class kj::Refcounted;
@@ -1259,8 +1282,10 @@ private:
 
   template <typename>
   friend class Ref;
+#ifndef WORKERD_USE_OILPAN
   template <typename U, typename... Params>
   friend Ref<U> alloc(Params&&... params);
+#endif
   template <typename U>
   friend Ref<U> _jsgThis(U* obj);
   template <typename, typename>
@@ -1275,7 +1300,7 @@ private:
 
 #ifdef WORKERD_USE_OILPAN
 
-template <typename T, typename = kj::EnableIf<kj::canConvert<T&, Wrappable&>()>>
+template <typename T>
 Ref<T> _jsgThis(T* ptr) {
   return Ref<T>(cppgc::Persistent<T>(ptr));
 }
@@ -1602,33 +1627,13 @@ public:
   }
 #endif
 
-  void visit(v8::TracedReference<v8::Data> ref) const;
-
-  template <typename T>
-  void visit(kj::Maybe<Ref<T>>& maybeRef) {
-    KJ_IF_MAYBE(ref, maybeRef) {
-      visit(*ref);
-    }
-  }
+  void visit(v8::TracedReference<v8::Data>& ref) const;
 
   void visit(Data& data);
-
-  void visit(kj::Maybe<Data>& maybeData) {
-    KJ_IF_MAYBE(data, maybeData) {
-      visit(*data);
-    }
-  }
 
   template <typename T>
   void visit(V8Ref<T>& value) {
     visit(static_cast<Data&>(value));
-  }
-
-  template <typename T>
-  void visit(kj::Maybe<V8Ref<T>>& maybeValue) {
-    KJ_IF_MAYBE(value, maybeValue) {
-      visit(*value);
-    }
   }
 
   void visit(BufferSource& bufferSource);
@@ -1636,13 +1641,6 @@ public:
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(T& supportsVisit) {
     supportsVisit.visitForGc(*this);
-  }
-
-  template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
-  void visit(kj::Maybe<T>& maybeSupportsVisit) {
-    KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
-      supportsVisit->visitForGc(*this);
-    }
   }
 
   void visit() {}
@@ -1656,6 +1654,33 @@ public:
   void visitAll(auto& collection) {
     for (auto& item : collection) {
       visit(item);
+    }
+  }
+
+  template <typename T>
+  void visit(kj::Maybe<Ref<T>>& maybeRef) {
+    KJ_IF_MAYBE(ref, maybeRef) {
+      visit(*ref);
+    }
+  }
+
+  void visit(kj::Maybe<Data>& maybeData) {
+    KJ_IF_MAYBE(data, maybeData) {
+      visit(*data);
+    }
+  }
+
+  template <typename T>
+  void visit(kj::Maybe<V8Ref<T>>& maybeValue) {
+    KJ_IF_MAYBE(value, maybeValue) {
+      visit(*value);
+    }
+  }
+
+  template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
+  void visit(kj::Maybe<T>& maybeSupportsVisit) {
+    KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
+      supportsVisit->visitForGc(*this);
     }
   }
 
@@ -1953,7 +1978,7 @@ public:
   // ---------------------------------------------------------------------------
   // Allocation-related stuff
 
-  template <typename T, typename... Params, kj::EnableIf<kj::canConvert<T&, Wrappable&>()>>
+  template <typename T, typename... Params>
   Ref<T> alloc(Params&&... params);
 #endif
 
@@ -2143,6 +2168,12 @@ private:
 
   bool warningsLogged;
 };
+
+#ifdef WORKERD_USE_OILPAN
+#define JSG_ALLOC(js, T, ...) js.alloc<T>(__VA_ARGS__)
+#else
+#define JSG_ALLOC(js, T, ...) jsg::alloc<T>(__VA_ARGS__)
+#endif
 
 // =======================================================================================
 // inline implementation details

@@ -1244,6 +1244,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   // Enter/lock isolate.
   Isolate::Impl::Lock recordedLock(*script->isolate, lockType);
   auto& lock = *recordedLock.lock;
+  jsg::Lock& js = lock;
 
   // If we throw an exception, it's important that `impl` is destroyed under lock.
   KJ_ON_SCOPE_FAILURE({
@@ -1375,7 +1376,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               KJ_SWITCH_ONEOF(handler.value) {
                 KJ_CASE_ONEOF(obj, api::ExportedHandler) {
                   obj.env = jsg::Value(lock.v8Isolate, bindingsScope);
-                  obj.ctx = jsg::alloc<api::ExecutionContext>();
+                  obj.ctx = JSG_ALLOC(js, api::ExecutionContext);
 
                   if (handler.name == "default") {
                     // The default export is given the string name "default". I guess that means that
@@ -2685,14 +2686,14 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_MAYBE(cls, impl->classInstance.tryGet<DurableObjectConstructor*>()) {
     context.addWaitUntil(context.run([this, &cls = **cls](Worker::Lock& lock) {
       auto isolate = lock.getIsolate();
-
+      jsg::Lock& js = lock;
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_MAYBE(c, impl->actorCache) {
         storage = impl->makeStorage(lock, *worker->getIsolate().apiIsolate, *c);
       }
       auto handler = cls(lock,
-          jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
-          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(isolate));
+          JSG_ALLOC(js, api::DurableObjectState, cloneId(), kj::mv(storage)),
+                    KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(isolate));
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
       //   constructor, and we want the handler methods to act like they take just one parameter.

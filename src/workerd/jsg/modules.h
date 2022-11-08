@@ -14,7 +14,8 @@ class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
 public:
-  CommonJsModuleObject(v8::Isolate* isolate) : exports(isolate, v8::Object::New(isolate)) {}
+  CommonJsModuleObject(jsg::Lock& js)
+      : exports(js.v8Ref(v8::Object::New(js.v8Isolate).As<v8::Value>())) {}
 
   v8::Local<v8::Value> getExports(v8::Isolate* isolate) { return exports.getHandle(isolate); }
   void setExports(jsg::Value value) { exports = kj::mv(value); }
@@ -28,9 +29,9 @@ private:
 
 class CommonJsModuleContext: public jsg::Object {
 public:
-  CommonJsModuleContext(v8::Isolate* isolate, kj::Path path)
-      : module(jsg::alloc<CommonJsModuleObject>(isolate)), path(kj::mv(path)),
-      exports(isolate, module->getExports(isolate)) {}
+  CommonJsModuleContext(jsg::Lock& js, kj::Path path)
+      : module(JSG_ALLOC(js, CommonJsModuleObject, js)), path(kj::mv(path)),
+      exports(js.v8Ref(module->getExports(js.v8Isolate))) {}
 
   v8::Local<v8::Value> require(kj::String specifier, v8::Isolate* isolate);
 

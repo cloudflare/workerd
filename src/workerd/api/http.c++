@@ -134,8 +134,8 @@ Headers::Headers(const kj::HttpHeaders& other, Guard guard)
   this->guard = guard;
 }
 
-jsg::Ref<Headers> Headers::clone() const {
-  auto result = jsg::alloc<Headers>(*this);
+jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
+  auto result = JSG_ALLOC(js, Headers, *this);
   result->guard = guard;
   return kj::mv(result);
 }
@@ -177,10 +177,10 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
   KJ_IF_MAYBE(i, init) {
     KJ_SWITCH_ONEOF(kj::mv(*i)) {
       KJ_CASE_ONEOF(dict, StringDict) {
-        return jsg::alloc<Headers>(kj::mv(dict));
+        return JSG_ALLOC(js, Headers, kj::mv(dict));
       }
       KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
-        return jsg::alloc<Headers>(*headers);
+        return JSG_ALLOC(js, Headers, *headers);
         // It's important to note here that we are treating the Headers object
         // as a special case here. Per the fetch spec, we *should* be grabbing
         // the Symbol.iterator off the Headers object and interpreting it as
@@ -208,12 +208,12 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
                        "must have exactly two elements.");
           return StringDict::Field{kj::mv(entry[0]), kj::mv(entry[1])};
         };
-        return jsg::alloc<Headers>(StringDict{kj::mv(dict)});
+        return JSG_ALLOC(js, Headers, StringDict{kj::mv(dict)});
       }
     }
   }
 
-  return jsg::alloc<Headers>();
+  return JSG_ALLOC(js, Headers);
 }
 
 kj::Maybe<jsg::ByteString> Headers::get(jsg::ByteString name) {
@@ -303,20 +303,20 @@ void Headers::delete_(jsg::ByteString name) {
 //   applied to the header map elements? We'd still copy the whole data structure to avoid iterator
 //   invalidation, but the elements would be cheaper to copy.
 
-jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> { getDisplayedHeaders() });
+jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock& js) {
+  return JSG_ALLOC(js, EntryIterator, IteratorState<DisplayedHeader> { getDisplayedHeaders() });
 }
-jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock&) {
+jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
   auto keysCopy = KJ_MAP(mapEntry, headers) {
     return jsg::ByteString(kj::str(mapEntry.second.key));
   };
-  return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
+  return JSG_ALLOC(js, KeyIterator, IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
 }
-jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock&) {
+jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
   auto valuesCopy = KJ_MAP(mapEntry, headers) {
     return jsg::ByteString(kj::strArray(mapEntry.second.values, ", "));
   };
-  return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> { kj::mv(valuesCopy) });
+  return JSG_ALLOC(js, ValueIterator, IteratorState<jsg::ByteString> { kj::mv(valuesCopy) });
 }
 
 void Headers::forEach(
@@ -477,7 +477,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   auto bodyStream = kj::heap<BodyBufferInputStream>(buffer.clone(js));
 
   return {
-    jsg::alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)),
+    JSG_ALLOC(js, ReadableStream, IoContext::current(), kj::mv(bodyStream)),
     kj::mv(buffer),
     kj::mv(contentType)
   };
@@ -530,7 +530,7 @@ void Body::rewindBody(jsg::Lock& js) {
   KJ_IF_MAYBE(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i->buffer).clone(js);
     auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(bufferCopy));
-    i->stream = jsg::alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream));
+    i->stream = JSG_ALLOC(js, ReadableStream, IoContext::current(), kj::mv(bodyStream));
   }
 }
 
@@ -613,7 +613,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<FormData>> Body::formData(
     jsg::Lock& js, CompatibilityFlags::Reader featureFlags) {
-  auto formData = jsg::alloc<FormData>();
+  auto formData = JSG_ALLOC(js, FormData);
 
   return js.evalNow([&] {
     JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
@@ -655,12 +655,12 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then([this](kj::Array<byte> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock& js, kj::Array<byte> buffer) {
     kj::String contentType =
         headersRef.get(jsg::ByteString(kj::str("Content-Type")))
             .map([](jsg::ByteString&& b) -> kj::String { return kj::mv(b); })
             .orDefault(nullptr);
-    return jsg::alloc<Blob>(kj::mv(buffer), kj::mv(contentType));
+    return JSG_ALLOC(js, Blob, kj::mv(buffer), kj::mv(contentType));
   });
 }
 
@@ -736,7 +736,7 @@ jsg::Ref<Request> Request::constructor(
       jsg::Ref<Request> oldRequest = kj::mv(r);
       url = kj::str(oldRequest->getUrl());
       method = oldRequest->method;
-      headers = jsg::alloc<Headers>(*oldRequest->headers);
+      headers = JSG_ALLOC(js, Headers, *oldRequest->headers);
       KJ_IF_MAYBE(oldCf, oldRequest->getCf(js)) {
         cf = js.v8Ref(*oldCf).deepClone(js);
       }
@@ -746,9 +746,10 @@ jsg::Ref<Request> Request::constructor(
         KJ_IF_MAYBE(oldJsBody, oldRequest->getBody()) {
           auto oldNativeBody = (*oldJsBody)->removeSource(js);
           body = Body::ExtractedBody(
-              jsg::alloc<ReadableStream>(IoContext::current(),
-                                          kj::mv(oldNativeBody)),
-                                          oldRequest->getBodyBuffer(js));
+              JSG_ALLOC(js, ReadableStream,
+                  IoContext::current(),
+                  kj::mv(oldNativeBody)),
+                  oldRequest->getBodyBuffer(js));
         }
       }
       redirect = oldRequest->getRedirectEnum();
@@ -834,7 +835,7 @@ jsg::Ref<Request> Request::constructor(
         redirect = otherRequest->redirect;
         fetcher = otherRequest->getFetcher();
         signal = otherRequest->getSignal();
-        headers = jsg::alloc<Headers>(*otherRequest->headers);
+        headers = JSG_ALLOC(js, Headers, *otherRequest->headers);
         KJ_IF_MAYBE(otherCf, otherRequest->cf) {
           cf = otherCf->deepClone(js);
         }
@@ -849,13 +850,15 @@ jsg::Ref<Request> Request::constructor(
   }
 
   if (headers == nullptr) {
-    headers = jsg::alloc<Headers>();
+    headers = JSG_ALLOC(js, Headers);
   }
 
   // TODO(conform): If `init` has a keepalive flag, pass it to the Body constructor.
-  return jsg::alloc<Request>(method, url, redirect,
-                 KJ_ASSERT_NONNULL(kj::mv(headers)), kj::mv(fetcher), kj::mv(signal),
-                 kj::mv(cf), kj::mv(body));
+  return JSG_ALLOC(js, Request, method, url, redirect,
+                   KJ_ASSERT_NONNULL(kj::mv(headers)),
+                   kj::mv(fetcher),
+                   kj::mv(signal),
+                   kj::mv(cf), kj::mv(body));
 }
 
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
@@ -867,7 +870,7 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
 
   auto bodyClone = Body::clone(js);
 
-  return jsg::alloc<Request>(
+  return JSG_ALLOC(js, Request,
       method, url, redirect, kj::mv(headersClone), getFetcher(), getSignal(),
       kj::mv(cfClone), kj::mv(bodyClone));
 }
@@ -920,7 +923,7 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
   KJ_IF_MAYBE(s, thisSignal) {
     return s->addRef();
   }
-  auto newSignal = jsg::alloc<AbortSignal>(nullptr, nullptr, AbortSignal::Flag::NEVER_ABORTS);
+  auto newSignal = JSG_ALLOC(js, AbortSignal, nullptr, nullptr, AbortSignal::Flag::NEVER_ABORTS);
   thisSignal = newSignal.addRef();
   return newSignal;
 }
@@ -985,7 +988,7 @@ jsg::Ref<Response> Response::constructor(
       KJ_IF_MAYBE(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(*initHeaders));
       } else {
-        headers = jsg::alloc<Headers>(jsg::Dict<jsg::ByteString, jsg::ByteString>());
+        headers = JSG_ALLOC(js, Headers, jsg::Dict<jsg::ByteString, jsg::ByteString>());
       }
 
       KJ_IF_MAYBE(c, initDict.cf) {
@@ -1006,7 +1009,7 @@ jsg::Ref<Response> Response::constructor(
       statusCode = otherResponse->statusCode;
       bodyEncoding = otherResponse->bodyEncoding;
       statusText = kj::str(otherResponse->statusText);
-      headers = jsg::alloc<Headers>(*otherResponse->headers);
+      headers = JSG_ALLOC(js, Headers, *otherResponse->headers);
       KJ_IF_MAYBE(otherCf, otherResponse->cf) {
         cf = otherCf->deepClone(js);
       }
@@ -1087,9 +1090,10 @@ jsg::Ref<Response> Response::constructor(
     }
   }
 
-  return jsg::alloc<Response>(statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)), kj::mv(headers),
-                              kj::mv(cf), kj::mv(body), flags, nullptr, kj::mv(webSocket),
-                              bodyEncoding);
+  return JSG_ALLOC(js, Response, statusCode,
+                   KJ_ASSERT_NONNULL(kj::mv(statusText)), kj::mv(headers),
+                   kj::mv(cf), kj::mv(body), flags, nullptr, kj::mv(webSocket),
+                   bodyEncoding);
 }
 
 jsg::Ref<Response> Response::redirect(
@@ -1117,11 +1121,12 @@ jsg::Ref<Response> Response::redirect(
   // Build our headers object with `Location` set to the parsed URL.
   kj::HttpHeaders kjHeaders(IoContext::current().getHeaderTable());
   kjHeaders.set(kj::HttpHeaderId::LOCATION, kj::mv(parsedUrl));
-  auto headers = jsg::alloc<Headers>(kjHeaders, Headers::Guard::IMMUTABLE);
+  auto headers = JSG_ALLOC(js, Headers, kjHeaders, Headers::Guard::IMMUTABLE);
 
   auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
 
-  return jsg::alloc<Response>(statusCode, kj::str(statusText), kj::mv(headers), nullptr, nullptr, flags);
+  return JSG_ALLOC(js, Response, statusCode, kj::str(statusText),
+                   kj::mv(headers), nullptr, nullptr, flags);
 }
 
 jsg::Ref<Response> Response::json_(
@@ -1154,7 +1159,7 @@ jsg::Ref<Response> Response::json_(
         KJ_IF_MAYBE(headers, dict.headers) {
           dict.headers = maybeSetContentType(Headers::constructor(js, kj::mv(*headers)));
         } else {
-          dict.headers = maybeSetContentType(jsg::alloc<Headers>());
+          dict.headers = maybeSetContentType(JSG_ALLOC(js, Headers));
         }
       }
       KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
@@ -1179,7 +1184,7 @@ jsg::Ref<Response> Response::json_(
     }
   } else {
     maybeInit = InitializerDict {
-      .headers = maybeSetContentType(jsg::alloc<Headers>()),
+      .headers = maybeSetContentType(JSG_ALLOC(js, Headers)),
     };
   }
   kj::String json = js.serializeJson(any);
@@ -1200,7 +1205,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader fla
 
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
-  return jsg::alloc<Response>(
+  return JSG_ALLOC(js, Response,
       statusCode, kj::str(statusText), kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone),
       flags, kj::mv(urlListClone));
 }
@@ -1498,7 +1503,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
               jsRequest->getMethodEnum(), kj::mv(urlList),
               response.statusCode, response.statusText, *response.headers,
               kj::heap<NullInputStream>(),
-              jsg::alloc<WebSocket>(kj::mv(webSocket), WebSocket::REMOTE),
+              JSG_ALLOC(js, WebSocket, kj::mv(webSocket), WebSocket::REMOTE),
               featureFlags,
               Response::BodyEncoding::AUTO,
               kj::mv(signal)));
@@ -1712,7 +1717,7 @@ jsg::Ref<Response> makeHttpResponse(
     CompatibilityFlags::Reader flags,
     Response::BodyEncoding bodyEncoding,
     kj::Maybe<jsg::Ref<AbortSignal>> signal) {
-  auto responseHeaders = jsg::alloc<Headers>(headers, Headers::Guard::RESPONSE);
+  auto responseHeaders = JSG_ALLOC(js, Headers, headers, Headers::Guard::RESPONSE);
   auto& context = IoContext::current();
 
   // The Fetch spec defines responses to HEAD or CONNECT requests, or responses with null body
@@ -1723,7 +1728,7 @@ jsg::Ref<Response> makeHttpResponse(
   // and the Fetch spec doesn't allow users to create Requests with CONNECT methods.
   kj::Maybe<Body::ExtractedBody> responseBody = nullptr;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
-    responseBody = Body::ExtractedBody(jsg::alloc<ReadableStream>(context,
+    responseBody = Body::ExtractedBody(JSG_ALLOC(js, ReadableStream, context,
         newSystemStream(kj::mv(body), getContentEncoding(context, headers, bodyEncoding))));
   }
 
@@ -1736,7 +1741,7 @@ jsg::Ref<Response> makeHttpResponse(
   }
 
   // TODO(someday): Fill response CF blob from somewhere?
-  return jsg::alloc<Response>(
+  return JSG_ALLOC(js, Response,
         statusCode, kj::str(statusText), kj::mv(responseHeaders),
         nullptr, kj::mv(responseBody), flags, kj::mv(urlList), kj::mv(webSocket));
 }
@@ -1775,7 +1780,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     } else KJ_IF_MAYBE(f, jsRequest->getFetcher()) {
       actualFetcher = kj::mv(*f);
     } else {
-      actualFetcher = jsg::alloc<Fetcher>(
+      actualFetcher = JSG_ALLOC(js, Fetcher,
           IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
     }
 
@@ -1841,7 +1846,7 @@ static jsg::Promise<Fetcher::GetResult> parseResponse(
     } else {
       // Empty body.
       return js.resolvedPromise(
-          Fetcher::GetResult(jsg::alloc<ReadableStream>(
+          Fetcher::GetResult(JSG_ALLOC(js, ReadableStream,
               IoContext::current(),
               newSystemStream(kj::heap<NullInputStream>(), StreamEncoding::IDENTITY))));
     }

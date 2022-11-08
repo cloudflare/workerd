@@ -180,7 +180,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
 
     if (typeName == "stream") {
       result = js.resolvedPromise(KvNamespace::GetResult(
-          jsg::alloc<ReadableStream>(context, kj::mv(stream))));
+          JSG_ALLOC(js, ReadableStream, context, kj::mv(stream))));
     } else if (typeName == "text") {
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client

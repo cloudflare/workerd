@@ -381,8 +381,12 @@ jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> SubtleCrypto::genera
     JSG_REQUIRE(algoImpl.generateFunc != nullptr, DOMNotSupportedError,
         "Unrecognized key generation algorithm \"", algorithm.name, "\" requested.");
 
-    auto cryptoKeyOrPair = algoImpl.generateFunc(algoImpl.name, kj::mv(algorithm), extractable,
-                                                 keyUsages);
+    auto cryptoKeyOrPair = algoImpl.generateFunc(js,
+        algoImpl.name,
+        kj::mv(algorithm),
+        extractable,
+        keyUsages);
+
     KJ_SWITCH_ONEOF(cryptoKeyOrPair) {
       KJ_CASE_ONEOF(cryptoKey, jsg::Ref<CryptoKey>) {
         if (keyUsages.size() == 0) {
@@ -603,7 +607,7 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(
   //   implementation functions don't necessarily know the name of the algorithm whose key they're
   //   importing (importKeyAesImpl handles AES-CTR, -CBC, and -GCM, for instance), so they should
   //   rely on this value to set the imported CryptoKey's name.
-  auto cryptoKey = jsg::alloc<CryptoKey>(
+  auto cryptoKey = JSG_ALLOC(js, CryptoKey,
       algoImpl.importFunc(algoImpl.name, format, kj::mv(keyData),
                           kj::mv(algorithm), extractable, keyUsages));
 
@@ -754,13 +758,13 @@ DigestStream::DigestStream(
         kj::heap<DigestStreamSink>(kj::mv(algorithm), kj::mv(fulfiller))),
       promise(kj::mv(promise)) {}
 
-jsg::Ref<DigestStream> DigestStream::constructor(Algorithm algorithm) {
+jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
   auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
 
   auto jsPromise = IoContext::current().awaitIoLegacy(kj::mv(paf.promise));
   jsPromise.markAsHandled();
 
-  return jsg::alloc<DigestStream>(
+  return JSG_ALLOC(js, DigestStream,
       interpretAlgorithmParam(kj::mv(algorithm)),
       kj::mv(paf.fulfiller),
       kj::mv(jsPromise));

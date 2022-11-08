@@ -593,9 +593,14 @@ private:
   }
 };
 
-CryptoKeyPair generateRsaPair(kj::StringPtr normalizedName, kj::Own<EVP_PKEY> privateEvpPKey,
-    kj::Own<EVP_PKEY> publicEvpPKey, CryptoKey::RsaKeyAlgorithm&& keyAlgorithm,
-    bool privateKeyExtractable, CryptoKeyUsageSet usages) {
+CryptoKeyPair generateRsaPair(
+    jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    kj::Own<EVP_PKEY> privateEvpPKey,
+    kj::Own<EVP_PKEY> publicEvpPKey,
+    CryptoKey::RsaKeyAlgorithm&& keyAlgorithm,
+    bool privateKeyExtractable,
+    CryptoKeyUsageSet usages) {
   auto privateKeyAlgorithm = keyAlgorithm.clone();
 
   CryptoKeyUsageSet publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
@@ -603,21 +608,21 @@ CryptoKeyPair generateRsaPair(kj::StringPtr normalizedName, kj::Own<EVP_PKEY> pr
 
   if (normalizedName == "RSASSA-PKCS1-v1_5") {
     return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(publicEvpPKey),
+      .publicKey =  JSG_ALLOC(js, CryptoKey, kj::heap<RsassaPkcs1V15Key>(kj::mv(publicEvpPKey),
           kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsassaPkcs1V15Key>(kj::mv(privateEvpPKey),
+      .privateKey = JSG_ALLOC(js, CryptoKey, kj::heap<RsassaPkcs1V15Key>(kj::mv(privateEvpPKey),
           kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
   } else if (normalizedName == "RSA-PSS") {
     return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(publicEvpPKey),
+      .publicKey =  JSG_ALLOC(js, CryptoKey, kj::heap<RsaPssKey>(kj::mv(publicEvpPKey),
           kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaPssKey>(kj::mv(privateEvpPKey),
+      .privateKey = JSG_ALLOC(js, CryptoKey, kj::heap<RsaPssKey>(kj::mv(privateEvpPKey),
           kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
   } else if (normalizedName == "RSA-OAEP") {
     return CryptoKeyPair {
-      .publicKey =  jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(publicEvpPKey),
+      .publicKey =  JSG_ALLOC(js, CryptoKey, kj::heap<RsaOaepKey>(kj::mv(publicEvpPKey),
           kj::mv(keyAlgorithm), "public"_kj, true, publicKeyUsages)),
-      .privateKey = jsg::alloc<CryptoKey>(kj::heap<RsaOaepKey>(kj::mv(privateEvpPKey),
+      .privateKey = JSG_ALLOC(js, CryptoKey, kj::heap<RsaOaepKey>(kj::mv(privateEvpPKey),
           kj::mv(privateKeyAlgorithm), "private"_kj, privateKeyExtractable, privateKeyUsages))};
   } else {
     JSG_FAIL_REQUIRE(DOMNotSupportedError, "Unimplemented RSA generation \"", normalizedName,
@@ -672,6 +677,7 @@ void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent)
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
+    jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -717,7 +723,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
     .hash = KeyAlgorithm { normalizedHashName }
   };
 
-  return generateRsaPair(normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
+  return generateRsaPair(js, normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
       kj::mv(keyAlgorithm), extractable, usages);
 }
 
@@ -1188,9 +1194,12 @@ public:
   }
 
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateElliptic(
+      jsg::Lock& js,
       kj::StringPtr normalizedName,
-      SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
-      CryptoKeyUsageSet privateKeyUsages, CryptoKeyUsageSet publicKeyUsages);
+      SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
+      bool extractable,
+      CryptoKeyUsageSet privateKeyUsages,
+      CryptoKeyUsageSet publicKeyUsages);
 
 private:
   static kj::Array<kj::byte> bigNumToPaddedArray(const BIGNUM& n, size_t paddedLength) {
@@ -1294,9 +1303,12 @@ EllipticCurveInfo lookupEllipticCurve(kj::StringPtr curveName) {
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
+    jsg::Lock& js,
     kj::StringPtr normalizedName,
-    SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
-    CryptoKeyUsageSet privateKeyUsages, CryptoKeyUsageSet publicKeyUsages) {
+    SubtleCrypto::GenerateKeyAlgorithm&& algorithm,
+    bool extractable,
+    CryptoKeyUsageSet privateKeyUsages,
+    CryptoKeyUsageSet publicKeyUsages) {
   kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve,TypeError,
       "Missing field \"namedCurve\" in \"algorithm\".");
 
@@ -1327,9 +1339,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   auto publicEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_EC_KEY(publicEvpPKey.get(), ecPublicKey.get()));
 
-  auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(privateEvpPKey),
+  auto privateKey = JSG_ALLOC(js, CryptoKey, kj::heap<EllipticKey>(kj::mv(privateEvpPKey),
       keyAlgorithm, "private"_kj, rsSize, extractable, privateKeyUsages));
-  auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EllipticKey>(kj::mv(publicEvpPKey),
+  auto publicKey = JSG_ALLOC(js, CryptoKey, kj::heap<EllipticKey>(kj::mv(publicEvpPKey),
       keyAlgorithm, "public"_kj, rsSize, true, publicKeyUsages));
 
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
@@ -1484,6 +1496,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
+    jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1493,7 +1506,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
   auto privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
   auto publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
 
-  return EllipticKey::generateElliptic(normalizedName, kj::mv(algorithm), extractable,
+  return EllipticKey::generateElliptic(js, normalizedName, kj::mv(algorithm), extractable,
       privateKeyUsages, publicKeyUsages);
 }
 
@@ -1541,13 +1554,15 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(
+    jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm &&algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages,
                                   CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits());
-  return EllipticKey::generateElliptic(normalizedName, kj::mv(algorithm), extractable, usages, {});
+  return EllipticKey::generateElliptic(js, normalizedName, kj::mv(algorithm),
+                                       extractable, usages, {});
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
@@ -1607,8 +1622,12 @@ namespace {
 class EdDsaKey final: public AsymmetricKey {
 public:
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(
-      kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
-      CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey);
+      jsg::Lock& js,
+      kj::StringPtr normalizedName,
+      int nid,
+      CryptoKeyUsageSet privateKeyUsages,
+      CryptoKeyUsageSet publicKeyUsages,
+      bool extractablePrivateKey);
 
   explicit EdDsaKey(kj::Own<EVP_PKEY> keyData,
                     CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
@@ -1746,8 +1765,12 @@ private:
 };
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
-    kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
-    CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
+    jsg::Lock& js,
+    kj::StringPtr normalizedName,
+    int nid,
+    CryptoKeyUsageSet privateKeyUsages,
+    CryptoKeyUsageSet publicKeyUsages,
+    bool extractablePrivateKey) {
   auto [curveName, keypair, keylen] = [nid, normalizedName] {
     switch (nid) {
       // BoringSSL doesn't support ED448/X448.
@@ -1778,9 +1801,9 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
       rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
       "public key", internalDescribeOpensslErrors());
 
-  auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateEvpPKey),
+  auto privateKey = JSG_ALLOC(js, CryptoKey, kj::heap<EdDsaKey>(kj::mv(privateEvpPKey),
       keyAlgorithm, "private"_kj, extractablePrivateKey, privateKeyUsages));
-  auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicEvpPKey),
+  auto publicKey = JSG_ALLOC(js, CryptoKey, kj::heap<EdDsaKey>(kj::mv(publicEvpPKey),
       keyAlgorithm, "public"_kj, true, publicKeyUsages));
 
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
@@ -1789,6 +1812,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
+    jsg::Lock& js,
     kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1803,8 +1827,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
   JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError, "EDDSA curve \"", namedCurve,
       "\" isn't supported.");
 
-  return EdDsaKey::generateKey(normalizedName, NID_ED25519, privateKeyUsages, publicKeyUsages,
-                               extractable);
+  return EdDsaKey::generateKey(js, normalizedName, NID_ED25519, privateKeyUsages,
+                               publicKeyUsages, extractable);
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(

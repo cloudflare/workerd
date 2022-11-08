@@ -1189,7 +1189,8 @@ public:
           auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
                                 ActorCache& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
-            return jsg::alloc<api::DurableObjectStorage>(IoContext::current().addObject(actorCache));
+            return JSG_ALLOC(js, api::DurableObjectStorage,
+                             IoContext::current().addObject(actorCache));
           };
 
           TimerChannel& timerChannel = service;

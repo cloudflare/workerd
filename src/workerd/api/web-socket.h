@@ -14,18 +14,18 @@ namespace workerd::api {
 
 class MessageEvent: public Event {
 public:
-  MessageEvent(v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event("message"), data(isolate, data) {}
-  MessageEvent(kj::String type, v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event(kj::mv(type)), data(isolate, data) {}
+  MessageEvent(jsg::Lock& js, v8::Local<v8::Value> data)
+      : Event("message"), data(js.v8Ref(data)) {}
+  MessageEvent(jsg::Lock& js, kj::String type, v8::Local<v8::Value> data)
+      : Event(kj::mv(type)), data(js.v8Ref(data)) {}
 
   struct Initializer {
     v8::Local<v8::Value> data;
     JSG_STRUCT(data);
   };
   static jsg::Ref<MessageEvent> constructor(
-      kj::String type, Initializer initializer, v8::Isolate* isolate) {
-    return jsg::alloc<MessageEvent>(kj::mv(type), isolate, initializer.data);
+      jsg::Lock& js, kj::String type, Initializer initializer) {
+    return JSG_ALLOC(js, MessageEvent, js, kj::mv(type), initializer.data);
   }
 
   v8::Local<v8::Value> getData(v8::Isolate* isolate) { return data.getHandle(isolate); }
@@ -63,8 +63,8 @@ public:
     jsg::Optional<bool> wasClean;
     JSG_STRUCT(code, reason, wasClean);
   };
-  static jsg::Ref<CloseEvent> constructor(kj::String type, Initializer initializer) {
-    return jsg::alloc<CloseEvent>(kj::mv(type),
+  static jsg::Ref<CloseEvent> constructor(jsg::Lock& js, kj::String type, Initializer initializer) {
+    return JSG_ALLOC(js, CloseEvent, kj::mv(type),
         initializer.code.orDefault(0),
         kj::mv(initializer.reason).orDefault(nullptr),
         initializer.wasClean.orDefault(false));
@@ -344,7 +344,7 @@ public:
   WebSocketPair(jsg::Ref<WebSocket> first, jsg::Ref<WebSocket> second)
       : sockets { kj::mv(first), kj::mv(second) } {}
 
-  static jsg::Ref<WebSocketPair> constructor();
+  static jsg::Ref<WebSocketPair> constructor(jsg::Lock& js);
 
   jsg::Ref<WebSocket> getFirst() { return sockets[0].addRef(); }
   jsg::Ref<WebSocket> getSecond() { return sockets[1].addRef(); }

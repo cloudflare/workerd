@@ -605,9 +605,9 @@ bool ReadableImpl<Self>::hasPendingReadRequests() {
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(WriterOwner& owner)
+WritableImpl<Self>::WritableImpl(jsg::Lock& js, WriterOwner& owner)
     : owner(owner),
-      signal(jsg::alloc<AbortSignal>()) {}
+      signal(JSG_ALLOC(js, AbortSignal)) {}
 
 template <typename Self>
 jsg::Promise<void> WritableImpl<Self>::abort(
@@ -1681,7 +1681,7 @@ ReadableByteStreamController::getByobRequest(jsg::Lock& js) {
   if (maybeByobRequest == nullptr) {
     KJ_IF_MAYBE(queue, impl.state.tryGet<ByteQueue>()) {
       KJ_IF_MAYBE(pendingByob, queue->nextPendingByobReadRequest()) {
-        maybeByobRequest = jsg::alloc<ReadableStreamBYOBRequest>(js,
+        maybeByobRequest = JSG_ALLOC(js, ReadableStreamBYOBRequest, js,
             kj::mv(*pendingByob), JSG_THIS);
       }
     } else {
@@ -1930,33 +1930,36 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       return Tee {
-        .branch1 = jsg::alloc<ReadableStream>(
+        .branch1 = JSG_ALLOC(js, ReadableStream,
             kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
-        .branch2 = jsg::alloc<ReadableStream>(
+        .branch2 = JSG_ALLOC(js, ReadableStream,
             kj::heap<ReadableStreamJsController>(StreamStates::Closed())),
       };
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return Tee {
-        .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
+        .branch1 = JSG_ALLOC(js, ReadableStream, kj::heap<ReadableStreamJsController>(
             errored.addRef(js))),
-        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
+        .branch2 = JSG_ALLOC(js, ReadableStream, kj::heap<ReadableStreamJsController>(
             errored.addRef(js))),
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       return Tee {
-        .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
-            kj::mv(consumer))),
+        .branch1 = JSG_ALLOC(js, ReadableStream,
+                             kj::heap<ReadableStreamJsController>(js, *consumer)),
+        .branch2 = JSG_ALLOC(js, ReadableStream,
+                             kj::heap<ReadableStreamJsController>(kj::mv(consumer))),
       };
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
       KJ_DEFER(state.init<StreamStates::Closed>());
       return Tee {
-        .branch1 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(js, *consumer)),
-        .branch2 = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>(
+        .branch1 = JSG_ALLOC(js, ReadableStream,
+                             kj::heap<ReadableStreamJsController>(js, *consumer)),
+        .branch2 = JSG_ALLOC(js, ReadableStream,
+                             kj::heap<ReadableStreamJsController>(
             kj::mv(consumer))),
       };
     }
@@ -1983,7 +1986,7 @@ void ReadableStreamJsController::setup(
     auto autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
         UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
 
-    auto controller = jsg::alloc<ReadableByteStreamController>(
+    auto controller = JSG_ALLOC(js, ReadableByteStreamController,
         kj::mv(underlyingSource),
         kj::mv(queuingStrategy));
 
@@ -1996,7 +1999,7 @@ void ReadableStreamJsController::setup(
   } else {
     JSG_REQUIRE(type == "", TypeError,
         kj::str("\"", type, "\" is not a valid type of ReadableStream."));
-    auto controller = jsg::alloc<ReadableStreamDefaultController>(
+    auto controller = JSG_ALLOC(js, ReadableStreamDefaultController,
         kj::mv(underlyingSource),
         kj::mv(queuingStrategy));
     state = kj::refcounted<ValueReadable>(controller.addRef(), this);
@@ -2460,8 +2463,8 @@ jsg::Promise<void> ReadableStreamJsSource::pipeLoop(
 
 // ======================================================================================
 
-WritableStreamDefaultController::WritableStreamDefaultController(WriterOwner& owner)
-    : impl(owner) {}
+WritableStreamDefaultController::WritableStreamDefaultController(jsg::Lock& js, WriterOwner& owner)
+    : impl(js, owner) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
     jsg::Lock& js,
@@ -2693,7 +2696,7 @@ void WritableStreamJsController::setup(
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
 
   maybeTransformer = kj::mv(underlyingSink.maybeTransformer);
-  state = jsg::alloc<WritableStreamDefaultController>(*this);
+  state = JSG_ALLOC(js, WritableStreamDefaultController, js, *this);
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

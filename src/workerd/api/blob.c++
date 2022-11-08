@@ -73,7 +73,10 @@ static kj::String normalizeType(kj::String type) {
   return kj::mv(type);
 }
 
-jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
+jsg::Ref<Blob> Blob::constructor(
+    jsg::Lock& js,
+    jsg::Optional<Bits> bits,
+    jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   KJ_IF_MAYBE(o, options) {
     KJ_IF_MAYBE(t, o->type) {
@@ -81,11 +84,14 @@ jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options
     }
   }
 
-  return jsg::alloc<Blob>(concat(kj::mv(bits)), kj::mv(type));
+  return JSG_ALLOC(js, Blob, concat(kj::mv(bits)), kj::mv(type));
 }
 
-jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> maybeEnd,
-                            jsg::Optional<kj::String> type) {
+jsg::Ref<Blob> Blob::slice(
+    jsg::Lock& js,
+    jsg::Optional<int> maybeStart,
+    jsg::Optional<int> maybeEnd,
+    jsg::Optional<kj::String> type) {
   int start = maybeStart.orDefault(0);
   int end = maybeEnd.orDefault(data.size());
 
@@ -111,7 +117,7 @@ jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> may
     end = data.size();
   }
 
-  return jsg::alloc<Blob>(JSG_THIS, data.slice(start, end),
+  return JSG_ALLOC(js, Blob, JSG_THIS, data.slice(start, end),
       normalizeType(kj::mv(type).orDefault(nullptr)));
 }
 
@@ -166,15 +172,15 @@ private:
   jsg::Ref<Blob> blob;
 };
 
-jsg::Ref<ReadableStream> Blob::stream(v8::Isolate* isolate) {
-  return jsg::alloc<ReadableStream>(
-      IoContext::current(),
-      kj::heap<BlobInputStream>(JSG_THIS));
+jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
+  return JSG_ALLOC(js, ReadableStream, IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
 }
 
 // =======================================================================================
 
-jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
+jsg::Ref<File> File::constructor(
+    jsg::Lock& js,
+    jsg::Optional<Bits> bits,
     kj::String name, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   kj::Maybe<double> maybeLastModified;
@@ -192,7 +198,7 @@ jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
     lastModified = dateNow();
   }
 
-  return jsg::alloc<File>(concat(kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
+  return JSG_ALLOC(js, File, concat(kj::mv(bits)), kj::mv(name), kj::mv(type), lastModified);
 }
 
 }  // namespace workerd::api

@@ -442,7 +442,7 @@ void WorkerdApiIsolate::compileGlobals(
       }
 
       KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-        value = lock.wrap(context, jsg::alloc<api::Fetcher>(
+        value = lock.wrap(context, JSG_ALLOC(lockParam, api::Fetcher,
             pipeline.channel,
             pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
                                   : api::Fetcher::RequiresHostAndProtocol::NO,
@@ -450,18 +450,18 @@ void WorkerdApiIsolate::compileGlobals(
       }
 
       KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::KvNamespace>(
+        value = lock.wrap(context, JSG_ALLOC(lockParam, api::KvNamespace,
             kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
       }
 
       KJ_CASE_ONEOF(r2, Global::R2Bucket) {
         value = lock.wrap(context,
-            jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+            JSG_ALLOC(lockParam, api::public_beta::R2Bucket, featureFlags, r2.subrequestChannel));
       }
 
       KJ_CASE_ONEOF(r2a, Global::R2Admin) {
         value = lock.wrap(context,
-            jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
+            JSG_ALLOC(lockParam, api::public_beta::R2Admin, featureFlags, r2a.subrequestChannel));
       }
 
       KJ_CASE_ONEOF(key, Global::CryptoKey) {
@@ -491,12 +491,14 @@ void WorkerdApiIsolate::compileGlobals(
       }
 
       KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
+        value = lock.wrap(context, JSG_ALLOC(lockParam, api::ColoLocalActorNamespace,
+                                             ns.actorChannel));
       }
 
       KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::DurableObjectNamespace>(ns.actorChannel,
-            kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+        value = lock.wrap(context, JSG_ALLOC(lockParam, api::DurableObjectNamespace,
+                                             ns.actorChannel,
+                                             kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
       }
 
       KJ_CASE_ONEOF(text, kj::String) {

@@ -537,7 +537,7 @@ public:
     }
   };
 
-  WritableImpl(WriterOwner& owner);
+  WritableImpl(jsg::Lock& js, WriterOwner& owner);
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Ref<Self> self,
@@ -1054,7 +1054,7 @@ public:
   using WritableImpl = jscontroller::WritableImpl<WritableStreamDefaultController>;
   using WriterOwner = jscontroller::WriterOwner;
 
-  explicit WritableStreamDefaultController(WriterOwner& owner);
+  explicit WritableStreamDefaultController(jsg::Lock& js, WriterOwner& owner);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 

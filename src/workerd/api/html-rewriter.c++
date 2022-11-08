@@ -550,7 +550,8 @@ template <typename T, typename CType>
 kj::Promise<void> Rewriter::thunkPromise( CType* content, RegisteredHandler& registeredHandler) {
   return ioContext.run(
       [this,content,&registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
-    auto jsContent = jsg::alloc<T>(*content, *this);
+    jsg::Lock& js = lock;
+    auto jsContent = JSG_ALLOC(js, T, *content, *this);
     auto scope = HTMLRewriter::TokenScope(jsContent);
     auto value = registeredHandler.callback(lock, kj::mv(jsContent));
 
@@ -628,13 +629,13 @@ kj::StringPtr Element::getNamespaceURI() {
   return lol_html_element_namespace_uri_get(&checkToken(impl).element);
 }
 
-jsg::Ref<Element::AttributesIterator> Element::getAttributes() {
+jsg::Ref<Element::AttributesIterator> Element::getAttributes(jsg::Lock& js) {
   auto& implRef = checkToken(impl);
 
   auto iter = LOL_HTML_OWN(
       attributes_iterator, lol_html_attributes_iterator_get(&implRef.element));
 
-  auto jsIter = jsg::alloc<Element::AttributesIterator>(kj::mv(iter));
+  auto jsIter = JSG_ALLOC(js, Element::AttributesIterator, kj::mv(iter));
   implRef.attributesIterators.add(jsIter.addRef());
   return kj::mv(jsIter);
 }
@@ -986,8 +987,8 @@ struct HTMLRewriter::Impl {
 HTMLRewriter::HTMLRewriter(): impl(kj::heap<Impl>()) {}
 HTMLRewriter::~HTMLRewriter() noexcept(false) {}
 
-jsg::Ref<HTMLRewriter> HTMLRewriter::constructor() {
-  return jsg::alloc<HTMLRewriter>();
+jsg::Ref<HTMLRewriter> HTMLRewriter::constructor(jsg::Lock& js) {
+  return JSG_ALLOC(js, HTMLRewriter);
 }
 
 jsg::Ref<HTMLRewriter> HTMLRewriter::on(kj::String stringSelector, ElementContentHandlers&& handlers) {
@@ -1031,7 +1032,7 @@ jsg::Ref<Response> HTMLRewriter::transform(
   // lol-html writes to a pipe, the other end of which is our transformed response body.
   auto ts = IdentityTransformStream::constructor(js);
   auto bodySource = ts->getReadable()->removeSource(js);
-  auto body = jsg::alloc<ReadableStream>(ioContext, kj::mv(bodySource));
+  auto body = JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(bodySource));
   response = Response::constructor(js, kj::Maybe(kj::mv(body)), kj::mv(response), featureFlags);
 
   auto outputSink = ts->getWritable()->removeSink(js);

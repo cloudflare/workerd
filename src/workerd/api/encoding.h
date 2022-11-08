@@ -144,6 +144,7 @@ public:
   };
 
   static jsg::Ref<TextDecoder> constructor(
+      jsg::Lock& js,
       jsg::Optional<kj::String> label,
       jsg::Optional<ConstructorOptions> options);
 
@@ -203,7 +204,7 @@ public:
     JSG_STRUCT(read, written);
   };
 
-  static jsg::Ref<TextEncoder> constructor();
+  static jsg::Ref<TextEncoder> constructor(jsg::Lock& js);
 
   v8::Local<v8::Uint8Array> encode(
       jsg::Optional<v8::Local<v8::String>> input, v8::Isolate* isolate);

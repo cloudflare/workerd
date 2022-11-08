@@ -24,7 +24,7 @@ struct BasicsContext: public jsg::Object {
 
   bool test(jsg::Lock& js) {
 
-    auto target = jsg::alloc<api::EventTarget>();
+    auto target = JSG_ALLOC(js, api::EventTarget);
 
     int called = 0;
 
@@ -49,12 +49,12 @@ struct BasicsContext: public jsg::Object {
     KJ_ASSERT(handler.isAttached());
     KJ_ASSERT(handlerOnce.isAttached());
 
-    KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
+    KJ_ASSERT(target->dispatchEventImpl(js, JSG_ALLOC(js, api::Event, kj::str("foo"))));
 
     KJ_ASSERT(handler.isAttached());
     KJ_ASSERT(!handlerOnce.isAttached());
 
-    KJ_ASSERT(target->dispatchEventImpl(js, jsg::alloc<api::Event>(kj::str("foo"))));
+    KJ_ASSERT(target->dispatchEventImpl(js, JSG_ALLOC(js, api::Event, kj::str("foo"))));
 
     return called == 3;
   }

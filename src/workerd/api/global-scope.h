@@ -157,7 +157,7 @@ public:
                  v8::PromiseRejectEvent event,
                  jsg::V8Ref<v8::Promise> promise,
                  jsg::Value value) {
-            auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
+            auto ev = JSG_ALLOC(js, PromiseRejectionEvent, event, kj::mv(promise), kj::mv(value));
             dispatchEventImpl(js, kj::mv(ev));
           }) {}
 
@@ -248,16 +248,16 @@ public:
     return JSG_THIS;
   }
 
-  jsg::Ref<Crypto> getCrypto() {
-    return jsg::alloc<Crypto>();
+  jsg::Ref<Crypto> getCrypto(jsg::Lock& js) {
+    return JSG_ALLOC(js, Crypto, js);
   }
 
-  jsg::Ref<Scheduler> getScheduler() {
-    return jsg::alloc<Scheduler>();
+  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
+    return JSG_ALLOC(js, Scheduler);
   }
 
-  jsg::Ref<Navigator> getNavigator() {
-    return jsg::alloc<Navigator>();
+  jsg::Ref<Navigator> getNavigator(jsg::Lock& js) {
+    return JSG_ALLOC(js, Navigator);
   }
 
   jsg::Unimplemented getOrigin() { return {}; }
@@ -267,8 +267,8 @@ public:
   //   a FetchEvent callback (in between .request() and FetchEvent.respondWith()), and otherwise
   //   throw.
 
-  jsg::Ref<CacheStorage> getCaches() {
-    return jsg::alloc<CacheStorage>();
+  jsg::Ref<CacheStorage> getCaches(jsg::Lock& js) {
+    return JSG_ALLOC(js, CacheStorage, js);
   }
 
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {

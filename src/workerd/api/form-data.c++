@@ -65,8 +65,12 @@ constexpr auto contentDisposition =
     p::sequence(p::discardWhitespace, httpIdentifier,
                 p::discardWhitespace, p::many(contentDispositionParam));
 
-void parseFormData(kj::Vector<FormData::Entry>& data, kj::ArrayPtr<const char> boundary,
-                   kj::ArrayPtr<const char> body, bool convertFilesToStrings) {
+void parseFormData(
+    jsg::Lock& js,
+    kj::Vector<FormData::Entry>& data,
+    kj::ArrayPtr<const char> boundary,
+    kj::ArrayPtr<const char> body,
+    bool convertFilesToStrings) {
   // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
   // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
   const auto delimiter = kj::str("\n--", boundary);
@@ -166,15 +170,17 @@ void parseFormData(kj::Vector<FormData::Entry>& data, kj::ArrayPtr<const char> b
     } else {
       data.add(FormData::Entry {
         kj::mv(name),
-        jsg::alloc<File>(kj::heapArray(message.asBytes()), KJ_ASSERT_NONNULL(kj::mv(filename)),
-                          kj::str(type.orDefault(nullptr)), dateNow())
+        JSG_ALLOC(js, File, kj::heapArray(message.asBytes()), KJ_ASSERT_NONNULL(kj::mv(filename)),
+            kj::str(type.orDefault(nullptr)), dateNow())
       });
     }
   }
 }
 
 kj::OneOf<jsg::Ref<File>, kj::String>
-blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+blobToFile(jsg::Lock& js,
+           kj::StringPtr name,
+           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
            jsg::Optional<kj::String> filename) {
   auto fromBlob = [&](jsg::Ref<Blob> blob) {
     kj::String fn;
@@ -183,8 +189,8 @@ blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::Str
     } else {
       fn = kj::str(name);
     }
-    return jsg::alloc<File>(kj::heapArray(blob->getData()), kj::mv(fn),
-                             kj::str(blob->getType()), dateNow());
+    return JSG_ALLOC(js, File, kj::heapArray(blob->getData()), kj::mv(fn),
+        kj::str(blob->getType()), dateNow());
   };
 
   KJ_SWITCH_ONEOF(value) {
@@ -296,14 +302,17 @@ FormData::EntryType FormData::clone(v8::Isolate* isolate, FormData::EntryType& v
   KJ_UNREACHABLE;
 }
 
-void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
-                     bool convertFilesToStrings) {
+void FormData::parse(
+    jsg::Lock& js,
+    kj::ArrayPtr<const char> rawText,
+    kj::StringPtr contentType,
+    bool convertFilesToStrings) {
   if (contentType.startsWith("multipart/form-data")) {
     auto boundary = JSG_REQUIRE_NONNULL(readContentTypeParameter(contentType, "boundary"),
         TypeError, "No boundary string in Content-Type header. The multipart/form-data MIME "
         "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
         "boundary=\"abcd\"'. See RFC 7578, section 4.");
-    parseFormData(data, boundary, rawText, convertFilesToStrings);
+    parseFormData(js, data, boundary, rawText, convertFilesToStrings);
   } else if (contentType.startsWith("application/x-www-form-urlencoded")) {
     // Let's read the charset so we can barf if the body isn't UTF-8.
     //
@@ -327,14 +336,16 @@ void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType
   }
 }
 
-jsg::Ref<FormData> FormData::constructor() {
-  return jsg::alloc<FormData>();
+jsg::Ref<FormData> FormData::constructor(jsg::Lock& js) {
+  return JSG_ALLOC(js, FormData);
 }
 
-void FormData::append(kj::String name,
+void FormData::append(
+    jsg::Lock& js,
+    kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
-  auto filifiedValue = blobToFile(name, kj::mv(value), kj::mv(filename));
+  auto filifiedValue = blobToFile(js, name, kj::mv(value), kj::mv(filename));
   data.add(Entry { kj::mv(name), kj::mv(filifiedValue) });
 }
 
@@ -389,16 +400,16 @@ void FormData::set(kj::String name,
   }
 }
 
-jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
+jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock& js) {
+  return JSG_ALLOC(js, EntryIterator, IteratorState { JSG_THIS });
 }
 
-jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
-  return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
+jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock& js) {
+  return JSG_ALLOC(js, KeyIterator, IteratorState { JSG_THIS });
 }
 
-jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
-  return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
+jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock& js) {
+  return JSG_ALLOC(js, ValueIterator, IteratorState { JSG_THIS });
 }
 
 void FormData::forEach(

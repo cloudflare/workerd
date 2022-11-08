@@ -29,7 +29,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     // Persistent references to the TransformStreamDefaultController are held by both
     // the readable and writable sides. The actual TransformStream object can be dropped
     // and allowed to be garbage collected.
-    auto controller = jsg::alloc<TransformStreamDefaultController>(js);
+    auto controller = JSG_ALLOC(js, TransformStreamDefaultController, js);
 
     auto readable = ReadableStream::constructor(
         js,
@@ -85,7 +85,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     // streams underlying controllers.
     controller->init(js, readable, writable, kj::mv(maybeTransformer));
 
-    return jsg::alloc<TransformStream>(kj::mv(readable), kj::mv(writable));
+    return JSG_ALLOC(js, TransformStream, kj::mv(readable), kj::mv(writable));
   }
 
   // The old implementation just defers to IdentityTransformStream. If any of the arguments
@@ -108,9 +108,9 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(jsg::Lock
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<IdentityTransformStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+  return JSG_ALLOC(js, IdentityTransformStream,
+      JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(readableSide)),
+      JSG_ALLOC(js, WritableStream, ioContext, kj::mv(writableSide)));
 }
 
 jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
@@ -126,9 +126,9 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
 
   auto& ioContext = IoContext::current();
 
-  return jsg::alloc<FixedLengthStream>(
-      jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+  return JSG_ALLOC(js, FixedLengthStream,
+      JSG_ALLOC(js, ReadableStream, ioContext, kj::mv(readableSide)),
+      JSG_ALLOC(js, WritableStream, ioContext, kj::mv(writableSide)));
 }
 
 }  // namespace workerd::api

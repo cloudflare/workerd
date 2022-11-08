@@ -48,7 +48,7 @@ public:
 
   bool isStopped() { return stopped; }
 
-  static jsg::Ref<Event> constructor(kj::String type, jsg::Optional<Init> init);
+  static jsg::Ref<Event> constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init);
   kj::StringPtr getType();
 
   void stopImmediatePropagation() { stopped = true; }
@@ -173,7 +173,7 @@ public:
 
   void waitUntil(kj::Promise<void> promise);
 
-  jsg::Optional<jsg::Ref<ActorState>> getActorState(v8::Isolate* isolate);
+  jsg::Optional<jsg::Ref<ActorState>> getActorState(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ExtendableEvent) {
     JSG_INHERIT(Event);
@@ -310,7 +310,7 @@ public:
   }
   JSG_REFLECTION(onEvents);
 
-  static jsg::Ref<EventTarget> constructor();
+  static jsg::Ref<EventTarget> constructor(jsg::Lock& js);
 
 private:
   void addNativeListener(jsg::Lock& js, NativeHandler& handler);
@@ -535,11 +535,11 @@ private:
 
 class AbortController final: public jsg::Object {
 public:
-  explicit AbortController()
-      : signal(jsg::alloc<AbortSignal>()) {}
+  explicit AbortController(jsg::Lock& js)
+      : signal(JSG_ALLOC(js, AbortSignal)) {}
 
-  static jsg::Ref<AbortController> constructor() {
-    return jsg::alloc<AbortController>();
+  static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
+    return JSG_ALLOC(js, AbortController);
   }
 
   jsg::Ref<AbortSignal> getSignal() { return signal.addRef(); }

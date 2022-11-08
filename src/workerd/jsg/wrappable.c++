@@ -72,9 +72,24 @@ void Wrappable::Trace(cppgc::Visitor* visitor) const {
   visitor->Trace(inner);
 }
 
+void Wrappable::jsgMaybeDeferDestruction(kj::OneOf<cppgc::Persistent<Wrappable>,
+                                                   cppgc::Member<Wrappable>> handle) {
+  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+  auto& base = KJ_ASSERT_NONNULL(isolate);
+  KJ_SWITCH_ONEOF(handle) {
+    KJ_CASE_ONEOF(member, cppgc::Member<Wrappable>) {
+      cppgc::Persistent<Wrappable> persistent = kj::mv(member);
+      base.deferDestruction(kj::mv(persistent));
+    }
+    KJ_CASE_ONEOF(persistent, cppgc::Persistent<Wrappable>) {
+      base.deferDestruction(kj::mv(persistent));
+    }
+  }
+}
+
 GcVisitor::GcVisitor(cppgc::Visitor* visitor) : inner(visitor) {}
 
-void GcVisitor::visit(v8::TracedReference<v8::Data> ref) {
+void GcVisitor::visit(v8::TracedReference<v8::Data>& ref) const {
   inner->Trace(ref);
 }
 

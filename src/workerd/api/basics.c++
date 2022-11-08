@@ -28,9 +28,9 @@ bool isSpecialEventType(kj::StringPtr type) {
 }
 }  // namespace
 
-jsg::Ref<Event> Event::constructor(kj::String type, jsg::Optional<Init> init) {
+jsg::Ref<Event> Event::constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init) {
   static const Init defaultInit;
-  return jsg::alloc<Event>(kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
+  return JSG_ALLOC(js, Event, kj::mv(type), init.orDefault(defaultInit), false /* not trusted */);
 }
 
 kj::StringPtr Event::getType() { return type; }
@@ -54,8 +54,8 @@ void Event::beginDispatch(jsg::Ref<EventTarget> target) {
   this->target = kj::mv(target);
 }
 
-jsg::Ref<EventTarget> EventTarget::constructor() {
-  return jsg::alloc<EventTarget>();
+jsg::Ref<EventTarget> EventTarget::constructor(jsg::Lock& js) {
+  return JSG_ALLOC(js, EventTarget);
 }
 
 EventTarget::~EventTarget() noexcept(false) {
@@ -369,9 +369,9 @@ jsg::Ref<AbortSignal> AbortSignal::abort(
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
   auto exception = abortException(js, maybeReason);
   KJ_IF_MAYBE(reason, maybeReason) {
-    return jsg::alloc<AbortSignal>(kj::mv(exception), js.v8Ref(*reason));
+    return JSG_ALLOC(js, AbortSignal, kj::mv(exception), js.v8Ref(*reason));
   }
-  return jsg::alloc<AbortSignal>(kj::cp(exception), js.exceptionToJs(kj::mv(exception)));
+  return JSG_ALLOC(js, AbortSignal, kj::cp(exception), js.exceptionToJs(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
@@ -385,7 +385,7 @@ void AbortSignal::throwIfAborted(jsg::Lock& js) {
 }
 
 jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
-  auto signal = jsg::alloc<AbortSignal>();
+  auto signal = JSG_ALLOC(js, AbortSignal);
 
   auto context = js.v8Isolate->GetCurrentContext();
 
@@ -437,7 +437,7 @@ void AbortSignal::triggerAbort(
   // of the spec here should be just fine.
   KJ_DEFER(removeAllHandlers());
 
-  dispatchEventImpl(js, jsg::alloc<Event>(kj::str("abort")));
+  dispatchEventImpl(js, JSG_ALLOC(js, Event, kj::str("abort")));
 }
 
 void AbortController::abort(
@@ -505,12 +505,12 @@ void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(v8::Isolate* isolate) {
+jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js) {
   IoContext& context = IoContext::current();
   return context.getActor().map([&](Worker::Actor& actor) {
     auto& lock = context.getCurrentLock();
     auto persistent = actor.makeStorageForSwSyntax(lock);
-    return jsg::alloc<api::ActorState>(
+    return JSG_ALLOC(js, api::ActorState,
         actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
   });
 }

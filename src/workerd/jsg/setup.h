@@ -11,6 +11,10 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 
+#ifdef WORKERD_USE_OILPAN
+#include <cppgc/allocation.h>
+#endif
+
 namespace workerd::jsg {
 
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
@@ -102,10 +106,24 @@ public:
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
 
+#ifdef WORKERD_USE_OILPAN
+  template <typename T, typename...Params>
+  Ref<T> alloc(Params... params) {
+    Ref<T> ref = cppgc::MakeGarbageCollected<T>(
+        cppHeap->GetAllocationHandle(),
+        kj::fwd<Params>(params)...);
+    ref->jsgSetIsolateBase(*this);
+    return ref;
+  }
+#endif
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
 
+#if WORKERD_USE_OILPAN
+  using Item = kj::OneOf<v8::Global<v8::Data>, cppgc::Persistent<Wrappable>>;
+#else
   class RefToDelete {
     // The internals of a jsg::Ref<T> to be deleted.
 
@@ -129,6 +147,7 @@ private:
   };
 
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
+#endif
 
   const V8System& system;
   v8::Isolate* ptr;
@@ -235,6 +254,13 @@ private:
   // `FindInstanceInPrototypeChain()` on an existing object to check whether it was created using
   // this template.
 };
+
+#ifdef WORKERD_USE_OILPAN
+template <typename T, typename... Params>
+Ref<T> Lock::alloc(Params&&... params) {
+  return IsolateBase::from(v8Isolate).alloc(kj::fwd<Params>(params)...);
+}
+#endif
 
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace

@@ -38,7 +38,9 @@ public:
   // Given a delimiter string `boundary`, serialize all fields in this form data to an array of
   // bytes suitable for use as an HTTP message body.
 
-  void parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
+  void parse(jsg::Lock& js,
+             kj::ArrayPtr<const char> rawText,
+             kj::StringPtr contentType,
              bool convertFilesToStrings);
   // Parse `rawText`, storing the results in this FormData object. `contentType` must be either
   // multipart/form-data or application/x-www-form-urlencoded.
@@ -56,13 +58,14 @@ public:
 
   // JS API
 
-  static jsg::Ref<FormData> constructor();
+  static jsg::Ref<FormData> constructor(jsg::Lock& js);
   // The spec allows a FormData to be constructed from a <form> HTML element. We don't support that,
   // for obvious reasons, so this constructor doesn't take any parameters. If someone tries to use
   // FormData to represent a <form> element we probably don't have to worry about making the error
   // message they receive too pretty: they won't get farther than `document.getElementById()`.
 
-  void append(kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+  void append(jsg::Lock& js,
+              kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
               jsg::Optional<kj::String> filename);
 
   void delete_(kj::String name);

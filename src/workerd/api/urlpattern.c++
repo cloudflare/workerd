@@ -1895,7 +1895,7 @@ jsg::Ref<URLPattern> URLPattern::constructor(
     jsg::Lock& js,
     jsg::Optional<URLPatternInput> input,
     jsg::Optional<jsg::UsvString> baseURL) {
-  return jsg::alloc<URLPattern>(js, kj::mv(input), kj::mv(baseURL));
+  return JSG_ALLOC(js, URLPattern, js, kj::mv(input), kj::mv(baseURL));
 }
 
 bool URLPattern::test(

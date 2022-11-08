@@ -61,8 +61,8 @@ struct InheritContext: public Object {
     JSG_RESOURCE_TYPE(Other) {}
   };
 
-  Ref<NumberBox> newExtendedAsBase(double value, kj::String text) {
-    return ExtendedNumberBox::constructor(value, kj::mv(text));
+  Ref<NumberBox> newExtendedAsBase(jsg::Lock& js, double value, kj::String text) {
+    return ExtendedNumberBox::constructor(js, value, kj::mv(text));
   }
 
   JSG_RESOURCE_TYPE(InheritContext) {
@@ -150,8 +150,8 @@ KJ_TEST("utf-8 scripts") {
 // ========================================================================================
 
 struct RefContext: public Object {
-  Ref<NumberBox> addAndReturnCopy(NumberBox& box, double value) {
-    auto copy = jsg::alloc<NumberBox>(box.value);
+  Ref<NumberBox> addAndReturnCopy(jsg::Lock& js, NumberBox& box, double value) {
+    auto copy = JSG_ALLOC(js, NumberBox, box.value);
     copy->value += value;
     return copy;
   }
@@ -327,7 +327,9 @@ KJ_TEST("jsg::Lock logWarning") {
 struct CallableContext: public Object {
   struct MyCallable: public Object {
   public:
-    static Ref<MyCallable> constructor() { return alloc<MyCallable>(); }
+    static Ref<MyCallable> constructor(jsg::Lock& js) {
+      return JSG_ALLOC(js, MyCallable);
+    }
 
     bool foo() { return true; }
 
@@ -337,7 +339,9 @@ struct CallableContext: public Object {
     }
   };
 
-  Ref<MyCallable> getCallable() { return alloc<MyCallable>(); }
+  Ref<MyCallable> getCallable(jsg::Lock& js) {
+    return JSG_ALLOC(js, MyCallable);
+  }
 
   JSG_RESOURCE_TYPE(CallableContext) {
     JSG_METHOD(getCallable);
