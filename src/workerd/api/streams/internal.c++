@@ -1546,7 +1546,7 @@ void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value>
   }
 }
 
-void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
+void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) const {
   for (auto& event : queue) {
     KJ_SWITCH_ONEOF(event.event) {
       KJ_CASE_ONEOF(write, Write) {
@@ -1566,7 +1566,7 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybePendingAbort);
 }
 
-void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
+void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_IF_MAYBE(locked, readState.tryGet<ReaderLocked>()) {
     visitor.visit(*locked);
   } else KJ_IF_MAYBE(locked, readState.tryGet<PipeLocked>()) {

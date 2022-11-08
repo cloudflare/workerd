@@ -88,7 +88,7 @@ private:
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(closedPromise, readyPromise)
 };
 
 class WritableStream: public jsg::Object {
@@ -102,6 +102,7 @@ public:
   explicit WritableStream(Controller controller);
 
   WritableStreamController& getController();
+  const WritableStreamController& getController() const;
 
   jsg::Ref<WritableStream> addRef() { return JSG_THIS; }
 
@@ -145,9 +146,7 @@ public:
 private:
   Controller controller;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(getController());
-  }
+  JSG_TRACE(getController())
 };
 
 }  // namespace workerd::api

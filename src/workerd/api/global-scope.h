@@ -71,9 +71,7 @@ private:
   jsg::V8Ref<v8::Promise> promise;
   jsg::Value reason;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(promise, reason);
-  }
+  JSG_TRACE(promise, reason);
 };
 
 class WorkerGlobalScope: public EventTarget {

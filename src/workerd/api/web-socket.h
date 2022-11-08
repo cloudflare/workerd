@@ -119,7 +119,7 @@ private:
   jsg::Value error;
   v8::Isolate* isolate;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(error)
 };
 
 class WebSocket: public EventTarget {

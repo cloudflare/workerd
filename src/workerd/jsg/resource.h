@@ -29,6 +29,7 @@ namespace std {
 
 namespace workerd::jsg {
 
+#ifndef WORKERD_USE_OILPAN
 template <typename T>
 constexpr bool resourceNeedsGcTracing() {
   // Return true if the type requires GC visitation, which we assume is the case if the type or any
@@ -39,6 +40,7 @@ template <>
 constexpr bool resourceNeedsGcTracing<Object>() {
   return false;
 }
+#endif
 
 template <typename T>
 #ifdef WORKERD_USE_OILPAN

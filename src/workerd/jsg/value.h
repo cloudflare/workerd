@@ -1147,7 +1147,7 @@ public:
 // MemoizedIdentity<T>
 
 template <typename T>
-void MemoizedIdentity<T>::visitForGc(GcVisitor& visitor) {
+void MemoizedIdentity<T>::visitForGc(GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(raw, T) {
       if constexpr (isGcVisitable<T>()) {

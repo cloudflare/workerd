@@ -110,7 +110,7 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableLockImpl<Controller
 }
 
 template <typename Controller>
-void ReadableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
+void ReadableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(locked, Locked) {}
     KJ_CASE_ONEOF(locked, Unlocked) {}
@@ -161,11 +161,6 @@ kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo
 template <typename Controller>
 jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Lock& js) {
   return KJ_ASSERT_NONNULL(inner.read(js, nullptr));
-}
-
-template <typename Controller>
-void ReadableLockImpl<Controller>::PipeLocked::visitForGc(jsg::GcVisitor &visitor) {
-  visitor.visit(writableStreamRef);
 }
 
 // ======================================================================================
@@ -260,7 +255,7 @@ void WritableLockImpl<Controller>::releasePipeLock() {
 }
 
 template <typename Controller>
-void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
+void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(locked, Unlocked) {}
     KJ_CASE_ONEOF(locked, Locked) {}
@@ -571,7 +566,7 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 }
 
 template <typename Self>
-void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
+void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
@@ -1037,7 +1032,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
 }
 
 template <typename Self>
-void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) {
+void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(writable, Writable) {}
@@ -1123,9 +1118,7 @@ struct ReadableState {
     controller->pull(js);
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(*consumer);
-  }
+  JSG_TRACE(*consumer)
 
   ReadableState cloneWithNewOwner(jsg::Lock& js, auto owner, auto stateListener) {
     return ReadableState(controller.addRef(), owner, consumer->clone(js, stateListener));
@@ -1158,9 +1151,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
 
   KJ_DISALLOW_COPY(ValueReadable);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
-  }
+  JSG_TRACE(state)
 
   bool hasPendingReadRequests() {
     return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
@@ -1266,9 +1257,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
 
   KJ_DISALLOW_COPY(ByteReadable);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(state);
-  }
+  JSG_TRACE(state)
 
   bool hasPendingReadRequests() {
     return state.map([](State& state) { return state.hasPendingReadRequests(); }).orDefault(false);
@@ -1421,10 +1410,6 @@ bool ReadableStreamDefaultController::hasPendingReadRequests() {
   return impl.hasPendingReadRequests();
 }
 
-void ReadableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(impl);
-}
-
 jsg::Promise<void> ReadableStreamDefaultController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -1481,7 +1466,7 @@ void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
   view = js.v8Ref(readRequest->getView(js));
 }
 
-void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
+void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) const {
     KJ_IF_MAYBE(impl, maybeImpl) {
       visitor.visit(impl->view, impl->controller);
     }
@@ -1630,10 +1615,6 @@ kj::Maybe<int> ReadableByteStreamController::getDesiredSize() {
 
 bool ReadableByteStreamController::hasPendingReadRequests() {
   return impl.hasPendingReadRequests();
-}
-
-void ReadableByteStreamController::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(maybeByobRequest, impl);
 }
 
 jsg::Promise<void> ReadableByteStreamController::cancel(
@@ -2012,7 +1993,7 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsController:
   return lock.tryPipeLock(*this, kj::mv(destination));
 }
 
-void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
+void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
@@ -2873,7 +2854,7 @@ jsg::Promise<void> WritableStreamJsController::write(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
+void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
     KJ_CASE_ONEOF(error, StreamStates::Errored) {
@@ -3033,7 +3014,7 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
   }
 }
 
-void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
+void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) const {
   KJ_IF_MAYBE(backpressureChange, maybeBackpressureChange) {
     visitor.visit(backpressureChange->promise, backpressureChange->resolver);
   }

@@ -1871,17 +1871,6 @@ URLPattern::URLPattern(
     jsg::Optional<jsg::UsvString> baseURL)
     : components(init(js, kj::mv(input), kj::mv(baseURL))) {}
 
-void URLPattern::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(components.protocol.regex,
-                components.username.regex,
-                components.password.regex,
-                components.hostname.regex,
-                components.port.regex,
-                components.pathname.regex,
-                components.search.regex,
-                components.hash.regex);
-}
-
 jsg::UsvStringPtr URLPattern::getProtocol() { return components.protocol.pattern; }
 jsg::UsvStringPtr URLPattern::getUsername() { return components.username.pattern; }
 jsg::UsvStringPtr URLPattern::getPassword() { return components.password.pattern; }

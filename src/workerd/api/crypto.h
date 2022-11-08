@@ -598,9 +598,7 @@ public:
 private:
   jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>> promise;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(promise);
-  }
+  JSG_TRACE(promise);
 };
 
 // =======================================================================================

@@ -406,10 +406,6 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   return kj::mv(signal);
 }
 
-void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(reason);
-}
-
 RefcountedCanceler& AbortSignal::getCanceler() {
   return *canceler;
 }
@@ -446,7 +442,7 @@ void AbortController::abort(
   signal->triggerAbort(js, maybeReason);
 }
 
-void EventTarget::visitForGc(jsg::GcVisitor& visitor) {
+void EventTarget::visitForGc(jsg::GcVisitor& visitor) const {
   for (auto& entry : typeMap) {
     for (auto& handler : entry.value.handlers) {
       KJ_SWITCH_ONEOF(handler.handler) {

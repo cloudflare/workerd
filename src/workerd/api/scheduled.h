@@ -51,9 +51,7 @@ public:
 private:
   jsg::Ref<ScheduledEvent> event;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(event);
-  }
+  JSG_TRACE(event);
 };
 
 #define EW_SCHEDULED_ISOLATE_TYPES \

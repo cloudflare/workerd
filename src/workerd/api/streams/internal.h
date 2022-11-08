@@ -166,7 +166,7 @@ public:
 
   kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
 
-  void visitForGc(jsg::GcVisitor& visitor) override;
+  void visitForGc(jsg::GcVisitor& visitor) const override;
 
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
@@ -197,7 +197,7 @@ private:
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
-    void visitForGc(jsg::GcVisitor& visitor) { visitor.visit(ref); }
+    JSG_TRACE(ref);
 
   private:
     ReadableStreamInternalController& inner;
@@ -264,7 +264,7 @@ public:
     return nullptr;
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) override;
+  void visitForGc(jsg::GcVisitor& visitor) const override;
 
 private:
   bool isClosedOrClosing();

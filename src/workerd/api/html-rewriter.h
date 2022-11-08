@@ -95,7 +95,7 @@ public:
   }
 
 private:
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
   struct Impl;
   kj::Own<Impl> impl;

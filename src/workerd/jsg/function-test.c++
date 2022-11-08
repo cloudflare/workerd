@@ -165,8 +165,8 @@ struct FunctionContext: public Object {
   }
 
   struct VisitDetector {
-    bool visited = false;
-    void visitForGc(GcVisitor& visitor) {
+    mutable bool visited = false;
+    void visitForGc(GcVisitor& visitor) const {
       visited = true;
     }
   };

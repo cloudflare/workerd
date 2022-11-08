@@ -38,7 +38,7 @@ public:
 private:
   kj::Array<jsg::Ref<TraceItem>> traces;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     for (auto& t: traces) {
       visitor.visit(t);
     }

@@ -720,10 +720,6 @@ jsg::Ref<WebSocketPair> WebSocketPair::constructor(jsg::Lock& js) {
       JSG_ALLOC(js, WebSocket, kj::mv(pipe.ends[1]), WebSocket::LOCAL));
 }
 
-void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(error);
-}
-
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
   jsg::Value err = js.exceptionToJs(kj::cp(e));
   reportError(js, kj::mv(err));

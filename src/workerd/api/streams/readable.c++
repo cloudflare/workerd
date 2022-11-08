@@ -148,10 +148,6 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void ReaderImpl::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(closedPromise);
-}
-
 // ======================================================================================
 
 ReadableStreamDefaultReader::ReadableStreamDefaultReader() : impl(*this) {}
@@ -196,10 +192,6 @@ jsg::Promise<ReadResult> ReadableStreamDefaultReader::read(jsg::Lock& js) {
 
 void ReadableStreamDefaultReader::releaseLock(jsg::Lock& js) {
   impl.releaseLock(js);
-}
-
-void ReadableStreamDefaultReader::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(impl);
 }
 
 // ======================================================================================
@@ -278,10 +270,6 @@ void ReadableStreamBYOBReader::releaseLock(jsg::Lock& js) {
   impl.releaseLock(js);
 }
 
-void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(impl);
-}
-
 // ======================================================================================
 
 ReadableStream::ReadableStream(
@@ -293,6 +281,18 @@ ReadableStream::ReadableStream(
 
 ReadableStream::ReadableStream(Controller controller) : controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
+}
+
+const ReadableStreamController& ReadableStream::getController() const {
+  KJ_SWITCH_ONEOF(controller) {
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
+      return *c;
+    }
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
+      return *c;
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 ReadableStreamController& ReadableStream::getController() {

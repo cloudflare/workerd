@@ -76,9 +76,8 @@ private:
   struct IteratorState {
     jsg::Ref<URLSearchParams> parent;
     uint index = 0;
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-    }
+
+    JSG_TRACE(parent);
   };
 public:
   using UsvStringPair = jsg::Sequence<jsg::UsvString>;
@@ -305,9 +304,7 @@ private:
   UrlRecord inner;
   kj::Maybe<jsg::Ref<URLSearchParams>> maybeSearchParams;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(maybeSearchParams);
-  }
+  JSG_TRACE(maybeSearchParams);
 
   friend class URLSearchParams;
 };

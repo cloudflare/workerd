@@ -90,9 +90,7 @@ public:
 private:
   jsg::Ref<DurableObjectId> id;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(id);
-  }
+  JSG_TRACE(id)
 };
 
 class DurableObjectNamespace: public jsg::Object {

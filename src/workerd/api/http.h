@@ -315,7 +315,7 @@ private:
   //   As such, it will briefly dangle during object destruction. While unlikely to be an issue,
   //   it's worth being aware of.
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     KJ_IF_MAYBE(i, impl) {
       visitor.visit(i->stream);
     }
@@ -638,9 +638,7 @@ private:
   // used explicity, thisSignal will not be.
   kj::Maybe<jsg::V8Ref<v8::Object>> cf;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(headers, fetcher, signal, thisSignal, cf);
-  }
+  JSG_TRACE(headers, fetcher, signal, thisSignal, cf);
 };
 
 class Response: public Body {
@@ -829,9 +827,7 @@ private:
 
   bool hasEnabledWebSocketCompression = false;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(headers, webSocket, cf);
-  }
+  JSG_TRACE(headers, webSocket, cf);
 };
 
 class FetchEvent: public ExtendableEvent {
@@ -871,9 +867,7 @@ private:
 
   kj::OneOf<AwaitingRespondWith, RespondWithCalled, ResponseSent> state;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(request);
-  }
+  JSG_TRACE(request);
 };
 
 jsg::Promise<jsg::Ref<Response>> fetchImpl(

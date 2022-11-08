@@ -53,11 +53,19 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
 
+#ifdef WORKERD_USE_OILPAN
+  void jsgTrace(GcVisitor& visitor) const override {
+    if (!this->movedAway) {
+      visitor.visit(this->value);
+    }
+  }
+#else
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
       visitor.visit(this->value);
     }
   }
+#endif
 };
 
 template <typename T>
@@ -356,9 +364,7 @@ public:
       return { js.v8Isolate, v8Resolver.getHandle(js.v8Isolate) };
     }
 
-    void visitForGc(GcVisitor& visitor) {
-      visitor.visit(v8Resolver);
-    }
+    JSG_TRACE(v8Resolver);
 
     // DEPRECATED: Versions that don't take `Lock`, same as with Promise.
     template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>>
@@ -387,9 +393,7 @@ public:
     V8Ref<v8::Promise::Resolver> v8Resolver;
   };
 
-  void visitForGc(GcVisitor& visitor) {
-    visitor.visit(v8Promise);
-  }
+  JSG_TRACE(v8Promise)
 
   // DEPRECATED: The versions below do not take a `Lock` as the first param, but they do actually
   //   require a lock. These versions also do not pass a `Lock` to the callback.

@@ -196,7 +196,7 @@ public:
     __builtin_unreachable();
   }
 
-  inline void visitForGc(GcVisitor& visitor) {
+  inline void visitForGc(GcVisitor& visitor) const {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         visitor.visit(native);
@@ -409,7 +409,7 @@ public:
     return func(kj::fwd<Params>(params)...);
   }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     func(visitor);
   }
 

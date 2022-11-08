@@ -105,7 +105,7 @@ public:
 
   inline bool isFinished() const { return state.template is<Finished>(); }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     KJ_IF_MAYBE(active, state) {
       visitor.visit(active->maybeNext, active->maybeReturn, active->maybeThrow);
     }
@@ -269,7 +269,7 @@ public:
     }
   }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     KJ_IF_MAYBE(i, impl) {
       (*i)->visitForGc(visitor);
     }
@@ -322,7 +322,7 @@ public:
     return js.template resolvedPromise<kj::Maybe<T>>(nullptr);
   }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     KJ_IF_MAYBE(i, impl) {
       i->visitForGc(visitor);
     }
@@ -662,7 +662,7 @@ public:
     return info.This();
   }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     if constexpr (hasPublicVisitForGc<State>()) {
       visitor.visit(state);
     }
@@ -693,7 +693,7 @@ public:
 
   bool returning = false;
 
-  void visitForGc(GcVisitor& visitor);
+  void visitForGc(GcVisitor& visitor) const;
 
   template <typename Type>
   struct Next {
@@ -770,7 +770,7 @@ public:
     return info.This();
   }
 
-  void visitForGc(GcVisitor& visitor) {
+  void visitForGc(GcVisitor& visitor) const {
     KJ_IF_MAYBE(inner, state.template tryGet<InnerState>()) {
       if constexpr (hasPublicVisitForGc<State>()) {
         visitor.visit(inner->state);

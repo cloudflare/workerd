@@ -168,9 +168,7 @@ public:
   }
 
 private:
-  void visitForGc(GcVisitor& visitor) {
-    visitor.visit(inner);
-  }
+  JSG_TRACE(inner)
 };
 
 struct ExtendedNumberBox: public NumberBox {
@@ -202,9 +200,7 @@ struct TestStruct {
 
   JSG_STRUCT(str, num, box);
 
-  void visitForGc(GcVisitor& visitor) {
-    visitor.visit(box);
-  }
+  JSG_TRACE(box)
 };
 
 }  // namespace workerd::jsg::test

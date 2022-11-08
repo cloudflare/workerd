@@ -111,9 +111,7 @@ private:
   kj::Own<RefcountedUrl> url;
   kj::Maybe<jsg::Ref<URLSearchParams>> searchParams;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(searchParams);
-  }
+  JSG_TRACE(searchParams);
 };
 
 class URLSearchParams: public jsg::Object {
@@ -127,9 +125,7 @@ private:
     jsg::Ref<URLSearchParams> parent;
     uint index = 0;
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-    }
+    JSG_TRACE(parent);
   };
 
 public:

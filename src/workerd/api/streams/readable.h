@@ -34,7 +34,7 @@ public:
 
   void releaseLock(jsg::Lock& js);
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(closedPromise);
 
 private:
   struct Initial {};
@@ -96,7 +96,7 @@ public:
 private:
   ReaderImpl impl;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(impl)
 };
 
 class ReadableStreamBYOBReader: public jsg::Object,
@@ -159,7 +159,7 @@ public:
 private:
   ReaderImpl impl;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(impl)
 };
 
 class ReadableStream: public jsg::Object {
@@ -189,6 +189,7 @@ public:
   explicit ReadableStream(Controller controller);
 
   ReadableStreamController& getController();
+  const ReadableStreamController& getController() const;
 
   jsg::Ref<ReadableStream> addRef() { return JSG_THIS; }
 
@@ -285,9 +286,7 @@ private:
   Controller controller;
   kj::Maybe<jsg::Promise<void>> maybePipeThrough;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(getController(), maybePipeThrough);
-  }
+  JSG_TRACE(getController(), maybePipeThrough)
 };
 
 struct QueuingStrategyInit {

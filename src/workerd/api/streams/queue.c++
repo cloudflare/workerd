@@ -38,10 +38,6 @@ jsg::Value ValueQueue::Entry::getValue(jsg::Lock& js) {
 
 size_t ValueQueue::Entry::getSize() const { return size; }
 
-void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(value);
-}
-
 ValueQueue::Entry ValueQueue::Entry::clone(jsg::Lock& js) {
   return Entry(value.addRef(js), size);
 }

@@ -259,7 +259,7 @@ kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* 
   KJ_UNREACHABLE;
 }
 
-void Name::visitForGc(GcVisitor& visitor) {
+void Name::visitForGc(GcVisitor& visitor) const {
   KJ_SWITCH_ONEOF(inner) {
     KJ_CASE_ONEOF(string, kj::String) {}
     KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {

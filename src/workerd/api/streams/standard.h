@@ -291,7 +291,7 @@ public:
         Controller& self,
         jsg::Ref<WritableStream> destination);
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
 private:
   class PipeLocked: public PipeController {
@@ -334,7 +334,7 @@ private:
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
-    void visitForGc(jsg::GcVisitor& visitor) ;
+    JSG_TRACE(writableStreamRef)
 
   private:
     Controller& inner;
@@ -362,7 +362,7 @@ public:
   void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
   bool pipeLock(WritableStream& owner,
                 jsg::Ref<ReadableStream> source,
@@ -458,7 +458,7 @@ public:
 
   kj::Own<Consumer> getConsumer(kj::Maybe<StateListener&> listener);
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
   size_t consumerCount();
 
@@ -492,9 +492,7 @@ private:
       size = nullptr;
     }
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, pulling, canceling, start, pull, cancel, size);
-    }
+    JSG_TRACE(starting, pulling, canceling, start, pull, cancel, size)
   };
 
   using Queue = typename Self::QueueType;
@@ -532,9 +530,7 @@ public:
     jsg::Value value;
     size_t size;
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(resolver, value);
-    }
+    JSG_TRACE(resolver, value)
   };
 
   WritableImpl(jsg::Lock& js, WriterOwner& owner);
@@ -595,7 +591,7 @@ public:
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value);
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
 private:
 
@@ -625,9 +621,7 @@ private:
       write = nullptr;
     }
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, aborting, closing, writing, write, close, abort, size);
-    }
+    JSG_TRACE(starting, aborting, closing, writing, write, close, abort, size)
   };
 
   kj::Maybe<WriterOwner&> owner;
@@ -698,7 +692,7 @@ public:
 private:
   ReadableImpl impl;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(impl)
 };
 
 class ReadableStreamBYOBRequest: public jsg::Object {
@@ -768,7 +762,7 @@ private:
 
   kj::Maybe<Impl> maybeImpl;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 };
 
 class ReadableByteStreamController: public jsg::Object {
@@ -817,7 +811,7 @@ private:
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(maybeByobRequest, impl);
 
   friend class ReadableStreamBYOBRequest;
   friend class ReadableStreamJsController;
@@ -932,7 +926,7 @@ public:
 
   kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
 
-  void visitForGc(jsg::GcVisitor& visitor) override;
+  void visitForGc(jsg::GcVisitor& visitor) const override;
 
   kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
 
@@ -1087,9 +1081,7 @@ public:
 private:
   WritableImpl impl;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(impl);
-   }
+  JSG_TRACE(impl)
 };
 
 class WritableStreamJsController: public WritableStreamController,
@@ -1169,7 +1161,7 @@ public:
   jsg::Promise<void> write(jsg::Lock& js,
                             jsg::Optional<v8::Local<v8::Value>> value) override;
 
-  void visitForGc(jsg::GcVisitor& visitor) override;
+  void visitForGc(jsg::GcVisitor& visitor) const override;
 
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -1240,9 +1232,7 @@ private:
       flush = nullptr;
     }
 
-    inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, transform, flush);
-    }
+    JSG_TRACE(starting, transform, flush)
   };
 
   void errorWritableAndUnblockWrite(jsg::Lock& js,
@@ -1266,7 +1256,7 @@ private:
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 };
 
 }  // namespace workerd::api

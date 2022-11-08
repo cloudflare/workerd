@@ -479,7 +479,7 @@ public:
     KJ_UNREACHABLE;
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {
@@ -609,7 +609,7 @@ public:
 
     size_t getSize() const;
 
-    void visitForGc(jsg::GcVisitor& visitor);
+    JSG_TRACE(value);
 
     Entry clone(jsg::Lock& js);
 
@@ -622,7 +622,7 @@ public:
     kj::Own<Entry> entry;
     QueueEntry clone();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
+    void visitForGc(jsg::GcVisitor& visitor) const {
       if (entry) visitor.visit(*entry);
     }
   };
@@ -657,9 +657,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    JSG_TRACE(impl);
 
   private:
     ConsumerImpl impl;
@@ -807,7 +805,7 @@ public:
 
     size_t getSize() const;
 
-    inline void visitForGc(jsg::GcVisitor& visitor) {}
+    inline void visitForGc(jsg::GcVisitor& visitor) const {}
 
   private:
     jsg::BackingStore store;
@@ -819,7 +817,7 @@ public:
 
     QueueEntry clone();
 
-    void visitForGc(jsg::GcVisitor& visitor) {}
+    void visitForGc(jsg::GcVisitor& visitor) const {}
   };
 
   class Consumer {
@@ -852,9 +850,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    JSG_TRACE(impl)
 
   private:
     ConsumerImpl impl;
@@ -892,7 +888,7 @@ public:
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
 
-  void visitForGc(jsg::GcVisitor& visitor) {}
+  void visitForGc(jsg::GcVisitor& visitor) const {}
 
 private:
   QueueImpl impl;

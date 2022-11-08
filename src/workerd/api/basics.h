@@ -157,9 +157,7 @@ private:
   bool propagationStopped = false;
   kj::Maybe<jsg::Ref<EventTarget>> target;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(target);
-  }
+  JSG_TRACE(target)
 };
 
 class ExtendableEvent: public Event {
@@ -244,9 +242,7 @@ public:
     }
 
     // The visitForGc here must be called from EventTarget's visitForGc implementation.
-    inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(func);
-    }
+    JSG_TRACE(func)
 
   private:
     kj::String type;
@@ -324,9 +320,7 @@ private:
       // If the event handler is registered with an AbortSignal, then the abortHandler
       // is set and will ensure that the handler is removed correctly.
 
-      void visitForGc(jsg::GcVisitor& visitor) {
-        visitor.visit(identity, callback);
-      }
+      JSG_TRACE(identity, callback);
     };
 
     struct NativeHandlerRef {
@@ -434,7 +428,7 @@ private:
   // Event handlers are not supposed to return values. The first time one does, we'll
   // emit a warning to help users debug things but we'll otherwise ignore it.
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  void visitForGc(jsg::GcVisitor& visitor) const;
 
   friend class NativeHandler;
 };
@@ -528,7 +522,7 @@ private:
   Flag flag;
   kj::Maybe<jsg::V8Ref<v8::Value>> reason;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(reason);
 
   friend class AbortController;
 };
@@ -558,11 +552,7 @@ public:
 private:
   jsg::Ref<AbortSignal> signal;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    // We have to be careful with gc here. The event listeners added to the AbortSignal
-    // could hold a circular reference to the AbortController.
-    visitor.visit(signal);
-  }
+  JSG_TRACE(signal)
 };
 
 class Scheduler final: public jsg::Object {

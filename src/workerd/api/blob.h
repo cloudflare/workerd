@@ -67,7 +67,7 @@ private:
   kj::ArrayPtr<const byte> data;
   kj::String type;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     KJ_IF_MAYBE(b, ownData.tryGet<jsg::Ref<Blob>>()) {
       visitor.visit(*b);
     }

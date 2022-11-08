@@ -178,10 +178,6 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(closedPromise, readyPromise);
-}
-
 // ======================================================================================
 
 WritableStream::WritableStream(
@@ -193,6 +189,18 @@ WritableStream::WritableStream(
 
 WritableStream::WritableStream(Controller controller) : controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
+}
+
+const WritableStreamController& WritableStream::getController() const {
+  KJ_SWITCH_ONEOF(controller) {
+    KJ_CASE_ONEOF(c, kj::Own<WritableStreamInternalController>) {
+      return *c;
+    }
+    KJ_CASE_ONEOF(c, kj::Own<WritableStreamJsController>) {
+      return *c;
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 WritableStreamController& WritableStream::getController() {

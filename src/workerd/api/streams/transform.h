@@ -56,9 +56,7 @@ private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(readable, writable);
-  }
+  JSG_TRACE(readable, writable)
 };
 
 class IdentityTransformStream: public TransformStream {

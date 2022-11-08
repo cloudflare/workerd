@@ -28,9 +28,7 @@ private:
     jsg::Ref<FormData> parent;
     uint index = 0;
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-    }
+    JSG_TRACE(parent);
   };
 
 public:

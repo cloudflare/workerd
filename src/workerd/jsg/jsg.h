@@ -969,8 +969,10 @@ private:
   const v8::FunctionCallbackInfo<v8::Value>& args;
 };
 
+#ifndef WORKERD_USE_OILPAN
 template <typename T>
 constexpr bool resourceNeedsGcTracing();
+#endif
 template <typename T>
 void visitSubclassForGc(T* obj, GcVisitor& visitor);
 
@@ -1002,13 +1004,13 @@ public:
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
 
 private:
-  inline void visitForGc(GcVisitor& visitor) {}
-  template <typename>
-  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
+  inline void visitForGc(GcVisitor& visitor) const {}
 #ifdef WORKERD_USE_OILPAN
   template <typename T>
   friend void visitSubclassForGc(const T* obj, GcVisitor& visitor);
 #else
+  template <typename>
+  friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
   friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
 #endif
@@ -1338,7 +1340,7 @@ public:
     return *this;
   }
 
-  void visitForGc(GcVisitor& visitor);
+  void visitForGc(GcVisitor& visitor) const;
 
 private:
   kj::OneOf<T, Value> value;
@@ -1387,7 +1389,7 @@ private:
   template <typename TypeWrapper>
   friend class NameWrapper;
 
-  void visitForGc(GcVisitor& visitor);
+  void visitForGc(GcVisitor& visitor) const;
 };
 
 template <typename Signature>
@@ -1607,7 +1609,7 @@ public:
 
 #ifdef WORKERD_USE_OILPAN
   template <typename T>
-  void visit(Ref<T>& ref) const {
+  void visit(const Ref<T>& ref) const {
     KJ_IF_MAYBE(inner, ref.inner) {
       KJ_SWITCH_ONEOF(*inner) {
         KJ_CASE_ONEOF(member, cppgc::Member<T>) {
@@ -1627,58 +1629,58 @@ public:
   }
 #endif
 
-  void visit(v8::TracedReference<v8::Data>& ref) const;
+  void visit(const v8::TracedReference<v8::Data>& ref) const;
 
-  void visit(Data& data);
+  void visit(const Data& data) const;
 
   template <typename T>
-  void visit(V8Ref<T>& value) {
+  void visit(const V8Ref<T>& value) const {
     visit(static_cast<Data&>(value));
   }
 
-  void visit(BufferSource& bufferSource);
+  void visit(const BufferSource& bufferSource) const;
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
-  void visit(T& supportsVisit) {
-    supportsVisit.visitForGc(*this);
+  void visit(const T& supportsVisit) const {
+    supportsVisit.visitForGc(this);
   }
 
-  void visit() {}
+  void visit() const {}
 
   template <typename T, typename U, typename... Args>
-  void visit(T& t, U& u, Args&... remaining) {
+  void visit(const T& t, const U& u, const Args&... remaining) const {
     visit(t);
     visit(u, kj::fwd<Args&>(remaining)...);
   }
 
-  void visitAll(auto& collection) {
+  void visitAll(const auto& collection) {
     for (auto& item : collection) {
       visit(item);
     }
   }
 
   template <typename T>
-  void visit(kj::Maybe<Ref<T>>& maybeRef) {
+  void visit(const kj::Maybe<Ref<T>>& maybeRef) const {
     KJ_IF_MAYBE(ref, maybeRef) {
       visit(*ref);
     }
   }
 
-  void visit(kj::Maybe<Data>& maybeData) {
+  void visit(const kj::Maybe<Data>& maybeData) const {
     KJ_IF_MAYBE(data, maybeData) {
       visit(*data);
     }
   }
 
   template <typename T>
-  void visit(kj::Maybe<V8Ref<T>>& maybeValue) {
+  void visit(const kj::Maybe<V8Ref<T>>& maybeValue) const {
     KJ_IF_MAYBE(value, maybeValue) {
       visit(*value);
     }
   }
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
-  void visit(kj::Maybe<T>& maybeSupportsVisit) {
+  void visit(const kj::Maybe<T>& maybeSupportsVisit) const {
     KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
       supportsVisit->visitForGc(*this);
     }
@@ -2174,6 +2176,11 @@ private:
 #else
 #define JSG_ALLOC(js, T, ...) jsg::alloc<T>(__VA_ARGS__)
 #endif
+
+#define JSG_TRACE(...) \
+inline void visitForGc(jsg::GcVisitor& visitor) const { \
+  visitor.visit(__VA_ARGS__); \
+}
 
 // =======================================================================================
 // inline implementation details

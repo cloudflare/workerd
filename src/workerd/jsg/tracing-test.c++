@@ -31,9 +31,7 @@ public:
   }
 
 private:
-  void visitForGc(GcVisitor& visitor) {
-    visitor.visit(inner);
-  }
+  JSG_TRACE(inner)
 };
 
 struct TraceTestContext: public Object {

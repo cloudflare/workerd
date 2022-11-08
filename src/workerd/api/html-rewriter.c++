@@ -176,9 +176,7 @@ struct UnregisteredElementHandlers {
   jsg::Optional<ElementCallbackFunction> text;
   // The actual handler functions. We store them as jsg::Values for compatibility with GcVisitor.
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(element, comments, text);
-  }
+  JSG_TRACE(element, comments, text);
 };
 
 struct UnregisteredDocumentHandlers {
@@ -190,9 +188,7 @@ struct UnregisteredDocumentHandlers {
 
   // The `this` object used to call the handler functions.
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(doctype, comments, text, end);
-  }
+  JSG_TRACE(doctype, comments, text, end);
 };
 
 using UnregisteredElementOrDocumentHandlers =
@@ -1070,7 +1066,7 @@ jsg::Ref<Response> HTMLRewriter::transform(
   return kj::mv(response);
 }
 
-void HTMLRewriter::visitForGc(jsg::GcVisitor& visitor) {
+void HTMLRewriter::visitForGc(jsg::GcVisitor& visitor) const {
   for (auto& handlers: impl->unregisteredHandlers) {
     KJ_SWITCH_ONEOF(handlers) {
       KJ_CASE_ONEOF(elementHandlers, UnregisteredElementHandlers) {

@@ -23,7 +23,7 @@ void AsyncIteratorImpl::popCurrent() {
   }
 }
 
-void AsyncIteratorImpl::visitForGc(jsg::GcVisitor& visitor) {
+void AsyncIteratorImpl::visitForGc(jsg::GcVisitor& visitor) const {
   visitor.visitAll(pendingStack);
 }
 

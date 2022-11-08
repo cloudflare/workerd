@@ -38,9 +38,7 @@ struct ReadResult {
 
   JSG_STRUCT(value, done);
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(value);
-  }
+  JSG_TRACE(value);
 };
 
 struct PipeToOptions {
@@ -296,7 +294,7 @@ public:
 
   virtual kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) = 0;
 
-  virtual void visitForGc(jsg::GcVisitor& visitor) {};
+  virtual void visitForGc(jsg::GcVisitor& visitor) const {};
 };
 
 class WritableStreamController {
@@ -388,9 +386,7 @@ public:
       return promise.whenResolved(kj::fwd(func), kj::fwd(errFunc));
     }
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(resolver, promise, reason);
-    }
+    JSG_TRACE(resolver, promise, reason);
 
     static kj::Maybe<PendingAbort> dequeue(kj::Maybe<PendingAbort>& maybePendingAbort);
   };
@@ -446,7 +442,7 @@ public:
 
   virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
 
-  virtual void visitForGc(jsg::GcVisitor& visitor) {};
+  virtual void visitForGc(jsg::GcVisitor& visitor) const {};
 };
 
 struct Unlocked {};
@@ -472,7 +468,7 @@ public:
     }
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     KJ_IF_MAYBE(i, impl) {
       visitor.visit(i->closedFulfiller);
     }
@@ -519,7 +515,7 @@ public:
     }
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  void visitForGc(jsg::GcVisitor& visitor) const {
     KJ_IF_MAYBE(i, impl) {
       visitor.visit(i->closedFulfiller, i->readyFulfiller);
     }

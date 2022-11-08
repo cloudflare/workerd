@@ -14,6 +14,7 @@ struct URLPatternComponent {
   jsg::UsvString pattern;
   jsg::V8Ref<v8::RegExp> regex;
   kj::Array<jsg::UsvString> nameList;
+  JSG_TRACE(regex);
 };
 
 struct URLPatternComponents {
@@ -26,6 +27,8 @@ struct URLPatternComponents {
   URLPatternComponent pathname;
   URLPatternComponent search;
   URLPatternComponent hash;
+
+  JSG_TRACE(protocol, username, password, hostname, port, pathname, search, hash)
 };
 
 class URLPattern: public jsg::Object {
@@ -131,7 +134,7 @@ public:
 private:
   URLPatternComponents components;
 
-  void visitForGc(jsg::GcVisitor& visitor);
+  JSG_TRACE(components)
 };
 
 #define EW_URLPATTERN_ISOLATE_TYPES           \
