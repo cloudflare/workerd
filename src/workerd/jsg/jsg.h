@@ -7,6 +7,7 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
+#include <kj/common.h>
 #include <kj/string.h>
 #include <kj/function.h>
 #include <kj/exception.h>
@@ -621,34 +622,42 @@ class Data {
   // visitation for them. Moving jsg::Data which are reachable via GC vistation is undefined
   // behavior outside of an isolate lock.
 
+  auto initHandle(v8::Isolate* isolate, v8::Local<v8::Data> handle) {
+#ifdef WORKERD_USE_OILPAN
+    return v8::Global<v8::Data>(isolate, handle);
+#else
+    return TracedHandle(isolate, handle);
+#endif
+  }
+
 public:
   Data(decltype(nullptr)) {}
   ~Data() noexcept(false) {
     destroy();
   }
-  Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
-    if (handle.IsWeak()) handle.ClearWeak();
-    other.isolate = nullptr;
-    assertInvariant();
-    other.assertInvariant();
-  }
-  Data& operator=(Data&& other) {
-    if (this != &other) {
-      destroy();
-      isolate = other.isolate;
-      handle = kj::mv(other.handle);
-      other.isolate = nullptr;
-      if (handle.IsWeak()) handle.ClearWeak();
-    }
-    assertInvariant();
-    other.assertInvariant();
-    return *this;
-  }
+  Data(Data&& other);
+
+  Data& operator=(Data&& other);
   KJ_DISALLOW_COPY(Data);
 
   Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
-      : isolate(isolate), handle(isolate, handle) {}
-  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) { return handle.Get(isolate); }
+      : isolate(isolate), handle(initHandle(isolate, handle)) {}
+
+  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) {
+#ifdef WORKERD_USE_OILPAN
+    KJ_SWITCH_ONEOF(handle) {
+      KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+        return global.Get(isolate);
+      }
+      KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+        return ref.Get(isolate);
+      }
+    }
+    KJ_UNREACHABLE;
+#else
+    return handle.Get(isolate);
+#endif
+  }
   v8::Local<v8::Data> getHandle(Lock& js);
   // Interact with raw V8 types.
 
@@ -656,16 +665,39 @@ public:
   Data addRef(Lock& js);
 
   inline bool operator==(const Data& other) const {
+#ifdef WORKERD_USE_OILPAN
+    KJ_SWITCH_ONEOF(handle) {
+      KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+        KJ_IF_MAYBE(otherGlobal, other.handle.tryGet<v8::Global<v8::Data>>()) {
+          return global == *otherGlobal;
+        }
+      }
+      KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+        KJ_IF_MAYBE(otherRef, other.handle.tryGet<v8::TracedReference<v8::Data>>()) {
+          return ref == *otherRef;
+        }
+      }
+    }
+    return false;
+#else
     return handle == other.handle;
+#endif
   }
 
 private:
   v8::Isolate* isolate = nullptr;
   // The isolate with which the handles below are associated.
 
+#ifdef WORKERD_USE_OILPAN
+  kj::OneOf<v8::TracedReference<v8::Data>, v8::Global<v8::Data>> handle;
+  // When the Data is first created, it will be set as a v8::Global.
+  // When the Data is traced, it will be changed to a v8::TracedReference.
+
+#else
   TraceableHandle handle;
   // Handle to the value which will be marked strong if any untraced C++ references exist, weak
   // otherwise.
+#endif
 
   friend class GcVisitor;
 
@@ -1390,6 +1422,8 @@ public:
     ref.inner->visitRef(*this, ref.parent, ref.strong);
   }
 
+  void visit(v8::TracedReference<v8::Data> ref);
+
   template <typename T>
   void visit(kj::Maybe<Ref<T>>& maybeRef) {
     KJ_IF_MAYBE(ref, maybeRef) {
@@ -1446,9 +1480,18 @@ public:
   }
 
 private:
+#ifdef WORKERD_USE_OILPAN
+  explicit GcVisitor(cppgc::Visitor* visitor);
+
+  cppgc::Visitor* inner;
+#else
   Wrappable& parent;
 
   explicit GcVisitor(Wrappable& parent): parent(parent) {}
+#endif
+
+  GcVisitor(GcVisitor&&) = delete;
+  GcVisitor& operator=(GcVisitor&&) = delete;
   KJ_DISALLOW_COPY(GcVisitor);
 
   friend class Wrappable;

@@ -14,12 +14,44 @@
 #include <kj/string.h>
 #include <kj/list.h>
 #include <v8.h>
+#ifdef WORKERD_USE_OILPAN
+#include <v8-cppgc.h>
+#endif
 
 namespace workerd::jsg {
 
 using kj::uint;
 
 class GcVisitor;
+
+#ifdef WORKERD_USE_OILPAN
+
+class Wrappable: public cppgc::GarbageCollected<Wrappable> {
+public:
+  Wrappable() = default;
+  Wrappable(Wrappable&&) = delete;
+  Wrappable& operator=(Wrappable&&) = delete;
+  KJ_DISALLOW_COPY(Wrappable);
+
+  v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
+
+  static kj::Maybe<Wrappable&> tryUnwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle);
+
+  void jsgAttachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object);
+  v8::Local<v8::Object> jsgAttachOpaqueWrapper(v8::Local<v8::Context> context);
+  void jsgDetachWrapper(v8::Isolate* isolate);
+
+  void Trace(cppgc::Visitor* visitor) const;
+  virtual void jsgTrace(GcVisitor& visitor) const {}
+
+private:
+  v8::TracedReference<v8::Object> inner;
+  friend class GcVisitor;
+};
+
+#else
+
 class HeapTracer;
 
 class TraceableHandle: public v8::Global<v8::Data> {
@@ -258,6 +290,8 @@ private:
   kj::List<Wrappable, &Wrappable::link> wrappers;
   // List of all Wrappables for which a JavaScript wrapper exists.
 };
+
+#endif
 
 #define DISALLOW_KJ_IO_DESTRUCTORS_SCOPE \
   kj::DisallowAsyncDestructorsScope disallow( \

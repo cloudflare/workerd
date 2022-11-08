@@ -49,11 +49,58 @@ void throwError(v8::Isolate* isolate, kj::StringPtr message) {
   isolate->ThrowException(v8::Exception::Error(v8Str(isolate, message)));
   throw JsExceptionThrown();
 }
+
+Data::Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
+#ifdef WORKERD_USE_OILPAN
+  // If the other.handle is a v8::TracedReference, it is already part of another GC'd
+  // objects visitation graph. We do not support moving such instances. Previously we
+  // would treat it as undefined behavior. Under oilpan we'll loudly complain.
+  KJ_REQUIRE(other.handle.is<v8::Global<v8::Data>>(), "moving a traced jsg::Data is unsupported");
+#else
+  if (handle.IsWeak()) handle.ClearWeak();
+#endif
+  other.isolate = nullptr;
+  assertInvariant();
+  other.assertInvariant();
+}
+
+Data& Data::operator=(Data&& other) {
+#ifdef WORKERD_USE_OILPAN
+  // If the other.handle is a v8::TracedReference, it is already part of another GC'd
+  // objects visitation graph. We do not support moving such instances. Previously we
+  // would treat it as undefined behavior. Under oilpan we'll loudly complain.
+  KJ_REQUIRE(other.handle.is<v8::Global<v8::Data>>(), "moving a traced jsg::Data is unsupported");
+#endif
+  if (this != &other) {
+    destroy();
+    isolate = other.isolate;
+    handle = kj::mv(other.handle);
+    other.isolate = nullptr;
+#ifndef WORKERD_USE_OILPAN
+    if (handle.IsWeak()) handle.ClearWeak();
+#endif
+  }
+  assertInvariant();
+  other.assertInvariant();
+  return *this;
+}
+
 void Data::destroy() {
   assertInvariant();
   if (isolate != nullptr) {
     if (v8::Locker::IsLocked(isolate)) {
+#ifdef WORKERD_USE_OILPAN
+      KJ_SWITCH_ONEOF(handle) {
+        KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+          global.Reset();
+        }
+        KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+          ref.Reset();
+        }
+      }
+#else
       handle.Reset();
+#endif
     } else {
       // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
       // defer these handles' destruction to the next time the isolate is locked.
@@ -61,7 +108,21 @@ void Data::destroy() {
       // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
       auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+#ifdef WORKERD_USE_OILPAN
+      v8::Global<v8::Data> toDestroy;
+      KJ_SWITCH_ONEOF(handle) {
+        KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+          toDestroy = kj::mv(global);
+        }
+        KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+          toDestroy = v8::Global<v8::Data>(isolate, ref.Get(isolate));
+          ref.Reset();
+        }
+      }
+      jsgIsolate.deferDestruction(kj::mv(toDestroy));
+#else
       jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
+#endif
     }
     isolate = nullptr;
   }
@@ -70,7 +131,20 @@ void Data::destroy() {
 #ifdef KJ_DEBUG
 void Data::assertInvariantImpl() {
     // Assert that only empty values are associated with null isolates.
-  KJ_DASSERT(isolate != nullptr || handle.IsEmpty());
+#ifdef WORKERD_USE_OILPAN
+  bool isEmpty = false;
+  KJ_SWITCH_ONEOF(handle) {
+    KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+      isEmpty = global.IsEmpty();
+    }
+    KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+      isEmpty = ref.IsEmpty();
+    }
+  }
+#else
+  bool isEmpty = handle.IsEmpty();
+#endif
+  KJ_DASSERT(isolate != nullptr || isEmpty);
 }
 #endif
 

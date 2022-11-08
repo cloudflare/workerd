@@ -56,6 +56,10 @@ private:
   kj::Own<v8::Platform> platform;
 
   explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
+
+#ifdef WORKERD_USE_OILPAN
+  friend class IsolateBase;
+#endif
 };
 
 class IsolateBase {
@@ -196,15 +200,21 @@ private:
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
 
+#ifndef WORKERD_USE_OILPAN
   static void scavengePrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
   static void scavengeEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
+#endif
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
   friend class IsolateBase;
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
+#ifdef WORKERD_USE_OILPAN
+  std::unique_ptr<v8::CppHeap> cppHeap;
+#else
   HeapTracer heapTracer;
+#endif
 
   friend class Data;
   friend class Wrappable;

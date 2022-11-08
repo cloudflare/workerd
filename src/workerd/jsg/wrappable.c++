@@ -9,6 +9,93 @@
 
 namespace workerd::jsg {
 
+#ifdef WORKERD_USE_OILPAN
+
+void Wrappable::jsgAttachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // TODO(oilpan): Use constants for type_info and indexes
+  uint16_t type_info = 1;
+  object->SetAlignedPointerInInternalField(0, &type_info);
+  object->SetAlignedPointerInInternalField(1, this);
+  inner.Reset(isolate, object);
+}
+
+v8::Local<v8::Object> Wrappable::jsgAttachOpaqueWrapper(v8::Local<v8::Context> context) {
+  auto isolate = context->GetIsolate();
+  auto object = jsg::check(IsolateBase::getOpaqueTemplate(isolate)
+      ->InstanceTemplate()->NewInstance(context));
+  jsgAttachWrapper(isolate, object);
+  return object;
+}
+
+void Wrappable::jsgDetachWrapper(v8::Isolate* isolate) {
+  KJ_IF_MAYBE(handle, tryGetHandle(isolate)) {
+    // TODO(oilpan): Use constants for the indexes
+    (*handle)->SetAlignedPointerInInternalField(0, nullptr);
+    (*handle)->SetAlignedPointerInInternalField(1, nullptr);
+    inner.Reset();
+  }
+  KJ_ASSERT(inner.IsEmpty());
+}
+
+v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) {
+  return inner.Get(isolate);
+}
+
+kj::Maybe<v8::Local<v8::Object>> Wrappable::tryGetHandle(v8::Isolate* isolate) {
+  if (!inner.IsEmpty()) {
+    return getHandle(isolate);
+  }
+  return nullptr;
+}
+
+kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> handle) {
+  if (handle->IsObject()) {
+    v8::Local<v8::Object> instance = v8::Local<v8::Object>::Cast(handle)
+        ->FindInstanceInPrototypeChain(IsolateBase::getOpaqueTemplate(isolate));
+    if (!instance.IsEmpty()) {
+      return *reinterpret_cast<Wrappable*>(instance->GetAlignedPointerFromInternalField(1));
+    }
+  }
+
+  return nullptr;
+}
+
+void Wrappable::Trace(cppgc::Visitor* visitor) const {
+  // // The implementation of Trace is required by cppgc.
+  // // In it, every handle to a garbage collected member held by this wrappable
+  // // must be visited. We'll start by visiting anything the subclasses may have, if any,
+  // // and end by tracing the wrapper. The wrapper does not need to exist here.
+  GcVisitor gcVisitor(visitor);
+  jsgTrace(gcVisitor);
+  visitor->Trace(inner);
+}
+
+GcVisitor::GcVisitor(cppgc::Visitor* visitor) : inner(visitor) {}
+
+void GcVisitor::visit(v8::TracedReference<v8::Data> ref) {
+  inner->Trace(ref);
+}
+
+void GcVisitor::visit(Data& value) {
+  KJ_SWITCH_ONEOF(value.handle) {
+    KJ_CASE_ONEOF(global, v8::Global<v8::Data>) {
+      if (!global.IsEmpty()) {
+        // The Data has previously not been traced. We're going to
+        // convert the handle to a v8::TracedReference and trace it.
+        value.handle = v8::TracedReference<v8::Data>(value.isolate, global.Get(value.isolate));
+        visit(value);
+      }
+    }
+    KJ_CASE_ONEOF(ref, v8::TracedReference<v8::Data>) {
+      visit(ref);
+    }
+  }
+}
+
+#else
+
 kj::Own<Wrappable> Wrappable::detachWrapper() {
   resetWrapperHandle();
   return detachWrapperRef();
@@ -337,5 +424,7 @@ void GcVisitor::visit(Data& value) {
     }
   }
 }
+
+#endif
 
 }  // namespace workerd::jsg

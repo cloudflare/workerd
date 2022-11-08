@@ -12,6 +12,10 @@
 #include "libplatform/libplatform.h"
 #include <ucontext.h>
 
+#ifdef WORKERD_USE_OILPAN
+#include <v8-cppgc.h>
+#endif
+
 #ifdef WORKERD_ICU_DATA_EMBED
 #include <icudata-embed.capnp.h>
 #include <unicode/udata.h>
@@ -151,6 +155,8 @@ void IsolateBase::clearDestructionQueue() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
   auto drop = queue.lockExclusive()->pop();
 }
+
+#ifndef WORKERD_USE_OILPAN
 
 void HeapTracer::destroy() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
@@ -293,6 +299,8 @@ void IsolateBase::scavengeEpilogue(
   HeapTracer::getTracer(isolate).endScavenge();
 }
 
+#endif
+
 namespace {
   static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
     if (params.array_buffer_allocator == nullptr &&
@@ -302,17 +310,35 @@ namespace {
     }
     return v8::Isolate::New(params);
   }
+
+#ifdef WORKERD_USE_OILPAN
+  static std::unique_ptr<v8::CppHeap> newCppHeap(const v8::Platform& platform) {
+    v8::CppHeapCreateParams params = {
+      .wrapper_descriptor = v8::WrapperDescriptor(0, 1, 1),
+    };
+    return v8::CppHeap::Create(const_cast<v8::Platform*>(&platform), params);
+  }
+#endif
 }
 
 IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams)
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
+#ifdef WORKERD_USE_OILPAN
+      cppHeap(newCppHeap(*system.platform)) {
+
+  ptr->AttachCppHeap(cppHeap.get());
+#else
       heapTracer(ptr) {
+#endif
+
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
 
+#ifndef WORKERD_USE_OILPAN
   ptr->AddGCPrologueCallback(scavengePrologue, v8::kGCTypeScavenge);
   ptr->AddGCEpilogueCallback(scavengeEpilogue, v8::kGCTypeScavenge);
+#endif
 
   ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
   ptr->SetData(0, this);
@@ -356,6 +382,9 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+#ifdef WORKERD_USE_OILPAN
+  KJ_ASSERT(ptr->GetCppHeap() == nullptr);
+#endif
   KJ_DEFER(ptr->Dispose());
 }
 
@@ -371,9 +400,11 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();
 
+#ifndef WORKERD_USE_OILPAN
   // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
   // may call into the heap tracer.
   KJ_DEFER(heapTracer.destroy());
+#endif
 
   // Make sure opaqueTemplate is destroyed under lock (but not until later).
   KJ_DEFER(opaqueTemplate.Reset());
@@ -382,8 +413,20 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // is destroyed before the lock is released.
   kj::Own<void> typeWrapperInstanceInner = kj::mv(typeWrapperInstance);
 
+#ifdef WORKERD_USE_OILPAN
+  // Terminate peforms a final GC on the cppHeap, clearing all roots.
+  // All C++ objects created on this heap should be reclaimed and no
+  // further allocations are possible.
+  cppHeap->Terminate();
+  // TODO(oilpan): It should be possible for us to check here that all
+  // wrappers were actually cleared. If any are retained, we have a
+  // memory leak.
+  ptr->DetachCppHeap();
+  cppHeap.reset();
+#else
   // Destroy all wrappers.
   heapTracer.clearWrappers();
+#endif
 }
 
 void IsolateBase::fatalError(const char* location, const char* message) {
