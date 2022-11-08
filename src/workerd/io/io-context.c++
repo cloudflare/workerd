@@ -143,11 +143,12 @@ ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& buil
 
 ThreadContext::ThreadContext(
     kj::Timer& timer, kj::EntropySource& entropySource,
-    HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory, bool fiddle)
+    HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory, capnp::ByteStreamFactory& byteStreamFactory, bool fiddle)
     : timer(timer),
       entropySource(entropySource),
       headerIds(headerIds),
       httpOverCapnpFactory(httpOverCapnpFactory),
+      byteStreamFactory(byteStreamFactory),
       fiddle(fiddle) {}
 
 IoContext::IoContext(ThreadContext& thread,

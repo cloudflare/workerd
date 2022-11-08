@@ -64,7 +64,8 @@ public:
 
   ThreadContext(
       kj::Timer& timer, kj::EntropySource& entropySource,
-      HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory, bool isFiddle);
+      HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+          capnp::ByteStreamFactory& byteStreamFactory, bool isFiddle);
 
   kj::Timer& getUnsafeTimer() { return timer; }
   // This should only be used to costruct TimerChannel. Everything else should use TimerChannel.
@@ -73,6 +74,7 @@ public:
   const kj::HttpHeaderTable& getHeaderTable() { return headerIds.table; }
   const HeaderIdBundle& getHeaderIds() { return headerIds; }
   capnp::HttpOverCapnpFactory& getHttpOverCapnpFactory() { return httpOverCapnpFactory; }
+  capnp::ByteStreamFactory& getByteStreamFactory() { return byteStreamFactory; }
   bool isFiddle() { return fiddle; }
 
 private:
@@ -81,6 +83,7 @@ private:
   kj::EntropySource& entropySource;
   HeaderIdBundle headerIds;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  capnp::ByteStreamFactory& byteStreamFactory;
   bool fiddle;
 };
 
