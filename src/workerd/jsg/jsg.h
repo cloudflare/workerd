@@ -626,7 +626,7 @@ class Data {
 #ifdef WORKERD_USE_OILPAN
     return v8::Global<v8::Data>(isolate, handle);
 #else
-    return TracedHandle(isolate, handle);
+    return TraceableHandle(isolate, handle);
 #endif
   }
 
