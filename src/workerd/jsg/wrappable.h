@@ -15,7 +15,10 @@
 #include <kj/list.h>
 #include <v8.h>
 #ifdef WORKERD_USE_OILPAN
+#include <kj/one-of.h>
 #include <v8-cppgc.h>
+#include <cppgc/persistent.h>
+#include <cppgc/member.h>
 #endif
 
 namespace workerd::jsg {
@@ -41,6 +44,10 @@ public:
   void jsgAttachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object);
   v8::Local<v8::Object> jsgAttachOpaqueWrapper(v8::Local<v8::Context> context);
   void jsgDetachWrapper(v8::Isolate* isolate);
+
+  void jsgMaybeDeferDestruction(kj::OneOf<cppgc::Persistent<Wrappable>,
+                                          cppgc::Member<Wrappable>> handle);
+  // Called by jsg::Ref<T> to ensure that its Wrappable is destroyed under the isolate lock.
 
   void Trace(cppgc::Visitor* visitor) const;
   virtual void jsgTrace(GcVisitor& visitor) const {}

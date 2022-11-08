@@ -17,6 +17,12 @@
 #include "macro-meta.h"
 #include "wrappable.h"
 
+#ifdef WORKERD_USE_OILPAN
+#include <v8-cppgc.h>
+#include <cppgc/member.h>
+#include <cppgc/persistent.h>
+#endif
+
 #define JSG_ASSERT(cond, jsErrorType, ...)                                              \
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 
@@ -967,7 +973,11 @@ public:
   // to explicitly declare the default constructor.
   Object() = default;
 
+#ifdef WORKERD_USE_OILPAN
+  inline void jsgTrace(GcVisitor& visitor) const override {}
+#else
   inline void jsgVisitForGc(GcVisitor& visitor) override {}
+#endif
 
   static constexpr bool jsgHasReflection = false;
   template <typename TypeWrapper>
@@ -1020,6 +1030,41 @@ class Ref {
   // behavior outside of an isolate lock.
 
 public:
+
+#ifdef WORKERD_USE_OILPAN
+  Ref(decltype(nullptr)) {}
+  Ref(Ref&& other): inner(kj::mv(other.inner)) {
+    KJ_IF_MAYBE(i, inner) {
+      KJ_REQUIRE(i->template is<cppgc::Persistent<T>>(),
+          "moving a traced jsg::Ref is unsupported");
+    }
+  }
+  explicit Ref(cppgc::Persistent<T> persistent): inner(kj::mv(persistent)) {}
+  // Upgrade a cppgc::Persistent to a Ref.
+
+  template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
+  Ref(Ref<U>&& other): inner(kj::mv(other.inner)) {
+    KJ_IF_MAYBE(i, inner) {
+      KJ_REQUIRE(i->template is<cppgc::Persistent<T>>(),
+          "moving a traced jsg::Ref is unsupported");
+    }
+  }
+
+  template <typename U>
+  Ref& operator=(Ref<U>&& other) {
+    KJ_IF_MAYBE(otherInner, other.inner) {
+      KJ_REQUIRE(otherInner->template is<cppgc::Persistent<U>>(),
+          "moving a traced jsg::Ref is unsupported");
+      destroy();
+      inner = kj::mv(*otherInner);
+      other.inner = nullptr;
+    } else {
+      destroy();
+    }
+    return *this;
+  }
+
+#else
   Ref(decltype(nullptr)): strong(false) {}
   Ref(Ref&& other): inner(kj::mv(other.inner)), strong(true) {
     if (other.strong) {
@@ -1055,11 +1100,96 @@ public:
     }
     return *this;
   }
+#endif
+
   ~Ref() noexcept(false) {
     destroy();
   }
   KJ_DISALLOW_COPY(Ref);
 
+#ifdef WORKERD_USE_OILPAN
+  T& operator*() {
+    auto& ref = KJ_REQUIRE_NONNULL(inner, "unable to dereference an empty jsg::Ref");
+    KJ_SWITCH_ONEOF(ref) {
+      KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+        return *member;
+      }
+      KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+        return *persistent;
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  T* operator->() { return get(); }
+  T* get() {
+    KJ_IF_MAYBE(i, inner) {
+      KJ_SWITCH_ONEOF(*i) {
+        KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+          return member.Get();
+        }
+        KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+          return persistent.Get();
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+    return nullptr;
+  }
+
+  Ref addRef() & {
+    KJ_IF_MAYBE(i, inner) {
+      KJ_SWITCH_ONEOF(*i) {
+        KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+          return Ref(cppgc::Persistent<T>(member.get()));
+        }
+        KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+          return Ref(cppgc::Persistent<T>(persistent.get()));
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+    return Ref();
+  }
+
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
+    // If the object has a JS wrapper, return it. Note that the JS wrapper is initialized lazily
+    // when the object is first passed to JS, so you can't be sure that it exists. To reliably
+    // get a handle (creating it on-demand if necessary), use a TypeHandler<Ref<T>>.
+    KJ_IF_MAYBE(i, inner) {
+      KJ_SWITCH_ONEOF(*i) {
+        KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+          return member->tryGetHandle(isolate);
+        }
+        KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+          return persistent->tryGetHandle(isolate);
+        }
+      }
+      KJ_UNREACHABLE;
+    }
+    return nullptr;
+  }
+
+  void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+    // Attach a JavaScript object which implements the JS interface for this C++ object. Normally,
+    // this happens automatically the first time the Ref is passed across the FFI barrier into JS.
+    // This method may be useful in order to use a different wrapper type than the one that would
+    // be used automatically. This method is also useful when implementing TypeWrapperExtensions.
+    //
+    // It is an error to attach a wrapper when another wrapper is already attached. Hence,
+    // typically this should only be called on a newly-allocated object.
+    auto& ref = KJ_ASSERT_NONNULL(inner, "unable to attach a wrapper to an empty jsg::Ref");
+    KJ_SWITCH_ONEOF(ref) {
+      KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+        member->Wrappable::jsgAttachWrapper(isolate, object);
+      }
+      KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+        persistent->Wrappable::jsgAttachWrapper(isolate, object);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+#else
   T& operator*() { return *inner; }
   T* operator->() { return inner.get(); }
   T* get() { return inner.get(); }
@@ -1067,7 +1197,6 @@ public:
   Ref addRef() & {
     return Ref(kj::addRef(*inner));
   }
-  Ref addRef() && = delete;  // would be redundant
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
     // If the object has a JS wrapper, return it. Note that the JS wrapper is initialized lazily
@@ -1087,9 +1216,19 @@ public:
 
     inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
   }
+#endif
+  Ref addRef() && = delete;  // would be redundant
 
 private:
+#ifdef WORKERD_USE_OILPAN
+  kj::Maybe<kj::OneOf<cppgc::Member<T>, cppgc::Persistent<T>>> inner;
+  // When the Ref is first created, the T is held by a cppgc::Persistent, making it a strong
+  // reference. The first time the ref is traced, this will be changed to a cppgc::Member<T>.
+#else
   kj::Own<T> inner;
+  bool strong;
+  // True if the ref is currently counted in the target's strong refcount.
+#endif
 
   kj::Maybe<Wrappable&> parent;
   // If this has ever been traced, the parent object from which the trace originated. This is kept
@@ -1098,13 +1237,24 @@ private:
   // This field does NOT move when the Ref moves, because it's a property of the specific Ref
   // location.
 
-  bool strong;
-  // True if the ref is currently counted in the target's strong refcount.
-
   void destroy() {
+#ifdef WORKERD_USE_OILPAN
+    KJ_IF_MAYBE(i, inner) {
+      KJ_SWITCH_ONEOF(*i) {
+        KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+          member->maybeDeferDestruction(kj::mv(member));
+        }
+        KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+          persistent->maybeDeferDestruction(kj::mv(persistent));
+        }
+      }
+      inner = nullptr;
+    }
+#else
     if (auto ptr = inner.get(); ptr != nullptr) {
       inner->maybeDeferDestruction(strong, kj::mv(inner), static_cast<Wrappable*>(ptr));
     }
+#endif
   }
 
   template <typename>
@@ -1118,8 +1268,19 @@ private:
   template <typename>
   friend class ObjectWrapper;
   friend class GcVisitor;
+#ifdef WORKERD_USE_OILPAN
+  friend class Lock;
+#endif
 };
 
+#ifdef WORKERD_USE_OILPAN
+
+template <typename T, typename = kj::EnableIf<kj::canConvert<T&, Wrappable&>()>>
+Ref<T> _jsgThis(T* ptr) {
+  return Ref<T>(cppgc::Persistent<T>(ptr));
+}
+
+#else
 template <typename T, typename... Params>
 Ref<T> alloc(Params&&... params) {
   return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
@@ -1129,6 +1290,7 @@ template <typename T>
 Ref<T> _jsgThis(T* obj) {
   return Ref<T>(kj::addRef(*obj));
 }
+#endif
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
 
@@ -1417,12 +1579,30 @@ class GcVisitor {
   // that the reference graph is a DAG, just like you always would in C++.
 
 public:
+
+#ifdef WORKERD_USE_OILPAN
+  template <typename T>
+  void visit(Ref<T>& ref) const {
+    KJ_IF_MAYBE(inner, ref.inner) {
+      KJ_SWITCH_ONEOF(*inner) {
+        KJ_CASE_ONEOF(member, cppgc::Member<T>) {
+          inner->Trace(member);
+        }
+        KJ_CASE_ONEOF(persistent, cppgc::Persistent<T>) {
+          ref.inner = cppgc::Member<T>(persistent.Get());
+          visit(ref);
+        }
+      }
+    }
+  }
+#else
   template <typename T>
   void visit(Ref<T>& ref) {
     ref.inner->visitRef(*this, ref.parent, ref.strong);
   }
+#endif
 
-  void visit(v8::TracedReference<v8::Data> ref);
+  void visit(v8::TracedReference<v8::Data> ref) const;
 
   template <typename T>
   void visit(kj::Maybe<Ref<T>>& maybeRef) {
@@ -1768,6 +1948,17 @@ public:
 
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(2));
   }
+
+#ifdef WORKERD_USE_OILPAN
+  // ---------------------------------------------------------------------------
+  // Allocation-related stuff
+
+  template <typename T, typename... Params, kj::EnableIf<kj::canConvert<T&, Wrappable&>()>>
+  Ref<T> alloc(Params&&... params);
+#endif
+
+  // ---------------------------------------------------------------------------
+  // JSON-related stuff
 
   Value parseJson(kj::StringPtr text);
   template <typename T>
