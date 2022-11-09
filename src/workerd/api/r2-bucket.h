@@ -308,8 +308,14 @@ private:
   friend class R2Admin;
 };
 
+#ifdef WORKERD_USE_OILPAN
+#define R2ERROR
+#else
+#define R2ERROR api::R2Error,
+#endif
+
 #define EW_R2_PUBLIC_BETA_ISOLATE_TYPES \
-  api::R2Error, \
+  R2ERROR \
   api::public_beta::R2Bucket, \
   api::public_beta::R2Bucket::HeadResult, \
   api::public_beta::R2Bucket::GetResult, \

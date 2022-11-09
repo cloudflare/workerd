@@ -397,7 +397,7 @@ void FormData::set(
     auto pivot = std::remove_if(++firstFound, data.end(), predicate);
     data.truncate(pivot - data.begin());
   } else {
-    append(kj::mv(name), kj::mv(value), kj::mv(filename));
+    append(js, kj::mv(name), kj::mv(value), kj::mv(filename));
   }
 }
 

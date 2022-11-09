@@ -37,6 +37,8 @@ public:
   Wrappable& operator=(Wrappable&&) = delete;
   KJ_DISALLOW_COPY(Wrappable);
 
+  virtual ~Wrappable() noexcept(false) {}
+
   v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
 

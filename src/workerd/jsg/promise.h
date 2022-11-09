@@ -340,7 +340,7 @@ public:
       if constexpr (isV8Ref<U>()) {
         handle = value.getHandle(isolate);
       } else {
-        handle = wrapOpaque(js, kj::mv(value));
+        handle = wrapOpaque(js, kj::fwd<U>(value));
       }
       check(v8Resolver.getHandle(isolate)->Resolve(isolate->GetCurrentContext(), handle));
     }
@@ -455,7 +455,7 @@ private:
     if constexpr (isV8Ref<U>()) {
       handle = value.getHandle(isolate);
     } else {
-      handle = wrapOpaque(js, kj::mv(value));
+      handle = wrapOpaque(js, kj::fwd<U>(value));
     };
     check(resolver->Resolve(context, handle));
     v8Promise.emplace(isolate, resolver->GetPromise());
@@ -480,7 +480,7 @@ private:
     v8::HandleScope scope(js.v8Isolate);
     auto context = js.v8Isolate->GetCurrentContext();
 
-    auto funcPairHandle = wrapOpaque(js, kj::mv(funcPair));
+    auto funcPairHandle = wrapOpaque(js, kj::fwd<FuncPair>(funcPair));
 
     auto then = check(v8::Function::New(
         context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
