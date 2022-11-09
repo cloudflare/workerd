@@ -11,10 +11,6 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 
-#ifdef WORKERD_USE_OILPAN
-#include <cppgc/allocation.h>
-#endif
-
 namespace workerd::jsg {
 
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
@@ -243,13 +239,6 @@ private:
   // `FindInstanceInPrototypeChain()` on an existing object to check whether it was created using
   // this template.
 };
-
-#ifdef WORKERD_USE_OILPAN
-template <typename T, typename... Params>
-Ref<T> Lock::alloc(Params&&... params) {
-  return IsolateBase::from(v8Isolate).alloc<T>(kj::fwd<Params>(params)...);
-}
-#endif
 
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace

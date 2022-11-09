@@ -135,6 +135,8 @@ private:
     }
   }
 
+  void visitForGc(jsg::GcVisitor& visitor) const;
+
   friend class url::URLSearchParams;
 };
 

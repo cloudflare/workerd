@@ -632,6 +632,8 @@ public:
 
 private:
   jsg::Ref<SubtleCrypto> subtle;
+
+  JSG_TRACE(subtle);
 };
 
 #define EW_CRYPTO_ISOLATE_TYPES                       \

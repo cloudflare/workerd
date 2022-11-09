@@ -106,6 +106,8 @@ public:
 
 private:
   jsg::Ref<Cache> default_;
+
+  JSG_TRACE(default_);
 };
 
 #define EW_CACHE_ISOLATE_TYPES \

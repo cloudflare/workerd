@@ -25,6 +25,8 @@ public:
   }
 private:
   jsg::Value exports;
+
+  JSG_TRACE(exports)
 };
 
 class CommonJsModuleContext: public jsg::Object {
@@ -48,6 +50,8 @@ public:
 private:
   kj::Path path;
   jsg::Value exports;
+
+  JSG_TRACE(exports)
 };
 
 class NonModuleScript {

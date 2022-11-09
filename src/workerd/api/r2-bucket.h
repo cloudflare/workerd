@@ -199,6 +199,8 @@ public:
     jsg::Optional<HttpMetadata> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
 
+    JSG_TRACE(checksums)
+
     jsg::Optional<Range> range;
     friend class R2Bucket;
   };

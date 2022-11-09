@@ -442,4 +442,12 @@ void FormData::forEach(
   }
 }
 
+void FormData::visitForGc(jsg::GcVisitor& visitor) const {
+  for (const auto& entry : data) {
+    KJ_IF_MAYBE(value, entry.value.tryGet<jsg::Ref<File>>()) {
+      visitor.visit(*value);
+    }
+  }
+}
+
 }  // namespace workerd::api

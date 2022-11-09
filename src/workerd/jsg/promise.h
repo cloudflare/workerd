@@ -92,7 +92,7 @@ v8::Local<v8::Value> wrapOpaque(Lock& js, T&& t) {
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
 
   auto context = js.v8Isolate->GetCurrentContext();
-  auto wrapped = JSG_ALLOC(js, OpaqueWrappable<T>, kj::mv(t));
+  auto wrapped = JSG_ALLOC(js, OpaqueWrappable<T>, kj::fwd<T>(t));
 #ifdef WORKERD_USE_OILPAN
   return wrapped->jsgAttachOpaqueWrapper(context);
 #else

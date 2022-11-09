@@ -286,6 +286,8 @@ private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::Value> transient;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent;
+
+  JSG_TRACE(transient, persistent)
 };
 
 class DurableObjectState: public jsg::Object {
@@ -316,6 +318,8 @@ public:
 private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
+
+  JSG_TRACE(storage)
 };
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                     \

@@ -13,7 +13,7 @@
 #include <capnp/compat/json.h>
 
 namespace workerd::api {
-static kj::Own<R2Error> toError(jsg::Lock& js, uint statusCode, kj::StringPtr responseBody) {
+static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
   capnp::JsonCodec json;
   json.handleByAnnotation<public_beta::R2ErrorResponse>();
   capnp::MallocMessageBuilder errorMessageArena;

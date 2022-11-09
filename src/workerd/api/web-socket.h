@@ -351,6 +351,8 @@ public:
 
 private:
   jsg::Ref<WebSocket> sockets[2];
+
+  JSG_TRACE(sockets[0], sockets[1])
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES \
