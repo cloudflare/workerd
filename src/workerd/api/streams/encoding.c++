@@ -5,6 +5,7 @@
 #include "encoding.h"
 #include "../encoding.h"
 #include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
@@ -48,7 +49,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Optional<kj::String> label,
     jsg::Optional<TextDecoderStreamInit> options,
     CompatibilityFlags::Reader flags) {
-  auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
+  auto decoder = TextDecoder::constructor(js, kj::mv(label), options.map([](auto& opts) {
     return TextDecoder::ConstructorOptions {
       .fatal = opts.fatal.orDefault(true),
     };

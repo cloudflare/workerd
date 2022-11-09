@@ -328,10 +328,10 @@ PipelineTracer::~PipelineTracer() noexcept(false) {
   }
 }
 
-kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
+kj::Promise<kj::Array<kj::Own<workerd::Trace>>> PipelineTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == nullptr, "onComplete() can only be called once");
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<workerd::Trace>>>();
   completeFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
@@ -339,18 +339,18 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(
     PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName,  kj::Maybe<kj::String> dispatchNamespace) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(dispatchNamespace));
+  auto trace = kj::refcounted<workerd::Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(dispatchNamespace));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
 
 WorkerTracer::WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
-      kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel)
+      kj::Own<workerd::Trace> trace, PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel), trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(nullptr, nullptr, nullptr)) {}
+      trace(kj::refcounted<workerd::Trace>(nullptr, nullptr, nullptr)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message) {
   if (trace->exceededLogLimit) {

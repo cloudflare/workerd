@@ -285,7 +285,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 }
 
 void ServiceWorkerGlobalScope::sendTraces(
-    kj::ArrayPtr<kj::Own<Trace>> traces,
+    kj::ArrayPtr<kj::Own<workerd::Trace>> traces,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   auto isolate = lock.getIsolate();

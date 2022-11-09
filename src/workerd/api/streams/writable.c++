@@ -9,6 +9,16 @@ namespace workerd::api {
 
 WritableStreamDefaultWriter::WritableStreamDefaultWriter() {}
 
+#ifdef WORKERD_USE_OILPAN
+void WritableStreamDefaultWriter::Dispose() {
+  KJ_IF_MAYBE(stream, state.tryGet<Attached>()) {
+    // Because this can be called during gc or other cleanup, it is important
+    // that releasing the writer does not cause the closed promise be resolved
+    // since that requires v8 heap allocations.
+    (*stream)->getController().releaseWriter(*this, nullptr);
+  }
+}
+#else
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_MAYBE(stream, state.tryGet<Attached>()) {
     // Because this can be called during gc or other cleanup, it is important
@@ -17,6 +27,7 @@ WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
     (*stream)->getController().releaseWriter(*this, nullptr);
   }
 }
+#endif
 
 jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
     jsg::Lock& js,

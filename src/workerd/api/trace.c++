@@ -14,7 +14,7 @@
 
 namespace workerd::api {
 
-TraceEvent::TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<Trace>> traces)
+TraceEvent::TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<workerd::Trace>> traces)
     : ExtendableEvent("trace"),
       traces(KJ_MAP(t, traces) -> jsg::Ref<TraceItem> {
         return JSG_ALLOC(js, TraceItem, kj::addRef(*t));
@@ -24,7 +24,7 @@ kj::Array<jsg::Ref<TraceItem>> TraceEvent::getTraces() {
   return KJ_MAP(t, traces) -> jsg::Ref<TraceItem> { return t.addRef(); };
 }
 
-TraceItem::TraceItem(kj::Own<Trace> trace) : trace(kj::mv(trace)) {}
+TraceItem::TraceItem(kj::Own<workerd::Trace> trace) : trace(kj::mv(trace)) {}
 
 kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
   KJ_IF_MAYBE(e, trace->eventInfo) {
@@ -76,7 +76,7 @@ uint TraceItem::getWallTime() {
   return trace->wallTime / kj::MILLISECONDS;
 }
 
-TraceItem::FetchEventInfo::FetchEventInfo(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo,
+TraceItem::FetchEventInfo::FetchEventInfo(kj::Own<workerd::Trace> trace, const Trace::FetchEventInfo& eventInfo,
                                           kj::Maybe<const Trace::FetchResponseInfo&> responseInfo)
     : trace(kj::mv(trace)), eventInfo(eventInfo), responseInfo(responseInfo) {}
 
@@ -93,7 +93,7 @@ TraceItem::FetchEventInfo::getResponse(jsg::Lock& js) {
   }
 }
 
-TraceItem::FetchEventInfo::Request::Request(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo)
+TraceItem::FetchEventInfo::Request::Request(kj::Own<workerd::Trace> trace, const Trace::FetchEventInfo& eventInfo)
     : trace(kj::mv(trace)), eventInfo(eventInfo) {}
 
 jsg::Optional<v8::Local<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(
@@ -150,14 +150,14 @@ jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request:
   return kj::mv(request);
 }
 
-TraceItem::FetchEventInfo::Response::Response(kj::Own<Trace> trace, const Trace::FetchResponseInfo& responseInfo)
+TraceItem::FetchEventInfo::Response::Response(kj::Own<workerd::Trace> trace, const Trace::FetchResponseInfo& responseInfo)
     : trace(kj::mv(trace)), responseInfo(responseInfo) {}
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
   return responseInfo.statusCode;
 }
 
-TraceItem::ScheduledEventInfo::ScheduledEventInfo(kj::Own<Trace> trace,
+TraceItem::ScheduledEventInfo::ScheduledEventInfo(kj::Own<workerd::Trace> trace,
     const Trace::ScheduledEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
 
 double TraceItem::ScheduledEventInfo::getScheduledTime() {
@@ -167,7 +167,7 @@ kj::StringPtr TraceItem::ScheduledEventInfo::getCron() {
   return eventInfo.cron;
 }
 
-TraceItem::AlarmEventInfo::AlarmEventInfo(kj::Own<Trace> trace,
+TraceItem::AlarmEventInfo::AlarmEventInfo(kj::Own<workerd::Trace> trace,
     const Trace::AlarmEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
@@ -190,7 +190,8 @@ kj::StringPtr TraceItem::getOutcome() {
   return enums[i].getProto().getName();
 }
 
-TraceLog::TraceLog(kj::Own<Trace> trace, const Trace::Log& log) : trace(kj::mv(trace)), log(log) {}
+TraceLog::TraceLog(kj::Own<workerd::Trace> trace, const Trace::Log& log)
+    : trace(kj::mv(trace)), log(log) {}
 
 double TraceLog::getTimestamp() {
   if (isPredictableModeForTest()) {
@@ -217,7 +218,7 @@ v8::Local<v8::Object> TraceLog::getMessage(v8::Isolate* isolate) {
   return handle.As<v8::Object>();
 }
 
-TraceException::TraceException(kj::Own<Trace> trace, const Trace::Exception& exception)
+TraceException::TraceException(kj::Own<workerd::Trace> trace, const Trace::Exception& exception)
     : trace(kj::mv(trace)), exception(exception) {}
 
 double TraceException::getTimestamp() {
@@ -245,7 +246,7 @@ jsg::Ref<TraceMetrics> UnsafeTraceMetrics::fromTrace(jsg::Lock& js, jsg::Ref<Tra
 namespace {
 kj::Promise<void> sendTracesToExportedHandler(
     kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Maybe<kj::StringPtr> entrypointNamePtr,
-    kj::ArrayPtr<kj::Own<Trace>> traces) {
+    kj::ArrayPtr<kj::Own<workerd::Trace>> traces) {
   // Mark the request as delivered because we're about to run some JS.
   incomingRequest->delivered();
 

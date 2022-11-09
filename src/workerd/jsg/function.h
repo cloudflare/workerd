@@ -18,10 +18,16 @@ template <typename Signature> class WrappableFunction;
 template <typename Ret, typename...Args>
 class WrappableFunction<Ret(Args...)>: public Wrappable {
 public:
+#ifdef WORKERD_USE_OILPAN
+  WrappableFunction() = default;
+#else
   WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
+#endif
   virtual Ret operator()(Lock& js, Args&&... args) = 0;
 
+#ifndef WORKERD_USE_OILPAN
   const bool needsGcTracing;
+#endif
 };
 
 template <typename Signature, typename Impl, bool = hasPublicVisitForGc<Impl>()>
@@ -31,7 +37,11 @@ template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl, false>: public WrappableFunction<Ret(Args...)> {
 public:
   WrappableFunctionImpl(Impl&& func)
+#ifdef WORKERD_USE_OILPAN
+      : WrappableFunction<Ret(Args...)>(),
+#else
       : WrappableFunction<Ret(Args...)>(false),
+#endif
         func(kj::fwd<Impl>(func)) {}
 
   Ret operator()(Lock& js, Args&&... args) override {
@@ -46,15 +56,26 @@ template <typename Ret, typename... Args, typename Impl>
 class WrappableFunctionImpl<Ret(Args...), Impl, true>: public WrappableFunction<Ret(Args...)> {
 public:
   WrappableFunctionImpl(Impl&& func)
+#ifdef WORKERD_USE_OILPAN
+      : WrappableFunction<Ret(Args...)>(),
+#else
       : WrappableFunction<Ret(Args...)>(true),
+#endif
         func(kj::fwd<Impl>(func)) {}
 
   Ret operator()(Lock& js, Args&&... args) override {
     return func(js, kj::fwd<Args>(args)...);
   }
+
+#ifdef WORKERD_USE_OILPAN
+  void jsgTrace(GcVisitor& visitor) const override {
+    visitor.visit(func);
+  }
+#else
   void jsgVisitForGc(GcVisitor& visitor) override {
     visitor.visit(func);
   }
+#endif
 
 private:
   Impl func;
@@ -138,9 +159,8 @@ public:
 
   template <typename Func, typename =
       decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<Args>()...))>
-  Function(Lock& js, Func&& func)
-      : impl(Ref<NativeFunction>(
-          alloc<WrappableFunctionImpl<Ret(Args...), Func>>(kj::fwd<Func>(func)))) {}
+  Function(Func&& func)
+      : impl(allocNative<WrappableFunctionImpl<Ret(Args...), Func>>(kj::fwd<Func>(func))) {}
   // Construct jsg::Function wrapping a C++ function. The parameter can be a lambda or anything
   // else with operator() with a compatible signature. If the parameter has a visitForGc(GcVisitor&)
   // method, then GC visitation will be arranged.
@@ -232,6 +252,14 @@ public:
   }
 
 private:
+
+  template <typename T, typename Func>
+  Ref<NativeFunction> allocNative(Func&& func) {
+    // TODO(oilpan): Determine a better way to do this that doesn't require looking up the isolate.
+    auto& js = Lock::from(v8::Isolate::GetCurrent());
+    return Ref<NativeFunction>(JSG_ALLOC(js, T, kj::fwd<Func>(func)));
+  }
+
   Function(Ref<NativeFunction>&& func) : impl(kj::mv(func)) {}
 
   struct JsImpl {

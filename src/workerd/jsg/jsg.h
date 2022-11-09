@@ -1039,6 +1039,25 @@ private:
   friend class SelfPropertyReader;
 };
 
+#ifdef WORKERD_USE_OILPAN
+template <typename U, typename T>
+kj::Maybe<kj::OneOf<cppgc::Member<T>, cppgc::Persistent<T>>> moveSubtype(
+    kj::Maybe<kj::OneOf<cppgc::Member<U>, cppgc::Persistent<U>>>&& item) {
+  KJ_IF_MAYBE(i, item) {
+    KJ_SWITCH_ONEOF(*i) {
+      KJ_CASE_ONEOF(member, cppgc::Member<U>) {
+        return kj::Maybe(cppgc::Member<T>(member.Release()));
+      }
+      KJ_CASE_ONEOF(persistent, cppgc::Persistent<U>) {
+        return kj::Maybe(cppgc::Persistent<T>(persistent.Release()));
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+  return nullptr;
+}
+#endif
+
 template <typename T>
 class Ref {
   // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
@@ -1075,7 +1094,10 @@ public:
   // Upgrade a cppgc::Persistent to a Ref.
 
   template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
-  Ref(Ref<U>&& other): inner(kj::mv(other.inner)) {
+  Ref(cppgc::Persistent<U> persistent): inner(kj::mv(persistent)) {}
+
+  template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
+  Ref(Ref<U>&& other): inner(moveSubtype<U, T>(kj::mv(other.inner))) {
     KJ_IF_MAYBE(i, inner) {
       KJ_REQUIRE(i->template is<cppgc::Persistent<T>>(),
           "moving a traced jsg::Ref is unsupported");

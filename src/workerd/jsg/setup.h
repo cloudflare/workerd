@@ -258,7 +258,7 @@ private:
 #ifdef WORKERD_USE_OILPAN
 template <typename T, typename... Params>
 Ref<T> Lock::alloc(Params&&... params) {
-  return IsolateBase::from(v8Isolate).alloc(kj::fwd<Params>(params)...);
+  return IsolateBase::from(v8Isolate).alloc<T>(kj::fwd<Params>(params)...);
 }
 #endif
 

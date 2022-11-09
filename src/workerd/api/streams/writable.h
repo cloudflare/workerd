@@ -7,6 +7,10 @@
 #include "internal.h"
 #include "standard.h"
 
+#ifdef WORKERD_USE_OILPAN
+#include <cppgc/prefinalizer.h>
+#endif
+
 namespace workerd::api {
 
 class WritableStreamDefaultWriter: public jsg::Object,
@@ -14,7 +18,12 @@ class WritableStreamDefaultWriter: public jsg::Object,
 public:
   explicit WritableStreamDefaultWriter();
 
+#ifdef WORKERD_USE_OILPAN
+  CPPGC_USING_PRE_FINALIZER(WritableStreamDefaultWriter, Dispose);
+  void Dispose();
+#else
   ~WritableStreamDefaultWriter() noexcept(false) override;
+#endif
 
   // JavaScript API
 

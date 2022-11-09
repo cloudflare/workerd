@@ -407,7 +407,7 @@ public:
   ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY(PipelineTracer);
 
-  kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
+  kj::Promise<kj::Array<kj::Own<workerd::Trace>>> onComplete();
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
   // exist at a time.
 
@@ -423,8 +423,8 @@ public:
   // Makes a tracer for a worker stage.
 
 private:
-  kj::Vector<kj::Own<Trace>> traces;
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Own<workerd::Trace>> traces;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<workerd::Trace>>>>> completeFulfiller;
 
   kj::Maybe<kj::Own<PipelineTracer>> parentTracer;
 
@@ -439,7 +439,7 @@ class WorkerTracer final : public kj::Refcounted {
 
 public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
-      kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel);
+      kj::Own<workerd::Trace> trace, PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
   KJ_DISALLOW_COPY(WorkerTracer);
 
@@ -474,7 +474,7 @@ public:
 
 private:
   PipelineLogLevel pipelineLogLevel;
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing

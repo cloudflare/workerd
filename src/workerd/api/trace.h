@@ -21,7 +21,7 @@ class TraceLog;
 
 class TraceEvent final: public ExtendableEvent {
 public:
-  explicit TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<Trace>> traces);
+  explicit TraceEvent(jsg::Lock& js, kj::ArrayPtr<kj::Own<workerd::Trace>> traces);
 
   static jsg::Ref<TraceEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor?
@@ -51,7 +51,7 @@ public:
   class ScheduledEventInfo;
   class AlarmEventInfo;
 
-  explicit TraceItem(kj::Own<Trace> trace);
+  explicit TraceItem(kj::Own<workerd::Trace> trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>, jsg::Ref<AlarmEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
@@ -78,7 +78,7 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
 };
 
 class TraceItem::FetchEventInfo final: public jsg::Object {
@@ -95,7 +95,8 @@ public:
   class Request;
   class Response;
 
-  explicit FetchEventInfo(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo,
+  explicit FetchEventInfo(kj::Own<workerd::Trace> trace,
+                          const Trace::FetchEventInfo& eventInfo,
                           kj::Maybe<const Trace::FetchResponseInfo&> responseInfo);
 
   jsg::Ref<Request> getRequest(jsg::Lock& js);
@@ -108,14 +109,14 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::FetchEventInfo& eventInfo;
   kj::Maybe<const Trace::FetchResponseInfo&> responseInfo;
 };
 
 class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 public:
-  explicit Request(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo);
+  explicit Request(kj::Own<workerd::Trace> trace, const Trace::FetchEventInfo& eventInfo);
 
   jsg::Optional<v8::Local<v8::Object>> getCf(v8::Isolate* isolate);
   jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders();
@@ -134,14 +135,14 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::FetchEventInfo& eventInfo;
   bool redacted = true;
 };
 
 class TraceItem::FetchEventInfo::Response final: public jsg::Object {
 public:
-  explicit Response(kj::Own<Trace> trace, const Trace::FetchResponseInfo& responseInfo);
+  explicit Response(kj::Own<workerd::Trace> trace, const Trace::FetchResponseInfo& responseInfo);
 
   uint16_t getStatus();
 
@@ -150,13 +151,14 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::FetchResponseInfo& responseInfo;
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {
 public:
-  explicit ScheduledEventInfo(kj::Own<Trace> trace, const Trace::ScheduledEventInfo& eventInfo);
+  explicit ScheduledEventInfo(kj::Own<workerd::Trace> trace,
+                              const Trace::ScheduledEventInfo& eventInfo);
 
   double getScheduledTime();
   kj::StringPtr getCron();
@@ -167,13 +169,13 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::ScheduledEventInfo& eventInfo;
 };
 
 class TraceItem::AlarmEventInfo final: public jsg::Object {
 public:
-  explicit AlarmEventInfo(kj::Own<Trace> trace, const Trace::AlarmEventInfo& eventInfo);
+  explicit AlarmEventInfo(kj::Own<workerd::Trace> trace, const Trace::AlarmEventInfo& eventInfo);
 
   kj::Date getScheduledTime();
 
@@ -182,13 +184,13 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::AlarmEventInfo& eventInfo;
 };
 
 class TraceLog final: public jsg::Object {
 public:
-  TraceLog(kj::Own<Trace> trace, const Trace::Log& log);
+  TraceLog(kj::Own<workerd::Trace> trace, const Trace::Log& log);
 
   double getTimestamp();
   kj::StringPtr getLevel();
@@ -201,13 +203,13 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::Log& log;
 };
 
 class TraceException final: public jsg::Object {
 public:
-  TraceException(kj::Own<Trace> trace, const Trace::Exception& exception);
+  TraceException(kj::Own<workerd::Trace> trace, const Trace::Exception& exception);
 
   double getTimestamp();
   kj::StringPtr getName();
@@ -220,7 +222,7 @@ public:
   }
 
 private:
-  kj::Own<Trace> trace;
+  kj::Own<workerd::Trace> trace;
   const Trace::Exception& exception;
 };
 
@@ -252,7 +254,7 @@ public:
 class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
 public:
   TraceCustomEventImpl(
-      uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<Trace>> traces)
+      uint16_t typeId, kj::TaskSet& waitUntilTasks, kj::Array<kj::Own<workerd::Trace>> traces)
     : typeId(typeId), waitUntilTasks(waitUntilTasks), traces(kj::mv(traces)) {}
 
   kj::Promise<Result> run(

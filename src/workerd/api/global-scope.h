@@ -179,7 +179,7 @@ public:
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
 
-  void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
+  void sendTraces(kj::ArrayPtr<kj::Own<workerd::Trace>> traces,
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
   // Received sendTraces (called from C++, not JS).
 
