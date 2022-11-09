@@ -303,9 +303,7 @@ class ByteLengthQueuingStrategy: public jsg::Object {
 public:
   ByteLengthQueuingStrategy(QueuingStrategyInit init) : init(init) {}
 
-  static jsg::Ref<ByteLengthQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init) {
-    return JSG_ALLOC(js, ByteLengthQueuingStrategy, init);
-  }
+  static jsg::Ref<ByteLengthQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init);
 
   double getHighWaterMark() const { return init.highWaterMark; }
 
@@ -328,9 +326,7 @@ class CountQueuingStrategy: public jsg::Object {
 public:
   CountQueuingStrategy(QueuingStrategyInit init) : init(init) {}
 
-  static jsg::Ref<CountQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init) {
-    return JSG_ALLOC(js, CountQueuingStrategy, init);
-  }
+  static jsg::Ref<CountQueuingStrategy> constructor(jsg::Lock& js, QueuingStrategyInit init);
 
   double getHighWaterMark() const { return init.highWaterMark; }
 

@@ -12,8 +12,12 @@ namespace workerd::api {
 // that we see pop up).
 // TODO(soon): Switch to structured objects and use jsg::Ref<R2Error> instead of kj::Own<R2Error>
 //   to maintain ownership.
+#ifdef WORKERD_USE_OILPAN
+class R2Error: public kj::Refcounted {
+#else
 class R2Error: public jsg::Object {
 public:
+#endif
   R2Error(uint v4Code, kj::String message): v4Code(v4Code), message(kj::mv(message)) {}
 
   constexpr kj::StringPtr getName() const { return "R2Error"_kj; }
@@ -22,6 +26,7 @@ public:
   kj::StringPtr getAction() const { return KJ_ASSERT_NONNULL(action); }
   v8::Local<v8::Value> getStack(v8::Isolate* isolate);
 
+#ifndef WORKERD_USE_OILPAN
   JSG_RESOURCE_TYPE(R2Error) {
     JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
 
@@ -33,6 +38,7 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(stack, getStack);
     // See getStack in dom-exception.h
   }
+#endif
 
 private:
   uint v4Code;

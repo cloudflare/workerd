@@ -12,7 +12,7 @@
 #include <strings.h>
 #include <kj/parse/char.h>
 #include <kj/compat/http.h>
-
+#include <workerd/jsg/setup.h>
 namespace workerd::api {
 
 namespace {
@@ -385,14 +385,16 @@ bool FormData::has(kj::String name) {
   return false;
 }
 
-void FormData::set(kj::String name,
+void FormData::set(
+    jsg::Lock& js,
+    kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
   // Set the first element named `name` to `value`, then remove all the rest matching that name.
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
   auto firstFound = std::find_if(data.begin(), data.end(), predicate);
   if (firstFound != data.end()) {
-    firstFound->value = blobToFile(name, kj::mv(value), kj::mv(filename));
+    firstFound->value = blobToFile(js, name, kj::mv(value), kj::mv(filename));
     auto pivot = std::remove_if(++firstFound, data.end(), predicate);
     data.truncate(pivot - data.begin());
   } else {

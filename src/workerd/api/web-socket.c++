@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/sentry.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
@@ -757,6 +758,21 @@ void WebSocket::assertNoError(jsg::Lock& js) {
   KJ_IF_MAYBE(e, error) {
     js.throwException(e->addRef(js));
   }
+}
+
+jsg::Ref<MessageEvent> MessageEvent::constructor(
+    jsg::Lock& js, kj::String type, Initializer initializer) {
+  return JSG_ALLOC(js, MessageEvent, js, kj::mv(type), initializer.data);
+}
+
+jsg::Ref<CloseEvent> CloseEvent::constructor(
+    jsg::Lock& js,
+    kj::String type,
+    Initializer initializer) {
+  return JSG_ALLOC(js, CloseEvent, kj::mv(type),
+      initializer.code.orDefault(0),
+      kj::mv(initializer.reason).orDefault(nullptr),
+      initializer.wasClean.orDefault(false));
 }
 
 }  // namespace workerd::api

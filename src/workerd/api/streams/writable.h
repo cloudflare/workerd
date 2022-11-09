@@ -15,11 +15,13 @@ namespace workerd::api {
 
 class WritableStreamDefaultWriter: public jsg::Object,
                                    public WritableStreamController::Writer {
+#ifdef WORKERD_USE_OILPAN
+  CPPGC_USING_PRE_FINALIZER(WritableStreamDefaultWriter, Dispose);
+#endif
 public:
   explicit WritableStreamDefaultWriter();
 
 #ifdef WORKERD_USE_OILPAN
-  CPPGC_USING_PRE_FINALIZER(WritableStreamDefaultWriter, Dispose);
   void Dispose();
 #else
   ~WritableStreamDefaultWriter() noexcept(false) override;

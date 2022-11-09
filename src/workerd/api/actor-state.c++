@@ -7,6 +7,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/sentry.h>
 #include <capnp/message.h>

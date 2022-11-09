@@ -6,6 +6,7 @@
 #include "blob.h"
 #include "util.h"
 #include <kj/array.h>
+#include <workerd/jsg/setup.h>
 #include <cmath>
 #include <map>
 #include <string.h>
@@ -593,6 +594,15 @@ bool UrlRecord::operator==(UrlRecord& other) {
 bool UrlRecord::equivalentTo(UrlRecord& other, GetHrefOption option) {
   auto href = getHref(option);
   return href == other.getHref(option);
+}
+
+jsg::Ref<URL> URL::constructor(
+    jsg::Lock& js,
+    jsg::UsvString url,
+    jsg::Optional<jsg::UsvString> base) {
+  return JSG_ALLOC(js, URL,
+      kj::mv(url),
+      base.map([](jsg::UsvString& base) { return base.asPtr(); }));
 }
 
 kj::Maybe<UrlRecord> URL::parse(
@@ -1792,6 +1802,15 @@ void URL::setSearch(jsg::UsvString query) {
   }
 }
 
+jsg::Ref<URLSearchParams> URL::getSearchParams(jsg::Lock& js) {
+  KJ_IF_MAYBE(searchParams, maybeSearchParams) {
+    return searchParams->addRef();
+  }
+  auto searchParams = JSG_ALLOC(js, URLSearchParams, inner.query, *this);
+  maybeSearchParams = searchParams.addRef();
+  return kj::mv(searchParams);
+}
+
 jsg::UsvString URL::getHash() {
   KJ_IF_MAYBE(fragment, inner.fragment) {
     if (!fragment->empty()) {
@@ -1822,6 +1841,12 @@ bool URL::isSpecialScheme(jsg::UsvStringPtr scheme) {
 
 kj::Maybe<uint16_t> URL::defaultPortForScheme(jsg::UsvStringPtr scheme) {
   return url::defaultPortForScheme(scheme);
+}
+
+jsg::Ref<URLSearchParams> URLSearchParams::constructor(
+    jsg::Lock& js,
+    jsg::Optional<Initializer> init) {
+  return JSG_ALLOC(js, URLSearchParams, kj::mv(init).orDefault(jsg::usv()));
 }
 
 void URLSearchParams::init(Initializer init) {

@@ -609,7 +609,7 @@ class Crypto: public jsg::Object {
   // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 
 public:
-  Crypto(jsg::Lock& js) : subtle(JSG_ALLOC(js, SubtleCrypto)) {}
+  Crypto(jsg::Lock& js);
   v8::Local<v8::ArrayBufferView> getRandomValues(v8::Local<v8::ArrayBufferView> buffer);
 
   kj::String randomUUID();

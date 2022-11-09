@@ -8,6 +8,7 @@
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include "util.h"
 #include <workerd/io/io-context.h>
 #include <workerd/util/uuid.h>
@@ -646,6 +647,8 @@ bool SubtleCrypto::timingSafeEqual(kj::Array<kj::byte> a, kj::Array<kj::byte> b)
 
 // =======================================================================================
 // Crypto implementation
+
+Crypto::Crypto(jsg::Lock& js) : subtle(JSG_ALLOC(js, SubtleCrypto)) {}
 
 v8::Local<v8::ArrayBufferView> Crypto::getRandomValues(v8::Local<v8::ArrayBufferView> bufferView) {
   // NOTE: TypeMismatchError is deprecated (obviated by TypeError), but the spec and W3C tests still

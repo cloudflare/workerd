@@ -109,9 +109,9 @@ public:
 #ifdef WORKERD_USE_OILPAN
   template <typename T, typename...Params>
   Ref<T> alloc(Params... params) {
-    Ref<T> ref = cppgc::MakeGarbageCollected<T>(
+    Ref<T> ref = cppgc::Persistent<T>(cppgc::MakeGarbageCollected<T>(
         cppHeap->GetAllocationHandle(),
-        kj::fwd<Params>(params)...);
+        kj::fwd<Params>(params)...));
     ref->jsgSetIsolateBase(*this);
     return ref;
   }

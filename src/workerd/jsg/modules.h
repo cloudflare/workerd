@@ -29,9 +29,7 @@ private:
 
 class CommonJsModuleContext: public jsg::Object {
 public:
-  CommonJsModuleContext(jsg::Lock& js, kj::Path path)
-      : module(JSG_ALLOC(js, CommonJsModuleObject, js)), path(kj::mv(path)),
-      exports(js.v8Ref(module->getExports(js.v8Isolate))) {}
+  CommonJsModuleContext(jsg::Lock& js, kj::Path path);
 
   v8::Local<v8::Value> require(kj::String specifier, v8::Isolate* isolate);
 

@@ -24,9 +24,7 @@ public:
     JSG_STRUCT(data);
   };
   static jsg::Ref<MessageEvent> constructor(
-      jsg::Lock& js, kj::String type, Initializer initializer) {
-    return JSG_ALLOC(js, MessageEvent, js, kj::mv(type), initializer.data);
-  }
+      jsg::Lock& js, kj::String type, Initializer initializer);
 
   v8::Local<v8::Value> getData(v8::Isolate* isolate) { return data.getHandle(isolate); }
 
@@ -63,12 +61,7 @@ public:
     jsg::Optional<bool> wasClean;
     JSG_STRUCT(code, reason, wasClean);
   };
-  static jsg::Ref<CloseEvent> constructor(jsg::Lock& js, kj::String type, Initializer initializer) {
-    return JSG_ALLOC(js, CloseEvent, kj::mv(type),
-        initializer.code.orDefault(0),
-        kj::mv(initializer.reason).orDefault(nullptr),
-        initializer.wasClean.orDefault(false));
-  }
+  static jsg::Ref<CloseEvent> constructor(jsg::Lock& js, kj::String type, Initializer initializer);
 
   int getCode() { return code; }
   kj::StringPtr getReason() { return reason; }

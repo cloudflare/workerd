@@ -529,12 +529,9 @@ private:
 
 class AbortController final: public jsg::Object {
 public:
-  explicit AbortController(jsg::Lock& js)
-      : signal(JSG_ALLOC(js, AbortSignal)) {}
+  AbortController(jsg::Lock& js);
 
-  static jsg::Ref<AbortController> constructor(jsg::Lock& js) {
-    return JSG_ALLOC(js, AbortController);
-  }
+  static jsg::Ref<AbortController> constructor(jsg::Lock& js);
 
   jsg::Ref<AbortSignal> getSignal() { return signal.addRef(); }
 

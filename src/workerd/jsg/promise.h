@@ -43,6 +43,8 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   OpaqueWrappable(T&& value)
       : value(kj::mv(value)) {}
 
+  virtual ~OpaqueWrappable() = default;
+
   T value;
   bool movedAway = false;
 };

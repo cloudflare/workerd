@@ -8,6 +8,7 @@
 #include "c-api/include/lol_html.h"
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/io/io-context.h>
+#include <workerd/jsg/setup.h>
 
 struct lol_html_HtmlRewriter {};
 struct lol_html_HtmlRewriterBuilder {};

@@ -14,6 +14,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/own-util.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
@@ -94,6 +95,32 @@ void ExecutionContext::waitUntil(kj::Promise<void> promise) {
 
 void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
+}
+
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
+    : unhandledRejections(
+        [this](jsg::Lock& js,
+                v8::PromiseRejectEvent event,
+                jsg::V8Ref<v8::Promise> promise,
+                jsg::Value value) {
+          auto ev = JSG_ALLOC(js, PromiseRejectionEvent, event, kj::mv(promise), kj::mv(value));
+          dispatchEventImpl(js, kj::mv(ev));
+        }) {}
+
+jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto(jsg::Lock& js) {
+  return JSG_ALLOC(js, Crypto, js);
+}
+
+jsg::Ref<Scheduler> ServiceWorkerGlobalScope::getScheduler(jsg::Lock& js) {
+  return JSG_ALLOC(js, Scheduler);
+}
+
+jsg::Ref<Navigator> ServiceWorkerGlobalScope::getNavigator(jsg::Lock& js) {
+  return JSG_ALLOC(js, Navigator);
+}
+
+jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches(jsg::Lock& js) {
+  return JSG_ALLOC(js, CacheStorage, js);
 }
 
 void ServiceWorkerGlobalScope::clear() {

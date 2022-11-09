@@ -149,15 +149,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // Global object API exposed to JavaScript.
 
 public:
-  ServiceWorkerGlobalScope(v8::Isolate* isolate)
-      : unhandledRejections(
-          [this](jsg::Lock& js,
-                 v8::PromiseRejectEvent event,
-                 jsg::V8Ref<v8::Promise> promise,
-                 jsg::Value value) {
-            auto ev = JSG_ALLOC(js, PromiseRejectionEvent, event, kj::mv(promise), kj::mv(value));
-            dispatchEventImpl(js, kj::mv(ev));
-          }) {}
+  ServiceWorkerGlobalScope(v8::Isolate* isolate);
 
   void clear();
   // Drop all references to JavaScript objects so that the context can be garbage-collected. Call
@@ -246,17 +238,11 @@ public:
     return JSG_THIS;
   }
 
-  jsg::Ref<Crypto> getCrypto(jsg::Lock& js) {
-    return JSG_ALLOC(js, Crypto, js);
-  }
+  jsg::Ref<Crypto> getCrypto(jsg::Lock& js);
 
-  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js) {
-    return JSG_ALLOC(js, Scheduler);
-  }
+  jsg::Ref<Scheduler> getScheduler(jsg::Lock& js);
 
-  jsg::Ref<Navigator> getNavigator(jsg::Lock& js) {
-    return JSG_ALLOC(js, Navigator);
-  }
+  jsg::Ref<Navigator> getNavigator(jsg::Lock& js);
 
   jsg::Unimplemented getOrigin() { return {}; }
   // TODO(conform): A browser-side service worker returns the origin for the URL on which it was
@@ -265,9 +251,7 @@ public:
   //   a FetchEvent callback (in between .request() and FetchEvent.respondWith()), and otherwise
   //   throw.
 
-  jsg::Ref<CacheStorage> getCaches(jsg::Lock& js) {
-    return JSG_ALLOC(js, CacheStorage, js);
-  }
+  jsg::Ref<CacheStorage> getCaches(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);

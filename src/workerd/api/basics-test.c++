@@ -13,6 +13,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/dom-exception.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/io/promise-wrapper.h>
 
 namespace workerd::api {

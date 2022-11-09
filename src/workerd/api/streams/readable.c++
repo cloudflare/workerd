@@ -4,6 +4,8 @@
 
 #include "readable.h"
 #include "writable.h"
+#include <workerd/jsg/setup.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
@@ -459,6 +461,11 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
   return kj::mv(stream);
 }
 
+jsg::Ref<ByteLengthQueuingStrategy> ByteLengthQueuingStrategy::constructor(
+    jsg::Lock& js, QueuingStrategyInit init) {
+  return JSG_ALLOC(js, ByteLengthQueuingStrategy, init);
+}
+
 jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
     jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeValue) {
   KJ_IF_MAYBE(value, maybeValue) {
@@ -472,5 +479,12 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
   }
   return nullptr;
 }
+
+jsg::Ref<CountQueuingStrategy> CountQueuingStrategy::constructor(
+    jsg::Lock& js,
+    QueuingStrategyInit init) {
+  return JSG_ALLOC(js, CountQueuingStrategy, init);
+}
+
 
 }  // namespace workerd::api

@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "setup.h"
 #include "modules.h"
 #include "promise.h"
 
@@ -335,7 +336,7 @@ Ref<CommonJsModuleContext>
 ModuleRegistry::CommonJsModuleInfo::initModuleContext(
     jsg::Lock& js,
     kj::StringPtr name) {
-  return JSG_ALLOC(js, jsg::CommonJsModuleContext, js.v8Isolate, kj::Path::parse(name));
+  return JSG_ALLOC(js, jsg::CommonJsModuleContext, js, kj::Path::parse(name));
 }
 
 ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
@@ -343,5 +344,9 @@ ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
     kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls)
     : fileScope(kj::mv(fileScope)),
       topLevelDecls(kj::mv(topLevelDecls)) {}
+
+CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
+    : module(JSG_ALLOC(js, CommonJsModuleObject, js)), path(kj::mv(path)),
+    exports(js.v8Ref(module->getExports(js.v8Isolate))) {}
 
 }  // namespace workerd::jsg

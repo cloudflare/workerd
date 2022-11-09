@@ -4,6 +4,7 @@
 
 #include "basics.h"
 #include "global-scope.h"
+#include <workerd/jsg/setup.h>
 #include <kj/async.h>
 #include <kj/vector.h>
 
@@ -434,6 +435,13 @@ void AbortSignal::triggerAbort(
   KJ_DEFER(removeAllHandlers());
 
   dispatchEventImpl(js, JSG_ALLOC(js, Event, kj::str("abort")));
+}
+
+AbortController::AbortController(jsg::Lock& js)
+    : signal(JSG_ALLOC(js, AbortSignal)) {}
+
+jsg::Ref<AbortController> AbortController::constructor(jsg::Lock& js) {
+  return JSG_ALLOC(js, AbortController, js);
 }
 
 void AbortController::abort(

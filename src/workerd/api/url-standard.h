@@ -93,9 +93,7 @@ public:
   URLSearchParams(kj::Maybe<jsg::UsvString>& maybeQuery, URL& url);
   // Constructor called by the URL class when created.
 
-  static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init) {
-    return JSG_ALLOC(js, URLSearchParams, kj::mv(init).orDefault(jsg::usv()));
-  }
+  static jsg::Ref<URLSearchParams> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
 
   void append(jsg::UsvString name, jsg::UsvString value);
   void delete_(jsg::UsvString name);
@@ -228,14 +226,10 @@ public:
 
   URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = nullptr);
 
-  static inline jsg::Ref<URL> constructor(
+  static jsg::Ref<URL> constructor(
       jsg::Lock& js,
       jsg::UsvString url,
-      jsg::Optional<jsg::UsvString> base) {
-    return JSG_ALLOC(js, URL,
-        kj::mv(url),
-        base.map([](jsg::UsvString& base) { return base.asPtr(); }));
-  }
+      jsg::Optional<jsg::UsvString> base);
 
   jsg::UsvString getHref();
   void setHref(jsg::UsvString value);
@@ -269,14 +263,7 @@ public:
   jsg::UsvString getHash();
   void setHash(jsg::UsvString value);
 
-  inline jsg::Ref<URLSearchParams> getSearchParams(jsg::Lock& js) {
-    KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-      return searchParams->addRef();
-    }
-    auto searchParams = JSG_ALLOC(js, URLSearchParams, inner.query, *this);
-    maybeSearchParams = searchParams.addRef();
-    return kj::mv(searchParams);
-  }
+  jsg::Ref<URLSearchParams> getSearchParams(jsg::Lock& js);
 
   UrlRecord& getRecord() KJ_LIFETIMEBOUND { return inner; }
 

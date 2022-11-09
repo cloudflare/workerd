@@ -74,7 +74,8 @@ public:
 
   bool has(kj::String name);
 
-  void set(kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
+  void set(jsg::Lock& js, kj::String name,
+           kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
            jsg::Optional<kj::String> filename);
 
   JSG_ITERATOR(EntryIterator, entries,

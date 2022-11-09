@@ -4,6 +4,7 @@
 
 #include "jsg-test.h"
 #include "string.h"
+#include "setup.h"
 namespace workerd::jsg::test {
 namespace {
 
