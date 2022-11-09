@@ -106,17 +106,6 @@ public:
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
 
-#ifdef WORKERD_USE_OILPAN
-  template <typename T, typename...Params>
-  Ref<T> alloc(Params... params) {
-    Ref<T> ref = cppgc::Persistent<T>(cppgc::MakeGarbageCollected<T>(
-        cppHeap->GetAllocationHandle(),
-        kj::fwd<Params>(params)...));
-    ref->jsgSetIsolateBase(*this);
-    return ref;
-  }
-#endif
-
 private:
   template <typename TypeWrapper>
   friend class Isolate;

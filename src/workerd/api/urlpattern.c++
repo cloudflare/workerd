@@ -9,7 +9,6 @@
 #include <algorithm>
 
 #include <workerd/io/io-context.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

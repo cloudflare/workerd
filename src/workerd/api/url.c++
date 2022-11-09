@@ -7,7 +7,6 @@
 #include <kj/encoding.h>
 #include <kj/string-tree.h>
 #include <kj/parse/char.h>
-#include <workerd/jsg/setup.h>
 #include <algorithm>
 #include <map>
 #include <set>

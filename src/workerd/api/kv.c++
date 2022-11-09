@@ -10,7 +10,6 @@
 #include <workerd/io/io-context.h>
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

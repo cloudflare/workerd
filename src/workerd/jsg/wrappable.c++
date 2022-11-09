@@ -11,6 +11,10 @@ namespace workerd::jsg {
 
 #ifdef WORKERD_USE_OILPAN
 
+void Wrappable::jsgSetIsolateBase(v8::Isolate* isolate) {
+  this->isolate = IsolateBase::from(isolate);
+}
+
 void Wrappable::jsgAttachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
   // TODO(oilpan): Use constants for type_info and indexes
   uint16_t type_info = 1;

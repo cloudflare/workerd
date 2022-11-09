@@ -12,7 +12,6 @@
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>
 #include <workerd/api/r2-api.capnp.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api::public_beta {
 static bool isWholeNumber(double x) {

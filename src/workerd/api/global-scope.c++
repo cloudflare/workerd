@@ -14,7 +14,6 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/own-util.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

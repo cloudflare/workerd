@@ -6,7 +6,6 @@
 #include "blob.h"
 #include "util.h"
 #include <kj/array.h>
-#include <workerd/jsg/setup.h>
 #include <cmath>
 #include <map>
 #include <string.h>

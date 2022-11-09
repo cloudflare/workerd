@@ -5,7 +5,6 @@
 #include "crypto-impl.h"
 #include <workerd/api/crypto.h>
 #include <workerd/io/io-context.h>
-#include <workerd/jsg/setup.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
 #include <set>

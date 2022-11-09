@@ -12,7 +12,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/io/io-context.h>
 #include <set>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

@@ -4,7 +4,6 @@
 
 #include "basics.h"
 #include "global-scope.h"
-#include <workerd/jsg/setup.h>
 #include <kj/async.h>
 #include <kj/vector.h>
 

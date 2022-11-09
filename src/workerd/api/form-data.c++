@@ -12,7 +12,6 @@
 #include <strings.h>
 #include <kj/parse/char.h>
 #include <kj/compat/http.h>
-#include <workerd/jsg/setup.h>
 namespace workerd::api {
 
 namespace {

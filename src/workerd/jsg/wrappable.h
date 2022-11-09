@@ -42,7 +42,7 @@ public:
 
   static kj::Maybe<Wrappable&> tryUnwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle);
 
-  void jsgSetIsolateBase(IsolateBase& isolate) { this->isolate = isolate; }
+  void jsgSetIsolateBase(v8::Isolate* isolate);
   void jsgAttachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object);
   v8::Local<v8::Object> jsgAttachOpaqueWrapper(v8::Local<v8::Context> context);
   void jsgDetachWrapper(v8::Isolate* isolate);

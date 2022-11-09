@@ -5,7 +5,6 @@
 #include "encoding.h"
 #include "../encoding.h"
 #include <workerd/jsg/buffersource.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

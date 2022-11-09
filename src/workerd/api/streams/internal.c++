@@ -7,7 +7,6 @@
 #include "writable.h"
 #include "transform.h"
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

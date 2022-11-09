@@ -4,7 +4,6 @@
 
 #include "blob.h"
 #include "system-streams.h"
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

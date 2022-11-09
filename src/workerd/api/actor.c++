@@ -7,7 +7,6 @@
 #include "system-streams.h"
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
-#include <workerd/jsg/setup.h>
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/schema.h>

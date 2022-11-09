@@ -20,6 +20,7 @@
 
 #ifdef WORKERD_USE_OILPAN
 #include <v8-cppgc.h>
+#include <cppgc/allocation.h>
 #include <cppgc/member.h>
 #include <cppgc/persistent.h>
 #endif
@@ -2014,7 +2015,13 @@ public:
   // Allocation-related stuff
 
   template <typename T, typename... Params>
-  Ref<T> alloc(Params&&... params);
+  Ref<T> alloc(Params&&... params) {
+    Ref<T> ref = cppgc::Persistent<T>(cppgc::MakeGarbageCollected<T>(
+        v8Isolate->GetCppHeap()->GetAllocationHandle(),
+        kj::fwd<Params>(params)...));
+    ref->jsgSetIsolateBase(v8Isolate);
+    return ref;
+  }
 #endif
 
   // ---------------------------------------------------------------------------

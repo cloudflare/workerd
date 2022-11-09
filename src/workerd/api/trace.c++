@@ -11,7 +11,6 @@
 #include <capnp/schema.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/own-util.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 

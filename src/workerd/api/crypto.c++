@@ -8,7 +8,6 @@
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/setup.h>
 #include "util.h"
 #include <workerd/io/io-context.h>
 #include <workerd/util/uuid.h>

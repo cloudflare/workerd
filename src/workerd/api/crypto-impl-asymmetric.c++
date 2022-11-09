@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto-impl.h"
-#include <workerd/jsg/setup.h>
 #include <openssl/rsa.h>
 #include <openssl/ec_key.h>
 #include <openssl/bn.h>

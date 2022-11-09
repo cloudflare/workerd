@@ -7,7 +7,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/sentry.h>
-#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
