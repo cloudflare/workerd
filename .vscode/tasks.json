@@ -5,10 +5,7 @@
       "label": "Bazel Build",
       "type": "shell",
       "command": "bazel",
-      "args": [
-        "build",
-        "//src/workerd/server"
-      ],
+      "args": ["build", "//src/workerd/server"],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -27,11 +24,7 @@
       "label": "Bazel Build (opt)",
       "type": "shell",
       "command": "bazel",
-      "args": [
-        "build",
-        "-c", "opt",
-        "//src/workerd/server"
-      ],
+      "args": ["build", "-c", "opt", "//src/workerd/server"],
       "group": {
         "kind": "build",
         "isDefault": false
@@ -50,11 +43,7 @@
       "label": "Bazel Test",
       "type": "shell",
       "command": "bazel",
-      "args": [
-        "test",
-        "--cache_test_results=no",
-        "//..."
-      ],
+      "args": ["test", "--cache_test_results=no", "//..."],
       "group": {
         "kind": "test",
         "isDefault": true
@@ -67,6 +56,40 @@
         "panel": "shared",
         "showReuseMessage": false,
         "clear": true
+      }
+    },
+    {
+      "label": "Generate rust-project.json",
+      "command": "bazel",
+      "args": ["run", "@rules_rust//tools/rust_analyzer:gen_rust_project"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "Generate compile_commands.json",
+      "command": "bazel",
+      "args": ["run", "//:refresh_compile_commands"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
       }
     }
   ]
