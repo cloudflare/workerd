@@ -159,7 +159,7 @@ cargo_build_script(
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cc-1.0.73//:cc",
+            "@crates_vendor__cc-1.0.76//:cc",
         ],
     }),
 )
