@@ -41,11 +41,11 @@ constexpr bool resourceNeedsGcTracing<Object>() {
 }
 
 template <typename T>
-inline void visitSubclassForGc(T* obj, GcVisitor& visitor) {
+inline void visitSubclassForGc(const T* obj, GcVisitor& visitor) {
   // Call obj->visitForGc() if and only if T defines its own `visitForGc()` method -- do not call
   // the parent class's `visitForGc()`.
   if constexpr (&T::visitForGc != &T::jsgSuper::visitForGc) {
-    obj->visitForGc(visitor);
+    const_cast<T*>(obj)->visitForGc(visitor);
   }
 }
 
@@ -97,19 +97,17 @@ template <typename T, bool isContext>
 T& extractInternalPointer(const v8::Local<v8::Context>& context,
                           const v8::Local<v8::Object>& object) {
   // Given a handle to a resource type, extract the raw C++ object pointer.
-  //
-  // Due to bugs in V8, we can't use internal fields on the global object:
-  //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
-  //
-  // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
-  // instead of the internal fields of the object.
-
   if constexpr (isContext) {
-    // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
-    return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
+    // TODO(cleanup): This is to support the case described in the "can't use
+    // builtin as prototype" test case in jsg-test.c++ where the global object
+    // is used as a prototype and an accessor is used. We likely should be
+    // throwing in the Getter/Setter handlers but this keeps us from breaking
+    // folks.
+    auto maybeHandle = Wrappable::WrapperHandle::tryUnwrap<T>(context, context->Global());
+    return KJ_ASSERT_NONNULL(maybeHandle);
   } else {
-    KJ_ASSERT(object->InternalFieldCount() == 2);
-    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(1));
+    auto maybeHandle = Wrappable::WrapperHandle::tryUnwrap<T>(context, object);
+    return KJ_ASSERT_NONNULL(maybeHandle);
   }
 }
 
@@ -949,9 +947,6 @@ public:
                          v8Str(isolate, "FinalizationRegistry"_kj,
                                v8::NewStringType::kInternalized)));
 
-    // Store a pointer to this object in slot 1, to be extracted in callbacks.
-    context->SetAlignedPointerInEmbedderData(1, ptr.get());
-
     // (Note: V8 docs say: "Note that index 0 currently has a special meaning for Chrome's
     // debugger." We aren't Chrome, but it does appear that some versions of V8 will mess with
     // slot 0, causing us to segfault if we try to put anything there. So we avoid it and use slot
@@ -985,7 +980,7 @@ public:
     // Try to unwrap a value of type Ref<T>.
 
     KJ_IF_MAYBE(p, tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-      return Ref<T>(kj::addRef(*p));
+      return Ref<T>(p->getStrongRefHandle());
     } else {
       return nullptr;
     }

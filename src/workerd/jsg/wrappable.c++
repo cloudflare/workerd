@@ -6,335 +6,578 @@
 #include "jsg.h"
 #include "setup.h"
 #include <kj/debug.h>
+#include <kj/memory.h>
+
+#include <cppgc/garbage-collected.h>
+#include <cppgc/allocation.h>
+#include <cppgc/visitor.h>
 
 namespace workerd::jsg {
 
-kj::Own<Wrappable> Wrappable::detachWrapper() {
-  resetWrapperHandle();
-  return detachWrapperRef();
-}
-
-void Wrappable::resetWrapperHandle() {
-  if (!wrapper.IsEmpty()) {
-    auto& tracer = HeapTracer::getTracer(isolate);
-    detachedTraceId = tracer.currentTraceId();
-    detached = tracer.isScavenging() ? WHILE_SCAVENGING
-             : tracer.isTracing() ? WHILE_TRACING
-             : OTHER;
-    tracer.removeWrapper({}, *this);
+namespace {
+void verifyTraceParent(const Wrappable& current, kj::Maybe<const Wrappable&> maybeParent) {
+  // Provides a quick double check that a traceable object is being traced by its
+  // actual parent.
+  KJ_IF_MAYBE(parent, maybeParent) {
+    KJ_ASSERT(parent == &current);
+  } else {
+    maybeParent = current;
   }
-  wrapper.Reset();
 }
+}  // namespace
 
-kj::Own<Wrappable> Wrappable::detachWrapperRef() {
-  return kj::mv(wrapperRef);
-}
+// ======================================================================================
+// V8Handle
 
-v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) {
-  return KJ_REQUIRE_NONNULL(tryGetHandle(isolate));
-}
-
-void Wrappable::addStrongRef() {
-  KJ_DREQUIRE(v8::Isolate::TryGetCurrent() != nullptr, "referencing wrapper without isolate lock");
-  if (strongRefcount++ == 0) {
-    // This object previously had no strong references, but now it has one.
-    if (wrapper.IsEmpty()) {
-      // Since we have no JS wrapper, we're forced to recursively mark all references reachable
-      // through this wrapper as strong.
-      GcVisitor visitor(*this);
-      jsgVisitForGc(visitor);
-    } else {
-      // Mark the handle strong. V8 will find it and trace it.
-      //
-      // If a trace is already in-progress, V8 won't have registered this handle as a root at the
-      // start of the trace, because it wasn't strong then. That's OK: as long as the handle still
-      // exists and is strong when the trace cycle later enters its final pause, it'll be
-      // discovered and traced then. OTOH if the handle becomes weak again before that (and
-      // short-lived strong handles are common), then we can get away without tracing it.
-      wrapper.ClearWeak<Wrappable>();
+kj::Maybe<kj::OneOf<Wrappable::RefBase, TracedGlobal<v8::Data>>> V8Handle::getV8Ref(
+    v8::Isolate* isolate,
+    v8::Local<v8::Data> data) {
+  // If the given data is a wrapper object for a Wrappable, then we will grab
+  // a ref to the Wrappable, otherwise we'll grab a v8::Global holding
+  // onto the data.
+  const auto maybeGetRef = [&](v8::Local<v8::Object> object, bool isContext)
+      -> kj::Maybe<Wrappable::RefBase> {
+    auto context = isolate->GetCurrentContext();
+    KJ_IF_MAYBE(wrappable, Wrappable::WrapperHandle::tryUnwrap(context, object)) {
+      return Wrappable::RefBase(wrappable->getStrongRefHandle());
     }
-  }
-}
-void Wrappable::removeStrongRef() {
-  KJ_DREQUIRE(isolate == nullptr || v8::Isolate::TryGetCurrent() == isolate,
-              "destroying wrapper without isolate lock");
-  if (--strongRefcount == 0) {
-    // This was the last strong reference.
-    if (wrapper.IsEmpty()) {
-      // We have no wrapper. We need to mark all references held by this object as weak.
-      if (isolate != nullptr) {
-        // But only if the current isolate isn't null. If strong ref count is zero,
-        // the wrapper is empty, and isolate is null, then the child handles it has will
-        // be released anyway (since we're about to be destroyed), thus this visitation
-        // isn't required (and may be buggy, since it may happen outside the isolate lock).
-        GcVisitor visitor(*this);
-        jsgVisitForGc(visitor);
+    return nullptr;
+  };
+
+  if (!data.IsEmpty()) {
+    if (data->IsValue()) {
+      auto value = data.As<v8::Value>();
+      if (value->IsObject()) {
+        KJ_IF_MAYBE(ref, maybeGetRef(value.As<v8::Object>(), value->IsContext())) {
+          return kj::Maybe(kj::mv(*ref));
+        }
       }
-    } else {
-      // Mark the handle weak, so that it only stays alive if reached via tracing or if JavaScript
-      // objects reference it.
-      setWeak();
     }
+    return kj::Maybe(TracedGlobal(isolate, data));
   }
+  return nullptr;
 }
 
-void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappable* self) {
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
+V8Handle::V8Handle(v8::Isolate* isolate, v8::Local<v8::Data> data)
+    : ref(getV8Ref(isolate, data)) {}
 
-  auto item = IsolateBase::RefToDelete(strong, kj::mv(ownSelf), self);
-
-  if (isolate == nullptr || v8::Locker::IsLocked(isolate)) {
-    // If we never attached a wrapper and were never traced, or the isolate is already locked, then
-    // we can just destroy the Wrappable immediately.
-    auto drop = kj::mv(item);
-  } else {
-    // Otherwise, we have a wrapper and we don't have the isolate locked.
-    auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
-    jsgIsolate.deferDestruction(kj::mv(item));
-  }
-}
-
-void Wrappable::traceFromV8(uint traceId) {
-  if (lastTraceId == traceId) {
-    // Duplicate trace, ignore.
-    //
-    // This can happen in particular if V8 choses to allocate an object unmarked but we determine
-    // that the object is already reachable. In that case we mark the object *and* run our own
-    // trace (because we can't be sure V8 didn't allocate the object already-marked), so we might
-    // get duplicate traces.
-  } else {
-    lastTraceId = traceId;
-    GcVisitor visitor(*this);
-    jsgVisitForGc(visitor);
-  }
-}
-
-void Wrappable::attachWrapper(v8::Isolate* isolate,
-                              v8::Local<v8::Object> object, bool needsGcTracing) {
-  auto& tracer = HeapTracer::getTracer(isolate);
-
-  if (detached != NOT_DETACHED) {
-    // It appears that this Wrappable once had a wrapper attached, and then that wrapper was GC'd,
-    // but later on a wrapper was added again. This suggests a serious problem with our GC, in that
-    // it is collecting objects that are still reachable from JavaScript. However, we can usually
-    // continue operating even in the presence of such a bug: it'll only cause a real problem if
-    // a script has attached additional properites to the object in JavaScript and expects them
-    // to still be there later. This is relatively uncommon for scripts to do, though it does
-    // happen.
-#ifdef KJ_DEBUG
-    KJ_FAIL_ASSERT("Wrappable had wrapper collected and then re-added later");
-#else
-    // Don't crash in production. Also avoid spamming logs.
-    static bool alreadyWarned = false;
-    if (!alreadyWarned) {
-      kj::StringPtr collected;
-      switch (detached) {
-        case NOT_DETACHED:     collected = "NOT_DETACHED";     break;
-        case WHILE_SCAVENGING: collected = "WHILE_SCAVENGING"; break;
-        case WHILE_TRACING:    collected = "WHILE_TRACING";    break;
-        case OTHER:            collected = "OTHER";            break;
+kj::Maybe<v8::Local<v8::Data>> V8Handle::tryGetHandle(v8::Isolate* isolate) const {
+  KJ_IF_MAYBE(r, ref) {
+    KJ_SWITCH_ONEOF(*r) {
+      KJ_CASE_ONEOF(ref, TracedGlobal<v8::Data>) {
+        return ref.tryGetHandle(isolate);
       }
-      KJ_LOG(ERROR, "Wrappable had wrapper collected and then re-added later", collected,
-                    kj::getStackTrace(), lastTraceId, wrapper.getLastMarked(),
-                    detachedTraceId, tracer.currentTraceId());
-      alreadyWarned = true;
+      KJ_CASE_ONEOF(wrappable, Wrappable::RefBase) {
+        return const_cast<Wrappable::RefBase&>(wrappable).tryGetHandle(isolate);
+      }
     }
-#endif
   }
+  return nullptr;
+}
 
-  KJ_REQUIRE(wrapper.IsEmpty());
-  wrapperRef = kj::addRef(*this);
-  wrapper.Reset(isolate, object);
-  this->isolate = isolate;
+v8::Local<v8::Data> V8Handle::getHandle(v8::Isolate* isolate) const {
+  return tryGetHandle(isolate).orDefault(v8::Local<v8::Data>());
+}
 
-  tracer.addWrapper({}, *this);
-
-  // Set up internal fields for a newly-allocated object. V8 apparently decides that embedder
-  // tracing is necessary if internal field 0 is non-null, so we set it only if we want tracing.
-  // Meanwhile, we use field 1 to be the pointer to ourselves used for API glue.
-  KJ_REQUIRE(object->InternalFieldCount() == 2);
-  object->SetAlignedPointerInInternalField(0, needsGcTracing ? this : nullptr);
-  object->SetAlignedPointerInInternalField(1, this);
-
-  if (lastTraceId == tracer.currentTraceId() || strongRefcount == 0) {
-    // Either:
-    // a) This object was reached during the most-recent trace cycle, but the wrapper wasn't
-    //    allocated yet.
-    // b) This object is currently only reachable from other JavaScript objects that themselves
-    //    have wrappers reachable only from JavaScript. (Note: As of this writing, this never
-    //    happens in practice since attachWrapper() is always called in cases where there is a
-    //    strong ref, typically on the stack.)
-    //
-    // In either case, it's important that we inform V8 that the wrapper cannot be scavenged, since
-    // it may be reachable via tracing. So, we must call tracer.mark(), which has the effect of
-    // initializing the TracedReference.
-    tracer.mark(wrapper);
-  } else {
-    // This object is not currently reachable via GC tracing from other C++ objects (it was not
-    // reached during the most-recent cycle), therefore it does not need a v8::TracedReference
-    // reference. It's best that we do not create such a reference unless it is needed, because the
-    // presence of a TracedReference reference will make the object ineligible to be collected
-    // during scavenges, because embedder heap tracing does not occur during those. Most wrappers
-    // are only ever referenced from the JS heap, *not* from other C++ objects, therefore would
-    // never be reached by tracing anyway -- we would like for those objects to remain eligible for
-    // collection during scavenges.
-    //
-    // So, we will avoid initializing `tracedWrapper` until an object is first discovered to be
-    // reachable via tracing from another C++ object.
-  }
-
-  if (strongRefcount == 0) {
-    // This object has no untraced references, so we should make it weak. Note that any refs it
-    // transitively holds are already weak, so we don't need to visit.
-    setWeak();
-  } else {
-    // This object has untraced references, but didn't have a wrapper. That means that any refs
-    // transitively reachable through the reference are strong. Now that a wrapper exists, the
-    // refs will be traced when the wrapper is traced, so they need to be marked weak.
-    GcVisitor visitor(*this);
-    jsgVisitForGc(visitor);
+void V8Handle::reset() {
+  KJ_IF_MAYBE(r, ref) {
+    KJ_SWITCH_ONEOF(*r) {
+      KJ_CASE_ONEOF(ref, TracedGlobal<v8::Data>) {
+        ref.reset();
+      }
+      KJ_CASE_ONEOF(wrappable, Wrappable::RefBase) {
+        auto dropMe = kj::mv(wrappable);
+      }
+    }
+    ref = nullptr;
   }
 }
 
-v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
-    v8::Local<v8::Context> context, bool needsGcTracing) {
+bool V8Handle::isEmpty() const {
+  KJ_IF_MAYBE(r, ref) {
+    KJ_SWITCH_ONEOF(*r) {
+      KJ_CASE_ONEOF(ref, TracedGlobal<v8::Data>) {
+        return ref.isEmpty();
+      }
+      KJ_CASE_ONEOF(wrappable, Wrappable::RefBase) {
+        return wrappable.isEmpty();
+      }
+    }
+  }
+  return true;
+}
+
+bool V8Handle::isTraced() const {
+  KJ_IF_MAYBE(r, ref) {
+    KJ_SWITCH_ONEOF(*r) {
+      KJ_CASE_ONEOF(ref, TracedGlobal<v8::Data>) {
+        return !ref.handle.IsEmpty() && ref.handle.IsWeak();
+      }
+      KJ_CASE_ONEOF(ref, Wrappable::RefBase) {
+        return ref.isTraced();
+      }
+    }
+  }
+  return false;
+}
+
+void V8Handle::visit(GcVisitor& visitor) {
+  KJ_IF_MAYBE(r, ref) {
+    KJ_SWITCH_ONEOF(*r) {
+      KJ_CASE_ONEOF(ref, Wrappable::RefBase) {
+        visitor.visit(ref);
+      }
+      KJ_CASE_ONEOF(traced, TracedGlobal<v8::Data>) {
+        traced.visit(visitor);
+      }
+    }
+  }
+}
+
+bool V8Handle::operator==(const V8Handle& other) const {
+  if (&other == this) return true;
+  if (isEmpty()) {
+    return other.isEmpty();
+  }
+  KJ_IF_MAYBE(otherRef, other.ref) {
+    KJ_SWITCH_ONEOF(KJ_ASSERT_NONNULL(ref)) {
+      KJ_CASE_ONEOF(ref, Wrappable::RefBase) {
+        // This is a wrappable. It should point to the same wrappable...
+        KJ_IF_MAYBE(otherRefBase, otherRef->tryGet<Wrappable::RefBase>()) {
+          return ref.get<Wrappable>() == otherRefBase->get<Wrappable>();
+        }
+      }
+      KJ_CASE_ONEOF(ref, TracedGlobal<v8::Data>) {
+        // If it's a TracedGlobal, we can only do a comparison under the isolate lock...
+        KJ_ASSERT(v8::Locker::IsLocked(ref.isolate));
+        KJ_IF_MAYBE(otherTracedGlobal, otherRef->tryGet<TracedGlobal<v8::Data>>()) {
+          // ... and under a HandleScope...
+          v8::HandleScope scope(ref.isolate);
+          // ... and only if the isolates for both also match.
+          return ref.isolate == otherTracedGlobal->isolate &&
+                 ref.handle.Get(ref.isolate) == otherTracedGlobal->handle.Get(ref.isolate);
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// ======================================================================================
+// Wrappable
+
+uint16_t Wrappable::kWorkerdEmbedderId = 1;
+
+Wrappable::~Wrappable() noexcept(false) {
+  KJ_IF_MAYBE(tracedRefHandle, maybeTracedRefHandle) {
+    tracedRefHandle->maybeWrappable = nullptr;
+  }
+}
+
+v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) const {
+  return tryGetHandle(isolate).orDefault(v8::Local<v8::Object>());
+}
+
+kj::Maybe<v8::Local<v8::Object>> Wrappable::tryGetHandle(v8::Isolate* isolate) const {
+  return wrapper.tryGetHandle(isolate);
+}
+
+void Wrappable::attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  KJ_ASSERT(!object.IsEmpty());
+  KJ_ASSERT(wrapper.isEmpty());
+  wrapper.attach(kj::addRef(*this), isolate, object);
+  KJ_IF_MAYBE(strong, maybeStrongRefHandle) {
+    strong->wrapper = cppgc::Persistent<WrapperHandle::Shim>(wrapper.wrapper.Get());
+  }
+}
+
+v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(v8::Local<v8::Context> context) {
   auto isolate = context->GetIsolate();
   auto object = jsg::check(IsolateBase::getOpaqueTemplate(isolate)
       ->InstanceTemplate()->NewInstance(context));
-  attachWrapper(isolate, object, needsGcTracing);
+  attachWrapper(isolate, object);
   return object;
 }
 
 kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
-    v8::Isolate* isolate, v8::Local<v8::Value> handle) {
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> handle) {
   if (handle->IsObject()) {
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::Cast(handle)
         ->FindInstanceInPrototypeChain(IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
-      return *reinterpret_cast<Wrappable*>(instance->GetAlignedPointerFromInternalField(1));
+      return WrapperHandle::tryUnwrap<Wrappable>(isolate->GetCurrentContext(), instance);
     }
   }
 
   return nullptr;
 }
 
-void Wrappable::jsgVisitForGc(GcVisitor& visitor) {
-  // Nothing; subclasses that need tracing will override.
+kj::Own<Wrappable::RefBase::StrongRefHandle> Wrappable::getStrongRefHandle() {
+  KJ_IF_MAYBE(strong, maybeStrongRefHandle) {
+    return kj::addRef(*strong);
+  }
+  auto handle = kj::refcounted<RefBase::StrongRefHandle>(kj::addRef(*this));
+  if (hasWrapper()) {
+    handle->wrapper = cppgc::Persistent<WrapperHandle::Shim>(wrapper.wrapper.Get());
+  }
+  return kj::mv(handle);
 }
 
-void Wrappable::deleterPass1(const v8::WeakCallbackInfo<Wrappable>& data) {
-  // We are required to clear the handle immediately.
-  data.GetParameter()->resetWrapperHandle();
-
-  // But we cannot do anything else right now. In particular, deleting the object could lead to
-  // other V8 APIs being invoked, which is illegal right now. We must register a second-pass
-  // callback to do that.
-  data.SetSecondPassCallback(&deleterPass2);
+kj::Maybe<kj::Own<Wrappable::RefBase::TracedRefHandle>> Wrappable::getTracedRefHandle() {
+  if (hasWrapper()) {
+    KJ_IF_MAYBE(traced, maybeTracedRefHandle) {
+      return kj::addRef(*traced);
+    }
+    return kj::refcounted<RefBase::TracedRefHandle>(
+        cppgc::Member<WrapperHandle::Shim>(wrapper.wrapper.Get()),
+        *this);
+  }
+  return nullptr;
 }
 
-void Wrappable::deleterPass2(const v8::WeakCallbackInfo<Wrappable>& data) {
-  // Detach the wrapper ref and let it be deleted. This possibly deletes the Wrappable, if it has
-  // no jsg::Refs left pointing at it from C++ objects.
-  data.GetParameter()->detachWrapperRef();
-}
+// ======================================================================================
+// Wrappable::WrapperHandle::Shim
 
-void Wrappable::setWeak() {
-  wrapper.SetWeak(this, &deleterPass1, v8::WeakCallbackType::kParameter);
-}
-
-void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, bool& refStrong) {
-  KJ_IF_MAYBE(p, refParent) {
-    KJ_ASSERT(p == &visitor.parent);
-  } else {
-    refParent = visitor.parent;
+class Wrappable::WrapperHandle::Shim final:
+    public cppgc::GarbageCollected<Wrappable::WrapperHandle::Shim> {
+public:
+  Shim(kj::Own<Wrappable> wrappable,
+       v8::Isolate* isolate,
+       v8::Local<v8::Object> object)
+      : wrappable(kj::mv(wrappable)),
+        wrapper(isolate, object),
+        diagnosticTypeName(this->wrappable->jsgTypeName()) {
+    object->SetAlignedPointerInInternalField(Wrappable::kEmbedderId,
+                                             &Wrappable::kWorkerdEmbedderId);
+    object->SetAlignedPointerInInternalField(Wrappable::kEmbedderSlot, this);
   }
 
-  if (isolate == nullptr) {
-    isolate = visitor.parent.isolate;
+  Shim(Shim&&) = delete;
+  Shim&& operator=(Shim&&) = delete;
+  KJ_DISALLOW_COPY(Shim);
+
+  Wrappable* get() { return wrappable.get(); }
+  const Wrappable* get() const { return wrappable.get(); }
+
+  void Trace(cppgc::Visitor* visitor) const {
+    GcVisitor gcVisitor(visitor, ++traceCounter);
+    wrappable->trace(gcVisitor);
   }
 
-  // Make ref strength match the parent.
-  bool becameWeak = false;
-  if (visitor.parent.strongRefcount > 0) {
-    // This reference should be strong, because the parent has strong refs.
-    //
-    // TODO(soon): This is not quite right. If the parent has a wrapper object, then we only need
-    //   a strong ref to that wrapper object itself. Children can be weak, because they'll be
-    //   traced. But it's not just the parent -- if any ancestor has a wrapper, and no intermediate
-    //   parents have strong refs, then we should be weak. Ugh. Not going to fix this in this
-    //   commit.
-
-    if (!refStrong) {
-      // Ref transitions from weak to strong.
-      addStrongRef();
-      refStrong = true;
-    }
-  } else {
-    if (refStrong) {
-      // Ref transitions from strong to weak.
-      refStrong = false;
-      removeStrongRef();
-      becameWeak = true;
-    }
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) const {
+    return wrapper.tryGetHandle(isolate);
   }
 
-  if (wrapper.IsEmpty()) {
-    if (lastTraceId != visitor.parent.lastTraceId) {
-      // Our wrapper hasn't been allocated yet, i.e. this object has never been directly visible to
-      // JavaScript. However, we might transitively hold reference to objects that do have wrappers,
-      // so we need to transitively trace to our children.
-      lastTraceId = visitor.parent.lastTraceId;
-      GcVisitor subVisitor(*this);
-      jsgVisitForGc(subVisitor);
-    }
-  } else {
-    // Wrapper is non-empty, so `isolate` can't be null.
-    auto& tracer = HeapTracer::getTracer(isolate);
+  const char* getDiagnosticTypeName() const { return diagnosticTypeName; }
 
-    if (becameWeak || visitor.parent.lastTraceId == tracer.currentTraceId()) {
-      // Either:
-      // a) This reference newly became a weak reference. However, it is clearly reachable from
-      //    another object. Therefore, we must ensure that the TracedReference is initialized so
-      //    that V8 knows that this object cannot be collected during scavenging and must instead
-      //    wait for tracing. Marking will do this for us.
-      // b) The parent has already been traced during this cycle. Probably, this call to visitRef()
-      //    is actually a result of the parent being traced. So this is the usual case where we
-      //    need to mark.
-      tracer.mark(wrapper);
+  void visit(GcVisitor& gcVisitor) {
+    wrapper.visit(gcVisitor);
+  }
+
+private:
+  kj::Own<Wrappable> wrappable;
+  TracedGlobal<v8::Object> wrapper;
+
+  mutable uint traceCounter = 0;
+  const char* diagnosticTypeName;
+
+  friend class WrapperHandle;
+};
+
+void Wrappable::trace(GcVisitor& gcVisitor) const {
+  gcVisitor.push(*this);
+  if (wrapper.wrapper.Get() != nullptr) {
+    wrapper.wrapper->visit(gcVisitor);
+  }
+  jsgVisitForGc(gcVisitor);
+  gcVisitor.pop();
+}
+
+// ======================================================================================
+// Wrappable::WrapperHandle
+
+v8::Local<v8::Object> Wrappable::WrapperHandle::getHandle(v8::Isolate* isolate) const {
+  return tryGetHandle(isolate).orDefault(v8::Local<v8::Object>());
+}
+
+kj::Maybe<v8::Local<v8::Object>> Wrappable::WrapperHandle::tryGetHandle(
+    v8::Isolate* isolate) const {
+  auto shim = wrapper.Get();
+  if (shim != nullptr) {
+    return shim->tryGetHandle(isolate);
+  }
+  return nullptr;
+}
+
+kj::Maybe<Wrappable&> Wrappable::WrapperHandle::tryUnwrap(
+    const v8::Local<v8::Context>& context,
+    const v8::Local<v8::Object>& object) {
+  // Can't be a wrapper object unless there are at least two internal fields.
+  if (object->InternalFieldCount() >= 2) {
+    void* ptr = object->GetAlignedPointerFromInternalField(Wrappable::kEmbedderSlot);
+    if (ptr != nullptr) {
+      return *reinterpret_cast<Shim*>(ptr)->get();
     }
+  }
+  return nullptr;
+}
+
+void Wrappable::WrapperHandle::attach(kj::Own<Wrappable> ownSelf,
+                             v8::Isolate* isolate,
+                             v8::Local<v8::Object> obj) {
+  KJ_ASSERT(v8::Locker::IsLocked(isolate));
+  KJ_ASSERT(isEmpty());
+  KJ_ASSERT(obj->InternalFieldCount() == kEmbedderFieldCount);
+
+  if (wasAttached) {
+    // It appears that this Wrappable once had a wrapper attached, and then that wrapper was GC'd,
+    // but later on a wrapper was added again. This suggests a serious problem with our GC, in that
+    // it is collecting objects that are still reachable from JavaScript. However, we can usually
+    // continue operating even in the presence of such a bug: it'll only cause a real problem if
+    // a script has attached additional properties to the object in JavaScript and expects them
+    // to still be there later. We know that scripts do so but we don't really know how common
+    // it is.
+#ifdef KJ_DEBUG
+    KJ_FAIL_ASSERT("Wrappable had wrapper collected and then re-added later");
+#else
+    // Don't crash in production. Also avoid spamming logs.
+    static bool alreadyWarned = false;
+    if (!alreadyWarned) {
+      KJ_LOG(ERROR, "Wrappable had wrapper collected and then re-added later", kj::getStackTrace());
+      alreadyWarned = true;
+    }
+#endif
+  }
+
+  wasAttached = true;
+  this->isolate = isolate;
+
+  // We don't typically use the new keyword for things. In this case, we want to. When the object
+  // is because it is garbage collected, it will be destroyed.
+  wrapper = IsolateBase::from(isolate).getHeap().alloc<Shim>(kj::mv(ownSelf), isolate, obj);
+  wrapper->Trace(nullptr);
+}
+
+bool Wrappable::WrapperHandle::isEmpty() const {
+  return wrapper.Get() == nullptr;
+}
+
+// ======================================================================================
+// Wrappable::RefBase::StrongRefHandle
+
+Wrappable::RefBase::StrongRefHandle::StrongRefHandle(kj::Own<Wrappable> ptr) : inner(kj::mv(ptr)) {
+  KJ_ASSERT(inner->maybeStrongRefHandle == nullptr);
+  inner->maybeStrongRefHandle = this;
+}
+
+Wrappable::RefBase::StrongRefHandle::~StrongRefHandle() noexcept(false) {
+  inner->maybeStrongRefHandle = nullptr;
+}
+
+// ======================================================================================
+// Wrappable::RefBase::TracedRefHandle
+
+Wrappable::RefBase::TracedRefHandle::TracedRefHandle(
+    cppgc::Member<WrapperHandle::Shim> wrapper,
+    Wrappable& wrappable)
+    : maybeWrappable(wrappable),
+      wrapper(kj::mv(wrapper)) {
+  KJ_ASSERT(wrappable.maybeTracedRefHandle == nullptr);
+  wrappable.maybeTracedRefHandle = this;
+}
+
+Wrappable::RefBase::TracedRefHandle::~TracedRefHandle() noexcept(false) {
+  KJ_IF_MAYBE(wrappable, maybeWrappable) {
+    wrappable->maybeTracedRefHandle = nullptr;
   }
 }
 
-void GcVisitor::visit(Data& value) {
-  if (!value.handle.IsEmpty()) {
-    // Make ref strength match the parent.
-    bool becameWeak = false;
-    if (parent.strongRefcount > 0) {
-      if (value.handle.IsWeak()) {
-        value.handle.ClearWeak();
+void Wrappable::RefBase::TracedRefHandle::visit(GcVisitor& visitor) {
+  visitor.visit(wrapper);
+}
+
+// ======================================================================================
+// Wrappable::RefBase
+
+Wrappable::RefBase::RefBase(kj::Maybe<RefHandle> handle)
+    : refHandle(kj::mv(handle)) {}
+
+Wrappable::RefBase::RefBase(RefBase&& other) : refHandle(other.addStrongRef()) {
+  auto dropMe = kj::mv(other.refHandle);
+  other.lastTraceId = 0;
+}
+
+Wrappable::RefBase::RefBase(kj::Own<Wrappable::RefBase::StrongRefHandle> strong)
+    : refHandle(kj::mv(strong)) {}
+
+Wrappable::RefBase& Wrappable::RefBase::operator=(RefBase&& other) {
+  refHandle = other.addStrongRef();
+  lastTraceId = 0;
+  auto dropMe = kj::mv(other.refHandle);
+  other.lastTraceId = 0;
+  return *this;
+}
+
+kj::Maybe<Wrappable&> Wrappable::RefBase::tryGetWrappable() {
+  KJ_IF_MAYBE(handle, refHandle) {
+    KJ_SWITCH_ONEOF(*handle) {
+      KJ_CASE_ONEOF(strong, kj::Own<Wrappable::RefBase::StrongRefHandle>) {
+        return *strong->inner;
       }
-    } else {
-      if (!value.handle.IsWeak()) {
-        value.handle.SetWeak();
-        becameWeak = true;
+      KJ_CASE_ONEOF(traced, kj::Own<Wrappable::RefBase::TracedRefHandle>) {
+        KJ_IF_MAYBE(inner, traced->maybeWrappable) {
+          return inner;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+kj::Maybe<const Wrappable&> Wrappable::RefBase::tryGetWrappable() const {
+  KJ_IF_MAYBE(handle, refHandle) {
+    KJ_SWITCH_ONEOF(*handle) {
+      KJ_CASE_ONEOF(strong, kj::Own<Wrappable::RefBase::StrongRefHandle>) {
+        return *strong->inner;
+      }
+      KJ_CASE_ONEOF(traced, kj::Own<Wrappable::RefBase::TracedRefHandle>) {
+        KJ_IF_MAYBE(inner, traced->maybeWrappable) {
+          return inner;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+kj::Maybe<Wrappable::RefBase::RefHandle> Wrappable::RefBase::addStrongRef() {
+  KJ_IF_MAYBE(wrappable, tryGetWrappable()) {
+    return kj::Maybe<Wrappable::RefBase::RefHandle>(wrappable->getStrongRefHandle());
+  }
+  return nullptr;
+}
+
+kj::Maybe<v8::Local<v8::Object>> Wrappable::RefBase::tryGetHandle(v8::Isolate* isolate) const {
+  // If the object has a JS wrapper, return it. Note that the JS wrapper is initialized lazily
+  // when the object is first passed to JS, so you can't be sure that it exists. To reliably
+  // get a handle (creating it on-demand if necessary), use a TypeHandler<Ref<T>>.
+  KJ_IF_MAYBE(wrappable, tryGetWrappable()) {
+    return wrappable->tryGetHandle(isolate);
+  }
+  return nullptr;
+}
+
+void Wrappable::RefBase::attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // Attach a JavaScript object which implements the JS interface for this C++ object. Normally,
+  // this happens automatically the first time the Ref is passed across the FFI barrier into JS.
+  // This method may be useful in order to use a different wrapper type than the one that would
+  // be used automatically. This method is also useful when implementing TypeWrapperExtensions.
+  //
+  // It is an error to attach a wrapper when another wrapper is already attached. Hence,
+  // typically this should only be called on a newly-allocated object.
+  KJ_IF_MAYBE(wrappable, tryGetWrappable()) {
+    wrappable->attachWrapper(isolate, object);
+  }
+}
+
+kj::Maybe<Wrappable::RefBase::RefHandle&> Wrappable::RefBase::maybeRefHandle() {
+  KJ_IF_MAYBE(handle, refHandle) {
+    return *handle;
+  }
+  return nullptr;
+}
+
+kj::Maybe<const Wrappable::RefBase::RefHandle&> Wrappable::RefBase::maybeRefHandle() const {
+  KJ_IF_MAYBE(handle, refHandle) {
+    return *handle;
+  }
+  return nullptr;
+}
+
+bool Wrappable::RefBase::isEmpty() const {
+  KJ_IF_MAYBE(handle, refHandle) {
+    KJ_SWITCH_ONEOF(*handle) {
+      KJ_CASE_ONEOF(strong, kj::Own<StrongRefHandle>) {
+        return false;
+      }
+      KJ_CASE_ONEOF(weak, kj::Own<TracedRefHandle>) {
+        return weak->maybeWrappable == nullptr;
+      }
+    }
+  }
+  return true;
+}
+
+bool Wrappable::RefBase::isTraced() const {
+  KJ_IF_MAYBE(handle, refHandle) {
+    return handle->is<kj::Own<Wrappable::RefBase::TracedRefHandle>>();
+  }
+  return false;
+}
+
+void Wrappable::RefBase::visit(GcVisitor& visitor) {
+  verifyTraceParent(visitor.getCurrent(), maybeParent);
+  if (lastTraceId == visitor.getTraceId()) {
+    // This was already traced in this pass. Do not trace again.
+    return;
+  }
+  lastTraceId = visitor.getTraceId();
+
+  KJ_IF_MAYBE(handle, refHandle) {
+    KJ_SWITCH_ONEOF(*handle) {
+      KJ_CASE_ONEOF(strong, kj::Own<Wrappable::RefBase::StrongRefHandle>) {
+        // If the Wrappable has a wrapper, then we are going to transition this into
+        // a TracedRefHandle and visit it. Otherwise, we skip visiting it and continue
+        // on to visiting its children.
+        if (strong->inner->hasWrapper()) {
+          bool hasTracedRef = strong->inner->hasTracedRef();
+          KJ_IF_MAYBE(tracedRefHandle, strong->inner->getTracedRefHandle()) {
+            refHandle = kj::mv((*tracedRefHandle));
+            if (hasTracedRef) {
+              return visit(visitor);
+            }
+          }
+        }
+      }
+      KJ_CASE_ONEOF(traced, kj::Own<Wrappable::RefBase::TracedRefHandle>) {
+        KJ_IF_MAYBE(wrappable, traced->maybeWrappable) {
+          traced->visit(visitor);
+        }
       }
     }
 
-    // Check if we need to mark.
-    // TODO(soon): Why parent.lastTraceId != 0 vs. parent.lastTraceId == tracer.currentTraceId()?
-    //   Just because we don't have a `tracer` object yet to check against? Does this actually
-    //   make any difference in practice? Leaving it for now because the worst case is we mark
-    //   too often, which is better than marking not often enough.
-    if (becameWeak || parent.lastTraceId != 0) {
-      // If `becameWeak`, then we must have an ancestor that has a wrapper and therefore a non-null
-      // isolate. All children would inherit that isolate.
-      //
-      // If `parent.lastTraceId != 0`, then the parent has been traced directly before so would
-      // certainly have an isolate.
-      //
-      // So either way, `parent.isolate` is non-null.
-      HeapTracer::getTracer(parent.isolate).mark(value.handle);
+    KJ_IF_MAYBE(wrappable, tryGetWrappable()) {
+      wrappable->trace(visitor);
     }
+  }
+}
+
+template <typename T>
+kj::Maybe<v8::Local<T>> TracedGlobal<T>::tryGetHandle(v8::Isolate* isolate) const {
+  KJ_ASSERT(isolate == this->isolate);
+  KJ_ASSERT(v8::Locker::IsLocked(isolate));
+  if (!handle.IsEmpty()) {
+    KJ_ASSERT(isolate == this->isolate);
+    KJ_ASSERT(v8::Locker::IsLocked(isolate));
+    v8::EscapableHandleScope scope(isolate);
+    return scope.Escape(handle.Get(isolate));
+  }
+  return nullptr;
+}
+
+template <typename T>
+void TracedGlobal<T>::visit(GcVisitor& visitor) {
+  verifyTraceParent(visitor.getCurrent(), maybeParent);
+  if (!isEmpty() && lastTraceId != visitor.getTraceId()) {
+    lastTraceId = visitor.getTraceId();
+    if (!handle.IsWeak()) {
+      handle.SetWeak();
+    }
+    if (traced.IsEmpty()) {
+      traced.Reset(isolate, handle.Get(isolate));
+    }
+    visitor.visit(traced);
   }
 }
 

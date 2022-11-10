@@ -6,10 +6,17 @@
 // Public API for setting up JavaScript context. Only high-level code needs to include this file.
 
 #include "jsg.h"
+#include "src/workerd/jsg/wrappable.h"
 #include "type-wrapper.h"
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
+
+#include <v8-cppgc.h>
+#include <cppgc/allocation.h>
+#include <cppgc/garbage-collected.h>
+#include <cppgc/persistent.h>
+#include <cppgc/visitor.h>
 
 namespace workerd::jsg {
 
@@ -24,6 +31,8 @@ kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 // it reads from whichever file successfully opens to find out the number of processors. Of course,
 // if you're in a sandbox, that probably won't work. And anyway, you probably don't actually want
 // V8 to consume all available cores with background work. So, please specify a thread pool size.
+
+class V8System;
 
 class V8System {
   // In order to use any part of the JSG API, you must first construct a V8System. You can only
@@ -52,11 +61,49 @@ public:
   typedef void FatalErrorCallback(kj::StringPtr location, kj::StringPtr message);
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
+  class Heap {
+  public:
+    Heap(Heap&&) = default;
+    Heap& operator=(Heap&&) = delete;
+    ~Heap() noexcept(false);
+
+    KJ_DISALLOW_COPY(Heap);
+
+    template <typename T, typename... Params>
+    inline T* alloc(Params&&... params) {
+      return cppgc::MakeGarbageCollected<T>(
+          getAllocationHandle(),
+          kj::fwd<Params>(params)...);
+    }
+
+  private:
+    std::unique_ptr<v8::CppHeap> heap;
+    v8::Isolate* isolate;
+
+    Heap(const V8System& system, v8::Isolate* isolate)
+        : heap(createHeap(system.platform.get(), isolate)),
+          isolate(isolate) {}
+
+    cppgc::AllocationHandle& getAllocationHandle();
+
+    void terminate();
+
+    static std::unique_ptr<v8::CppHeap> createHeap(
+        const v8::Platform* platform,
+        v8::Isolate* isolate);
+
+    friend class V8System;
+    friend class IsolateBase;
+  };
+
+  Heap getHeap(v8::Isolate* isolate) const { return Heap(*this, isolate); }
+
 private:
   kj::Own<v8::Platform> platform;
 
   explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
 };
+
 
 class IsolateBase {
   // Base class of Isolate<T> containing parts that don't need to be templated, to avoid code
@@ -98,36 +145,15 @@ public:
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
 
+  inline V8System::Heap& getHeap() { return cppHeap; }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
 
-  class RefToDelete {
-    // The internals of a jsg::Ref<T> to be deleted.
-
-  public:
-    RefToDelete(bool strong, kj::Own<void> ownWrappable, Wrappable* wrappable)
-        : strong(strong), ownWrappable(kj::mv(ownWrappable)), wrappable(wrappable) {}
-    ~RefToDelete() noexcept(false) {
-      if (ownWrappable.get() != nullptr && strong) {
-        wrappable->removeStrongRef();
-      }
-    }
-    RefToDelete(RefToDelete&&) = default;
-    // Default move ctor okay because ownWrappable.get() will be null if moved-from.
-    KJ_DISALLOW_COPY(RefToDelete);
-
-  private:
-    bool strong;
-    kj::Own<void> ownWrappable;
-    // Keeps the `wrappable` pointer below valid.
-    Wrappable* wrappable;
-  };
-
-  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
-
   const V8System& system;
   v8::Isolate* ptr;
+  V8System::Heap cppHeap;
   bool evalAllowed = false;
   bool captureThrowsAsRejections = false;
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
@@ -150,6 +176,7 @@ private:
   static constexpr auto DESTRUCTION_QUEUE_MAX_CAPACITY = 10'000;
   // If a queue grows larger than this, we reset it back to the initial size.
 
+  using Item = kj::OneOf<v8::Global<v8::Data>, v8::TracedReference<v8::Data>>;
   const kj::MutexGuarded<BatchQueue<Item>> queue {
     DESTRUCTION_QUEUE_INITIAL_SIZE,
     DESTRUCTION_QUEUE_MAX_CAPACITY
@@ -196,18 +223,15 @@ private:
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
 
-  static void scavengePrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
-  static void scavengeEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
-
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
   friend class IsolateBase;
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
-  HeapTracer heapTracer;
-
   friend class Data;
   friend class Wrappable;
+  friend class V8Handle;
+  friend class WrapperHandle;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);

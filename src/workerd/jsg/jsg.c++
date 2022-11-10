@@ -49,30 +49,6 @@ void throwError(v8::Isolate* isolate, kj::StringPtr message) {
   isolate->ThrowException(v8::Exception::Error(v8Str(isolate, message)));
   throw JsExceptionThrown();
 }
-void Data::destroy() {
-  assertInvariant();
-  if (isolate != nullptr) {
-    if (v8::Locker::IsLocked(isolate)) {
-      handle.Reset();
-    } else {
-      // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
-      // defer these handles' destruction to the next time the isolate is locked.
-      //
-      // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
-      // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
-      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
-      jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
-    }
-    isolate = nullptr;
-  }
-}
-
-#ifdef KJ_DEBUG
-void Data::assertInvariantImpl() {
-    // Assert that only empty values are associated with null isolates.
-  KJ_DASSERT(isolate != nullptr || handle.IsEmpty());
-}
-#endif
 
 Lock::Lock(v8::Isolate* v8Isolate)
     : v8Isolate(v8Isolate), locker(v8Isolate), scope(v8Isolate),

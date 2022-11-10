@@ -7,6 +7,7 @@
 
 #include "jsg.h"
 #include "setup.h"
+#include "src/workerd/jsg/wrappable.h"
 #include <kj/test.h>
 
 namespace workerd::jsg::test {

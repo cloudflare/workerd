@@ -1603,8 +1603,11 @@ kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
 }
 
 api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
-  return *reinterpret_cast<api::ServiceWorkerGlobalScope*>(
-      getContext()->GetAlignedPointerFromEmbedderData(1));
+  v8::Local<v8::Context> context = getContext();
+  v8::Local<v8::Object> object = context->Global();
+  auto maybe = jsg::Wrappable::tryUnwrap<api::ServiceWorkerGlobalScope>(
+          context, object);
+  return KJ_ASSERT_NONNULL(maybe);
 }
 
 bool Worker::Lock::isInspectorEnabled() {

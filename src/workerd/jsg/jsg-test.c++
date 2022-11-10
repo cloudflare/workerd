@@ -29,7 +29,7 @@ static_assert(isGcVisitable<kj::Maybe<TestStruct>>());
 
 // ========================================================================================
 
-V8System v8System;
+V8System v8System({"--expose-gc"_kj});
 
 struct TestContext: public Object {
   JSG_RESOURCE_TYPE(TestContext) {}
@@ -356,6 +356,106 @@ KJ_TEST("Test JSG_CALLABLE") {
 
   // It's weird, but still accepted.
   e.expectEval("let obj = getCallable(); new obj();", "boolean", "true");
+}
+
+// ========================================================================================
+// GC/Trace/Circular Test
+struct GcTestContext: public Object {
+  struct GcDetector: public Object {
+    kj::Maybe<GcDetector&> sibling;
+    ~GcDetector() noexcept(false) {
+      KJ_IF_MAYBE(s, sibling) {
+        s->sibling = nullptr;
+      }
+    }
+
+    bool isSiblingCollected() const { return sibling == nullptr; }
+
+    JSG_RESOURCE_TYPE(GcDetector) {
+      JSG_READONLY_INSTANCE_PROPERTY(siblingCollected, isSiblingCollected);
+    }
+  };
+
+  struct Misc: public Object {
+    kj::Maybe<Ref<Misc>> other;
+    static Ref<Misc> constructor() { return alloc<Misc>(); }
+    void setOther(Ref<Misc> misc) { other = kj::mv(misc); }
+    kj::Maybe<Ref<Misc>> getOther() {
+      KJ_IF_MAYBE(o, other) {
+        return o->addRef();
+      }
+      return nullptr;
+    }
+    JSG_RESOURCE_TYPE(Misc) {
+      JSG_INSTANCE_PROPERTY(other, getOther, setOther);
+    }
+  };
+
+  kj::Array<Ref<GcDetector>> makeGcDetectorPair() {
+    auto obj1 = alloc<GcDetector>();
+    auto obj2 = alloc<GcDetector>();
+    obj1->sibling = *obj2;
+    obj2->sibling = *obj1;
+    return kj::arr(kj::mv(obj1), kj::mv(obj2));
+  }
+
+
+  JSG_RESOURCE_TYPE(GcTestContext) {
+    JSG_METHOD(makeGcDetectorPair);
+    JSG_NESTED_TYPE(GcDetector);
+    JSG_NESTED_TYPE(Misc);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(GcTestIsolate, GcTestContext,
+                         GcTestContext::GcDetector,
+                         GcTestContext::Misc);
+
+KJ_TEST("Test Basic GC Cycle") {
+  Evaluator<GcTestContext, GcTestIsolate> e(v8System);
+
+  e.expectEval(
+    "let pair = makeGcDetectorPair();"
+    "let a = pair[0];"
+    "let b = pair[1];"
+    "pair = null;"
+    "gc();"
+    "if (a.siblingCollected || b.siblingCollected) {"
+    "  throw new Error('expected !siblingCollected');"
+    "}"
+    "a = null;"
+    "gc();"
+    "if (!b.siblingCollected) {"
+    "  throw new Error('expected a to be collected');"
+    "}"
+    "true;",
+    "boolean", "true"
+  );
+}
+
+KJ_TEST("Test Extended GC Cycle") {
+  Evaluator<GcTestContext, GcTestIsolate> e(v8System);
+
+  e.expectEval(
+    "let pair = makeGcDetectorPair();"
+    "let a = pair[0];"
+    "let b = pair[1];"
+    "pair = null;"
+    "gc();"
+    "let r = new Misc();"
+    "let r2 = new Misc();"
+    "r2.detector = a;"
+    "r.other = r2;"
+    "r2 = null;"
+    "a = null;"
+    "r = null;"
+    // Currently requires two gc passes in this case.
+    "gc(); gc();"
+    "if (!b.siblingCollected) {"
+    "  throw new Error('expected a to be collected');"
+    "}"
+    "true;",
+    "boolean", "true"
+  );
 }
 
 }  // namespace

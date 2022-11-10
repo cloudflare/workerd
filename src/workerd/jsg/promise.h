@@ -43,6 +43,8 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   OpaqueWrappable(T&& value)
       : value(kj::mv(value)) {}
 
+  const char* jsgTypeName() const override { return "OpaqueWrappable"; }
+
   T value;
   bool movedAway = false;
 };
@@ -53,9 +55,9 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
 
-  void jsgVisitForGc(GcVisitor& visitor) override {
+  void jsgVisitForGc(GcVisitor& visitor) const override {
     if (!this->movedAway) {
-      visitor.visit(this->value);
+      visitor.visit(const_cast<T&>(this->value));
     }
   }
 };
@@ -82,7 +84,7 @@ v8::Local<v8::Value> wrapOpaque(v8::Local<v8::Context> context, T&& t) {
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
 
   auto wrapped = kj::refcounted<OpaqueWrappable<T>>(kj::mv(t));
-  return wrapped->attachOpaqueWrapper(context, isGcVisitable<T>());
+  return wrapped->attachOpaqueWrapper(context);
 }
 
 template <typename T>

@@ -21,6 +21,8 @@ public:
   WrappableFunction(bool needsGcTracing): needsGcTracing(needsGcTracing) {}
   virtual Ret operator()(Lock& js, Args&&... args) = 0;
 
+  const char* jsgTypeName() const { return "WrappableFunction"; }
+
   const bool needsGcTracing;
 };
 
@@ -52,8 +54,8 @@ public:
   Ret operator()(Lock& js, Args&&... args) override {
     return func(js, kj::fwd<Args>(args)...);
   }
-  void jsgVisitForGc(GcVisitor& visitor) override {
-    visitor.visit(func);
+  void jsgVisitForGc(GcVisitor& visitor) const override {
+    visitor.visit(const_cast<Impl&>(func));
   }
 
 private:
@@ -72,7 +74,6 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
       auto& wrapper = TypeWrapper::from(isolate);
       auto& func = extractInternalPointer<WrappableFunction<Ret(Args...)>, false>(
           context, args.Data().As<v8::Object>());
-
       if constexpr (isVoid<Ret>()) {
         func(Lock::from(isolate), wrapper.template unwrap<Args>(context, args, indexes,
             TypeErrorContext::callbackArgument(indexes))...);
@@ -312,7 +313,7 @@ public:
         // produces exactly the same JavaScript handle. So... screw it.
         data = *h;
       } else {
-        data = ref->attachOpaqueWrapper(context, ref->needsGcTracing);
+        data = ref->attachOpaqueWrapper(context);
       }
 
       // TODO(conform): Correctly set `length` on all functions. Probably doesn't need a compat flag

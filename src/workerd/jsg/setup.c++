@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "src/workerd/jsg/wrappable.h"
 #if __APPLE__
 // We need to define `_XOPEN_SOURCE` to get `ucontext_t` on Mac.
 #define _XOPEN_SOURCE
@@ -21,6 +22,9 @@
 #include <mach/mach.h>
 #endif
 
+#include <cppgc/platform.h>
+#include <v8-cppgc.h>
+
 namespace workerd::jsg {
 
 static bool v8Initialized = false;
@@ -35,6 +39,35 @@ static void reportV8FatalError(kj::StringPtr location, kj::StringPtr message) {
 }
 static void v8DcheckError(const char* file, int line, const char* message) {
   reportV8FatalError(kj::str(file, ':', line), message);
+}
+
+V8System::Heap::~Heap() noexcept(false) {
+  // Ensure that terminate was called.
+  KJ_ASSERT(heap == nullptr);
+}
+
+void V8System::Heap::terminate() {
+  isolate->DetachCppHeap();
+  heap->Terminate();
+  heap.reset();
+}
+
+std::unique_ptr<v8::CppHeap> V8System::Heap::createHeap(
+    const v8::Platform* platform,
+    v8::Isolate* isolate) {
+  v8::CppHeapCreateParams params {
+    .wrapper_descriptor = v8::WrapperDescriptor(
+      Wrappable::kEmbedderId,
+      Wrappable::kEmbedderSlot,
+      Wrappable::kWorkerdEmbedderId)
+  };
+  auto heap = v8::CppHeap::Create(const_cast<v8::Platform*>(platform), params);
+  isolate->AttachCppHeap(heap.get());
+  return heap;
+}
+
+cppgc::AllocationHandle& V8System::Heap::getAllocationHandle() {
+  return heap->GetAllocationHandle();
 }
 
 class PlatformDisposer final: public kj::Disposer {
@@ -121,12 +154,14 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 
   v8::V8::InitializePlatform(platform.get());
   v8::V8::Initialize();
+  cppgc::InitializeProcess(platform->GetPageAllocator());
   v8Initialized = true;
 }
 
 V8System::~V8System() noexcept(false) {
   v8::V8::Dispose();
   v8::V8::DisposePlatform();
+  cppgc::ShutdownProcess();
 }
 
 void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
@@ -151,148 +186,6 @@ void IsolateBase::clearDestructionQueue() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
   auto drop = queue.lockExclusive()->pop();
 }
-
-void HeapTracer::destroy() {
-  DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
-  KJ_DEFER(isolate = nullptr);
-  isolate->SetEmbedderHeapTracer(nullptr);
-  referencesToMarkLater.clear();
-  wrappersToTrace.clear();
-}
-
-void HeapTracer::mark(TraceableHandle& handle) {
-  if (handle.lastMarked == traceId) {
-    return;
-  }
-
-  // mark() may be called even when we're not currently tracing, in order to inform us that the
-  // object has become reachable from a new parent object. We must ensure that the TracedReference
-  // is initialized in this case, to prevent the object from being collected during scavenging.
-  // Scavenge passes do not actually perform a trace, and instead try to free objects that are
-  // known not to be reachable because the only references V8 ever knew about have gone away. So
-  // we have to make sure a TracedReference exists to tell V8 "this can't be collected without
-  // tracing".
-
-  // Calculate previous trace ID. See TracePrologue() wrap-around logic.
-  uint prevTraceId = traceId == 1 ? uint(kj::maxValue) : traceId - 1;
-
-  if (handle.lastMarked == prevTraceId) {
-    // Handle should still be valid.
-  } else {
-    // Handle was probably collected, or hadn't been created yet. (Re)create it.
-    v8::HandleScope scope(isolate);
-    kj::ctor(handle.tracedRef, isolate, handle.Get(isolate));
-  }
-
-  handle.lastMarked = traceId;
-
-  if (inAdvanceTracing) {
-    // We actually are in the middle of a trace, so mark the reference for V8.
-    RegisterEmbedderReference(handle.tracedRef);
-  } else if (inTrace) {
-    // A trace is happening but V8 hasn't called AdvanceTracing(), so we can't actually call back
-    // to RegisterEmbedderReference() right now as V8 will not like it. But we can't save a pointer
-    // to the handle itself to mark later becasue, who knows, maybe it'll be dropped on the C++
-    // side in the meantime. So we make a copy TracedReference which we can mark during the next
-    // AdvanceTracing(). Awkwardly, this means we don't actually mark `handle.tracedRef`, so it
-    // can still be collected, but at least the object it points to cannot be.
-    //
-    // Note that this code path only ever executes if incremental tracing is enabled, which
-    // as of this writing is disabled by default.
-    v8::HandleScope scope(isolate);
-    auto local = handle.Get(isolate);
-    referencesToMarkLater.add(v8::TracedReference<v8::Data>(isolate, local));
-
-    static bool logOnce KJ_UNUSED = ([]() {
-      // I can't figure out how to get this code to actually run in tests, but it is apparently
-      // happening in production and causing problems. Try to gather some stack traces from
-      // production.
-      KJ_LOG(ERROR, "mark() called during trace outside of AdvanceTracing?", kj::getStackTrace());
-      return true;
-    })();
-  }
-}
-
-void HeapTracer::clearWrappers() {
-  while (!wrappers.empty()) {
-    wrappers.front().detachWrapper();
-  }
-}
-
-void HeapTracer::RegisterV8References(
-    const std::vector<std::pair<void*, void*>>& internalFields) {
-  for (auto [dummy, obj]: internalFields) {
-    KJ_ASSERT(dummy == obj);
-    wrappersToTrace.add(reinterpret_cast<Wrappable*>(obj));
-  }
-}
-
-void HeapTracer::TracePrologue(TraceFlags flags) {
-  wrappersToTrace.clear();
-  if (++traceId == 0) {
-    KJ_LOG(ERROR, "trace ID wrapped around!");
-
-    // We probably don't need to crash, because all of our logic only compares trace IDs for
-    // equality, not less/greater. Just make sure we don't use ID 0.
-    traceId = 1;
-  }
-  inTrace = true;
-}
-
-bool HeapTracer::AdvanceTracing(double deadlineMs) {
-  // TODO(perf): Actually honor deadlineMs.
-
-  inAdvanceTracing = true;
-  KJ_DEFER(inAdvanceTracing = false);
-
-  auto refs = kj::mv(referencesToMarkLater);
-  for (auto& ref: refs) {
-    RegisterEmbedderReference(ref);
-  }
-
-  auto wrappables = kj::mv(wrappersToTrace);
-  for (auto wrappable: wrappables) {
-    wrappable->traceFromV8(traceId);
-  }
-
-  return false;
-}
-bool HeapTracer::IsTracingDone() {
-  return wrappersToTrace.empty() && referencesToMarkLater.empty();
-}
-
-void HeapTracer::TraceEpilogue(TraceSummary* trace_summary) {
-  KJ_ASSERT(wrappersToTrace.empty());
-  if (!referencesToMarkLater.empty()) {
-    KJ_LOG(ERROR, "referencesToMarkLater is not empty at end of trace?");
-    referencesToMarkLater.clear();
-  }
-  inTrace = false;
-}
-
-void HeapTracer::EnterFinalPause(EmbedderStackState stackState) {}
-
-void IsolateBase::scavengePrologue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).startScavenge();
-
-  // V8 frequently performs "scavenges" to quickly reclaim memory from short-lived objects. During
-  // a scavenge, V8 does *not* invoke our EmbedderHeapTracer. It used to be that we therefore had
-  // to iterate over all our weak handles and call MarkActive() on them in order to make sure the
-  // scavenger didn't try to collect them. We no longer need to do that because we now use
-  // TracedReference for any handle that is traceable, and V8 knows not to scavenge such handles.
-  //
-  // Note that the scavenge pass can still collect some of our wrapper objects -- specifically, the
-  // ones that have only ever been reachable directly from JavaScript (and no longer are), but were
-  // never reachable transitively through another C++ object, and therefore never had a
-  // TracedReference allocated for them.
-}
-
-void IsolateBase::scavengeEpilogue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).endScavenge();
-}
-
 namespace {
   static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
     if (params.array_buffer_allocator == nullptr &&
@@ -307,12 +200,9 @@ namespace {
 IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams)
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
-      heapTracer(ptr) {
+      cppHeap(system.getHeap(ptr)) {
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
-
-  ptr->AddGCPrologueCallback(scavengePrologue, v8::kGCTypeScavenge);
-  ptr->AddGCEpilogueCallback(scavengeEpilogue, v8::kGCTypeScavenge);
 
   ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
   ptr->SetData(0, this);
@@ -356,6 +246,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+  cppHeap.terminate();
   KJ_DEFER(ptr->Dispose());
 }
 
@@ -367,13 +258,10 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Delete all wrappers.
   v8::Locker lock(ptr);
   v8::Isolate::Scope scope(ptr);
+  v8::HandleScope handleScope(ptr);
 
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();
-
-  // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
-  // may call into the heap tracer.
-  KJ_DEFER(heapTracer.destroy());
 
   // Make sure opaqueTemplate is destroyed under lock (but not until later).
   KJ_DEFER(opaqueTemplate.Reset());
@@ -381,9 +269,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Make sure the TypeWrapper is destroyed under lock by declaring a new copy of the variable that
   // is destroyed before the lock is released.
   kj::Own<void> typeWrapperInstanceInner = kj::mv(typeWrapperInstance);
-
-  // Destroy all wrappers.
-  heapTracer.clearWrappers();
 }
 
 void IsolateBase::fatalError(const char* location, const char* message) {

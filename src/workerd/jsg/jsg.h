@@ -7,6 +7,8 @@
 //
 // Any files declaring an API to export to JavaScript will need to include this header.
 
+#include <kj/debug.h>
+
 #include <kj/string.h>
 #include <kj/function.h>
 #include <kj/exception.h>
@@ -15,6 +17,9 @@
 #include <v8.h>
 #include "macro-meta.h"
 #include "wrappable.h"
+
+#include <deque>
+#include <cppgc/visitor.h>
 
 #define JSG_ASSERT(cond, jsErrorType, ...)                                              \
   KJ_ASSERT(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
@@ -113,6 +118,7 @@ namespace v8 {
 namespace workerd::jsg {
 
 using kj::byte;
+class GcVisitor;
 
 class JsExceptionThrown: public std::exception {
 public:
@@ -147,12 +153,13 @@ private:
       ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = jsgThis; \
   using jsgThis = Type; \
+  const char* jsgTypeName() const override { return #Type; } \
   template <typename> \
   friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing(); \
   template <typename T> \
   friend void ::workerd::jsg::visitSubclassForGc( \
-      T* obj, ::workerd::jsg::GcVisitor& visitor); \
-  inline void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) override { \
+      const T* obj, ::workerd::jsg::GcVisitor& visitor); \
+  inline void jsgVisitForGc(::workerd::jsg::GcVisitor& visitor) const override { \
     jsgSuper::jsgVisitForGc(visitor); \
     ::workerd::jsg::visitSubclassForGc<Type>(this, visitor); \
   } \
@@ -678,6 +685,8 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
 
 class Lock;
 
+template <typename T> class Ref;
+
 class Data {
   // Arbitrary V8 data, wrapped for storage from C++. You can't do much with it, so instead you
   // should probably use V8Ref<T>, a version of this that's strongly typed.
@@ -699,34 +708,16 @@ class Data {
 
 public:
   Data(decltype(nullptr)) {}
-  ~Data() noexcept(false) {
-    destroy();
-  }
-  Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
-    if (handle.IsWeak()) handle.ClearWeak();
-    other.isolate = nullptr;
-    assertInvariant();
-    other.assertInvariant();
-  }
-  Data& operator=(Data&& other) {
-    if (this != &other) {
-      destroy();
-      isolate = other.isolate;
-      handle = kj::mv(other.handle);
-      other.isolate = nullptr;
-      if (handle.IsWeak()) handle.ClearWeak();
-    }
-    assertInvariant();
-    other.assertInvariant();
-    return *this;
-  }
+  Data(Data&&) = default;
+  Data& operator=(Data&&) = default;
   KJ_DISALLOW_COPY(Data);
 
-  Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
-      : isolate(isolate), handle(isolate, handle) {}
-  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) { return handle.Get(isolate); }
+  Data(v8::Isolate* isolate, v8::Local<v8::Data> handle) : handle(isolate, handle) {}
+
+  v8::Local<v8::Data> getHandle(v8::Isolate* isolate) {
+    return handle.getHandle(isolate);
+  }
   v8::Local<v8::Data> getHandle(Lock& js);
-  // Interact with raw V8 types.
 
   Data addRef(v8::Isolate* isolate) { return Data(isolate, getHandle(isolate)); }
   Data addRef(Lock& js);
@@ -735,27 +726,17 @@ public:
     return handle == other.handle;
   }
 
-private:
-  v8::Isolate* isolate = nullptr;
-  // The isolate with which the handles below are associated.
-
-  TraceableHandle handle;
-  // Handle to the value which will be marked strong if any untraced C++ references exist, weak
-  // otherwise.
-
-  friend class GcVisitor;
-
-  void destroy();
-
-  // Debugging helpers.
-  void assertInvariant() {
-#ifdef KJ_DEBUG
-    assertInvariantImpl();
-#endif
+  inline explicit operator bool() const {
+    return !handle.isEmpty();
   }
-#ifdef KJ_DEBUG
-  void assertInvariantImpl();
-#endif
+
+private:
+  inline void visit(GcVisitor& visitor) { handle.visit(visitor); }
+
+  V8Handle handle;
+
+  template <typename T>
+  friend class V8Ref;
 };
 
 template <typename T>
@@ -797,6 +778,7 @@ public:
   }
 
 private:
+  inline void visit(GcVisitor& visitor) { Data::visit(visitor); }
   friend class GcVisitor;
 };
 
@@ -992,7 +974,7 @@ private:
 template <typename T>
 constexpr bool resourceNeedsGcTracing();
 template <typename T>
-void visitSubclassForGc(T* obj, GcVisitor& visitor);
+void visitSubclassForGc(const T* obj, GcVisitor& visitor);
 
 class Object: private Wrappable {
   // All resource types must inherit from this.
@@ -1011,18 +993,21 @@ public:
   // to explicitly declare the default constructor.
   Object() = default;
 
-  inline void jsgVisitForGc(GcVisitor& visitor) override {}
+  inline void jsgVisitForGc(GcVisitor& visitor) const override {}
 
   static constexpr bool jsgHasReflection = false;
   template <typename TypeWrapper>
   inline void jsgInitReflection(TypeWrapper& wrapper) {}
 
 private:
+  template <typename T>
+  Ref<T> jsgAddRef();
+
   inline void visitForGc(GcVisitor& visitor) {}
   template <typename>
   friend constexpr bool ::workerd::jsg::resourceNeedsGcTracing();
   template <typename T>
-  friend void visitSubclassForGc(T* obj, GcVisitor& visitor);
+  friend void visitSubclassForGc(const T* obj, GcVisitor& visitor);
   template <typename T>
   friend class Ref;
   friend class kj::Refcounted;
@@ -1039,10 +1024,17 @@ private:
   friend class ObjectWrapper;
   template <typename>
   friend class SelfPropertyReader;
+
+  template <typename U>
+  friend Ref<U> _jsgThis(U* obj);
+
+  friend struct Wrappable::RefBase::StrongRefHandle;
+  friend struct Wrappable::RefBase::TracedRefHandle;
+  friend class Wrappable::RefBase;
 };
 
 template <typename T>
-class Ref {
+class Ref: private Wrappable::RefBase {
   // Ref<T> is a reference to a resource type (a type with a JSG_RESOURCE_TYPE block) living on
   // the V8 heap.
   //
@@ -1064,60 +1056,72 @@ class Ref {
   // behavior outside of an isolate lock.
 
 public:
-  Ref(decltype(nullptr)): strong(false) {}
-  Ref(Ref&& other): inner(kj::mv(other.inner)), strong(true) {
-    if (other.strong) {
-      other.strong = false;
-    } else {
-      inner->addStrongRef();
-    }
+  Ref(decltype(nullptr)) : RefBase(nullptr) {}
+
+  Ref(Ref&& other): RefBase(kj::mv(other)) {
+    KJ_ASSERT(other.isEmpty());
+    KJ_ASSERT(!isTraced());
   }
-  explicit Ref(kj::Own<T> innerParam): inner(kj::mv(innerParam)), strong(true) {
-    // Upgrade a KJ allocation to a Ref. This is useful if you want to allocate the object outside
-    // the isolate lock and then bring it in later. The object must be allocated with
-    // kj::refcounted. Once the Ref is constructed, the refcount is protected by the isolate lock
-    // going forward; you can no longer add or remove refs outside the lock.
-    inner->addStrongRef();
-  }
+
   template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
-  Ref(Ref<U>&& other): inner(kj::mv(other.inner)), strong(true) {
-    if (other.strong) {
-      other.strong = false;
-    } else {
-      inner->addStrongRef();
-    }
+  Ref(Ref<U>&& other) : RefBase(kj::mv(other)) {
+    KJ_ASSERT(other.isEmpty());
+    KJ_ASSERT(!isTraced());
   }
+
+  explicit Ref(kj::Own<T> innerParam) : RefBase(kj::mv(innerParam)) {}
+  // Upgrade a KJ allocation to a Ref. This is useful if you want to allocate the object outside
+  // the isolate lock and then bring it in later. The object must be allocated with
+  // kj::refcounted. Once the Ref is constructed, the refcount is protected by the isolate lock
+  // going forward; you can no longer add or remove refs outside the lock.
+
   template <typename U>
   Ref& operator=(Ref<U>&& other) {
-    destroy();
-    inner = kj::mv(other.inner);
-    strong = true;
-    if (other.strong) {
-      other.strong = false;
-    } else {
-      inner->addStrongRef();
-    }
+    RefBase::operator=(kj::mv(other));
+    KJ_ASSERT(!isTraced());
+    KJ_ASSERT(other.isEmpty());
     return *this;
   }
-  ~Ref() noexcept(false) {
-    destroy();
-  }
+
   KJ_DISALLOW_COPY(Ref);
 
-  T& operator*() { return *inner; }
-  T* operator->() { return inner.get(); }
-  T* get() { return inner.get(); }
-
-  Ref addRef() & {
-    return Ref(kj::addRef(*inner));
+  T* get() {
+    return RefBase::get<T>();
   }
+  const T* get() const {
+    return RefBase::get<T>();
+  }
+  T& operator*() {
+    auto ptr = get();
+    KJ_ASSERT(ptr != nullptr);
+    return *ptr;
+  }
+  const T& operator*() const {
+    auto ptr = get();
+    KJ_ASSERT(ptr != nullptr);
+    return *ptr;
+  }
+  T* operator->() { return get(); }
+  const T* operator->() const { return get(); }
+
+  inline explicit operator bool() const { return !RefBase::isEmpty(); }
+
+  inline bool operator==(const Ref& other) const {
+    return get() == other.get();
+  }
+  template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
+  inline bool operator==(const Ref<U>& other) const {
+    return get() == other.get();
+  }
+
+  Ref addRef() & { return Ref(RefBase::addStrongRef()); }
   Ref addRef() && = delete;  // would be redundant
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
     // If the object has a JS wrapper, return it. Note that the JS wrapper is initialized lazily
     // when the object is first passed to JS, so you can't be sure that it exists. To reliably
     // get a handle (creating it on-demand if necessary), use a TypeHandler<Ref<T>>.
-    return inner->tryGetHandle(isolate);
+    return RefBase::tryGetHandle(isolate);
   }
 
   void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
@@ -1128,27 +1132,28 @@ public:
     //
     // It is an error to attach a wrapper when another wrapper is already attached. Hence,
     // typically this should only be called on a newly-allocated object.
-
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>());
+    RefBase::attachWrapper(isolate, object);
   }
 
 private:
-  kj::Own<T> inner;
+  Ref(kj::Maybe<RefBase::RefHandle> handle)
+      : RefBase(kj::mv(handle)) {}
+  Ref(kj::Maybe<kj::Own<Wrappable::RefBase::StrongRefHandle>> handle)
+      : RefBase(getRefHandle(kj::mv(handle))) {}
 
-  kj::Maybe<Wrappable&> parent;
-  // If this has ever been traced, the parent object from which the trace originated. This is kept
-  // for debugging purposes only -- there should only ever be one parent for a particular ref.
-  //
-  // This field does NOT move when the Ref moves, because it's a property of the specific Ref
-  // location.
-
-  bool strong;
-  // True if the ref is currently counted in the target's strong refcount.
-
-  void destroy() {
-    if (auto ptr = inner.get(); ptr != nullptr) {
-      inner->maybeDeferDestruction(strong, kj::mv(inner), static_cast<Wrappable*>(ptr));
+  static kj::Maybe<RefBase::RefHandle> getRefHandle(
+      kj::Maybe<kj::Own<RefBase::StrongRefHandle>> maybeHandle) {
+    KJ_IF_MAYBE(handle, maybeHandle) {
+      return kj::Maybe<RefBase::RefHandle>(kj::mv(*handle));
     }
+    return nullptr;
+  }
+
+  const RefBase& getRefBase() const { return *this; }
+  // For debugging purposes.
+
+  void visit(GcVisitor& visitor) {
+    RefBase::visit(visitor);
   }
 
   template <typename>
@@ -1161,6 +1166,7 @@ private:
   friend class ResourceWrapper;
   template <typename>
   friend class ObjectWrapper;
+  friend class Object;
   friend class GcVisitor;
 };
 
@@ -1171,7 +1177,12 @@ Ref<T> alloc(Params&&... params) {
 
 template <typename T>
 Ref<T> _jsgThis(T* obj) {
-  return Ref<T>(kj::addRef(*obj));
+  return obj->template jsgAddRef<T>();
+}
+
+template <typename T>
+Ref<T> Object::jsgAddRef() {
+  return Ref<T>(Wrappable::getStrongRefHandle());
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))
@@ -1462,8 +1473,22 @@ class GcVisitor {
 
 public:
   template <typename T>
+  void visit(v8::TracedReference<T>& t) {
+    if (visitor != nullptr) {
+      visitor->Trace(t);
+    }
+  }
+
+  template <typename T>
+  void visit(cppgc::Member<T>& t) {
+    if (visitor != nullptr) {
+      visitor->Trace(t);
+    }
+  }
+
+  template <typename T>
   void visit(Ref<T>& ref) {
-    ref.inner->visitRef(*this, ref.parent, ref.strong);
+    ref.visit(*this);
   }
 
   template <typename T>
@@ -1471,6 +1496,10 @@ public:
     KJ_IF_MAYBE(ref, maybeRef) {
       visit(*ref);
     }
+  }
+
+  void visit(Wrappable::RefBase& ref) {
+    ref.visit(*this);
   }
 
   void visit(Data& data);
@@ -1483,7 +1512,7 @@ public:
 
   template <typename T>
   void visit(V8Ref<T>& value) {
-    visit(static_cast<Data&>(value));
+    value.visit(*this);
   }
 
   template <typename T>
@@ -1503,7 +1532,7 @@ public:
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(kj::Maybe<T>& maybeSupportsVisit) {
     KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
-      supportsVisit->visitForGc(*this);
+      visit(*supportsVisit);
     }
   }
 
@@ -1522,11 +1551,32 @@ public:
   }
 
 private:
-  Wrappable& parent;
+  cppgc::Visitor* visitor;
+  uint traceId;
+  std::deque<const Wrappable*> stack;
 
-  explicit GcVisitor(Wrappable& parent): parent(parent) {}
+  explicit GcVisitor(cppgc::Visitor* visitor, uint traceId)
+      : visitor(visitor), traceId(traceId) {}
+
+  void push(const Wrappable& current) {
+    stack.push_front(&current);
+  }
+
+  inline void pop() {
+    stack.pop_front();
+  }
+
+  inline const Wrappable& getCurrent() {
+    KJ_ASSERT(!stack.empty());
+    return *stack.front();
+  }
+
+  uint getTraceId() const { return traceId; }
+
   KJ_DISALLOW_COPY(GcVisitor);
 
+  template <typename T>
+  friend class TracedGlobal;
   friend class Wrappable;
   friend class Object;
 };
