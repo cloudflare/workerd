@@ -5,7 +5,6 @@
 #pragma once
 
 #include "r2-bucket.h"
-#include "r2-multipart.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/http.h>
 
