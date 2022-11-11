@@ -3,8 +3,6 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
-load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
-load("@bazel_skylib//lib:selects.bzl", "selects")
 
 # ========================================================================================
 # C++ deps for API extraction
@@ -74,6 +72,7 @@ filegroup(
     )
     for (date, label) in compat_dates
 ]
+
 # ========================================================================================
 # Parameter Name Extractor
 #
@@ -84,18 +83,34 @@ cc_ast_dump(
     name = "dump_api_ast",
     src = api_encoder_src,
     out = "api.ast.json",
-    visibility = ["//visibility:public"],
     deps = [":api_encoder_lib"],
 )
 
 rust_binary(
-    name = "param_extractor",
+    name = "param_extractor_bin",
     srcs = ["param-extractor.rs"],
-    data = [":dump_api_ast"],
-    visibility = ["//visibility:public"],
     deps = [
+        "@crates_vendor//:anyhow",
         "@crates_vendor//:clang-ast",
+        "@crates_vendor//:pico-args",
         "@crates_vendor//:serde",
         "@crates_vendor//:serde_json",
     ],
+)
+
+run_binary(
+    name = "param_extractor",
+    srcs = [
+        ":api_encoder",
+        ":dump_api_ast",
+    ],
+    outs = ["param-names.json"],
+    args = [
+        "--input",
+        "$(location dump_api_ast)",
+        "--output",
+        "$(location param-names.json)",
+    ],
+    tool = "param_extractor_bin",
+    visibility = ["//visibility:public"],
 )

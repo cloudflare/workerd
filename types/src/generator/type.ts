@@ -125,11 +125,6 @@ export function createParamDeclarationNodes(
   // `args` may include internal implementation types that shouldn't appear
   // in parameters. Therefore, we may end up with fewer params than args.
   const params: ts.ParameterDeclaration[] = [];
-  // Index to use in the name of the next parameter
-
-  if (fullyQualifiedParentName !== "TODO") {
-    console.log(`${fullyQualifiedParentName}.${name}`);
-  }
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];

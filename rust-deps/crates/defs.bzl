@@ -300,6 +300,7 @@ _NORMAL_DEPENDENCIES = {
             "libc": "@crates_vendor__libc-0.2.137//:libc",
             "lolhtml": "@crates_vendor__lolhtml-0.2.0//:lolhtml",
             "object": "@crates_vendor__object-0.23.0//:object",
+            "pico-args": "@crates_vendor__pico-args-0.5.0//:pico_args",
             "serde": "@crates_vendor__serde-1.0.147//:serde",
             "serde_json": "@crates_vendor__serde_json-1.0.87//:serde_json",
             "typed-arena": "@crates_vendor__typed-arena-2.0.1//:typed_arena",
@@ -897,6 +898,16 @@ def crate_repositories():
         urls = ["https://crates.io/api/v1/crates/phf_shared/0.8.0/download"],
         strip_prefix = "phf_shared-0.8.0",
         build_file = Label("@workerd//rust-deps/crates:BUILD.phf_shared-0.8.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__pico-args-0.5.0",
+        sha256 = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315",
+        type = "tar.gz",
+        urls = ["https://crates.io/api/v1/crates/pico-args/0.5.0/download"],
+        strip_prefix = "pico-args-0.5.0",
+        build_file = Label("@workerd//rust-deps/crates:BUILD.pico-args-0.5.0.bazel"),
     )
 
     maybe(

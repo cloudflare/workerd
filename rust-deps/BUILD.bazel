@@ -115,6 +115,9 @@ crates_vendor(
         "serde_json": crate.spec(
             version = "1.0",
             features = ["default"]
+        ),
+        "pico-args": crate.spec(
+            version = "0.5",
         )
     },
     supported_platform_triples = [

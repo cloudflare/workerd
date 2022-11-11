@@ -32,10 +32,15 @@ js_run_binary(
         "src/workerd/tools",
         "--defines",
         "types/defines",
+        "--input-ast-json",
+        "src/workerd/tools/param-names.json",
         "--output",
         "types/definitions",
         "--format",
-    ],
+    ] + [[
+        "--input-capnp",
+        capnp_file,
+    ] for capnp_file in "$(locations api_encoder)".split()],
     out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
     tool = ":types_bin",
