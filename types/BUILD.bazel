@@ -27,10 +27,14 @@ js_run_binary(
     name = "types",
     srcs = [
         "//src/workerd/tools:api_encoder",
+        "//src/workerd/tools:param_extractor",
     ],
     outs = ["api.d.ts"],  # TODO(soon) switch to out_dirs when generating multiple files
     args = [
+        "--input-capnp",
         "src/workerd/tools/api.capnp.bin",
+        "--input-ast-json",
+        "src/workerd/tools/param-names.json",
         "--output",
         "types/api.d.ts",
         "--format",

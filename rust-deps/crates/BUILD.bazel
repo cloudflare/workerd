@@ -76,6 +76,12 @@ alias(
 )
 
 alias(
+    name = "pico-args",
+    actual = "@crates_vendor__pico-args-0.5.0//:pico_args",
+    tags = ["manual"],
+)
+
+alias(
     name = "serde",
     actual = "@crates_vendor__serde-1.0.147//:serde",
     tags = ["manual"],
