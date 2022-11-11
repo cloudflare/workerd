@@ -9,16 +9,21 @@ interface Parameter {
   name: string;
 }
 
+// Support methods defined in parent classes
+const additionalClassNames: Record<string, string[]> = {
+  DurableObjectStorageOperations: [
+    "DurableObjectStorage",
+    "DurableObjectTransaction",
+  ],
+};
 export function getParameterName(
   fullyQualifiedParentName: string,
   methodName: string,
   parameterIndex: number
 ): string {
-  console.error(`${fullyQualifiedParentName}.${methodName}[${parameterIndex}]`);
+  const path = `${fullyQualifiedParentName}.${methodName}[${parameterIndex}]`;
 
-  const name = paramNameData.get(
-    `${fullyQualifiedParentName}.${methodName}[${parameterIndex}]`
-  )?.name;
+  const name = paramNameData.get(path)?.name;
   // Some parameter names are reserved TypeScript words, which break later down the pipeline
   if (name == "function" || name == "number" || name == "string") {
     return `$${name}`;
@@ -32,14 +37,34 @@ export function getParameterName(
 export function parseApiAstDump(astDumpPath: string) {
   paramNameData = new Map(
     JSON.parse(fs.readFileSync(astDumpPath, { encoding: "utf-8" }))
-      .map((p: any) => ({
-        fullyQualifiedParentName: p.fully_qualified_parent_name
-          .filter((n: any) => !!n)
-          .join("::"),
-        methodName: p.function_like,
-        parameterIndex: p.index,
-        name: p.name,
-      }))
+      .flatMap((p: any) => {
+        const shouldRename = p.fully_qualified_parent_name.find(
+          (n: string) => !!additionalClassNames[n]
+        );
+        const renameOptions = additionalClassNames[shouldRename] ?? [];
+        const methodName = p.function_like.endsWith("_")
+          ? p.function_like.slice(0, -1)
+          : p.function_like;
+        return [
+          ...renameOptions.map((r) => ({
+            fullyQualifiedParentName: p.fully_qualified_parent_name
+              .filter((n: any) => !!n)
+              .map((n: string) => (n === shouldRename ? r : n))
+              .join("::"),
+            methodName,
+            parameterIndex: p.index,
+            name: p.name,
+          })),
+          {
+            fullyQualifiedParentName: p.fully_qualified_parent_name
+              .filter((n: any) => !!n)
+              .join("::"),
+            methodName,
+            parameterIndex: p.index,
+            name: p.name,
+          },
+        ];
+      })
       .map((p: Parameter) => [
         `${p.fullyQualifiedParentName}.${p.methodName}[${p.parameterIndex}]`,
         p,

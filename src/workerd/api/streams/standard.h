@@ -74,6 +74,7 @@ struct UnderlyingSource {
     autoAllocateChunkSize: never;
     start?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
     pull?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
   });
 
   kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
@@ -100,7 +101,11 @@ struct UnderlyingSink {
   JSG_STRUCT(type, start, write, abort, close);
   JSG_STRUCT_TS_OVERRIDE(<W = any> {
     write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
+    start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
+    abort?: (reason: any) => void | Promise<void>;
+    close?: () => void | Promise<void>;
   });
+
 
   kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
   // The maybeTransformer field here is part of the internal implementation of

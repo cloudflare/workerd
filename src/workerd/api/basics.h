@@ -297,6 +297,9 @@ public:
   struct HandlerObject {
     HandlerFunction handleEvent;
     JSG_STRUCT(handleEvent);
+    JSG_STRUCT_TS_OVERRIDE({
+      handleEvent: (event: Event) => any | undefined;
+    });
   };
   typedef kj::OneOf<HandlerFunction, HandlerObject> Handler;
 

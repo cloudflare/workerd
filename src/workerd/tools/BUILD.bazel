@@ -101,7 +101,6 @@ rust_binary(
 run_binary(
     name = "param_extractor",
     srcs = [
-        ":api_encoder",
         ":dump_api_ast",
     ],
     outs = ["param-names.json"],
