@@ -1,5 +1,6 @@
 import assert from "assert";
 import { test } from "node:test";
+import path from "path";
 import ts from "typescript";
 import { printer } from "../../src/print";
 import { createMemoryProgram } from "../../src/program";
@@ -32,7 +33,9 @@ export interface AsyncThingIteratorNext {
   value?: number;
 }
 `;
-  const [program, sourcePath] = createMemoryProgram(source);
+  const sourcePath = path.resolve(__dirname, "source.ts");
+  const sources = new Map([[sourcePath, source]]);
+  const program = createMemoryProgram(sources);
   const checker = program.getTypeChecker();
   const sourceFile = program.getSourceFile(sourcePath);
   assert(sourceFile !== undefined);

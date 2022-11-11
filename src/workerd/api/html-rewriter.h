@@ -57,6 +57,13 @@ public:
     jsg::Optional<ElementCallbackFunction> text;
 
     JSG_STRUCT(element, comments, text);
+
+    JSG_STRUCT_TS_OVERRIDE({
+      element?(element: Element): void | Promise<void>;
+      comments?(comment: Comment): void | Promise<void>;
+      text?(element: Text): void | Promise<void>;
+    });
+    // Specify parameter types for callback functions
   };
 
   struct DocumentContentHandlers {
@@ -69,6 +76,14 @@ public:
     jsg::Optional<ElementCallbackFunction> end;
 
     JSG_STRUCT(doctype, comments, text, end);
+
+    JSG_STRUCT_TS_OVERRIDE({
+      doctype?(doctype: Doctype): void | Promise<void>;
+      comments?(comment: Comment): void | Promise<void>;
+      text?(text: Text): void | Promise<void>;
+      end?(end: DocumentEnd): void | Promise<void>;
+    });
+    // Specify parameter types for callback functions
   };
 
   jsg::Ref<HTMLRewriter> on(kj::String selector, ElementContentHandlers&& handlers);
@@ -113,6 +128,12 @@ private:
 //
 // The Element content token also exposes an AttributesIterator type. This is not a content token
 // per se, but follows the same scoping rule.
+//
+// Note, when generating TypeScript types, definitions to include are collected before overrides are
+// applied. Because ElementCallbackFunction's parameter is always jsg::Ref<jsg::Object> and not the
+// token type, we would not include token types by default as these are only defined in overrides.
+// Therefore, we manually define each token type as a JSG_TS_ROOT(), so it gets visited when
+// collecting definitions.
 
 class HTMLRewriter::Token: public jsg::Object {
 public:
@@ -190,6 +211,20 @@ public:
     JSG_METHOD(removeAndKeepContent);
     JSG_METHOD(setInnerContent);
     JSG_METHOD(onEndTag);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      before(content: string, options?: ContentOptions): Element;
+      after(content: string, options?: ContentOptions): Element;
+      prepend(content: string, options?: ContentOptions): Element;
+      append(content: string, options?: ContentOptions): Element;
+      replace(content: string, options?: ContentOptions): Element;
+      setInnerContent(content: string, options?: ContentOptions): Element;
+
+      onEndTag(handler: (tag: EndTag) => void | Promise<void>): void;
+    });
+    // Require content to be a string, and specify parameter type for onEndTag
+    // callback function
   }
 
 private:
@@ -258,6 +293,13 @@ public:
     JSG_METHOD(before);
     JSG_METHOD(after);
     JSG_METHOD(remove);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      before(content: string, options?: ContentOptions): EndTag;
+      after(content: string, options?: ContentOptions): EndTag;
+    });
+    // Require content to be a string
   }
 
 private:
@@ -290,6 +332,14 @@ public:
     JSG_METHOD(after);
     JSG_METHOD(replace);
     JSG_METHOD(remove);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      before(content: string, options?: ContentOptions): Comment;
+      after(content: string, options?: ContentOptions): Comment;
+      replace(content: string, options?: ContentOptions): Comment;
+    });
+    // Require content to be a string
   }
 
 private:
@@ -324,6 +374,14 @@ public:
     JSG_METHOD(after);
     JSG_METHOD(replace);
     JSG_METHOD(remove);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      before(content: string, options?: ContentOptions): Text;
+      after(content: string, options?: ContentOptions): Text;
+      replace(content: string, options?: ContentOptions): Text;
+    });
+    // Require content to be a string
   }
 
 private:
@@ -346,6 +404,8 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_READONLY_INSTANCE_PROPERTY(publicId, getPublicId);
     JSG_READONLY_INSTANCE_PROPERTY(systemId, getSystemId);
+
+    JSG_TS_ROOT();
   }
 
 private:
@@ -364,6 +424,12 @@ public:
 
   JSG_RESOURCE_TYPE(DocumentEnd) {
     JSG_METHOD(append);
+
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      append(content: string, options?: ContentOptions): DocumentEnd;
+    });
+    // Require content to be a string
   }
 
 private:

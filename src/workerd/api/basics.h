@@ -182,6 +182,9 @@ public:
 #if !WORKERD_API_BASICS_TEST
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(actorState, getActorState);
 #endif
+
+    JSG_TS_OVERRIDE({ actorState: never });
+    // Omit `actorState` from definitions
   }
 };
 
@@ -307,6 +310,19 @@ public:
     JSG_METHOD(addEventListener);
     JSG_METHOD(removeEventListener);
     JSG_METHOD(dispatchEvent);
+
+    JSG_TS_DEFINE(
+      type EventListener<EventType extends Event = Event> = (event: EventType) => void;
+      interface EventListenerObject<EventType extends Event = Event> {
+        handleEvent(event: EventType): void;
+      }
+      type EventListenerOrEventListenerObject<EventType extends Event = Event> = EventListener<EventType> | EventListenerObject<EventType>;
+    );
+    JSG_TS_OVERRIDE(<EventMap extends Record<string, Event> = Record<string, Event>> {
+      addEventListener<Type extends keyof EventMap>(type: Type, handler: EventListenerOrEventListenerObject<EventMap[Type]>, options?: EventTargetAddEventListenerOptions | boolean): void;
+      removeEventListener<Type extends keyof EventMap>(type: Type, handler: EventListenerOrEventListenerObject<EventMap[Type]>, options?: EventTargetEventListenerOptions | boolean): void;
+      dispatchEvent(event: EventMap[keyof EventMap]): boolean;
+    });
   }
   JSG_REFLECTION(onEvents);
 

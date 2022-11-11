@@ -2,7 +2,7 @@ import assert from "assert";
 import fs from "fs/promises";
 import { test } from "node:test";
 import path from "path";
-import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
+import { BuiltinType_Type, StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import { main } from "../src";
 
@@ -12,14 +12,52 @@ test("main: generates types", async () => {
   const groups = root.initGroups(1);
   const group = groups.get(0);
   group.setName("definitions");
-  const structures = group.initStructures(8);
+  const structures = group.initStructures(5);
 
-  // TODO(soon): rename/remove these once we implement JSG_TS_ROOT macro
-  const root1 = structures.get(0);
-  root1.setName("ServiceWorkerGlobalScope");
-  root1.setFullyQualifiedName("workerd::api::ServiceWorkerGlobalScope");
+  const eventTarget = structures.get(0);
+  eventTarget.setName("EventTarget");
+  eventTarget.setFullyQualifiedName("workerd::api::EventTarget");
   {
-    const members = root1.initMembers(2);
+    const members = eventTarget.initMembers(2);
+    members.get(0).initConstructor();
+    const method = members.get(1).initMethod();
+    method.setName("addEventListener");
+    {
+      const args = method.initArgs(2);
+      args.get(0).initString().setName("kj::String");
+      args.get(1).initBuiltin().setType(BuiltinType_Type.V8FUNCTION);
+    }
+    method.initReturnType().setVoidt();
+  }
+  eventTarget.setTsOverride(`<EventMap extends Record<string, Event> = Record<string, Event>> {
+    addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
+  }`);
+
+  const workerGlobalScope = structures.get(1);
+  workerGlobalScope.setName("WorkerGlobalScope");
+  workerGlobalScope.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
+  let extendsStructure = workerGlobalScope.initExtends().initStructure();
+  extendsStructure.setName("EventTarget");
+  extendsStructure.setFullyQualifiedName("workerd::api::EventTarget");
+  workerGlobalScope.setTsDefine(`type WorkerGlobalScopeEventMap = {
+    fetch: Event;
+    scheduled: Event;
+  }`);
+  workerGlobalScope.setTsOverride(
+    "extends EventTarget<WorkerGlobalScopeEventMap>"
+  );
+
+  const serviceWorkerGlobalScope = structures.get(2);
+  serviceWorkerGlobalScope.setName("ServiceWorkerGlobalScope");
+  serviceWorkerGlobalScope.setFullyQualifiedName(
+    "workerd::api::ServiceWorkerGlobalScope"
+  );
+  extendsStructure = serviceWorkerGlobalScope.initExtends().initStructure();
+  extendsStructure.setName("WorkerGlobalScope");
+  extendsStructure.setFullyQualifiedName("workerd::api::WorkerGlobalScope");
+  serviceWorkerGlobalScope.setTsRoot(true);
+  {
+    const members = serviceWorkerGlobalScope.initMembers(2);
 
     // Test that global extraction is performed after iterator processing
     const method = members.get(0).initMethod();
@@ -37,23 +75,7 @@ test("main: generates types", async () => {
     prop.initType().initPromise().initValue().initNumber().setName("int");
   }
 
-  const root2 = structures.get(1);
-  root2.setName("ExportedHandler");
-  root2.setFullyQualifiedName("workerd::api::ExportedHandler");
-  const root3 = structures.get(2);
-  root3.setName("DurableObjectNamespace");
-  root3.setFullyQualifiedName("workerd::api::DurableObjectNamespace");
-  const root4 = structures.get(3);
-  root4.setName("AnalyticsEngine");
-  root4.setFullyQualifiedName("workerd::api::AnalyticsEngine");
-  const root5 = structures.get(4);
-  root5.setName("KvNamespace");
-  root5.setFullyQualifiedName("workerd::api::KvNamespace");
-  const root6 = structures.get(5);
-  root6.setName("R2Bucket");
-  root6.setFullyQualifiedName("workerd::api::public_beta::R2Bucket");
-
-  const iterator = structures.get(6);
+  const iterator = structures.get(3);
   iterator.setName("ThingIterator");
   iterator.setFullyQualifiedName("workerd::api::ThingIterator");
   iterator.initExtends().initIntrinsic().setName("v8::kIteratorPrototype");
@@ -68,7 +90,7 @@ test("main: generates types", async () => {
     const iteratorMethod = iterator.initIterator();
     iteratorMethod.initReturnType().setUnknown();
   }
-  const iteratorNext = structures.get(7);
+  const iteratorNext = structures.get(4);
   iteratorNext.setName("ThingIteratorNext");
   iteratorNext.setFullyQualifiedName("workerd::api::ThingIteratorNext");
   {
@@ -97,23 +119,23 @@ test("main: generates types", async () => {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-// definitions
-export interface ServiceWorkerGlobalScope {
+export declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
+    constructor();
+    addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
+}
+export type WorkerGlobalScopeEventMap = {
+    fetch: Event;
+    scheduled: Event;
+};
+export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
+}
+export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
+export declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
-export interface ExportedHandler {
-}
-export interface DurableObjectNamespace {
-}
-export interface AnalyticsEngine {
-}
-export interface KvNamespace {
-}
-export interface R2Bucket {
-}
 `
   );
 
@@ -124,18 +146,29 @@ export interface R2Bucket {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-// definitions
-export interface ServiceWorkerGlobalScope {
+export declare class EventTarget<
+  EventMap extends Record<string, Event> = Record<string, Event>
+> {
+  constructor();
+  addEventListener<Type extends keyof EventMap>(
+    type: Type,
+    handler: (event: EventMap[Type]) => void
+  ): void;
+}
+export type WorkerGlobalScopeEventMap = {
+  fetch: Event;
+  scheduled: Event;
+};
+export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {}
+export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   things(param0: boolean): IterableIterator<string>;
   get prop(): Promise<number>;
 }
+export declare function addEventListener<
+  Type extends keyof WorkerGlobalScopeEventMap
+>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
 export declare function things(param0: boolean): IterableIterator<string>;
 export declare const prop: Promise<number>;
-export interface ExportedHandler {}
-export interface DurableObjectNamespace {}
-export interface AnalyticsEngine {}
-export interface KvNamespace {}
-export interface R2Bucket {}
 `
   );
 });

@@ -17,6 +17,10 @@ public:
 
   JSG_RESOURCE_TYPE(CompressionStream) {
     JSG_INHERIT(TransformStream);
+
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
+      constructor(format: "gzip" | "deflate");
+    });
   }
 };
 
@@ -28,6 +32,10 @@ public:
 
   JSG_RESOURCE_TYPE(DecompressionStream) {
     JSG_INHERIT(TransformStream);
+
+    JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
+      constructor(format: "gzip" | "deflate");
+    });
   }
 };
 

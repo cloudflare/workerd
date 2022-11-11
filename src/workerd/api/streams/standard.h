@@ -24,6 +24,9 @@ struct StreamQueuingStrategy {
   jsg::Optional<jsg::Function<SizeAlgorithm>> size;
 
   JSG_STRUCT(highWaterMark, size);
+  JSG_STRUCT_TS_OVERRIDE(QueuingStrategy<T = any> {
+    size?: (chunk: T) => number | bigint;
+  });
 };
 
 struct UnderlyingSource {
@@ -59,6 +62,19 @@ struct UnderlyingSource {
   jsg::Optional<jsg::Function<CancelAlgorithm>> cancel;
 
   JSG_STRUCT(type, autoAllocateChunkSize, start, pull, cancel);
+  JSG_STRUCT_TS_DEFINE(interface UnderlyingByteSource {
+    type: "bytes";
+    autoAllocateChunkSize?: number;
+    start?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    pull?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+  });
+  JSG_STRUCT_TS_OVERRIDE(<R = any> {
+    type?: "" | undefined;
+    autoAllocateChunkSize: never;
+    start?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    pull?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+  });
 
   kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
   // The maybeTransformer field here is part of the internal implementation of
@@ -82,6 +98,9 @@ struct UnderlyingSink {
   jsg::Optional<jsg::Function<CloseAlgorithm>> close;
 
   JSG_STRUCT(type, start, write, abort, close);
+  JSG_STRUCT_TS_OVERRIDE(<W = any> {
+    write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
+  });
 
   kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
   // The maybeTransformer field here is part of the internal implementation of
@@ -102,6 +121,11 @@ struct Transformer {
   jsg::Optional<jsg::Function<FlushAlgorithm>> flush;
 
   JSG_STRUCT(readableType, writableType, start, transform, flush);
+  JSG_STRUCT_TS_OVERRIDE(<I = any, O = any> {
+    start?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    transform?: (chunk: I, controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    flush?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+  });
 };
 
 // =======================================================================================
@@ -693,6 +717,10 @@ public:
     JSG_METHOD(close);
     JSG_METHOD(enqueue);
     JSG_METHOD(error);
+
+    JSG_TS_OVERRIDE(<R = any> {
+      enqueue(chunk?: R): void;
+    });
   }
 
 private:
@@ -1215,6 +1243,10 @@ public:
     JSG_METHOD(enqueue);
     JSG_METHOD(error);
     JSG_METHOD(terminate);
+
+    JSG_TS_OVERRIDE(<O = any> {
+      enqueue(chunk?: O): void;
+    });
   }
 
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);

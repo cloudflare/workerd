@@ -12,6 +12,8 @@ import {
 import ts from "typescript";
 import { createStructureNode } from "./structure";
 
+export { getTypeName } from "./type";
+
 type StructureMap = Map<string, Structure>;
 // Builds a lookup table mapping type names to structures
 function collectStructureMap(root: StructureGroups): StructureMap {
@@ -24,26 +26,15 @@ function collectStructureMap(root: StructureGroups): StructureMap {
   return map;
 }
 
-// Types to visit in `collectIncluded` for finding types to include
-// (global scope and bindings types)
-// TODO(soon): replace this with a macro like JSG_TS_ROOT or JSG_TS_BINDING_TYPE
-const TYPE_ROOTS = [
-  "workerd::api::ServiceWorkerGlobalScope",
-  "workerd::api::ExportedHandler",
-  "workerd::api::DurableObjectNamespace",
-  "workerd::api::AnalyticsEngine",
-  "workerd::api::KvNamespace",
-  "workerd::api::public_beta::R2Bucket",
-];
-
 // Builds a set containing the names of structures that should be included
 // in the definitions, because they are referenced by root types or any of their
-// children.
+// children. A struct/resource type is marked as a root type using a
+// `JSG_(STRUCT_)TS_ROOT` macro.
 //
 // We need to do this as some types should only be included in the definitions
 // when certain compatibility flags are enabled (e.g. `Navigator`,
 // standards-compliant `URL`). However, these types are always included in
-// the *_TYPES macros.
+// the `*_TYPES` macros.
 function collectIncluded(map: StructureMap): Set<string> {
   const included = new Set<string>();
 
@@ -73,7 +64,7 @@ function collectIncluded(map: StructureMap): Set<string> {
 
   function visitFunction(func: FunctionType | Method) {
     func.getArgs().forEach(visitType);
-    return visitType(func.getReturnType());
+    visitType(func.getReturnType());
   }
 
   function visitMember(member: Member) {
@@ -105,10 +96,9 @@ function collectIncluded(map: StructureMap): Set<string> {
     }
   }
 
-  for (const rootName of TYPE_ROOTS) {
-    const root = map.get(rootName);
-    assert(root !== undefined, `Unknown root type: ${rootName}`);
-    visitStructure(root);
+  // Visit all structures with `JSG_(STRUCT_)TS_ROOT` macros
+  for (const structure of map.values()) {
+    if (structure.getTsRoot()) visitStructure(structure);
   }
 
   return included;
@@ -154,29 +144,34 @@ export function generateDefinitions(root: StructureGroups): ts.Node[] {
   const included = collectIncluded(map);
   const classes = collectClasses(map);
 
+  // Record a list of ignored structures to make sure we haven't missed any
+  // `JSG_TS_ROOT()` macros
+  const ignored: string[] = [];
   // Can't use `flatMap()` here as `getGroups()` returns a `capnp.List`
   const nodes = root.getGroups().map((group) => {
     const structureNodes: ts.Node[] = [];
     group.getStructures().forEach((structure) => {
       const name = structure.getFullyQualifiedName();
+
       if (included.has(name)) {
         const asClass = classes.has(name);
         structureNodes.push(createStructureNode(structure, asClass));
+      } else {
+        ignored.push(name);
       }
     });
 
-    // Add group label to first in group
-    if (structureNodes.length > 0) {
-      ts.addSyntheticLeadingComment(
-        structureNodes[0],
-        ts.SyntaxKind.SingleLineCommentTrivia,
-        ` ${group.getName()}`,
-        /* hasTrailingNewLine */ true
-      );
-    }
-
     return structureNodes;
   });
+
+  // Log ignored types to make sure we didn't forget anything
+  if (ignored.length > 0) {
+    console.warn(
+      "WARNING: The following types were not referenced from any `JSG_TS_ROOT()`ed type and have been omitted from the output. " +
+        "This could be because of disabled compatibility flags."
+    );
+    for (const name of ignored) console.warn(`- ${name}`);
+  }
 
   return nodes.flat();
 }

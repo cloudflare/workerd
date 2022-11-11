@@ -79,11 +79,13 @@ function isIterable(array: ArrayType) {
 
 // Returns `true` iff `typeNode` is `never`
 export function isUnsatisfiable(typeNode: ts.TypeNode) {
-  return (
+  const isNeverTypeReference =
     ts.isTypeReferenceNode(typeNode) &&
     ts.isIdentifier(typeNode.typeName) &&
-    typeNode.typeName.escapedText === "never"
-  );
+    typeNode.typeName.text === "never";
+  const isNeverKeyword =
+    ts.isToken(typeNode) && typeNode.kind == ts.SyntaxKind.NeverKeyword;
+  return isNeverTypeReference || isNeverKeyword;
 }
 
 // Strings to replace in fully-qualified structure names with nothing
@@ -270,7 +272,14 @@ export function createTypeNode(type: Type, allowCoercion = false): ts.TypeNode {
             f.createTypeReferenceNode("ArrayBufferView"),
           ]);
         case BuiltinType_Type.KJ_DATE:
-          return f.createTypeReferenceNode("Date");
+          if (allowCoercion) {
+            return f.createUnionTypeNode([
+              f.createTypeReferenceNode("number"),
+              f.createTypeReferenceNode("Date"),
+            ]);
+          } else {
+            return f.createTypeReferenceNode("Date");
+          }
         case BuiltinType_Type.V8FUNCTION:
           return f.createTypeReferenceNode("Function");
         default:
