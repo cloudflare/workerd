@@ -28,7 +28,7 @@ js_run_binary(
     srcs = [
         "//src/workerd/tools:api_encoder",
     ],
-    outs = ["api.d.ts"],  # TODO(soon) switch to out_dirs when generating multiple files
+    outs = ["api.d.ts", "api.ts"],  # TODO(soon) switch to out_dirs when generating multiple files
     args = [
         "src/workerd/tools/api.capnp.bin",
         "--output",

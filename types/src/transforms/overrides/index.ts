@@ -2,6 +2,12 @@ import assert from "assert";
 import ts from "typescript";
 import { isUnsatisfiable } from "../../generator/type";
 import { printNode } from "../../print";
+import {
+  ensureExportDeclareModifiers,
+  ensureExportModifier,
+  ensureStatementModifiers,
+  hasModifier,
+} from "../helpers";
 import { maybeGetDefines, maybeGetOverride } from "./compiler";
 
 export { compileOverridesDefines } from "./compiler";
@@ -426,128 +432,4 @@ function maybeGetStatementName(node: ts.Statement): ts.Identifier | undefined {
   ) {
     return node.name;
   }
-}
-
-// Checks whether the modifiers array contains a modifier of the specified kind
-function hasModifier(modifiers: ts.ModifiersArray, kind: ts.Modifier["kind"]) {
-  let hasModifier = false;
-  modifiers?.forEach((modifier) => {
-    hasModifier ||= modifier.kind === kind;
-  });
-  return hasModifier;
-}
-
-// Ensure a modifiers array has the specified modifier, inserting it at the
-// start if it doesn't.
-function ensureModifier(
-  ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined,
-  ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
-): ts.ModifiersArray {
-  // If modifiers already contains the required modifier, return it as is...
-  if (modifiers !== undefined && hasModifier(modifiers, ensure)) {
-    return modifiers;
-  }
-  // ...otherwise, add the modifier to the start of the array
-  return ctx.factory.createNodeArray(
-    [ctx.factory.createToken(ensure), ...(modifiers ?? [])],
-    modifiers?.hasTrailingComma
-  );
-}
-
-// Ensure a modifiers array includes the `export` modifier
-function ensureExportModifier(
-  ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined
-): ts.ModifiersArray {
-  return ensureModifier(ctx, modifiers, ts.SyntaxKind.ExportKeyword);
-}
-
-// Ensures a modifiers array includes the `export declare` modifiers
-function ensureExportDeclareModifiers(
-  ctx: ts.TransformationContext,
-  modifiers: ts.ModifiersArray | undefined
-): ts.ModifiersArray {
-  // Call in reverse, so we end up with `export declare` not `declare export`
-  modifiers = ensureModifier(ctx, modifiers, ts.SyntaxKind.DeclareKeyword);
-  return ensureModifier(ctx, modifiers, ts.SyntaxKind.ExportKeyword);
-}
-
-// Make sure replacement node is `export`ed, with the `declare` modifier if it's
-// a class, variable or function declaration.
-function ensureStatementModifiers(
-  ctx: ts.TransformationContext,
-  node: ts.Node
-): ts.Node {
-  if (ts.isClassDeclaration(node)) {
-    return ctx.factory.updateClassDeclaration(
-      node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers),
-      node.name,
-      node.typeParameters,
-      node.heritageClauses,
-      node.members
-    );
-  }
-  if (ts.isInterfaceDeclaration(node)) {
-    return ctx.factory.updateInterfaceDeclaration(
-      node,
-      node.decorators,
-      ensureExportModifier(ctx, node.modifiers),
-      node.name,
-      node.typeParameters,
-      node.heritageClauses,
-      node.members
-    );
-  }
-  if (ts.isEnumDeclaration(node)) {
-    return ctx.factory.updateEnumDeclaration(
-      node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers),
-      node.name,
-      node.members
-    );
-  }
-  if (ts.isTypeAliasDeclaration(node)) {
-    return ctx.factory.updateTypeAliasDeclaration(
-      node,
-      node.decorators,
-      ensureExportModifier(ctx, node.modifiers),
-      node.name,
-      node.typeParameters,
-      node.type
-    );
-  }
-  if (ts.isVariableStatement(node)) {
-    return ctx.factory.updateVariableStatement(
-      node,
-      ensureExportDeclareModifiers(ctx, node.modifiers),
-      node.declarationList
-    );
-  }
-  if (ts.isFunctionDeclaration(node)) {
-    return ctx.factory.updateFunctionDeclaration(
-      node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers),
-      node.asteriskToken,
-      node.name,
-      node.typeParameters,
-      node.parameters,
-      node.type,
-      node.body
-    );
-  }
-  if (ts.isModuleDeclaration(node)) {
-    return ctx.factory.updateModuleDeclaration(
-      node,
-      node.decorators,
-      ensureExportDeclareModifiers(ctx, node.modifiers),
-      node.name,
-      node.body
-    );
-  }
-  assert.fail(`Expected statement, got "${printNode(node)}"`);
 }
