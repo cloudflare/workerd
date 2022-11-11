@@ -119,23 +119,24 @@ test("main: generates types", async () => {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-export declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
+declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
     constructor();
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
 }
-export type WorkerGlobalScopeEventMap = {
+declare type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
 };
-export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
+declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {
 }
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+/** This ServiceWorker API interface represents the global execution context of a service worker. */
+declare interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     things(param0: boolean): IterableIterator<string>;
     get prop(): Promise<number>;
 }
-export declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
-export declare function things(param0: boolean): IterableIterator<string>;
-export declare const prop: Promise<number>;
+declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
+declare function things(param0: boolean): IterableIterator<string>;
+declare const prop: Promise<number>;
 `
   );
 
@@ -146,7 +147,7 @@ export declare const prop: Promise<number>;
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
-export declare class EventTarget<
+declare class EventTarget<
   EventMap extends Record<string, Event> = Record<string, Event>
 > {
   constructor();
@@ -155,20 +156,22 @@ export declare class EventTarget<
     handler: (event: EventMap[Type]) => void
   ): void;
 }
-export type WorkerGlobalScopeEventMap = {
+declare type WorkerGlobalScopeEventMap = {
   fetch: Event;
   scheduled: Event;
 };
-export declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {}
-export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
+declare abstract class WorkerGlobalScope extends EventTarget<WorkerGlobalScopeEventMap> {}
+/** This ServiceWorker API interface represents the global execution context of a service worker. */
+declare interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   things(param0: boolean): IterableIterator<string>;
   get prop(): Promise<number>;
 }
-export declare function addEventListener<
-  Type extends keyof WorkerGlobalScopeEventMap
->(type: Type, handler: (event: WorkerGlobalScopeEventMap[Type]) => void): void;
-export declare function things(param0: boolean): IterableIterator<string>;
-export declare const prop: Promise<number>;
+declare function addEventListener<Type extends keyof WorkerGlobalScopeEventMap>(
+  type: Type,
+  handler: (event: WorkerGlobalScopeEventMap[Type]) => void
+): void;
+declare function things(param0: boolean): IterableIterator<string>;
+declare const prop: Promise<number>;
 `
   );
 });
