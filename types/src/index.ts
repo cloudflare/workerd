@@ -11,18 +11,75 @@ import ts from "typescript";
 import { generateDefinitions } from "./generator";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
+import { ParsedTypeDefinition, collateStandards } from "./standards";
 import {
   compileOverridesDefines,
+  createCommentsTransformer,
   createGlobalScopeTransformer,
   createIteratorTransformer,
   createOverrideDefineTransformer,
 } from "./transforms";
-
+import { createAmbientTransformer } from "./transforms/ambient";
+import { createImportableTransformer } from "./transforms/importable";
 const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 `;
 
-function printDefinitions(root: StructureGroups): string {
+function checkDiagnostics(sources: Map<string, string>) {
+  const host = ts.createCompilerHost(
+    { noEmit: true },
+    /* setParentNodes */ true
+  );
+
+  host.getDefaultLibLocation = () =>
+    path.dirname(require.resolve("typescript"));
+  const program = createMemoryProgram(sources, host, {
+    lib: ["lib.esnext.d.ts"],
+  });
+  const emitResult = program.emit();
+
+  const allDiagnostics = ts
+    .getPreEmitDiagnostics(program)
+    .concat(emitResult.diagnostics);
+
+  allDiagnostics.forEach((diagnostic) => {
+    if (diagnostic.file) {
+      const { line, character } = ts.getLineAndCharacterOfPosition(
+        diagnostic.file,
+        diagnostic.start!
+      );
+      const message = ts.flattenDiagnosticMessageText(
+        diagnostic.messageText,
+        "\n"
+      );
+      console.log(`(${line + 1},${character + 1}): ${message}`);
+    } else {
+      console.log(
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+      );
+    }
+  });
+}
+function transform(
+  sources: Map<string, string>,
+  sourcePath: string,
+  transforms: (
+    program: ts.Program,
+    checker: ts.TypeChecker
+  ) => ts.TransformerFactory<ts.SourceFile>[]
+) {
+  const program = createMemoryProgram(sources);
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(sourcePath);
+  assert(sourceFile !== undefined);
+  const result = ts.transform(sourceFile, transforms(program, checker));
+  assert.strictEqual(result.transformed.length, 1);
+  return printer.printFile(result.transformed[0]);
+}
+function printDefinitions(
+  root: StructureGroups,
+  standards: ParsedTypeDefinition
+): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
   const nodes = generateDefinitions(root);
 
@@ -33,45 +90,46 @@ function printDefinitions(root: StructureGroups): string {
   let source = printNodeList(nodes);
   sources.set(sourcePath, source);
 
-  // Build TypeScript program from source files and overrides. Importantly,
-  // these are in the same program, so we can use nodes from one in the other.
-  let program = createMemoryProgram(sources);
-  let checker = program.getTypeChecker();
-  let sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
-
   // Run post-processing transforms on program
-  let result = ts.transform(sourceFile, [
+  source = transform(sources, sourcePath, (program, checker) => [
     // Run iterator transformer before overrides so iterator-like interfaces are
     // still removed if they're replaced in overrides
     createIteratorTransformer(checker),
     createOverrideDefineTransformer(program, replacements),
   ]);
-  assert.strictEqual(result.transformed.length, 1);
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
   // rebuild the program to re-run type checking.
   // TODO: is there a way to re-run the type checker on an existing program?
-  source = printer.printFile(result.transformed[0]);
-  program = createMemoryProgram(new Map([[sourcePath, source]]));
-  checker = program.getTypeChecker();
-  sourceFile = program.getSourceFile(sourcePath);
-  assert(sourceFile !== undefined);
+  source = transform(
+    new Map([[sourcePath, source]]),
+    sourcePath,
+    (program, checker) => [
+      // Run global scope transformer after overrides so members added in
+      // overrides are extracted
+      createGlobalScopeTransformer(checker),
+      createCommentsTransformer(standards),
+      createAmbientTransformer(),
+      // TODO(polish): maybe flatten union types?
+    ]
+  );
 
-  result = ts.transform(sourceFile, [
-    // Run global scope transformer after overrides so members added in
-    // overrides are extracted
-    createGlobalScopeTransformer(checker),
-    // TODO(polish): maybe flatten union types?
-  ]);
-  assert.strictEqual(result.transformed.length, 1);
+  checkDiagnostics(new Map([[sourcePath, source]]));
 
-  // TODO(polish): maybe log diagnostics with `ts.getPreEmitDiagnostics(program, sourceFile)`?
-  //  (see https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API#a-minimal-compiler)
+  const importable = transform(
+    new Map([[sourcePath, source]]),
+    sourcePath,
+    () => [createImportableTransformer()]
+  );
+
+  checkDiagnostics(new Map([[sourcePath, importable]]));
 
   // Print program to string
-  return definitionsHeader + printer.printFile(result.transformed[0]);
+  return {
+    ambient: definitionsHeader + source,
+    importable: definitionsHeader + importable,
+  };
 }
 
 // Generates TypeScript types from a binary Cap’n Proto file containing encoded
@@ -109,17 +167,31 @@ export async function main(args?: string[]) {
   const message = new Message(buffer, /* packed */ false);
   const root = message.getRoot(StructureGroups);
 
-  let definitions = printDefinitions(root);
+  const standards = await collateStandards(
+    path.join(
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.d.ts"
+    ),
+    path.join(
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.iterable.d.ts"
+    )
+  );
+
+  let { ambient, importable } = printDefinitions(root, standards);
+
   if (options.format) {
-    definitions = prettier.format(definitions, { parser: "typescript" });
+    ambient = prettier.format(ambient, { parser: "typescript" });
+    importable = prettier.format(importable, { parser: "typescript" });
   }
   if (options.output !== undefined) {
+    console.log(options.output);
     const output = path.resolve(options.output);
     await mkdir(path.dirname(output), { recursive: true });
-    await writeFile(output, definitions);
-  } else {
-    // Write to stdout without extra newline
-    process.stdout.write(definitions);
+    await writeFile(output, ambient);
+
+    const importableFile = path.join(path.dirname(output), "api.ts");
+    await writeFile(importableFile, importable);
   }
 }
 
