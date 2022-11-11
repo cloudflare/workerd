@@ -4,7 +4,9 @@
 
 @0xd25a546ad8e45f46;
 
-$import "/capnp/c++.capnp".namespace("workerd::rpc");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::rpc");
+$Cxx.allowCancellation;
 
 struct JaegerSpan @0x946ed67bd99d1210 {
   traceIdHigh @0 :UInt64;

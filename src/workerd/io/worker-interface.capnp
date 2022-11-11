@@ -6,6 +6,8 @@
 
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::rpc");
+# We do not use `$Cxx.allowCancellation` because runAlarm() currently depends on blocking
+# cancellation.
 
 using import "/capnp/compat/http-over-capnp.capnp".HttpMethod;
 using import "/capnp/compat/http-over-capnp.capnp".HttpService;
@@ -97,16 +99,17 @@ struct AlarmRun @0xfa8ea4e97e23b03d {
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
-  getHttpService @0 () -> (http :HttpService);
+  getHttpService @0 () -> (http :HttpService) $Cxx.allowCancellation;
   # Gets the HTTP interface to this worker (to trigger FetchEvents).
 
-  sendTraces @1 (traces :List(Trace));
+  sendTraces @1 (traces :List(Trace)) $Cxx.allowCancellation;
   # Deliver a trace event to a trace worker. This always completes immediately; the trace handler
   # runs as a "waitUntil" task.
 
-  prewarm @2 (url :Text);
+  prewarm @2 (url :Text) $Cxx.allowCancellation;
 
-  runScheduled @3 (scheduledTime :Int64, cron :Text) -> (result :ScheduledRun);
+  runScheduled @3 (scheduledTime :Int64, cron :Text) -> (result :ScheduledRun)
+      $Cxx.allowCancellation;
   # Runs a scheduled worker. Returns a ScheduledRun, detailing information about the run such as
   # the outcome and whether the run should be retried. This does not complete immediately.
 
@@ -116,6 +119,10 @@ interface EventDispatcher @0xf20697475ec1752d {
   # scheduledTime is a unix timestamp in milliseconds for when the alarm should be run
   # Returns an AlarmRun, detailing information about the run such as
   # the outcome and whether the run should be retried. This does not complete immediately.
+  #
+  # TODO(cleanup): runAlarm()'s implementation currently relies on *not* allowing cancellation.
+  #   It would be cleaner to handle that inside the implementation so we could mark the entire
+  #   interface (and file) with allowCancellation.
 
   obsolete5 @5();
   obsolete6 @6();

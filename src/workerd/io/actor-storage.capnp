@@ -4,7 +4,9 @@
 
 @0xb200a391b94343f1;
 
-$import "/capnp/c++.capnp".namespace("workerd::rpc");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::rpc");
+$Cxx.allowCancellation;
 
 interface ActorStorage @0xd7759d7fc87c08e4 {
   struct KeyValue {

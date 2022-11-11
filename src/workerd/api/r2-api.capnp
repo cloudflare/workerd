@@ -8,6 +8,7 @@ using Cxx = import "/capnp/c++.capnp";
 using Json = import "/capnp/compat/json.capnp";
 
 $Cxx.namespace("workerd::api::public_beta");
+$Cxx.allowCancellation;
 
 const versionPublicBeta :UInt32 = 1;
 
