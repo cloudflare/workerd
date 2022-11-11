@@ -83,7 +83,7 @@ fn get_parameter_names(clang_ast: ClangNode) -> Vec<Parameter> {
         .collect()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct Parameter {
     fully_qualified_parent_name: Vec<String>,
     function_like: String,
@@ -127,8 +127,8 @@ fn traverse_function_like(
     node.inner
         .into_iter()
         .filter_map(|child| {
-            if let Clang::ParmVarDecl { name } = child.kind {
-                Some(name.unwrap_or_else(|| String::from("")))
+            if let Clang::ParmVarDecl { name: Some(name) } = child.kind {
+                Some(name)
             } else {
                 None
             }
