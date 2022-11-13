@@ -158,6 +158,7 @@ public:
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
 
     JSG_STRUCT(httpMetadata, customMetadata);
+    JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
   };
 
   class HeadResult: public jsg::Object {

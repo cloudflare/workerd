@@ -17,6 +17,7 @@ class R2MultipartUpload: public jsg::Object {
       kj::String etag;
 
       JSG_STRUCT(partNumber, etag);
+      JSG_STRUCT_TS_OVERRIDE(R2UploadedPart);
     };
 
     R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket):
