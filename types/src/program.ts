@@ -1,4 +1,3 @@
-import { assert } from "console";
 import path from "path";
 import ts from "typescript";
 

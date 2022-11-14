@@ -13,13 +13,42 @@ wd_cc_binary(
     ],
 )
 
-run_binary(
+compat_dates = [
+    # Oldest compatibility date, with no flags enabled
+    ("2021-01-01", "oldest"),
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#formdata-parsing-supports-file
+    ("2021-11-03", "2021-11-03"),
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#settersgetters-on-api-object-prototypes
+    ("2022-01-31", "2022-01-31"),
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
+    ("2022-03-21", "2022-03-21"),
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
+    ("2022-08-04", "2022-08-04"),
+    # Latest compatibility date
+    ("2030-01-01", "experimental"),
+]
+
+filegroup(
     name = "api_encoder",
-    outs = ["api.capnp.bin"],
-    args = [
-        "--output",
-        "$(location api.capnp.bin)",
+    srcs = [
+        "//src/workerd/tools:api_encoder_" + label
+        for (date, label) in compat_dates
     ],
-    tool = "api_encoder_bin",
     visibility = ["//visibility:public"],
 )
+
+[
+    run_binary(
+        name = "api_encoder_" + label,
+        outs = [label + ".api.capnp.bin"],
+        args = [
+            "--output",
+            "$(location " + label + ".api.capnp.bin)",
+            "--compatibility-date",
+            date,
+        ],
+        tool = "api_encoder_bin",
+        visibility = ["//visibility:public"],
+    )
+    for (date, label) in compat_dates
+]

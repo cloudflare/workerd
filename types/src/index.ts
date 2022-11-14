@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import assert from "assert";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "fs/promises";
 import path from "path";
-import { arrayBuffer } from "stream/consumers";
 import util from "util";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
@@ -141,13 +140,14 @@ function printDefinitions(
 // Usage: types [options] [input]
 //
 // Options:
-//  -o, --output <file>
-//    File path to write TypeScript to, defaults to stdout if omitted
+//  -o, --output <dir>
+//    Directory to write types to, in folders based on compat date
 //  -f, --format
 //    Formats generated types with Prettier
 //
 // Input:
-//    Binary Cap’n Proto file path, defaults to reading from stdin if omitted
+//    Directory containing binary Cap’n Proto file paths, in the format <label>.api.capnp.bin
+//      <label> should relate to the compatibility date
 export async function main(args?: string[]) {
   const { values: options, positionals } = util.parseArgs({
     options: {
@@ -158,15 +158,12 @@ export async function main(args?: string[]) {
     allowPositionals: true,
     args,
   });
-  const maybeInputPath = positionals[0];
-
-  const buffer =
-    maybeInputPath === undefined
-      ? await arrayBuffer(process.stdin)
-      : await readFile(maybeInputPath);
-  const message = new Message(buffer, /* packed */ false);
-  const root = message.getRoot(StructureGroups);
-
+  const inputDir = positionals[0];
+  assert(
+    inputDir,
+    "This script requires a positional argument pointing to a directory containing binary Cap’n Proto file paths, in the format <label>.api.capnp.bin"
+  );
+  const files = await readdir(inputDir);
   const standards = await collateStandards(
     path.join(
       path.dirname(require.resolve("typescript")),
@@ -177,21 +174,23 @@ export async function main(args?: string[]) {
       "lib.webworker.iterable.d.ts"
     )
   );
-
-  let { ambient, importable } = printDefinitions(root, standards);
-
-  if (options.format) {
-    ambient = prettier.format(ambient, { parser: "typescript" });
-    importable = prettier.format(importable, { parser: "typescript" });
-  }
-  if (options.output !== undefined) {
-    console.log(options.output);
-    const output = path.resolve(options.output);
-    await mkdir(path.dirname(output), { recursive: true });
-    await writeFile(output, ambient);
-
-    const importableFile = path.join(path.dirname(output), "api.ts");
-    await writeFile(importableFile, importable);
+  for (const file of files) {
+    const buffer = await readFile(path.join(inputDir, file));
+    const message = new Message(buffer, /* packed */ false);
+    const root = message.getRoot(StructureGroups);
+    let { ambient, importable } = printDefinitions(root, standards);
+    if (options.format) {
+      ambient = prettier.format(ambient, { parser: "typescript" });
+      importable = prettier.format(importable, { parser: "typescript" });
+    }
+    if (options.output !== undefined) {
+      const output = path.resolve(options.output);
+      const [date] = file.split(".api.capnp.bin");
+      await mkdir(path.join(output, date), { recursive: true });
+      await writeFile(path.join(output, date, "api.d.ts"), ambient);
+      const importableFile = path.join(output, date, "api.ts");
+      await writeFile(importableFile, importable);
+    }
   }
 }
 
