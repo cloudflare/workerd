@@ -52,6 +52,7 @@ function checkDiagnostics(sources: Map<string, string>) {
     path.dirname(require.resolve("typescript"));
   const program = createMemoryProgram(sources, host, {
     lib: ["lib.esnext.d.ts"],
+    types: [], // Make sure not to include @types/node from dependencies
   });
   const emitResult = program.emit();
 
@@ -69,7 +70,9 @@ function checkDiagnostics(sources: Map<string, string>) {
         diagnostic.messageText,
         "\n"
       );
-      console.log(`(${line + 1},${character + 1}): ${message}`);
+      console.log(
+        `${diagnostic.file.fileName}:${line + 1}:${character + 1} : ${message}`
+      );
     } else {
       console.log(
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")

@@ -29,6 +29,7 @@ test("main: generates types", async () => {
     }
     method.initReturnType().setVoidt();
   }
+  eventTarget.setTsDefine("interface Event {}");
   eventTarget.setTsOverride(`<EventMap extends Record<string, Event> = Record<string, Event>> {
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
   }`);
@@ -123,6 +124,9 @@ test("main: generates types", async () => {
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
+/** An event which takes place in the DOM. */
+declare interface Event {
+}
 declare class EventTarget<EventMap extends Record<string, Event> = Record<string, Event>> {
     constructor();
     addEventListener<Type extends keyof EventMap>(type: Type, handler: (event: EventMap[Type]) => void): void;
@@ -151,6 +155,8 @@ declare const prop: Promise<number>;
     output,
     `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
+/** An event which takes place in the DOM. */
+declare interface Event {}
 declare class EventTarget<
   EventMap extends Record<string, Event> = Record<string, Event>
 > {
