@@ -25,7 +25,7 @@ compat_dates = [
     # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
     ("2022-08-04", "2022-08-04"),
     # Latest compatibility date
-    ("2024-01-01", "experimental"),
+    ("2030-01-01", "experimental"),
 ]
 
 filegroup(
