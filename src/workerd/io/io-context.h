@@ -707,6 +707,10 @@ public:
     return thread.getHttpOverCapnpFactory();
   }
 
+  capnp::ByteStreamFactory& getByteStreamFactory() {
+    return thread.getByteStreamFactory();
+  }
+
   const kj::HttpHeaderTable& getHeaderTable() { return thread.getHeaderTable(); }
   const ThreadContext::HeaderIdBundle& getHeaderIds() { return thread.getHeaderIds(); }
 

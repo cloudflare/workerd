@@ -85,6 +85,7 @@ public:
 
     virtual kj::Promise<Result> sendRpc(
         capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+        capnp::ByteStreamFactory& byteStreamFactory,
         kj::TaskSet& waitUntilTasks,
         rpc::EventDispatcher::Client dispatcher) = 0;
     // Forward the event over RPC.
@@ -155,6 +156,7 @@ class RpcWorkerInterface: public WorkerInterface {
 
 public:
   RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+                     capnp::ByteStreamFactory& byteStreamFactory,
                      kj::TaskSet& waitUntilTasks,
                      rpc::EventDispatcher::Client dispatcher);
 
@@ -169,6 +171,7 @@ public:
 
 private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
+  capnp::ByteStreamFactory& byteStreamFactory;
   kj::TaskSet& waitUntilTasks;
   rpc::EventDispatcher::Client dispatcher;
 };
