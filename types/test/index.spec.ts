@@ -108,12 +108,16 @@ test("main: generates types", async () => {
   // https://bazel.build/reference/test-encyclopedia#initial-conditions
   const tmpPath = process.env.TEST_TMPDIR;
   assert(tmpPath !== undefined);
-  const inputPath = path.join(tmpPath, "types.capnp.bin");
-  const outputPath = path.join(tmpPath, "types.d.ts");
+  const definitionsDir = path.join(tmpPath, "definitions");
+  await fs.mkdir(definitionsDir);
+  const inputDir = path.join(tmpPath, "capnp");
+  await fs.mkdir(inputDir);
+  const inputPath = path.join(inputDir, "types.api.capnp.bin");
+  const outputPath = path.join(definitionsDir, "types", "api.d.ts");
 
   await fs.writeFile(inputPath, new Uint8Array(message.toArrayBuffer()));
 
-  await main([inputPath, "--output", outputPath]);
+  await main([inputDir, "--output", definitionsDir]);
   let output = await fs.readFile(outputPath, "utf8");
   assert.strictEqual(
     output,
@@ -141,7 +145,7 @@ declare const prop: Promise<number>;
   );
 
   // Test formatted output
-  await main([inputPath, "-o", outputPath, "--format"]);
+  await main([inputDir, "-o", definitionsDir, "--format"]);
   output = await fs.readFile(outputPath, "utf8");
   assert.strictEqual(
     output,
