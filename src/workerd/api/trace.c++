@@ -292,7 +292,8 @@ auto TraceCustomEventImpl::run(
 }
 
 auto TraceCustomEventImpl::sendRpc(
-      capnp::HttpOverCapnpFactory& httpOverCapnpFactory, kj::TaskSet& waitUntilTasks,
+      capnp::HttpOverCapnpFactory& httpOverCapnpFactory, capnp::ByteStreamFactory& byteStreamFactory,
+      kj::TaskSet& waitUntilTasks,
       workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
   auto req = dispatcher.sendTracesRequest();
   auto out = req.initTraces(traces.size());
