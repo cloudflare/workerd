@@ -28,13 +28,13 @@ js_run_binary(
     srcs = [
         "//src/workerd/tools:api_encoder",
     ],
-    outs = ["api.d.ts", "api.ts"],  # TODO(soon) switch to out_dirs when generating multiple files
     args = [
-        "src/workerd/tools/api.capnp.bin",
+        "src/workerd/tools",
         "--output",
-        "types/api.d.ts",
+        "types/definitions",
         "--format",
     ],
+    out_dirs = ["definitions"],
     silent_on_success = False,  # Always enable logging for debugging
     tool = ":types_bin",
 )

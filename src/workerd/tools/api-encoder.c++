@@ -64,12 +64,21 @@ struct ApiEncoderMain {
     return kj::MainBuilder(context, "<unknown>", "API Encoder")
         .addOptionWithArg({"o", "output"}, KJ_BIND_METHOD(*this, setOutput),
                           "<file>", "Output to <file>")
+        .addOptionWithArg(
+            {"c", "compatibility-date"},
+            KJ_BIND_METHOD(*this, setCompatibilityDate), "<date>",
+            "Set the compatibility date of the generated types to <date>")
         .callAfterParsing(KJ_BIND_METHOD(*this, run))
         .build();
   }
 
   kj::MainBuilder::Validity setOutput(kj::StringPtr value) {
     output = value;
+    return true;
+  }
+
+  kj::MainBuilder::Validity setCompatibilityDate(kj::StringPtr value) {
+    compatibilityDate = value;
     return true;
   }
 
@@ -102,11 +111,13 @@ struct ApiEncoderMain {
 
   bool run() {
     // Create RTTI builder with all non-experimental compatibility flags enabled
-    // TODO(soon): generate different types for different flags, for now, we
-    //  set the compatibility date in the future such that all flags with a
-    //  $compatEnableDate are enabled.
     capnp::MallocMessageBuilder flagsMessage;
-    auto flags = compileFlags(flagsMessage, "2023-01-01", {});
+    CompatibilityFlags::Reader flags;
+    KJ_IF_MAYBE (date, compatibilityDate) {
+      flags = compileFlags(flagsMessage, *date, {});
+    } else {
+      flags = compileFlags(flagsMessage, "2021-01-01", {});
+    }
     auto builder = rtti::Builder(flags);
 
     // Build structure groups
@@ -153,8 +164,7 @@ struct ApiEncoderMain {
 
   template <typename... Types>
   void writeGroup(
-      capnp::List<rtti::StructureGroups::StructureGroup>::Builder
-          &groups,
+      capnp::List<rtti::StructureGroups::StructureGroup>::Builder &groups,
       rtti::Builder<CompatibilityFlags::Reader> &builder, kj::StringPtr name) {
     auto group = groups[groupsIndex++];
     group.setName(name);
@@ -169,6 +179,7 @@ struct ApiEncoderMain {
 private:
   kj::ProcessContext &context;
   kj::Maybe<kj::StringPtr> output;
+  kj::Maybe<kj::StringPtr> compatibilityDate;
 
   unsigned int groupsIndex = 0;
   unsigned int structureIndex = 0;
