@@ -27,9 +27,11 @@ js_run_binary(
     name = "types",
     srcs = [
         "//src/workerd/tools:api_encoder",
-    ],
+    ] + glob(["defines/**/*.ts"]),
     args = [
         "src/workerd/tools",
+        "--defines",
+        "types/defines",
         "--output",
         "types/definitions",
         "--format",

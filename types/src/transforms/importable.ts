@@ -13,6 +13,16 @@ export function createImportableTransformer(): ts.TransformerFactory<ts.SourceFi
 
 function createVisitor(ctx: ts.TransformationContext) {
   return (node: ts.Node) => {
+    // Remove `module` declarations (e.g. `declare module "assets:*" {...}`) as
+    // these can't be `export`ed, and don't really make sense in non-ambient
+    // declarations
+    if (
+      ts.isModuleDeclaration(node) &&
+      (node.flags & ts.NodeFlags.Namespace) === 0
+    ) {
+      return;
+    }
+
     return ensureStatementModifiers(ctx, node);
   };
 }
