@@ -49,7 +49,7 @@ public:
     // have a maximum of 20 elements.
 
     JSG_STRUCT(indexes, doubles, blobs);
-    JSG_STRUCT_TS_OVERRIDE(AnalyticsEngineDataPoint)
+    JSG_STRUCT_TS_OVERRIDE(AnalyticsEngineDataPoint);
   };
 
   void writeDataPoint(jsg::Lock& js,
