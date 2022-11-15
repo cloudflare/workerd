@@ -25,10 +25,10 @@ export function getParameterName(
 
   const name = paramNameData.get(path)?.name;
   // Some parameter names are reserved TypeScript words, which break later down the pipeline
-  if (name == "function" || name == "number" || name == "string") {
+  if (name === "function" || name === "number" || name === "string") {
     return `$${name}`;
   }
-  if (name && name != "" && name != "undefined") {
+  if (name && name !== "undefined") {
     return name;
   }
   return `param${parameterIndex}`;
@@ -42,9 +42,9 @@ export function parseApiAstDump(astDumpPath: string) {
           (n: string) => !!additionalClassNames[n]
         );
         const renameOptions = additionalClassNames[shouldRename] ?? [];
-        const methodName = p.function_like.endsWith("_")
-          ? p.function_like.slice(0, -1)
-          : p.function_like;
+        const methodName = p.function_like_name.endsWith("_")
+          ? p.function_like_name.slice(0, -1)
+          : p.function_like_name;
         return [
           ...renameOptions.map((r) => ({
             fullyQualifiedParentName: p.fully_qualified_parent_name

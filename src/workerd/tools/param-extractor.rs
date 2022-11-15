@@ -33,14 +33,14 @@ impl Clang {
     }
 
     fn name(&self) -> Option<&str> {
-        match *self {
-            Clang::NamespaceDecl { ref name } => name.as_ref().map(|s| s.as_ref()),
-            Clang::FunctionDecl { ref name } => name.as_ref().map(|s| s.as_ref()),
-            Clang::CXXMethodDecl { ref name } => name.as_ref().map(|s| s.as_ref()),
-            Clang::CXXRecordDecl { ref name } => name.as_ref().map(|s| s.as_ref()),
+        match self {
+            Clang::NamespaceDecl { name }
+            | Clang::FunctionDecl { name }
+            | Clang::CXXMethodDecl { name }
+            | Clang::CXXRecordDecl { name }
+            | Clang::ParmVarDecl { name }
+            | Clang::Other { name } => name.as_ref().map(AsRef::as_ref),
             Clang::CXXConstructorDecl => Some("constructor"),
-            Clang::ParmVarDecl { ref name } => name.as_ref().map(|s| s.as_ref()),
-            Clang::Other { ref name } => name.as_ref().map(|s| s.as_ref()),
         }
     }
 }
@@ -50,18 +50,16 @@ type ClangNode = clang_ast::Node<Clang>;
 fn main() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
 
-    let clang_ast = args.value_from_os_str::<_, _, anyhow::Error>("--input", |path| {
+    let clang_ast = args.value_from_os_str("--input", |path| {
         let file = File::open(path)?;
         let rdr = BufReader::new(file);
-        Ok(serde_json::from_reader(rdr)?)
+        serde_json::from_reader(rdr).map_err(anyhow::Error::from)
     })?;
 
     let value = get_parameter_names(clang_ast);
 
-    let mut writer = args.value_from_os_str::<_, _, anyhow::Error>("--output", |path| {
-        let file = File::create(path)?;
-        Ok(BufWriter::new(file))
-    })?;
+    let mut writer =
+        args.value_from_os_str("--output", |path| File::create(path).map(BufWriter::new))?;
 
     serde_json::to_writer(&mut writer, &value)?;
     writer.flush()?;
@@ -70,15 +68,14 @@ fn main() -> Result<()> {
 }
 
 fn get_parameter_names(clang_ast: ClangNode) -> Vec<Parameter> {
+    let workerd_namespace = Clang::NamespaceDecl {
+        name: Some("workerd".to_owned()),
+    };
+
     clang_ast
         .inner
         .into_iter()
-        .filter(|node| {
-            node.kind
-                == Clang::NamespaceDecl {
-                    name: Some("workerd".to_owned()),
-                }
-        })
+        .filter(|node| node.kind == workerd_namespace)
         .flat_map(|node| traverse_disambiguous(node, vec![]))
         .collect()
 }
@@ -86,7 +83,7 @@ fn get_parameter_names(clang_ast: ClangNode) -> Vec<Parameter> {
 #[derive(Serialize, Debug)]
 struct Parameter {
     fully_qualified_parent_name: Vec<String>,
-    function_like: String,
+    function_like_name: String,
     index: usize,
     name: String,
 }
@@ -136,7 +133,7 @@ fn traverse_function_like(
         .enumerate()
         .map(|(i, param_name)| Parameter {
             fully_qualified_parent_name: fully_qualified_parent_name.clone(),
-            function_like: function_like_name.clone(),
+            function_like_name: function_like_name.clone(),
             index: i,
             name: param_name,
         })
