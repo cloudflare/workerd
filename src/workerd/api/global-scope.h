@@ -149,12 +149,14 @@ struct ExportedHandler {
     type ExportedHandlerFetchHandler<Env = unknown> = (request: Request, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown> {
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown> {
     fetch?: ExportedHandlerFetchHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
     scheduled?: ExportedHandlerScheduledHandler<Env>;
     alarm: never;
+    queue?: ExportedHandlerQueueHandler<Env, QueueMessage>;
   });
   // Make `env` parameter generic
 
