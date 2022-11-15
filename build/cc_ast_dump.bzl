@@ -1,4 +1,8 @@
-"""Dump the AST of a given C++ source file"""
+"""
+Dump the AST of a given C++ source file
+
+Based loosely on https://github.com/bazelbuild/rules_cc/blob/main/examples/my_c_compile/my_c_compile.bzl
+"""
 
 load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain", "use_cpp_toolchain")
 load("@rules_cc//cc:action_names.bzl", "CPP_COMPILE_ACTION_NAME")
