@@ -149,7 +149,9 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 * On Linux:
   * libc++ (e.g. the package `libc++1` on Debian Bullseye)
 * On macOS:
-  * full XCode 13+ installation
+  * The XCode command line tools, which can be installed with `xcode-select --install`
+
+> Note: if you're running `workerd` in Ubuntu in the GitHub Actions CI environment, you'll need to use `runs-on: ubuntu-22.04` rather than `runs-on: ubuntu-latest`
 
 ### Local Worker development with `wrangler`
 
