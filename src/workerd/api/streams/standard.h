@@ -99,6 +99,7 @@ struct UnderlyingSink {
   jsg::Optional<jsg::Function<CloseAlgorithm>> close;
 
   JSG_STRUCT(type, start, write, abort, close);
+  // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
   JSG_STRUCT_TS_OVERRIDE(<W = any> {
     write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
     start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
