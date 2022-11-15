@@ -524,6 +524,7 @@ struct RequestInitializerDict {
   JSG_STRUCT_TS_OVERRIDE(RequestInit {
     headers?: HeadersInit;
     body?: BodyInit | null;
+    cf?: IncomingRequestCfProperties | RequestInitCfProperties;
   });
 };
 
@@ -624,6 +625,10 @@ public:
 
     JSG_METHOD(clone);
 
+    JSG_TS_DEFINE(type RequestInfo = Request | string | URL);
+    // All type aliases get inlined when exporting RTTI, but this type alias is included by
+    // the official TypeScript types, so users might be depending on it.
+
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(method, getMethod);
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
@@ -638,6 +643,13 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
+
+      JSG_TS_OVERRIDE({
+        constructor(input: RequestInfo, init?: RequestInit);
+        get cf(): IncomingRequestCfProperties | undefined;
+      });
+      // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
+      // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(method, getMethod);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
@@ -652,13 +664,14 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
-    }
 
-    JSG_TS_DEFINE(type RequestInfo = Request | string | URL);
-    // All type aliases get inlined when exporting RTTI, but this type alias is included by
-    // the official TypeScript types, so users might be depending on it.
-    JSG_TS_OVERRIDE({ constructor(input: RequestInfo, init?: RequestInit); });
-    // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining
+      JSG_TS_OVERRIDE({
+        constructor(input: RequestInfo, init?: RequestInit);
+        readonly cf?: IncomingRequestCfProperties;
+      });
+      // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
+      // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.
+    }
   }
 
 private:

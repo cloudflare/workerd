@@ -32,4 +32,5 @@ $ bazel test //types:all
 - `src/transforms`: post-processing TypeScript AST transforms
 - `src/index.ts`: main entrypoint
 - `src/{print,program}.ts`: helpers for printing nodes and creating programs
-- `workerd`: symlink required to resolve JSG RTTI Cap’n Proto files during development
+- `defines`: additional TypeScript-only definitions that don't correspond to
+  `workerd` runtime APIs, appended to the end of outputs

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "assert";
-import { appendFile, mkdir, readFile, readdir, writeFile } from "fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "fs/promises";
 import path from "path";
 import util from "util";
 import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
@@ -24,6 +24,24 @@ const definitionsHeader = `/* eslint-disable */
 // noinspection JSUnusedGlobalSymbols
 `;
 
+async function* walkDir(root: string): AsyncGenerator<string> {
+  const entries = await readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) yield* walkDir(entryPath);
+    else yield entryPath;
+  }
+}
+
+async function collateExtraDefinitions(definitionsDir?: string) {
+  if (definitionsDir === undefined) return "";
+  const files: Promise<string>[] = [];
+  for await (const filePath of walkDir(path.resolve(definitionsDir))) {
+    files.push(readFile(filePath, "utf8"));
+  }
+  return (await Promise.all(files)).join("\n");
+}
+
 function checkDiagnostics(sources: Map<string, string>) {
   const host = ts.createCompilerHost(
     { noEmit: true },
@@ -34,6 +52,7 @@ function checkDiagnostics(sources: Map<string, string>) {
     path.dirname(require.resolve("typescript"));
   const program = createMemoryProgram(sources, host, {
     lib: ["lib.esnext.d.ts"],
+    types: [], // Make sure not to include @types/node from dependencies
   });
   const emitResult = program.emit();
 
@@ -51,14 +70,19 @@ function checkDiagnostics(sources: Map<string, string>) {
         diagnostic.messageText,
         "\n"
       );
-      console.log(`(${line + 1},${character + 1}): ${message}`);
+      console.log(
+        `${diagnostic.file.fileName}:${line + 1}:${character + 1} : ${message}`
+      );
     } else {
       console.log(
         ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
       );
     }
   });
+
+  assert(allDiagnostics.length === 0, "TypeScript failed to compile!");
 }
+
 function transform(
   sources: Map<string, string>,
   sourcePath: string,
@@ -75,9 +99,11 @@ function transform(
   assert.strictEqual(result.transformed.length, 1);
   return printer.printFile(result.transformed[0]);
 }
+
 function printDefinitions(
   root: StructureGroups,
-  standards: ParsedTypeDefinition
+  standards: ParsedTypeDefinition,
+  extraDefinitions: string
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
   const nodes = generateDefinitions(root);
@@ -96,11 +122,12 @@ function printDefinitions(
     createIteratorTransformer(checker),
     createOverrideDefineTransformer(program, replacements),
   ]);
+  source += extraDefinitions;
 
   // We need the type checker to respect our updated definitions after applying
   // overrides (e.g. to find the correct nodes when traversing heritage), so
-  // rebuild the program to re-run type checking.
-  // TODO: is there a way to re-run the type checker on an existing program?
+  // rebuild the program to re-run type checking. We also want to include our
+  // additional definitions.
   source = transform(
     new Map([[sourcePath, source]]),
     sourcePath,
@@ -140,6 +167,9 @@ function printDefinitions(
 // Usage: types [options] [input]
 //
 // Options:
+//  -d, --defines <dir>
+//    Directory containing extra TypeScript definitions, not associated with C++
+//    files, to concatenate to the output
 //  -o, --output <dir>
 //    Directory to write types to, in folders based on compat date
 //  -f, --format
@@ -151,6 +181,7 @@ function printDefinitions(
 export async function main(args?: string[]) {
   const { values: options, positionals } = util.parseArgs({
     options: {
+      defines: { type: "string", short: "d" },
       output: { type: "string", short: "o" },
       format: { type: "boolean", short: "f" },
     },
@@ -163,6 +194,9 @@ export async function main(args?: string[]) {
     inputDir,
     "This script requires a positional argument pointing to a directory containing binary Cap’n Proto file paths, in the format <label>.api.capnp.bin"
   );
+
+  const extra = await collateExtraDefinitions(options.defines);
+
   const files = await readdir(inputDir);
   const standards = await collateStandards(
     path.join(
@@ -178,7 +212,7 @@ export async function main(args?: string[]) {
     const buffer = await readFile(path.join(inputDir, file));
     const message = new Message(buffer, /* packed */ false);
     const root = message.getRoot(StructureGroups);
-    let { ambient, importable } = printDefinitions(root, standards);
+    let { ambient, importable } = printDefinitions(root, standards, extra);
     if (options.format) {
       ambient = prettier.format(ambient, { parser: "typescript" });
       importable = prettier.format(importable, { parser: "typescript" });
