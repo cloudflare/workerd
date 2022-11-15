@@ -19,9 +19,7 @@ import https from 'https';
 import child_process from 'child_process';
 
 declare const LATEST_COMPATIBILITY_DATE: string;
-
-// Make something semver-ish
-const WORKERD_VERSION = `1.${LATEST_COMPATIBILITY_DATE.split('-').join('')}.0`;
+declare const WORKERD_VERSION: string;
 
 const toPath = path.join(__dirname, 'bin', 'workerd');
 let isToPathJS = true;
@@ -45,7 +43,7 @@ function validateBinaryVersion(...command: string[]): void {
     })
     .toString()
     .trim();
-  if (stdout !== LATEST_COMPATIBILITY_DATE) {
+  if (stdout !== `workerd ${LATEST_COMPATIBILITY_DATE}`) {
     throw new Error(
       `Expected ${JSON.stringify(
         LATEST_COMPATIBILITY_DATE

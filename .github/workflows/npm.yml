@@ -1,0 +1,123 @@
+name: Publish to NPM
+on:
+# Since we still need to manually upload binaries, use manual run
+# Ideally this would trigger off `release`
+  workflow_dispatch:
+    inputs:
+      patch:
+        description: 'Patch Version'
+        required: true
+        default: '0'
+
+jobs:
+  version:
+    outputs:
+      version: ${{ steps.echo.outputs.version }}
+      date: ${{ steps.echo.outputs.date }}
+      release_version: ${{ steps.echo.outputs.release_version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/bazel-disk-cache
+          key: capnp-cache
+      - name: build capnp
+        run: |
+          bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
+      - id: echo
+        run: |
+          echo "date=$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '"')" >> $GITHUB_OUTPUT;
+          echo "version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
+  publish-arch-specific:
+    # if: ${{ github.repository_owner == 'cloudflare' }}
+    name: Publish arch-specific packages to npm
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [darwin-64, linux-64, linux-arm64, darwin-arm64]
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Use Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Modify package.json version
+        run: node npm/scripts/bump-version.mjs npm/workerd-${{ matrix.arch }}/package.json
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - uses: robinraju/release-downloader@v1.5
+        with:
+          tag: v${{ needs.version.outputs.release_version }}
+          fileName: workerd-${{ matrix.arch }}
+          tarBall: false
+          zipBall: false
+          out-file-path: "release-downloads"
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: chmod +x $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}
+      - run: mkdir npm/workerd-${{ matrix.arch }}/bin
+      - run: cp $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }} npm/workerd-${{ matrix.arch }}/bin/workerd
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
+      - run: cat npm/workerd-${{ matrix.arch }}/.npmrc
+      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
+
+  publish-wrapper:
+    # if: ${{ github.repository_owner == 'cloudflare' }}
+    name: Publish `workerd` to NPM
+    needs: [version, publish-arch-specific]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Use Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Modify package.json version
+        run: node npm/scripts/bump-version.mjs npm/workerd/package.json
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: mkdir -p npm/workerd/lib
+      - run: mkdir -p npm/workerd/bin
+      - name: Build node-install
+        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build node-shim
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build node-path
+        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - name: Build package
+        run: node npm/scripts/build-shim-package.mjs
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
+      - run: cd npm/workerd && npm publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
