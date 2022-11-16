@@ -1807,6 +1807,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImpl(
   }
 }
 
+jsg::Ref<Socket> Fetcher::connect(
+    jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options) {
+  return connectImpl(js, JSG_THIS, kj::mv(address));
+}
+
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
     jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit,

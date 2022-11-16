@@ -15,6 +15,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/r2-admin.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/util/thread-scopes.h>
 #include <openssl/sha.h>
@@ -50,6 +51,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_FORMDATA_ISOLATE_TYPES,
   EW_HTML_REWRITER_ISOLATE_TYPES,
   EW_HTTP_ISOLATE_TYPES,
+  EW_SOCKETS_ISOLATE_TYPES,
   EW_KV_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ISOLATE_TYPES,

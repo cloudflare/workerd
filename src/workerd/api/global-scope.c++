@@ -570,4 +570,9 @@ jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
   return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit), featureFlags);
 }
 
+jsg::Ref<Socket> ServiceWorkerGlobalScope::connect(
+    jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options) {
+  return connectImpl(js, nullptr, kj::mv(address));
+}
+
 }  // namespace workerd::api

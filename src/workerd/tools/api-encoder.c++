@@ -40,7 +40,8 @@
   F("url", EW_URL_ISOLATE_TYPES)                                               \
   F("url-standard", EW_URL_STANDARD_ISOLATE_TYPES)                             \
   F("url-pattern", EW_URLPATTERN_ISOLATE_TYPES)                                \
-  F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)
+  F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                   \
+  F("sockets", EW_SOCKETS_ISOLATE_TYPES)
 
 namespace workerd::api {
 namespace {
