@@ -1298,15 +1298,14 @@ public:
     // we need to drop down to the C++ interface and generate the kj::Exception
     // ourselves. If any additional JSG_RESOURCE_TYPE error-like things are
     // introduced, they'll need to be handled explicitly here also.
-    auto isolate = context->GetIsolate();
-    auto& wrapper = TypeWrapper::from(isolate);
+    auto& js = Lock::from(context->GetIsolate());
+    auto& wrapper = TypeWrapper::from(js.v8Isolate);
     KJ_IF_MAYBE(domException, wrapper.tryUnwrap(context, handle,
                                                 (DOMException*)nullptr,
                                                 parentObject)) {
-      auto isolate = context->GetIsolate();
       return KJ_EXCEPTION(FAILED,
           kj::str("jsg.DOMException(", domException->getName(), "): ",
-                  domException->getMessage(isolate)));
+                  domException->getMessage()));
     } else {
 
       static const constexpr kj::StringPtr PREFIXES[] = {
