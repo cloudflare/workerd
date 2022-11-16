@@ -31,7 +31,7 @@ js_run_binary(
     args = [
         "--input-dir",
         "src/workerd/tools",
-        "--defines",
+        "--defines-dir",
         "types/defines",
         "--output-dir",
         "types/definitions",

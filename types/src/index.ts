@@ -180,10 +180,15 @@ function printDefinitions(
 //      <label> should relate to the compatibility date
 export async function main(args?: string[]) {
   const {
-    values: { "input-dir": inputDir, "output-dir": outputDir, ...options },
+    values: {
+      "input-dir": inputDir,
+      "output-dir": outputDir,
+      "defines-dir": definesDir,
+      ...options
+    },
   } = util.parseArgs({
     options: {
-      defines: { type: "string", short: "d" },
+      "defines-dir": { type: "string", short: "d" },
       "input-dir": { type: "string", short: "i" },
       "output-dir": { type: "string", short: "o" },
       format: { type: "boolean", short: "f" },
@@ -203,7 +208,7 @@ export async function main(args?: string[]) {
     filenames.map((filename) => path.join(inputDir, filename))
   );
 
-  const extra = await collateExtraDefinitions(options.defines);
+  const extra = await collateExtraDefinitions(definesDir);
 
   const paramNamesJson = inputFiles.find(
     (filepath) => path.basename(filepath) === "param-names.json"
