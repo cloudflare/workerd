@@ -402,6 +402,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "customEvent() can only be called once"));
   this->incomingRequest = nullptr;
+
+  auto& context = incomingRequest->getContext();
+  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
+      t->setEventInfo(context.now(), Trace::CustomEventInfo());
+  }
+
   return event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
 }
 

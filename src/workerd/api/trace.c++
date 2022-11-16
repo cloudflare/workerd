@@ -38,6 +38,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent() {
       KJ_CASE_ONEOF(alarm, Trace::AlarmEventInfo) {
         return kj::Maybe(jsg::alloc<AlarmEventInfo>(kj::addRef(*trace), alarm));
       }
+      KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
+        return kj::Maybe(jsg::alloc<CustomEventInfo>(kj::addRef(*trace), custom));
+      }
     }
   }
   return nullptr;
@@ -170,6 +173,9 @@ TraceItem::AlarmEventInfo::AlarmEventInfo(kj::Own<Trace> trace,
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
   return eventInfo.scheduledTime;
 }
+
+TraceItem::CustomEventInfo::CustomEventInfo(kj::Own<Trace> trace,
+    const Trace::CustomEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
 
 kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
   return trace->scriptName;

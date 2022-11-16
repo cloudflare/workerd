@@ -50,10 +50,12 @@ public:
   class FetchEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
+  class CustomEventInfo;
 
   explicit TraceItem(kj::Own<Trace> trace);
 
-  typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>, jsg::Ref<AlarmEventInfo>> EventInfo;
+  typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>,
+      jsg::Ref<AlarmEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent();
   // TODO(someday): support more event types (trace, queue) via kj::OneOf.
   kj::Maybe<double> getEventTimestamp();
@@ -186,6 +188,17 @@ private:
   const Trace::AlarmEventInfo& eventInfo;
 };
 
+class TraceItem::CustomEventInfo final: public jsg::Object {
+public:
+  explicit CustomEventInfo(kj::Own<Trace> trace, const Trace::CustomEventInfo& eventInfo);
+
+  JSG_RESOURCE_TYPE(CustomEventInfo) {}
+
+private:
+  kj::Own<Trace> trace;
+  const Trace::CustomEventInfo& eventInfo;
+};
+
 class TraceLog final: public jsg::Object {
 public:
   TraceLog(kj::Own<Trace> trace, const Trace::Log& log);
@@ -283,6 +296,7 @@ private:
   api::TraceEvent,                            \
   api::TraceItem,                             \
   api::TraceItem::AlarmEventInfo,             \
+  api::TraceItem::CustomEventInfo,            \
   api::TraceItem::ScheduledEventInfo,         \
   api::TraceItem::FetchEventInfo,             \
   api::TraceItem::FetchEventInfo::Request,    \
