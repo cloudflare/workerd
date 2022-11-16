@@ -1906,6 +1906,7 @@ public:
 
   // ---------------------------------------------------------------------------
   // Name/Symbol stuff
+
   Name newSymbol(kj::StringPtr symbol);
   // Creates a Name encapsulating a new unique v8::Symbol.
 
@@ -1969,6 +1970,14 @@ public:
 
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);
+
+  // ---------------------------------------------------------------------------
+  // Misc. Stuff
+
+  void requestGcForTesting() const;
+  // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
+  // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
+  // implementation in setup.c++. Use responsibly.
 
 private:
   friend class IsolateBase;

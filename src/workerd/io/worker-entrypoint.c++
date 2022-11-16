@@ -8,6 +8,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/thread-scopes.h>
 
 namespace workerd {
 
@@ -181,7 +182,14 @@ kj::Promise<void> WorkerEntrypoint::request(
       failOpenClient = context.getHttpClientNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
                                                      kj::mv(cfBlobJson));
     }
-    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+    if (isPredictableModeForTest()) {
+      promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
+        auto lock = worker->getIsolate().getApiIsolate().lock();
+        lock->requestGcForTesting();
+      });
+    }
+    waitUntilTasks.add(kj::mv(promise));
   })).then([this]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
@@ -349,12 +357,22 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
         lock.getExportedHandler(entrypointName, context.getActor()));
   }));
 
-  return incomingRequest->finishScheduled().then([&context](bool completed) mutable {
+  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
     return WorkerInterface::ScheduledResult {
       .retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU
     };
   }).attach(kj::mv(incomingRequest));
+
+  if (isPredictableModeForTest()) {
+    promise = promise.then([worker = kj::atomicAddRef(context.getWorker())](auto res) {
+      auto lock = worker->getIsolate().getApiIsolate().lock();
+      lock->requestGcForTesting();
+      return res;
+    });
+  }
+
+  return promise;
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
@@ -368,7 +386,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   //alarm() should only work with actors
   auto& actor = KJ_REQUIRE_NONNULL(context.getActor());
 
-  return actor.dedupAlarm(scheduledTime,
+  auto promise = actor.dedupAlarm(scheduledTime,
       [this,&context,scheduledTime,incomingRequest = kj::mv(incomingRequest)]() mutable
       -> kj::Promise<WorkerInterface::AlarmResult> {
     incomingRequest->delivered();
@@ -395,6 +413,16 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
       }));
     });
   });
+
+  if (isPredictableModeForTest()) {
+    promise = promise.then([worker = kj::atomicAddRef(context.getWorker())](auto res) {
+      auto lock = worker->getIsolate().getApiIsolate().lock();
+      lock->requestGcForTesting();
+      return res;
+    });
+  }
+
+  return promise;
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
@@ -403,7 +431,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
                                 "customEvent() can only be called once"));
   this->incomingRequest = nullptr;
 
-  return event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
+  auto& context = incomingRequest->getContext();
+  auto worker = kj::atomicAddRef(context.getWorker());
+  auto promise = event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
+
+  if (isPredictableModeForTest()) {
+    promise = promise.then([worker = kj::mv(worker)](auto res) {
+      auto lock = worker->getIsolate().getApiIsolate().lock();
+      lock->requestGcForTesting();
+      return res;
+    });
+  }
+  return promise;
 }
 
 } // namespace workerd
