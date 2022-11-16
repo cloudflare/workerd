@@ -19,6 +19,7 @@
 #include "trace.h"
 #include "scheduled.h"
 #include "blob.h"
+#include "sockets.h"
 
 namespace workerd::api {
 
@@ -272,6 +273,9 @@ public:
       jsg::Optional<Request::Initializer> requestInitr,
       CompatibilityFlags::Reader featureFlags);
 
+  jsg::Ref<Socket> connect(
+      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options);
+
   jsg::Ref<ServiceWorkerGlobalScope> getSelf() {
     return JSG_THIS;
   }
@@ -413,6 +417,7 @@ public:
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
+    JSG_METHOD(connect);
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(

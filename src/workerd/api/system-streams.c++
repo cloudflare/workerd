@@ -252,6 +252,14 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
+SystemMultiStream newSystemMultiStream(
+    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding, IoContext& context) {
+  return {
+    .readable = kj::heap<EncodedAsyncInputStream>(kj::addRef(*rc), encoding, context),
+    .writable = kj::heap<EncodedAsyncOutputStream>(kj::mv(rc), encoding, context)
+  };
+}
+
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
                                   Response::BodyEncoding bodyEncoding) {
   if (bodyEncoding == Response::BodyEncoding::MANUAL) {

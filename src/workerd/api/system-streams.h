@@ -8,6 +8,7 @@
 
 #include "streams.h"
 #include "http.h"
+#include "sockets.h"
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -30,6 +31,18 @@ kj::Own<WritableStreamSink> newSystemStream(
 // A WritableStreamSink which automatically encodes its underlying stream.
 //
 // NOTE: As with the other overload of newSystemStream(), `inner` must be wholly owned.
+
+struct SystemMultiStream {
+  kj::Own<ReadableStreamSource> readable;
+  kj::Own<WritableStreamSink> writable;
+};
+
+SystemMultiStream newSystemMultiStream(
+    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding,
+    IoContext& context = IoContext::current());
+// A combo ReadableStreamSource and WritableStreamSink which automatically decodes/encodes its
+// underlying stream. This function takes `PipelinedAsyncIoStream` because it needs a refcounted
+// stream.
 
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
                                   Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);

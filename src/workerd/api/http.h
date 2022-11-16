@@ -345,6 +345,9 @@ class Request;
 class Response;
 struct RequestInitializerDict;
 
+class Socket;
+struct SocketOptions;
+
 class Fetcher: public jsg::Object {
   // A capability to send HTTP requests to some destination other than the public internet.
   // This is the type of `request.fetcher` (if it is not null).
@@ -402,6 +405,9 @@ public:
   // Wraps kj::Url::parse to take into account whether the Fetcher requires a host to be
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
 
+  jsg::Ref<Socket> connect(
+      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options);
+
   jsg::Promise<jsg::Ref<Response>> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit,
@@ -432,6 +438,7 @@ public:
 
   JSG_RESOURCE_TYPE(Fetcher) {
     JSG_METHOD(fetch);
+    JSG_METHOD(connect);
 
     JSG_METHOD(get);
     JSG_METHOD(put);
