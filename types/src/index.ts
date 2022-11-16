@@ -213,9 +213,11 @@ export async function main(args?: string[]) {
   );
 
   if (paramNamesJson === undefined) {
-    throw new Error(
-      `Expected to find a file named param-names.json in ${inputDir} containing parameter names`
+    console.warn(
+      `Couldn't find param-names.json in ${inputDir} containing parameter names, params will be nameless.`
     );
+  } else {
+    parseApiAstDump(paramNamesJson);
   }
 
   if (capnpFiles.length === 0) {
