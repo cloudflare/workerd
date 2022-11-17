@@ -685,6 +685,7 @@ public:
 
   size_t getTimeoutCount();
 
+  kj::Date now(IncomingRequest& incomingRequest);
   kj::Date now();
   // Access the event loop's current time point. This will remain constant between ticks.
 

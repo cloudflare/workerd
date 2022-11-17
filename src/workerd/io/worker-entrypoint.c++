@@ -405,7 +405,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 
   auto& context = incomingRequest->getContext();
   KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
-      t->setEventInfo(context.now(), Trace::CustomEventInfo());
+      t->setEventInfo(context.now(*incomingRequest), Trace::CustomEventInfo());
   }
 
   return event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
