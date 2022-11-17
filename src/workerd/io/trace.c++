@@ -152,6 +152,9 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto alarmBuilder = eventInfoBuilder.initAlarm();
         alarm.copyTo(alarmBuilder);
       }
+      KJ_CASE_ONEOF(custom, CustomEventInfo) {
+        eventInfoBuilder.initCustom();
+      }
     }
   } else {
     eventInfoBuilder.setNone();
@@ -214,6 +217,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::ALARM:
         eventInfo = AlarmEventInfo(e.getAlarm());
+        break;
+      case rpc::Trace::EventInfo::Which::CUSTOM:
+        eventInfo = CustomEventInfo(e.getCustom());
         break;
       case rpc::Trace::EventInfo::Which::NONE:
         eventInfo = nullptr;
@@ -426,6 +432,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
     }
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;
   trace->eventInfo = kj::mv(info);

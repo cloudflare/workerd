@@ -45,6 +45,7 @@ struct Trace @0x8e8d911203762d34 {
     fetch @6 :FetchEventInfo;
     scheduled @7 :ScheduledEventInfo;
     alarm @9 :AlarmEventInfo;
+    custom @13 :CustomEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -66,6 +67,8 @@ struct Trace @0x8e8d911203762d34 {
   struct AlarmEventInfo {
     scheduledTimeMs @0 :Int64;
   }
+
+  struct CustomEventInfo {}
 
   response @8 :FetchResponseInfo;
   struct FetchResponseInfo {
