@@ -168,7 +168,6 @@ export function createParamDeclarationNodes(
       /* decorators */ undefined,
       /* modifiers */ undefined,
       dotDotDotToken,
-      // TODO(soon): use actual parameter names here once extracted
       getParameterName(fullyQualifiedParentName, name, i),
       questionToken,
       typeNode

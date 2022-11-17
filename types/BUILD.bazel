@@ -27,6 +27,7 @@ js_run_binary(
     name = "types",
     srcs = [
         "//src/workerd/tools:api_encoder",
+        "//src/workerd/tools:param_extractor",
     ] + glob(["defines/**/*.ts"]),
     args = [
         "--input-dir",
