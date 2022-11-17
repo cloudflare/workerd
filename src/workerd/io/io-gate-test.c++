@@ -182,6 +182,95 @@ KJ_TEST("InputGate nested critical section outlives parent") {
   rootWait.wait(ws);
 }
 
+KJ_TEST("InputGate deeply nested critical sections") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  InputGate gate;
+
+  kj::Own<InputGate::CriticalSection> cs1;
+  kj::Own<InputGate::CriticalSection> cs2;
+  kj::Own<InputGate::CriticalSection> cs3;
+  kj::Own<InputGate::CriticalSection> cs4;
+
+  {
+    auto lock = gate.wait().wait(ws);
+    cs1 = lock.startCriticalSection();
+  }
+
+  {
+    auto lock = cs1->wait().wait(ws);
+    cs2 = lock.startCriticalSection();
+  }
+
+  {
+    auto lock = cs2->wait().wait(ws);
+    cs3 = lock.startCriticalSection();
+    cs4 = lock.startCriticalSection();
+  }
+
+  // Start cs2
+  cs2->wait();
+
+  // Add some waiters to cs2, some of which are waiting to start more nested critical sections
+  auto lock = cs2->wait().wait(ws);
+  auto waiter1 = cs2->wait();
+  auto waiter2 = cs2->wait();
+
+  // Both of these wait on cs2 indirectly, as they are nested under cs2
+  auto waiter3 = cs3->wait();
+  auto waiter4 = cs4->wait();
+
+  KJ_EXPECT(!waiter1.poll(ws));
+  KJ_EXPECT(!waiter2.poll(ws));
+  KJ_EXPECT(!waiter3.poll(ws));
+  KJ_EXPECT(!waiter4.poll(ws));
+
+  // Mark cs2 as complete with outstanding waiters, and drop our reference to it.
+  cs2->succeeded();
+  cs2 = nullptr;
+
+  // Our waiters should still be outstanding as we have not released the lock
+  KJ_EXPECT(!waiter1.poll(ws));
+  KJ_EXPECT(!waiter2.poll(ws));
+  KJ_EXPECT(!waiter3.poll(ws));
+  KJ_EXPECT(!waiter4.poll(ws));
+
+  // Drop some outstanding waiters
+  { auto drop = kj::mv(waiter2); }
+  { auto drop = kj::mv(waiter4); }
+
+  // Release the lock on cs2
+  { auto drop = kj::mv(lock); }
+
+  // cs3 should have started
+  KJ_ASSERT(!waiter1.poll(ws));
+  KJ_ASSERT(waiter3.poll(ws));
+  auto lock2 = waiter3.wait(ws);
+
+  // Add a waiter on cs3
+  auto waiter5 = cs3->wait();
+  KJ_ASSERT(!waiter5.poll(ws));
+
+  // Can't start new tasks on the root until both cs1 and cs3 have succeeded, and all outstanding
+  // tasks have either been dropped or completed.
+  auto waiter6 = gate.wait();
+  KJ_ASSERT(!waiter6.poll(ws));
+
+  cs1->succeeded();
+  cs3->succeeded();
+
+  // drop waiter5
+  { auto drop = kj::mv(waiter5); }
+
+  // Release the lock on cs3
+  { auto drop = kj::mv(lock2); }
+
+  // Our root task should be ready now.
+  KJ_ASSERT(waiter6.poll(ws));
+  waiter6.wait(ws);
+}
+
 KJ_TEST("InputGate critical section lock outlives critical section") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
@@ -207,6 +296,17 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
 
   // Lock should have been reparented, so should still work.
   KJ_ASSERT(lock.isFor(gate));
+
+  // The gate should still be locked
+  auto waiter = gate.wait();
+  KJ_EXPECT(!waiter.poll(ws));
+
+  // Drop the outstanding lock
+  { auto drop = kj::mv(lock); }
+
+  // Our waiter should resolve now
+  KJ_ASSERT(waiter.poll(ws));
+  KJ_EXPECT(waiter.wait(ws).isFor(gate));
 }
 
 KJ_TEST("InputGate broken") {

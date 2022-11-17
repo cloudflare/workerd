@@ -25,7 +25,7 @@ InputGate::~InputGate() noexcept {
 
 InputGate::Waiter::Waiter(
     kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter)
-    : fulfiller(fulfiller), gate(gate), isChildWaiter(isChildWaiter) {
+    : fulfiller(fulfiller), gate(&gate), isChildWaiter(isChildWaiter) {
   gate.hooks.inputGateWaiterAdded();
   if (isChildWaiter) {
     gate.waitingChildren.add(*this);
@@ -34,12 +34,12 @@ InputGate::Waiter::Waiter(
   }
 }
 InputGate::Waiter::~Waiter() noexcept(false) {
-  gate.hooks.inputGateWaiterRemoved();
+  gate->hooks.inputGateWaiterRemoved();
   if (link.isLinked()) {
     if (isChildWaiter) {
-      gate.waitingChildren.remove(*this);
+      gate->waitingChildren.remove(*this);
     } else {
-      gate.waiters.remove(*this);
+      gate->waiters.remove(*this);
     }
   }
 }
@@ -65,8 +65,14 @@ kj::Promise<void> InputGate::onBroken() {
 void InputGate::releaseLock() {
   if (isCriticalSection) {
     auto& self = static_cast<CriticalSection&>(*this);
-    if (self.state == CriticalSection::DONE) {
-      // Tasks and locks are reparented at this point.
+    if (self.state == CriticalSection::REPARENTED) {
+      // This lock was for a critical section that has already completed, therefore the lock
+      // should be considered "reparented", and we should forward the release to the parent.
+
+      // Ensure any waiters on us have already been reparented.
+      KJ_DASSERT(self.waitingChildren.size() == 0);
+      KJ_DASSERT(self.waiters.size() == 0);
+
       self.parentAsInputGate().releaseLock();
       return;
     }
@@ -102,6 +108,8 @@ kj::Maybe<InputGate::CriticalSection&> InputGate::Lock::getCriticalSection() {
 }
 
 bool InputGate::Lock::isFor(const InputGate& otherGate) const {
+  KJ_ASSERT(!otherGate.isCriticalSection);
+
   InputGate* ptr = gate;
   while (ptr->isCriticalSection) {
     ptr = &static_cast<CriticalSection&>(*ptr).parentAsInputGate();
@@ -132,7 +140,7 @@ InputGate::CriticalSection::~CriticalSection() noexcept(false) {
           "awaits a task that was initiated outside of the critical section. Since a critical "
           "section blocks all other tasks from completing, this leads to deadlock."));
       break;
-    case DONE:
+    case REPARENTED:
       // Common case.
       break;
   }
@@ -143,38 +151,20 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
     case NOT_STARTED: {
       state = INITIAL_WAIT;
 
-      // Find the ancestor that we want to lock, skipping parents in the DONE state since children
-      // of DONE critical sections are reparented.
-      InputGate* target = nullptr;
-      for (CriticalSection* ptr = this; target == nullptr;) {
-        KJ_SWITCH_ONEOF(ptr->parent) {
-          KJ_CASE_ONEOF(p, InputGate*) {
-            target = p;
-          }
-          KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-            if (c.get()->state == DONE) {
-              // Keep looping...
-              ptr = c;
-            } else {
-              target = c;
-            }
-          }
-        }
-      }
-
-      KJ_IF_MAYBE(e, target->brokenState.tryGet<kj::Exception>()) {
+      auto& target = parentAsInputGate();
+      KJ_IF_MAYBE(e, target.brokenState.tryGet<kj::Exception>()) {
         // Oops, we're broken.
         setBroken(*e);
         return kj::cp(*e);
       }
 
       // Add ourselves to this parent's child waiter list.
-      if (target->lockCount == 0) {
+      if (target.lockCount == 0) {
         state = RUNNING;
-        parentLock = Lock(*target);
+        parentLock = Lock(target);
         return wait();
       } else {
-        return kj::newAdaptedPromise<Lock, Waiter>(*target, true)
+        return kj::newAdaptedPromise<Lock, Waiter>(target, true)
             .then([this](Lock lock) {
           state = RUNNING;
           parentLock = kj::mv(lock);
@@ -194,7 +184,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
     case RUNNING:
       // CriticalSection is active, so defer to InputGate implementation.
       return InputGate::wait();
-    case DONE:
+    case REPARENTED:
       // Once the CriticalSection has declared itself done, then any straggler tasks it initiated
       // are adopted by the parent.
       // WARNING: Don't use parentAsInputGate() here as that'll bypass the override of wait() if
@@ -219,17 +209,19 @@ InputGate::Lock InputGate::CriticalSection::succeeded() {
   // adopted by the parent.
   auto& parentGate = parentAsInputGate();
   for (auto& waiter: waitingChildren) {
-    waiters.remove(waiter);
+    waitingChildren.remove(waiter);
     parentGate.waitingChildren.add(waiter);
+    waiter.gate = &parentGate;
   }
   for (auto& waiter: waiters) {
     waiters.remove(waiter);
     parentGate.waiters.add(waiter);
+    waiter.gate = &parentGate;
   }
   parentGate.lockCount += lockCount;
   lockCount = 0;
 
-  state = DONE;
+  state = REPARENTED;
   auto result = KJ_ASSERT_NONNULL(kj::mv(parentLock));
   parentLock = nullptr;
   return result;
@@ -265,6 +257,25 @@ void InputGate::setBroken(const kj::Exception& e) {
     f->get()->reject(kj::cp(e));
   }
   brokenState = kj::cp(e);
+}
+
+InputGate& InputGate::CriticalSection::parentAsInputGate() {
+  CriticalSection* ptr = this;
+  for(;;) {
+    KJ_SWITCH_ONEOF(ptr->parent) {
+      KJ_CASE_ONEOF(p, InputGate*) {
+        return *p;
+      }
+      KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+        if (c.get()->state == REPARENTED) {
+          // Keep looping...
+          ptr = c;
+        } else {
+          return *c.get();
+        }
+      }
+    }
+  }
 }
 
 // =======================================================================================
