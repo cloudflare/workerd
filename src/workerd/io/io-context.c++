@@ -808,8 +808,8 @@ size_t IoContext::getTimeoutCount() {
   return timeoutManager->getTimeoutCount();
 }
 
-kj::Date IoContext::now() {
-  kj::Date adjustedTime = getIoChannelFactory().getTimer().now();
+kj::Date IoContext::now(IncomingRequest& incomingRequest) {
+  kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
 
   KJ_IF_MAYBE (maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
@@ -820,6 +820,10 @@ kj::Date IoContext::now() {
   } else {
     return adjustedTime;
   }
+}
+
+kj::Date IoContext::now() {
+  return now(getCurrentIncomingRequest());
 }
 
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
