@@ -103,7 +103,6 @@ public:
     explicit CustomEventInfo() {};
     CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
 
-//    void copyTo(rpc::Trace::CustomEventInfo::Builder builder);
   };
 
   class FetchResponseInfo {
