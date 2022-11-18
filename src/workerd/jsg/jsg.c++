@@ -5,6 +5,7 @@
 #include "jsg.h"
 #include "setup.h"
 #include <execinfo.h>
+#include <workerd/util/thread-scopes.h>
 
 namespace workerd::jsg {
 
@@ -147,6 +148,15 @@ void Lock::setCommonJsExportDefault(bool exportDefault) {
 
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
+}
+
+void Lock::requestGcForTesting() const {
+  if (!isPredictableModeForTest()) {
+    KJ_LOG(ERROR, "Test GC used while not in a test");
+    return;
+  }
+  v8Isolate->RequestGarbageCollectionForTesting(
+    v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {
