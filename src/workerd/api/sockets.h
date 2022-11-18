@@ -114,7 +114,8 @@ jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, jsg::Ref<Fetcher> fetcher, kj::String address);
 
 jsg::Ref<Socket> connectImpl(
-    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::String address);
+    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::String address,
+    CompatibilityFlags::Reader featureFlags);
 
 #define EW_SOCKETS_ISOLATE_TYPES         \
   api::Socket,                       \

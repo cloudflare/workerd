@@ -406,7 +406,8 @@ public:
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options);
+      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options,
+      CompatibilityFlags::Reader featureFlags);
 
   jsg::Promise<jsg::Ref<Response>> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
