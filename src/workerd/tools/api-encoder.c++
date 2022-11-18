@@ -13,6 +13,7 @@
 #include <workerd/api/analytics-engine.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/rtti.h>

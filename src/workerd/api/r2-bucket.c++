@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "r2-multipart.h"
 #include "r2-bucket.h"
 #include "r2-rpc.h"
 #include <array>
@@ -541,6 +542,94 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
   });
 }
 
+jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::Lock& js, kj::String key,
+    jsg::Optional<MultipartOptions> options, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    auto client = context.getHttpClient(
+      clientIndex, true, nullptr, "r2_createMultipartUpload"_kj);
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto payloadBuilder = requestBuilder.initPayload();
+    auto createMultipartUploadBuilder = payloadBuilder.initCreateMultipartUpload();
+    createMultipartUploadBuilder.setObject(key);
+
+    KJ_IF_MAYBE(o, options) {
+      KJ_IF_MAYBE(m, o->customMetadata) {
+        auto fields = createMultipartUploadBuilder.initCustomFields(m->fields.size());
+        for (size_t i = 0; i < m->fields.size(); i++) {
+          fields[i].setK(m->fields[i].name);
+          fields[i].setV(m->fields[i].value);
+        }
+      }
+      KJ_IF_MAYBE(m, o->httpMetadata) {
+        auto fields = createMultipartUploadBuilder.initHttpFields();
+        HttpMetadata httpMetadata = [&]() {
+          KJ_SWITCH_ONEOF(*m) {
+            KJ_CASE_ONEOF(m, HttpMetadata) {
+              return kj::mv(m);
+            }
+            KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+              return HttpMetadata::fromRequestHeaders(js, *h);
+            }
+          }
+          KJ_UNREACHABLE;
+        }();
+
+        KJ_IF_MAYBE(ct, httpMetadata.contentType) {
+          fields.setContentType(*ct);
+        }
+        KJ_IF_MAYBE(ce, httpMetadata.contentEncoding) {
+          fields.setContentEncoding(*ce);
+        }
+        KJ_IF_MAYBE(cd, httpMetadata.contentDisposition) {
+          fields.setContentDisposition(*cd);
+        }
+        KJ_IF_MAYBE(cl, httpMetadata.contentLanguage) {
+          fields.setContentLanguage(*cl);
+        }
+        KJ_IF_MAYBE(cc, httpMetadata.cacheControl) {
+          fields.setCacheControl(*cc);
+        }
+        KJ_IF_MAYBE(ce, httpMetadata.cacheExpiry) {
+          fields.setCacheExpiry((*ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        }
+      }
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+    auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
+
+    auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
+        kj::mv(bucket));
+
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, key=kj::mv(key), this] (jsg::Lock& js, R2Result r2Result) mutable {
+      r2Result.throwIfError("createMultipartUpload", errorType);
+
+      capnp::MallocMessageBuilder responseMessage;
+      capnp::JsonCodec json;
+      json.handleByAnnotation<R2CreateMultipartUploadResponse>();
+      auto responseBuilder = responseMessage.initRoot<R2CreateMultipartUploadResponse>();
+
+      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+      kj::String uploadId = kj::str(responseBuilder.getUploadId());
+      return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
+    });
+  });
+}
+
+jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
+      kj::String key, kj::String uploadId, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+    return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
+}
+
 jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
@@ -782,7 +871,6 @@ R2Bucket::HttpMetadata R2Bucket::HttpMetadata::clone() const {
   };
 }
 
-
 void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   JSG_REQUIRE(httpMetadata != nullptr, TypeError,
       "HTTP metadata unknown for key `", name,
@@ -894,6 +982,11 @@ R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
 
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte> &arr) {
   return kj::heapArray(arr.asPtr());
+}
+
+kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
+  kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+    return parseObjectMetadata<R2Bucket::HeadResult>(action, r2Result, errorType);
 }
 
 } // namespace workerd::api::public_beta

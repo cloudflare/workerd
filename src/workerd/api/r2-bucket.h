@@ -8,10 +8,15 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/http.h>
+#include <workerd/api/r2-api.capnp.h>
+#include <capnp/compat/json.h>
+#include <workerd/util/http-util.h>
 
 namespace workerd::api::public_beta {
 
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
+
+class R2MultipartUpload;
 
 class R2Bucket: public jsg::Object {
   // A capability to an R2 Bucket.
@@ -148,6 +153,14 @@ public:
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
+  struct MultipartOptions {
+    jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
+    jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+
+    JSG_STRUCT(httpMetadata, customMetadata);
+    JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
+  };
+
   class HeadResult: public jsg::Object {
   public:
     HeadResult(kj::String name, kj::String version, double size,
@@ -281,24 +294,41 @@ public:
     // from `R2BucketListOptions` to `R2ListOptions`.
   };
 
-  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(jsg::Lock& js, kj::String key,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(
+      jsg::Lock& js, kj::String key,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
   jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> get(
       jsg::Lock& js, kj::String key, jsg::Optional<GetOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
       kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<void> delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
-  jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
+      jsg::Lock& js, kj::String key, jsg::Optional<MultipartOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Ref<R2MultipartUpload> resumeMultipartUpload(
+      jsg::Lock& js, kj::String key, kj::String uploadId,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<void> delete_(
+      jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
+  jsg::Promise<ListResult> list(
+      jsg::Lock& js, jsg::Optional<ListOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+  );
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {
     JSG_METHOD(head);
     JSG_METHOD(get);
     JSG_METHOD(put);
+    JSG_METHOD(createMultipartUpload);
+    JSG_METHOD(resumeMultipartUpload);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(list);
 
@@ -356,22 +386,13 @@ private:
   kj::Maybe<kj::String> adminBucket;
 
   friend class R2Admin;
+  friend class R2MultipartUpload;
 };
 
-#define EW_R2_PUBLIC_BETA_ISOLATE_TYPES \
-  api::R2Error, \
-  api::public_beta::R2Bucket, \
-  api::public_beta::R2Bucket::HeadResult, \
-  api::public_beta::R2Bucket::GetResult, \
-  api::public_beta::R2Bucket::Range, \
-  api::public_beta::R2Bucket::Conditional, \
-  api::public_beta::R2Bucket::GetOptions, \
-  api::public_beta::R2Bucket::PutOptions, \
-  api::public_beta::R2Bucket::Checksums, \
-  api::public_beta::R2Bucket::StringChecksums, \
-  api::public_beta::R2Bucket::HttpMetadata, \
-  api::public_beta::R2Bucket::ListOptions, \
-  api::public_beta::R2Bucket::ListResult
-// The list of r2-bucket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
+kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
+  kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+// Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
+// by making use of dynamic dispatch.
 
 }  // namespace workerd::api::public_beta
+

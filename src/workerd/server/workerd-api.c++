@@ -14,8 +14,9 @@
 #include <workerd/api/crypto-impl.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/kv.h>
-#include <workerd/api/r2-admin.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/r2.h>
+#include <workerd/api/r2-admin.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/util/thread-scopes.h>
 #include <openssl/sha.h>
