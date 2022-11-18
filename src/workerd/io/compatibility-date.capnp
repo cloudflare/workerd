@@ -227,9 +227,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # request that no compression be used.
 
   nodeJs18CompatExperimental @21 :Bool
-        $compatEnableFlag("nodejs_18_compat_experimental");
+      $compatEnableFlag("nodejs_18_compat_experimental");
   # Experimental, do not use.
   # Enables nodejs 18 compat imports in the application.
   # This is currently a work in progress mechanism that is not yet available for use in workerd.
   # WARNING: IT WILL BREAK in the future. Do not ignore this warning.
+
+  tcpSocketsSupport @22 :Bool
+      $compatEnableFlag("tcp_sockets_support");
+  # Enables TCP sockets in workerd.
+  # These are still under development and therefore subject to change.
+  # WARNING: DO NOT depend on this feature as its API is still subject to change.
 }
