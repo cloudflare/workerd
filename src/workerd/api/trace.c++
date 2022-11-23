@@ -185,6 +185,14 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
   return trace->dispatchNamespace;
 }
 
+jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
+  if (trace->scriptTags.size() > 0) {
+    return KJ_MAP(t, trace->scriptTags) -> kj::StringPtr { return t; };
+  } else {
+    return nullptr;
+  }
+}
+
 kj::StringPtr TraceItem::getOutcome() {
   // TODO(cleanup): Add to enumToStr() to capnp?
   auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();
