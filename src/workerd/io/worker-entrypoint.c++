@@ -42,7 +42,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(
                                    ThreadContext& threadContext,
                                    kj::Own<const Worker> worker,
                                    kj::Maybe<kj::StringPtr> entrypointName,
-                                   kj::Maybe<kj::Own<Worker::Actor>> actor,
+                                   kj::Maybe<Worker::Actor::LocalActorReference&> actor,
                                    kj::Own<LimitEnforcer> limitEnforcer,
                                    kj::Own<void> ioContextDependency,
                                    kj::Own<IoChannelFactory> ioChannelFactory,
@@ -54,7 +54,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(
                                    kj::Maybe<kj::String> cfBlobJson) {
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(cfBlobJson));
-  obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer),
+  obj->init(kj::mv(worker), actor, kj::mv(limitEnforcer),
       kj::mv(ioContextDependency), kj::mv(ioChannelFactory), kj::addRef(*metrics),
       kj::mv(workerTracer), kj::mv(tracer));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
@@ -75,7 +75,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
 
 void WorkerEntrypoint::init(
     kj::Own<const Worker> worker,
-    kj::Maybe<kj::Own<Worker::Actor>> actor,
+    kj::Maybe<Worker::Actor::LocalActorReference&> actor,
     kj::Own<LimitEnforcer> limitEnforcer,
     kj::Own<void> ioContextDependency,
     kj::Own<IoChannelFactory> ioChannelFactory,
@@ -86,8 +86,9 @@ void WorkerEntrypoint::init(
   // IoContext, in which case we reuse it.
 
   auto newContext = [&]() {
-    auto actorRef = actor.map([](kj::Own<Worker::Actor>& ptr) -> Worker::Actor& {
-      return *ptr;
+    auto actorRef = actor.map([](Worker::Actor::LocalActorReference& ptr) -> Worker::Actor& {
+      return *KJ_REQUIRE_NONNULL(ptr.get());
+      // TODO(now): Might need to check this in more depth (could it be null??)
     });
 
     return kj::refcounted<IoContext>(
@@ -97,11 +98,13 @@ void WorkerEntrypoint::init(
 
   kj::Own<IoContext> context;
   KJ_IF_MAYBE(a, actor) {
-    KJ_IF_MAYBE(rc, a->get()->getIoContext()) {
+    KJ_IF_MAYBE(rc, KJ_REQUIRE_NONNULL(a->get())->getIoContext()) {
+      // TODO(now): Might need to check this in more depth (could it be null??)
       context = kj::addRef(*rc);
     } else {
       context = newContext();
-      a->get()->setIoContext(kj::addRef(*context));
+      KJ_REQUIRE_NONNULL(a->get())->setIoContext(kj::addRef(*context));
+      // TODO(now): Might need to check this in more depth (could it be null??)
     }
   } else {
     context = newContext();

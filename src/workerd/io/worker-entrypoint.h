@@ -24,7 +24,7 @@ public:
                    ThreadContext& threadContext,
                    kj::Own<const Worker> worker,
                    kj::Maybe<kj::StringPtr> entrypointName,
-                   kj::Maybe<kj::Own<Worker::Actor>> actor,
+                   kj::Maybe<Worker::Actor::LocalActorReference&> actor,
                    kj::Own<LimitEnforcer> limitEnforcer,
                    kj::Own<void> ioContextDependency,
                    kj::Own<IoChannelFactory> ioChannelFactory,
@@ -74,7 +74,7 @@ private:
 
   void init(
       kj::Own<const Worker> worker,
-      kj::Maybe<kj::Own<Worker::Actor>> actor,
+      kj::Maybe<Worker::Actor::LocalActorReference&> actor,
       kj::Own<LimitEnforcer> limitEnforcer,
       kj::Own<void> ioContextDependency,
       kj::Own<IoChannelFactory> ioChannelFactory,

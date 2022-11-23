@@ -1137,12 +1137,12 @@ public:
 
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
-      kj::Maybe<kj::Own<Worker::Actor>> actor = nullptr) {
+      kj::Maybe<Worker::Actor::LocalActorReference> actor = nullptr) {
     return WorkerEntrypoint::construct(
         threadContext,
         kj::atomicAddRef(*worker),
         entrypointName,
-        kj::mv(actor),
+        actor,
         kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
         {},                        // ioContextDependency
         kj::Own<IoChannelFactory>(this, kj::NullDisposer::instance),
@@ -1247,7 +1247,8 @@ private:
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata) override {
-      return service.startRequest(kj::mv(metadata), className, kj::addRef(*actor));
+      return service.startRequest(kj::mv(metadata), className,
+          Worker::Actor::LocalActorReference(kj::addRef(*actor)));
     }
 
   private:

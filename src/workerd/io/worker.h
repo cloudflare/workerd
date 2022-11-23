@@ -15,6 +15,7 @@
 #include <kj/mutex.h>
 #include "io-channels.h"
 #include <workerd/io/actor-storage.capnp.h>
+#include <workerd/util/own-util.h>
 
 namespace v8 { class Isolate; }
 
@@ -630,6 +631,34 @@ public:
   // from the thread that created it.
 
   ~Actor() noexcept(false);
+
+  class LocalActorReference {
+    // Helps us keep track of a refcount so we can remove actors from the map of active actors.
+  public:
+    LocalActorReference(kj::Maybe<Worker::Actor&> innerActor): innerActor(innerActor) {}
+    LocalActorReference(kj::Own<Worker::Actor> ownedActor)
+        : innerActor(*ownedActor.get()),
+          ownedActor(kj::addRef(KJ_REQUIRE_NONNULL(innerActor))) {}
+
+    LocalActorReference(LocalActorReference&& other)
+        : innerActor(other.innerActor),
+          ownedActor(mapAddRef(other.innerActor)) {}
+
+    virtual ~LocalActorReference() {}
+
+    virtual Worker::Actor* operator->() {
+      return &KJ_REQUIRE_NONNULL(innerActor);
+    }
+
+    virtual kj::Maybe<Worker::Actor*> get() {
+      return innerActor.map([](Worker::Actor& a) {
+        return &a;
+      });
+    }
+
+    kj::Maybe<Worker::Actor&> innerActor;
+    kj::Maybe<kj::Own<Worker::Actor>> ownedActor;
+  };
 
   void ensureConstructed(IoContext&);
   // Call when starting any new request, to ensure that the actor object's constructor has run.
