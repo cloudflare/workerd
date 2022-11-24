@@ -12,6 +12,7 @@ import {
 } from "@workerd/jsg/rtti.capnp.js";
 import ts, { factory as f } from "typescript";
 import { printNode } from "../print";
+import { getParameterName } from "./parameter-names";
 
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/findLastIndex
 export function findLastIndex<T>(
@@ -101,6 +102,8 @@ export function getTypeName(structure: Structure | StructureType): string {
 }
 
 export function createParamDeclarationNodes(
+  fullyQualifiedParentName: string,
+  name: string,
   args: Type[]
 ): ts.ParameterDeclaration[] {
   // Find the index of the last required parameter, all optional before this
@@ -122,8 +125,6 @@ export function createParamDeclarationNodes(
   // `args` may include internal implementation types that shouldn't appear
   // in parameters. Therefore, we may end up with fewer params than args.
   const params: ts.ParameterDeclaration[] = [];
-  // Index to use in the name of the next parameter
-  let paramIndex = 0;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -167,8 +168,7 @@ export function createParamDeclarationNodes(
       /* decorators */ undefined,
       /* modifiers */ undefined,
       dotDotDotToken,
-      // TODO(soon): use actual parameter names here once extracted
-      `param${paramIndex++}`,
+      getParameterName(fullyQualifiedParentName, name, i),
       questionToken,
       typeNode
     );
@@ -303,7 +303,11 @@ export function createTypeNode(type: Type, allowCoercion = false): ts.TypeNode {
       }
     case Type_Which.FUNCTION:
       const func = type.getFunction();
-      const params = createParamDeclarationNodes(func.getArgs().toArray());
+      const params = createParamDeclarationNodes(
+        "FUNCTION_TODO",
+        "FUNCTION_TODO",
+        func.getArgs().toArray()
+      );
       const result = createTypeNode(
         func.getReturnType(),
         true // Always allow coercion in callback functions

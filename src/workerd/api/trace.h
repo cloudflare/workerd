@@ -257,7 +257,7 @@ private:
 
 class UnsafeTraceMetrics final: public jsg::Object {
 public:
-  jsg::Ref<TraceMetrics> fromTrace(jsg::Ref<TraceItem>);
+  jsg::Ref<TraceMetrics> fromTrace(jsg::Ref<TraceItem> item);
 
   JSG_RESOURCE_TYPE(UnsafeTraceMetrics) {
     JSG_METHOD(fromTrace);

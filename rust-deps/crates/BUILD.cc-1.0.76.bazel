@@ -15,17 +15,18 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_proc_macro",
+    "rust_binary",
+    "rust_library",
 )
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_proc_macro(
-    name = "derive_more",
+rust_library(
+    name = "cc",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,32 +51,6 @@ rust_proc_macro(
         ],
     }),
     crate_features = [
-        "add",
-        "add_assign",
-        "as_mut",
-        "as_ref",
-        "constructor",
-        "convert_case",
-        "default",
-        "deref",
-        "deref_mut",
-        "display",
-        "error",
-        "from",
-        "from_str",
-        "index",
-        "index_mut",
-        "into",
-        "into_iterator",
-        "is_variant",
-        "iterator",
-        "mul",
-        "mul_assign",
-        "not",
-        "rustc_version",
-        "sum",
-        "try_into",
-        "unwrap",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -107,14 +82,76 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.99.17",
+    version = "1.0.76",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__convert_case-0.4.0//:convert_case",
-            "@crates_vendor__proc-macro2-1.0.47//:proc_macro2",
-            "@crates_vendor__quote-1.0.21//:quote",
-            "@crates_vendor__syn-1.0.103//:syn",
+        ],
+    }),
+)
+
+rust_binary(
+    name = "gcc-shim__bin",
+    srcs = glob(
+        include = [
+            "**/*.rs",
+        ],
+        exclude = [
+        ],
+    ),
+    aliases = selects.with_or({
+        "//conditions:default": {
+        },
+    }),
+    compile_data = glob(
+        include = ["**"],
+        exclude = [
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ) + select_with_or({
+        "//conditions:default": [
+        ],
+    }),
+    crate_features = [
+    ],
+    crate_root = "src/bin/gcc-shim.rs",
+    data = select_with_or({
+        "//conditions:default": [
+        ],
+    }),
+    edition = "2018",
+    proc_macro_deps = [
+    ] + select_with_or({
+        "//conditions:default": [
+        ],
+    }),
+    rustc_env = {
+    },
+    rustc_env_files = select_with_or({
+        "//conditions:default": [
+        ],
+    }),
+    rustc_flags = [
+        # In most cases, warnings in 3rd party crates are not interesting as
+        # they're out of the control of consumers. The flag here silences
+        # warnings. For more details see:
+        # https://doc.rust-lang.org/rustc/lints/levels.html
+        "--cap-lints=allow",
+    ],
+    tags = [
+        "cargo-bazel",
+        "manual",
+        "noclippy",
+        "norustfmt",
+    ],
+    version = "1.0.76",
+    deps = [
+        ":cc",
+    ] + select_with_or({
+        "//conditions:default": [
         ],
     }),
 )
