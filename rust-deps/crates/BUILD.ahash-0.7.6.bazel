@@ -96,7 +96,7 @@ rust_library(
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps
-            "@crates_vendor__getrandom-0.2.7//:getrandom",
+            "@crates_vendor__getrandom-0.2.8//:getrandom",
 
             # Common Deps
             "@crates_vendor__ahash-0.7.6//:build_script_build",
@@ -110,7 +110,7 @@ rust_library(
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps
-            "@crates_vendor__once_cell-1.15.0//:once_cell",
+            "@crates_vendor__once_cell-1.16.0//:once_cell",
 
             # Common Deps
             "@crates_vendor__ahash-0.7.6//:build_script_build",

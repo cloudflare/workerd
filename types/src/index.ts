@@ -7,7 +7,7 @@ import { StructureGroups } from "@workerd/jsg/rtti.capnp.js";
 import { Message } from "capnp-ts";
 import prettier from "prettier";
 import ts from "typescript";
-import { generateDefinitions } from "./generator";
+import { generateDefinitions, parseApiAstDump } from "./generator";
 import { printNodeList, printer } from "./print";
 import { createMemoryProgram } from "./program";
 import { ParsedTypeDefinition, collateStandards } from "./standards";
@@ -179,25 +179,58 @@ function printDefinitions(
 //    Directory containing binary Cap’n Proto file paths, in the format <label>.api.capnp.bin
 //      <label> should relate to the compatibility date
 export async function main(args?: string[]) {
-  const { values: options, positionals } = util.parseArgs({
+  const {
+    values: {
+      "input-dir": inputDir,
+      "output-dir": outputDir,
+      "defines-dir": definesDir,
+      ...options
+    },
+  } = util.parseArgs({
     options: {
-      defines: { type: "string", short: "d" },
-      output: { type: "string", short: "o" },
+      "defines-dir": { type: "string", short: "d" },
+      "input-dir": { type: "string", short: "i" },
+      "output-dir": { type: "string", short: "o" },
       format: { type: "boolean", short: "f" },
     },
     strict: true,
-    allowPositionals: true,
+    allowPositionals: false,
     args,
   });
-  const inputDir = positionals[0];
-  assert(
-    inputDir,
-    "This script requires a positional argument pointing to a directory containing binary Cap’n Proto file paths, in the format <label>.api.capnp.bin"
+
+  if (!inputDir) {
+    throw new Error(
+      "Expected an argument --input-dir pointing to a directory containing api.capnp.bin files and parameter names"
+    );
+  }
+
+  const inputFiles = await readdir(inputDir).then((filenames) =>
+    filenames.map((filename) => path.join(inputDir, filename))
   );
 
-  const extra = await collateExtraDefinitions(options.defines);
+  const extra = await collateExtraDefinitions(definesDir);
 
-  const files = await readdir(inputDir);
+  const paramNamesJson = inputFiles.find(
+    (filepath) => path.basename(filepath) === "param-names.json"
+  );
+  const capnpFiles = inputFiles.filter((filename) =>
+    path.basename(filename).endsWith("api.capnp.bin")
+  );
+
+  if (paramNamesJson === undefined) {
+    console.warn(
+      `Couldn't find param-names.json in ${inputDir} containing parameter names, params will be nameless.`
+    );
+  } else {
+    parseApiAstDump(paramNamesJson);
+  }
+
+  if (capnpFiles.length === 0) {
+    throw new Error(
+      `Expected to find at least one file ending with api.capnp.bin in ${inputDir}`
+    );
+  }
+
   const standards = await collateStandards(
     path.join(
       path.dirname(require.resolve("typescript")),
@@ -208,8 +241,9 @@ export async function main(args?: string[]) {
       "lib.webworker.iterable.d.ts"
     )
   );
-  for (const file of files) {
-    const buffer = await readFile(path.join(inputDir, file));
+
+  for (const file of capnpFiles) {
+    const buffer = await readFile(file);
     const message = new Message(buffer, /* packed */ false);
     const root = message.getRoot(StructureGroups);
     let { ambient, importable } = printDefinitions(root, standards, extra);
@@ -217,9 +251,9 @@ export async function main(args?: string[]) {
       ambient = prettier.format(ambient, { parser: "typescript" });
       importable = prettier.format(importable, { parser: "typescript" });
     }
-    if (options.output !== undefined) {
-      const output = path.resolve(options.output);
-      const [date] = file.split(".api.capnp.bin");
+    if (outputDir !== undefined) {
+      const output = path.resolve(outputDir);
+      const [date] = path.basename(file).split(".api.capnp.bin");
       await mkdir(path.join(output, date), { recursive: true });
       await writeFile(path.join(output, date, "api.d.ts"), ambient);
       const importableFile = path.join(output, date, "api.ts");

@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # (MIT OR Apache-2.0) AND Unicode-DFS-2016
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "unicode_ident",
+    name = "itoa",
     srcs = glob(
         include = [
             "**/*.rs",

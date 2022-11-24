@@ -13,6 +13,7 @@ import ts from "typescript";
 import { createStructureNode } from "./structure";
 
 export { getTypeName } from "./type";
+export { parseApiAstDump } from "./parameter-names";
 
 type StructureMap = Map<string, Structure>;
 // Builds a lookup table mapping type names to structures
