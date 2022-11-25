@@ -485,6 +485,22 @@ KJ_TEST("Server: serve basic Service Worker") {
     Bad Request)"_blockquote);
 }
 
+KJ_TEST("Server: use service name as Service Worker origin") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    serviceWorkerScript =
+        `addEventListener("fetch", event => {
+        `  event.respondWith(new Response(new Error("Doh!").stack));
+        `})
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", R"(
+    Error: Doh!
+        at hello:2:34)"_blockquote);
+}
+
 KJ_TEST("Server: serve basic modular Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
