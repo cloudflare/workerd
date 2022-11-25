@@ -90,6 +90,26 @@ class Wrappable: public kj::Refcounted {
   // Wrappable and are not visible to GC tracing.
 
 public:
+  static constexpr uint INTERNAL_FIELD_COUNT = 2;
+  // Number of internal fields in a wrapper object.
+  //
+  // V8's EmbedderHeapTracer API imposes the following seemingly-arbitrary requirements on objects'
+  // internal fields:
+  // - The object has at least two internal fields (otherwise, it is ignored).
+  // - The first internal field is not null (otherwise, the object is ignored).
+  // - The object has an even number of internal fields (otherwise, DCHECK-failure).
+  // - Only the first two internal field values are reported to the tracing API.
+  //
+  // Right then, we'll allocate two fields. The first will point to the GC tracing callback
+  // (null if no tracing needed), the second will point to the object itself.
+
+  static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 1;
+  // Index of the internal field that points back to the `Wrappable`.
+
+  static constexpr uint NEEDS_TRACING_FIELD_INDEX = 0;
+  // Index of the internal field that must be non-null to convince EmbedderHeapTracer that the
+  // object needs tracing. The actual value is not relevant aside from nullness.
+
   void addStrongRef();
   void removeStrongRef();
 

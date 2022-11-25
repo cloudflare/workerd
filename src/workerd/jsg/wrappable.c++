@@ -149,12 +149,11 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   tracer.addWrapper({}, *this);
 
-  // Set up internal fields for a newly-allocated object. V8 apparently decides that embedder
-  // tracing is necessary if internal field 0 is non-null, so we set it only if we want tracing.
-  // Meanwhile, we use field 1 to be the pointer to ourselves used for API glue.
-  KJ_REQUIRE(object->InternalFieldCount() == 2);
-  object->SetAlignedPointerInInternalField(0, needsGcTracing ? this : nullptr);
-  object->SetAlignedPointerInInternalField(1, this);
+  // Set up internal fields for a newly-allocated object.
+  KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+  object->SetAlignedPointerInInternalField(
+      NEEDS_TRACING_FIELD_INDEX, needsGcTracing ? this : nullptr);
+  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this);
 
   if (lastTraceId == tracer.currentTraceId() || strongRefcount == 0) {
     // Either:
@@ -211,7 +210,8 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::Cast(handle)
         ->FindInstanceInPrototypeChain(IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
-      return *reinterpret_cast<Wrappable*>(instance->GetAlignedPointerFromInternalField(1));
+      return *reinterpret_cast<Wrappable*>(
+          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
     }
   }
 

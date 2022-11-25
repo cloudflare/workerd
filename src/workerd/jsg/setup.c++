@@ -350,7 +350,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
   {
     v8::HandleScope scope(ptr);
     auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
-    opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(2);
+    opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
     this->opaqueTemplate.Reset(ptr, opaqueTemplate);
   }
 }
