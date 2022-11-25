@@ -160,6 +160,10 @@ void HeapTracer::destroy() {
   wrappersToTrace.clear();
 }
 
+HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).heapTracer;
+}
+
 void HeapTracer::mark(TraceableHandle& handle) {
   if (handle.lastMarked == traceId) {
     return;

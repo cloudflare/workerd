@@ -239,9 +239,7 @@ public:
   void destroy();
   // Call under isolate lock when shutting down isolate.
 
-  static HeapTracer& getTracer(v8::Isolate* isolate) {
-    return *reinterpret_cast<HeapTracer*>(isolate->GetEmbedderHeapTracer());
-  }
+  static HeapTracer& getTracer(v8::Isolate* isolate);
 
   uint currentTraceId() { return traceId; }
 

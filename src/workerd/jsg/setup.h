@@ -208,6 +208,7 @@ private:
 
   friend class Data;
   friend class Wrappable;
+  friend class HeapTracer;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);
