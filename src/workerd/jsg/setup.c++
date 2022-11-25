@@ -155,9 +155,6 @@ void IsolateBase::clearDestructionQueue() {
 void HeapTracer::destroy() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
   KJ_DEFER(isolate = nullptr);
-  isolate->SetEmbedderHeapTracer(nullptr);
-  referencesToMarkLater.clear();
-  wrappersToTrace.clear();
 }
 
 HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
@@ -190,31 +187,7 @@ void HeapTracer::mark(TraceableHandle& handle) {
 
   handle.lastMarked = traceId;
 
-  if (inAdvanceTracing) {
-    // We actually are in the middle of a trace, so mark the reference for V8.
-    RegisterEmbedderReference(handle.tracedRef);
-  } else if (inTrace) {
-    // A trace is happening but V8 hasn't called AdvanceTracing(), so we can't actually call back
-    // to RegisterEmbedderReference() right now as V8 will not like it. But we can't save a pointer
-    // to the handle itself to mark later becasue, who knows, maybe it'll be dropped on the C++
-    // side in the meantime. So we make a copy TracedReference which we can mark during the next
-    // AdvanceTracing(). Awkwardly, this means we don't actually mark `handle.tracedRef`, so it
-    // can still be collected, but at least the object it points to cannot be.
-    //
-    // Note that this code path only ever executes if incremental tracing is enabled, which
-    // as of this writing is disabled by default.
-    v8::HandleScope scope(isolate);
-    auto local = handle.Get(isolate);
-    referencesToMarkLater.add(v8::TracedReference<v8::Data>(isolate, local));
-
-    static bool logOnce KJ_UNUSED = ([]() {
-      // I can't figure out how to get this code to actually run in tests, but it is apparently
-      // happening in production and causing problems. Try to gather some stack traces from
-      // production.
-      KJ_LOG(ERROR, "mark() called during trace outside of AdvanceTracing?", kj::getStackTrace());
-      return true;
-    })();
-  }
+  // TODO(now): New marking strategy.
 }
 
 void HeapTracer::clearWrappers() {
@@ -222,59 +195,6 @@ void HeapTracer::clearWrappers() {
     wrappers.front().detachWrapper();
   }
 }
-
-void HeapTracer::RegisterV8References(
-    const std::vector<std::pair<void*, void*>>& internalFields) {
-  for (auto [dummy, obj]: internalFields) {
-    KJ_ASSERT(dummy == obj);
-    wrappersToTrace.add(reinterpret_cast<Wrappable*>(obj));
-  }
-}
-
-void HeapTracer::TracePrologue(TraceFlags flags) {
-  wrappersToTrace.clear();
-  if (++traceId == 0) {
-    KJ_LOG(ERROR, "trace ID wrapped around!");
-
-    // We probably don't need to crash, because all of our logic only compares trace IDs for
-    // equality, not less/greater. Just make sure we don't use ID 0.
-    traceId = 1;
-  }
-  inTrace = true;
-}
-
-bool HeapTracer::AdvanceTracing(double deadlineMs) {
-  // TODO(perf): Actually honor deadlineMs.
-
-  inAdvanceTracing = true;
-  KJ_DEFER(inAdvanceTracing = false);
-
-  auto refs = kj::mv(referencesToMarkLater);
-  for (auto& ref: refs) {
-    RegisterEmbedderReference(ref);
-  }
-
-  auto wrappables = kj::mv(wrappersToTrace);
-  for (auto wrappable: wrappables) {
-    wrappable->traceFromV8(traceId);
-  }
-
-  return false;
-}
-bool HeapTracer::IsTracingDone() {
-  return wrappersToTrace.empty() && referencesToMarkLater.empty();
-}
-
-void HeapTracer::TraceEpilogue(TraceSummary* trace_summary) {
-  KJ_ASSERT(wrappersToTrace.empty());
-  if (!referencesToMarkLater.empty()) {
-    KJ_LOG(ERROR, "referencesToMarkLater is not empty at end of trace?");
-    referencesToMarkLater.clear();
-  }
-  inTrace = false;
-}
-
-void HeapTracer::EnterFinalPause(EmbedderStackState stackState) {}
 
 void IsolateBase::scavengePrologue(
     v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {

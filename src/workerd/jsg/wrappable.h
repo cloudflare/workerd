@@ -222,13 +222,11 @@ private:
   friend class HeapTracer;
 };
 
-class HeapTracer final: public v8::EmbedderHeapTracer {
+class HeapTracer {
   // For historical reasons, this is actually implemented in setup.c++.
 
 public:
-  explicit HeapTracer(v8::Isolate* isolate): isolate(isolate) {
-    isolate->SetEmbedderHeapTracer(this);
-  }
+  explicit HeapTracer(v8::Isolate* isolate): isolate(isolate) {}
 
   ~HeapTracer() noexcept {
     // Destructor has to be noexcept because it inherits from a V8 type that has a noexcept
@@ -254,24 +252,14 @@ public:
   void startScavenge() { scavenging = true; }
   void endScavenge() { scavenging = false; }
 
-  void RegisterV8References(const std::vector<std::pair<void*, void*>>& internalFields) override;
-  void TracePrologue(TraceFlags flags) override;
-  bool AdvanceTracing(double deadlineMs) override;
-  bool IsTracingDone() override;
-  void TraceEpilogue(TraceSummary* trace_summary) override;
-  void EnterFinalPause(EmbedderStackState stackState) override;
-
-  bool isTracing() { return inTrace; }
+  bool isTracing() { return false; }
   bool isScavenging() { return scavenging; }
 
 private:
   v8::Isolate* isolate;
   uint traceId = 1;
-  bool inTrace = false;
-  bool inAdvanceTracing = false;
   bool scavenging = false;
   kj::Vector<Wrappable*> wrappersToTrace;
-  kj::Vector<v8::TracedReference<v8::Data>> referencesToMarkLater;
 
   kj::List<Wrappable, &Wrappable::link> wrappers;
   // List of all Wrappables for which a JavaScript wrapper exists.
