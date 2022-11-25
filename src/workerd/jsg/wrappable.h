@@ -15,6 +15,8 @@
 #include <kj/list.h>
 #include <v8.h>
 
+namespace cppgc { class Visitor; }
+
 namespace workerd::jsg {
 
 using kj::uint;
@@ -47,6 +49,8 @@ public:
   KJ_DISALLOW_COPY(TraceableHandle);
 
   uint getLastMarked() { return lastMarked; }
+
+  void visit(GcVisitor& visitor);
 
 private:
   v8::TracedReference<v8::Data> tracedRef;
@@ -90,7 +94,7 @@ class Wrappable: public kj::Refcounted {
   // Wrappable and are not visible to GC tracing.
 
 public:
-  static constexpr uint INTERNAL_FIELD_COUNT = 2;
+  static constexpr uint INTERNAL_FIELD_COUNT = 3;
   // Number of internal fields in a wrapper object.
   //
   // V8's EmbedderHeapTracer API imposes the following seemingly-arbitrary requirements on objects'
@@ -103,12 +107,26 @@ public:
   // Right then, we'll allocate two fields. The first will point to the GC tracing callback
   // (null if no tracing needed), the second will point to the object itself.
 
-  static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 1;
+  static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 2;
   // Index of the internal field that points back to the `Wrappable`.
 
-  static constexpr uint NEEDS_TRACING_FIELD_INDEX = 0;
-  // Index of the internal field that must be non-null to convince EmbedderHeapTracer that the
-  // object needs tracing. The actual value is not relevant aside from nullness.
+  static constexpr uint CPPGC_SHIM_FIELD_INDEX = 1;
+  // Index of the internal field that contains a pointer to the cppgc shim object, used to get
+  // tracing callback from V8 and get notification when the wrapper is collected.
+
+  static constexpr uint WRAPPABLE_TAG_FIELD_INDEX = 0;
+  // Field must contain a pointer to `WRAPPABLE_TAG`. This is a requirement of v8::CppHeap. The
+  // purpose is not clear.
+  //
+  // Note that although V8 lets us configure which slot this tag is in, in practice if we set it
+  // to anything other than zero, we see crashes inside V8. It appears that V8 allocates some
+  // objects of its own which have internal fields, and then GC doesn't check that the index is
+  // in-bounds before reading it...
+
+  static constexpr uint16_t WRAPPABLE_TAG = 0xeb04;
+  // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
+  //
+  // This value was chosen randomly.
 
   void addStrongRef();
   void removeStrongRef();
@@ -164,10 +182,12 @@ public:
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
 
-  void traceFromV8(uint traceId);
+  void traceFromV8(cppgc::Visitor& cppgcVisitor);
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
 
 private:
+  class CppgcShim;
+
   TraceableHandle wrapper;
   // Handle to the JS wrapper object. The wrapper is created lazily when the object is first
   // exported to JavaScript; until then, the wrapper is empty.
@@ -241,7 +261,7 @@ public:
 
   uint currentTraceId() { return traceId; }
 
-  void mark(TraceableHandle& handle);
+  void mark(TraceableHandle& handle, kj::Maybe<GcVisitor&> visitor);
   // If no trace is in progress, does nothing. If a trace is in progress, either calls
   // RegisterEmbedderReference() now or arranges for it to be called before the end of the trace.
 

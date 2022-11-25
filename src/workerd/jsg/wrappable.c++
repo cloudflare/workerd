@@ -6,8 +6,22 @@
 #include "jsg.h"
 #include "setup.h"
 #include <kj/debug.h>
+#include <v8-cppgc.h>
+#include <cppgc/allocation.h>
+#include <cppgc/garbage-collected.h>
 
 namespace workerd::jsg {
+
+class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
+public:
+  CppgcShim(Wrappable& wrappable): wrappable(kj::addRef(wrappable)) {}
+
+  void Trace(cppgc::Visitor* visitor) const {
+    const_cast<Wrappable*>(wrappable.get())->traceFromV8(*visitor);
+  }
+
+  kj::Own<Wrappable> wrappable;
+};
 
 kj::Own<Wrappable> Wrappable::detachWrapper() {
   resetWrapperHandle();
@@ -41,7 +55,7 @@ void Wrappable::addStrongRef() {
     if (wrapper.IsEmpty()) {
       // Since we have no JS wrapper, we're forced to recursively mark all references reachable
       // through this wrapper as strong.
-      GcVisitor visitor(*this);
+      GcVisitor visitor(*this, nullptr);
       jsgVisitForGc(visitor);
     } else {
       // Mark the handle strong. V8 will find it and trace it.
@@ -67,7 +81,7 @@ void Wrappable::removeStrongRef() {
         // the wrapper is empty, and isolate is null, then the child handles it has will
         // be released anyway (since we're about to be destroyed), thus this visitation
         // isn't required (and may be buggy, since it may happen outside the isolate lock).
-        GcVisitor visitor(*this);
+        GcVisitor visitor(*this, nullptr);
         jsgVisitForGc(visitor);
       }
     } else {
@@ -94,7 +108,9 @@ void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappa
   }
 }
 
-void Wrappable::traceFromV8(uint traceId) {
+void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
+  uint traceId = HeapTracer::getTracer(isolate).currentTraceId();
+
   if (lastTraceId == traceId) {
     // Duplicate trace, ignore.
     //
@@ -104,7 +120,7 @@ void Wrappable::traceFromV8(uint traceId) {
     // get duplicate traces.
   } else {
     lastTraceId = traceId;
-    GcVisitor visitor(*this);
+    GcVisitor visitor(*this, cppgcVisitor);
     jsgVisitForGc(visitor);
   }
 }
@@ -151,9 +167,15 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  object->SetAlignedPointerInInternalField(
-      NEEDS_TRACING_FIELD_INDEX, needsGcTracing ? this : nullptr);
   object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this);
+
+  auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
+
+  auto cppgcShim = cppgc::MakeGarbageCollected<CppgcShim>(cppgcAllocHandle, *this);
+
+  object->SetAlignedPointerInInternalField(CPPGC_SHIM_FIELD_INDEX, cppgcShim);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX,
+      const_cast<uint16_t*>(&WRAPPABLE_TAG));
 
   if (lastTraceId == tracer.currentTraceId() || strongRefcount == 0) {
     // Either:
@@ -167,7 +189,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
     // In either case, it's important that we inform V8 that the wrapper cannot be scavenged, since
     // it may be reachable via tracing. So, we must call tracer.mark(), which has the effect of
     // initializing the TracedReference.
-    tracer.mark(wrapper);
+    tracer.mark(wrapper, nullptr);
   } else {
     // This object is not currently reachable via GC tracing from other C++ objects (it was not
     // reached during the most-recent cycle), therefore it does not need a v8::TracedReference
@@ -190,7 +212,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
     // This object has untraced references, but didn't have a wrapper. That means that any refs
     // transitively reachable through the reference are strong. Now that a wrapper exists, the
     // refs will be traced when the wrapper is traced, so they need to be marked weak.
-    GcVisitor visitor(*this);
+    GcVisitor visitor(*this, nullptr);
     jsgVisitForGc(visitor);
   }
 }
@@ -284,7 +306,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
       // JavaScript. However, we might transitively hold reference to objects that do have wrappers,
       // so we need to transitively trace to our children.
       lastTraceId = visitor.parent.lastTraceId;
-      GcVisitor subVisitor(*this);
+      GcVisitor subVisitor(*this, visitor.cppgcVisitor);
       jsgVisitForGc(subVisitor);
     }
   } else {
@@ -300,7 +322,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
       // b) The parent has already been traced during this cycle. Probably, this call to visitRef()
       //    is actually a result of the parent being traced. So this is the usual case where we
       //    need to mark.
-      tracer.mark(wrapper);
+      tracer.mark(wrapper, visitor);
     }
   }
 }
@@ -333,7 +355,7 @@ void GcVisitor::visit(Data& value) {
       // certainly have an isolate.
       //
       // So either way, `parent.isolate` is non-null.
-      HeapTracer::getTracer(parent.isolate).mark(value.handle);
+      HeapTracer::getTracer(parent.isolate).mark(value.handle, *this);
     }
   }
 }

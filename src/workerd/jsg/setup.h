@@ -54,6 +54,7 @@ public:
 
 private:
   kj::Own<v8::Platform> platform;
+  friend class IsolateBase;
 
   explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
 };
@@ -205,6 +206,7 @@ private:
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   HeapTracer heapTracer;
+  std::unique_ptr<v8::CppHeap> cppgcHeap;
 
   friend class Data;
   friend class Wrappable;

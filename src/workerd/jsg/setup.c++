@@ -11,6 +11,7 @@
 #include <cxxabi.h>
 #include "libplatform/libplatform.h"
 #include <ucontext.h>
+#include <v8-cppgc.h>
 
 #ifdef WORKERD_ICU_DATA_EMBED
 #include <icudata-embed.capnp.h>
@@ -121,6 +122,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 
   v8::V8::InitializePlatform(platform.get());
   v8::V8::Initialize();
+  cppgc::InitializeProcess(platform->GetPageAllocator());
   v8Initialized = true;
 }
 
@@ -161,7 +163,7 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).heapTracer;
 }
 
-void HeapTracer::mark(TraceableHandle& handle) {
+void HeapTracer::mark(TraceableHandle& handle, kj::Maybe<GcVisitor&> visitor) {
   if (handle.lastMarked == traceId) {
     return;
   }
@@ -187,7 +189,11 @@ void HeapTracer::mark(TraceableHandle& handle) {
 
   handle.lastMarked = traceId;
 
-  // TODO(now): New marking strategy.
+  KJ_IF_MAYBE(v, visitor) {
+    KJ_IF_MAYBE(cgv, v->cppgcVisitor) {
+      cgv->Trace(handle.tracedRef);
+    }
+  }
 }
 
 void HeapTracer::clearWrappers() {
@@ -240,6 +246,28 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
       heapTracer(ptr) {
+  v8::CppHeapCreateParams params {
+    .wrapper_descriptor = v8::WrapperDescriptor(
+        Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+        Wrappable::CPPGC_SHIM_FIELD_INDEX,
+        Wrappable::WRAPPABLE_TAG),
+
+    .marking_support = cppgc::Heap::MarkingType::kAtomic,
+    .sweeping_support = cppgc::Heap::SweepingType::kAtomic
+    // We currently don't attempt to support incremental marking or sweeping. We probably could
+    // support them, but it will take some careful investigation and testing. It's not clear if
+    // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+    // full atomic mark-sweep usually doesn't require much of a pause.
+    //
+    // We probably won't ever support concurrent marking or sweeping because concurrent GC is only
+    // expected to be a win if there are idle CPU cores available. Workers normally run on servers
+    // that are handling many requests at once, thus it's expected CPU cores will be fully
+    // utilized. This differs from browser environments, where a user is typically doing only one
+    // thing at a time and thus likely has CPU cores to spare.
+  };
+  cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
+  ptr->AttachCppHeap(cppgcHeap.get());
+
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
 
@@ -288,6 +316,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+  ptr->DetachCppHeap();
   KJ_DEFER(ptr->Dispose());
 }
 

@@ -1523,12 +1523,15 @@ public:
 
 private:
   Wrappable& parent;
+  kj::Maybe<cppgc::Visitor&> cppgcVisitor;
 
-  explicit GcVisitor(Wrappable& parent): parent(parent) {}
+  explicit GcVisitor(Wrappable& parent, kj::Maybe<cppgc::Visitor&> cppgcVisitor)
+      : parent(parent), cppgcVisitor(cppgcVisitor) {}
   KJ_DISALLOW_COPY(GcVisitor);
 
   friend class Wrappable;
   friend class Object;
+  friend class HeapTracer;
 };
 
 constexpr bool isGcVisitable_(...) { return false; }
