@@ -64,7 +64,7 @@ public:
   // Running the script will create a v8::Script instance bound to the given
   // context then will run it to completion.
 
-  static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js);
+  static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
 
 private:
   v8::Global<v8::UnboundScript> unboundScript;

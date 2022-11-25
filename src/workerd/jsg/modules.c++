@@ -264,10 +264,10 @@ void NonModuleScript::run(v8::Local<v8::Context> context) const {
   check(boundScript->Run(context));
 }
 
-NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js) {
+NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name) {
   // Create a dummy script origin for it to appear in Sources panel.
   auto isolate = js.v8Isolate;
-  v8::ScriptOrigin origin(isolate, v8StrIntern(isolate, "worker.js"));
+  v8::ScriptOrigin origin(isolate, v8StrIntern(isolate, name));
   v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
   return NonModuleScript(js,
       check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
