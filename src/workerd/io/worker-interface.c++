@@ -285,6 +285,15 @@ kj::Promise<void> RpcWorkerInterface::request(
   return promise.attach(kj::mv(inner));
 }
 
+kj::Promise<void> RpcWorkerInterface::connect(
+    kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+    ConnectResponse& tunnel) {
+  auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
+  auto promise = inner->connect(host, headers, connection, tunnel);
+  return promise.attach(kj::mv(inner));
+}
+
+
 void RpcWorkerInterface::prewarm(kj::StringPtr url) {
   auto req = dispatcher.prewarmRequest(
       capnp::MessageSize { url.size() / sizeof(capnp::word) + 4, 0 });
