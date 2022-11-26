@@ -196,8 +196,8 @@ private:
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
 
-  static void scavengePrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
-  static void scavengeEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
+  static void gcPrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
+  static void gcEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 

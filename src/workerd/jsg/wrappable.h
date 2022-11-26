@@ -252,13 +252,21 @@ public:
   void startScavenge() { scavenging = true; }
   void endScavenge() { scavenging = false; }
 
-  bool isTracing() { return false; }
+  void startTrace() {
+    tracing = true;
+    ++traceId;
+    if (traceId == 0) traceId = 1;  // allow wrap-around but skip ID zero
+  }
+  void endTrace() { tracing = false; }
+
+  bool isTracing() { return tracing; }
   bool isScavenging() { return scavenging; }
 
 private:
   v8::Isolate* isolate;
   uint traceId = 1;
   bool scavenging = false;
+  bool tracing = false;
   kj::Vector<Wrappable*> wrappersToTrace;
 
   kj::List<Wrappable, &Wrappable::link> wrappers;

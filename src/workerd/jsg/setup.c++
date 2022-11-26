@@ -174,7 +174,7 @@ void HeapTracer::mark(TraceableHandle& handle) {
   // we have to make sure a TracedReference exists to tell V8 "this can't be collected without
   // tracing".
 
-  // Calculate previous trace ID. See TracePrologue() wrap-around logic.
+  // Calculate previous trace ID. See startTrace() wrap-around logic.
   uint prevTraceId = traceId == 1 ? uint(kj::maxValue) : traceId - 1;
 
   if (handle.lastMarked == prevTraceId) {
@@ -196,25 +196,33 @@ void HeapTracer::clearWrappers() {
   }
 }
 
-void IsolateBase::scavengePrologue(
+void IsolateBase::gcPrologue(
     v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).startScavenge();
+  if (type == v8::kGCTypeScavenge) {
+    HeapTracer::getTracer(isolate).startScavenge();
 
-  // V8 frequently performs "scavenges" to quickly reclaim memory from short-lived objects. During
-  // a scavenge, V8 does *not* invoke our EmbedderHeapTracer. It used to be that we therefore had
-  // to iterate over all our weak handles and call MarkActive() on them in order to make sure the
-  // scavenger didn't try to collect them. We no longer need to do that because we now use
-  // TracedReference for any handle that is traceable, and V8 knows not to scavenge such handles.
-  //
-  // Note that the scavenge pass can still collect some of our wrapper objects -- specifically, the
-  // ones that have only ever been reachable directly from JavaScript (and no longer are), but were
-  // never reachable transitively through another C++ object, and therefore never had a
-  // TracedReference allocated for them.
+    // V8 frequently performs "scavenges" to quickly reclaim memory from short-lived objects. During
+    // a scavenge, V8 does *not* invoke our EmbedderHeapTracer. It used to be that we therefore had
+    // to iterate over all our weak handles and call MarkActive() on them in order to make sure the
+    // scavenger didn't try to collect them. We no longer need to do that because we now use
+    // TracedReference for any handle that is traceable, and V8 knows not to scavenge such handles.
+    //
+    // Note that the scavenge pass can still collect some of our wrapper objects -- specifically, the
+    // ones that have only ever been reachable directly from JavaScript (and no longer are), but were
+    // never reachable transitively through another C++ object, and therefore never had a
+    // TracedReference allocated for them.
+  } else if (type == v8::kGCTypeMarkSweepCompact) {
+    HeapTracer::getTracer(isolate).startTrace();
+  }
 }
 
-void IsolateBase::scavengeEpilogue(
+void IsolateBase::gcEpilogue(
     v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).endScavenge();
+  if (type == v8::kGCTypeScavenge) {
+    HeapTracer::getTracer(isolate).endScavenge();
+  } else if (type == v8::kGCTypeMarkSweepCompact) {
+    HeapTracer::getTracer(isolate).endTrace();
+  }
 }
 
 namespace {
@@ -235,8 +243,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
 
-  ptr->AddGCPrologueCallback(scavengePrologue, v8::kGCTypeScavenge);
-  ptr->AddGCEpilogueCallback(scavengeEpilogue, v8::kGCTypeScavenge);
+  ptr->AddGCPrologueCallback(gcPrologue, v8::kGCTypeAll);
+  ptr->AddGCEpilogueCallback(gcEpilogue, v8::kGCTypeAll);
 
   ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
   ptr->SetData(0, this);
