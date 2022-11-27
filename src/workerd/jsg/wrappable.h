@@ -24,53 +24,6 @@ using kj::uint;
 class GcVisitor;
 class HeapTracer;
 
-class TraceableHandle: public v8::Global<v8::Data> {
-  // Internal type used anywhere where a v8::Global with support for GC tracing is desired. This
-  // encapsulates the very weird behavior of TracedReference.
-
-public:
-  using v8::Global<v8::Data>::Global;
-
-  TraceableHandle(TraceableHandle&& other)
-      : v8::Global<v8::Data>(kj::mv(other)) {
-    // Since we don't know if `other.lastMarked` is current, we have to assume `other.tracedRef` is
-    // invalid and not touch it. Setting `lastMarked` to zero ensures it'll be recreated if needed.
-    other.lastMarked = 0;
-  }
-  TraceableHandle& operator=(TraceableHandle&& other) {
-    static_cast<v8::Global<v8::Data>&>(*this) = kj::mv(other);
-    // Since we don't know if `other.lastMarked` is current, we have to assume `other.tracedRef` is
-    // invalid and not touch it. Setting `lastMarked` to zero ensures it'll be recreated if needed.
-    lastMarked = 0;
-    other.lastMarked = 0;
-    return *this;
-  }
-
-  KJ_DISALLOW_COPY(TraceableHandle);
-
-  uint getLastMarked() { return lastMarked; }
-
-  void visit(GcVisitor& visitor);
-
-private:
-  v8::TracedReference<v8::Data> tracedRef;
-  // Space for a TracedReference. Note that V8's TracedReference has very weird lifetime
-  // properties. It becomes poison when V8 decides it is unreachable. Any attempt to use it after
-  // that point will crash or worse. This includes calling `Reset()`! `Reset()` will blow up if
-  // the reference has been collected. And attempting to assign `tracedRef` implicitly calls
-  // `Reset()`! So if the ref has been deemed unreachable then YOU CANNOT ASSIGN OVER IT.
-  //
-  // However, the type has no destructor. So... you can safely placement-new over it. (Or use
-  // kj::ctor(), which is a nice interface for placement-new.)
-
-  uint lastMarked = 0;
-  // Last trace ID at which `tracedRef` was marked. 0 indicates never marked. If `lastMarked` is
-  // not equal to either the current or previous trace, then `tracedRef` must be assumed to be
-  // poison which must not be touched!
-
-  friend class HeapTracer;
-};
-
 class Wrappable: public kj::Refcounted {
   // Base class for C++ objects which can be "wrapped" for JavaScript consumption. A JavaScript
   // "wrapper" object is created, and then the JS wrapper and C++ Wrappable are "attached" to each
@@ -243,10 +196,6 @@ public:
   static HeapTracer& getTracer(v8::Isolate* isolate);
 
   uint currentTraceId() { return traceId; }
-
-  void mark(TraceableHandle& handle, kj::Maybe<GcVisitor&> visitor);
-  // If no trace is in progress, does nothing. If a trace is in progress, either calls
-  // RegisterEmbedderReference() now or arranges for it to be called before the end of the trace.
 
   void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.add(wrappable); }
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }

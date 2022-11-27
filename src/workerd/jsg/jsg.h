@@ -703,7 +703,7 @@ public:
     destroy();
   }
   Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
-    if (handle.IsWeak()) handle.ClearWeak();
+    if (other.tracedHandle != nullptr) handle.ClearWeak();
     other.isolate = nullptr;
     assertInvariant();
     other.assertInvariant();
@@ -714,7 +714,7 @@ public:
       isolate = other.isolate;
       handle = kj::mv(other.handle);
       other.isolate = nullptr;
-      if (handle.IsWeak()) handle.ClearWeak();
+      if (other.tracedHandle != nullptr) handle.ClearWeak();
     }
     assertInvariant();
     other.assertInvariant();
@@ -739,9 +739,14 @@ private:
   v8::Isolate* isolate = nullptr;
   // The isolate with which the handles below are associated.
 
-  TraceableHandle handle;
+  v8::Global<v8::Data> handle;
   // Handle to the value which will be marked strong if any untraced C++ references exist, weak
   // otherwise.
+
+  kj::Maybe<v8::TracedReference<v8::Data>> tracedHandle;
+  // When `handle` is weak, `tracedHandle` is a copy of it used to integrate with V8 GC tracing.
+  // When `handle` is strong, we null out `tracedHandle`, because we don't need it, and it is
+  // illegal to hold onto a traced handle without actually marking it during each trace.
 
   friend class GcVisitor;
 

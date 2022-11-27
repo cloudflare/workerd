@@ -251,32 +251,31 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
 void GcVisitor::visit(Data& value) {
   if (!value.handle.IsEmpty()) {
     // Make ref strength match the parent.
-    bool becameWeak = false;
     if (parent.strongRefcount > 0 && parent.wrapper == nullptr) {
-      if (value.handle.IsWeak()) {
+      // This is directly reachable by a strong ref, so mark the handle strong.
+      if (value.tracedHandle != nullptr) {
+        // Convert the handle back to strong and discard the traced reference.
         value.handle.ClearWeak();
+        value.tracedHandle = nullptr;
       }
     } else {
-      if (!value.handle.IsWeak()) {
+      // This is only reachable via traced objects, so the handle should be weak, and we should
+      // hold a TracedReference alongside it.
+      if (value.tracedHandle == nullptr) {
+        // Create the TrancedReference.
+        v8::HandleScope scope(parent.isolate);
+        value.tracedHandle = v8::TracedReference<v8::Data>(
+            parent.isolate, value.handle.Get(parent.isolate));
+
+        // Set the handle weak.
         value.handle.SetWeak();
-        becameWeak = true;
       }
     }
 
-    // Check if we need to mark.
-    // TODO(soon): Why parent.lastTraceId != 0 vs. parent.lastTraceId == tracer.currentTraceId()?
-    //   Just because we don't have a `tracer` object yet to check against? Does this actually
-    //   make any difference in practice? Leaving it for now because the worst case is we mark
-    //   too often, which is better than marking not often enough.
-    if (becameWeak || parent.lastTraceId != 0) {
-      // If `becameWeak`, then we must have an ancestor that has a wrapper and therefore a non-null
-      // isolate. All children would inherit that isolate.
-      //
-      // If `parent.lastTraceId != 0`, then the parent has been traced directly before so would
-      // certainly have an isolate.
-      //
-      // So either way, `parent.isolate` is non-null.
-      HeapTracer::getTracer(parent.isolate).mark(value.handle, *this);
+    KJ_IF_MAYBE(c, cppgcVisitor) {
+      KJ_IF_MAYBE(t, value.tracedHandle) {
+        c->Trace(*t);
+      }
     }
   }
 }

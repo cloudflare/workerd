@@ -163,39 +163,6 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).heapTracer;
 }
 
-void HeapTracer::mark(TraceableHandle& handle, kj::Maybe<GcVisitor&> visitor) {
-  if (handle.lastMarked == traceId) {
-    return;
-  }
-
-  // mark() may be called even when we're not currently tracing, in order to inform us that the
-  // object has become reachable from a new parent object. We must ensure that the TracedReference
-  // is initialized in this case, to prevent the object from being collected during scavenging.
-  // Scavenge passes do not actually perform a trace, and instead try to free objects that are
-  // known not to be reachable because the only references V8 ever knew about have gone away. So
-  // we have to make sure a TracedReference exists to tell V8 "this can't be collected without
-  // tracing".
-
-  // Calculate previous trace ID. See startTrace() wrap-around logic.
-  uint prevTraceId = traceId == 1 ? uint(kj::maxValue) : traceId - 1;
-
-  if (handle.lastMarked == prevTraceId) {
-    // Handle should still be valid.
-  } else {
-    // Handle was probably collected, or hadn't been created yet. (Re)create it.
-    v8::HandleScope scope(isolate);
-    kj::ctor(handle.tracedRef, isolate, handle.Get(isolate));
-  }
-
-  handle.lastMarked = traceId;
-
-  KJ_IF_MAYBE(v, visitor) {
-    KJ_IF_MAYBE(cgv, v->cppgcVisitor) {
-      cgv->Trace(handle.tracedRef);
-    }
-  }
-}
-
 void HeapTracer::clearWrappers() {
   while (!wrappers.empty()) {
     wrappers.front().detachWrapper();
