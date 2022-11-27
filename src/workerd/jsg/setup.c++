@@ -154,6 +154,17 @@ void IsolateBase::clearDestructionQueue() {
   auto drop = queue.lockExclusive()->pop();
 }
 
+HeapTracer::HeapTracer(v8::Isolate* isolate): isolate(isolate) {
+  isolate->AddGCEpilogueCallback(
+      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+    auto& self = *reinterpret_cast<HeapTracer*>(data);
+    for (Wrappable* wrappable: self.detachLater) {
+      wrappable->detachWrapper();
+    }
+    self.detachLater.clear();
+  }, this, v8::GCType::kGCTypeAll);
+}
+
 void HeapTracer::destroy() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
   KJ_DEFER(isolate = nullptr);
@@ -167,6 +178,33 @@ void HeapTracer::clearWrappers() {
   while (!wrappers.empty()) {
     wrappers.front().detachWrapper();
   }
+}
+
+bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
+  // We can safely discard our wrapper objects, if they are unmodified, because we can recreate
+  // them later. If we see any other type of handle, conservatively assume it must be traced (so
+  // must be considered a root for minor GC).
+  return handle.WrapperClassId() != Wrappable::WRAPPABLE_TAG;
+}
+
+void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
+  // V8 only calls this if the wrapper object is not reachable from JavaScript *and* it was not
+  // modified after creation. It may still be reachable via C++, but we can recreate the wrapper
+  // as needed if the C++ object is exported to JavaScript again later.
+  auto& wrappable = *reinterpret_cast<Wrappable*>(
+      handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+
+  // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
+  // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
+  // visit the reference again, but it will DCHECK-fail on that second attempt because the
+  // reference is in an inconsistent state at that point.
+  KJ_ASSERT_NONNULL(wrappable.wrapper).Reset();
+
+  // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
+  // if the wrapable has strong references, which means that its outgoing references need to be
+  // upgraded to strong).
+  detachLater.add(&wrappable);
 }
 
 namespace {
@@ -205,6 +243,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
   };
   cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
   ptr->AttachCppHeap(cppgcHeap.get());
+  ptr->SetEmbedderRootsHandler(&heapTracer);
 
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);

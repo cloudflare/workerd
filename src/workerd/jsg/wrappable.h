@@ -173,11 +173,11 @@ private:
   friend class HeapTracer;
 };
 
-class HeapTracer {
+class HeapTracer: public v8::EmbedderRootsHandler {
   // For historical reasons, this is actually implemented in setup.c++.
 
 public:
-  explicit HeapTracer(v8::Isolate* isolate): isolate(isolate) {}
+  explicit HeapTracer(v8::Isolate* isolate);
 
   ~HeapTracer() noexcept {
     // Destructor has to be noexcept because it inherits from a V8 type that has a noexcept
@@ -194,9 +194,16 @@ public:
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();
 
+  // implements EmbedderRootsHandler -------------------------------------------
+  bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
+  void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
+
 private:
   v8::Isolate* isolate;
   kj::Vector<Wrappable*> wrappersToTrace;
+
+  kj::Vector<Wrappable*> detachLater;
+  // Wrappables on which detachWrapper() should be called at the end of this GC pass.
 
   kj::List<Wrappable, &Wrappable::link> wrappers;
   // List of all Wrappables for which a JavaScript wrapper exists.

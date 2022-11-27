@@ -45,6 +45,12 @@ kj::Own<Wrappable> Wrappable::detachWrapper() {
     cppgcShim = nullptr;
     strongWrapper.Reset();
     HeapTracer::getTracer(isolate).removeWrapper({}, *this);
+    if (strongRefcount > 0) {
+      // Need to visit child references in order to convert them to strong references, since we
+      // no longer have an intervening wrapper.
+      GcVisitor visitor(*this, nullptr);
+      jsgVisitForGc(visitor);
+    }
     return result;
   } else {
     return {};
@@ -122,8 +128,13 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   KJ_REQUIRE(wrapper == nullptr);
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
-  wrapper = v8::TracedReference<v8::Object>(isolate, object);
+  auto& wrapperRef = wrapper.emplace(isolate, object);
   this->isolate = isolate;
+
+  // Set a class ID so we can recognize this in HeapTracer::IsRoot(). We reuse WRAPPABLE_TAG for
+  // this for lack of a reason not to, though technically we could be using a different identifier
+  // here vs. in WRAPPABLE_TAG_FIELD_INDEX below.
+  wrapperRef.SetWrapperClassId(WRAPPABLE_TAG);
 
   // Add to list of objects to force-clean at isolate shutdown.
   tracer.addWrapper({}, *this);
