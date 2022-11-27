@@ -194,19 +194,8 @@ public:
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();
 
-  void startScavenge() { scavenging = true; }
-  void endScavenge() { scavenging = false; }
-
-  void startTrace() { tracing = true; }
-  void endTrace() { tracing = false; }
-
-  bool isTracing() { return tracing; }
-  bool isScavenging() { return scavenging; }
-
 private:
   v8::Isolate* isolate;
-  bool scavenging = false;
-  bool tracing = false;
   kj::Vector<Wrappable*> wrappersToTrace;
 
   kj::List<Wrappable, &Wrappable::link> wrappers;

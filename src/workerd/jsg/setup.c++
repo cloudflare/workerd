@@ -169,35 +169,6 @@ void HeapTracer::clearWrappers() {
   }
 }
 
-void IsolateBase::gcPrologue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  if (type == v8::kGCTypeScavenge) {
-    HeapTracer::getTracer(isolate).startScavenge();
-
-    // V8 frequently performs "scavenges" to quickly reclaim memory from short-lived objects. During
-    // a scavenge, V8 does *not* invoke our EmbedderHeapTracer. It used to be that we therefore had
-    // to iterate over all our weak handles and call MarkActive() on them in order to make sure the
-    // scavenger didn't try to collect them. We no longer need to do that because we now use
-    // TracedReference for any handle that is traceable, and V8 knows not to scavenge such handles.
-    //
-    // Note that the scavenge pass can still collect some of our wrapper objects -- specifically, the
-    // ones that have only ever been reachable directly from JavaScript (and no longer are), but were
-    // never reachable transitively through another C++ object, and therefore never had a
-    // TracedReference allocated for them.
-  } else if (type == v8::kGCTypeMarkSweepCompact) {
-    HeapTracer::getTracer(isolate).startTrace();
-  }
-}
-
-void IsolateBase::gcEpilogue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  if (type == v8::kGCTypeScavenge) {
-    HeapTracer::getTracer(isolate).endScavenge();
-  } else if (type == v8::kGCTypeMarkSweepCompact) {
-    HeapTracer::getTracer(isolate).endTrace();
-  }
-}
-
 namespace {
   static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
     if (params.array_buffer_allocator == nullptr &&
@@ -237,9 +208,6 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
-
-  ptr->AddGCPrologueCallback(gcPrologue, v8::kGCTypeAll);
-  ptr->AddGCEpilogueCallback(gcEpilogue, v8::kGCTypeAll);
 
   ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
   ptr->SetData(0, this);
