@@ -139,13 +139,9 @@ public:
   v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
-    if (wrapper.IsEmpty()) {
-      return nullptr;
-    } else {
-      // V8 doesn't let us cast directly from v8::Data to subtypes of v8::Value, so we're forced to
-      // use this double cast... Ech.
-      return wrapper.Get(isolate).As<v8::Value>().As<v8::Object>();
-    }
+    return wrapper.map([&](v8::TracedReference<v8::Object>& ref) {
+      return ref.Get(isolate);
+    });
   }
 
   void visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, bool& refStrong);
@@ -188,18 +184,27 @@ public:
 private:
   class CppgcShim;
 
-  TraceableHandle wrapper;
+  kj::Maybe<CppgcShim&> cppgcShim;
+  // If a JS wrapper is currently allocated, this point to the cppgc shim object.
+
+  kj::Maybe<v8::TracedReference<v8::Object>> wrapper;
   // Handle to the JS wrapper object. The wrapper is created lazily when the object is first
   // exported to JavaScript; until then, the wrapper is empty.
   //
-  // This handle is marked strong whenever there are non-GC-traced references to the object (i.e.
-  // from other C++ objects). Otherwise, it is marked weak, with a weak callback that potentially
-  // deletes the object.
-  //
-  // This handle always holds a v8::Object.
+  // If the wrapper object is "unmodified" from its original creation state, then V8 may choose to
+  // collect it even when it could still technically be reached via C++ objects. The idea here is
+  // that if the object is returned to JavaScript again later, the wrapper can be reconstructed at
+  // that time. However, if the wrapper is modified by the application (e.g. monkey-patched with
+  // a new property), then collecting and recreating it won't work. The logic to decide if an
+  // object has been "modified" is internal to V8 and baked into its use of EmbedderRootsHandler.
+
+  v8::Global<v8::Object> strongWrapper;
+  // Whenever there are non-GC-traced references to the object (i.e. from other C++ objects, i.e.
+  // strongRefcount > 0), and `wrapper` is non-null, then `strongWrapper` contains a copy of
+  // `wrapper`, to force it to stay alive. Otherwise, `strongWrapper` is empty.
 
   v8::Isolate* isolate = nullptr;
-  // Will be non-null if `wrapper` is non-empty or `lastTraceId` is non-zero.
+  // Will be non-null if `wrapper` has ever been non-null or `lastTraceId` is non-zero.
 
   uint lastTraceId = 0;
   // Last GC trace in which this object was reached. 0 = never reached.
@@ -213,30 +218,8 @@ private:
   // Whenever the value of the boolean expression (strongRefcount > 0 && wrapper.IsEmpty()) changes,
   // a GC visitation is needed to update all outgoing refs.
 
-  enum {
-    NOT_DETACHED,
-    WHILE_SCAVENGING,
-    WHILE_TRACING,
-    OTHER
-  } detached = NOT_DETACHED;
-  // Has this had a wrapper in the past which was detached? For debugging.
-
-  uint detachedTraceId = 0;
-  // traceId when detachment occurred.
-
-  kj::Own<Wrappable> wrapperRef;
-  // A pointer to self, intended to represent V8's reference to this object. Must be reset at
-  // the same time as `wrapper` is reset.
-
   kj::ListLink<Wrappable> link;
   // When `wrapperRef` is non-empty, the Wrappable is a member of the list `HeapTracer::wrappers`.
-
-  void resetWrapperHandle();
-  kj::Own<Wrappable> detachWrapperRef();
-  static void deleterPass1(const v8::WeakCallbackInfo<Wrappable>& data);
-  static void deleterPass2(const v8::WeakCallbackInfo<Wrappable>& data);
-
-  void setWeak();
 
   friend class GcVisitor;
   friend class HeapTracer;
