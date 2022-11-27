@@ -157,12 +157,7 @@ private:
   // `wrapper`, to force it to stay alive. Otherwise, `strongWrapper` is empty.
 
   v8::Isolate* isolate = nullptr;
-  // Will be non-null if `wrapper` has ever been non-null or `lastTraceId` is non-zero.
-
-  uint lastTraceId = 0;
-  // Last GC trace in which this object was reached. 0 = never reached.
-  //
-  // Whenever this changes, a GC visitation must be executed to update outgoing refs.
+  // Will be non-null if `wrapper` has ever been non-null.
 
   uint strongRefcount = 0;
   // How many strong Ref<T>s point at this object, forcing the wrapper to stay alive even if GC
@@ -195,8 +190,6 @@ public:
 
   static HeapTracer& getTracer(v8::Isolate* isolate);
 
-  uint currentTraceId() { return traceId; }
-
   void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.add(wrappable); }
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();
@@ -204,11 +197,7 @@ public:
   void startScavenge() { scavenging = true; }
   void endScavenge() { scavenging = false; }
 
-  void startTrace() {
-    tracing = true;
-    ++traceId;
-    if (traceId == 0) traceId = 1;  // allow wrap-around but skip ID zero
-  }
+  void startTrace() { tracing = true; }
   void endTrace() { tracing = false; }
 
   bool isTracing() { return tracing; }
@@ -216,7 +205,6 @@ public:
 
 private:
   v8::Isolate* isolate;
-  uint traceId = 1;
   bool scavenging = false;
   bool tracing = false;
   kj::Vector<Wrappable*> wrappersToTrace;

@@ -110,21 +110,9 @@ void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappa
 }
 
 void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
-  uint traceId = HeapTracer::getTracer(isolate).currentTraceId();
-
-  if (lastTraceId == traceId) {
-    // Duplicate trace, ignore.
-    //
-    // This can happen in particular if V8 choses to allocate an object unmarked but we determine
-    // that the object is already reachable. In that case we mark the object *and* run our own
-    // trace (because we can't be sure V8 didn't allocate the object already-marked), so we might
-    // get duplicate traces.
-  } else {
-    lastTraceId = traceId;
-    cppgcVisitor.Trace(KJ_ASSERT_NONNULL(wrapper));
-    GcVisitor visitor(*this, cppgcVisitor);
-    jsgVisitForGc(visitor);
-  }
+  cppgcVisitor.Trace(KJ_ASSERT_NONNULL(wrapper));
+  GcVisitor visitor(*this, cppgcVisitor);
+  jsgVisitForGc(visitor);
 }
 
 void Wrappable::attachWrapper(v8::Isolate* isolate,
@@ -238,12 +226,8 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
       // This object doesn't currently have a wrapper, so traces must transitively trace through
       // it. However, as an optimization, we can skip the trace if we've already been traced in
       // this trace pass.
-      auto& tracer = HeapTracer::getTracer(isolate);
-      if (lastTraceId != tracer.currentTraceId()) {
-        lastTraceId = tracer.currentTraceId();
-        GcVisitor subVisitor(*this, visitor.cppgcVisitor);
-        jsgVisitForGc(subVisitor);
-      }
+      GcVisitor subVisitor(*this, visitor.cppgcVisitor);
+      jsgVisitForGc(subVisitor);
     }
   }
 }
