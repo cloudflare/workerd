@@ -204,23 +204,27 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
   }
 
   // Make ref strength match the parent.
-  if (visitor.parent.strongRefcount > 0) {
-    // This reference should be strong, because the parent has strong refs.
-    //
-    // TODO(soon): This is not quite right. If the parent has a wrapper object, then we only need
-    //   a strong ref to that wrapper object itself. Children can be weak, because they'll be
-    //   traced. But it's not just the parent -- if any ancestor has a wrapper, and no intermediate
-    //   parents have strong refs, then we should be weak. Ugh. Not going to fix this in this
-    //   commit.
+  if (visitor.parent.strongRefcount > 0 && visitor.parent.wrapper == nullptr) {
+    // This reference should be strong, because the parent has strong refs and does not have its
+    // own wrapper that will be traced.
 
     if (!refStrong) {
       // Ref transitions from weak to strong.
+      //
+      // This should never happen during a GC pass, since we should only be visiting traced
+      // references then.
+      KJ_ASSERT(visitor.cppgcVisitor == nullptr);
       addStrongRef();
       refStrong = true;
     }
   } else {
     if (refStrong) {
       // Ref transitions from strong to weak.
+      //
+      // Note that a Ref can become weak here as part of a GC pass. Specifically, the Ref might
+      // have previously been added to an object that already had a JS wrapper before the Ref was
+      // added. In this case, we won't detect that the Ref is traced until the next GC pass reaches
+      // it.
       refStrong = false;
       removeStrongRef();
     }
@@ -248,7 +252,7 @@ void GcVisitor::visit(Data& value) {
   if (!value.handle.IsEmpty()) {
     // Make ref strength match the parent.
     bool becameWeak = false;
-    if (parent.strongRefcount > 0) {
+    if (parent.strongRefcount > 0 && parent.wrapper == nullptr) {
       if (value.handle.IsWeak()) {
         value.handle.ClearWeak();
       }
