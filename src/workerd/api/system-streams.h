@@ -38,10 +38,9 @@ struct SystemMultiStream {
 };
 
 SystemMultiStream newSystemMultiStream(
-    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding,
-    IoContext& context = IoContext::current());
+    kj::Own<kj::AsyncIoStream> stream, IoContext& context = IoContext::current());
 // A combo ReadableStreamSource and WritableStreamSink which automatically decodes/encodes its
-// underlying stream. This function takes `PipelinedAsyncIoStream` because it needs a refcounted
+// underlying stream. This function takes `NotifiedAsyncIoStream` because it needs a refcounted
 // stream.
 
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,

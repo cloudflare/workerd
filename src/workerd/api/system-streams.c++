@@ -252,11 +252,99 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
+
+class WrappedAsyncIoStream final :
+    public ReadableStreamSource, public WritableStreamSink, public kj::Refcounted {
+  // A wrapper around a native `kj::AsyncIoStream` to enable a ReadableStream and WritableStream
+  // to be constructed from it.
+
+public:
+  explicit WrappedAsyncIoStream(kj::Own<kj::AsyncIoStream> inner, IoContext& context);
+  ~WrappedAsyncIoStream();
+
+  // ReadableStreamSource methods:
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding outEncoding) override;
+
+  kj::Maybe<Tee> tryTee(uint64_t limit) override;
+
+  // WritableStreamSink methods:
+  kj::Promise<void> write(const void* buffer, size_t size) override;
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
+
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
+      ReadableStreamSource& input, bool end) override;
+
+  kj::Promise<void> end() override;
+
+  void abort(kj::Exception reason) override;
+
+private:
+  kj::Own<kj::AsyncIoStream> inner;
+
+  IoContext& ioContext;
+};
+
+WrappedAsyncIoStream::WrappedAsyncIoStream(
+    kj::Own<kj::AsyncIoStream> inner, IoContext& context)
+    : inner(kj::mv(inner)), ioContext(context) { }
+
+WrappedAsyncIoStream::~WrappedAsyncIoStream() {
+  inner->shutdownWrite();
+}
+
+kj::Promise<size_t> WrappedAsyncIoStream::tryRead(
+    void* buffer, size_t minBytes, size_t maxBytes) {
+  return inner->tryRead(buffer, minBytes, maxBytes)
+      .attach(ioContext.registerPendingEvent());
+}
+
+kj::Maybe<uint64_t> WrappedAsyncIoStream::tryGetLength(StreamEncoding outEncoding) {
+  KJ_REQUIRE(outEncoding == StreamEncoding::IDENTITY);
+  return inner->tryGetLength();
+}
+
+kj::Maybe<ReadableStreamSource::Tee> WrappedAsyncIoStream::tryTee(uint64_t limit) {
+  auto tee = kj::newTee(kj::mv(inner), limit);
+
+  Tee result;
+  result.branches[0] = newSystemStream(
+      newTeeErrorAdapter(kj::mv(tee.branches[0])), StreamEncoding::IDENTITY);
+  result.branches[1] = newSystemStream(
+      newTeeErrorAdapter(kj::mv(tee.branches[1])), StreamEncoding::IDENTITY);
+  return kj::mv(result);
+}
+
+kj::Promise<void> WrappedAsyncIoStream::write(const void* buffer, size_t size) {
+  return inner->write(buffer, size).attach(ioContext.registerPendingEvent());
+}
+
+kj::Promise<void> WrappedAsyncIoStream::write(
+    kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+  return inner->write(pieces).attach(ioContext.registerPendingEvent());
+}
+
+kj::Maybe<kj::Promise<DeferredProxy<void>>> WrappedAsyncIoStream::tryPumpFrom(
+    ReadableStreamSource& input, bool end) {
+  return input.pumpTo(*this, end);
+}
+
+kj::Promise<void> WrappedAsyncIoStream::end() {
+  return kj::READY_NOW;
+}
+
+void WrappedAsyncIoStream::abort(kj::Exception reason) {
+  inner->shutdownWrite();
+  inner->abortRead();
+}
+
 SystemMultiStream newSystemMultiStream(
-    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding, IoContext& context) {
+    kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+  auto wrapped = kj::refcounted<WrappedAsyncIoStream>(kj::mv(stream), context);
   return {
-    .readable = kj::heap<EncodedAsyncInputStream>(kj::addRef(*rc), encoding, context),
-    .writable = kj::heap<EncodedAsyncOutputStream>(kj::mv(rc), encoding, context)
+    .readable = kj::addRef(*wrapped),
+    .writable = kj::mv(wrapped)
   };
 }
 
