@@ -208,6 +208,12 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
     promise = (*gz)->end();
   }
 
+  KJ_IF_MAYBE(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
+    if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream->get())) {
+      casted->shutdownWrite();
+    }
+  }
+
   return promise.attach(ioContext.registerPendingEvent());
 }
 
@@ -253,10 +259,14 @@ kj::Own<WritableStreamSink> newSystemStream(
 }
 
 SystemMultiStream newSystemMultiStream(
-    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding, IoContext& context) {
+    kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+
+  auto wrapped = kj::refcountedWrapper(kj::mv(stream));
   return {
-    .readable = kj::heap<EncodedAsyncInputStream>(kj::addRef(*rc), encoding, context),
-    .writable = kj::heap<EncodedAsyncOutputStream>(kj::mv(rc), encoding, context)
+    .readable = kj::heap<EncodedAsyncInputStream>(
+        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context),
+    .writable = kj::heap<EncodedAsyncOutputStream>(
+        wrapped->addWrappedRef(), StreamEncoding::IDENTITY, context)
   };
 }
 

@@ -10,83 +10,24 @@
 
 namespace workerd::api {
 
-class PipelinedAsyncIoStream final : public kj::AsyncIoStream, public kj::Refcounted {
-  // A stream that is backed by a promise for an AsyncIoStream. All operations on this stream
-  // are deferred until the `inner` promise completes.
-public:
-  explicit PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner);
-  void shutdownWrite() override;
-  void abortRead() override;
-  void getsockopt(int level, int option, void* value, uint* length) override;
-  void setsockopt(int level, int option, const void* value, uint length) override;
-
-  void getsockname(struct sockaddr* addr, uint* length) override;
-  void getpeername(struct sockaddr* addr, uint* length) override;
-
-  // AsyncInputStream methods:
-  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override;
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
-
-  // AsyncOutputStream methods:
-  kj::Promise<void> write(const void* buffer, size_t size) override;
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override;
-
-  kj::Promise<void> whenWriteDisconnected() override;
-
-private:
-  template <typename T>
-  kj::Promise<T> thenOrRunNow(std::function<kj::Promise<T> (kj::Own<kj::AsyncIoStream> *)> f) {
-    // Either calls `then` on the `inner` promise with the `f` callback, or calls `f` on an already
-    // stored stream (if the `inner` promise completed).
-    KJ_IF_MAYBE(e, error) {
-      kj::throwRecoverableException(kj::mv(*e));
-    }
-
-    KJ_IF_MAYBE(s, completedInner) {
-      return f(s);
-    } else {
-      return inner.then([this, f](kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<T> {
-        completedInner = kj::mv(stream);
-        return f(&KJ_ASSERT_NONNULL(completedInner));
-      });
-    }
-  }
-
-  kj::Maybe<kj::Own<kj::AsyncIoStream>> completedInner;
-  // Stored io stream once the `inner` promise completes.
-  kj::Maybe<kj::Exception> error;
-  // Stored error if any of the operations throw.
-  kj::Promise<kj::Own<kj::AsyncIoStream>> inner;
-  // A promise holding a stream that will be available at some point in the future. Typically once
-  // a connection is established.
-};
-
 struct SocketOptions {
   jsg::Unimplemented tls; // TODO(later): TCP socket options need to be implemented.
   JSG_STRUCT(tls);
 };
 
-struct InitData {
-  jsg::Ref<ReadableStream> readable;
-  jsg::Ref<WritableStream> writable;
-  IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
-};
-
 class Socket: public jsg::Object {
 public:
-  Socket(InitData data)
-      : readable(kj::mv(data.readable)), writable(kj::mv(data.writable)),
-        closeFulfiller(kj::mv(data.closeFulfiller)) {};
-  Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise);
+  Socket(jsg::Lock& js, jsg::Ref<ReadableStream> readable, jsg::Ref<WritableStream> writable,
+      kj::Own<jsg::PromiseResolverPair<void>> close)
+      : readable(kj::mv(readable)), writable(kj::mv(writable)),
+        closeFulfiller(kj::mv(close)),
+        closedPromise(kj::mv(closeFulfiller->promise)) {
+  };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
-  jsg::Promise<void> getClosed() {
-    // TODO: Right now this promise won't complete when the remote end closes the socket.
-    //       Do we need to wrap ReadableStream/WritableStream to make this work or is there a
-    //       better way?
-    auto& context = IoContext::current();
-    return context.awaitIo(kj::mv(closeFulfiller->promise));
+  jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
+    return closedPromise;
   }
 
   jsg::Promise<void> close(jsg::Lock& js);
@@ -102,8 +43,25 @@ public:
 private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
+  kj::Own<jsg::PromiseResolverPair<void>> closeFulfiller;
+  // This fulfiller is used to resolve the `closedPromise` below.
+  jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
+
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
-  IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
+
+  void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
+    KJ_IF_MAYBE(err, maybeErr) {
+      closeFulfiller->resolver.reject(js, kj::cp(*err));
+    } else {
+      closeFulfiller->resolver.resolve();
+    }
+  };
+
+  jsg::Promise<void> errorHandler(jsg::Lock& js, jsg::Value err) {
+    auto jsException = err.getHandle(js.v8Isolate);
+    resolveFulfiller(js, jsg::createTunneledException(js.v8Isolate, jsException));
+    return js.resolvedPromise();
+  };
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(readable, writable);
