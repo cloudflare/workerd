@@ -8,6 +8,10 @@ on:
         description: 'Patch Version'
         required: true
         default: '0'
+      prerelease:
+        description: 'Is Prerelease'
+        type: boolean
+        default: false
 
 jobs:
   version:
@@ -31,7 +35,7 @@ jobs:
       - id: echo
         run: |
           echo "date=$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '"')" >> $GITHUB_OUTPUT;
-          echo "version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
   publish-arch-specific:
     # if: ${{ github.repository_owner == 'cloudflare' }}
@@ -69,8 +73,7 @@ jobs:
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
       - run: cp $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }} npm/workerd-${{ matrix.arch }}/bin/workerd
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
-      - run: cat npm/workerd-${{ matrix.arch }}/.npmrc
-      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public
+      - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag ${{ inputs.prerelease == true && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
@@ -118,6 +121,6 @@ jobs:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd/.npmrc
-      - run: cd npm/workerd && npm publish --access public
+      - run: cd npm/workerd && npm publish --access public --tag ${{ inputs.prerelease == true && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
