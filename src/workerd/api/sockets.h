@@ -14,7 +14,8 @@ class PipelinedAsyncIoStream final : public kj::AsyncIoStream, public kj::Refcou
   // A stream that is backed by a promise for an AsyncIoStream. All operations on this stream
   // are deferred until the `inner` promise completes.
 public:
-  explicit PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner);
+  explicit PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner,
+      std::function<void()> onClose);
   void shutdownWrite() override;
   void abortRead() override;
   void getsockopt(int level, int option, void* value, uint* length) override;
@@ -59,6 +60,8 @@ private:
   kj::Promise<kj::Own<kj::AsyncIoStream>> inner;
   // A promise holding a stream that will be available at some point in the future. Typically once
   // a connection is established.
+  std::function<void()> onClose;
+  // Callbacks used to notify the Socket of writable/readable stream closure.
 };
 
 struct SocketOptions {
@@ -69,27 +72,48 @@ struct SocketOptions {
 struct InitData {
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
-  IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
+  IoOwn<kj::PromiseFulfillerPair<bool>> closeFulfiller;
+  IoOwn<kj::PromiseFulfillerPair<void>> jsCloseFulfiller;
+  kj::ForkedPromise<void> jsCloseFulfillerFork;
 };
 
 class Socket: public jsg::Object {
 public:
-  Socket(InitData data)
+  Socket(jsg::Lock& js, InitData data)
       : readable(kj::mv(data.readable)), writable(kj::mv(data.writable)),
-        closeFulfiller(kj::mv(data.closeFulfiller)) {};
-  Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise);
+        closeFulfiller(kj::mv(data.closeFulfiller)),
+        jsCloseFulfiller(kj::mv(data.jsCloseFulfiller)),
+        jsCloseFulfillerFork(kj::mv(data.jsCloseFulfillerFork)) {
+    auto& context = IoContext::current();
+    // Attach a callback to close the readable/writable streams when the socket is closed (either
+    // explicitly or implicitly).
+    context.awaitIo(js, kj::mv(closeFulfiller->promise), [this](
+        jsg::Lock& js, bool isImplicit) mutable {
+      if (!isImplicit) {
+        // A `close` call was made on the socket. Forcibly close the readable/writable streams.
+        readable->getController().cancel(js, nullptr).then(js, [writable = kj::mv(writable), this](
+            jsg::Lock& js) mutable {
+          writable->getController().abort(js, nullptr).then(js,
+              [this](jsg::Lock& js) mutable { resolveJsFulfiller(nullptr); },
+              [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
+        }, [this](jsg::Lock& js, jsg::Value err) { errorHandler(js, kj::mv(err)); });
+      } else {
+        // When the socket is closed implicitly (e.g. when the remote end disconnects), then we
+        // cannot cancel its readable/writable streams. So we only resolve the `closed` promise.
+        resolveJsFulfiller(nullptr);
+      }
+    });
+  };
+  Socket(jsg::Lock& js, kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise);
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
   jsg::Promise<void> getClosed() {
-    // TODO: Right now this promise won't complete when the remote end closes the socket.
-    //       Do we need to wrap ReadableStream/WritableStream to make this work or is there a
-    //       better way?
     auto& context = IoContext::current();
-    return context.awaitIo(kj::mv(closeFulfiller->promise));
+    return context.awaitIo(jsCloseFulfillerFork.addBranch());
   }
 
-  jsg::Promise<void> close(jsg::Lock& js);
+  void close();
   // Closes the socket connection.
 
   JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {
@@ -103,7 +127,31 @@ private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
-  IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
+  IoOwn<kj::PromiseFulfillerPair<bool>> closeFulfiller;
+  // This fulfiller is used to signal either an implicit or explicit socket closure.
+  IoOwn<kj::PromiseFulfillerPair<void>> jsCloseFulfiller;
+  // Used to signal to JS scripts that socket has been closed. Its `promise` is returned via the
+  // `closed` property of the socket.
+
+  kj::ForkedPromise<void> jsCloseFulfillerFork;
+  void performClose(bool isImplicit);
+
+  void resolveJsFulfiller(kj::Maybe<kj::Exception> maybeErr) {
+    if (!jsCloseFulfiller->fulfiller->isWaiting()) {
+      return;
+    }
+    KJ_IF_MAYBE(err, maybeErr) {
+      jsCloseFulfiller->fulfiller->reject(kj::cp(*err));
+    } else {
+      jsCloseFulfiller->fulfiller->fulfill();
+    }
+  };
+
+  void errorHandler(jsg::Lock& js, jsg::Value err) {
+    auto jsException = err.getHandle(js.v8Isolate);
+    auto tunneled = jsg::createTunneledException(js.v8Isolate, jsException);
+    resolveJsFulfiller(jsg::createTunneledException(js.v8Isolate, jsException));
+  };
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(readable, writable);

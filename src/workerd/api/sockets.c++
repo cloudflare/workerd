@@ -28,7 +28,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   //   the Socket to throw an appropriate error. Right now in this circumstance,
   //   `request.connection`'s operations will throw KJ exceptions which will be exposed to the
   //   script as internal errors.
-  return jsg::alloc<Socket>(request.connection.attach(kj::mv(request.status)));
+  return jsg::alloc<Socket>(js, request.connection.attach(kj::mv(request.status)));
 }
 
 jsg::Ref<Socket> connectImpl(
@@ -47,43 +47,57 @@ jsg::Ref<Socket> connectImpl(
   return connectImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(address));
 }
 
-InitData initialiseSocket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise) {
+InitData initialiseSocket(
+    jsg::Lock& js, kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise,
+    std::function<void()> onClose) {
   auto& context = IoContext::current();
 
   // Initialise the readable/writable streams with a custom AsyncIoStream that waits for the
   // completion of `connectionPromise` before performing reads/writes.
-  auto stream = kj::refcounted<PipelinedAsyncIoStream>(kj::mv(connectionPromise));
+  auto stream = kj::refcounted<PipelinedAsyncIoStream>(kj::mv(connectionPromise), onClose);
   auto sysStreams = newSystemMultiStream(kj::addRef(*stream), StreamEncoding::IDENTITY, context);
+  auto readable = jsg::alloc<ReadableStream>(context, kj::mv(sysStreams.readable));
+  auto writable = jsg::alloc<WritableStream>(context, kj::mv(sysStreams.writable));
+
+  auto closeFulfiller = IoContext::current().addObject(
+      kj::heap<kj::PromiseFulfillerPair<bool>>(kj::newPromiseAndFulfiller<bool>()));
+  auto jsCloseFulfiller = IoContext::current().addObject(
+      kj::heap<kj::PromiseFulfillerPair<void>>(kj::newPromiseAndFulfiller<void>()));
+  auto jsCloseFulfillerFork = jsCloseFulfiller->promise.fork();
 
   return {
-    .readable = jsg::alloc<ReadableStream>(context, kj::mv(sysStreams.readable)),
-    .writable = jsg::alloc<WritableStream>(context, kj::mv(sysStreams.writable)),
-    .closeFulfiller = IoContext::current().addObject(
-        kj::heap<kj::PromiseFulfillerPair<void>>(kj::newPromiseAndFulfiller<void>()))
+    .readable = kj::mv(readable),
+    .writable = kj::mv(writable),
+    .closeFulfiller = kj::mv(closeFulfiller),
+    .jsCloseFulfiller = kj::mv(jsCloseFulfiller),
+    .jsCloseFulfillerFork = kj::mv(jsCloseFulfillerFork)
   };
 }
 
-Socket::Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise) :
-    Socket(initialiseSocket(kj::mv(connectionPromise))) {};
+Socket::Socket(jsg::Lock& js, kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise) :
+    Socket(js, initialiseSocket(js, kj::mv(connectionPromise), [this]() { performClose(true); })) {};
 
-jsg::Promise<void> Socket::close(jsg::Lock& js) {
-  if (!closeFulfiller->fulfiller->isWaiting()) {
-    return js.resolvedPromise();
-  }
-
-  auto result = js.resolvedPromise();
-  result = readable->cancel(js, nullptr);
-  result = writable->abort(js, nullptr);
-  closeFulfiller->fulfiller->fulfill();
-  return result;
+void Socket::close() {
+  performClose(false);
 }
 
-PipelinedAsyncIoStream::PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner) :
-    inner(kj::mv(inner)) {};
+void Socket::performClose(bool isImplicit) {
+  if (!closeFulfiller->fulfiller->isWaiting()) {
+    return;
+  }
+
+  // Readable and writable streams are closed inside callback set up in `initialiseSocket`.
+  closeFulfiller->fulfiller->fulfill(kj::mv(isImplicit));
+}
+
+PipelinedAsyncIoStream::PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner,
+    std::function<void()> onClose) :
+    inner(kj::mv(inner)), onClose(onClose) {};
 
 void PipelinedAsyncIoStream::shutdownWrite() {
-  thenOrRunNow<void>([](kj::Own<kj::AsyncIoStream>* stream) {
+  thenOrRunNow<void>([this](kj::Own<kj::AsyncIoStream>* stream) {
     (*stream)->shutdownWrite();
+    onClose();
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -91,8 +105,9 @@ void PipelinedAsyncIoStream::shutdownWrite() {
 }
 
 void PipelinedAsyncIoStream::abortRead() {
-  thenOrRunNow<void>([](kj::Own<kj::AsyncIoStream>* stream) {
+  thenOrRunNow<void>([this](kj::Own<kj::AsyncIoStream>* stream) {
     (*stream)->abortRead();
+    onClose();
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -137,13 +152,27 @@ void PipelinedAsyncIoStream::getpeername(struct sockaddr* addr, uint* length) {
 
 kj::Promise<size_t> PipelinedAsyncIoStream::read(void* buffer, size_t minBytes, size_t maxBytes) {
   return thenOrRunNow<size_t>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    return (*stream)->read(buffer, minBytes, maxBytes);
+    auto& context = IoContext::current();
+    return context.awaitJs(context.awaitIo(
+        (*stream)->read(buffer, minBytes, maxBytes), [this](size_t size) {
+      if (size == 0) {
+        onClose();
+      }
+      return size;
+    }));
   });
 }
 
 kj::Promise<size_t> PipelinedAsyncIoStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
-  return thenOrRunNow<size_t>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    return (*stream)->tryRead(buffer, minBytes, maxBytes);
+  return thenOrRunNow<size_t>([=](kj::Own<kj::AsyncIoStream>* stream) -> kj::Promise<size_t> {
+    auto& context = IoContext::current();
+    return context.awaitJs(context.awaitIo(
+        (*stream)->tryRead(buffer, minBytes, maxBytes), [this](size_t size) {
+      if (size == 0) {
+        onClose();
+      }
+      return size;
+    }));
   });
 }
 
@@ -161,7 +190,11 @@ kj::Promise<void> PipelinedAsyncIoStream::write(kj::ArrayPtr<const kj::ArrayPtr<
 
 kj::Promise<void> PipelinedAsyncIoStream::whenWriteDisconnected() {
   return thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    return (*stream)->whenWriteDisconnected();
+    auto& context = IoContext::current();
+    return context.awaitJs(context.awaitIo(
+        (*stream)->whenWriteDisconnected(), [this]() {
+      onClose();
+    }));
   });
 }
 
