@@ -82,6 +82,17 @@ void Trace::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder) 
   builder.setScheduledTimeMs((scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
 }
 
+Trace::QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
+    : queueName(kj::mv(queueName)), batchSize(batchSize) {}
+
+Trace::QueueEventInfo::QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader)
+    : queueName(kj::heapString(reader.getQueueName())), batchSize(reader.getBatchSize()) {}
+
+void Trace::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) {
+  builder.setQueueName(queueName);
+  builder.setBatchSize(batchSize);
+}
+
 Trace::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode)
     : statusCode(statusCode) {}
 
@@ -160,6 +171,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto alarmBuilder = eventInfoBuilder.initAlarm();
         alarm.copyTo(alarmBuilder);
       }
+      KJ_CASE_ONEOF(queue, QueueEventInfo) {
+        auto queueBuilder = eventInfoBuilder.initQueue();
+        queue.copyTo(queueBuilder);
+      }
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -229,6 +244,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::ALARM:
         eventInfo = AlarmEventInfo(e.getAlarm());
+        break;
+      case rpc::Trace::EventInfo::Which::QUEUE:
+        eventInfo = QueueEventInfo(e.getQueue());
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
         eventInfo = CustomEventInfo(e.getCustom());
@@ -444,6 +462,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
     }
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;

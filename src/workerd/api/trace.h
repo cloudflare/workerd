@@ -50,14 +50,15 @@ public:
   class FetchEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
+  class QueueEventInfo;
   class CustomEventInfo;
 
   explicit TraceItem(kj::Own<Trace> trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>,
-      jsg::Ref<AlarmEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
+      jsg::Ref<AlarmEventInfo>, jsg::Ref<QueueEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent();
-  // TODO(someday): support more event types (trace, queue) via kj::OneOf.
+  // TODO(someday): support more event types (trace, email) via kj::OneOf.
   kj::Maybe<double> getEventTimestamp();
 
   kj::Array<jsg::Ref<TraceLog>> getLogs();
@@ -190,6 +191,24 @@ private:
   const Trace::AlarmEventInfo& eventInfo;
 };
 
+class TraceItem::QueueEventInfo final: public jsg::Object {
+public:
+  explicit QueueEventInfo(kj::Own<Trace> trace, const Trace::QueueEventInfo& eventInfo);
+
+  kj::StringPtr getQueueName();
+  uint32_t getBatchSize();
+  // TODO(now): Add something about the timestamp(s) of the newest/oldest message(s) in the batch?
+
+  JSG_RESOURCE_TYPE(QueueEventInfo) {
+    JSG_READONLY_INSTANCE_PROPERTY(queue, getQueueName);
+    JSG_READONLY_INSTANCE_PROPERTY(batchSize, getBatchSize);
+  }
+
+private:
+  kj::Own<Trace> trace;
+  const Trace::QueueEventInfo& eventInfo;
+};
+
 class TraceItem::CustomEventInfo final: public jsg::Object {
 public:
   explicit CustomEventInfo(kj::Own<Trace> trace, const Trace::CustomEventInfo& eventInfo);
@@ -300,6 +319,7 @@ private:
   api::TraceItem::AlarmEventInfo,             \
   api::TraceItem::CustomEventInfo,            \
   api::TraceItem::ScheduledEventInfo,         \
+  api::TraceItem::QueueEventInfo,             \
   api::TraceItem::FetchEventInfo,             \
   api::TraceItem::FetchEventInfo::Request,    \
   api::TraceItem::FetchEventInfo::Response,   \
