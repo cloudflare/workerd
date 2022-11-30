@@ -513,7 +513,8 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
   }
   kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
   if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    durationStartTime = kj::systemPreciseMonotonicClock().now();
+    auto delta = kj::systemPreciseCalendarClock().now() - overrideStartTime;
+    durationStartTime = kj::systemPreciseMonotonicClock().now() - delta;
   }
   return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParentContext);
 }
@@ -523,7 +524,8 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Maybe<Jaeger::SpanContext&> overrideParent) {
   kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
   if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    durationStartTime = kj::systemPreciseMonotonicClock().now();
+    auto delta = kj::systemPreciseCalendarClock().now() - overrideStartTime;
+    durationStartTime = kj::systemPreciseMonotonicClock().now() - delta;
   }
   return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParent);
 }
