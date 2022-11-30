@@ -511,14 +511,20 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
   KJ_IF_MAYBE(p, overrideParent) {
     overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
   }
-  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
+  if (parentSpanContext != nullptr || overrideParent != nullptr) {
+    durationStartTime = kj::systemPreciseMonotonicClock().now();
+  }
   return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParentContext);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Date overrideStartTime,
                               kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
+  if (parentSpanContext != nullptr || overrideParent != nullptr) {
+    durationStartTime = kj::systemPreciseMonotonicClock().now();
+  }
   return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParent);
 }
 
@@ -529,22 +535,24 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
     overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
   }
   kj::Date startTime = kj::origin<kj::Date>();
+  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
   if (parentSpanContext != nullptr || overrideParent != nullptr) {
     auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
     startTime = clock.now();
+    durationStartTime = kj::systemPreciseMonotonicClock().now();
   }
-  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
   return makeSpanImpl(operationName, startTime, durationStartTime, overrideParentContext);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Maybe<Jaeger::SpanContext&> overrideParent) {
   kj::Date startTime = kj::origin<kj::Date>();
+  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
   if (parentSpanContext != nullptr || overrideParent != nullptr) {
     auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
     startTime = clock.now();
+    durationStartTime = kj::systemPreciseMonotonicClock().now();
   }
-  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
   return makeSpanImpl(operationName, startTime, durationStartTime, overrideParent);
 }
 
