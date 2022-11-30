@@ -290,6 +290,9 @@ private:
   kj::Maybe<JaegerSpanSubmitter&> jaegerSpanSubmitter;
   kj::Own<void> ownJaegerSpanSubmitter;
   uint64_t predictableJaegerSpanId = 1;
+
+  Span makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
+      kj::Maybe<Jaeger::SpanContext&> overrideParent);
 };
 
 kj::Maybe<Tracer::Span> mapMakeSpan(

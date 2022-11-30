@@ -506,23 +506,45 @@ void WorkerTracer::setTrace(rpc::Trace::Reader reader) {
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Date overrideStartTime,
                               kj::Maybe<Tracer::Span&> overrideParent) {
-  kj::Maybe<Jaeger::SpanContext&> parent =
-      parentSpanContext.map([](auto& c) -> auto& { return c; } );
+  kj::Maybe<Jaeger::SpanContext&> overrideParentContext;
   KJ_IF_MAYBE(p, overrideParent) {
-    parent = p->spanData.map([](auto& d) -> auto& { return d.context; });
+    overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
   }
-  kj::Maybe<Jaeger::SpanData> data;
-  KJ_IF_MAYBE(p, parent) {
-    data = Jaeger::SpanData(
-        Jaeger::SpanContext(p->traceId, makeSpanId(), p->spanId, p->flags),
-        operationName, overrideStartTime);
-  }
-  return Span(kj::addRef(*this), kj::mv(data));
+  return makeSpanImpl(operationName, overrideStartTime, overrideParentContext);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Date overrideStartTime,
                               kj::Maybe<Jaeger::SpanContext&> overrideParent) {
+  return makeSpanImpl(operationName, overrideStartTime, overrideParent);
+}
+
+Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
+                              kj::Maybe<Tracer::Span&> overrideParent) {
+  kj::Maybe<Jaeger::SpanContext&> overrideParentContext;
+  KJ_IF_MAYBE(p, overrideParent) {
+    overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
+  }
+  kj::Date startTime = kj::origin<kj::Date>();
+  if (parentSpanContext != nullptr || overrideParent != nullptr) {
+    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
+    startTime = clock.now();
+  }
+  return makeSpanImpl(operationName, startTime, overrideParentContext);
+}
+
+Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
+                              kj::Maybe<Jaeger::SpanContext&> overrideParent) {
+  kj::Date startTime = kj::origin<kj::Date>();
+  if (parentSpanContext != nullptr || overrideParent != nullptr) {
+    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
+    startTime = clock.now();
+  }
+  return makeSpanImpl(operationName, startTime, overrideParent);
+}
+
+Tracer::Span Tracer::makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
+                                  kj::Maybe<Jaeger::SpanContext&> overrideParent) {
   kj::Maybe<Jaeger::SpanContext&> parent =
       parentSpanContext.map([](auto& c) -> auto& { return c; } );
   KJ_IF_MAYBE(p, overrideParent) {
@@ -532,29 +554,9 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
   KJ_IF_MAYBE(p, parent) {
     data = Jaeger::SpanData(
         Jaeger::SpanContext(p->traceId, makeSpanId(), p->spanId, p->flags),
-        operationName, overrideStartTime);
+        operationName, startTime);
   }
   return Span(kj::addRef(*this), kj::mv(data));
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Maybe<Tracer::Span&> overrideParent) {
-  kj::Date overrideStartTime = kj::origin<kj::Date>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
-    overrideStartTime = clock.now();
-  }
-  return makeSpan(operationName, overrideStartTime, overrideParent);
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  kj::Date overrideStartTime = kj::origin<kj::Date>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
-    overrideStartTime = clock.now();
-  }
-  return makeSpan(operationName, overrideStartTime, overrideParent);
 }
 
 Jaeger::SpanId Tracer::makeSpanId() {
