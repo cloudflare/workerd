@@ -271,9 +271,10 @@ Trace::Exception::Exception(rpc::Trace::Exception::Reader reader)
       name(kj::str(reader.getName())),
       message(kj::str(reader.getMessage())) {}
 
-Tracer::Span::Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData)
+Tracer::Span::Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData,
+    kj::TimePoint durationStartTime)
     : tracer(kj::mv(tracer)), spanData(kj::mv(spanData)),
-      durationStartTime(kj::systemPreciseMonotonicClock().now()) {}
+      durationStartTime(durationStartTime) {}
 
 Tracer::Span::~Span() noexcept(false) {
   KJ_IF_MAYBE(d, spanData) {
@@ -510,13 +511,15 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
   KJ_IF_MAYBE(p, overrideParent) {
     overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
   }
-  return makeSpanImpl(operationName, overrideStartTime, overrideParentContext);
+  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParentContext);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
                               kj::Date overrideStartTime,
                               kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  return makeSpanImpl(operationName, overrideStartTime, overrideParent);
+  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParent);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
@@ -530,7 +533,8 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
     auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
     startTime = clock.now();
   }
-  return makeSpanImpl(operationName, startTime, overrideParentContext);
+  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  return makeSpanImpl(operationName, startTime, durationStartTime, overrideParentContext);
 }
 
 Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
@@ -540,10 +544,12 @@ Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
     auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
     startTime = clock.now();
   }
-  return makeSpanImpl(operationName, startTime, overrideParent);
+  kj::TimePoint durationStartTime = kj::systemPreciseMonotonicClock().now();
+  return makeSpanImpl(operationName, startTime, durationStartTime, overrideParent);
 }
 
 Tracer::Span Tracer::makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
+                                  kj::TimePoint durationStartTime,
                                   kj::Maybe<Jaeger::SpanContext&> overrideParent) {
   kj::Maybe<Jaeger::SpanContext&> parent =
       parentSpanContext.map([](auto& c) -> auto& { return c; } );
@@ -556,7 +562,7 @@ Tracer::Span Tracer::makeSpanImpl(kj::StringPtr operationName, kj::Date startTim
         Jaeger::SpanContext(p->traceId, makeSpanId(), p->spanId, p->flags),
         operationName, startTime);
   }
-  return Span(kj::addRef(*this), kj::mv(data));
+  return Span(kj::addRef(*this), kj::mv(data), durationStartTime);
 }
 
 Jaeger::SpanId Tracer::makeSpanId() {
