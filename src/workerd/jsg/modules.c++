@@ -35,7 +35,8 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     // If the referrer module is a built-in, it is only permitted to resolve
     // internal modules. If the worker bundle provided an override for a builtin,
     // then internalOnly will be false.
-    bool internalOnly = ref.type == ModuleRegistry::Type::BUILTIN;
+    bool internalOnly = ref.type == ModuleRegistry::Type::BUILTIN ||
+                        ref.type == ModuleRegistry::Type::INTERNAL;
 
     result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath, internalOnly), Error,
         "No such module \"", targetPath.toString(),
