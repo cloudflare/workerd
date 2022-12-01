@@ -297,20 +297,41 @@ public:
 
     JSG_ASYNC_ITERABLE(values);
 
-    JSG_TS_DEFINE(interface ReadableStream<R = any> {
-      cancel(reason?: any): Promise<void>;
+    if (flags.getJsgPropertyOnPrototypeTemplate()) {
+      JSG_TS_DEFINE(interface ReadableStream<R = any> {
+        get locked(): boolean;
 
-      getReader(): ReadableStreamDefaultReader<R>;
-      getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+        cancel(reason?: any): Promise<void>;
 
-      pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
-      pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+        getReader(): ReadableStreamDefaultReader<R>;
+        getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
 
-      tee(): [ReadableStream<R>, ReadableStream<R>];
+        pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+        pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
 
-      values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-      [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-    });
+        tee(): [ReadableStream<R>, ReadableStream<R>];
+
+        values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+        [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+      });
+    } else {
+      JSG_TS_DEFINE(interface ReadableStream<R = any> {
+        readonly locked: boolean;
+
+        cancel(reason?: any): Promise<void>;
+
+        getReader(): ReadableStreamDefaultReader<R>;
+        getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+
+        pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+        pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+
+        tee(): [ReadableStream<R>, ReadableStream<R>];
+
+        values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+        [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+      });
+    }
     JSG_TS_OVERRIDE(const ReadableStream: {
       prototype: ReadableStream;
       new (underlyingSource: UnderlyingByteSource, strategy?: QueuingStrategy<Uint8Array>): ReadableStream<Uint8Array>;

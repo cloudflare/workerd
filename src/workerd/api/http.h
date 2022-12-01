@@ -652,9 +652,10 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
 
-      JSG_TS_OVERRIDE({
+      JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
-        get cf(): IncomingRequestCfProperties | undefined;
+        clone(): Request<CfHostMetadata>;
+        get cf(): IncomingRequestCfProperties<CfHostMetadata> | undefined;
       });
       // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
       // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.
@@ -673,9 +674,10 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
 
-      JSG_TS_OVERRIDE({
+      JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
-        readonly cf?: IncomingRequestCfProperties;
+        clone(): Request<CfHostMetadata>;
+        readonly cf?: IncomingRequestCfProperties<CfHostMetadata>;
       });
       // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
       // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.

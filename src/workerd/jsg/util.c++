@@ -123,6 +123,16 @@ bool setRemoteError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
       v8::True(isolate)));
 }
 
+bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
+  KJ_ASSERT(exception->IsObject());
+  auto obj = exception.As<v8::Object>();
+  return jsg::check(
+    obj->Set(
+      isolate->GetCurrentContext(),
+      jsg::v8Str(isolate, "durableObjectReset"_kj, v8::NewStringType::kInternalized),
+      v8::True(isolate)));
+}
+
 struct TunneledErrorType {
   kj::StringPtr type;
   // What type of JavaScript error to throw.
@@ -133,6 +143,9 @@ struct TunneledErrorType {
 
   bool isFromRemote;
   // Was the error tunneled from either a worker or an actor?
+
+  bool isDurableObjectReset;
+  // Was the error created because a durable object is broken?
 };
 
 namespace {
@@ -160,11 +173,16 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   internalMessage = stripRemoteExceptionPrefix(internalMessage);
 
-  bool isFromRemote = false;
+  struct Properties {
+    bool isFromRemote = false;
+    bool isDurableObjectReset = false;
+  };
+  Properties properties;
+
   // Remove `remote.` (if present). Note that there are cases where we return a tunneled error
   // through multiple workers, so let's be paranoid and allow for multiple "remote." prefxies.
   while (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
-    isFromRemote = true;
+    properties.isFromRemote = true;
     internalMessage = internalMessage.slice(ERROR_REMOTE_PREFIX.size());
   }
 
@@ -178,45 +196,50 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     }
   };
 
-  auto tryExtractError =
-      [isFromRemote](kj::StringPtr msg) -> kj::Maybe<TunneledErrorType> {
+  auto tryExtractError = [](kj::StringPtr msg, Properties properties)
+      -> kj::Maybe<TunneledErrorType> {
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_CFJS)) {
       return TunneledErrorType{
         .type = msg.slice(ERROR_TUNNELED_PREFIX_CFJS.size()),
         .isInternal = false,
-        .isFromRemote = isFromRemote,
+        .isFromRemote = properties.isFromRemote,
+        .isDurableObjectReset = properties.isDurableObjectReset,
       };
     }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{
         .type = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
         .isInternal = false,
-        .isFromRemote = isFromRemote,
+        .isFromRemote = properties.isFromRemote,
+        .isDurableObjectReset = properties.isDurableObjectReset,
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_CFJS)) {
       return TunneledErrorType{
         .type = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_CFJS.size()),
         .isInternal = true,
-        .isFromRemote = isFromRemote,
+        .isFromRemote = properties.isFromRemote,
+        .isDurableObjectReset = properties.isDurableObjectReset,
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
       return TunneledErrorType{
         .type = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
         .isInternal = true,
-        .isFromRemote = isFromRemote,
+        .isFromRemote = properties.isFromRemote,
+        .isDurableObjectReset = properties.isDurableObjectReset,
       };
     }
 
     return nullptr;
   };
 
-  auto makeDefaultError = [isFromRemote]() {
+  auto makeDefaultError = [](Properties properties) {
     return TunneledErrorType{
       .type = "Error",
       .isInternal = true,
-      .isFromRemote = isFromRemote,
+      .isFromRemote = properties.isFromRemote,
+      .isDurableObjectReset = properties.isDurableObjectReset,
     };
   };
 
@@ -226,32 +249,35 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     auto idx = findDelim(internalMessage);
     while(idx) {
       internalMessage = internalMessage.slice(idx);
-      KJ_IF_MAYBE(e, tryExtractError(internalMessage)) {
+      KJ_IF_MAYBE(e, tryExtractError(internalMessage, properties)) {
         return kj::mv(*e);
       }
       idx = findDelim(internalMessage);
     }
 
     // We failed to extract an expected error, make a default one.
-    return makeDefaultError();
+    return makeDefaultError(properties);
   }
 
   while (internalMessage.startsWith("broken.")) {
+    properties.isDurableObjectReset = true;
+
     // Trim away all broken prefixes, they are not allowed to have internal delimiters.
     internalMessage = internalMessage.slice(findDelim(internalMessage));
   }
 
   // There are no prefixes left, just try to extract the error.
-  KJ_IF_MAYBE(e, tryExtractError(internalMessage)) {
+  KJ_IF_MAYBE(e, tryExtractError(internalMessage, properties)) {
     return kj::mv(*e);
   } else {
-    return makeDefaultError();
+    return makeDefaultError(properties);
   }
 }
 struct DecodedException {
   v8::Local<v8::Value> handle;
   bool isInternal;
   bool isFromRemote;
+  bool isDurableObjectReset;
 };
 
 DecodedException decodeTunneledException(v8::Isolate* isolate,
@@ -287,6 +313,7 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
   DecodedException result;
   result.isInternal = tunneledInfo.isInternal;
   result.isFromRemote = tunneledInfo.isFromRemote;
+  result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
 
   // TODO(cleanup): This code has gotten pretty ugly, could probably use some refactoring.
   if (errorType.startsWith("Error")) {
@@ -341,6 +368,10 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
     setRemoteError(isolate, result.handle);
   }
 
+  if (result.isDurableObjectReset) {
+    setDurableObjectResetError(isolate, result.handle);
+  }
+
   return result;
 }
 
@@ -387,6 +418,10 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
       auto exception = v8::Exception::Error(v8Str(isolate, "Network connection lost."_kj));
       if (tunneledException.isFromRemote) {
         setRemoteError(isolate, exception);
+      }
+
+      if (tunneledException.isDurableObjectReset) {
+        setDurableObjectResetError(isolate, exception);
       }
 
       return exception;
