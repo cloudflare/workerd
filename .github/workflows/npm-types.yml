@@ -1,0 +1,70 @@
+name: Publish types to NPM
+on:
+# Since we still need to manually upload binaries, use manual run
+# Ideally this would trigger off `release`
+  workflow_dispatch:
+    inputs:
+      patch:
+        description: 'Patch Version'
+        required: true
+        default: '0'
+      prerelease:
+        description: 'Is Prerelease'
+        type: boolean
+        default: false
+
+jobs:
+  version:
+    outputs:
+      version: ${{ steps.echo.outputs.version }}
+      date: ${{ steps.echo.outputs.date }}
+      release_version: ${{ steps.echo.outputs.release_version }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/bazel-disk-cache
+          key: capnp-cache
+      - name: build capnp
+        run: |
+          bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
+      - id: echo
+        run: |
+          echo "date=$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '"')" >> $GITHUB_OUTPUT;
+          echo "version=${{ inputs.prerelease == false && '4' || '0'}}.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
+  build-and-publish-types:
+    runs-on: ubuntu-22.04
+    needs: version
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
+      - name: Cache
+        id: cache
+        uses: actions/cache@v2
+        with:
+          path: ~/bazel-disk-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache-types
+      - name: install dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+            export DEBIAN_FRONTEND=noninteractive
+            sudo apt-get install -y build-essential git clang libc++-dev
+      - name: build types
+        run: |
+            bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //types:types
+      - name: Build package
+        run: node npm/scripts/build-types-package.mjs
+        env:
+          WORKERD_VERSION: ${{ needs.version.outputs.version }}
+          LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
+      - run: cp -r bazel-bin/types/definitions/. npm/workers-types
+      - run: cp npm/workers-types/oldest/* npm/workers-types
+      - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workers-types/.npmrc
+      - run: cd npm/workers-types && npm publish --access public --tag ${{ inputs.prerelease == true && 'alpha' || 'latest'}}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
