@@ -265,8 +265,8 @@ export async function main(args?: string[]) {
       ambient = prettier.format(ambient, { parser: "typescript" });
       importable = prettier.format(importable, { parser: "typescript" });
     }
-    if (options.output !== undefined) {
-      const output = path.resolve(options.output);
+    if (outputDir !== undefined) {
+      const output = path.resolve(outputDir);
 
       const [date] = path.basename(file).split(".api.capnp.bin");
       await mkdir(path.join(output, date), { recursive: true });
