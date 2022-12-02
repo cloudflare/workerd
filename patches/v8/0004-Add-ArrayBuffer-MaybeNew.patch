@@ -1,7 +1,7 @@
-From ef1d0dc9dcd206fe658d63472556d197369f1149 Mon Sep 17 00:00:00 2001
+From fe5b8a5a21e1ce15625b2b8389ecf861883b7788 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
-Subject: [PATCH 4/4] Add `ArrayBuffer::MaybeNew()`.
+Subject: [PATCH 4/5] Add `ArrayBuffer::MaybeNew()`.
 
 In Cloudflare's edge runtime, this is part of a larger patch that allows graceful handling of allocations that exceed memory limits. `workerd` currently doesn't enforce any limits, so to reduce complexity we just forward to `New()`.
 

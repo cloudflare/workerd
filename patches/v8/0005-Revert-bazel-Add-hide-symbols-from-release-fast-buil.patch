@@ -1,0 +1,45 @@
+From d0f3e57286f40413f0a54488a098e92e5d86326a Mon Sep 17 00:00:00 2001
+From: Victor Gomes <victorgomes@chromium.org>
+Date: Fri, 21 Oct 2022 12:18:34 +0000
+Subject: [PATCH 5/5] Revert "[bazel] Add hide symbols from release / fast
+ builds"
+
+This reverts commit 6e4dea75e8e66d47bbfb0b0832400e32e6e57620.
+
+[Commit description from Kenton for workerd; patch content from upstream.]
+
+This revert appears upstream shortly after V8 10.8 was cut:
+
+https://chromium-review.googlesource.com/c/v8/v8/+/3971120
+
+The upstream revert message is not very informative, but the change broke
+dynamic linking of unit tests in fastbuild mode. A subsequent reland of
+the change uses the flags only in opt mode, which should work better.
+
+This patch can be removed when updating to V8 10.9.
+---
+ bazel/defs.bzl | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index d8db3fe8ba..a472b828e0 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -151,14 +151,6 @@ def _default_args():
+                 "-fno-integrated-as",
+             ],
+             "//conditions:default": [],
+-        }) + select({
+-            "@v8//bazel/config:is_debug":[
+-                "-fvisibility=default",
+-            ],
+-            "//conditions:default": [
+-                "-fvisibility=hidden",
+-                "-fvisibility-inlines-hidden",
+-            ],
+         }),
+         includes = ["include"],
+         linkopts = select({
+--
+2.30.2
+
