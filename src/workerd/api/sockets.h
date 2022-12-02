@@ -77,7 +77,7 @@ public:
   Socket(InitData data)
       : readable(kj::mv(data.readable)), writable(kj::mv(data.writable)),
         closeFulfiller(kj::mv(data.closeFulfiller)) {};
-  Socket(kj::Promise<kj::HttpClient::ConnectResponse> connectionPromise);
+  Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise);
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
