@@ -159,9 +159,24 @@ HeapTracer::HeapTracer(v8::Isolate* isolate): isolate(isolate) {
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
     auto& self = *reinterpret_cast<HeapTracer*>(data);
     for (Wrappable* wrappable: self.detachLater) {
-      wrappable->detachWrapper();
+      wrappable->detachWrapper(true);
     }
     self.detachLater.clear();
+    if (type == v8::GCType::kGCTypeMarkSweepCompact) {
+      // After a completed major GC, in theory, the CppgcShim freelist should be empty, because
+      // anything in the freelist should have been unreachable and therefore should have been
+      // collected.
+      //
+      // In practice, though, it seems that V8's GC doesn't actually invoke cppgc object
+      // destructors *during* the GC pass. Instead, the destructors get invoked shortly later,
+      // during a subsequent allocation attempt.
+      //
+      // However, the GC has already made the determination that the objects are unreachable, and
+      // will definitely destroy them, even if they become reachable again. Therefore, it's
+      // important that we clear our freelist now, so that we don't attempt to reuse an
+      // already-condemned object.
+      self.clearFreelistedShims();
+    }
   }, this, v8::GCType::kGCTypeAll);
 }
 
@@ -176,8 +191,10 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 
 void HeapTracer::clearWrappers() {
   while (!wrappers.empty()) {
-    wrappers.front().detachWrapper();
+    // Don't freelist the shim because we're shutting down anyway.
+    wrappers.front().detachWrapper(false);
   }
+  clearFreelistedShims();
 }
 
 bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {

@@ -127,7 +127,7 @@ public:
   // Perform GC visitation. This is named with the `jsg` prefix because it pollutes the
   // namespace of JSG_RESOURCE types.
 
-  kj::Own<Wrappable> detachWrapper();
+  kj::Own<Wrappable> detachWrapper(bool shouldFreelistShim);
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
 
@@ -194,6 +194,10 @@ public:
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();
 
+  void addToFreelist(Wrappable::CppgcShim& shim);
+  Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
+  void clearFreelistedShims();
+
   // implements EmbedderRootsHandler -------------------------------------------
   bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
@@ -207,6 +211,10 @@ private:
 
   kj::List<Wrappable, &Wrappable::link> wrappers;
   // List of all Wrappables for which a JavaScript wrapper exists.
+
+  kj::Maybe<Wrappable::CppgcShim&> freelistedShims;
+  // List of shim objects for wrappers that were collected during a minor GC. The shim objects
+  // can be reused for future allocations.
 };
 
 #define DISALLOW_KJ_IO_DESTRUCTORS_SCOPE \
