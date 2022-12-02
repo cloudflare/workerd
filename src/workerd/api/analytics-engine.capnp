@@ -4,7 +4,9 @@
 
 @0x8fe697b0d6269a23;
 
-$import "/capnp/c++.capnp".namespace("workerd::api");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::api");
+$Cxx.allowCancellation;
 
 # ========================================================================================
 # DO NOT MODIFY BELOW THIS COMMENT -- except if copying from the authoritative version.

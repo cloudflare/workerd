@@ -4,7 +4,9 @@
 
 @0x8b3d4aaa36221ec8;
 
-$import "/capnp/c++.capnp".namespace("workerd");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd");
+$Cxx.allowCancellation;
 
 const supportedCompatibilityDate :Text = "2022-11-08";
 # Newest compatibility date that can safely be set using code compiled from this repo. Trying to

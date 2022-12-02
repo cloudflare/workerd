@@ -10,6 +10,7 @@ using Cxx = import "/capnp/c++.capnp";
 using Json = import "/capnp/compat/json.capnp";
 
 $Cxx.namespace("workerd::cdp");
+$Cxx.allowCancellation;
 
 enum LogType {
   log @0;

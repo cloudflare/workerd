@@ -329,7 +329,8 @@ private:
   class Server final: public capnp::DynamicCapability::Server {
   public:
     Server(MockServer& mock)
-        : capnp::DynamicCapability::Server(mock.schema), mock(kj::addRef(mock)) {}
+        : capnp::DynamicCapability::Server(mock.schema, {.allowCancellation = true}),
+          mock(kj::addRef(mock)) {}
     ~Server() noexcept(false) {
       mock->dropped = true;
       KJ_IF_MAYBE(w, mock->waiter) {
@@ -339,7 +340,6 @@ private:
 
     kj::Promise<void> call(capnp::InterfaceSchema::Method method,
         capnp::CallContext<capnp::DynamicStruct, capnp::DynamicStruct> context) override {
-      context.allowCancellation();
       return kj::newAdaptedPromise<void, ReceivedCall>(*mock, method, kj::mv(context));
     }
 

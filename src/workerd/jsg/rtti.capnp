@@ -5,7 +5,9 @@
 @0xb042d6da9e1721ad;
 # Runtime information about jsg types and definitions
 
-$import "/capnp/c++.capnp".namespace("workerd::jsg::rtti");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::jsg::rtti");
+$Cxx.allowCancellation;
 
 struct Type {
   # A description of the C++ type.

@@ -34,7 +34,9 @@
 # afraid to fall back to code for anything the config cannot express, as Workers are very fast
 # to execute!
 
-$import "/capnp/c++.capnp".namespace("workerd::server::config");
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::server::config");
+$Cxx.allowCancellation;
 
 struct Config {
   # Top-level configuration for a workerd instance.
