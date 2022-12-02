@@ -204,6 +204,8 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
   // if the wrapable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
+  // TODO(now): Find out if it's actually safe to `detachWrapper()` inline. In my experiments it
+  //   didn't appear to cause any problems.
   detachLater.add(&wrappable);
 }
 

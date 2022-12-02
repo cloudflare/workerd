@@ -55,6 +55,20 @@ void Data::destroy() {
   if (isolate != nullptr) {
     if (v8::Locker::IsLocked(isolate)) {
       handle.Reset();
+
+      // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
+      // used. Note that merely detroying the TracedReference does nothing -- only explicitly
+      // calling Reset() has an effect.
+      //
+      // In particular, this permits `Data` values to be collected by minor (non-tracing) GC, as
+      // long as there are no cycles.
+      //
+      // TODO(now): Determine if it's always safe to reset the handle here. The handle becomes
+      //   invalid after a tracing pass in which it is not marked. `Reset()`ing it after that would
+      //   be UB. However, we would expect that such a tracing pass would have destroyed the
+      //   `Data`. Is it safe to `Reset()` the handle late in the trace, when destructors are
+      //   being called? It seems to work, but I need to confirm.
+      KJ_IF_MAYBE(t, tracedHandle) { t->Reset(); }
     } else {
       // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
       // defer these handles' destruction to the next time the isolate is locked.

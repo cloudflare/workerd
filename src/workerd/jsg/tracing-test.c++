@@ -77,6 +77,30 @@ private:
   }
 };
 
+class ValueBox: public jsg::Object {
+  // Contains an arbitrary value.
+
+public:
+  ValueBox(jsg::Value inner): inner(kj::mv(inner)) {}
+
+  static jsg::Ref<ValueBox> constructor(jsg::Value inner) {
+    return jsg::alloc<ValueBox>(kj::mv(inner));
+  }
+
+  jsg::Value inner;
+
+  jsg::Value getInner(jsg::Lock& lock) { return inner.addRef(lock); }
+
+  JSG_RESOURCE_TYPE(ValueBox) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(inner, getInner);
+  }
+
+private:
+  void visitForGc(GcVisitor& visitor) {
+    visitor.visit(inner);
+  }
+};
+
 struct TraceTestContext: public Object {
   kj::Maybe<jsg::Ref<NumberBox>> strongRef;
   // A strong reference to a NumberBox which may be get and set.
@@ -113,6 +137,7 @@ struct TraceTestContext: public Object {
     JSG_NESTED_TYPE(NumberBox);
     JSG_NESTED_TYPE(NumberBoxHolder);
     JSG_NESTED_TYPE(GcDetector);
+    JSG_NESTED_TYPE(ValueBox);
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD_NAMED(assert, assert_);
@@ -121,7 +146,7 @@ struct TraceTestContext: public Object {
 };
 
 JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate, TraceTestContext, NumberBox,
-                         NumberBoxHolder, GcDetector, GcDetectorBox);
+                         NumberBoxHolder, GcDetector, GcDetectorBox, ValueBox);
 
 KJ_TEST("GC collects objects when expected") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
@@ -193,6 +218,30 @@ KJ_TEST("GC collects objects when expected") {
     a = null;
     gc({type: "minor"});
     assert(b.siblingCollected, "minor GC did not collect transitive native objects");
+  )", "undefined", "undefined");
+
+  // Test that minor GC can collect unreachable jsg::Value.
+  e.expectEval(R"(
+    let pair = makeGcDetectorPair();
+    let a = pair[0];
+    let b = pair[1];
+    pair = null;
+
+    // Without the IIFE here, a hidden reference gets left on the stack or something.
+    (() => {
+      a = new ValueBox(a);
+    })();
+
+    a = null;
+
+    // We need two minor GC passes to fully collect the object. This is because the first GC pass
+    // collects the `ValueBox`, thus destroying its `jsg::Value inner` member, but V8's GC doesn't
+    // actually notice that this makes the inner object unreachable until a second pass.
+    // TODO(now): Is there any trick we could use to make V8 notice?
+    gc({type: "minor"});
+    gc({type: "minor"});
+
+    assert(b.siblingCollected, "minor GC did not collect jsg::Value");
   )", "undefined", "undefined");
 }
 
