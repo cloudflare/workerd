@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/revocable.h>
 #include "http.h"
 
 
@@ -14,7 +15,7 @@ class PipelinedAsyncIoStream final : public kj::AsyncIoStream, public kj::Refcou
   // A stream that is backed by a promise for an AsyncIoStream. All operations on this stream
   // are deferred until the `inner` promise completes.
 public:
-  explicit PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoStream>> inner);
+  explicit PipelinedAsyncIoStream(kj::Promise<kj::Own<RevocableIoStream>> inner);
   void shutdownWrite() override;
   void abortRead() override;
   void getsockopt(int level, int option, void* value, uint* length) override;
@@ -35,7 +36,7 @@ public:
 
 private:
   template <typename T>
-  kj::Promise<T> thenOrRunNow(std::function<kj::Promise<T> (kj::Own<kj::AsyncIoStream> *)> f) {
+  kj::Promise<T> thenOrRunNow(std::function<kj::Promise<T> (kj::Own<RevocableIoStream> *)> f) {
     // Either calls `then` on the `inner` promise with the `f` callback, or calls `f` on an already
     // stored stream (if the `inner` promise completed).
     KJ_IF_MAYBE(e, error) {
@@ -45,18 +46,18 @@ private:
     KJ_IF_MAYBE(s, completedInner) {
       return f(s);
     } else {
-      return inner.then([this, f](kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<T> {
+      return inner.then([this, f](kj::Own<RevocableIoStream> stream) -> kj::Promise<T> {
         completedInner = kj::mv(stream);
         return f(&KJ_ASSERT_NONNULL(completedInner));
       });
     }
   }
 
-  kj::Maybe<kj::Own<kj::AsyncIoStream>> completedInner;
+  kj::Maybe<kj::Own<RevocableIoStream>> completedInner;
   // Stored io stream once the `inner` promise completes.
   kj::Maybe<kj::Exception> error;
   // Stored error if any of the operations throw.
-  kj::Promise<kj::Own<kj::AsyncIoStream>> inner;
+  kj::Promise<kj::Own<RevocableIoStream>> inner;
   // A promise holding a stream that will be available at some point in the future. Typically once
   // a connection is established.
 };
@@ -77,7 +78,7 @@ public:
   Socket(InitData data)
       : readable(kj::mv(data.readable)), writable(kj::mv(data.writable)),
         closeFulfiller(kj::mv(data.closeFulfiller)) {};
-  Socket(kj::Promise<kj::HttpClient::ConnectResponse> connectionPromise);
+  Socket(kj::Promise<kj::Own<RevocableIoStream>> connectionPromise);
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
