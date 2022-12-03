@@ -94,7 +94,7 @@ rust_library(
             "@crates_vendor__fallible-iterator-0.2.0//:fallible_iterator",
             "@crates_vendor__gimli-0.23.0//:gimli",
             "@crates_vendor__rustc-demangle-0.1.21//:rustc_demangle",
-            "@crates_vendor__smallvec-1.10.0//:smallvec",
+            "@crates_vendor__smallvec-1.9.0//:smallvec",
         ],
     }),
 )

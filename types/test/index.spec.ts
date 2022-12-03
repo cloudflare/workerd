@@ -118,7 +118,7 @@ test("main: generates types", async () => {
 
   await fs.writeFile(inputPath, new Uint8Array(message.toArrayBuffer()));
 
-  await main(["--input-dir", inputDir, "--output-dir", definitionsDir]);
+  await main([inputDir, "--output", definitionsDir]);
   let output = await fs.readFile(outputPath, "utf8");
   assert.strictEqual(
     output,
@@ -149,7 +149,7 @@ declare const prop: Promise<number>;
   );
 
   // Test formatted output
-  await main(["-i", inputDir, "-o", definitionsDir, "--format"]);
+  await main([inputDir, "-o", definitionsDir, "--format"]);
   output = await fs.readFile(outputPath, "utf8");
   assert.strictEqual(
     output,

@@ -19,7 +19,6 @@ import {
 } from "./type";
 
 function createMethodPartial(
-  fullyQualifiedParentName: string,
   method: Method
 ): [ts.Modifier[], string, ts.ParameterDeclaration[], ts.TypeNode] {
   const modifiers: ts.Modifier[] = [];
@@ -27,24 +26,16 @@ function createMethodPartial(
     modifiers.push(f.createToken(ts.SyntaxKind.StaticKeyword));
   }
   const name = method.getName();
-  const params = createParamDeclarationNodes(
-    fullyQualifiedParentName,
-    name,
-    method.getArgs().toArray()
-  );
+  const params = createParamDeclarationNodes(method.getArgs().toArray());
   const result = createTypeNode(method.getReturnType());
   return [modifiers, name, params, result];
 }
 
 function createIteratorMethodPartial(
-  fullyQualifiedParentName: string,
   method: Method,
   isAsync: boolean
 ): [ts.Modifier[], ts.PropertyName, ts.ParameterDeclaration[], ts.TypeNode] {
-  const [modifiers, , params, result] = createMethodPartial(
-    fullyQualifiedParentName,
-    method
-  );
+  const [modifiers, , params, result] = createMethodPartial(method);
   const symbolIteratorExpression = f.createPropertyAccessExpression(
     f.createIdentifier("Symbol"),
     isAsync ? "asyncIterator" : "iterator"
@@ -139,7 +130,6 @@ function createConstantPartial(
 }
 
 function createInterfaceMemberNode(
-  fullyQualifiedInterfaceName: string,
   member: Member
 ): ts.TypeElement | ts.TypeElement[] {
   let modifiers: ts.Modifier[];
@@ -152,10 +142,7 @@ function createInterfaceMemberNode(
   switch (member.which()) {
     case Member_Which.METHOD:
       const method = member.getMethod();
-      [modifiers, name, params, result] = createMethodPartial(
-        fullyQualifiedInterfaceName,
-        method
-      );
+      [modifiers, name, params, result] = createMethodPartial(method);
       return f.createMethodSignature(
         modifiers,
         name,
@@ -197,12 +184,10 @@ function createInterfaceMemberNode(
 }
 
 function createIteratorInterfaceMemberNode(
-  fullyQualifiedInterfaceName: string,
   method: Method,
   isAsync: boolean
 ): ts.TypeElement {
   const [modifiers, name, params, result] = createIteratorMethodPartial(
-    fullyQualifiedInterfaceName,
     method,
     isAsync
   );
@@ -217,7 +202,6 @@ function createIteratorInterfaceMemberNode(
 }
 
 function createClassMemberNode(
-  fullyQualifiedClassName: string,
   member: Member
 ): ts.ClassElement | ts.ClassElement[] {
   let modifiers: ts.Modifier[];
@@ -229,10 +213,7 @@ function createClassMemberNode(
   switch (member.which()) {
     case Member_Which.METHOD:
       const method = member.getMethod();
-      [modifiers, name, params, result] = createMethodPartial(
-        fullyQualifiedClassName,
-        method
-      );
+      [modifiers, name, params, result] = createMethodPartial(method);
       return f.createMethodDeclaration(
         /* decorators */ undefined,
         modifiers,
@@ -284,11 +265,7 @@ function createClassMemberNode(
       );
     case Member_Which.CONSTRUCTOR:
       const constructor = member.getConstructor();
-      params = createParamDeclarationNodes(
-        fullyQualifiedClassName,
-        "constructor",
-        constructor.getArgs().toArray()
-      );
+      params = createParamDeclarationNodes(constructor.getArgs().toArray());
       return f.createConstructorDeclaration(
         /* decorators */ undefined,
         /* modifiers */ undefined,
@@ -301,12 +278,10 @@ function createClassMemberNode(
 }
 
 function createIteratorClassMemberNode(
-  fullyQualifiedClassName: string,
   method: Method,
   isAsync: boolean
 ): ts.ClassElement {
   const [modifiers, name, params, result] = createIteratorMethodPartial(
-    fullyQualifiedClassName,
     method,
     isAsync
   );
@@ -348,7 +323,6 @@ function filterUnimplementedProperties<
 export function createStructureNode(structure: Structure, asClass: boolean) {
   const modifiers: ts.Modifier[] = [f.createToken(ts.SyntaxKind.ExportKeyword)];
   const name = getTypeName(structure);
-  const fullyQualifiedName = structure.getFullyQualifiedName();
 
   const heritage: ts.HeritageClause[] = [];
   if (structure.hasExtends()) {
@@ -368,9 +342,7 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
   if (asClass) {
     modifiers.push(f.createToken(ts.SyntaxKind.DeclareKeyword));
     // Can't use `flatMap()` here as `members` is a `capnp.List`
-    const classMembers = members
-      .map((member) => createClassMemberNode(fullyQualifiedName, member))
-      .flat();
+    const classMembers = members.map(createClassMemberNode).flat();
 
     const constructorIndex = classMembers.findIndex((member) =>
       ts.isConstructorDeclaration(member)
@@ -388,15 +360,11 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
     // Add iterator members
     if (structure.hasIterator()) {
       const iterator = structure.getIterator();
-      classMembers.push(
-        createIteratorClassMemberNode(fullyQualifiedName, iterator, false)
-      );
+      classMembers.push(createIteratorClassMemberNode(iterator, false));
     }
     if (structure.hasAsyncIterator()) {
       const iterator = structure.getAsyncIterator();
-      classMembers.push(
-        createIteratorClassMemberNode(fullyQualifiedName, iterator, true)
-      );
+      classMembers.push(createIteratorClassMemberNode(iterator, true));
     }
 
     return f.createClassDeclaration(
@@ -409,22 +377,16 @@ export function createStructureNode(structure: Structure, asClass: boolean) {
     );
   } else {
     // Can't use `flatMap()` here as `members` is a `capnp.List`
-    const interfaceMembers = members
-      .map((member) => createInterfaceMemberNode(fullyQualifiedName, member))
-      .flat();
+    const interfaceMembers = members.map(createInterfaceMemberNode).flat();
 
     // Add iterator members
     if (structure.hasIterator()) {
       const iterator = structure.getIterator();
-      interfaceMembers.push(
-        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, false)
-      );
+      interfaceMembers.push(createIteratorInterfaceMemberNode(iterator, false));
     }
     if (structure.hasAsyncIterator()) {
       const iterator = structure.getAsyncIterator();
-      interfaceMembers.push(
-        createIteratorInterfaceMemberNode(fullyQualifiedName, iterator, true)
-      );
+      interfaceMembers.push(createIteratorInterfaceMemberNode(iterator, true));
     }
 
     return f.createInterfaceDeclaration(

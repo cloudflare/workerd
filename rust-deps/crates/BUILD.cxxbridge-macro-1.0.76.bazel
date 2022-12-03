@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_proc_macro(
-    name = "thiserror_impl",
+    name = "cxxbridge_macro",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -81,13 +81,13 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.37",
+    version = "1.0.76",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.47//:proc_macro2",
+            "@crates_vendor__proc-macro2-1.0.44//:proc_macro2",
             "@crates_vendor__quote-1.0.21//:quote",
-            "@crates_vendor__syn-1.0.103//:syn",
+            "@crates_vendor__syn-1.0.101//:syn",
         ],
     }),
 )

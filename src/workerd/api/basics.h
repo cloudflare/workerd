@@ -297,11 +297,6 @@ public:
   struct HandlerObject {
     HandlerFunction handleEvent;
     JSG_STRUCT(handleEvent);
-
-    // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
-    JSG_STRUCT_TS_OVERRIDE({
-      handleEvent: (event: Event) => any | undefined;
-    });
   };
   typedef kj::OneOf<HandlerFunction, HandlerObject> Handler;
 
