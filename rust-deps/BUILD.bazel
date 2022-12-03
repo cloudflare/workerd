@@ -103,22 +103,6 @@ crates_vendor(
             git = "https://github.com/cloudflare/lol-html.git",
             rev = "e0cc5131055033e443df1e756700b3b914b4c380",
         ),
-
-        # Used for RTTI parameter extraction
-        "clang-ast": crate.spec(
-            version = "0.1",
-        ),
-        "serde": crate.spec(
-            version = "1.0",
-            features = ["default", "derive"],
-        ),
-        "serde_json": crate.spec(
-            version = "1.0",
-            features = ["default"]
-        ),
-        "pico-args": crate.spec(
-            version = "0.5",
-        )
     },
     supported_platform_triples = [
         "aarch64-apple-darwin",

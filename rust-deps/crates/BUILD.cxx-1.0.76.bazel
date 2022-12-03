@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "anyhow",
+    name = "cxx",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,6 +54,7 @@ rust_library(
         ],
     }),
     crate_features = [
+        "alloc",
         "default",
         "std",
     ],
@@ -66,6 +67,7 @@ rust_library(
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__cxxbridge-macro-1.0.76//:cxxbridge_macro",
         ],
     }),
     rustc_env = {
@@ -87,18 +89,19 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.66",
+    version = "1.0.76",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__anyhow-1.0.66//:build_script_build",
+            "@crates_vendor__cxx-1.0.76//:build_script_build",
+            "@crates_vendor__link-cplusplus-1.0.7//:link_cplusplus",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "anyhow_build_script",
+    name = "cxx_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -117,6 +120,7 @@ cargo_build_script(
         ],
     }),
     crate_features = [
+        "alloc",
         "default",
         "std",
     ],
@@ -127,6 +131,7 @@ cargo_build_script(
         ],
     }),
     edition = "2018",
+    links = "cxxbridge1",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -155,11 +160,13 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.66",
+    version = "1.0.76",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__cc-1.0.73//:cc",
+            "@crates_vendor__cxxbridge-flags-1.0.76//:cxxbridge_flags",
         ],
     }),
 )
@@ -171,7 +178,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "anyhow_build_script",
+    actual = "cxx_build_script",
     tags = [
         "manual",
     ],

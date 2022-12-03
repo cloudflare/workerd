@@ -95,7 +95,7 @@ rust_library(
             "@crates_vendor__memchr-2.5.0//:memchr",
             "@crates_vendor__safemem-0.3.3//:safemem",
             "@crates_vendor__selectors-0.22.0//:selectors",
-            "@crates_vendor__thiserror-1.0.37//:thiserror",
+            "@crates_vendor__thiserror-1.0.36//:thiserror",
         ],
     }),
 )
