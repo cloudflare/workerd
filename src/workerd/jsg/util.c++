@@ -736,4 +736,89 @@ void returnRejectedPromise(
   return returnRejectedPromiseImpl(info, exception, tryCatch);
 }
 
+// ======================================================================================
+
+template <typename Type, typename Data>
+class ExternString: public Type {
+  // The implementation of ExternString here is very closely after the implementation of the same
+  // class in Node.js, with modifications to fit our conventions. It is distributed under the
+  // same MIT license that Node.js uses. The appropriate copyright attribution is included here:
+  //
+  // Copyright Node.js contributors. All rights reserved.
+
+  // Permission is hereby granted, free of charge, to any person obtaining a copy
+  // of this software and associated documentation files (the "Software"), to
+  // deal in the Software without restriction, including without limitation the
+  // rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+  // sell copies of the Software, and to permit persons to whom the Software is
+  // furnished to do so, subject to the following conditions:
+
+  // The above copyright notice and this permission notice shall be included in
+  // all copies or substantial portions of the Software.
+
+  // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+  // IN THE SOFTWARE.
+
+public:
+  inline const Data* data() const override { return buf.begin(); }
+
+  inline size_t length() const override { return buf.size(); }
+
+  inline uint64_t byteLength() const { return length() * sizeof(Data); }
+
+  static v8::MaybeLocal<v8::String> createExtern(v8::Isolate* isolate,
+                                                 kj::ArrayPtr<const Data>& buf) {
+    if (buf.size() == 0) {
+      return v8::String::Empty(isolate);
+    }
+
+    // TODO(now): In Node.js impl, we check to see if length is less than a specified
+    // minimum. If it is, it's likely more efficient to just copy and use a regular
+    // heap allocated string than an external. We're not doing that here currently, but
+    // we might?
+
+    // We typically don't use the new keyword in workerd/Workers but in this case we
+    // have to.
+    auto resource = new ExternString<Type, Data>(isolate, buf);
+
+    v8::MaybeLocal<v8::String> str;
+    if constexpr (kj::isSameType<Type, v8::String::ExternalOneByteStringResource>()) {
+      str = v8::String::NewExternalOneByte(isolate, resource);
+    } else {
+      // resource here must be a v8::String::ExternalStringResource.
+      str = v8::String::NewExternalTwoByte(isolate, resource);
+    }
+    if (str.IsEmpty()) {
+      // This should happen only if the string is too long
+      delete resource;
+      return v8::MaybeLocal<v8::String>();
+    }
+
+    return str;
+  }
+
+private:
+  v8::Isolate* isolate;
+  kj::ArrayPtr<const Data> buf;
+
+  inline ExternString(v8::Isolate* isolate, kj::ArrayPtr<const Data>& buf)
+      : isolate(isolate), buf(buf) {}
+};
+
+using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;
+using ExternTwoByteString = ExternString<v8::String::ExternalStringResource, uint16_t>;
+
+v8::MaybeLocal<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf) {
+  return ExternOneByteString::createExtern(js.v8Isolate, buf);
+}
+
+v8::MaybeLocal<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
+  return ExternTwoByteString::createExtern(js.v8Isolate, buf);
+}
+
 }  // namespace workerd::jsg
