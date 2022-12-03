@@ -1,0 +1,16 @@
+# Based on https://www.neilmacy.co.uk/blog/github-action-to-block-merging
+name: "Internal PR Required"
+on:
+  pull_request:
+    types: [synchronize, opened, reopened, labeled, unlabeled]
+
+jobs:
+  InternalPRRequired:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for label
+        if: ${{ contains(github.event.*.labels.*.name, 'needs-internal-pr') }}
+        run: |
+          echo "Pull request is labeled as 'needs-internal-pr'"
+          echo "This workflow fails so the pull request cannot be merged"
+          exit 1
