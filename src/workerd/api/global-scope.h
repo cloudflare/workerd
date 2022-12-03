@@ -536,7 +536,7 @@ public:
 
       structuredClone<T>(value: T, options?: StructuredSerializeOptions): T;
 
-      fetch(input: RequestInfo, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
+      fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
     });
   }
 
