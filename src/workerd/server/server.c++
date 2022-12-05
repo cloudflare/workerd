@@ -1395,7 +1395,8 @@ private:
     KJ_FAIL_REQUIRE("no logging channels");
   }
 
-  kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id) override {
+  kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
+      kj::Maybe<kj::String> locationHint) override {
     auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
         "link() has not been called");
 

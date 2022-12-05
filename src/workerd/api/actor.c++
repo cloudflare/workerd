@@ -52,9 +52,11 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 public:
   GlobalActorOutgoingFactory(
       uint channelId,
-      jsg::Ref<DurableObjectId> id)
+      jsg::Ref<DurableObjectId> id,
+      kj::Maybe<kj::String> locationHint)
     : channelId(channelId),
-      id(kj::mv(id)) {}
+      id(kj::mv(id)),
+      locationHint(kj::mv(locationHint)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -62,7 +64,7 @@ public:
     // Lazily initialize actorChannel
     if (actorChannel == nullptr) {
       auto& context = IoContext::current();
-      actorChannel = context.getGlobalActorChannel(channelId, id->getInner());
+      actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint));
     }
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -81,6 +83,7 @@ public:
 private:
   uint channelId;
   jsg::Ref<DurableObjectId> id;
+  kj::Maybe<kj::String> locationHint;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
@@ -119,10 +122,16 @@ jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(kj::String id) {
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
-    jsg::Ref<DurableObjectId> id, CompatibilityFlags::Reader featureFlags) {
+    jsg::Ref<DurableObjectId> id,
+    jsg::Optional<GetDurableObjectOptions> options,
+    CompatibilityFlags::Reader featureFlags) {
   auto& context = IoContext::current();
+  kj::Maybe<kj::String> locationHint = nullptr;
+  KJ_IF_MAYBE(o, options) {
+    locationHint = kj::mv(o->locationHint);
+  }
   auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
-      kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef()));
+      kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint)));
   auto requiresHost = featureFlags.getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;

@@ -790,8 +790,8 @@ public:
   }
 
   kj::Own<IoChannelFactory::ActorChannel> getGlobalActorChannel(
-        uint channel, const ActorIdFactory::ActorId& id) {
-    return getIoChannelFactory().getGlobalActor(channel, id);
+        uint channel, const ActorIdFactory::ActorId& id, kj::Maybe<kj::String> locationHint) {
+    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint));
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(uint channel, kj::String id) {
     return getIoChannelFactory().getColoLocalActor(channel, kj::mv(id));
