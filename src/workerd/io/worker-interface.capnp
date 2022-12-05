@@ -47,6 +47,7 @@ struct Trace @0x8e8d911203762d34 {
     fetch @6 :FetchEventInfo;
     scheduled @7 :ScheduledEventInfo;
     alarm @9 :AlarmEventInfo;
+    queue @15 :QueueEventInfo;
     custom @13 :CustomEventInfo;
   }
   struct FetchEventInfo {
@@ -68,6 +69,11 @@ struct Trace @0x8e8d911203762d34 {
 
   struct AlarmEventInfo {
     scheduledTimeMs @0 :Int64;
+  }
+
+  struct QueueEventInfo {
+    queueName @0 :Text;
+    batchSize @1 :UInt32;
   }
 
   struct CustomEventInfo {}

@@ -98,6 +98,17 @@ public:
     void copyTo(rpc::Trace::AlarmEventInfo::Builder builder);
   };
 
+  class QueueEventInfo {
+  public:
+    explicit QueueEventInfo(kj::String queueName, uint32_t batchSize);
+    QueueEventInfo(rpc::Trace::QueueEventInfo::Reader reader);
+
+    kj::String queueName;
+    uint32_t batchSize;
+
+    void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
+  };
+
   class CustomEventInfo {
   public:
     explicit CustomEventInfo() {};
@@ -157,7 +168,8 @@ public:
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
   // We treat the origin value as "unset".
 
-  typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, CustomEventInfo> EventInfo;
+  typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
+          CustomEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent

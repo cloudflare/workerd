@@ -38,6 +38,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent() {
       KJ_CASE_ONEOF(alarm, Trace::AlarmEventInfo) {
         return kj::Maybe(jsg::alloc<AlarmEventInfo>(kj::addRef(*trace), alarm));
       }
+      KJ_CASE_ONEOF(queue, Trace::QueueEventInfo) {
+        return kj::Maybe(jsg::alloc<QueueEventInfo>(kj::addRef(*trace), queue));
+      }
       KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<CustomEventInfo>(kj::addRef(*trace), custom));
       }
@@ -172,6 +175,17 @@ TraceItem::AlarmEventInfo::AlarmEventInfo(kj::Own<Trace> trace,
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
   return eventInfo.scheduledTime;
+}
+
+TraceItem::QueueEventInfo::QueueEventInfo(kj::Own<Trace> trace,
+    const Trace::QueueEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+
+kj::StringPtr TraceItem::QueueEventInfo::getQueueName() {
+  return eventInfo.queueName;
+}
+
+uint32_t TraceItem::QueueEventInfo::getBatchSize() {
+  return eventInfo.batchSize;
 }
 
 TraceItem::CustomEventInfo::CustomEventInfo(kj::Own<Trace> trace,
