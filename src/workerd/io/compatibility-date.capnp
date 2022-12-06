@@ -240,4 +240,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables TCP sockets in workerd.
   # These are still under development and therefore subject to change.
   # WARNING: DO NOT depend on this feature as its API is still subject to change.
+
+  readableStreamFrom @23 :Bool
+      $compatEnableFlag("enable_readablestream_from")
+      $compatDisableFlag("disable_readablestream_from");
+  # Enables ReadableStream.from() in workerd.
+  # ReadableStream.from() is a new API proposed for the stream specification.
+  # It will remain disabled by default until the change officially lands in the spec.
 }

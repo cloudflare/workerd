@@ -487,6 +487,11 @@ jsg::Ref<ReadableStream> ReadableStream::from(
     jsg::Lock& js,
     kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> generator,
     CompatibilityFlags::Reader flags) {
+
+  JSG_REQUIRE(flags.getReadableStreamFrom(), Error,
+              "ReadableStream.from() is not available. Use the enable_readablestream_from "
+              "compatibility flag to enable it.");
+
   KJ_SWITCH_ONEOF(generator) {
     KJ_CASE_ONEOF(gen, jsg::AsyncGenerator<jsg::Value>) {
       auto wrapper = kj::refcounted<AsyncGeneratorWrapper>(kj::mv(gen));
