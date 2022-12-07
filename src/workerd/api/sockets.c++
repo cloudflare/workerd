@@ -30,8 +30,15 @@ jsg::Ref<Socket> connectImplNoOutputLock(
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // The connection request failed!
       // TODO(later): The status may include an errorBody that we currently do nothing with.
-      revocable->revoke(KJ_EXCEPTION(FAILED,
-          kj::str("jsg.Error: Unable to establish a TCP Socket (", status.statusCode,")")));
+
+      // TODO(later): It would likely be better to report a more meaningful error here like
+      // "connection refused" or "DNS lookup failed" but doing so requires more knowledge
+      // about what error codes the proxy returns.
+
+      // TODO(sockets): Will the underlying stream already throw an exception in this case?
+      // If so, does this exception end up racing that one? Need to evaluate if we even
+      // need RevocableIoStream in this case.
+      revocable->revoke(KJ_EXCEPTION(FAILED, "jsg.Error: Unable to establish a TCP Socket"));
     }
   }).eagerlyEvaluate(nullptr);
 
