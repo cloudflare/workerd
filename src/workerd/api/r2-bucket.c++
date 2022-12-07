@@ -531,13 +531,17 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
          sentCustomMetadata = kj::mv(sentCustomMetadata),
          &errorType]
-        (jsg::Lock& js, R2Result r2Result) mutable {
-      auto result = parseObjectMetadata<HeadResult>("put", r2Result, errorType);
-      KJ_IF_MAYBE(o, result) {
-        o->get()->httpMetadata = kj::mv(sentHttpMetadata);
-        o->get()->customMetadata = kj::mv(sentCustomMetadata);
+        (jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      if (r2Result.preconditionFailed()) {
+        return nullptr;
+      } else {
+        auto result = parseObjectMetadata<HeadResult>("put", r2Result, errorType);
+        KJ_IF_MAYBE(o, result) {
+          o->get()->httpMetadata = kj::mv(sentHttpMetadata);
+          o->get()->customMetadata = kj::mv(sentCustomMetadata);
+        }
+        return result;
       }
-      return result;
     });
   });
 }
