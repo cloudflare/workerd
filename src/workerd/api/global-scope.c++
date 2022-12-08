@@ -7,6 +7,7 @@
 #include <kj/encoding.h>
 
 #include <workerd/api/system-streams.h>
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/io/trace.h>
@@ -95,6 +96,24 @@ void ExecutionContext::waitUntil(kj::Promise<void> promise) {
 void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
 }
+
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
+    : unhandledRejections(
+        [this](jsg::Lock& js,
+                v8::PromiseRejectEvent event,
+                jsg::V8Ref<v8::Promise> promise,
+                jsg::Value value) {
+          // If async context tracking is enabled, then we need to ensure that we enter the frame
+          // associated with the promise before we invoke the unhandled rejection callback handling.
+          kj::Maybe<jsg::AsyncContextFrame::Scope> maybeScope;
+          KJ_IF_MAYBE(context, jsg::AsyncContextFrame::tryGetContext(js, promise)) {
+            if (!context->isRoot(js)) {
+              maybeScope.emplace(js, jsg::AsyncContextFrame::tryGetContext(js, promise));
+            }
+          }
+          auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
+          dispatchEventImpl(js, kj::mv(ev));
+        }) {}
 
 void ServiceWorkerGlobalScope::clear() {
   removeAllHandlers();
@@ -478,8 +497,10 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
   return jsg::v8StrFromLatin1(isolate, decoded.asBytes());
 }
 
-void ServiceWorkerGlobalScope::queueMicrotask(v8::Local<v8::Function> task, v8::Isolate* isolate) {
-  isolate->EnqueueMicrotask(task);
+void ServiceWorkerGlobalScope::queueMicrotask(
+    jsg::Lock& js,
+    v8::Local<v8::Function> task) {
+  js.v8Isolate->EnqueueMicrotask(jsg::AsyncContextFrame::wrap(js, task, nullptr, nullptr));
 }
 
 v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
@@ -508,27 +529,36 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
+    jsg::Lock& js,
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args,
-    v8::Isolate* isolate) {
+    jsg::Varargs args) {
+  auto& context = jsg::AsyncContextFrame::current(js);
+  if (!context.isRoot(js)) {
+    // If the AsyncContextFrame is the root frame, we do not have to wrap it at all.
+    // This is because setInterval/setTimeout callbacks are always invoked by the
+    // system. If there is no AsyncContextFrame::Scope on the stack, it will always
+    // use the root frame.
+    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
+        js, function.getHandle(js), nullptr, nullptr));
+  }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(
-    timeoutIdGenerator,
-    /* repeats = */ false,
-    [function = function.addRef(isolate), argv = kj::mv(argv)](jsg::Lock& js) mutable {
-      auto isolate = js.v8Isolate;
-      auto context = isolate->GetCurrentContext();
-      auto localFunction = function.getHandle(isolate);
-      auto localArgs = KJ_MAP(arg, argv) {
-        return arg.getHandle(isolate);
-      };
-      auto argc = localArgs.size();
+      timeoutIdGenerator,
+      /* repeats = */ false,
+      [function = function.addRef(js),
+       argv = kj::mv(argv)]
+       (jsg::Lock& js) mutable {
+    auto context = js.v8Isolate->GetCurrentContext();
+    auto localFunction = function.getHandle(js);
+    auto localArgs = KJ_MAP(arg, argv) {
+      return arg.getHandle(js);
+    };
+    auto argc = localArgs.size();
 
-      // Cast to void to discard the result value.
-      (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
-    },
-    msDelay.orDefault(0));
+    // Cast to void to discard the result value.
+    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+  }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
 
@@ -539,27 +569,36 @@ void ServiceWorkerGlobalScope::clearTimeout(kj::Maybe<TimeoutId::NumberType> tim
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
+    jsg::Lock& js,
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args,
-    v8::Isolate* isolate) {
+    jsg::Varargs args) {
+  auto& context = jsg::AsyncContextFrame::current(js);
+  if (!context.isRoot(js)) {
+    // If the AsyncContextFrame is the root frame, we do not have to wrap it at all.
+    // This is because setInterval/setTimeout callbacks are always invoked by the
+    // system. If there is no AsyncContextFrame::Scope on the stack, it will always
+    // use the root frame.
+    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
+        js, function.getHandle(js), nullptr, nullptr));
+  }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(
-    timeoutIdGenerator,
-    /* repeats = */ true,
-    [function = function.addRef(isolate), argv = kj::mv(argv)](jsg::Lock& js) mutable {
-      auto isolate = js.v8Isolate;
-      auto context = isolate->GetCurrentContext();
-      auto localFunction = function.getHandle(isolate);
-      auto localArgs = KJ_MAP(arg, argv) {
-        return arg.getHandle(isolate);
-      };
-      auto argc = localArgs.size();
+      timeoutIdGenerator,
+      /* repeats = */ true,
+      [function = function.addRef(js),
+       argv = kj::mv(argv)]
+       (jsg::Lock& js) mutable {
+    auto context = js.v8Isolate->GetCurrentContext();
+    auto localFunction = function.getHandle(js);
+    auto localArgs = KJ_MAP(arg, argv) {
+      return arg.getHandle(js);
+    };
+    auto argc = localArgs.size();
 
-      // Cast to void to discard the result value.
-      (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
-    },
-    msDelay.orDefault(0));
+    // Cast to void to discard the result value.
+    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+  }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
 
