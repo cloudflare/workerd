@@ -7,6 +7,7 @@
 #include "util.h"
 #include <kj/encoding.h>
 #include <kj/compat/url.h>
+#include <kj/memory.h>
 #include <kj/parse/char.h>
 #include <workerd/util/http-util.h>
 #include <workerd/jsg/ser.h>
@@ -1950,6 +1951,9 @@ kj::Own<WorkerInterface> Fetcher::getClient(
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       return outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+    }
+    KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+      return outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
     }
   }
   KJ_UNREACHABLE;
