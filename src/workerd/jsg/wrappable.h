@@ -190,6 +190,10 @@ public:
 
   static HeapTracer& getTracer(v8::Isolate* isolate);
 
+  static bool isInCppgcDestructor();
+  // Returns true if the current thread is currently executing the destructor of a CppgcShim
+  // object, which implies that we are collecting unreachable objects.
+
   void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.add(wrappable); }
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();

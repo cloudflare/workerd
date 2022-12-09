@@ -12,6 +12,14 @@
 
 namespace workerd::jsg {
 
+namespace {
+
+static thread_local bool inCppgcShimDestructor = false;
+
+};
+
+bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
+
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
 public:
   CppgcShim(Wrappable& wrappable): state(Active { kj::addRef(wrappable) }) {
@@ -20,6 +28,10 @@ public:
   }
 
   ~CppgcShim() {
+    KJ_DASSERT(!inCppgcShimDestructor);
+    inCppgcShimDestructor = true;
+    KJ_DEFER(inCppgcShimDestructor = false);
+
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
         KJ_DASSERT(&KJ_ASSERT_NONNULL(active.wrappable->cppgcShim) == this);

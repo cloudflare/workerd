@@ -237,7 +237,8 @@ KJ_TEST("GC collects objects when expected") {
     // We need two minor GC passes to fully collect the object. This is because the first GC pass
     // collects the `ValueBox`, thus destroying its `jsg::Value inner` member, but V8's GC doesn't
     // actually notice that this makes the inner object unreachable until a second pass.
-    // TODO(now): Is there any trick we could use to make V8 notice?
+    // TODO(perf): When V8 implements "unified young-generation", circle back and see if we can
+    //   improved this.
     gc({type: "minor"});
     gc({type: "minor"});
 
