@@ -362,6 +362,12 @@ private:
 // Use inside a JSG_RESOURCE_TYPE block to declare a property on this object that should be
 // accessible to JavaScript. `name` is the JavaScript member name, while `getter` and `setter` are
 // the names of C++ methods that get and set this property.
+//
+// WARNING: This is usually not what you want. Usually you want JSG_PROTOTYPE_PROPERTY instead.
+// Note that V8 implements instance properties by modifying the instance immediately after
+// construction, which is inefficient and can break some optimizations. For example, any object
+// with an instance proprety will not be possible to collect during minor GCs, only major GCs.
+// Prototype properties are on the prototype, so have no runtime overhead until they are used.
 
 #define JSG_PROTOTYPE_PROPERTY(name, getter, setter) \
   do { \

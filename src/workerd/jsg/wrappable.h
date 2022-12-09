@@ -49,16 +49,6 @@ class Wrappable: public kj::Refcounted {
 public:
   static constexpr uint INTERNAL_FIELD_COUNT = 3;
   // Number of internal fields in a wrapper object.
-  //
-  // V8's EmbedderHeapTracer API imposes the following seemingly-arbitrary requirements on objects'
-  // internal fields:
-  // - The object has at least two internal fields (otherwise, it is ignored).
-  // - The first internal field is not null (otherwise, the object is ignored).
-  // - The object has an even number of internal fields (otherwise, DCHECK-failure).
-  // - Only the first two internal field values are reported to the tracing API.
-  //
-  // Right then, we'll allocate two fields. The first will point to the GC tracing callback
-  // (null if no tracing needed), the second will point to the object itself.
 
   static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 2;
   // Index of the internal field that points back to the `Wrappable`.

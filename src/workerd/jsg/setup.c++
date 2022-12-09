@@ -199,15 +199,28 @@ void HeapTracer::clearWrappers() {
 }
 
 bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
-  // We can safely discard our wrapper objects, if they are unmodified, because we can recreate
-  // them later. If we see any other type of handle, conservatively assume it must be traced (so
-  // must be considered a root for minor GC).
+  // V8 will call this during minor GCs to decide if the given object is a "root" for minor GC
+  // purposes, meaning it cannot be collected. V8 only calls this if the pointed-to object is an
+  // object that it believes would be safe to destroy and recreate, i.e. a recreated object would
+  // be indistinguishable from the original. In particular, it checks that the object has not been
+  // modified by the application (e.g. the app has not added any properties of its own), is not a
+  // key in a WeakMap, and several other conditions. Objects which are safe to recreate are said
+  // to be "unmodified".
+  //
+  // Having decided that the object is unmodified, V8 calls `IsRoot()` to ask us, the embedder,
+  // whether we also agree the object is safe to drop and recreate. We return false if it is safe,
+  // true if it is not safe. Perhaps the method would be better named something like
+  // `IsSafeToDropIfUnmodified()`, but it is what it is.
+  //
+  // Our wrapper objects are indeed safe to discard and recreate (if they are unmodified). To be
+  // safe, though, let's verify that the handle V8 is giving us really does point to one of our
+  // wrappers. If it points to something else, assume it is not safe.
   return handle.WrapperClassId() != Wrappable::WRAPPABLE_TAG;
 }
 
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
-  // V8 only calls this if the wrapper object is not reachable from JavaScript *and* it was not
-  // modified after creation. It may still be reachable via C++, but we can recreate the wrapper
+  // V8 only calls this if the wrapper object is not reachable from JavaScript *and* IsRoot()
+  // returned false earlier. It may still be reachable via C++, but we can recreate the wrapper
   // as needed if the C++ object is exported to JavaScript again later.
   auto& wrappable = *reinterpret_cast<Wrappable*>(
       handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
@@ -259,6 +272,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     // utilized. This differs from browser environments, where a user is typically doing only one
     // thing at a time and thus likely has CPU cores to spare.
   };
+  // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
+  // V8 wants a non-const pointer here, but the object is in fact thread-safe.
   cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
   ptr->AttachCppHeap(cppgcHeap.get());
   ptr->SetEmbedderRootsHandler(&heapTracer);
