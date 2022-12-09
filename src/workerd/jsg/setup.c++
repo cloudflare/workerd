@@ -129,6 +129,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 V8System::~V8System() noexcept(false) {
   v8::V8::Dispose();
   v8::V8::DisposePlatform();
+  cppgc::ShutdownProcess();
 }
 
 void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
@@ -308,7 +309,12 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
 IsolateBase::~IsolateBase() noexcept(false) {
   ptr->DetachCppHeap();
-  KJ_DEFER(ptr->Dispose());
+
+  // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
+  // To be safe we call `Terminate()`.
+  cppgcHeap->Terminate();
+
+  ptr->Dispose();
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
