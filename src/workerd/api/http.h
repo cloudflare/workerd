@@ -384,6 +384,14 @@ public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
   };
 
+  class CrossContextOutgoingFactory {
+    // Used by Fetchers that obtain their HttpClient in a custom way, but which aren't tied
+    // to a specific I/O context. The factory object moves with the isolate across threads and
+    // contexts, and must work from any context.
+  public:
+    virtual kj::Own<WorkerInterface> newSingleUseClient(IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
+  };
+
   Fetcher(IoOwn<OutgoingFactory> outgoingFactory,
           RequiresHostAndProtocol requiresHost,
           bool isInHouse = false)
@@ -392,6 +400,15 @@ public:
         isInHouse(isInHouse) {}
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, such as ones
   // created for Actors.
+
+  Fetcher(kj::Own<CrossContextOutgoingFactory> outgoingFactory,
+          RequiresHostAndProtocol requiresHost,
+          bool isInHouse = false)
+      : channelOrClientFactory(kj::mv(outgoingFactory)),
+        requiresHost(requiresHost),
+        isInHouse(isInHouse) {}
+  // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, but doesn't
+  // require an IoContext
 
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext,
@@ -455,7 +472,7 @@ public:
   }
 
 private:
-  kj::OneOf<uint, IoOwn<OutgoingFactory>> channelOrClientFactory;
+  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>> channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
 };
