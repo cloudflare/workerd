@@ -274,7 +274,8 @@ namespace {
 v8::Local<v8::Module> compileEsmModule(
     jsg::Lock& js,
     kj::StringPtr name,
-    kj::ArrayPtr<const char> content) {
+    kj::ArrayPtr<const char> content,
+    ModuleInfoCompileFlags flags) {
   // Must pass true for `is_module`, but we can skip everything else.
   const int resourceLineOffset = 0;
   const int resourceColumnOffset = 0;
@@ -289,7 +290,16 @@ v8::Local<v8::Module> compileEsmModule(
                           resourceColumnOffset,
                           resourceIsSharedCrossOrigin, scriptId, {},
                           resourceIsOpaque, isWasm, isModule);
-  v8::ScriptCompiler::Source source(jsg::v8Str(js.v8Isolate, content), origin);
+  v8::Local<v8::String> contentStr;
+  if ((flags & ModuleInfoCompileFlags::EXTERNAL) == ModuleInfoCompileFlags::EXTERNAL) {
+    // TODO(later): Use of newExternalOneByteString here limits our built-in source
+    // modules (for which this path is used) to only the latin1 character set. We
+    // may need to revisit that to import built-ins as UTF-16 (two-byte).
+    contentStr = jsg::check(jsg::newExternalOneByteString(js, content));
+  } else {
+    contentStr = jsg::v8Str(js.v8Isolate, content);
+  }
+  v8::ScriptCompiler::Source source(contentStr, origin);
   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 }
 
@@ -322,8 +332,9 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
 ModuleRegistry::ModuleInfo::ModuleInfo(
     jsg::Lock& js,
     kj::StringPtr name,
-    kj::ArrayPtr<const char> content)
-    : ModuleInfo(js, compileEsmModule(js, name, content)) {}
+    kj::ArrayPtr<const char> content,
+    CompileFlags flags)
+    : ModuleInfo(js, compileEsmModule(js, name, content, flags)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
     jsg::Lock& js,

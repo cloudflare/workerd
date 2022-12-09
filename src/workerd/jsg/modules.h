@@ -175,7 +175,21 @@ public:
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
-    ModuleInfo(jsg::Lock& js, kj::StringPtr name, kj::ArrayPtr<const char> content);
+    enum class CompileFlags {
+      NONE,
+      EXTERNAL,
+      // The EXTERNAL flag tells the compile operation to treat the content as an external
+      // string wrapping an immutable buffer outside the V8 heap. When this flag is not set,
+      // the content is copied into the V8 heap.
+      // TODO(cleanup): Once we have a more complete set of options here for options that
+      // are used for all built-in modules, we'll likely collapse the flags into a single
+      // BUILTIN flag that encompasses multiple options.
+    };
+
+    ModuleInfo(jsg::Lock& js,
+               kj::StringPtr name,
+               kj::ArrayPtr<const char> content,
+               CompileFlags flags = CompileFlags::NONE);
 
     ModuleInfo(jsg::Lock& js, kj::StringPtr name,
                kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
@@ -210,6 +224,19 @@ public:
 
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
 };
+
+using ModuleInfoCompileFlags = ModuleRegistry::ModuleInfo::CompileFlags;
+
+inline constexpr ModuleInfoCompileFlags operator|(
+    ModuleInfoCompileFlags a,
+    ModuleInfoCompileFlags b) {
+  return static_cast<ModuleInfoCompileFlags>(static_cast<uint>(a) | static_cast<uint>(b));
+}
+inline constexpr ModuleInfoCompileFlags operator&(
+    ModuleInfoCompileFlags a,
+    ModuleInfoCompileFlags b) {
+  return static_cast<ModuleInfoCompileFlags>(static_cast<uint>(a) & static_cast<uint>(b));
+}
 
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
@@ -381,7 +408,7 @@ private:
           type(type),
           info(kj::mv(info)) {}
 
-    Entry(const kj::Path& specifier, Type type, kj::ArrayPtr<const char> src)
+    Entry(const kj::Path& specifier,Type type, kj::ArrayPtr<const char> src)
         : specifier(specifier.clone()),
           type(type),
           info(src) {}
@@ -402,7 +429,7 @@ private:
           return moduleInfo;
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src);
+          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileFlags::EXTERNAL);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
         KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {
