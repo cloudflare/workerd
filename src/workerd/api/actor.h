@@ -131,8 +131,16 @@ public:
   //
   // The ID may be one that was originally created using either `newUniqueId()` or `idFromName()`.
 
+  struct GetDurableObjectOptions {
+    jsg::Optional<kj::String> locationHint;
+
+    JSG_STRUCT(locationHint);
+  };
+
   jsg::Ref<DurableObject> get(
-      jsg::Ref<DurableObjectId> id, CompatibilityFlags::Reader featureFlags);
+      jsg::Ref<DurableObjectId> id,
+      jsg::Optional<GetDurableObjectOptions> options,
+      CompatibilityFlags::Reader featureFlags);
   // Gets a durable object by ID or creates it if it doesn't already exist.
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace) {
@@ -153,6 +161,7 @@ private:
   api::DurableObject,                               \
   api::DurableObjectId,                             \
   api::DurableObjectNamespace,                      \
-  api::DurableObjectNamespace::NewUniqueIdOptions
+  api::DurableObjectNamespace::NewUniqueIdOptions,  \
+  api::DurableObjectNamespace::GetDurableObjectOptions
 
 }  // namespace workerd::api
