@@ -101,7 +101,8 @@ export function getTypeName(structure: Structure | StructureType): string {
 }
 
 export function createParamDeclarationNodes(
-  args: Type[]
+  args: Type[],
+  forMethod = false
 ): ts.ParameterDeclaration[] {
   // Find the index of the last required parameter, all optional before this
   // will use the `| undefined` syntax, as opposed to a `?` token.
@@ -129,7 +130,8 @@ export function createParamDeclarationNodes(
     const arg = args[i];
     let typeNode = createTypeNode(
       arg,
-      true // Always allow coercion in method params
+      true, // Always allow coercion in function params
+      forMethod // Allow additional coercion in method params
     );
 
     let dotDotDotToken: ts.DotDotDotToken | undefined;
@@ -178,7 +180,19 @@ export function createParamDeclarationNodes(
   return params;
 }
 
-export function createTypeNode(type: Type, allowCoercion = false): ts.TypeNode {
+export function createTypeNode(
+  type: Type,
+  allowCoercion = false,
+  allowMethodParameterCoercion = false
+): ts.TypeNode {
+  // If `allowMethodParameterCoercion` is set, `allowCoercion` must be set too.
+  // `allowMethodParameterCoercion` enables additional coercions for C++ method
+  // parameters.
+  assert(
+    !allowMethodParameterCoercion || allowCoercion,
+    `"allowMethodParameterCoercion" requires "allowCoercion"`
+  );
+
   // noinspection FallThroughInSwitchStatementJS
   switch (type.which()) {
     case Type_Which.UNKNOWN:
@@ -199,6 +213,17 @@ export function createTypeNode(type: Type, allowCoercion = false): ts.TypeNode {
       }
     case Type_Which.PROMISE:
       const value = type.getPromise().getValue();
+
+      if (allowMethodParameterCoercion && value.which() === Type_Which.VOIDT) {
+        // For C++ method parameters, treat `Promise<void>` as `Promise<any>`.
+        // We don't use `allowCoercion` here, as we want stream callback return
+        // types to be `Promise<void>` so they match official TypeScript types:
+        // https://github.com/microsoft/TypeScript/blob/f1288c33a1594046dcb4bad2ecdda80a1b035bb7/lib/lib.webworker.d.ts#L5987-L6025
+        return f.createTypeReferenceNode("Promise", [
+          f.createTypeReferenceNode("any"),
+        ]);
+      }
+
       const valueType = createTypeNode(value, allowCoercion);
       const promiseType = f.createTypeReferenceNode("Promise", [valueType]);
       if (allowCoercion) {

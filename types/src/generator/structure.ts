@@ -26,7 +26,10 @@ function createMethodPartial(
     modifiers.push(f.createToken(ts.SyntaxKind.StaticKeyword));
   }
   const name = method.getName();
-  const params = createParamDeclarationNodes(method.getArgs().toArray());
+  const params = createParamDeclarationNodes(
+    method.getArgs().toArray(),
+    /* forMethod */ true
+  );
   const result = createTypeNode(method.getReturnType());
   return [modifiers, name, params, result];
 }
@@ -265,7 +268,10 @@ function createClassMemberNode(
       );
     case Member_Which.CONSTRUCTOR:
       const constructor = member.getConstructor();
-      params = createParamDeclarationNodes(constructor.getArgs().toArray());
+      params = createParamDeclarationNodes(
+        constructor.getArgs().toArray(),
+        /* forMethod */ true
+      );
       return f.createConstructorDeclaration(
         /* decorators */ undefined,
         /* modifiers */ undefined,

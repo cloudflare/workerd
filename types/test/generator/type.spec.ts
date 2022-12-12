@@ -81,6 +81,10 @@ test("createTypeNode: generic types", () => {
     printNode(createTypeNode(type, true)),
     "void | Promise<void>"
   );
+  assert.strictEqual(
+    printNode(createTypeNode(type, true, true)),
+    "Promise<any>"
+  );
 
   const maybe = type.initMaybe();
   maybe.initValue().setBoolt();

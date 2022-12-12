@@ -15,9 +15,10 @@ test("createStructureNode: method members", () => {
   let method = members.get(0).initMethod();
   method.setName("one");
   {
-    const args = method.initArgs(2);
+    const args = method.initArgs(3);
     args.get(0).setBoolt();
-    const maybe = args.get(1).initMaybe();
+    args.get(1).initPromise().initValue().setVoidt();
+    const maybe = args.get(2).initMaybe();
     maybe.setName("jsg::Optional");
     maybe.initValue().initNumber().setName("int");
   }
@@ -42,7 +43,7 @@ test("createStructureNode: method members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, false)),
     `export interface Methods {
-    one(param0: boolean, param1?: number): void;
+    one(param0: boolean, param1: Promise<any>, param2?: number): void;
     three(...param0: any[]): boolean;
 }`
   );
@@ -51,7 +52,7 @@ test("createStructureNode: method members", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, true)),
     `export declare abstract class Methods {
-    one(param0: boolean, param1?: number): void;
+    one(param0: boolean, param1: Promise<any>, param2?: number): void;
     static three(...param0: any[]): boolean;
 }`
   );
@@ -252,12 +253,13 @@ test("createStructureNode: constructors", () => {
 
   const constructor = members.get(0).initConstructor();
   {
-    const args = constructor.initArgs(3);
+    const args = constructor.initArgs(4);
     let maybe = args.get(0).initMaybe();
     maybe.setName("jsg::Optional");
     maybe.initValue().setBoolt();
     args.get(1).initString().setName("kj::String");
-    maybe = args.get(2).initMaybe();
+    args.get(2).initPromise().initValue().setVoidt();
+    maybe = args.get(3).initMaybe();
     maybe.setName("jsg::Optional");
     maybe.initValue().initNumber().setName("int");
   }
@@ -265,7 +267,7 @@ test("createStructureNode: constructors", () => {
   assert.strictEqual(
     printNode(createStructureNode(structure, true)),
     `export declare class Constructor {
-    constructor(param0: boolean | undefined, param1: string, param2?: number);
+    constructor(param0: boolean | undefined, param1: string, param2: Promise<any>, param3?: number);
 }`
   );
 });
