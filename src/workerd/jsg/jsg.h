@@ -362,6 +362,12 @@ private:
 // Use inside a JSG_RESOURCE_TYPE block to declare a property on this object that should be
 // accessible to JavaScript. `name` is the JavaScript member name, while `getter` and `setter` are
 // the names of C++ methods that get and set this property.
+//
+// WARNING: This is usually not what you want. Usually you want JSG_PROTOTYPE_PROPERTY instead.
+// Note that V8 implements instance properties by modifying the instance immediately after
+// construction, which is inefficient and can break some optimizations. For example, any object
+// with an instance proprety will not be possible to collect during minor GCs, only major GCs.
+// Prototype properties are on the prototype, so have no runtime overhead until they are used.
 
 #define JSG_PROTOTYPE_PROPERTY(name, getter, setter) \
   do { \
@@ -703,7 +709,20 @@ public:
     destroy();
   }
   Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
-    if (handle.IsWeak()) handle.ClearWeak();
+    KJ_IF_MAYBE(t, other.tracedHandle) {
+      // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
+      // So, we need to make the handle strong.
+      handle.ClearWeak();
+
+      // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
+      // does nothing, because it doesn't know if the reference is even still valid, since it
+      // could be called during GC sweep time. But here, we know that `other` is definitely still
+      // valid, because we wouldn't be moving from an unreachable object. So we should Reset() the
+      // `TracedReference` so that V8 knows it's gone, which might make minor GCs more effective.
+      t->Reset();
+
+      other.tracedHandle = nullptr;
+    }
     other.isolate = nullptr;
     assertInvariant();
     other.assertInvariant();
@@ -714,7 +733,11 @@ public:
       isolate = other.isolate;
       handle = kj::mv(other.handle);
       other.isolate = nullptr;
-      if (handle.IsWeak()) handle.ClearWeak();
+      KJ_IF_MAYBE(t, other.tracedHandle) {
+        handle.ClearWeak();
+        t->Reset();
+        other.tracedHandle = nullptr;
+      }
     }
     assertInvariant();
     other.assertInvariant();
@@ -739,9 +762,14 @@ private:
   v8::Isolate* isolate = nullptr;
   // The isolate with which the handles below are associated.
 
-  TraceableHandle handle;
+  v8::Global<v8::Data> handle;
   // Handle to the value which will be marked strong if any untraced C++ references exist, weak
   // otherwise.
+
+  kj::Maybe<v8::TracedReference<v8::Data>> tracedHandle;
+  // When `handle` is weak, `tracedHandle` is a copy of it used to integrate with V8 GC tracing.
+  // When `handle` is strong, we null out `tracedHandle`, because we don't need it, and it is
+  // illegal to hold onto a traced handle without actually marking it during each trace.
 
   friend class GcVisitor;
 
@@ -1523,12 +1551,15 @@ public:
 
 private:
   Wrappable& parent;
+  kj::Maybe<cppgc::Visitor&> cppgcVisitor;
 
-  explicit GcVisitor(Wrappable& parent): parent(parent) {}
+  explicit GcVisitor(Wrappable& parent, kj::Maybe<cppgc::Visitor&> cppgcVisitor)
+      : parent(parent), cppgcVisitor(cppgcVisitor) {}
   KJ_DISALLOW_COPY(GcVisitor);
 
   friend class Wrappable;
   friend class Object;
+  friend class HeapTracer;
 };
 
 constexpr bool isGcVisitable_(...) { return false; }

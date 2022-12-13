@@ -1,7 +1,7 @@
-From 6c3439ffcdfea7acc0135ca39147f959805723a8 Mon Sep 17 00:00:00 2001
+From 9552b08768d3325b8c755cc082500ba2990a1282 Mon Sep 17 00:00:00 2001
 From: Alex Robinson <arobinson@cloudflare.com>
 Date: Wed, 2 Mar 2022 15:58:04 -0600
-Subject: [PATCH 1/4] Allow manually setting ValueDeserializer format version
+Subject: [PATCH 1/5] Allow manually setting ValueDeserializer format version
 
 For many years, V8's serialization version didn't change. In the meantime,
 we accidentally stored data that was missing a version header. This patch
@@ -22,13 +22,13 @@ like:
  3 files changed, 18 insertions(+)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 078f367c64..da5c327955 100644
+index 729730c608..4398684017 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
-@@ -256,6 +256,13 @@ class V8_EXPORT ValueDeserializer {
+@@ -279,6 +279,13 @@ class V8_EXPORT ValueDeserializer {
     */
    uint32_t GetWireFormatVersion() const;
-
+ 
 +  /**
 +   * Sets the underlying wire format version. Should only be used if there's no
 +   * header specifying the wire format version but you're confident you know
@@ -40,13 +40,13 @@ index 078f367c64..da5c327955 100644
     * Reads raw data in various common formats to the buffer.
     * Note that integer types are read in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index bbab4c72ac..512099336f 100644
+index 14b7c541b3..4a71629579 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3579,6 +3579,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
+@@ -3578,6 +3578,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
    return private_->deserializer.GetWireFormatVersion();
  }
-
+ 
 +void ValueDeserializer::SetWireFormatVersion(uint32_t version) {
 +  private_->deserializer.SetWireFormatVersion(version);
 +}
@@ -55,13 +55,13 @@ index bbab4c72ac..512099336f 100644
    PREPARE_FOR_EXECUTION(context, ValueDeserializer, ReadValue, Value);
    i::MaybeHandle<i::Object> result;
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index 445d75b7a4..b69157e026 100644
+index 1c7e7bb76f..95950427c3 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
-@@ -213,6 +213,13 @@ class ValueDeserializer {
+@@ -216,6 +216,13 @@ class ValueDeserializer {
     */
    uint32_t GetWireFormatVersion() const { return version_; }
-
+ 
 +  /*
 +   * Sets the underlying wire format version. Should only be used if there's no
 +   * header specifying the wire format version but you're confident you know
@@ -72,6 +72,6 @@ index 445d75b7a4..b69157e026 100644
    /*
     * Deserializes a V8 object from the buffer.
     */
---
+-- 
 2.30.2
 

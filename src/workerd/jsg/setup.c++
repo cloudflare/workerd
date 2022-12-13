@@ -11,6 +11,7 @@
 #include <cxxabi.h>
 #include "libplatform/libplatform.h"
 #include <ucontext.h>
+#include <v8-cppgc.h>
 
 #ifdef WORKERD_ICU_DATA_EMBED
 #include <icudata-embed.capnp.h>
@@ -121,12 +122,14 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
 
   v8::V8::InitializePlatform(platform.get());
   v8::V8::Initialize();
+  cppgc::InitializeProcess(platform->GetPageAllocator());
   v8Initialized = true;
 }
 
 V8System::~V8System() noexcept(false) {
   v8::V8::Dispose();
   v8::V8::DisposePlatform();
+  cppgc::ShutdownProcess();
 }
 
 void V8System::setFatalErrorCallback(FatalErrorCallback* callback) {
@@ -152,145 +155,90 @@ void IsolateBase::clearDestructionQueue() {
   auto drop = queue.lockExclusive()->pop();
 }
 
+HeapTracer::HeapTracer(v8::Isolate* isolate): isolate(isolate) {
+  isolate->AddGCPrologueCallback(
+      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+    // We can expect that any freelisted shims will be collected during a major GC, because
+    // they are not in use therefore not reachable. We should therefore clear the freelist now,
+    // before the trace starts.
+    //
+    // Note that we cannot simply depend on the destructor of CppgcShim to remove objects from
+    // the freelist, because destructors do not actually run at trace time. They may be deferred
+    // to run some time after the trace is done. If we accidentally reuse a shim during that
+    // time, we'll have a problem as the shim will still be destroyed as it was already
+    // determined to be unreachable.
+    //
+    // We must clear the freelist in the GC prologue, not the epilogue, because when building in
+    // ASAN mode, V8 will poison the objects' memory, so our attempt to clear the freelist after
+    // the fact will trigger a spurious ASAN failure.
+    reinterpret_cast<HeapTracer*>(data)->clearFreelistedShims();
+  }, this, v8::GCType::kGCTypeMarkSweepCompact);
+
+  isolate->AddGCEpilogueCallback(
+      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+    auto& self = *reinterpret_cast<HeapTracer*>(data);
+    for (Wrappable* wrappable: self.detachLater) {
+      wrappable->detachWrapper(true);
+    }
+    self.detachLater.clear();
+  }, this, v8::GCType::kGCTypeAll);
+}
+
 void HeapTracer::destroy() {
   DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
   KJ_DEFER(isolate = nullptr);
-  isolate->SetEmbedderHeapTracer(nullptr);
-  referencesToMarkLater.clear();
-  wrappersToTrace.clear();
 }
 
-void HeapTracer::mark(TraceableHandle& handle) {
-  if (handle.lastMarked == traceId) {
-    return;
-  }
-
-  // mark() may be called even when we're not currently tracing, in order to inform us that the
-  // object has become reachable from a new parent object. We must ensure that the TracedReference
-  // is initialized in this case, to prevent the object from being collected during scavenging.
-  // Scavenge passes do not actually perform a trace, and instead try to free objects that are
-  // known not to be reachable because the only references V8 ever knew about have gone away. So
-  // we have to make sure a TracedReference exists to tell V8 "this can't be collected without
-  // tracing".
-
-  // Calculate previous trace ID. See TracePrologue() wrap-around logic.
-  uint prevTraceId = traceId == 1 ? uint(kj::maxValue) : traceId - 1;
-
-  if (handle.lastMarked == prevTraceId) {
-    // Handle should still be valid.
-  } else {
-    // Handle was probably collected, or hadn't been created yet. (Re)create it.
-    v8::HandleScope scope(isolate);
-    kj::ctor(handle.tracedRef, isolate, handle.Get(isolate));
-  }
-
-  handle.lastMarked = traceId;
-
-  if (inAdvanceTracing) {
-    // We actually are in the middle of a trace, so mark the reference for V8.
-    RegisterEmbedderReference(handle.tracedRef);
-  } else if (inTrace) {
-    // A trace is happening but V8 hasn't called AdvanceTracing(), so we can't actually call back
-    // to RegisterEmbedderReference() right now as V8 will not like it. But we can't save a pointer
-    // to the handle itself to mark later becasue, who knows, maybe it'll be dropped on the C++
-    // side in the meantime. So we make a copy TracedReference which we can mark during the next
-    // AdvanceTracing(). Awkwardly, this means we don't actually mark `handle.tracedRef`, so it
-    // can still be collected, but at least the object it points to cannot be.
-    //
-    // Note that this code path only ever executes if incremental tracing is enabled, which
-    // as of this writing is disabled by default.
-    v8::HandleScope scope(isolate);
-    auto local = handle.Get(isolate);
-    referencesToMarkLater.add(v8::TracedReference<v8::Data>(isolate, local));
-
-    static bool logOnce KJ_UNUSED = ([]() {
-      // I can't figure out how to get this code to actually run in tests, but it is apparently
-      // happening in production and causing problems. Try to gather some stack traces from
-      // production.
-      KJ_LOG(ERROR, "mark() called during trace outside of AdvanceTracing?", kj::getStackTrace());
-      return true;
-    })();
-  }
+HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
+  return IsolateBase::from(isolate).heapTracer;
 }
 
 void HeapTracer::clearWrappers() {
   while (!wrappers.empty()) {
-    wrappers.front().detachWrapper();
+    // Don't freelist the shim because we're shutting down anyway.
+    wrappers.front().detachWrapper(false);
   }
+  clearFreelistedShims();
 }
 
-void HeapTracer::RegisterV8References(
-    const std::vector<std::pair<void*, void*>>& internalFields) {
-  for (auto [dummy, obj]: internalFields) {
-    KJ_ASSERT(dummy == obj);
-    wrappersToTrace.add(reinterpret_cast<Wrappable*>(obj));
-  }
-}
-
-void HeapTracer::TracePrologue(TraceFlags flags) {
-  wrappersToTrace.clear();
-  if (++traceId == 0) {
-    KJ_LOG(ERROR, "trace ID wrapped around!");
-
-    // We probably don't need to crash, because all of our logic only compares trace IDs for
-    // equality, not less/greater. Just make sure we don't use ID 0.
-    traceId = 1;
-  }
-  inTrace = true;
-}
-
-bool HeapTracer::AdvanceTracing(double deadlineMs) {
-  // TODO(perf): Actually honor deadlineMs.
-
-  inAdvanceTracing = true;
-  KJ_DEFER(inAdvanceTracing = false);
-
-  auto refs = kj::mv(referencesToMarkLater);
-  for (auto& ref: refs) {
-    RegisterEmbedderReference(ref);
-  }
-
-  auto wrappables = kj::mv(wrappersToTrace);
-  for (auto wrappable: wrappables) {
-    wrappable->traceFromV8(traceId);
-  }
-
-  return false;
-}
-bool HeapTracer::IsTracingDone() {
-  return wrappersToTrace.empty() && referencesToMarkLater.empty();
-}
-
-void HeapTracer::TraceEpilogue(TraceSummary* trace_summary) {
-  KJ_ASSERT(wrappersToTrace.empty());
-  if (!referencesToMarkLater.empty()) {
-    KJ_LOG(ERROR, "referencesToMarkLater is not empty at end of trace?");
-    referencesToMarkLater.clear();
-  }
-  inTrace = false;
-}
-
-void HeapTracer::EnterFinalPause(EmbedderStackState stackState) {}
-
-void IsolateBase::scavengePrologue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).startScavenge();
-
-  // V8 frequently performs "scavenges" to quickly reclaim memory from short-lived objects. During
-  // a scavenge, V8 does *not* invoke our EmbedderHeapTracer. It used to be that we therefore had
-  // to iterate over all our weak handles and call MarkActive() on them in order to make sure the
-  // scavenger didn't try to collect them. We no longer need to do that because we now use
-  // TracedReference for any handle that is traceable, and V8 knows not to scavenge such handles.
+bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
+  // V8 will call this during minor GCs to decide if the given object is a "root" for minor GC
+  // purposes, meaning it cannot be collected. V8 only calls this if the pointed-to object is an
+  // object that it believes would be safe to destroy and recreate, i.e. a recreated object would
+  // be indistinguishable from the original. In particular, it checks that the object has not been
+  // modified by the application (e.g. the app has not added any properties of its own), is not a
+  // key in a WeakMap, and several other conditions. Objects which are safe to recreate are said
+  // to be "unmodified".
   //
-  // Note that the scavenge pass can still collect some of our wrapper objects -- specifically, the
-  // ones that have only ever been reachable directly from JavaScript (and no longer are), but were
-  // never reachable transitively through another C++ object, and therefore never had a
-  // TracedReference allocated for them.
+  // Having decided that the object is unmodified, V8 calls `IsRoot()` to ask us, the embedder,
+  // whether we also agree the object is safe to drop and recreate. We return false if it is safe,
+  // true if it is not safe. Perhaps the method would be better named something like
+  // `IsSafeToDropIfUnmodified()`, but it is what it is.
+  //
+  // Our wrapper objects are indeed safe to discard and recreate (if they are unmodified). To be
+  // safe, though, let's verify that the handle V8 is giving us really does point to one of our
+  // wrappers. If it points to something else, assume it is not safe.
+  return handle.WrapperClassId() != Wrappable::WRAPPABLE_TAG;
 }
 
-void IsolateBase::scavengeEpilogue(
-    v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags) {
-  HeapTracer::getTracer(isolate).endScavenge();
+void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
+  // V8 only calls this if the wrapper object is not reachable from JavaScript *and* IsRoot()
+  // returned false earlier. It may still be reachable via C++, but we can recreate the wrapper
+  // as needed if the C++ object is exported to JavaScript again later.
+  auto& wrappable = *reinterpret_cast<Wrappable*>(
+      handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+
+  // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
+  // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
+  // visit the reference again, but it will DCHECK-fail on that second attempt because the
+  // reference is in an inconsistent state at that point.
+  KJ_ASSERT_NONNULL(wrappable.wrapper).Reset();
+
+  // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
+  // if the wrapable has strong references, which means that its outgoing references need to be
+  // upgraded to strong).
+  detachLater.add(&wrappable);
 }
 
 namespace {
@@ -308,11 +256,33 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
       heapTracer(ptr) {
+  v8::CppHeapCreateParams params {
+    .wrapper_descriptor = v8::WrapperDescriptor(
+        Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+        Wrappable::CPPGC_SHIM_FIELD_INDEX,
+        Wrappable::WRAPPABLE_TAG),
+
+    .marking_support = cppgc::Heap::MarkingType::kAtomic,
+    .sweeping_support = cppgc::Heap::SweepingType::kAtomic
+    // We currently don't attempt to support incremental marking or sweeping. We probably could
+    // support them, but it will take some careful investigation and testing. It's not clear if
+    // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+    // full atomic mark-sweep usually doesn't require much of a pause.
+    //
+    // We probably won't ever support concurrent marking or sweeping because concurrent GC is only
+    // expected to be a win if there are idle CPU cores available. Workers normally run on servers
+    // that are handling many requests at once, thus it's expected CPU cores will be fully
+    // utilized. This differs from browser environments, where a user is typically doing only one
+    // thing at a time and thus likely has CPU cores to spare.
+  };
+  // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
+  // V8 wants a non-const pointer here, but the object is in fact thread-safe.
+  cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
+  ptr->AttachCppHeap(cppgcHeap.get());
+  ptr->SetEmbedderRootsHandler(&heapTracer);
+
   ptr->SetFatalErrorHandler(&fatalError);
   ptr->SetOOMErrorHandler(&oomError);
-
-  ptr->AddGCPrologueCallback(scavengePrologue, v8::kGCTypeScavenge);
-  ptr->AddGCEpilogueCallback(scavengeEpilogue, v8::kGCTypeScavenge);
 
   ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
   ptr->SetData(0, this);
@@ -350,13 +320,19 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
   {
     v8::HandleScope scope(ptr);
     auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
-    opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(2);
+    opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
     this->opaqueTemplate.Reset(ptr, opaqueTemplate);
   }
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
-  KJ_DEFER(ptr->Dispose());
+  ptr->DetachCppHeap();
+
+  // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
+  // To be safe we call `Terminate()`.
+  cppgcHeap->Terminate();
+
+  ptr->Dispose();
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {

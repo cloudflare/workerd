@@ -54,6 +54,7 @@ public:
 
 private:
   kj::Own<v8::Platform> platform;
+  friend class IsolateBase;
 
   explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);
 };
@@ -196,18 +197,17 @@ private:
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike);
   static bool allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source);
 
-  static void scavengePrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
-  static void scavengeEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags);
-
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
 
   friend class IsolateBase;
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
 
   HeapTracer heapTracer;
+  std::unique_ptr<v8::CppHeap> cppgcHeap;
 
   friend class Data;
   friend class Wrappable;
+  friend class HeapTracer;
 
   friend bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
   friend bool getCommonJsExportDefault(v8::Isolate* isolate);

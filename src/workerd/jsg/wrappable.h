@@ -15,57 +15,14 @@
 #include <kj/list.h>
 #include <v8.h>
 
+namespace cppgc { class Visitor; }
+
 namespace workerd::jsg {
 
 using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
-
-class TraceableHandle: public v8::Global<v8::Data> {
-  // Internal type used anywhere where a v8::Global with support for GC tracing is desired. This
-  // encapsulates the very weird behavior of TracedReference.
-
-public:
-  using v8::Global<v8::Data>::Global;
-
-  TraceableHandle(TraceableHandle&& other)
-      : v8::Global<v8::Data>(kj::mv(other)) {
-    // Since we don't know if `other.lastMarked` is current, we have to assume `other.tracedRef` is
-    // invalid and not touch it. Setting `lastMarked` to zero ensures it'll be recreated if needed.
-    other.lastMarked = 0;
-  }
-  TraceableHandle& operator=(TraceableHandle&& other) {
-    static_cast<v8::Global<v8::Data>&>(*this) = kj::mv(other);
-    // Since we don't know if `other.lastMarked` is current, we have to assume `other.tracedRef` is
-    // invalid and not touch it. Setting `lastMarked` to zero ensures it'll be recreated if needed.
-    lastMarked = 0;
-    other.lastMarked = 0;
-    return *this;
-  }
-
-  KJ_DISALLOW_COPY(TraceableHandle);
-
-  uint getLastMarked() { return lastMarked; }
-
-private:
-  v8::TracedReference<v8::Data> tracedRef;
-  // Space for a TracedReference. Note that V8's TracedReference has very weird lifetime
-  // properties. It becomes poison when V8 decides it is unreachable. Any attempt to use it after
-  // that point will crash or worse. This includes calling `Reset()`! `Reset()` will blow up if
-  // the reference has been collected. And attempting to assign `tracedRef` implicitly calls
-  // `Reset()`! So if the ref has been deemed unreachable then YOU CANNOT ASSIGN OVER IT.
-  //
-  // However, the type has no destructor. So... you can safely placement-new over it. (Or use
-  // kj::ctor(), which is a nice interface for placement-new.)
-
-  uint lastMarked = 0;
-  // Last trace ID at which `tracedRef` was marked. 0 indicates never marked. If `lastMarked` is
-  // not equal to either the current or previous trace, then `tracedRef` must be assumed to be
-  // poison which must not be touched!
-
-  friend class HeapTracer;
-};
 
 class Wrappable: public kj::Refcounted {
   // Base class for C++ objects which can be "wrapped" for JavaScript consumption. A JavaScript
@@ -90,6 +47,30 @@ class Wrappable: public kj::Refcounted {
   // Wrappable and are not visible to GC tracing.
 
 public:
+  static constexpr uint INTERNAL_FIELD_COUNT = 3;
+  // Number of internal fields in a wrapper object.
+
+  static constexpr uint WRAPPED_OBJECT_FIELD_INDEX = 2;
+  // Index of the internal field that points back to the `Wrappable`.
+
+  static constexpr uint CPPGC_SHIM_FIELD_INDEX = 1;
+  // Index of the internal field that contains a pointer to the cppgc shim object, used to get
+  // tracing callback from V8 and get notification when the wrapper is collected.
+
+  static constexpr uint WRAPPABLE_TAG_FIELD_INDEX = 0;
+  // Field must contain a pointer to `WRAPPABLE_TAG`. This is a requirement of v8::CppHeap. The
+  // purpose is not clear.
+  //
+  // Note that although V8 lets us configure which slot this tag is in, in practice if we set it
+  // to anything other than zero, we see crashes inside V8. It appears that V8 allocates some
+  // objects of its own which have internal fields, and then GC doesn't check that the index is
+  // in-bounds before reading it...
+
+  static constexpr uint16_t WRAPPABLE_TAG = 0xeb04;
+  // The value pointed to by the internal field field `WRAPPABLE_TAG_FIELD_INDEX`.
+  //
+  // This value was chosen randomly.
+
   void addStrongRef();
   void removeStrongRef();
 
@@ -101,13 +82,9 @@ public:
   v8::Local<v8::Object> getHandle(v8::Isolate* isolate);
 
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate) {
-    if (wrapper.IsEmpty()) {
-      return nullptr;
-    } else {
-      // V8 doesn't let us cast directly from v8::Data to subtypes of v8::Value, so we're forced to
-      // use this double cast... Ech.
-      return wrapper.Get(isolate).As<v8::Value>().As<v8::Object>();
-    }
+    return wrapper.map([&](v8::TracedReference<v8::Object>& ref) {
+      return ref.Get(isolate);
+    });
   }
 
   void visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, bool& refStrong);
@@ -140,31 +117,37 @@ public:
   // Perform GC visitation. This is named with the `jsg` prefix because it pollutes the
   // namespace of JSG_RESOURCE types.
 
-  kj::Own<Wrappable> detachWrapper();
+  kj::Own<Wrappable> detachWrapper(bool shouldFreelistShim);
   // Detaches the wrapper from V8 and returns the reference that V8 had previously held.
   // (Typically, the caller will ignore the return value, thus dropping the reference.)
 
-  void traceFromV8(uint traceId);
+  void traceFromV8(cppgc::Visitor& cppgcVisitor);
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
 
 private:
-  TraceableHandle wrapper;
+  class CppgcShim;
+
+  kj::Maybe<CppgcShim&> cppgcShim;
+  // If a JS wrapper is currently allocated, this point to the cppgc shim object.
+
+  kj::Maybe<v8::TracedReference<v8::Object>> wrapper;
   // Handle to the JS wrapper object. The wrapper is created lazily when the object is first
   // exported to JavaScript; until then, the wrapper is empty.
   //
-  // This handle is marked strong whenever there are non-GC-traced references to the object (i.e.
-  // from other C++ objects). Otherwise, it is marked weak, with a weak callback that potentially
-  // deletes the object.
-  //
-  // This handle always holds a v8::Object.
+  // If the wrapper object is "unmodified" from its original creation state, then V8 may choose to
+  // collect it even when it could still technically be reached via C++ objects. The idea here is
+  // that if the object is returned to JavaScript again later, the wrapper can be reconstructed at
+  // that time. However, if the wrapper is modified by the application (e.g. monkey-patched with
+  // a new property), then collecting and recreating it won't work. The logic to decide if an
+  // object has been "modified" is internal to V8 and baked into its use of EmbedderRootsHandler.
+
+  v8::Global<v8::Object> strongWrapper;
+  // Whenever there are non-GC-traced references to the object (i.e. from other C++ objects, i.e.
+  // strongRefcount > 0), and `wrapper` is non-null, then `strongWrapper` contains a copy of
+  // `wrapper`, to force it to stay alive. Otherwise, `strongWrapper` is empty.
 
   v8::Isolate* isolate = nullptr;
-  // Will be non-null if `wrapper` is non-empty or `lastTraceId` is non-zero.
-
-  uint lastTraceId = 0;
-  // Last GC trace in which this object was reached. 0 = never reached.
-  //
-  // Whenever this changes, a GC visitation must be executed to update outgoing refs.
+  // Will be non-null if `wrapper` has ever been non-null.
 
   uint strongRefcount = 0;
   // How many strong Ref<T>s point at this object, forcing the wrapper to stay alive even if GC
@@ -173,42 +156,18 @@ private:
   // Whenever the value of the boolean expression (strongRefcount > 0 && wrapper.IsEmpty()) changes,
   // a GC visitation is needed to update all outgoing refs.
 
-  enum {
-    NOT_DETACHED,
-    WHILE_SCAVENGING,
-    WHILE_TRACING,
-    OTHER
-  } detached = NOT_DETACHED;
-  // Has this had a wrapper in the past which was detached? For debugging.
-
-  uint detachedTraceId = 0;
-  // traceId when detachment occurred.
-
-  kj::Own<Wrappable> wrapperRef;
-  // A pointer to self, intended to represent V8's reference to this object. Must be reset at
-  // the same time as `wrapper` is reset.
-
   kj::ListLink<Wrappable> link;
   // When `wrapperRef` is non-empty, the Wrappable is a member of the list `HeapTracer::wrappers`.
-
-  void resetWrapperHandle();
-  kj::Own<Wrappable> detachWrapperRef();
-  static void deleterPass1(const v8::WeakCallbackInfo<Wrappable>& data);
-  static void deleterPass2(const v8::WeakCallbackInfo<Wrappable>& data);
-
-  void setWeak();
 
   friend class GcVisitor;
   friend class HeapTracer;
 };
 
-class HeapTracer final: public v8::EmbedderHeapTracer {
+class HeapTracer: public v8::EmbedderRootsHandler {
   // For historical reasons, this is actually implemented in setup.c++.
 
 public:
-  explicit HeapTracer(v8::Isolate* isolate): isolate(isolate) {
-    isolate->SetEmbedderHeapTracer(this);
-  }
+  explicit HeapTracer(v8::Isolate* isolate);
 
   ~HeapTracer() noexcept {
     // Destructor has to be noexcept because it inherits from a V8 type that has a noexcept
@@ -219,44 +178,37 @@ public:
   void destroy();
   // Call under isolate lock when shutting down isolate.
 
-  static HeapTracer& getTracer(v8::Isolate* isolate) {
-    return *reinterpret_cast<HeapTracer*>(isolate->GetEmbedderHeapTracer());
-  }
+  static HeapTracer& getTracer(v8::Isolate* isolate);
 
-  uint currentTraceId() { return traceId; }
-
-  void mark(TraceableHandle& handle);
-  // If no trace is in progress, does nothing. If a trace is in progress, either calls
-  // RegisterEmbedderReference() now or arranges for it to be called before the end of the trace.
+  static bool isInCppgcDestructor();
+  // Returns true if the current thread is currently executing the destructor of a CppgcShim
+  // object, which implies that we are collecting unreachable objects.
 
   void addWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.add(wrappable); }
   void removeWrapper(kj::Badge<Wrappable>, Wrappable& wrappable) { wrappers.remove(wrappable); }
   void clearWrappers();
 
-  void startScavenge() { scavenging = true; }
-  void endScavenge() { scavenging = false; }
+  void addToFreelist(Wrappable::CppgcShim& shim);
+  Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
+  void clearFreelistedShims();
 
-  void RegisterV8References(const std::vector<std::pair<void*, void*>>& internalFields) override;
-  void TracePrologue(TraceFlags flags) override;
-  bool AdvanceTracing(double deadlineMs) override;
-  bool IsTracingDone() override;
-  void TraceEpilogue(TraceSummary* trace_summary) override;
-  void EnterFinalPause(EmbedderStackState stackState) override;
-
-  bool isTracing() { return inTrace; }
-  bool isScavenging() { return scavenging; }
+  // implements EmbedderRootsHandler -------------------------------------------
+  bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
+  void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
 
 private:
   v8::Isolate* isolate;
-  uint traceId = 1;
-  bool inTrace = false;
-  bool inAdvanceTracing = false;
-  bool scavenging = false;
   kj::Vector<Wrappable*> wrappersToTrace;
-  kj::Vector<v8::TracedReference<v8::Data>> referencesToMarkLater;
+
+  kj::Vector<Wrappable*> detachLater;
+  // Wrappables on which detachWrapper() should be called at the end of this GC pass.
 
   kj::List<Wrappable, &Wrappable::link> wrappers;
   // List of all Wrappables for which a JavaScript wrapper exists.
+
+  kj::Maybe<Wrappable::CppgcShim&> freelistedShims;
+  // List of shim objects for wrappers that were collected during a minor GC. The shim objects
+  // can be reused for future allocations.
 };
 
 #define DISALLOW_KJ_IO_DESTRUCTORS_SCOPE \

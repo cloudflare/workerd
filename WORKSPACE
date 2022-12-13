@@ -221,7 +221,7 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "35952837d5c420b727642b88e28651cb80c3f538",
+    commit = "18865d6af0404f2d2aeb1c99dd73503364ce0967",
     shallow_since = "1662649276 +0000",
     patch_args = [ "-p1" ],
     patches = [
@@ -229,13 +229,14 @@ git_repository(
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
+        "//:patches/v8/0005-Revert-bazel-Add-hide-symbols-from-release-fast-buil.patch",
     ],
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "b3070c52557323463e6b9827e2343e60e1b91f85",
+    commit = "20f8ac695af59b6c830def7d4e95bfeb13dd7be5",
     shallow_since = "1660168635 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
     patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ]
@@ -244,7 +245,7 @@ new_git_repository(
 new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    commit = "2ba7a48ca6167ee8ef311a7f3bc60b5e5cf5ee79",
+    commit = "521ac34ebd795939c7e16b37d9d3ddb40e8ed556",
     shallow_since = "1659619139 -0700",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
 )

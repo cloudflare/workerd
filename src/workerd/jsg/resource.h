@@ -108,8 +108,9 @@ T& extractInternalPointer(const v8::Local<v8::Context>& context,
     // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
     return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
   } else {
-    KJ_ASSERT(object->InternalFieldCount() == 2);
-    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(1));
+    KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(
+        Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
   }
 }
 
@@ -149,7 +150,7 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
 
       auto context = isolate->GetCurrentContext();
       auto obj = args.This();
-      KJ_ASSERT(obj->InternalFieldCount() == 2);
+      KJ_ASSERT(obj->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
 
       auto& wrapper = TypeWrapper::from(isolate);
 
@@ -177,7 +178,7 @@ struct ConstructorCallback<TypeWrapper, T,
 
       auto context = isolate->GetCurrentContext();
       auto obj = args.This();
-      KJ_ASSERT(obj->InternalFieldCount() == 2);
+      KJ_ASSERT(obj->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
 
       auto& wrapper = TypeWrapper::from(isolate);
 
@@ -206,7 +207,7 @@ struct ConstructorCallback<TypeWrapper, T,
 
       auto context = isolate->GetCurrentContext();
       auto obj = args.This();
-      KJ_ASSERT(obj->InternalFieldCount() == 2);
+      KJ_ASSERT(obj->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
 
       auto& wrapper = TypeWrapper::from(isolate);
 
@@ -1028,16 +1029,7 @@ private:
 
     auto instance = constructor->InstanceTemplate();
 
-    // V8's GC visitation API imposes the following seemingly-arbitrary requirements on objects'
-    // internal fields:
-    // - The object has at least two internal fields (otherwise, it is ignored).
-    // - The first internal field is not null (otherwise, the object is ignored).
-    // - The object has an even number of internal fields (otherwise, DCHECK-failure).
-    // - Only the first two internal field values are reported to the tracing API.
-    //
-    // Right then, we'll allocate two fields. The first will point to the GC tracing callback
-    // (null if no tracing needed), the second will point to the object itself.
-    instance->SetInternalFieldCount(2);
+    instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
 
     constructor->SetClassName(v8Str(
         isolate, typeName(typeid(T)), v8::NewStringType::kInternalized));

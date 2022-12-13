@@ -55,6 +55,29 @@ void Data::destroy() {
   if (isolate != nullptr) {
     if (v8::Locker::IsLocked(isolate)) {
       handle.Reset();
+
+      // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
+      // used. Note that merely detroying the TracedReference does nothing -- only explicitly
+      // calling Reset() has an effect.
+      //
+      // In particular, this permits `Data` values to be collected by minor (non-tracing) GC, as
+      // long as there are no cycles.
+      //
+      // HOWEVER, this is not safe if the TracedReference is being destroyed as a result of a
+      // major (traced) GC. In that case, the TracedReference itself may point to a reference slot
+      // that was already collected, and trying to reset it would be UB.
+      //
+      // In all other cases, resetting the handle is safe:
+      // - During minor GC, TracedReferences aren't collected by the GC itself, so must still be
+      //   valid.
+      // - If the `Data` is being destroyed _not_ as part of GC, e.g. it's being destroyed because
+      //   the data structure holding it is being modified in a way that drops the reference, then
+      //   that implies that the reference is still reachable, so must still be valid.
+      KJ_IF_MAYBE(t, tracedHandle) {
+        if (!HeapTracer::isInCppgcDestructor()) {
+          t->Reset();
+        }
+      }
     } else {
       // This thread doesn't have the isolate locked right now. To minimize lock contention, we'll
       // defer these handles' destruction to the next time the isolate is locked.
