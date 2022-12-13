@@ -36,7 +36,7 @@ public:
 
 private:
   template <typename T>
-  kj::Promise<T> thenOrRunNow(std::function<kj::Promise<T> (kj::Own<kj::AsyncIoStream> *)> f) {
+  kj::Promise<T> thenOrRunNow(std::function<kj::Promise<T> (kj::AsyncIoStream&)> f) {
     // Either calls `then` on the `inner` promise with the `f` callback, or calls `f` on an already
     // stored stream (if the `inner` promise completed).
     KJ_IF_MAYBE(e, error) {
@@ -44,11 +44,11 @@ private:
     }
 
     KJ_IF_MAYBE(s, completedInner) {
-      return f(s);
+      return f(*s->get());
     } else {
       return inner.then([this, f](kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<T> {
         completedInner = kj::mv(stream);
-        return f(&KJ_ASSERT_NONNULL(completedInner));
+        return f(*KJ_ASSERT_NONNULL(completedInner));
       });
     }
   }

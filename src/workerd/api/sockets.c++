@@ -95,8 +95,8 @@ PipelinedAsyncIoStream::PipelinedAsyncIoStream(kj::Promise<kj::Own<kj::AsyncIoSt
     inner(kj::mv(inner)), onClose(onClose) {};
 
 void PipelinedAsyncIoStream::shutdownWrite() {
-  thenOrRunNow<void>([this](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->shutdownWrite();
+  thenOrRunNow<void>([this](kj::AsyncIoStream& stream) {
+    stream.shutdownWrite();
     onClose();
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
@@ -105,8 +105,8 @@ void PipelinedAsyncIoStream::shutdownWrite() {
 }
 
 void PipelinedAsyncIoStream::abortRead() {
-  thenOrRunNow<void>([this](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->abortRead();
+  thenOrRunNow<void>([this](kj::AsyncIoStream& stream) {
+    stream.abortRead();
     onClose();
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
@@ -115,8 +115,8 @@ void PipelinedAsyncIoStream::abortRead() {
 }
 
 void PipelinedAsyncIoStream::getsockopt(int level, int option, void* value, uint* length) {
-  thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->getsockopt(level, option, value, length);
+  thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    stream.getsockopt(level, option, value, length);
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -124,8 +124,8 @@ void PipelinedAsyncIoStream::getsockopt(int level, int option, void* value, uint
 }
 
 void PipelinedAsyncIoStream::setsockopt(int level, int option, const void* value, uint length) {
-  thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->setsockopt(level, option, value, length);
+  thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    stream.setsockopt(level, option, value, length);
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -133,8 +133,8 @@ void PipelinedAsyncIoStream::setsockopt(int level, int option, const void* value
 }
 
 void PipelinedAsyncIoStream::getsockname(struct sockaddr* addr, uint* length) {
-  thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->getsockname(addr, length);
+  thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    stream.getsockname(addr, length);
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -142,8 +142,8 @@ void PipelinedAsyncIoStream::getsockname(struct sockaddr* addr, uint* length) {
 }
 
 void PipelinedAsyncIoStream::getpeername(struct sockaddr* addr, uint* length) {
-  thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    (*stream)->getpeername(addr, length);
+  thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    stream.getpeername(addr, length);
     return kj::READY_NOW;
   }).detach([this](kj::Exception&& exception) mutable {
     error = kj::mv(exception);
@@ -151,10 +151,10 @@ void PipelinedAsyncIoStream::getpeername(struct sockaddr* addr, uint* length) {
 }
 
 kj::Promise<size_t> PipelinedAsyncIoStream::read(void* buffer, size_t minBytes, size_t maxBytes) {
-  return thenOrRunNow<size_t>([=](kj::Own<kj::AsyncIoStream>* stream) {
+  return thenOrRunNow<size_t>([=](kj::AsyncIoStream& stream) {
     auto& context = IoContext::current();
     return context.awaitJs(context.awaitIo(
-        (*stream)->read(buffer, minBytes, maxBytes), [this](size_t size) {
+        stream.read(buffer, minBytes, maxBytes), [this](size_t size) {
       if (size == 0) {
         onClose();
       }
@@ -164,10 +164,10 @@ kj::Promise<size_t> PipelinedAsyncIoStream::read(void* buffer, size_t minBytes, 
 }
 
 kj::Promise<size_t> PipelinedAsyncIoStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
-  return thenOrRunNow<size_t>([=](kj::Own<kj::AsyncIoStream>* stream) -> kj::Promise<size_t> {
+  return thenOrRunNow<size_t>([=](kj::AsyncIoStream& stream) -> kj::Promise<size_t> {
     auto& context = IoContext::current();
     return context.awaitJs(context.awaitIo(
-        (*stream)->tryRead(buffer, minBytes, maxBytes), [this](size_t size) {
+        stream.tryRead(buffer, minBytes, maxBytes), [this](size_t size) {
       if (size == 0) {
         onClose();
       }
@@ -177,22 +177,22 @@ kj::Promise<size_t> PipelinedAsyncIoStream::tryRead(void* buffer, size_t minByte
 }
 
 kj::Promise<void> PipelinedAsyncIoStream::write(const void* buffer, size_t size) {
-  return thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    return (*stream)->write(buffer, size);
+  return thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    return stream.write(buffer, size);
   });
 }
 
 kj::Promise<void> PipelinedAsyncIoStream::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
-  return thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
-    return (*stream)->write(pieces);
+  return thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
+    return stream.write(pieces);
   });
 }
 
 kj::Promise<void> PipelinedAsyncIoStream::whenWriteDisconnected() {
-  return thenOrRunNow<void>([=](kj::Own<kj::AsyncIoStream>* stream) {
+  return thenOrRunNow<void>([=](kj::AsyncIoStream& stream) {
     auto& context = IoContext::current();
     return context.awaitJs(context.awaitIo(
-        (*stream)->whenWriteDisconnected(), [this]() {
+        stream.whenWriteDisconnected(), [this]() {
       onClose();
     }));
   });
