@@ -57,7 +57,7 @@ interface Queue<Body = any> {
 
   /**
    * Sends a batch of messages to the Queue.
-   * @param messages Each item in the array must be supported by the [structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm#supported_types). A batch can contain up to 100 messages, though items are limited to 128 KB each, and the total size of the array cannot exceed 256 KB.
+   * @param messages Each item in the input must be supported by the [structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm#supported_types). A batch can contain up to 100 messages, though items are limited to 128 KB each, and the total size of the array cannot exceed 256 KB.
    * @returns A promise that resolves when the messages are confirmed to be written to disk.
    */
   sendBatch(messages: Iterable<MessageSendRequest<Body>>): Promise<void>;
