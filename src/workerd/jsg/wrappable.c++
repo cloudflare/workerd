@@ -21,6 +21,15 @@ static thread_local bool inCppgcShimDestructor = false;
 bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
 
 void HeapTracer::clearWrappers() {
+  // When clearing wrappers (at isolate shutdown), we may be destroying objects that were recenly
+  // determined to be unreachable, but the CppgcShim destructors haven't been run yet. We need to
+  // treat this case as if we are running CppgcShim destructors, that is, assume any
+  // TracedReferences we destroy have already been collected so cannot be touched.
+  // TODO(cleanup): Rename `inCppgcShimDestructor` to `possiblyCollectingUnreachableObject`?
+  KJ_ASSERT(!inCppgcShimDestructor);
+  inCppgcShimDestructor = true;
+  KJ_DEFER(inCppgcShimDestructor = false);
+
   while (!wrappers.empty()) {
     // Don't freelist the shim because we're shutting down anyway.
     wrappers.front().detachWrapper(false);
