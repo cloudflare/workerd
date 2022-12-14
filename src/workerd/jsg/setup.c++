@@ -193,14 +193,6 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
   return IsolateBase::from(isolate).heapTracer;
 }
 
-void HeapTracer::clearWrappers() {
-  while (!wrappers.empty()) {
-    // Don't freelist the shim because we're shutting down anyway.
-    wrappers.front().detachWrapper(false);
-  }
-  clearFreelistedShims();
-}
-
 bool HeapTracer::IsRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 will call this during minor GCs to decide if the given object is a "root" for minor GC
   // purposes, meaning it cannot be collected. V8 only calls this if the pointed-to object is an
