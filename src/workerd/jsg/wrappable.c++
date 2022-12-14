@@ -20,6 +20,14 @@ static thread_local bool inCppgcShimDestructor = false;
 
 bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
 
+void HeapTracer::clearWrappers() {
+  while (!wrappers.empty()) {
+    // Don't freelist the shim because we're shutting down anyway.
+    wrappers.front().detachWrapper(false);
+  }
+  clearFreelistedShims();
+}
+
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
   // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
   // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
