@@ -70,14 +70,17 @@ struct InitData {
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
+  kj::Promise<kj::HttpClient::ConnectRequest::Status> status;
 };
 
 class Socket: public jsg::Object {
 public:
   Socket(InitData data)
       : readable(kj::mv(data.readable)), writable(kj::mv(data.writable)),
-        closeFulfiller(kj::mv(data.closeFulfiller)) {};
-  Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise);
+        closeFulfiller(kj::mv(data.closeFulfiller)),
+        status(data.status.then([this](auto s) {return statusHandler(kj::mv(s));}).eagerlyEvaluate(nullptr)) { };
+  Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise,
+      kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -104,9 +107,20 @@ private:
   jsg::Ref<WritableStream> writable;
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   IoOwn<kj::PromiseFulfillerPair<void>> closeFulfiller;
+  kj::Promise<kj::HttpClient::ConnectRequest::Status> status;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(readable, writable);
+  }
+
+  kj::HttpClient::ConnectRequest::Status statusHandler(kj::HttpClient::ConnectRequest::Status status) {
+    if (status.statusCode < 200 || status.statusCode >= 300) {
+      KJ_DBG("Inside status handler, rejecting closed socket");
+      auto err = kj::str("jsg.Error: Could not establish TCP socket tunnel");
+      closeFulfiller->fulfiller->reject(
+          kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(err)));
+    }
+    return status;
   }
 };
 

@@ -24,11 +24,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = kj::newHttpClient(*client);
   auto request = httpClient->connect(address, *headers);
-  // TODO(soon): If `request.status` resolves to have a statusCode < 200 || >= 300, arrange for the
-  //   the Socket to throw an appropriate error. Right now in this circumstance,
-  //   `request.connection`'s operations will throw KJ exceptions which will be exposed to the
-  //   script as internal errors.
-  return jsg::alloc<Socket>(request.connection.attach(kj::mv(request.status)));
+  return jsg::alloc<Socket>(kj::mv(request.connection), kj::mv(request.status));
 }
 
 jsg::Ref<Socket> connectImpl(
@@ -47,24 +43,27 @@ jsg::Ref<Socket> connectImpl(
   return connectImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(address));
 }
 
-InitData initialiseSocket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise) {
+InitData initialiseSocket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise,
+  kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
   auto& context = IoContext::current();
 
   // Initialise the readable/writable streams with a custom AsyncIoStream that waits for the
   // completion of `connectionPromise` before performing reads/writes.
   auto stream = kj::refcounted<PipelinedAsyncIoStream>(kj::mv(connectionPromise));
   auto sysStreams = newSystemMultiStream(kj::addRef(*stream), StreamEncoding::IDENTITY, context);
+  auto fulfiller = kj::heap<kj::PromiseFulfillerPair<void>>(kj::newPromiseAndFulfiller<void>());
 
   return {
     .readable = jsg::alloc<ReadableStream>(context, kj::mv(sysStreams.readable)),
     .writable = jsg::alloc<WritableStream>(context, kj::mv(sysStreams.writable)),
-    .closeFulfiller = IoContext::current().addObject(
-        kj::heap<kj::PromiseFulfillerPair<void>>(kj::newPromiseAndFulfiller<void>()))
+    .closeFulfiller = IoContext::current().addObject(kj::mv(fulfiller)),
+    .status = kj::mv(status)
   };
 }
 
-Socket::Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise) :
-    Socket(initialiseSocket(kj::mv(connectionPromise))) {};
+Socket::Socket(kj::Promise<kj::Own<kj::AsyncIoStream>> connectionPromise,
+    kj::Promise<kj::HttpClient::ConnectRequest::Status> status) :
+    Socket(initialiseSocket(kj::mv(connectionPromise), kj::mv(status))) { };
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
   if (!closeFulfiller->fulfiller->isWaiting()) {
