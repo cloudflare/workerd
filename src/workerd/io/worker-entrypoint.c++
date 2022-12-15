@@ -156,7 +156,11 @@ kj::Promise<void> WorkerEntrypoint::request(
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
 
-  return context.run(
+  kj::Maybe<kj::Promise<void>> proxyTask;
+  kj::Maybe<kj::Own<kj::HttpClient>> failOpenClient;
+  bool loggedExceptionEarlier = false;
+
+  co_await context.run(
       [this, &context, method, url, &headers, &requestBody,
        &metrics = incomingRequest->getMetrics(),
        &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
@@ -164,17 +168,19 @@ kj::Promise<void> WorkerEntrypoint::request(
     return lock.getGlobalScope().request(
         method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
-  }).then([this](api::DeferredProxy<void> deferredProxy) {
+  }).then([&proxyTask](api::DeferredProxy<void> deferredProxy) {
     proxyTask = kj::mv(deferredProxy.proxyTask);
   }).exclusiveJoin(context.onAbort())
-      .catch_([this,&context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+      .catch_([&loggedExceptionEarlier,&context](kj::Exception&& exception) mutable
+          -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER,
                                       kj::cp(exception));
     return kj::mv(exception);
-  }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
+  }).attach(kj::defer([this,&failOpenClient,incomingRequest=kj::mv(incomingRequest),&context]
+                      () mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     if (context.isFailOpen()) {
       // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
@@ -190,7 +196,7 @@ kj::Promise<void> WorkerEntrypoint::request(
       });
     }
     waitUntilTasks.add(kj::mv(promise));
-  })).then([this]() -> kj::Promise<void> {
+  })).then([&proxyTask]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
     KJ_IF_MAYBE(p, proxyTask) {
@@ -198,11 +204,11 @@ kj::Promise<void> WorkerEntrypoint::request(
     } else {
       return kj::READY_NOW;
     }
-  }).attach(kj::defer([this]() mutable {
+  }).attach(kj::defer([&proxyTask]() mutable {
     // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
     proxyTask = nullptr;
-  })).catch_([this,wrappedResponse = kj::mv(wrappedResponse),isActor,
-              method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
+  })).catch_([this,&failOpenClient,&loggedExceptionEarlier,wrappedResponse=kj::mv(wrappedResponse),
+              isActor,method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
              (kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
 

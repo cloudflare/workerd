@@ -65,12 +65,6 @@ private:
   kj::Maybe<kj::String> cfBlobJson;
   // Members initialized at startup.
 
-  kj::Maybe<kj::Promise<void>> proxyTask;
-  kj::Maybe<kj::Own<kj::HttpClient>> failOpenClient;
-  bool loggedExceptionEarlier = false;
-  // Hacky members used to hold some temporary state while processing a request.
-  // See gory details in WorkerEntrypoint::request().
-
   void init(
       kj::Own<const Worker> worker,
       kj::Maybe<kj::Own<Worker::Actor>> actor,
