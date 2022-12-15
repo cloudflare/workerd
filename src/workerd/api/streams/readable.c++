@@ -307,13 +307,6 @@ ReadableStreamController& ReadableStream::getController() {
   KJ_UNREACHABLE;
 }
 
-kj::Own<ReadableStreamSource> ReadableStream::removeSource(jsg::Lock& js) {
-  return JSG_REQUIRE_NONNULL(
-      getController().removeSource(js),
-      TypeError,
-      "This ReadableStream does not have a ReadableStreamSource");
-}
-
 jsg::Promise<void> ReadableStream::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -440,6 +433,67 @@ jsg::Promise<void> ReadableStream::returnFunction(
     reader->releaseLock(js);
   }
   return js.resolvedPromise();
+}
+
+jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js) {
+  JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
+  JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
+  KJ_SWITCH_ONEOF(controller) {
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
+      return jsg::alloc<ReadableStream>(IoContext::current(),
+          KJ_REQUIRE_NONNULL(c->removeSource(js)));
+    }
+    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
+      auto stream = jsg::alloc<ReadableStream>(c->detach(js));
+      return kj::mv(stream);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
+  return getController().tryGetLength(encoding);
+}
+
+kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
+    jsg::Lock& js,
+    kj::Own<WritableStreamSink> sink,
+    bool end) {
+  return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
+    KJ_REQUIRE(!isDisturbed(), "The ReadableStream has already been read.");
+    KJ_REQUIRE(!isLocked(), "The ReadableStream has been locked to a reader.");
+
+    KJ_SWITCH_ONEOF(controller) {
+      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
+        auto source = KJ_ASSERT_NONNULL(c->removeSource(js));
+
+        struct Holder: public kj::Refcounted {
+          kj::Own<WritableStreamSink> sink;
+          kj::Own<ReadableStreamSource> source;
+          Holder(kj::Own<WritableStreamSink> sink,
+                 kj::Own<ReadableStreamSource> source)
+              : sink(kj::mv(sink)), source(kj::mv(source)) {}
+        };
+
+        auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
+        return holder->source->pumpTo(*holder->sink, end).then(
+            [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+          proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
+          return kj::mv(proxy);
+        }, [&holder=*holder](kj::Exception&& ex) mutable {
+          holder.sink->abort(kj::cp(ex));
+          holder.source->cancel(kj::cp(ex));
+          return kj::mv(ex);
+        }).attach(kj::mv(holder));
+      }
+      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
+        // It is important to note that the JavaScript-backed streams do not support
+        // the deferred proxy optimization.
+        return addNoopDeferredProxy(c->pumpTo(js, kj::mv(sink), end));
+      }
+    }
+    KJ_UNREACHABLE;
+  });
 }
 
 jsg::Ref<ReadableStream> ReadableStream::constructor(

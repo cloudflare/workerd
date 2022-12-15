@@ -906,15 +906,8 @@ jsg::Promise<kj::Array<kj::byte>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js
     JSG_REQUIRE(!body->isDisturbed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto source = body->removeSource(js);
-
-    // TODO(cleanup): We use awaitIoLegacy() because ReadableStreamSource is responsible for
-    //   registering its own pending events. Someday ReadableStreamSource should return
-    //   jsg::Promise instead of kj::Promise.
     auto& context = IoContext::current();
-    return context.awaitIoLegacy(
-        source->readAllBytes(context.getLimitEnforcer().getBufferingLimit())
-            .attach(kj::mv(source)));
+    return body->getController().readAllBytes(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
@@ -945,14 +938,7 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
       }
     }
 
-    auto source = body->removeSource(js);
-
-    // TODO(cleanup): We use awaitIoLegacy() because ReadableStreamSource is responsible for
-    //   registering its own pending events. Someday ReadableStreamSource should return
-    //   jsg::Promise instead of kj::Promise.
-    return context.awaitIoLegacy(
-        source->readAllText(context.getLimitEnforcer().getBufferingLimit())
-            .attach(kj::mv(source)));
+    return body->getController().readAllText(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 

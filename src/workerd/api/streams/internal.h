@@ -45,8 +45,8 @@ public:
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
-  kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit = kj::maxValue);
-  kj::Promise<kj::String> readAllText(uint64_t limit = kj::maxValue);
+  kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
+  kj::Promise<kj::String> readAllText(uint64_t limit);
 
   virtual void cancel(kj::Exception reason);
   // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
@@ -147,7 +147,7 @@ public:
 
   Tee tee(jsg::Lock& js) override;
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js) override;
+  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js);
 
   bool isClosedOrErrored() const override {
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
@@ -165,6 +165,11 @@ public:
   kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
+
+  jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
@@ -208,6 +213,7 @@ private:
   bool disturbed = false;
   bool readPending = false;
 
+  friend class ReadableStream;
   friend class WritableStreamInternalController;
   friend class PipeLocked;
 };

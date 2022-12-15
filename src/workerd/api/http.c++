@@ -556,16 +556,8 @@ jsg::Promise<kj::Array<byte>> Body::arrayBuffer(jsg::Lock& js) {
     return js.evalNow([&] {
       JSG_REQUIRE(!i->stream->isDisturbed(), TypeError, "Body has already been used. "
           "It can only be used once. Use tee() first if you need to read it twice.");
-      auto bodySource = i->stream->removeSource(js);
-
-      // TODO(cleanup): We use awaitIoLegacy() here to avoid registering a pending event because
-      //   ReadableStreamSource::readAllBytes() is responsible for pending events since it could
-      //   be a stream implemented in JavaScript. We should refactor ReadableStreamSource to return
-      //   a jsg::Promise instead.
-      auto& context = IoContext::current();
-      return context.awaitIoLegacy(
-          bodySource->readAllBytes(context.getLimitEnforcer().getBufferingLimit())
-              .attach(kj::mv(bodySource)));
+      return i->stream->getController().readAllBytes(js,
+          IoContext::current().getLimitEnforcer().getBufferingLimit());
     });
   }
 
@@ -599,11 +591,8 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
         }
       }
 
-      // TODO(cleanup): See comment in arrayBuffer().
-      auto bodySource = i->stream->removeSource(js);
-      return context.awaitIoLegacy(
-          bodySource->readAllText(context.getLimitEnforcer().getBufferingLimit())
-              .attach(kj::mv(bodySource)));
+      return i->stream->getController().readAllText(js,
+          context.getLimitEnforcer().getBufferingLimit());
     });
   }
 
@@ -625,15 +614,12 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(
         TypeError, "Parsing a Body as FormData requires a Content-Type header.");
 
     KJ_IF_MAYBE(i, impl) {
-      auto bodySource = i->stream->removeSource(js);
+      KJ_ASSERT(!i->stream->isDisturbed());
       auto& context = IoContext::current();
-      auto promise = bodySource->readAllText(context.getLimitEnforcer().getBufferingLimit())
-          .attach(kj::mv(bodySource));
-
-      // TODO(cleanup): See comment in arrayBuffer().
-      return context.awaitIoLegacy(kj::mv(promise)).then(
+      return i->stream->getController().readAllText(js,
+          context.getLimitEnforcer().getBufferingLimit()).then(js,
           [contentType = kj::mv(contentType), formData = kj::mv(formData), featureFlags]
-          (kj::String rawText) mutable {
+          (auto& js, kj::String rawText) mutable {
         formData->parse(kj::mv(rawText), contentType,
             !featureFlags.getFormDataParserSupportsFiles());
         return kj::mv(formData);
@@ -745,11 +731,13 @@ jsg::Ref<Request> Request::constructor(
         JSG_REQUIRE(!oldRequest->getBodyUsed(),
             TypeError, "Cannot reconstruct a Request with a used body.");
         KJ_IF_MAYBE(oldJsBody, oldRequest->getBody()) {
-          auto oldNativeBody = (*oldJsBody)->removeSource(js);
-          body = Body::ExtractedBody(
-              jsg::alloc<ReadableStream>(IoContext::current(),
-                                          kj::mv(oldNativeBody)),
-                                          oldRequest->getBodyBuffer(js));
+          // The stream spec says to "create a proxy" for the passed in readable, which it
+          // defines generically as creating a TransformStream and using pipeThrough to pass
+          // the input stream through, giving the TransformStream's readable to the extracted
+          // body below. We don't need to do that. Instead, we just create a new ReadableStream
+          // that takes over ownership of the internals of the given stream. The given stream
+          // is left in a locked/disturbed mode so that it can no longer be used.
+          body = Body::ExtractedBody((*oldJsBody)->detach(js), oldRequest->getBodyBuffer(js));
         }
       }
       redirect = oldRequest->getRedirectEnum();
@@ -1265,19 +1253,12 @@ kj::Promise<DeferredProxy<void>> Response::send(
     auto clientSocket = outer.acceptWebSocket(outHeaders);
     return (*ws)->couple(kj::mv(clientSocket));
   } else KJ_IF_MAYBE(jsBody, getBody()) {
-    auto bodySource = (*jsBody)->removeSource(js);
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding);
+    auto maybeLength = (*jsBody)->tryGetLength(encoding);
     auto stream = newSystemStream(
-        outer.send(statusCode, statusText, outHeaders, bodySource->tryGetLength(encoding)),
+        outer.send(statusCode, statusText, outHeaders, maybeLength),
         encoding);
-    auto promise = bodySource->pumpTo(*stream, true);
-    return promise
-        .then([stream = kj::mv(stream), bodySource = kj::mv(bodySource)]
-              (DeferredProxy<void> deferredProxy) mutable {
-      deferredProxy.proxyTask = deferredProxy.proxyTask
-          .attach(kj::mv(stream), kj::mv(bodySource));
-      return kj::mv(deferredProxy);
-    });
+    return (*jsBody)->pumpTo(js, kj::mv(stream), true);
   } else {
     outer.send(statusCode, statusText, outHeaders, uint64_t(0));
     return addNoopDeferredProxy(kj::READY_NOW);
@@ -1513,9 +1494,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       // Note that for requests, we do not automatically handle Content-Encoding, because the fetch()
       // standard does not say that we should. Hence, we always use StreamEncoding::IDENTITY.
       // https://github.com/whatwg/fetch/issues/589
-      auto bodySource = (*jsBody)->removeSource(js);
+      auto maybeLength = (*jsBody)->tryGetLength(StreamEncoding::IDENTITY);
 
-      if (bodySource->tryGetLength(StreamEncoding::IDENTITY).orDefault(1) == 0 &&
+      if (maybeLength.orDefault(1) == 0 &&
           headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == nullptr &&
           headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == nullptr) {
         // Request has a non-null but explicitly empty body, and has neither a Content-Length nor
@@ -1527,13 +1508,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
         headers.set(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
       }
 
-      nativeRequest = client->request(
-          jsRequest->getMethodEnum(), url,
-          headers, bodySource->tryGetLength(StreamEncoding::IDENTITY));
+      nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
       auto& nr = KJ_ASSERT_NONNULL(nativeRequest);
       auto stream = newSystemStream(kj::mv(nr.body), StreamEncoding::IDENTITY);
-      auto writePromise = AbortSignal::maybeCancelWrap(signal,
-          ioContext.waitForDeferredProxy(bodySource->pumpTo(*stream, true)))
+
+      // We want to support bidirectional streaming, so we actually don't want to wait for the
+      // request to finish before we deliver the response to the app.
+      // TODO(someday): Allow deferred proxying for bidirectional streaming.
+      ioContext.addWaitUntil(AbortSignal::maybeCancelWrap(signal,
+          ioContext.waitForDeferredProxy((*jsBody)->pumpTo(js, kj::mv(stream), true)))
           .catch_([](kj::Exception&& e) {
         if (e.getType() == kj::Exception::Type::DISCONNECTED) {
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always return the
@@ -1542,12 +1525,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
         } else {
           kj::throwFatalException(kj::mv(e));
         }
-      }).attach(kj::mv(bodySource), kj::mv(stream));
+      }));
 
-      // We want to support bidirectional streaming, so we actually don't want to wait for the
-      // request to finish before we deliver the response to the app.
-      // TODO(someday): Allow deferred proxying for bidirectional streaming.
-      ioContext.addWaitUntil(kj::mv(writePromise));
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
     }

@@ -1030,9 +1030,8 @@ jsg::Ref<Response> HTMLRewriter::transform(
 
   // lol-html writes to a pipe, the other end of which is our transformed response body.
   auto ts = IdentityTransformStream::constructor(js);
-  auto bodySource = ts->getReadable()->removeSource(js);
-  auto body = jsg::alloc<ReadableStream>(ioContext, kj::mv(bodySource));
-  response = Response::constructor(js, kj::Maybe(kj::mv(body)), kj::mv(response), featureFlags);
+  response = Response::constructor(js,
+    kj::Maybe(ts->getReadable()), kj::mv(response), featureFlags);
 
   auto outputSink = ts->getWritable()->removeSink(js);
 
@@ -1049,20 +1048,13 @@ jsg::Ref<Response> HTMLRewriter::transform(
   auto rewriter = kj::heap<Rewriter>(
       js, impl->unregisteredHandlers, encoding, kj::mv(outputSink), featureFlags);
 
-  // NOTE: Avoid throwing any exceptions after removing the input response body source. This makes
+  // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
   //   the input response object disturbed (response.bodyUsed === true), which should only happen
   //   after we know that nothing else (like invalid encoding) could cause an exception.
-  auto inputSource = KJ_ASSERT_NONNULL(maybeInput)->removeSource(js);
 
   // Drive and flush the parser asynchronously.
-  auto promise = ioContext.waitForDeferredProxy(inputSource->pumpTo(*rewriter, true))
-      .catch_([&inputSource = *inputSource, &rewriter = *rewriter](kj::Exception&& e) {
-    inputSource.cancel(kj::cp(e));
-    rewriter.abort(kj::cp(e));
-    return kj::Promise<void>(kj::mv(e));
-  }).attach(kj::mv(inputSource), kj::mv(rewriter));
-
-  ioContext.addTask(kj::mv(promise));
+  ioContext.addTask(ioContext.waitForDeferredProxy(
+      KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true)));
 
   // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
   //   response so the GC can find the handlers which Rewriter co-owns.

@@ -1635,6 +1635,61 @@ jsg::Promise<ReadResult> ReadableStreamInternalController::PipeLocked::read(jsg:
   return KJ_ASSERT_NONNULL(inner.read(js, nullptr));
 }
 
+jsg::Promise<kj::Array<byte>> ReadableStreamInternalController::readAllBytes(
+    jsg::Lock& js,
+    uint64_t limit) {
+  if (isLockedToReader()) {
+    return js.rejectedPromise<kj::Array<byte>>(KJ_EXCEPTION(FAILED,
+        "jsg.TypeError: This ReadableStream is currently locked to a reader."));
+  }
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return js.resolvedPromise(kj::Array<byte>());
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.rejectedPromise<kj::Array<byte>>(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      auto source = KJ_ASSERT_NONNULL(removeSource(js));
+      auto& context = IoContext::current();
+      return context.awaitIoLegacy(source->readAllBytes(limit).attach(kj::mv(source)));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
+    jsg::Lock& js,
+    uint64_t limit) {
+  if (isLockedToReader()) {
+    return js.rejectedPromise<kj::String>(KJ_EXCEPTION(FAILED,
+        "jsg.TypeError: This ReadableStream is currently locked to a reader."));
+  }
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return js.resolvedPromise(kj::String());
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.rejectedPromise<kj::String>(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(readable, Readable) {
+      auto source = KJ_ASSERT_NONNULL(removeSource(js));
+      auto& context = IoContext::current();
+      return context.awaitIoLegacy(source->readAllText(limit).attach(kj::mv(source)));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncoding encoding) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return 0UL; }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
+    KJ_CASE_ONEOF(readable, Readable) { return readable->tryGetLength(encoding); }
+  }
+  KJ_UNREACHABLE;
+}
+
 kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
     void* buffer,
     size_t minBytes,

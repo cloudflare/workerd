@@ -143,13 +143,11 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   }
 
   kj::Maybe<uint64_t> expectedBodySize;
-  kj::Own<ReadableStreamSource> streamSource;
 
   KJ_IF_MAYBE(b, supportedBody) {
     KJ_SWITCH_ONEOF(*b) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        streamSource = stream->removeSource(js);
-        expectedBodySize = streamSource->tryGetLength(StreamEncoding::IDENTITY);
+        expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
         if (expectedBodySize == nullptr) {
           expectedBodySize = streamSize;
         }
@@ -185,7 +183,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   return context.waitForOutputLocks()
       .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
       metadataPayload = kj::mv(metadataPayload), headers = kj::mv(headers),
-      streamSource = kj::mv(streamSource), expectedBodySize, supportedBody = kj::mv(supportedBody)]
+      expectedBodySize, supportedBody = kj::mv(supportedBody)]
       () mutable {
     uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
     auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, combinedSize);
@@ -200,7 +198,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
 
     return req.body->write(metadataPayload.begin(), metadataPayload.size())
         .attach(kj::mv(metadataPayload))
-        .then([&context, supportedBody = kj::mv(supportedBody), streamSource = kj::mv(streamSource),
+        .then([&context, supportedBody = kj::mv(supportedBody),
                reqBody = kj::mv(req.body)]() mutable -> kj::Promise<void> {
       KJ_IF_MAYBE(b, supportedBody) {
         KJ_SWITCH_ONEOF(*b) {
@@ -217,9 +215,14 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
             return reqBody->write(data.begin(), data.size());
           }
           KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-            auto dest = newSystemStream(kj::mv(reqBody), StreamEncoding::IDENTITY, context);
-            return context.waitForDeferredProxy(streamSource->pumpTo(*dest, true))
-                .attach(kj::mv(streamSource), kj::mv(dest));
+            // Because the ReadableStream might be a fully JavaScript-backed stream, we must
+            // start running the pump within the IoContex/isolate lock.
+            return context.run(
+                [dest = newSystemStream(kj::mv(reqBody), StreamEncoding::IDENTITY, context),
+                 stream = kj::mv(stream)](jsg::Lock& js) mutable {
+              return IoContext::current().waitForDeferredProxy(
+                  stream->pumpTo(js, kj::mv(dest), true));
+            });
           }
         }
 

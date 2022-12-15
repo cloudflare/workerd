@@ -101,11 +101,6 @@ class ReadableStreamController {
   //
   // As such, it exists within the V8 heap (it's allocated directly as a member of the
   // ReadableStream) and will always execute within the V8 isolate lock.
-  // Both the ReadableStreamInternalController and ReadableByteStreamController support the
-  // removeSource() method that can be used to acquire a kj heap object that can be used to
-  // consume the stream data from outside of the isolate lock (however, when using the
-  // ReadableByteStreamController, every tryRead() call will necessarily acquire the isolate
-  // lock in order to complete).
   //
   // The methods here return jsg::Promise rather than kj::Promise because the controller
   // operations here do not always require passing through the kj mechanisms or kj event loop.
@@ -276,13 +271,6 @@ public:
   // this streams data. The specific details of how the branching occurs is entirely up to the
   // controller implementation.
 
-  virtual kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js) = 0;
-  // Only byte-oriented ReadableStreamController implementations will have a ReadableStreamSource
-  // that can be detached using removeSource. A nullptr should be returned by controllers that do
-  // not support removing the source. Once the source has been removed successfully, all other
-  // operations on the controller should fail with an exception as the released ReadableStreamSource
-  // should be the only way of interacting with the stream.
-
   virtual bool isClosedOrErrored() const = 0;
 
   virtual bool isDisturbed() = 0;
@@ -302,6 +290,18 @@ public:
   virtual kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
+
+  virtual jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) = 0;
+  virtual jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) = 0;
+  // Fully consumes the ReadableStream. If the stream is already locked to a reader or
+  // errored, the returned JS promise will reject. If the stream is already closed, the
+  // returned JS promise will resolve with a zero-length result. Importantly, this will
+  // lock the stream and will fully consume it.
+  //
+  // limit specifies an upper maximum bound on the number of bytes permitted to be read.
+  // The promise will reject if the read will produce more bytes than the limit.
+
+  virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
 };
 
 class WritableStreamController {
