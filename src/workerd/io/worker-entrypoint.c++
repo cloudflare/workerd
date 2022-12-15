@@ -121,7 +121,9 @@ kj::Promise<void> WorkerEntrypoint::request(
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
-  auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
+  // `response` depends on MetricsCollector::Request, so make sure `wrappedResponse` keeps it alive.
+  auto& metrics = incomingRequest->getMetrics();
+  auto wrappedResponse = kj::heap<ResponseSentTracker>(response).attach(kj::addRef(metrics));
 
   bool isActor = context.getActor() != nullptr;
 
@@ -154,62 +156,62 @@ kj::Promise<void> WorkerEntrypoint::request(
         kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
-  auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
-
-  kj::Maybe<kj::Promise<void>> proxyTask;
   kj::Maybe<kj::Own<kj::HttpClient>> failOpenClient;
   bool loggedExceptionEarlier = false;
 
-  co_await context.run(
-      [this, &context, method, url, &headers, &requestBody,
-       &metrics = incomingRequest->getMetrics(),
-       &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
-      (Worker::Lock& lock) mutable {
-    return lock.getGlobalScope().request(
-        method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
-  }).then([&proxyTask](api::DeferredProxy<void> deferredProxy) {
-    proxyTask = kj::mv(deferredProxy.proxyTask);
-  }).exclusiveJoin(context.onAbort())
-      .catch_([&loggedExceptionEarlier,&context](kj::Exception&& exception) mutable
-          -> kj::Promise<void> {
-    // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
-    // logging internal errors to syslog.
-    loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER,
-                                      kj::cp(exception));
-    return kj::mv(exception);
-  }).attach(kj::defer([this,&failOpenClient,incomingRequest=kj::mv(incomingRequest),&context]
-                      () mutable {
-    // The request has been canceled, but allow it to continue executing in the background.
-    if (context.isFailOpen()) {
-      // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
-      // that purpose later.
-      failOpenClient = context.getHttpClientNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
-                                                     kj::mv(cfBlobJson));
-    }
-    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    if (isPredictableModeForTest()) {
-      promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
-        auto lock = worker->getIsolate().getApiIsolate().lock();
-        lock->requestGcForTesting();
+  try {
+    kj::Maybe<kj::Promise<void>> proxyTask;
+    KJ_DEFER({
+      // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
+      // TODO(cleanup): This made superficial sense to me in the promise-chain version of this code,
+      //   but now that I have refactored it into a coroutine, I'm not sure it ever did anything.
+      proxyTask = nullptr;
+    });
+
+    {
+      KJ_DEFER({
+        // The request has been canceled, but allow it to continue executing in the background.
+        if (context.isFailOpen()) {
+          // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
+          // that purpose later.
+          failOpenClient = context.getHttpClientNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
+                                                        kj::mv(cfBlobJson));
+        }
+        auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+        if (isPredictableModeForTest()) {
+          promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
+            auto lock = worker->getIsolate().getApiIsolate().lock();
+            lock->requestGcForTesting();
+          });
+        }
+        waitUntilTasks.add(kj::mv(promise));
+      });
+
+      co_await context.run(
+          [this, &context, method, url, &headers, &requestBody,
+          &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
+          (Worker::Lock& lock) mutable {
+        return lock.getGlobalScope().request(
+            method, url, headers, requestBody, wrappedResponse,
+            cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
+      }).then([&proxyTask](api::DeferredProxy<void> deferredProxy) {
+        proxyTask = kj::mv(deferredProxy.proxyTask);
+      }).exclusiveJoin(context.onAbort())
+          .catch_([&loggedExceptionEarlier,&context](kj::Exception&& exception) mutable
+              -> kj::Promise<void> {
+        // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
+        // logging internal errors to syslog.
+        loggedExceptionEarlier = true;
+        context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER,
+                                          kj::cp(exception));
+        return kj::mv(exception);
       });
     }
-    waitUntilTasks.add(kj::mv(promise));
-  })).then([&proxyTask]() -> kj::Promise<void> {
+
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
-    KJ_IF_MAYBE(p, proxyTask) {
-      return kj::mv(*p);
-    } else {
-      return kj::READY_NOW;
-    }
-  }).attach(kj::defer([&proxyTask]() mutable {
-    // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
-    proxyTask = nullptr;
-  })).catch_([this,&failOpenClient,&loggedExceptionEarlier,wrappedResponse=kj::mv(wrappedResponse),
-              isActor,method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
-             (kj::Exception&& exception) mutable -> kj::Promise<void> {
+    co_await KJ_ASSERT_NONNULL(proxyTask);
+  } catch (kj::Exception& exception) {
     // Don't return errors to end user.
 
     auto isInternalException = !jsg::isTunneledException(exception.getDescription())
@@ -261,49 +263,24 @@ kj::Promise<void> WorkerEntrypoint::request(
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
-      return exceptionToPropagate();
+      throw exceptionToPropagate();
     } else KJ_IF_MAYBE(client, failOpenClient) {
-      // Fall back to origin.
+      // Fall back to origin. We can't actually do this in the catch handler, because C++ says,
+      // "Thou shalt not co_await in a catch handler". :( Fine, we'll do it later.
 
       // We're catching the exception, but metrics should still indicate an exception.
-      metrics->reportFailure(exception);
-
-      auto promise = kj::evalNow([&] {
-        // kj::newHttpService adapts an HttpClient to look like an HttpService which makes it
-        // easier to forward the call.
-        auto httpWrapper = kj::newHttpService(**client);
-        auto promise = httpWrapper->request(
-            method, url, headers, requestBody, *wrappedResponse);
-        metrics->setFailedOpen(true);
-        return promise.attach(kj::mv(httpWrapper), kj::mv(*client));
-      });
-      return promise.catch_([this,wrappedResponse = kj::mv(wrappedResponse),
-                             metrics = kj::mv(metrics)]
-                            (kj::Exception&& e) mutable {
-        metrics->setFailedOpen(false);
-        if (e.getType() != kj::Exception::Type::DISCONNECTED &&
-            // Avoid logging recognized external errors here, such as invalid headers returned from
-            // the server.
-            !jsg::isTunneledException(e.getDescription()) &&
-            !jsg::isDoNotLogException(e.getDescription())) {
-          KJ_LOG(ERROR, "fail-open fallback failed", e);
-        }
-        if (!wrappedResponse->isSent()) {
-          kj::HttpHeaders headers(threadContext.getHeaderTable());
-          wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
-        }
-      });
+      metrics.reportFailure(exception);
     } else if (tunnelExceptions) {
       // Like with the isActor check, we want to return exceptions back to the caller.
       // We don't want to handle this case the same as the isActor case though, since we want
       // fail-open to operate normally, which means this case must happen after fail-open handling.
-      return exceptionToPropagate();
+      throw exceptionToPropagate();
     } else {
       // Return error.
 
       // We're catching the exception and replacing it with 5xx, but metrics should still indicate
       // an exception.
-      metrics->reportFailure(exception);
+      metrics.reportFailure(exception);
 
       // We can't send an error response if a response was already started; we can only drop the
       // connection in that case.
@@ -316,9 +293,38 @@ kj::Promise<void> WorkerEntrypoint::request(
         }
       }
 
-      return kj::READY_NOW;
+      // Do not propagate exception back to the caller. We can go ahead and return here, since we're
+      // not failing open.
+      co_return;
     }
-  });
+  }
+
+  KJ_IF_MAYBE(client, failOpenClient) {
+    // Fall back to origin.
+
+    try {
+      // kj::newHttpService adapts an HttpClient to look like an HttpService which makes it
+      // easier to forward the call.
+      auto httpWrapper = kj::newHttpService(**client);
+      auto promise = httpWrapper->request(
+          method, url, headers, requestBody, *wrappedResponse);
+      metrics.setFailedOpen(true);
+      co_await promise;
+    } catch (kj::Exception& e) {
+      metrics.setFailedOpen(false);
+      if (e.getType() != kj::Exception::Type::DISCONNECTED &&
+          // Avoid logging recognized external errors here, such as invalid headers returned from
+          // the server.
+          !jsg::isTunneledException(e.getDescription()) &&
+          !jsg::isDoNotLogException(e.getDescription())) {
+        KJ_LOG(ERROR, "fail-open fallback failed", e);
+      }
+      if (!wrappedResponse->isSent()) {
+        kj::HttpHeaders headers(threadContext.getHeaderTable());
+        wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+      }
+    }
+  }
 }
 
 void WorkerEntrypoint::prewarm(kj::StringPtr url) {
