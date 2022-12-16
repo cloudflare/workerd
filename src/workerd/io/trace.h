@@ -213,7 +213,8 @@ class Tracer final : public kj::Refcounted {
 public:
   class Span final {
   public:
-    explicit Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData);
+    explicit Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData,
+        kj::TimePoint durationStartTime);
     ~Span() noexcept(false);
     Span(Span&&) = default;
     Span& operator=(Span&&) = default;
@@ -278,6 +279,10 @@ public:
   // Makes a Jaeger tracing span, automatically tracking the beginning and end of the span via
   // lifetime.  Jaeger spans are for internal profiling, so we record more precise timing than we
   // expose to customers.
+  //
+  // TODO(someday): Expose a way to override both the span's starting timestamp and the duration
+  // start time.  These are measured from the calendar clock and the monotonic clock,
+  // respectively; the current API only allows overriding the starting timestamp.
 
 private:
   Jaeger::SpanId makeSpanId();
@@ -290,6 +295,9 @@ private:
   kj::Maybe<JaegerSpanSubmitter&> jaegerSpanSubmitter;
   kj::Own<void> ownJaegerSpanSubmitter;
   uint64_t predictableJaegerSpanId = 1;
+
+  Span makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
+      kj::TimePoint durationStartTime, kj::Maybe<Jaeger::SpanContext&> overrideParent);
 };
 
 kj::Maybe<Tracer::Span> mapMakeSpan(
