@@ -175,21 +175,21 @@ public:
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
-    enum class CompileFlags {
-      NONE,
-      EXTERNAL,
-      // The EXTERNAL flag tells the compile operation to treat the content as an external
-      // string wrapping an immutable buffer outside the V8 heap. When this flag is not set,
-      // the content is copied into the V8 heap.
-      // TODO(cleanup): Once we have a more complete set of options here for options that
-      // are used for all built-in modules, we'll likely collapse the flags into a single
-      // BUILTIN flag that encompasses multiple options.
+    enum class CompileOption {
+      BUNDLE,
+      // The BUNDLE options tells the compile operation to threat the content as coming
+      // from a worker bundle.
+      BUILTIN,
+      // The BUILTIN option tells the compile operation to treat the content as a builtin
+      // module. This implies certain changes in behavior, such as treating the content
+      // as an immutable, process-lifetime buffer that will never be destroyed, and caching
+      // the compilation data.
     };
 
     ModuleInfo(jsg::Lock& js,
                kj::StringPtr name,
                kj::ArrayPtr<const char> content,
-               CompileFlags flags = CompileFlags::NONE);
+               CompileOption flags = CompileOption::BUNDLE);
 
     ModuleInfo(jsg::Lock& js, kj::StringPtr name,
                kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
@@ -225,18 +225,7 @@ public:
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
 };
 
-using ModuleInfoCompileFlags = ModuleRegistry::ModuleInfo::CompileFlags;
-
-inline constexpr ModuleInfoCompileFlags operator|(
-    ModuleInfoCompileFlags a,
-    ModuleInfoCompileFlags b) {
-  return static_cast<ModuleInfoCompileFlags>(static_cast<uint>(a) | static_cast<uint>(b));
-}
-inline constexpr ModuleInfoCompileFlags operator&(
-    ModuleInfoCompileFlags a,
-    ModuleInfoCompileFlags b) {
-  return static_cast<ModuleInfoCompileFlags>(static_cast<uint>(a) & static_cast<uint>(b));
-}
+using ModuleInfoCompileOption = ModuleRegistry::ModuleInfo::CompileOption;
 
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
@@ -429,7 +418,7 @@ private:
           return moduleInfo;
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileFlags::EXTERNAL);
+          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
         KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {

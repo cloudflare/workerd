@@ -4,9 +4,39 @@
 
 #include "modules.h"
 #include "promise.h"
+#include <kj/mutex.h>
 
 namespace workerd::jsg {
 namespace {
+
+class CompileCache {
+  // The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
+  //
+  // Importantly, this is a process-lifetime in-memory cache that is only appropriate for
+  // built-in modules.
+  //
+  // The memory-safety of this cache depends on the assumption that entries are never removed
+  // or replaced. If things are ever changed such that entries are removed/replaced, then
+  // we'd likely need to have find return an atomic refcount or something similar.
+public:
+  void add(const void* key, std::unique_ptr<v8::ScriptCompiler::CachedData> cached) const {
+    cache.lockExclusive()->upsert(key, kj::mv(cached), [](auto&,auto&&) {});
+  }
+
+  kj::Maybe<v8::ScriptCompiler::CachedData&> find(const void* key) const {
+    return cache.lockShared()->find(key).map([](auto& data)
+        -> v8::ScriptCompiler::CachedData& { return *data; });
+  }
+
+  static const CompileCache& get() {
+    static CompileCache instance;
+    return instance;
+  }
+
+private:
+  kj::MutexGuarded<kj::HashMap<const void*, std::unique_ptr<v8::ScriptCompiler::CachedData>>> cache;
+  // The key is the address of the static global that was compiled to produce the CachedData.
+};
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
   return static_cast<ModuleRegistry*>(
@@ -275,7 +305,7 @@ v8::Local<v8::Module> compileEsmModule(
     jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
-    ModuleInfoCompileFlags flags) {
+    ModuleInfoCompileOption option) {
   // Must pass true for `is_module`, but we can skip everything else.
   const int resourceLineOffset = 0;
   const int resourceColumnOffset = 0;
@@ -291,16 +321,39 @@ v8::Local<v8::Module> compileEsmModule(
                           resourceIsSharedCrossOrigin, scriptId, {},
                           resourceIsOpaque, isWasm, isModule);
   v8::Local<v8::String> contentStr;
-  if ((flags & ModuleInfoCompileFlags::EXTERNAL) == ModuleInfoCompileFlags::EXTERNAL) {
+
+  if (option == ModuleInfoCompileOption::BUILTIN) {
     // TODO(later): Use of newExternalOneByteString here limits our built-in source
     // modules (for which this path is used) to only the latin1 character set. We
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
     contentStr = jsg::check(jsg::newExternalOneByteString(js, content));
-  } else {
-    contentStr = jsg::v8Str(js.v8Isolate, content);
+
+    const auto& compileCache = CompileCache::get();
+    KJ_IF_MAYBE(cached, compileCache.find(content.begin())) {
+      v8::ScriptCompiler::Source source(contentStr, origin, cached);
+      v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
+      KJ_DEFER(if (source.GetCachedData()->rejected) {
+        KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
+        js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: Internal error"));
+      });
+      return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
+    }
+
+    v8::ScriptCompiler::Source source(contentStr, origin);
+    auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+
+    auto cachedData = std::unique_ptr<v8::ScriptCompiler::CachedData>(
+        v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
+    compileCache.add(content.begin(), kj::mv(cachedData));
+    return module;
   }
+
+  contentStr = jsg::v8Str(js.v8Isolate, content);
+
   v8::ScriptCompiler::Source source(contentStr, origin);
-  return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+  auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+
+  return module;
 }
 
 v8::Local<v8::Module> createSyntheticModule(
@@ -333,7 +386,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
     jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
-    CompileFlags flags)
+    CompileOption flags)
     : ModuleInfo(js, compileEsmModule(js, name, content, flags)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
