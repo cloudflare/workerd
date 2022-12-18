@@ -341,7 +341,7 @@ void hexEncode(
 }
 
 kj::byte fromHexDigit(uint32_t c) {
-  KJ_ASSERT(u_isxdigit(c));
+  KJ_ASSERT(isHexDigit(c));
   if ('0' <= c && c <= '9') {
     return c - '0';
   } else if ('a' <= c && c <= 'f') {
@@ -420,7 +420,7 @@ jsg::UsvString percentDecode(jsg::UsvStringPtr input) {
       continue;
     }
     auto digit1 = *next;
-    if (!u_isxdigit(digit1)) {
+    if (!isHexDigit(digit1)) {
       result.add(c);
       ++it;
       continue;
@@ -431,7 +431,7 @@ jsg::UsvString percentDecode(jsg::UsvStringPtr input) {
       continue;
     }
     auto digit2 = *next;
-    if (!u_isxdigit(digit2)) {
+    if (!isHexDigit(digit2)) {
       result.add(c);
       ++it;
       continue;
@@ -802,7 +802,7 @@ kj::Maybe<UrlRecord> URL::parse(
           break;
         }
         case 16:
-          if (!u_isxdigit(c)) {
+          if (!isHexDigit(c)) {
             return nullptr;
           }
           break;

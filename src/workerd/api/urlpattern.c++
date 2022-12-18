@@ -492,7 +492,7 @@ jsg::UsvString canonicalizeIpv6Hostname(jsg::UsvStringPtr input, kj::Maybe<jsg::
   auto it = input.begin();
   while (it) {
     auto c = *it;
-    JSG_REQUIRE(u_isxdigit(c) || c == '[' || c == ']' || c == ':',
+    JSG_REQUIRE(isHexDigit(c) || c == '[' || c == ']' || c == ':',
                  TypeError, kj::str(SYNTAX_ERROR, ": Invalid IPv6 address."));
     result.add(u_tolower(c));
     ++it;

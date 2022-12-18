@@ -31,6 +31,13 @@ kj::String toLower(kj::String&& str);
 kj::String toUpper(kj::String&& str);
 // Mutate `str` with all alphabetic ASCII characters uppercased. Returns `str`.
 
+inline bool isHexDigit(uint32_t c) {
+  // Check if `c` is the ASCII code of a hexadecimal digit.
+  return ('0' <= c && c <= '9') ||
+         ('a' <= c && c <= 'f') ||
+         ('A' <= c && c <= 'F');
+}
+
 void parseQueryString(kj::Vector<kj::Url::QueryParam>& query, kj::ArrayPtr<const char> rawText,
                       bool skipLeadingQuestionMark = false);
 // Parse `rawText` as application/x-www-form-urlencoded name/value pairs and store in `query`. If
