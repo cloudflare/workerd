@@ -1036,7 +1036,12 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
     // do something like unwrap(isolate->GetCurrentContext()).emitPromiseRejection(). However, JSG
     // doesn't currently provide an easy way to do this.
     if (IoContext::hasCurrent()) {
-      IoContext::current().reportPromiseRejectEvent(message);
+      try {
+        IoContext::current().reportPromiseRejectEvent(message);
+      } catch (jsg::JsExceptionThrown&) {
+        // V8 expects us to just return.
+        return;
+      }
     }
   });
 }
