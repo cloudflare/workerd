@@ -73,8 +73,9 @@ public:
     // before the gate is unlocked.
 
     kj::Own<CriticalSection> startCriticalSection();
-    // Start a new critical section from this lock. No further Locks will be handed out by
-    // InputGate::lock() until the CriticalSection has been dropped.
+    // Start a new critical section from this lock. After `wait()` has been called on the returned
+    // critical section for the first time, no further Locks will be handed out by
+    // InputGate::wait() until the CriticalSection has been dropped.
     //
     // CriticalSections can be nested. If this Lock is itself part of a CriticalSection, the new
     // CriticalSection will be nested within it and the outer CriticalSection's wait() won't
@@ -120,7 +121,7 @@ private:
     ~Waiter() noexcept(false);
 
     kj::PromiseFulfiller<Lock>& fulfiller;
-    InputGate& gate;
+    InputGate* gate;
     bool isChildWaiter;
     kj::ListLink<Waiter> link;
   };
@@ -192,7 +193,7 @@ private:
     RUNNING,
     // First lock has been obtained, waiting for success() or failed().
 
-    DONE
+    REPARENTED
     // success() or failed() has been called.
   };
 
@@ -207,17 +208,8 @@ private:
 
   friend class InputGate;
 
-  InputGate& parentAsInputGate() {
-    KJ_SWITCH_ONEOF(parent) {
-      KJ_CASE_ONEOF(p, InputGate*) {
-        return *p;
-      }
-      KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
-        return *c;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
+  InputGate& parentAsInputGate();
+  // Return a reference for the parent scope, skipping any reparented CriticalSections
 };
 
 class OutputGate {
