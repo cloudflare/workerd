@@ -3418,6 +3418,13 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
   });
 }
 
+kj::Promise<void> Worker::Isolate::SubrequestClient::connect(
+    kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+    kj::HttpService::ConnectResponse& tunnel) {
+  // TODO(someday): EW-7116 Figure out how to represent TCP connections in the devtools network tab.
+  return inner->connect(host, headers, connection, tunnel);
+}
+
 // TODO(someday): Log other kinds of subrequests?
 void Worker::Isolate::SubrequestClient::prewarm(kj::StringPtr url) {
   inner->prewarm(url);
