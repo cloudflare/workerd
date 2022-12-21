@@ -38,6 +38,14 @@ public:
   //   more resources to be dropped when merely proxying a request. However, it means we would no
   //   longer be immplementing kj::HttpService. But maybe that doesn't matter too much in practice.
 
+  virtual kj::Promise<void> connect(kj::StringPtr host,
+                                    const kj::HttpHeaders& headers,
+                                    kj::AsyncIoStream& connection,
+                                    ConnectResponse& response) = 0;
+  // This is the same as the inherited HttpService::connect(), but we override it to be
+  // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
+  // than get the default implementation which throws an unimplemented exception.
+
   virtual void prewarm(kj::StringPtr url) = 0;
   // Hints that this worker will likely be invoked in the near future, so should be warmed up now.
   // This method should also call `prewarm()` on any subsequent pipeline stages that are expected
@@ -136,6 +144,8 @@ public:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override;
+  kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection, ConnectResponse& response) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;

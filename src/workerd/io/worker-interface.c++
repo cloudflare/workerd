@@ -33,6 +33,17 @@ public:
     }
   }
 
+  kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection, ConnectResponse& response) override {
+    KJ_IF_MAYBE(w, worker) {
+      return w->get()->connect(host, headers, connection, response);
+    } else {
+      return promise.addBranch().then([this, host, &headers, &connection, &response]() {
+        return KJ_ASSERT_NONNULL(worker)->connect(host, headers, connection, response);
+      });
+    }
+  }
+
   void prewarm(kj::StringPtr url) override {
     KJ_IF_MAYBE(w, worker) {
       w->get()->prewarm(url);
@@ -198,6 +209,12 @@ kj::Promise<void> RevocableWorkerInterface::request(
       .attach(kj::mv(wrappedResponse));
 }
 
+kj::Promise<void> RevocableWorkerInterface::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+    kj::AsyncIoStream& connection, ConnectResponse& response) {
+  KJ_UNIMPLEMENTED("TODO(someday): RevocableWorkerInterface::connect() should be implemented to "
+      "disconnect long-lived connections similar to how it treats WebSockets");
+}
+
 RevocableWorkerInterface::RevocableWorkerInterface(WorkerInterface& worker,
     kj::Promise<void> revokeProm)
     : worker(worker), revokeProm(revokeProm.fork()) {}
@@ -237,6 +254,11 @@ public:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override {
+    kj::throwFatalException(kj::mv(exception));
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection, ConnectResponse& response) override {
     kj::throwFatalException(kj::mv(exception));
   }
 
