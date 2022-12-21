@@ -45,11 +45,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   annotation compatEnableDate @0x91a5d5d7244cf6d0 (field) :Text;
   # The compatibility date (date string, like "2021-05-17") after which this flag should always
   # be enabled.
-  #
-  # WARNING: Flags which do not define an enable date are experimental and are subject to change.
-  #   Workers which enable these flags may break when used with a future version of `workerd`.
-  #   Workers uploaded to Cloudflare using these flags could break randomly at any time due to a
-  #   runtime update; Cloudflare is not responsible for such breakage.
 
   annotation compatEnableAllDates @0x9a1d37c8030d9418 (field) :Void;
   # All compatability dates should start using the flag as enabled.
@@ -69,6 +64,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #
   # ("FL" refers to Cloudflare's HTTP proxy stack which is used for all outbound requests. Flags
   # with this annotation have no effect when `workerd` is used outside of Cloudflare.)
+
+  annotation experimental @0xe3e5a63e76284d88 (field):Void;
+  # Flags with this annotation can only be used when workerd is run with the --experimental flag.
+  # These flags may be subject to change or even removal in the future with no warning -- they are
+  # not covered by Workers' usual backwards-compatibility promise. Experimental flags cannot be
+  # used in Workers deployed on Cloudflare except by test accounts belonging to Cloudflare team
+  # members.
 
   formDataParserSupportsFiles @0 :Bool
       $compatEnableFlag("formdata_parser_supports_files")
@@ -216,7 +218,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the module.exports. When this flag is enabled, the export is fixed.
 
   obsolete19 @19 :Bool
-      $compatEnableFlag("durable_object_rename");
+      $compatEnableFlag("durable_object_rename")
+      $experimental;
   # Obsolete flag. Has no effect.
 
   webSocketCompression @20 :Bool
@@ -229,14 +232,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # request that no compression be used.
 
   nodeJs18CompatExperimental @21 :Bool
-      $compatEnableFlag("nodejs_18_compat_experimental");
+      $compatEnableFlag("nodejs_18_compat_experimental")
+      $experimental;
   # Experimental, do not use.
   # Enables nodejs 18 compat imports in the application.
   # This is currently a work in progress mechanism that is not yet available for use in workerd.
   # WARNING: IT WILL BREAK in the future. Do not ignore this warning.
 
   tcpSocketsSupport @22 :Bool
-      $compatEnableFlag("tcp_sockets_support");
+      $compatEnableFlag("tcp_sockets_support")
+      $experimental;
   # Enables TCP sockets in workerd.
   # These are still under development and therefore subject to change.
   # WARNING: DO NOT depend on this feature as its API is still subject to change.

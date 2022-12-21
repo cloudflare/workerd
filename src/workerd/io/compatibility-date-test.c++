@@ -31,6 +31,7 @@ KJ_TEST("compatibility date parsing") {
   expectParseTo("2000-01-01", "2000-01-01");
   expectParseTo("2999-12-31", "2999-12-31");
   expectParseTo("2024-02-29", "2024-02-29");
+  expectParseTo("2112-04-01", "2112-04-01");
 
   // Alas, strptime() accepts February 30 as a perfectly valid date.
   //expectNoParse("2024-2-30");
@@ -65,7 +66,7 @@ KJ_TEST("compatibility flag parsing") {
       kj::StringPtr expectedOutput,
       kj::ArrayPtr<const kj::StringPtr> expectedErrors = nullptr,
       CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
-      bool r2InternalBetaApiSet = false) {
+      bool r2InternalBetaApiSet = false, bool experimental = false) {
     capnp::MallocMessageBuilder message;
     auto orphanage = message.getOrphanage();
 
@@ -89,8 +90,7 @@ KJ_TEST("compatibility flag parsing") {
       kj::Vector<kj::String> errors;
     };
     ErrorReporterImpl errorReporter;
-
-    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
                               dateValidation);
 
     capnp::TextCodec codec;
@@ -158,15 +158,22 @@ KJ_TEST("compatibility flag parsing") {
                "supported by this server binary is \"", SUPPORTED_COMPATIBILITY_DATE, "\".")},
       CompatibilityDateValidation::CODE_VERSION);
 
-  // Test experimental requirement using the durable_object_alarms flag since we know this flag
-  // is obsolete and will never have a date set.
-  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_alarms"_kj}, "(obsolete14 = true)",
-      {"The compatibility flag durable_object_alarms is experimental and may break or be removed "
+  // Test experimental requirement using durable_object_rename as it is obsolete
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {"The compatibility flag durable_object_rename is experimental and may break or be removed "
        "in a future version of workerd. To use this flag, you must pass --experimental on the "
        "command line."_kj},
-      CompatibilityDateValidation::CODE_VERSION);
+      CompatibilityDateValidation::CODE_VERSION, false, false);
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_rename"_kj}, "(obsolete19 = true)",
+      {}, CompatibilityDateValidation::CODE_VERSION, false, true);
+
+  // Test experimental requirement using the durable_object_alarms flag since we know this flag
+  // is obsolete and will never have a date set. (Should always pass, even if experimental flags
+  // aren't allowed)
   expectCompileCompatibilityFlags("2020-01-01", {"durable_object_alarms"_kj}, "(obsolete14 = true)",
-      {}, CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL);
+      {}, CompatibilityDateValidation::CODE_VERSION, false, false);
+  expectCompileCompatibilityFlags("2020-01-01", {"durable_object_alarms"_kj}, "(obsolete14 = true)",
+      {}, CompatibilityDateValidation::CODE_VERSION, false, true);
 
   // Multiple errors.
   expectCompileCompatibilityFlags("abcd",
@@ -182,7 +189,7 @@ KJ_TEST("compatibility flag parsing") {
 
   // Can explicitly disable flag that's enabled for all dates.s
   expectCompileCompatibilityFlags("2021-05-17", {"r2_internal_beta_bindings"}, "()", {},
-      CompatibilityDateValidation::FUTURE_FOR_TEST, true);
+      CompatibilityDateValidation::FUTURE_FOR_TEST, true, false);
 }
 
 KJ_TEST("encode to flag list for FL") {
@@ -191,7 +198,8 @@ KJ_TEST("encode to flag list for FL") {
 
   auto compileOwnFeatureFlags = [&](kj::StringPtr compatDate,
       kj::ArrayPtr<const kj::StringPtr> featureFlags,
-      CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST) {
+      CompatibilityDateValidation dateValidation = CompatibilityDateValidation::FUTURE_FOR_TEST,
+      bool experimental = false) {
 
     auto flagListOrphan = orphanage.newOrphan<capnp::List<capnp::Text>>(featureFlags.size());
     auto flagList = flagListOrphan.get();
@@ -214,7 +222,7 @@ KJ_TEST("encode to flag list for FL") {
     };
     ErrorReporterImpl errorReporter;
 
-    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter,
+    compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
                               dateValidation);
     KJ_ASSERT(errorReporter.errors.empty());
 

@@ -101,6 +101,7 @@ static constexpr uint64_t COMPAT_ENABLE_FLAG_ANNOTATION_ID = 0xb6dabbc87cd1b03eu
 static constexpr uint64_t COMPAT_DISABLE_FLAG_ANNOTATION_ID = 0xd145cf1adc42577cull;
 static constexpr uint64_t COMPAT_ENABLE_DATE_ANNOTATION_ID = 0x91a5d5d7244cf6d0ull;
 static constexpr uint64_t COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID = 0x9a1d37c8030d9418;
+static constexpr uint64_t EXPERIMENTAl_ANNOTATION_ID = 0xe3e5a63e76284d88;
 static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
 
 }  // namespace
@@ -108,11 +109,11 @@ static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
 void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
                          CompatibilityFlags::Builder output,
                          Worker::ValidationErrorReporter& errorReporter,
+                         bool allowExperimentalFeatures,
                          CompatibilityDateValidation dateValidation) {
   auto parsedCompatDate = CompatDate::parse(compatDate, errorReporter);
 
   switch (dateValidation) {
-    case CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL:
     case CompatibilityDateValidation::CODE_VERSION:
       if (KJ_ASSERT_NONNULL(CompatDate::parse(SUPPORTED_COMPATIBILITY_DATE)) < parsedCompatDate) {
         errorReporter.addError(kj::str(
@@ -147,6 +148,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
     bool enableByDate = false;
     bool enableByFlag = false;
     bool disableByFlag = false;
+    bool isExperimental = false;
 
     kj::Maybe<CompatDate> enableDate;
     kj::StringPtr enableFlagName;
@@ -171,6 +173,8 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
         enableByDate = parsedCompatDate >= parsedDate;
       } else if (annotation.getId() == COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID) {
         enableByDate = true;
+      } else if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
+        isExperimental = true;
       }
     }
 
@@ -196,12 +200,16 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
       // it redundant, because at a future date it won't be redundant, and someone could want to
       // set the flag early to make sure they don't forget later.
     }
-    if (dateValidation == CompatibilityDateValidation::CODE_VERSION &&
-        enableByFlag && !enableByDate && enableDate == nullptr) {
-      errorReporter.addError(kj::str(
-          "The compatibility flag ", enableFlagName, " is experimental and may break or be "
-          "removed in a future version of workerd. To use this flag, you must pass --experimental "
-          "on the command line."));
+    if (enableByFlag && isExperimental && !allowExperimentalFeatures) {
+      if (dateValidation == CompatibilityDateValidation::CURRENT_DATE_FOR_CLOUDFLARE) {
+        errorReporter.addError(kj::str("The compatibility flag ", enableFlagName,
+            " is experimental and cannot yet be used in Workers deployed to Cloudflare."));
+      } else {
+        errorReporter.addError(kj::str(
+            "The compatibility flag ", enableFlagName, " is experimental and may break or be "
+            "removed in a future version of workerd. To use this flag, you must pass --experimental "
+            "on the command line."));
+      }
     }
 
     dynamicOutput.set(field, enableByFlag || (enableByDate && !disableByFlag));
