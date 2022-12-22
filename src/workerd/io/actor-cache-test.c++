@@ -651,7 +651,25 @@ KJ_TEST("ActorCache batching due to maxKeysPerRpc") {
   test.delete_("grault");
   test.delete_({"garply"_kj, "waldo"_kj});
 
+  // We keep these promises, so they should not be "muted". Specifically, "count4" should be its own
+  // batch despite fitting in a batch with "count3" because it's a separate delete.
+  auto deleteProm1 = expectUncached(test.delete_({"count1"_kj, "count2"_kj, "count3"_kj}));
+  auto deleteProm2 = expectUncached(test.delete_({"count4"_kj}));
+  auto deleteProm3 = expectUncached(test.delete_({"count5"_kj, "count6"_kj}));
+
   auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["count1", "count2"]))
+      .thenReturn(CAPNP(numDeleted = 1)); // Treat one of this batch as present, 2 total.
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["count3"]))
+      .thenReturn(CAPNP(numDeleted = 1)); // Treat one of this batch as present, 2 total.
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["count4"]))
+      .thenReturn(CAPNP(numDeleted = 0)); // Treat this batch as absent.
+  mockTxn->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["count5", "count6"]))
+      .thenReturn(CAPNP(numDeleted = 2)); // Treat all of this batch as present.
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["grault", "garply"]))
       .thenReturn(CAPNP(numDeleted = 1));
@@ -671,6 +689,10 @@ KJ_TEST("ActorCache batching due to maxKeysPerRpc") {
       .thenReturn(CAPNP());
   mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
   mockTxn->expectDropped(ws);
+
+  KJ_EXPECT(deleteProm1.wait(ws) == 2);
+  KJ_EXPECT(deleteProm2.wait(ws) == 0);
+  KJ_EXPECT(deleteProm3.wait(ws) == 2);
 }
 
 KJ_TEST("ActorCache batching due to max storage RPC words") {

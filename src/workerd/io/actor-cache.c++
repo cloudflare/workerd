@@ -2630,15 +2630,15 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
 
   struct RpcCountedDelete {
     kj::Own<CountedDelete> countedDelete;
-    RpcDeleteRequest rpcDelete;
+    kj::Array<RpcDeleteRequest> rpcDeletes;
   };
   auto rpcCountedDeletes = kj::heapArrayBuilder<RpcCountedDelete>(countedDeleteFlushes.size());
   auto rpcMutedDeletes = kj::heapArrayBuilder<RpcDeleteRequest>(mutedDeleteFlush.batches.size());
   auto rpcPuts = kj::heapArrayBuilder<RpcPutRequest>(putFlush.batches.size());
 
   for (auto& flush: countedDeleteFlushes) {
-    KJ_ASSERT(flush.batches.size() == 1);
     auto entryIt = flush.entries.begin();
+    kj::Vector<RpcDeleteRequest> rpcDeletes;
     for (auto& batch: flush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
@@ -2650,11 +2650,12 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
         listBuilder.set(i, entry.key.asBytes());
       }
 
-      rpcCountedDeletes.add(RpcCountedDelete{
-        .countedDelete = kj::mv(flush.countedDelete),
-        .rpcDelete = kj::mv(request),
-      });
+      rpcDeletes.add(kj::mv(request));
     }
+    rpcCountedDeletes.add(RpcCountedDelete{
+      .countedDelete = kj::mv(flush.countedDelete),
+      .rpcDeletes = rpcDeletes.releaseAsArray(),
+    });
     KJ_ASSERT(entryIt == flush.entries.end());
   }
 
@@ -2732,18 +2733,33 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   auto promises = kj::heapArrayBuilder<kj::Promise<void>>(
       rpcPuts.size() + rpcMutedDeletes.size() + rpcCountedDeletes.size()
       + 2 + !maybeAlarmChange.is<CleanAlarm>());
+
+  auto joinCountedDelete = [](RpcCountedDelete& rpcCountedDelete) -> kj::Promise<void> {
+    auto promises = KJ_MAP(request, rpcCountedDelete.rpcDeletes) {
+      return request.send().then(
+          [](capnp::Response<rpc::ActorStorage::Operations::DeleteResults>&& response) mutable
+          -> uint {
+        return response.getNumDeleted();
+      });
+    };
+
+    for (auto& promise : promises) {
+      // Reuse `countDeleted` since it's already in a state object anyway.
+      rpcCountedDelete.countedDelete->countDeleted += co_await promise;
+    }
+  };
   for (auto& rpcCountedDelete: rpcCountedDeletes) {
-    promises.add(rpcCountedDelete.rpcDelete.send()
-        .then([&countedDelete = *rpcCountedDelete.countedDelete]
-              (capnp::Response<rpc::ActorStorage::Operations::DeleteResults>&& response) mutable {
+    promises.add(joinCountedDelete(rpcCountedDelete).then(
+        [&countedDelete = *rpcCountedDelete.countedDelete]() mutable {
       // Note that it's OK to trust the delete count even if the transaction ultimately gets rolled
       // back, because:
       // - We know that nothing else could be concurrently modifying our storage in a way that
       //   makes the count different on a retry.
       // - If retries fail and the flush never completes at all, the output gate will kick in and
       //   make it impossible for anyone to observe the bogus result.
-      countedDelete.resultFulfiller->fulfill(
-          countedDelete.countDeleted + response.getNumDeleted());
+      // HACK: This uses a `kj::mv()` because promise fulfillers require rvalues even for trivially
+      // copyable types.
+      countedDelete.resultFulfiller->fulfill(kj::mv(countedDelete.countDeleted));
     }, [&countedDelete = *rpcCountedDelete.countedDelete](kj::Exception&& e) {
       if (e.getType() == kj::Exception::Type::DISCONNECTED) {
         // This deletion will be retried, so don't touch the fulfiller.
