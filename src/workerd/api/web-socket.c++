@@ -557,6 +557,10 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
   return extensions.map([](kj::StringPtr value){ return value; });
 }
 
+kj::Maybe<v8::Local<v8::Value>> WebSocket::getAttachment() {
+  return attachment.map([](v8::Local<v8::Value>& value){ return value; });
+}
+
 void WebSocket::dispatchOpen(jsg::Lock& js) {
   dispatchEventImpl(js, jsg::alloc<Event>("open"));
 }

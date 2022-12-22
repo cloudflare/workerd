@@ -13,6 +13,8 @@
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-storage.h>
+#include <workerd/api/web-socket.h>
+#include <workerd/io/hibernation-manager.h>
 
 namespace workerd::api {
 
@@ -750,6 +752,30 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId() 
 jsg::Promise<jsg::Value> DurableObjectState::blockConcurrencyWhile(jsg::Lock& js,
     jsg::Function<jsg::Promise<jsg::Value>()> callback) {
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
+}
+
+void DurableObjectState::acceptWebSocket(jsg::Ref<WebSocket> ws, kj::Array<kj::String> tags) {
+  JSG_ASSERT(!ws->isAccepted(), Error,
+      "Cannot call `acceptWebSocket()` if the WebSocket was already accepted via `accept()`");
+  JSG_ASSERT(ws->LOCAL == WebSocket::Locality::LOCAL, Error,
+      "Outgoing WebSocket connections cannot be hibernated.");
+
+  // We need to get a HibernationManager to give the websocket to.
+  auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+  if (a.getHibernationManager() == nullptr) {
+    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(nullptr));
+  }
+  // HibernationManager's acceptWebSocket() will throw if the websocket is in an incompatible state.
+  KJ_REQUIRE_NONNULL(a.getHibernationManager()).acceptWebSocket(kj::mv(ws), kj::mv(tags));
+}
+
+kj::Array<jsg::Ref<api::WebSocket>> DurableObjectState::getWebSockets(jsg::Lock& js,
+    kj::String tag) {
+  auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+  KJ_IF_MAYBE(manager, a.getHibernationManager()) {
+    return manager->getWebSockets(js, tag.asPtr()).releaseAsArray();
+  }
+  return kj::Array<jsg::Ref<api::WebSocket>>();
 }
 
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate) {

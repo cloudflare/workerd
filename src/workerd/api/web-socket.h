@@ -212,10 +212,16 @@ public:
   // We need to access the underlying KJ WebSocket so we can determine the compression configuration
   // it uses (if any).
 
+  kj::Maybe<v8::Local<v8::Value>> attachment;
+  // All WebSockets have this property. It starts out null but can
+  // be assigned to any serializable value. The property will
+  // survive hibernation.
+
 
   kj::Maybe<kj::StringPtr> getUrl();
   kj::Maybe<kj::StringPtr> getProtocol();
   kj::Maybe<kj::StringPtr> getExtensions();
+  kj::Maybe<v8::Local<v8::Value>> getAttachment();
 
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -237,11 +243,13 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
+      JSG_READONLY_PROTOTYPE_PROPERTY(attachment, getAttachment);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
+      JSG_READONLY_INSTANCE_PROPERTY(attachment, getAttachment);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
