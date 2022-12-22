@@ -19,6 +19,7 @@ namespace workerd::api {
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObjectId;
+class WebSocket;
 
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate);
 
@@ -337,8 +338,7 @@ class DurableObjectState: public jsg::Object {
   // The type passed as the first parameter to durable object class's constructor.
 
 public:
-  DurableObjectState(Worker::Actor::Id actorId,
-      kj::Maybe<jsg::Ref<DurableObjectStorage>> storage);
+  DurableObjectState(Worker::Actor::Id actorId, kj::Maybe<jsg::Ref<DurableObjectStorage>> storage);
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -355,11 +355,38 @@ public:
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
 
+  void acceptWebSocket(jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
+  // Adds a WebSocket to the set attached to this object.
+  // `ws.accept()` must NOT have been called separately.
+  // Once called, any incoming messages will be delivered
+  // by calling the Durable Object's webSocketMessage()
+  // handler, and webSocketClose() will be invoked upon
+  // disconnect.
+  //
+  // After calling this, the WebSocket is accepted, so
+  // its send() and close() methods can be used to send
+  // messages. It should be noted that calling addEventListener()
+  // on the websocket does nothing, since inbound events will
+  // automatically be delivered to one of the webSocketMessage()/
+  // webSocketClose()/webSocketError() handlers. No inbound events
+  // to a WebSocket accepted via acceptWebSocket() will ever be
+  // delivered to addEventListener(), so there is no reason to call it.
+  //
+  // `tags` are string tags which can be used to look up
+  // the WebSocket with getWebSockets().
+
+  kj::Array<jsg::Ref<api::WebSocket>> getWebSockets(jsg::Lock& js, jsg::Optional<kj::String> tag);
+  // Gets an array of accepted WebSockets matching the given tag.
+  // If no tag is provided, an array of all accepted WebSockets is returned.
+  // Disconnected WebSockets are automatically removed from the list.
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_METHOD(blockConcurrencyWhile);
+    JSG_METHOD(acceptWebSocket);
+    JSG_METHOD(getWebSockets);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(someday): This currently exists for testing purposes only but maybe it could be
@@ -380,6 +407,9 @@ public:
 private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
+  const size_t MAX_TAGS_PER_CONNECTION = 10;
+  const size_t MAX_TAG_LENGTH = 256;
+  // Limits for Hibernatable WebSocket tags.
 };
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                     \
