@@ -763,7 +763,7 @@ public:
           consumer(consumer),
           queue(queue) {}
 
-    KJ_DISALLOW_COPY(ByobRequest);
+    KJ_DISALLOW_ONLY_COPY(ByobRequest);
     ByobRequest(ByobRequest&&) = delete;
     ByobRequest& operator=(ByobRequest&&) = delete;
 

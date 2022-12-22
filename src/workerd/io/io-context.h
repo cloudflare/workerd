@@ -1044,7 +1044,7 @@ public:
   IoOwn(IoOwn&& other);
   IoOwn(decltype(nullptr)): item(nullptr) {}
   ~IoOwn() noexcept(false);
-  KJ_DISALLOW_COPY(IoOwn);
+  KJ_DISALLOW_ONLY_COPY(IoOwn);
 
   T* operator->();
   T& operator*() { return *operator->(); }

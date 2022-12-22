@@ -131,7 +131,7 @@ public:
     explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
     Log(rpc::Trace::Log::Reader reader);
     Log(Log&&) = default;
-    KJ_DISALLOW_COPY(Log);
+    KJ_DISALLOW_ONLY_COPY(Log);
     ~Log() noexcept(false) = default;
 
     kj::Date timestamp;
@@ -149,7 +149,7 @@ public:
     explicit Exception(kj::Date timestamp, kj::String name, kj::String message);
     Exception(rpc::Trace::Exception::Reader reader);
     Exception(Exception&&) = default;
-    KJ_DISALLOW_COPY(Exception);
+    KJ_DISALLOW_ONLY_COPY(Exception);
     ~Exception() noexcept(false) = default;
 
     kj::Date timestamp;

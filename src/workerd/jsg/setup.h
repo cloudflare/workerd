@@ -116,7 +116,7 @@ private:
     }
     RefToDelete(RefToDelete&&) = default;
     // Default move ctor okay because ownWrappable.get() will be null if moved-from.
-    KJ_DISALLOW_COPY(RefToDelete);
+    KJ_DISALLOW_ONLY_COPY(RefToDelete);
 
   private:
     bool strong;

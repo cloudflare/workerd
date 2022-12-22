@@ -60,7 +60,7 @@ public:
   ~LolString() noexcept(false) {
     lol_html_str_free({ chars.begin(), chars.size() });
   }
-  KJ_DISALLOW_COPY(LolString);
+  KJ_DISALLOW_ONLY_COPY(LolString);
   LolString(LolString&& other): chars(other.chars) {
     other.chars = nullptr;
   }
@@ -156,7 +156,7 @@ public:
   TokenScope(TokenScope&& o) : contentToken(kj::mv(o.contentToken)) {
     o.contentToken = nullptr;
   }
-  KJ_DISALLOW_COPY(TokenScope);
+  KJ_DISALLOW_ONLY_COPY(TokenScope);
 
 private:
   kj::Maybe<jsg::Ref<HTMLRewriter::Token>> contentToken;

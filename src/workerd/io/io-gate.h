@@ -64,7 +64,7 @@ public:
     // A lock that blocks all new events from being delivered while it exists.
 
   public:
-    KJ_DISALLOW_COPY(Lock);
+    KJ_DISALLOW_ONLY_COPY(Lock);
     Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) { other.gate = nullptr; }
     ~Lock() noexcept(false) { if (gate != nullptr) gate->releaseLock(); }
 

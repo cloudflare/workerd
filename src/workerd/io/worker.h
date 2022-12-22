@@ -119,7 +119,7 @@ public:
     inline ~WarnAboutIsolateLockScope() noexcept(false) {
       if (!released) release();
     }
-    KJ_DISALLOW_COPY(WarnAboutIsolateLockScope);
+    KJ_DISALLOW_ONLY_COPY(WarnAboutIsolateLockScope);
     inline WarnAboutIsolateLockScope(WarnAboutIsolateLockScope&& other)
         : released(other.released) {
       other.released = true;

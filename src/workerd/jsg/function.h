@@ -147,7 +147,7 @@ public:
 
   Function(Function&&) = default;
   Function& operator=(Function&&) = default;
-  KJ_DISALLOW_COPY(Function);
+  KJ_DISALLOW_ONLY_COPY(Function);
 
   Ret operator()(jsg::Lock& jsl, Args... args) {
     KJ_SWITCH_ONEOF(impl) {

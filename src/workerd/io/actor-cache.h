@@ -239,7 +239,7 @@ private:
     DeferredAlarmDeleter(ActorCache& parent): parent(parent) {}
     DeferredAlarmDeleter(DeferredAlarmDeleter&& other)
         : parent(other.parent) { other.parent = nullptr; }
-    KJ_DISALLOW_COPY(DeferredAlarmDeleter);
+    KJ_DISALLOW_ONLY_COPY(DeferredAlarmDeleter);
 
     ~DeferredAlarmDeleter() noexcept(false) {
       KJ_IF_MAYBE(p, parent) {

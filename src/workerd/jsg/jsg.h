@@ -743,7 +743,7 @@ public:
     other.assertInvariant();
     return *this;
   }
-  KJ_DISALLOW_COPY(Data);
+  KJ_DISALLOW_ONLY_COPY(Data);
 
   Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
       : isolate(isolate), handle(isolate, handle) {}
@@ -802,7 +802,7 @@ public:
     Data::operator=(kj::mv(other));
     return *this;
   }
-  KJ_DISALLOW_COPY(V8Ref);
+  KJ_DISALLOW_ONLY_COPY(V8Ref);
 
   v8::Local<T> getHandle(v8::Isolate* isolate) {
     if constexpr (std::is_base_of<v8::Value, T>()) {
@@ -842,7 +842,7 @@ public:
       : V8Ref<T>(isolate, handle), identityHash(handle->GetIdentityHash()) {}
   HashableV8Ref(HashableV8Ref&& other) = default;
   HashableV8Ref& operator=(HashableV8Ref&& other) = default;
-  KJ_DISALLOW_COPY(HashableV8Ref);
+  KJ_DISALLOW_ONLY_COPY(HashableV8Ref);
 
   HashableV8Ref addRef(v8::Isolate* isolate) {
     return HashableV8Ref(isolate, this->getHandle(isolate), identityHash);
@@ -982,7 +982,7 @@ public:
     }
   }
   Varargs(Varargs&&) = default;
-  KJ_DISALLOW_COPY(Varargs);
+  KJ_DISALLOW_ONLY_COPY(Varargs);
 
   size_t size() { return length; }
 
@@ -1031,7 +1031,7 @@ public:
   // Objects that extend from jsg::Object should never be copied or moved
   // independently of their owning jsg::Ref so we explicitly delete the
   // copy and move constructors and assignment operators to be safe.
-  KJ_DISALLOW_COPY(Object);
+  KJ_DISALLOW_ONLY_COPY(Object);
   Object(Object&&) = delete;
   Object& operator=(Object&&) = delete;
 
@@ -1130,7 +1130,7 @@ public:
   ~Ref() noexcept(false) {
     destroy();
   }
-  KJ_DISALLOW_COPY(Ref);
+  KJ_DISALLOW_ONLY_COPY(Ref);
 
   T& operator*() { return *inner; }
   T* operator->() { return inner.get(); }
@@ -1257,7 +1257,7 @@ public:
   explicit Name(kj::String string);
   explicit Name(kj::StringPtr string);
   explicit Name(Lock& js, v8::Local<v8::Symbol> symbol);
-  KJ_DISALLOW_COPY(Name);
+  KJ_DISALLOW_ONLY_COPY(Name);
   Name(Name&&) = default;
   Name& operator=(Name&&) = default;
 
@@ -1432,7 +1432,7 @@ public:
   JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(handle->GetIsolate(), handle), object(kj::mv(object)) {}
   JsContext(JsContext&&) = default;
-  KJ_DISALLOW_COPY(JsContext);
+  KJ_DISALLOW_ONLY_COPY(JsContext);
 
   T& operator*() { return *object; }
   T* operator->() { return object.get(); }

@@ -43,7 +43,7 @@ public:
   using Iterator = Map::iterator;
 
   TimeoutManagerImpl() = default;
-  KJ_DISALLOW_COPY(TimeoutManagerImpl);
+  KJ_DISALLOW_ONLY_COPY(TimeoutManagerImpl);
   TimeoutManagerImpl(TimeoutManagerImpl&&) = delete;
   TimeoutManagerImpl& operator=(TimeoutManagerImpl&&) = delete;
 

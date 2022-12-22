@@ -308,7 +308,7 @@ public:
   UsvString(UsvString&& other) = default;
   UsvString& operator=(UsvString&& other) = default;
 
-  KJ_DISALLOW_COPY(UsvString);
+  KJ_DISALLOW_ONLY_COPY(UsvString);
 
   UsvString clone() KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvString.
@@ -421,7 +421,7 @@ public:
   UsvStringBuilder(UsvStringBuilder&& other) = default;
   UsvStringBuilder& operator=(UsvStringBuilder&& other) = default;
 
-  KJ_DISALLOW_COPY(UsvStringBuilder);
+  KJ_DISALLOW_ONLY_COPY(UsvStringBuilder);
 
   inline operator UsvStringPtr() KJ_LIFETIMEBOUND { return UsvStringPtr(buffer); }
   inline UsvStringPtr asPtr() KJ_LIFETIMEBOUND { return UsvStringPtr(*this); }

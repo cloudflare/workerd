@@ -107,7 +107,7 @@ public:
     explicit SpanData(SpanContext context, kj::StringPtr operationName, kj::Date startTime)
         : context(context), operationName(operationName), startTime(startTime) {}
     SpanData(SpanData&&) = default;
-    KJ_DISALLOW_COPY(SpanData);
+    KJ_DISALLOW_ONLY_COPY(SpanData);
 
     using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
     // TODO(someday): Support binary bytes, too.

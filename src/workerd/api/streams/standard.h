@@ -749,7 +749,7 @@ public:
       kj::Own<ByteQueue::ByobRequest> readRequest,
       jsg::Ref<ReadableByteStreamController> controller);
 
-  KJ_DISALLOW_COPY(ReadableStreamBYOBRequest);
+  KJ_DISALLOW_ONLY_COPY(ReadableStreamBYOBRequest);
   ReadableStreamBYOBRequest(ReadableStreamBYOBRequest&&) = delete;
   ReadableStreamBYOBRequest& operator=(ReadableStreamBYOBRequest&&) = delete;
 

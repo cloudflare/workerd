@@ -49,7 +49,7 @@ public:
     Batch(Batch&&) = default;
     Batch& operator=(Batch&&) = default;
     ~Batch() noexcept(false);
-    KJ_DISALLOW_COPY(Batch);
+    KJ_DISALLOW_ONLY_COPY(Batch);
 
     operator kj::ArrayPtr<T>() {
       return batchQueue
