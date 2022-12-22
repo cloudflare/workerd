@@ -12,27 +12,12 @@
 #include <capnp/message.h>
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-storage.h>
 
 namespace workerd::api {
 
 namespace {
 
-constexpr size_t ADVERTISED_MAX_VALUE_SIZE = 128 * 1024;
-constexpr size_t ENFORCED_MAX_VALUE_SIZE = ADVERTISED_MAX_VALUE_SIZE + 34;
-// We grant some extra cushion on top of the advertised max size in order
-// to avoid penalizing people for pushing right up against the advertised size.
-// The v8 serialization method we use can add a few extra bytes for its type tag
-// and other metadata, such as the length of a string or number of items in an
-// array. The most important cases (where users are most likely to try to
-// intentionally run right up against the limit) are Strings and ArrayBuffers,
-// which each get 4 bytes of metadata attached when encoded. We throw a little
-// extra on just for future proofing and an abundance of caution.
-//
-// If you're curious why we add 34 bytes of cushion -- we used to add 32, but
-// then started writing v8 serialization headers, which are 2 bytes, and didn't
-// want to stop accepting values that we accepted before writing headers.
-
-constexpr size_t MAX_KEY_SIZE = 2048;
 constexpr size_t BILLING_UNIT = 4096;
 
 enum class BillAtLeastOne {
@@ -44,17 +29,6 @@ uint32_t billingUnits(size_t bytes, BillAtLeastOne billAtLeastOne = BillAtLeastO
     return 1; // always bill for at least 1 billing unit
   }
   return bytes / BILLING_UNIT + (bytes % BILLING_UNIT != 0);
-}
-
-void checkMaxKeySize(size_t keySize) {
-  JSG_REQUIRE(keySize <= MAX_KEY_SIZE, RangeError, "Keys cannot be larger than 2048 bytes.");
-}
-
-void checkMaxKeySize(kj::StringPtr key, v8::Isolate* isolate) {
-  if (key.size() > MAX_KEY_SIZE) {
-    jsg::throwRangeError(isolate, kj::str("Key \"", key, "\" is larger than the limit of ",
-          MAX_KEY_SIZE, " bytes."));
-  }
 }
 
 v8::Local<v8::Value> deserializeMaybeV8Value(
@@ -236,7 +210,7 @@ kj::Function<jsg::Value(v8::Isolate*, ActorCache::GetResultList)> getMultipleRes
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
     kj::String key, const GetOptions& options, v8::Isolate* isolate) {
-  checkMaxKeySize(key.size());
+  ActorStorageLimits::checkMaxKeySize(key);
 
   auto result = getCache(OP_GET).get(kj::str(key), options);
   return transformCacheResultWithCacheStatus(isolate, kj::mv(result), options,
@@ -460,12 +434,10 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
     kj::String key, v8::Local<v8::Value> value, const PutOptions& options, v8::Isolate* isolate) {
-  checkMaxKeySize(key.size());
+  ActorStorageLimits::checkMaxKeySize(key);
+
   kj::Array<byte> buffer = serializeV8Value(value, isolate);
-  if (buffer.size() > ENFORCED_MAX_VALUE_SIZE) {
-    jsg::throwRangeError(isolate,
-        kj::str("Values cannot be larger than ", ADVERTISED_MAX_VALUE_SIZE, " bytes."));
-  }
+  ActorStorageLimits::checkMaxValueSize(key, buffer);
 
   auto units = billingUnits(key.size() + buffer.size());
 
@@ -530,7 +502,7 @@ void DurableObjectTransaction::deleteAll() {
 
 jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
     kj::String key, const PutOptions& options, v8::Isolate* isolate) {
-  checkMaxKeySize(key.size());
+  ActorStorageLimits::checkMaxKeySize(key);
 
   return transformCacheResult(isolate, getCache(OP_DELETE).delete_(kj::mv(key), options), options,
       [](v8::Isolate* isolate, bool value) {
@@ -541,10 +513,7 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
     kj::Array<kj::String> keys, const GetOptions& options, v8::Isolate* isolate) {
-  if (keys.size() > rpc::ActorStorage::MAX_KEYS) {
-    jsg::throwRangeError(isolate,
-      kj::str("Maximum number of keys is ", rpc::ActorStorage::MAX_KEYS, "."));
-  }
+  ActorStorageLimits::checkMaxPairsCount(keys.size());
 
   auto numKeys = keys.size();
 
@@ -554,10 +523,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options, v8::Isolate* isolate) {
-  if (entries.fields.size() > rpc::ActorStorage::MAX_KEYS) {
-    jsg::throwRangeError(isolate,
-      kj::str("Maximum number of pairs is ", rpc::ActorStorage::MAX_KEYS, "."));
-  }
+  ActorStorageLimits::checkMaxPairsCount(entries.fields.size());
 
   kj::Vector<ActorCache::KeyValuePair> kvs(entries.fields.size());
 
@@ -568,13 +534,10 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     // deleting an undefined field is confusing, throwing could break otherwise working code, and
     // a stray undefined here or there is probably closer to what the user desires.
 
-    checkMaxKeySize(field.name, isolate);
+    ActorStorageLimits::checkMaxKeySize(field.name);
 
     kj::Array<byte> buffer = serializeV8Value(field.value, isolate);
-    if (buffer.size() > ENFORCED_MAX_VALUE_SIZE) {
-      jsg::throwRangeError(isolate, kj::str("Value for key \"", field.name, "\" is above the limit of ",
-            ADVERTISED_MAX_VALUE_SIZE, " bytes."));
-    }
+    ActorStorageLimits::checkMaxValueSize(field.name, buffer);
 
     units += billingUnits(field.name.size() + buffer.size());
 
@@ -595,12 +558,10 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
 jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
     kj::Array<kj::String> keys, const PutOptions& options, v8::Isolate* isolate) {
-  if (keys.size() > rpc::ActorStorage::MAX_KEYS) {
-    jsg::throwRangeError(isolate,
-      kj::str("Maximum number of keys is ", rpc::ActorStorage::MAX_KEYS, "."));
-  }
+  ActorStorageLimits::checkMaxPairsCount(keys.size());
+
   for (auto& key: keys) {
-    checkMaxKeySize(key, isolate);
+    ActorStorageLimits::checkMaxKeySize(key);
   }
 
   auto numKeys = keys.size();

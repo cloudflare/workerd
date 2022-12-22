@@ -133,12 +133,6 @@ private:
 // case an exception is thrown. Writing code that deals with maybes is cumbersome and error-prone
 // compared to C++ exceptions.
 
-[[noreturn]] void throwRangeError(v8::Isolate* isolate, kj::StringPtr message);
-// Convenience method to throw a RangeError.
-
-[[noreturn]] void throwError(v8::Isolate* isolate, kj::StringPtr message);
-// Convenience method to throw a generic Error.
-
 // =======================================================================================
 // Macros for declaring type glue.
 

@@ -41,15 +41,6 @@ const char* JsExceptionThrown::what() const noexcept {
   return whatBuffer.cStr();
 }
 
-void throwRangeError(v8::Isolate* isolate, kj::StringPtr message) {
-  isolate->ThrowException(v8::Exception::RangeError(v8Str(isolate, message)));
-  throw JsExceptionThrown();
-}
-
-void throwError(v8::Isolate* isolate, kj::StringPtr message) {
-  isolate->ThrowException(v8::Exception::Error(v8Str(isolate, message)));
-  throw JsExceptionThrown();
-}
 void Data::destroy() {
   assertInvariant();
   if (isolate != nullptr) {
