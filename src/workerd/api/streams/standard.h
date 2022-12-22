@@ -749,9 +749,7 @@ public:
       kj::Own<ByteQueue::ByobRequest> readRequest,
       jsg::Ref<ReadableByteStreamController> controller);
 
-  KJ_DISALLOW_COPY(ReadableStreamBYOBRequest);
-  ReadableStreamBYOBRequest(ReadableStreamBYOBRequest&&) = delete;
-  ReadableStreamBYOBRequest& operator=(ReadableStreamBYOBRequest&&) = delete;
+  KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamBYOBRequest);
 
   kj::Maybe<int> getAtLeast();
   // getAtLeast is a non-standard Workers-specific extension that specifies

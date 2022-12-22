@@ -43,9 +43,7 @@ public:
   using Iterator = Map::iterator;
 
   TimeoutManagerImpl() = default;
-  KJ_DISALLOW_COPY(TimeoutManagerImpl);
-  TimeoutManagerImpl(TimeoutManagerImpl&&) = delete;
-  TimeoutManagerImpl& operator=(TimeoutManagerImpl&&) = delete;
+  KJ_DISALLOW_COPY_AND_MOVE(TimeoutManagerImpl);
 
   TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) override {
