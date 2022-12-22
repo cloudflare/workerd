@@ -33,6 +33,7 @@ namespace api {
   class ServiceWorkerGlobalScope;
   struct ExportedHandler;
   struct CryptoAlgorithm;
+  class WebSocket;
 }
 
 class IoContext;
@@ -638,6 +639,16 @@ public:
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
+  class HibernationManager : public kj::Refcounted {
+    // The HibernationManager class manages HibernatableWebSockets created by an actor.
+    // The manager handles accepting new websockets, retreiving existing websockets by tag, and
+    // removing websockets from its collection when they disconnect.
+  public:
+    virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
+    virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(jsg::Lock& js, kj::StringPtr tag) = 0;
+    virtual void hibernateWebSockets(jsg::Lock& js, v8::Isolate* isolate, IoContext& context) = 0;
+  };
+
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
         bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
@@ -703,6 +714,15 @@ public:
   //   some more information to the place where `Actor` is created, which might be uglier than it's
   //   worth.
 
+  kj::Maybe<HibernationManager&> getHibernationManager();
+  // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
+  // setHibernationManager() hasn't been called yet, or if the HibernationManager has moved to the
+  // DeferredProxy::proxyTask.
+
+  void setHibernationManager(kj::Own<HibernationManager> manager);
+  // Set the HibernationManager for this actor. This is called once, on the first call to
+  // `acceptWebSocket`.
+
   const Worker& getWorker() { return *worker; }
 
   void assertCanSetAlarm();
@@ -727,6 +747,12 @@ private:
   kj::Maybe<RequestTracker&> tracker;
   struct Impl;
   kj::Own<Impl> impl;
+  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
+  // TODO(now): Move into Worker::Actor::Impl?
+  // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
+  // websocket. We eventually move the HibernationManager into the DeferredProxy task
+  // (since it's long lived), but can still refer to the HibernationManager by passing a reference
+  // in each CustomEvent.
 
   kj::Maybe<api::ExportedHandler&> getHandler();
   friend class Worker;

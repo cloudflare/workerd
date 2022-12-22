@@ -3071,6 +3071,17 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
   });
 }
 
+kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
+  return hibernationManager.map([](kj::Own<HibernationManager>& hib) -> HibernationManager& {
+    return *hib;
+  });
+}
+
+void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+  KJ_REQUIRE(hibernationManager == nullptr);
+  hibernationManager = kj::mv(hib);
+}
+
 // =======================================================================================
 
 uint Worker::Isolate::getCurrentLoad() const {
