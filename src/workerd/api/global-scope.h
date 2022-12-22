@@ -418,7 +418,9 @@ public:
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
-    JSG_METHOD(connect);
+    if (flags.getTcpSocketsSupport()) {
+      JSG_METHOD(connect);
+    }
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(

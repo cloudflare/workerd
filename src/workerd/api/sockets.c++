@@ -34,9 +34,9 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::String address,
     CompatibilityFlags::Reader featureFlags) {
-  if (!featureFlags.getTcpSocketsSupport()) {
-    JSG_FAIL_REQUIRE(TypeError, "TCP Sockets API not enabled.");
-  }
+  // `connect()` should be hidden when the feature flag is off, so we shouldn't even get here.
+  KJ_ASSERT(featureFlags.getTcpSocketsSupport());
+
   jsg::Ref<Fetcher> actualFetcher = nullptr;
   KJ_IF_MAYBE(f, fetcher) {
     actualFetcher = kj::mv(*f);
