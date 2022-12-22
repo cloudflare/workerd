@@ -872,6 +872,10 @@ private:
     }
   }
 
+  kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection, kj::HttpService::ConnectResponse& response) override {
+    throwUnsupported();
+  }
   void prewarm(kj::StringPtr url) override {}
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     throwUnsupported();
