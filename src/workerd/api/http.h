@@ -454,9 +454,11 @@ public:
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String url,
       CompatibilityFlags::Reader featureFlags);
 
-  JSG_RESOURCE_TYPE(Fetcher) {
+  JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     JSG_METHOD(fetch);
-    JSG_METHOD(connect);
+    if (flags.getTcpSocketsSupport()) {
+      JSG_METHOD(connect);
+    }
 
     JSG_METHOD(get);
     JSG_METHOD(put);
