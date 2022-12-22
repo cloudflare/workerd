@@ -62,8 +62,8 @@ private:
 };
 
 struct SocketOptions {
-  bool tsl; // TODO(later): TCP socket options need to be implemented.
-  JSG_STRUCT(tsl);
+  jsg::Unimplemented tls; // TODO(later): TCP socket options need to be implemented.
+  JSG_STRUCT(tls);
 };
 
 struct InitData {
