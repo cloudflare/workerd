@@ -299,7 +299,7 @@ private:
         e->maybeReceived = nullptr;
       }
     }
-    KJ_DISALLOW_COPY(ReceivedCall);
+    KJ_DISALLOW_COPY_AND_MOVE(ReceivedCall);
 
     kj::PromiseFulfiller<void>& fulfiller;
     MockServer& mock;

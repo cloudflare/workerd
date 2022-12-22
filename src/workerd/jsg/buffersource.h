@@ -107,7 +107,7 @@ public:
 
   BackingStore(BackingStore&& other) = default;
   BackingStore& operator=(BackingStore&& other) = default;
-  KJ_DISALLOW_ONLY_COPY(BackingStore);
+  KJ_DISALLOW_COPY(BackingStore);
 
   inline kj::ArrayPtr<kj::byte> asArrayPtr() KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
@@ -275,7 +275,7 @@ public:
   BufferSource(BufferSource&&) = default;
   BufferSource& operator=(BufferSource&&) = default;
 
-  KJ_DISALLOW_ONLY_COPY(BufferSource);
+  KJ_DISALLOW_COPY(BufferSource);
 
   inline bool isDetached() const { return maybeBackingStore == nullptr; }
   // True if the BackingStore has been removed from this BufferSource.

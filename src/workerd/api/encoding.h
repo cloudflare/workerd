@@ -81,7 +81,7 @@ public:
   AsciiDecoder() = default;
   AsciiDecoder(AsciiDecoder&&) = default;
   AsciiDecoder& operator=(AsciiDecoder&&) = default;
-  KJ_DISALLOW_ONLY_COPY(AsciiDecoder);
+  KJ_DISALLOW_COPY(AsciiDecoder);
 
   Encoding getEncoding() override { return Encoding::Windows_1252; }
 

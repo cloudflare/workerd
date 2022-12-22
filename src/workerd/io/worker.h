@@ -84,7 +84,7 @@ public:
   // properties to `target`.
 
   ~Worker() noexcept(false);
-  KJ_DISALLOW_COPY(Worker);
+  KJ_DISALLOW_COPY_AND_MOVE(Worker);
 
   const Script& getScript() const { return *script; }
   const Isolate& getIsolate() const;
@@ -119,7 +119,7 @@ public:
     inline ~WarnAboutIsolateLockScope() noexcept(false) {
       if (!released) release();
     }
-    KJ_DISALLOW_ONLY_COPY(WarnAboutIsolateLockScope);
+    KJ_DISALLOW_COPY(WarnAboutIsolateLockScope);
     inline WarnAboutIsolateLockScope(WarnAboutIsolateLockScope&& other)
         : released(other.released) {
       other.released = true;
@@ -142,7 +142,7 @@ private:
     ~TeardownFinishedGuard() noexcept(false) {
       ref.teardownFinished();
     }
-    KJ_DISALLOW_COPY(TeardownFinishedGuard);
+    KJ_DISALLOW_COPY_AND_MOVE(TeardownFinishedGuard);
 
   private:
     Observer& ref;
@@ -169,7 +169,7 @@ class Worker::Script: public kj::AtomicRefcounted {
 
 public:
   ~Script() noexcept(false);
-  KJ_DISALLOW_COPY(Script);
+  KJ_DISALLOW_COPY_AND_MOVE(Script);
 
   inline kj::StringPtr getId() const { return id; }
   const Isolate& getIsolate() const { return *isolate; }
@@ -243,7 +243,7 @@ public:
   // inspector session to stay open across them).
 
   ~Isolate() noexcept(false);
-  KJ_DISALLOW_COPY(Isolate);
+  KJ_DISALLOW_COPY_AND_MOVE(Isolate);
 
   const IsolateObserver& getMetrics() const { return *metrics; }
 
@@ -407,7 +407,7 @@ private:
         : constIsolate(kj::mv(isolate)), inner(kj::mv(inner)),
           contentEncodingHeaderId(contentEncodingHeaderId),
           requestMetrics(kj::addRef(requestMetrics)) {}
-    KJ_DISALLOW_COPY(SubrequestClient);
+    KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override;
@@ -524,7 +524,7 @@ public:
   };
 
   explicit Lock(const Worker& worker, LockType lockType);
-  KJ_DISALLOW_COPY(Lock);
+  KJ_DISALLOW_COPY_AND_MOVE(Lock);
   ~Lock() noexcept(false);
 
   void requireNoPermanentException();
@@ -720,7 +720,7 @@ class Worker::AsyncWaiter: public kj::Refcounted {
 public:
   AsyncWaiter(kj::Own<const Isolate> isolate);
   ~AsyncWaiter() noexcept;
-  KJ_DISALLOW_COPY(AsyncWaiter);
+  KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
 
 private:
   const kj::Executor& executor;

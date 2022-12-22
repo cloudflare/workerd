@@ -159,7 +159,7 @@ public:
     ~LockRecord() noexcept(false) {
       KJ_IF_MAYBE(l, lockTiming) l->get()->stop();
     }
-    KJ_DISALLOW_COPY(LockRecord);
+    KJ_DISALLOW_COPY_AND_MOVE(LockRecord);
 
     void locked() { KJ_IF_MAYBE(l, lockTiming) l->get()->locked(); }
     void gcPrologue() { KJ_IF_MAYBE(l, lockTiming) l->get()->gcPrologue(); }

@@ -39,7 +39,7 @@ public:
 
   explicit HTMLRewriter();
   ~HTMLRewriter() noexcept(false);
-  KJ_DISALLOW_COPY(HTMLRewriter);
+  KJ_DISALLOW_COPY_AND_MOVE(HTMLRewriter);
 
   static jsg::Ref<HTMLRewriter> constructor();
 
@@ -230,7 +230,7 @@ public:
 private:
   struct Impl {
     Impl(CType& element, Rewriter&);
-    KJ_DISALLOW_COPY(Impl);
+    KJ_DISALLOW_COPY_AND_MOVE(Impl);
     ~Impl() noexcept(false);
 
     CType& element;

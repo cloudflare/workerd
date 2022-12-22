@@ -36,7 +36,7 @@ KJ_TEST("BatchQueue::Batch clears the pop buffer when it is destroyed") {
   struct DestructionDetector {
     DestructionDetector(uint& count): count(count) {}
     ~DestructionDetector() noexcept(false) { ++count; }
-    KJ_DISALLOW_COPY(DestructionDetector);
+    KJ_DISALLOW_COPY_AND_MOVE(DestructionDetector);
     uint& count;
   };
 

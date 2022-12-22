@@ -116,7 +116,7 @@ private:
     }
     RefToDelete(RefToDelete&&) = default;
     // Default move ctor okay because ownWrappable.get() will be null if moved-from.
-    KJ_DISALLOW_ONLY_COPY(RefToDelete);
+    KJ_DISALLOW_COPY(RefToDelete);
 
   private:
     bool strong;
@@ -176,7 +176,7 @@ private:
 
   explicit IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams);
   ~IsolateBase() noexcept(false);
-  KJ_DISALLOW_COPY(IsolateBase);
+  KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
   void dropWrappers(kj::Own<void> typeWrapperInstance);
 

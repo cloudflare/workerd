@@ -18,7 +18,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 public:
   ResponseSentTracker(kj::HttpService::Response& inner)
       : inner(inner) {}
-  KJ_DISALLOW_COPY(ResponseSentTracker);
+  KJ_DISALLOW_COPY_AND_MOVE(ResponseSentTracker);
 
   bool isSent() const { return sent; }
 

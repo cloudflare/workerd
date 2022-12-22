@@ -60,7 +60,7 @@ public:
   ~LolString() noexcept(false) {
     lol_html_str_free({ chars.begin(), chars.size() });
   }
-  KJ_DISALLOW_ONLY_COPY(LolString);
+  KJ_DISALLOW_COPY(LolString);
   LolString(LolString&& other): chars(other.chars) {
     other.chars = nullptr;
   }
@@ -156,7 +156,7 @@ public:
   TokenScope(TokenScope&& o) : contentToken(kj::mv(o.contentToken)) {
     o.contentToken = nullptr;
   }
-  KJ_DISALLOW_ONLY_COPY(TokenScope);
+  KJ_DISALLOW_COPY(TokenScope);
 
 private:
   kj::Maybe<jsg::Ref<HTMLRewriter::Token>> contentToken;
@@ -210,7 +210,7 @@ public:
       kj::ArrayPtr<const char> encoding,
       kj::Own<WritableStreamSink> inner,
       CompatibilityFlags::Reader featureFlags);
-  KJ_DISALLOW_COPY(Rewriter);
+  KJ_DISALLOW_COPY_AND_MOVE(Rewriter);
 
   // WritableStreamSink implementation. The input body pumpTo() operation calls these.
   kj::Promise<void> write(const void* buffer, size_t size) override;
