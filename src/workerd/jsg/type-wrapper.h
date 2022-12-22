@@ -408,7 +408,7 @@ public:
         MaybeWrapper<Self>(configuration) {
     isolate->SetData(1, this);
   }
-  KJ_DISALLOW_COPY(TypeWrapper);
+  KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
   static TypeWrapper& from(v8::Isolate* isolate) {
     return *reinterpret_cast<TypeWrapper*>(isolate->GetData(1));

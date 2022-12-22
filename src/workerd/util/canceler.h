@@ -49,7 +49,7 @@ public:
     canceler.release();
   }
 
-  KJ_DISALLOW_COPY(RefcountedCanceler);
+  KJ_DISALLOW_COPY_AND_MOVE(RefcountedCanceler);
 
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {

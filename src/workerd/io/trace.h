@@ -47,7 +47,7 @@ public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
-  KJ_DISALLOW_COPY(Trace);
+  KJ_DISALLOW_COPY_AND_MOVE(Trace);
 
   class FetchEventInfo {
   public:
@@ -263,7 +263,7 @@ public:
   explicit Tracer(kj::EntropySource& entropySource,
       kj::Maybe<kj::Own<Tracer>> parent, kj::Maybe<Jaeger::SpanContext> parentSpanContext,
       kj::Maybe<JaegerSpanSubmitter&> jaegerSpanSubmitter, kj::Own<void> ownJaegerSpanSubmitter);
-  KJ_DISALLOW_COPY(Tracer);
+  KJ_DISALLOW_COPY_AND_MOVE(Tracer);
 
   kj::Own<Tracer> makeSubtracer(kj::Maybe<Jaeger::SpanContext> overrideParent);
 
@@ -433,7 +433,7 @@ public:
   // Creates a pipeline tracer (with a possible parent).
 
   ~PipelineTracer() noexcept(false);
-  KJ_DISALLOW_COPY(PipelineTracer);
+  KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
@@ -470,7 +470,7 @@ public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
-  KJ_DISALLOW_COPY(WorkerTracer);
+  KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   void log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().

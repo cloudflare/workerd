@@ -198,7 +198,7 @@ public:
                             kj::Own<IoChannelFactory> ioChannelFactory,
                             kj::Own<RequestObserver> metrics,
                             kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
-  KJ_DISALLOW_COPY(IoContext_IncomingRequest);
+  KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
   IoContext& getContext() { return *context; }
@@ -608,7 +608,7 @@ public:
 
   public:
 
-    KJ_DISALLOW_COPY(Finalizeable);
+    KJ_DISALLOW_COPY_AND_MOVE(Finalizeable);
 
 #ifdef KJ_DEBUG
     Finalizeable();
@@ -866,7 +866,7 @@ private:
   class OwnedObjectList {
   public:
     OwnedObjectList() = default;
-    KJ_DISALLOW_COPY(OwnedObjectList);
+    KJ_DISALLOW_COPY_AND_MOVE(OwnedObjectList);
     ~OwnedObjectList() noexcept(false);
 
     void link(kj::Own<OwnedObject> object);
@@ -918,7 +918,7 @@ private:
   public:
     DeleteQueuePtr(kj::Own<DeleteQueue> value)
         : kj::Own<DeleteQueue>(kj::mv(value)) {}
-    KJ_DISALLOW_COPY(DeleteQueuePtr);
+    KJ_DISALLOW_COPY_AND_MOVE(DeleteQueuePtr);
     ~DeleteQueuePtr() noexcept(false) {
       auto ptr = get();
       if (ptr != nullptr) {

@@ -356,7 +356,7 @@ private:
     // constructor.
 
     ~Entry() noexcept(false);
-    KJ_DISALLOW_COPY(Entry);
+    KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
     kj::Maybe<ActorCache&> cache;
     const Key key;
@@ -489,7 +489,7 @@ private:
     kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> fulfiller;
     ReadCompletionChain() = default;
     ~ReadCompletionChain() noexcept(false);
-    KJ_DISALLOW_COPY(ReadCompletionChain);
+    KJ_DISALLOW_COPY_AND_MOVE(ReadCompletionChain);
   };
   kj::Own<ReadCompletionChain> readCompletionChain = kj::refcounted<ReadCompletionChain>();
   // Used to implement waitForPastReads(). See that function to understand how it works...
@@ -736,7 +736,7 @@ public:
   explicit SharedLru(Options options);
 
   ~SharedLru() noexcept(false);
-  KJ_DISALLOW_COPY(SharedLru);
+  KJ_DISALLOW_COPY_AND_MOVE(SharedLru);
 
   size_t currentSize() const { return size.load(std::memory_order_relaxed); }
   // Mostly for testing.

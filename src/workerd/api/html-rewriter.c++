@@ -210,7 +210,7 @@ public:
       kj::ArrayPtr<const char> encoding,
       kj::Own<WritableStreamSink> inner,
       CompatibilityFlags::Reader featureFlags);
-  KJ_DISALLOW_COPY(Rewriter);
+  KJ_DISALLOW_COPY_AND_MOVE(Rewriter);
 
   // WritableStreamSink implementation. The input body pumpTo() operation calls these.
   kj::Promise<void> write(const void* buffer, size_t size) override;

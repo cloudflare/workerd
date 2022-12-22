@@ -606,7 +606,7 @@ struct Worker::Isolate::Impl {
       }
       impl.currentLock = nullptr;
     }
-    KJ_DISALLOW_COPY(Lock);
+    KJ_DISALLOW_COPY_AND_MOVE(Lock);
 
     void setupContext(v8::Local<v8::Context> context) {
       // Set WebAssembly.Module @@HasInstance
@@ -1912,7 +1912,7 @@ public:
     }
   }
 
-  KJ_DISALLOW_COPY(LimitedBodyWrapper);
+  KJ_DISALLOW_COPY_AND_MOVE(LimitedBodyWrapper);
 
   void reset() {
     this->inner = nullptr;
@@ -2313,7 +2313,7 @@ private:
       session = nullptr;
     }
 
-    KJ_DISALLOW_COPY(State);
+    KJ_DISALLOW_COPY_AND_MOVE(State);
   };
   kj::MutexGuarded<kj::Own<State>> state;
   // Mutex ordering: You must lock this *before* locking the isolate.

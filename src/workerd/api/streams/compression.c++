@@ -57,7 +57,7 @@ public:
     }
   }
 
-  KJ_DISALLOW_COPY(Context);
+  KJ_DISALLOW_COPY_AND_MOVE(Context);
 
   void setInput(const void* in, size_t size) {
     ctx.next_in = const_cast<byte*>(reinterpret_cast<const byte*>(in));

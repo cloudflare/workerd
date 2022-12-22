@@ -1156,7 +1156,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
   ValueReadable(jsg::Lock& js, auto owner, ValueReadable& other)
       : state(KJ_ASSERT_NONNULL(other.state).cloneWithNewOwner(js, owner, this)) {}
 
-  KJ_DISALLOW_COPY(ValueReadable);
+  KJ_DISALLOW_COPY_AND_MOVE(ValueReadable);
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(state);
@@ -1264,7 +1264,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
       : state(KJ_ASSERT_NONNULL(other.state).cloneWithNewOwner(js, owner, this)),
         autoAllocateChunkSize(other.autoAllocateChunkSize) {}
 
-  KJ_DISALLOW_COPY(ByteReadable);
+  KJ_DISALLOW_COPY_AND_MOVE(ByteReadable);
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(state);

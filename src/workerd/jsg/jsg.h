@@ -1031,9 +1031,7 @@ public:
   // Objects that extend from jsg::Object should never be copied or moved
   // independently of their owning jsg::Ref so we explicitly delete the
   // copy and move constructors and assignment operators to be safe.
-  KJ_DISALLOW_COPY(Object);
-  Object(Object&&) = delete;
-  Object& operator=(Object&&) = delete;
+  KJ_DISALLOW_COPY_AND_MOVE(Object);
 
   // Since we explicitly delete the copy and move constructors, we have
   // to explicitly declare the default constructor.
@@ -1555,7 +1553,7 @@ private:
 
   explicit GcVisitor(Wrappable& parent, kj::Maybe<cppgc::Visitor&> cppgcVisitor)
       : parent(parent), cppgcVisitor(cppgcVisitor) {}
-  KJ_DISALLOW_COPY(GcVisitor);
+  KJ_DISALLOW_COPY_AND_MOVE(GcVisitor);
 
   friend class Wrappable;
   friend class Object;

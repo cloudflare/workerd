@@ -30,7 +30,7 @@ public:
 
   static bool isActive();
 
-  KJ_DISALLOW_COPY(AllowV8BackgroundThreadsScope);
+  KJ_DISALLOW_COPY_AND_MOVE(AllowV8BackgroundThreadsScope);
 };
 
 class IsolateShutdownScope {
@@ -43,7 +43,7 @@ public:
 
   static bool isActive();
 
-  KJ_DISALLOW_COPY(IsolateShutdownScope);
+  KJ_DISALLOW_COPY_AND_MOVE(IsolateShutdownScope);
 };
 
 bool isMultiTenantProcess();
@@ -83,7 +83,7 @@ public:
   // ProgressCounters are reentrant, like v8::Lockers.
 
   ~ThreadProgressCounter() noexcept(false);
-  KJ_DISALLOW_COPY(ThreadProgressCounter);
+  KJ_DISALLOW_COPY_AND_MOVE(ThreadProgressCounter);
 
   static bool hasProgress();
   // Returns true if progress has been made since the last call to update().

@@ -319,7 +319,7 @@ public:
     ~UpdateBackpressureScope() noexcept(false) {
       queue.maybeUpdateBackpressure();
     }
-    KJ_DISALLOW_COPY(UpdateBackpressureScope);
+    KJ_DISALLOW_COPY_AND_MOVE(UpdateBackpressureScope);
   };
 
   using ReadRequest = typename Self::ReadRequest;
@@ -763,9 +763,7 @@ public:
           consumer(consumer),
           queue(queue) {}
 
-    KJ_DISALLOW_COPY(ByobRequest);
-    ByobRequest(ByobRequest&&) = delete;
-    ByobRequest& operator=(ByobRequest&&) = delete;
+    KJ_DISALLOW_COPY_AND_MOVE(ByobRequest);
 
     ~ByobRequest() noexcept(false);
 
