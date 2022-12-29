@@ -7,6 +7,7 @@
 #include <kj/debug.h>
 #include <kj/vector.h>
 #include <cstdlib>
+#include <workerd/util/thread-scopes.h>
 
 namespace workerd {
 
@@ -71,7 +72,7 @@ void setJaegerTimeField(T& timeField, kj::Date value) {
   return setJaegerTimeField(timeField, value - kj::UNIX_EPOCH);
 }
 
-void setJaegerTag(jaeger::api_v2::KeyValue& kv, const Jaeger::SpanData::Tag& tag) {
+void setJaegerTag(jaeger::api_v2::KeyValue& kv, const Span::Tag& tag) {
   kv.set_key(tag.key.begin(), tag.key.size());
   KJ_SWITCH_ONEOF(tag.value) {
     KJ_CASE_ONEOF(b, bool) {
@@ -93,7 +94,7 @@ void setJaegerTag(jaeger::api_v2::KeyValue& kv, const Jaeger::SpanData::Tag& tag
   }
 }
 
-void setJaegerLog(jaeger::api_v2::Log& l, const Jaeger::SpanData::Log& log) {
+void setJaegerLog(jaeger::api_v2::Log& l, const Span::Log& log) {
   setJaegerTimeField(*l.mutable_timestamp(), log.timestamp);
   setJaegerTag(*l.add_fields(), log.tag);
 }
@@ -228,13 +229,24 @@ kj::Maybe<Jaeger::SpanContext> Jaeger::SpanContext::fromHeader(kj::StringPtr hea
   return nullptr;
 }
 
+kj::Maybe<Jaeger::SpanContext> Jaeger::SpanContext::fromParent(SpanParent& parent) {
+  return parent.getObserver().map([](SpanObserver& observer) {
+    if (Observer* jaegerObserver = dynamic_cast<Observer*>(&observer)) {
+      return jaegerObserver->getContext();
+    } else {
+      KJ_FAIL_REQUIRE("tried to extract Jaeger SpanContext from unknown observer type");
+    }
+  });
+}
+
 kj::String Jaeger::SpanContext::toHeader() const {
   return kj::str(traceId, ":", spanId, ":", parentSpanId, ":", flags);
 }
 
-kj::Array<byte> Jaeger::SpanData::toProtobuf(kj::ArrayPtr<Tag> processTags,
-                                             kj::ArrayPtr<Tag> defaultTags,
-                                             kj::StringPtr serviceName) const {
+kj::Array<byte> Jaeger::spanToProtobuf(const SpanContext& context, const Span& span,
+                                       kj::ArrayPtr<Span::Tag> processTags,
+                                       kj::ArrayPtr<Span::Tag> defaultTags,
+                                       kj::StringPtr serviceName) {
   auto traceIdBuf = context.traceId.toProtobuf();
   auto spanIdBuf = context.spanId.toProtobuf();
   auto parentSpanIdBuf = context.parentSpanId.toProtobuf();
@@ -249,16 +261,16 @@ kj::Array<byte> Jaeger::SpanData::toProtobuf(kj::ArrayPtr<Tag> processTags,
 
   for (auto& tag: defaultTags) {
     // Don't override the span's own tags.
-    if (tags.find(tag.key) == nullptr) {
+    if (span.tags.find(tag.key) == nullptr) {
       setJaegerTag(*s.add_tags(), tag);
     }
   }
 
-  for (auto& tag: tags) {
+  for (auto& tag: span.tags) {
     setJaegerTag(*s.add_tags(), tag);
   }
 
-  for (auto& log: logs) {
+  for (auto& log: span.logs) {
     setJaegerLog(*s.add_logs(), log);
   }
 
@@ -266,11 +278,17 @@ kj::Array<byte> Jaeger::SpanData::toProtobuf(kj::ArrayPtr<Tag> processTags,
   s.set_span_id(spanIdBuf.begin(), spanIdBuf.size());
   s.set_flags(context.flags);
 
-  std::string operationNameStr(operationName.begin(), operationName.size());
+  std::string operationNameStr(span.operationName.begin(), span.operationName.size());
   s.set_operation_name(operationNameStr);
 
-  setJaegerTimeField(*s.mutable_start_time(), startTime);
-  setJaegerTimeField(*s.mutable_duration(), duration);
+  if (isPredictableModeForTest()) {
+    // Initialize these to empty values.
+    s.mutable_start_time();
+    s.mutable_duration();
+  } else {
+    setJaegerTimeField(*s.mutable_start_time(), span.startTime);
+    setJaegerTimeField(*s.mutable_duration(), span.endTime - span.startTime);
+  }
 
   jaeger::api_v2::SpanRef *parent = s.add_references();
   parent->set_trace_id(traceIdBuf.begin(), traceIdBuf.size());
@@ -293,6 +311,15 @@ kj::String KJ_STRINGIFY(const Jaeger::SpanId& s) {
 
 kj::String KJ_STRINGIFY(const Jaeger::SpanContext& s) {
   return s.toHeader();
+}
+
+kj::Own<SpanObserver> Jaeger::Observer::newChild() {
+  return kj::refcounted<Observer>(kj::addRef(*submitter),
+      SpanContext(context.traceId, submitter->makeSpanId(), context.spanId, context.flags));
+}
+
+void Jaeger::Observer::report(const Span& span) {
+  submitter->submitSpan(context, span);
 }
 
 } // namespace workerd
