@@ -932,6 +932,7 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 }
 
 // =======================================================================================
+
 class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
   // Implements the interface for the devtools inspector protocol.
   //
@@ -997,7 +998,7 @@ public:
                 return kj::READY_NOW;
               } else {
                 // If it's any other kind of error, propagate it!
-                throw ex;
+                kj::throwFatalException(kj::mv(ex));
               }
             });
           } else {
@@ -2143,8 +2144,8 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
 
   KJ_IF_MAYBE(inspector, inspectorOverride) {
     // Create the special inspector service.
-    maybeInspectorService = makeInspectorService(headerTableBuilder);
-    auto& inspectorService = *KJ_ASSERT_NONNULL(maybeInspectorService);
+    auto& inspectorService = *maybeInspectorService.emplace(
+        makeInspectorService(headerTableBuilder));
 
     // Configure and start the inspector socket.
     static constexpr uint DEFAULT_PORT = 9229;
