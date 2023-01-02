@@ -2103,8 +2103,10 @@ KJ_TEST("Server: disk service allow dotfiles") {
   KJ_EXPECT(test.root->openFile(kj::Path({"secret"}))->readAllText() == "this is super-secret");
 }
 
+// =======================================================================================
+// Test Cache API
 
-KJ_TEST("Cache: If no cache service is defined, access to the cache API should error") {
+KJ_TEST("Server: If no cache service is defined, access to the cache API should error") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -2130,8 +2132,7 @@ KJ_TEST("Cache: If no cache service is defined, access to the cache API should e
 
 }
 
-
-KJ_TEST("Cache: cached response") {
+KJ_TEST("Server: cached response") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2191,8 +2192,7 @@ KJ_TEST("Cache: cached response") {
 
 }
 
-
-KJ_TEST("Cache: cache name is passed through to service") {
+KJ_TEST("Server: cache name is passed through to service") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2250,8 +2250,8 @@ KJ_TEST("Cache: cache name is passed through to service") {
     CF-Cache-Status: HIT
 
     cached)"_blockquote);
-
 }
+
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)
