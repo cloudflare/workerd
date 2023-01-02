@@ -1082,6 +1082,18 @@ public:
   }
 
   kj::Promise<void> listen(kj::Own<kj::ConnectionReceiver> listener) {
+    // Note that we intentionally do not make inspector connections be part of the usual drain()
+    // procedure. Inspector connections are always long-lived WebSockets, and we do not want the
+    // existence of such a connection to hold the server open. We do, however, want the connection
+    // to stay open until all other requests are drained, for debugging purposes.
+    //
+    // Thus:
+    // * We let connection loop tasks live on `HttpServer`'s own `TaskSet`, rather than our
+    //   server's main `TaskSet` which we wait to become empty on drain.
+    // * We do not add this `HttpServer` to the server's `httpServers` list, so it will not receive
+    //   drain() requests. (However, our caller does cancel listening on the server port as soon
+    //   as we begin draining, since we may want new connections to go to a new instance of the
+    //   server.)
     return server.listenHttp(*listener).attach(kj::mv(listener));
   }
 
@@ -1968,16 +1980,15 @@ Server::Service& Server::lookupService(
 
 // =======================================================================================
 
-class Server::HttpListener final: private kj::TaskSet::ErrorHandler {
+class Server::HttpListener final: public kj::Refcounted {
 public:
-  HttpListener(kj::Own<kj::ConnectionReceiver> listener, Service& service,
-              kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter,
+  HttpListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener, Service& service,
+               kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter,
                kj::HttpHeaderTable& headerTable, kj::Timer& timer)
-      : listener(kj::mv(listener)), service(service),
+      : owner(owner), listener(kj::mv(listener)), service(service),
         headerTable(headerTable), timer(timer),
         physicalProtocol(physicalProtocol),
-        rewriter(kj::mv(rewriter)),
-        tasks(*this) {}
+        rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
     return listener->acceptAuthenticated()
@@ -2019,36 +2030,44 @@ public:
       }
 
       auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
-      tasks.add(conn->http.listenHttp(kj::mv(stream.stream)).attach(kj::mv(conn)));
+
+      auto promise = kj::evalNow([&]() {
+        return conn->listedHttp.httpServer.listenHttp(kj::mv(stream.stream))
+          .attach(kj::mv(conn))
+          .attach(kj::addRef(*this));  // two attach()es because `this` must outlive `conn`
+      });
+
+      // Run the connection handler loop in the global task set, so that run() waits for open
+      // connections to finish before returning, even if the listener loop is canceled. However,
+      // do not consider exceptions from a specific connection to be fatal.
+      owner.tasks.add(promise.catch_([](kj::Exception&& exception) {
+        KJ_LOG(ERROR, exception);
+      }));
 
       return run();
     });
   }
 
 private:
+  Server& owner;
   kj::Own<kj::ConnectionReceiver> listener;
   Service& service;
   kj::HttpHeaderTable& headerTable;
   kj::Timer& timer;
   kj::StringPtr physicalProtocol;
   kj::Own<HttpRewriter> rewriter;
-  kj::TaskSet tasks;
-
-  void taskFailed(kj::Exception&& exception) override {
-    KJ_LOG(ERROR, exception);
-  }
 
   struct Connection final: public kj::HttpService, public kj::HttpServerErrorHandler {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
         : parent(parent), cfBlobJson(kj::mv(cfBlobJson)),
-          http(parent.timer, parent.headerTable, *this, kj::HttpServerSettings {
+          listedHttp(parent.owner, parent.timer, parent.headerTable, *this, kj::HttpServerSettings {
             .errorHandler = *this,
             .webSocketCompressionMode = kj::HttpServerSettings::MANUAL_COMPRESSION
           }) {}
 
     HttpListener& parent;
     kj::Maybe<kj::String> cfBlobJson;
-    kj::HttpServer http;
+    ListedHttpServer listedHttp;
 
     class ResponseWrapper final: public kj::HttpService::Response {
     public:
@@ -2123,21 +2142,31 @@ private:
 kj::Promise<void> Server::listenHttp(
     kj::Own<kj::ConnectionReceiver> listener, Service& service,
     kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter) {
-  auto obj = kj::heap<HttpListener>(kj::mv(listener), service,
-                                    physicalProtocol, kj::mv(rewriter),
-                                    globalContext->headerTable, timer);
+  auto obj = kj::refcounted<HttpListener>(*this, kj::mv(listener), service,
+                                          physicalProtocol, kj::mv(rewriter),
+                                          globalContext->headerTable, timer);
   return obj->run().attach(kj::mv(obj));
 }
 
 // =======================================================================================
 
-kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config) {
+kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config,
+                              kj::Promise<void> drainWhen) {
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
 
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
+
+  auto forkedDrainWhen = drainWhen
+      .then([this]() mutable {
+    // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
+    // have a request in-flight.
+    for (auto& httpServer: httpServers) {
+      httpServer.httpServer.drain();
+    }
+  }).fork();
 
   // ---------------------------------------------------------------------------
   // Configure inspector.
@@ -2159,7 +2188,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
         [&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
       KJ_LOG(INFO, "Inspector is listening");
       return inspectorService.listen(kj::mv(listener));
-    }));
+    }).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   // ---------------------------------------------------------------------------
@@ -2340,7 +2369,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
         .then([this, &service, rewriter = kj::mv(rewriter), physicalProtocol]
               (kj::Own<kj::ConnectionReceiver> listener) mutable {
       return listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
-    }));
+    }).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   for (auto& unmatched: socketOverrides) {
