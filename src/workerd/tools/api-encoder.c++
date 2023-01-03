@@ -85,7 +85,7 @@ struct ApiEncoderMain {
   }
 
   CompatibilityFlags::Reader
-  compileFlags(capnp::MessageBuilder &message, kj::StringPtr compatDate,
+  compileFlags(capnp::MessageBuilder &message, kj::StringPtr compatDate, bool experimental,
                kj::ArrayPtr<const kj::StringPtr> compatFlags) {
     // Based on src/workerd/io/compatibility-date-test.c++
     auto orphanage = message.getOrphanage();
@@ -100,7 +100,7 @@ struct ApiEncoderMain {
     ApiEncoderErrorReporterImpl errorReporter;
 
     compileCompatibilityFlags(compatDate, flagList.asReader(), output,
-                              errorReporter,
+                              errorReporter, experimental,
                               CompatibilityDateValidation::FUTURE_FOR_TEST);
 
     if (!errorReporter.errors.empty()) {
@@ -116,9 +116,9 @@ struct ApiEncoderMain {
     capnp::MallocMessageBuilder flagsMessage;
     CompatibilityFlags::Reader flags;
     KJ_IF_MAYBE (date, compatibilityDate) {
-      flags = compileFlags(flagsMessage, *date, {});
+      flags = compileFlags(flagsMessage, *date, false, {});
     } else {
-      flags = compileFlags(flagsMessage, "2021-01-01", {});
+      flags = compileFlags(flagsMessage, "2021-01-01", false, {});
     }
     auto builder = rtti::Builder(flags);
 

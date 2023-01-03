@@ -14,10 +14,6 @@ enum class CompatibilityDateValidation {
   // Allow dates up through the date specified by `supportedCompatibilityDate` in
   // `compatiility-date.capnp`.
 
-  CODE_VERSION_EXPERIMENTAL,
-  // Like CODE_VERSION but permit the use of experimental flags, which is any flag that does not
-  // yet have a default-on date set.
-
   CURRENT_DATE_FOR_CLOUDFLARE,
   // Allow dates up to through the current date.
   //
@@ -39,6 +35,7 @@ enum class CompatibilityDateValidation {
 void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
                          CompatibilityFlags::Builder output,
                          Worker::ValidationErrorReporter& errorReporter,
+                         bool allowExperimentalFeatures,
                          CompatibilityDateValidation dateValidation);
 
 kj::Array<kj::StringPtr> decompileCompatibilityFlagsForFl(CompatibilityFlags::Reader input);

@@ -1493,10 +1493,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
-                              featureFlags, errorReporter,
-                              experimental
-                                  ? CompatibilityDateValidation::CODE_VERSION_EXPERIMENTAL
-                                  : CompatibilityDateValidation::CODE_VERSION);
+                              featureFlags, errorReporter, experimental,
+                              CompatibilityDateValidation::CODE_VERSION);
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibiltyDate."));
   }
