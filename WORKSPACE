@@ -160,16 +160,16 @@ cxxbridge_repositories()
 
 http_archive(
     name = "aspect_rules_js",
-    sha256 = "b9fde0f20de6324ad443500ae738bda00facbd73900a12b417ce794856e01407",
-    strip_prefix = "rules_js-1.5.0",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.5.0.tar.gz",
+    sha256 = "66ecc9f56300dd63fb86f11cfa1e8affcaa42d5300e2746dba08541916e913fd",
+    strip_prefix = "rules_js-1.13.0",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.13.0.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_ts",
-    sha256 = "743f0e988e4e3f1e25e52c79f9dc3da1ddd77507ae88787ae95b4e70c537872b",
-    strip_prefix = "rules_ts-1.0.0-rc4",
-    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.0.0-rc4.tar.gz",
+    sha256 = "e81f37c4fe014fc83229e619360d51bfd6cb8ac405a7e8018b4a362efa79d000",
+    strip_prefix = "rules_ts-1.0.4",
+    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.0.4.tar.gz",
 )
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
