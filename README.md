@@ -97,38 +97,9 @@ The cache will now be cleaned and you can try building again.
 
 `workerd` is configured using a config file written in Cap'n Proto text format.
 
-A simple "Hello World!" config file might look like:
-
-```capnp
-using Workerd = import "/workerd/workerd.capnp";
-
-const config :Workerd.Config = (
-  services = [
-    (name = "main", worker = .mainWorker),
-  ],
-
-  sockets = [
-    # Serve HTTP on port 8080.
-    ( name = "http",
-      address = "*:8080",
-      http = (),
-      service = "main"
-    ),
-  ]
-);
-
-const mainWorker :Workerd.Worker = (
-  serviceWorkerScript = embed "hello.js",
-  compatibilityDate = "2022-09-16",
-);
-```
-
-Where `hello.js` contains:
-
-```javascript
-addEventListener("fetch", event => {
-  event.respondWith(new Response("Hello World"));
-});
+A simple "Hello World!" config file is in
+[examples/helloWorld/helloWorld.capnp](examples/helloWorld/helloWorld.capnp)
+with javascript handler in [examples/helloWorld/helloWorld.js](examples/helloWorld/helloWorld.js).
 ```
 
 [Complete reference documentation is provided by the comments in workerd.capnp.](src/workerd/server/workerd.capnp)
@@ -144,6 +115,10 @@ To serve your config, do:
 `workerd serve my-config.capnp`
 
 For more details about command-line usage, use `workerd --help`.
+
+You can use bazel to run workerd too:
+
+`bazel run //src/workerd/server:workerd -- serve $(pwd)/examples/helloWorld/helloWorld.capnp`
 
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:
 * On Linux:
