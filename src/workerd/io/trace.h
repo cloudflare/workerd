@@ -4,15 +4,16 @@
 
 #pragma once
 
-#include "jaeger.h"
 #include <kj/async.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
 #include <kj/string.h>
 #include <kj/time.h>
 #include <kj/vector.h>
+#include <kj/map.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/util/own-util.h>
 
 namespace kj {
   enum class HttpMethod;
@@ -20,6 +21,8 @@ namespace kj {
 }
 
 namespace workerd {
+
+using kj::byte;
 
 typedef rpc::Trace::Log::Level LogLevel;
 
@@ -207,218 +210,7 @@ public:
   // pipelineLogLevel.
 };
 
-class Tracer final : public kj::Refcounted {
-  // Records a worker stage's trace information into a Trace object.  When all references to the
-  // Tracer are released, its Trace is considered complete and ready for submission.
-public:
-  class Span final {
-  public:
-    explicit Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData,
-        kj::TimePoint durationStartTime);
-    ~Span() noexcept(false);
-    Span(Span&&) = default;
-    Span& operator=(Span&&) = default;
-
-    Tracer& getTracer() { return *tracer; }
-    kj::Maybe<Jaeger::SpanContext> getSpanContext();
-
-    void setOperationName(kj::StringPtr name);
-    // `name` should generally be available when creating a span. This method is
-    // only needed in cases where the real operation name is known after the
-    // span is created.
-
-    using TagValue = Jaeger::SpanData::TagValue;
-    void setTag(kj::StringPtr key, TagValue value);
-    // `key` must point to memory that will remain valid all the way until this span's data is
-    // serialized.
-
-    void addLog(kj::Date timestamp, kj::StringPtr key, TagValue value);
-    // `key` must point to memory that will remain valid all the way until this span's data is
-    // serialized.
-    //
-    // The differences between this and `setTag()` is that logs are timestamped and may have
-    // duplicate keys.
-
-  private:
-    kj::Own<Tracer> tracer;
-    kj::Maybe<Jaeger::SpanData> spanData;
-    kj::TimePoint durationStartTime;
-
-    static constexpr auto MAX_LOGS = 1023;
-    uint droppedLogs = 0;
-    // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
-    // we report how many in a final "dropped_logs" log.
-    //
-    // At the risk of being too clever, I chose a limit that is one below a power of two so that
-    // we'll typically have space for one last element available for the "dropped_logs" log without
-    // needing to grow the vector.
-
-    friend Tracer;
-  };
-  class JaegerSpanSubmitter {
-  public:
-    virtual void submitSpan(Jaeger::SpanData data) = 0;
-  };
-
-  explicit Tracer(kj::EntropySource& entropySource,
-      kj::Maybe<kj::Own<Tracer>> parent, kj::Maybe<Jaeger::SpanContext> parentSpanContext,
-      kj::Maybe<JaegerSpanSubmitter&> jaegerSpanSubmitter, kj::Own<void> ownJaegerSpanSubmitter);
-  KJ_DISALLOW_COPY_AND_MOVE(Tracer);
-
-  kj::Own<Tracer> makeSubtracer(kj::Maybe<Jaeger::SpanContext> overrideParent);
-
-  kj::Maybe<Jaeger::SpanContext> getParentSpanContext() { return parentSpanContext; }
-  // Returns the Jaeger span under which this tracer is running.
-
-  Span makeSpan(kj::StringPtr operationName, kj::Date overrideStartTime,
-      kj::Maybe<Span&> overrideParent = nullptr);
-  Span makeSpan(kj::StringPtr operationName, kj::Date overrideStartTime,
-      kj::Maybe<Jaeger::SpanContext&> overrideParent);
-  Span makeSpan(kj::StringPtr operationName, kj::Maybe<Span&> overrideParent = nullptr);
-  Span makeSpan(kj::StringPtr operationName, kj::Maybe<Jaeger::SpanContext&> overrideParent);
-  // Makes a Jaeger tracing span, automatically tracking the beginning and end of the span via
-  // lifetime.  Jaeger spans are for internal profiling, so we record more precise timing than we
-  // expose to customers.
-  //
-  // TODO(someday): Expose a way to override both the span's starting timestamp and the duration
-  // start time.  These are measured from the calendar clock and the monotonic clock,
-  // respectively; the current API only allows overriding the starting timestamp.
-
-private:
-  Jaeger::SpanId makeSpanId();
-
-  kj::EntropySource& entropySource;
-  // Entropy source used for initializing new Jaeger spans.
-
-  kj::Maybe<kj::Own<Tracer>> parent;
-  kj::Maybe<Jaeger::SpanContext> parentSpanContext;
-  kj::Maybe<JaegerSpanSubmitter&> jaegerSpanSubmitter;
-  kj::Own<void> ownJaegerSpanSubmitter;
-  uint64_t predictableJaegerSpanId = 1;
-
-  Span makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
-      kj::TimePoint durationStartTime, kj::Maybe<Jaeger::SpanContext&> overrideParent);
-};
-
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<kj::Own<Tracer>>& tracer, kj::StringPtr operationName,
-    kj::Maybe<Tracer::Span&> overrideParent = nullptr);
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<Tracer&> tracer, kj::StringPtr operationName,
-    kj::Maybe<Tracer::Span&> overrideParent = nullptr);
-// Convenience function to conditionally call `tracer.makeSpan()` on a `Maybe<Own<Tracer>>`, similar
-// to `mapAddRef()`. Also returns nullptr if the Maybe contains a Tracer with no parent Jaeger span.
-//
-// TODO(cleanup): Tracing suffers from Maybe-overload. There's probably a better interface design.
-
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<Tracer::Span&> parent, kj::StringPtr operationName);
-// Like above but gets the `tracer` from `parent.getTracer()` (if parent is non-null).
-
-kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<kj::Own<Tracer>>& tracer);
-kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<Tracer&> tracer);
-// If tracer is non-null, return tracer->getParentSpanContext().
-
 // =======================================================================================
-
-class MaybeSpan {
-  // Convenience wrapper around a Maybe<Tracer::Span>.
-
-public:
-  MaybeSpan() = default;
-  explicit MaybeSpan(Tracer::Span span): span(kj::mv(span)) {}
-  MaybeSpan(kj::Maybe<Tracer::Span> span): span(kj::mv(span)) {}
-  MaybeSpan& operator=(std::nullptr_t) {
-    span = nullptr;
-    return *this;
-  };
-
-  bool operator==(std::nullptr_t) { return span == nullptr; }
-
-  explicit operator bool() { return span != nullptr; }
-  // TODO(cleanup): Remove this, per KJ style people should always use `== nullptr`.
-
-  operator kj::Maybe<Tracer::Span&>() & { return span; }
-  // TODO(cleanup): Remove this. It's a temporary helper while refactoring.
-
-  kj::Maybe<Jaeger::SpanContext> getSpanContext() {
-    KJ_IF_MAYBE(s, span) {
-      return s->getSpanContext();
-    } else {
-      return nullptr;
-    }
-  }
-
-  void setOperationName(kj::StringPtr name) {
-    KJ_IF_MAYBE(s, span) {
-      s->setOperationName(name);
-    }
-  }
-
-  void setTag(kj::StringPtr key, Tracer::Span::TagValue value) {
-    KJ_IF_MAYBE(s, span) {
-      s->setTag(key, kj::mv(value));
-    }
-  }
-
-  void addLog(kj::Date timestamp, kj::StringPtr key, Tracer::Span::TagValue value) {
-    KJ_IF_MAYBE(s, span) {
-      s->addLog(timestamp, key, kj::mv(value));
-    }
-  }
-
-  MaybeSpan makeChild(kj::StringPtr operationName) {
-    return mapMakeSpan(span, operationName);
-  }
-
-private:
-  kj::Maybe<Tracer::Span> span;
-
-  friend class MaybeTracer;
-};
-
-class MaybeTracer {
-  // Counterpart to MaybeSpan. MaybeTracer's intent is to support only the Jaeger-tracing aspect of
-  // Tracer.
-
-public:
-  MaybeTracer() = default;
-  MaybeTracer(std::nullptr_t) {}
-  MaybeTracer(MaybeTracer&&) = default;
-  MaybeTracer& operator=(MaybeTracer&&) = default;
-
-  explicit MaybeTracer(kj::Maybe<kj::Own<Tracer>> tracer) : tracer(kj::mv(tracer)) {}
-
-  explicit MaybeTracer(kj::Maybe<Tracer::Span&> span);
-  explicit MaybeTracer(MaybeSpan& span): MaybeTracer(span.span) {}
-  // Convenience constructor from Tracer::Span& to make a MaybeTracer whose parent is that span.
-
-  bool operator==(std::nullptr_t) { return tracer == nullptr; }
-
-  kj::Maybe<Jaeger::SpanContext> getSpanContext() {
-    KJ_IF_MAYBE(t, tracer) {
-      return (**t).getParentSpanContext();
-    } else {
-      return nullptr;
-    }
-  }
-
-  MaybeTracer addRef() {
-    return MaybeTracer(tracer.map([](kj::Own<Tracer>& t) { return kj::addRef(*t); }));
-  }
-
-  MaybeSpan makeSpan(kj::StringPtr operationName,
-                     kj::Maybe<Jaeger::SpanContext> overrideParent = nullptr) {
-    KJ_IF_MAYBE(t, tracer) {
-      return MaybeSpan((*t)->makeSpan(operationName, overrideParent));
-    } else {
-      return {};
-    }
-  }
-
-private:
-  kj::Maybe<kj::Own<Tracer>> tracer;
-};
 
 class WorkerTracer;
 
@@ -517,6 +309,212 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
   // characters.
   auto truncatedId = id.slice(0, kj::min(id.size(), 10));
   return kj::str(truncatedId);
+}
+
+// =======================================================================================
+// Span tracing
+//
+// TODO(cleanup): As of now, this aspect of tracing is actually not related to the rest of this
+//   file. Most of this file defines the interface to feed Trace Workers. Span tracing, however,
+//   is currently designed to feed tracing of the Workers Runtime itself for the benefit of the
+//   developers of the runtime.
+//
+//   However, we might potentially want to give trace workers some access to span tracing as well.
+//   But, that hasn't been designed yet, and it's not clear if that would be based on the same
+//   concept of spans or completely separate. In the latter case, these classes should probably
+//   move to a diffeent header.
+
+class SpanBuilder;
+class SpanObserver;
+
+struct Span {
+  // Represents a trace span. `Span` objects are delivered to `SpanObserver`s for recording. To
+  // create a `Span`, use a `SpanBuilder`.
+
+public:
+  using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
+  // TODO(someday): Support binary bytes, too.
+  using TagMap = kj::HashMap<kj::StringPtr, TagValue>;
+  using Tag = TagMap::Entry;
+
+  struct Log {
+    kj::Date timestamp;
+    Tag tag;
+  };
+
+  kj::StringPtr operationName;
+  kj::Date startTime;
+  kj::Date endTime;
+  TagMap tags;
+  kj::Vector<Log> logs;
+
+  static constexpr auto MAX_LOGS = 1023;
+  uint droppedLogs = 0;
+  // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
+  // we report how many in a final "dropped_logs" log.
+  //
+  // At the risk of being too clever, I chose a limit that is one below a power of two so that
+  // we'll typically have space for one last element available for the "dropped_logs" log without
+  // needing to grow the vector.
+
+  explicit Span(kj::StringPtr operationName, kj::Date startTime)
+      : operationName(operationName), startTime(startTime), endTime(startTime) {}
+};
+
+class SpanParent {
+  // An opaque token which can be used to create child spans of some parent. This is typically
+  // passed down from a caller to a callee when the caller wants to allow the callee to create
+  // spans for itself that show up as children of the caller's span, but the caller does not
+  // want to give the callee any other ability to modify the parent span.
+
+public:
+  SpanParent(SpanBuilder& builder);
+
+  SpanParent(decltype(nullptr)) {}
+  // Make a SpanParent that causes children not to be reported anywhere.
+
+  SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
+
+  SpanParent(SpanParent&& other) = default;
+  SpanParent& operator=(SpanParent&& other) = default;
+  KJ_DISALLOW_COPY(SpanParent);
+
+  SpanParent addRef();
+
+  SpanBuilder newChild(kj::StringPtr operationName,
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+  // Create a new child span.
+  //
+  // `operationName` should be a string literal with infinite lifetime.
+
+  bool isObserved() { return observer != nullptr; }
+  // Useful to skip unnecessary code when not observed.
+
+  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  // Get the underlying SpanObserver representing the parent span.
+  //
+  // This is needed in particular when making outbound network requests that must be annotated with
+  // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
+  // the `SpanObserver` to the expected observer type in order to extract the trace ID.
+
+private:
+  kj::Maybe<kj::Own<SpanObserver>> observer;
+
+  friend class SpanBuilder;
+};
+
+class SpanBuilder {
+  // Interface for writing a span. Essentially, this is a mutable interface to a `Span` object,
+  // given only to the code which is meant to create the span, whereas code that merely collects
+  // and reports spans gets the `Span` type.
+  //
+  // The reason we use a separate builder type rather than rely on constness is so that the methods
+  // can be no-ops when there is no observer, avoiding unnecessary allocations. To allow for this,
+  // SpanBuilder is designed to be write-only -- you cannot read back the content. Only the
+  // observer (if there is one) receives the content.
+
+public:
+  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::StringPtr operationName,
+                       kj::Date startTime = kj::systemPreciseCalendarClock().now())
+      { KJ_IF_MAYBE(o, observer) { state.emplace(kj::mv(*o), operationName, startTime); } }
+  // Create a new top-level span that will report to the given observer. If the observer is null,
+  // no data is collected.
+  //
+  // `operationName` should be a string literal with infinite lifetime.
+
+  SpanBuilder(decltype(nullptr)) {}
+  // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
+
+  SpanBuilder(SpanBuilder&& other) = default;
+  SpanBuilder& operator=(SpanBuilder&& other);  // ends the existing span and starts a new one
+  KJ_DISALLOW_COPY(SpanBuilder);
+
+  ~SpanBuilder() noexcept(false);
+
+  void end();
+  // Finishes and submits the span. This is done implicitly by the destructor, but sometimes it's
+  // useful to be able to submit early. The SpanBuilder ignores all further method calls after this
+  // is invoked.
+
+  bool isObserved() { return state != nullptr; }
+  // Useful to skip unnecessary code when not observed.
+
+  SpanBuilder newChild(kj::StringPtr operationName,
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+  // Create a new child span.
+  //
+  // `operationName` should be a string literal with infinite lifetime.
+
+  void setOperationName(kj::StringPtr operationName);
+  // Change the operation name from what was specified at span creation.
+  //
+  // `operationName` should be a string literal with infinite lifetime.
+
+  using TagValue = Span::TagValue;
+  void setTag(kj::StringPtr key, TagValue value);
+  // `key` must point to memory that will remain valid all the way until this span's data is
+  // serialized.
+
+  void addLog(kj::Date timestamp, kj::StringPtr key, TagValue value);
+  // `key` must point to memory that will remain valid all the way until this span's data is
+  // serialized.
+  //
+  // The differences between this and `setTag()` is that logs are timestamped and may have
+  // duplicate keys.
+
+private:
+  struct State {
+    kj::Own<SpanObserver> observer;
+    // The observer, or null if not being observed.
+
+    Span span;
+    // The under-construction span.
+
+    State(kj::Own<SpanObserver> observer, kj::StringPtr operationName,
+          kj::Date startTime)
+        : observer(kj::mv(observer)), span(operationName, startTime) {}
+  };
+  kj::Maybe<State> state;
+
+  friend class SpanParent;
+};
+
+class SpanObserver: public kj::Refcounted {
+  // Abstract interface for observing trace spans reported by the runtime. Different
+  // implementations might support different tracing back-ends, e.g. Trace Workers, Jaeger, or
+  // whatever infrastrure you prefer to use for this.
+  //
+  // A new SpanObserver is created at the start of each Span. The observer is used to report the
+  // span data at the end of the span, as well as to construct child observers.
+
+public:
+  virtual kj::Own<SpanObserver> newChild() = 0;
+  // Allocate a new child span.
+  //
+  // Note that children can be created long after a span has completed.
+
+  virtual void report(const Span& span) = 0;
+  // Report the span data. Called at the end of the span.
+  //
+  // This should always be called exactly once per observer.
+};
+
+inline SpanParent::SpanParent(SpanBuilder& builder)
+    : observer(builder.state.map(
+          [](SpanBuilder::State& state) { return kj::addRef(*state.observer); })) {}
+
+inline SpanParent SpanParent::addRef() {
+  return SpanParent(mapAddRef(observer));
+}
+
+inline SpanBuilder SpanParent::newChild(kj::StringPtr operationName, kj::Date startTime) {
+  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
+                     operationName, startTime);
+}
+
+inline SpanBuilder SpanBuilder::newChild(kj::StringPtr operationName, kj::Date startTime) {
+  return SpanBuilder(state.map([](State& state) { return state.observer->newChild(); }),
+                     operationName, startTime);
 }
 
 } // namespace workerd

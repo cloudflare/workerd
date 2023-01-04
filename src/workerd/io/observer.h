@@ -62,7 +62,7 @@ public:
     return kj::mv(client);
   }
 
-  virtual kj::Maybe<Tracer::Span&> getSpan() { return nullptr; }
+  virtual SpanParent getSpan() { return nullptr; }
 
   virtual void addedContextTask() {}
   virtual void finishedContextTask() {}
@@ -132,7 +132,7 @@ public:
   };
 
   virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
-      kj::OneOf<MaybeTracer, kj::Maybe<RequestObserver&>> tracerOrRequest) const { return nullptr; }
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return nullptr; }
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
   // request (if any) is being traced.
 

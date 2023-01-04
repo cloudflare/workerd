@@ -17,6 +17,7 @@
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <workerd/io/jaeger.capnp.h>
+#include "trace.h"
 
 namespace workerd {
 
@@ -75,6 +76,11 @@ public:
     kj::String toHeader() const;
     // Handles colon-separated HTTP header format
 
+    static kj::Maybe<SpanContext> fromParent(SpanParent& parent);
+    static kj::Maybe<SpanContext> fromParent(SpanParent&& parent) { return fromParent(parent); }
+    // If the SpanParent is observed, downcast the observer is Jaeger::Observer and extract the
+    // SpanContext. This will throw if it encounters an unexpected observer type.
+
     void toCapnp(rpc::JaegerSpan::Builder builder) {
       builder.setTraceIdHigh(traceId.high);
       builder.setTraceIdLow(traceId.low);
@@ -103,37 +109,32 @@ public:
     uint flags = 0;
   };
 
-  struct SpanData {
-    explicit SpanData(SpanContext context, kj::StringPtr operationName, kj::Date startTime)
-        : context(context), operationName(operationName), startTime(startTime) {}
-    SpanData(SpanData&&) = default;
-    KJ_DISALLOW_COPY(SpanData);
+  static kj::Array<byte> spanToProtobuf(const SpanContext& context, const Span& span,
+      kj::ArrayPtr<Span::Tag> processTags, kj::ArrayPtr<Span::Tag> defaultTags,
+      kj::StringPtr serviceName);
+  // Replicates Jaeger go library's protobuf serialization.
 
-    using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
-    // TODO(someday): Support binary bytes, too.
-    using TagMap = kj::HashMap<kj::StringPtr, TagValue>;
-    using Tag = TagMap::Entry;
-    // Tag and log keys are are expected to be static strings.
+  class SpanSubmitter: public kj::Refcounted {
+  public:
+    virtual void submitSpan(const SpanContext& context, const Span& span) = 0;
+    virtual Jaeger::SpanId makeSpanId() = 0;
+  };
 
-    kj::Array<byte> toProtobuf(kj::ArrayPtr<Tag> processTags, kj::ArrayPtr<Tag> defaultTags,
-                               kj::StringPtr serviceName) const;
-    // Replicates Jaeger go library's protobuf serialization.
+  class Observer: public SpanObserver {
+  public:
+    Observer(kj::Own<SpanSubmitter> submitter,
+             SpanContext context)
+        : submitter(kj::mv(submitter)), context(context) {}
+    SpanContext getContext() { return context; }
 
+    kj::Own<SpanObserver> newChild() override;
+    void report(const Span& span) override;
+
+  private:
+    kj::Own<SpanSubmitter> submitter;
     SpanContext context;
 
-    kj::StringPtr operationName;
-    kj::Date startTime;
-    kj::Duration duration = 0 * kj::SECONDS;
-
-    struct Log {
-      kj::Date timestamp;
-      Tag tag;
-    };
-
-    TagMap tags;
-    kj::Vector<Log> logs;
-
-    // TODO(someday): warnings?
+    SpanId makeChildSpanId();
   };
 };
 

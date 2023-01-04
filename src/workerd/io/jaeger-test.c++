@@ -214,8 +214,7 @@ process {
 KJ_TEST("can write span data") {
   auto spanContext = KJ_ASSERT_NONNULL(Jaeger::SpanContext::fromHeader(
       "c3adb70e6fce1825:c6e1011ff2ea0fb3:d11b288de039af9e:0"_kj));
-  auto spanData = Jaeger::SpanData(
-      spanContext,
+  auto spanData = Span(
       "test_span"_kj,
       kj::origin<kj::Date>() + 1 * kj::SECONDS);
 
@@ -224,14 +223,14 @@ KJ_TEST("can write span data") {
   spanData.tags.insert("float64_tag"_kj, 3.14159);
   spanData.tags.insert("string_tag"_kj, kj::str("string tag value"));
 
-  spanData.logs.add(Jaeger::SpanData::Log {
+  spanData.logs.add(Span::Log {
     .timestamp = kj::UNIX_EPOCH + 123 * kj::SECONDS,
     .tag = {
       .key = "log_key"_kj,
       .value = 3.14159,
     }
   });
-  spanData.logs.add(Jaeger::SpanData::Log {
+  spanData.logs.add(Span::Log {
     .timestamp = kj::UNIX_EPOCH + 456 * kj::SECONDS,
     .tag = {
       .key = "another_log_key"_kj,
@@ -239,7 +238,7 @@ KJ_TEST("can write span data") {
     }
   });
 
-  using Tag = Jaeger::SpanData::Tag;
+  using Tag = Span::Tag;
   static Tag processTags[] = {
     Tag { .key = "hostname"_kj,  .value = kj::str("123m5") },
     // TODO(cleanup): Use int64_t for `coloId`.
@@ -248,12 +247,13 @@ KJ_TEST("can write span data") {
     Tag { .key = "colo_name"_kj, .value = kj::str("abc01") },
     Tag { .key = "cordon"_kj,    .value = kj::str("paid") },
   };
-  kj::Vector<Jaeger::SpanData::Tag> defaultTags;
-  defaultTags.add(Jaeger::SpanData::Tag {
+  kj::Vector<Span::Tag> defaultTags;
+  defaultTags.add(Span::Tag {
     .key = "default tag key"_kj,
     .value = kj::str("default tag value")
   });
-  auto protobuf = spanData.toProtobuf(processTags, defaultTags, "foo-service");
+  auto protobuf = Jaeger::spanToProtobuf(
+      spanContext, spanData, processTags, defaultTags, "foo-service");
 
   jaeger::api_v2::Span span;
   KJ_REQUIRE(span.ParseFromArray(protobuf.begin(), protobuf.size()), protobuf);

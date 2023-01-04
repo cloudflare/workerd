@@ -271,42 +271,33 @@ Trace::Exception::Exception(rpc::Trace::Exception::Reader reader)
       name(kj::str(reader.getName())),
       message(kj::str(reader.getMessage())) {}
 
-Tracer::Span::Span(kj::Own<Tracer> tracer, kj::Maybe<Jaeger::SpanData> spanData,
-    kj::TimePoint durationStartTime)
-    : tracer(kj::mv(tracer)), spanData(kj::mv(spanData)),
-      durationStartTime(durationStartTime) {}
+SpanBuilder& SpanBuilder::operator=(SpanBuilder &&other) {
+  end();
+  state = kj::mv(other.state);
+  return *this;
+}
 
-Tracer::Span::~Span() noexcept(false) {
-  KJ_IF_MAYBE(d, spanData) {
-    d->duration = isPredictableModeForTest() ? kj::Duration() :
-        (kj::systemPreciseMonotonicClock().now() - durationStartTime);
-    if (droppedLogs > 0) {
-      d->logs.add(Jaeger::SpanData::Log {
-        .timestamp = d->startTime + d->duration,
-        .tag = {
-          .key = "dropped_logs"_kj,
-          .value = int64_t(droppedLogs),
-        }
-      });
-    }
-    auto& submitter = KJ_REQUIRE_NONNULL(tracer->jaegerSpanSubmitter);
-    submitter.submitSpan(kj::mv(*d));
+SpanBuilder::~SpanBuilder() noexcept(false) {
+  end();
+}
+
+void SpanBuilder::end() {
+  KJ_IF_MAYBE(s, state) {
+    s->span.endTime = kj::systemPreciseCalendarClock().now();
+    s->observer->report(s->span);
+    state = nullptr;
   }
 }
 
-kj::Maybe<Jaeger::SpanContext> Tracer::Span::getSpanContext() {
-  return spanData.map([](Jaeger::SpanData& d) { return d.context; });
-}
-
-void Tracer::Span::setOperationName(kj::StringPtr name) {
-  KJ_IF_MAYBE(d, spanData) {
-    d->operationName = name;
+void SpanBuilder::setOperationName(kj::StringPtr operationName) {
+  KJ_IF_MAYBE(s, state) {
+    s->span.operationName = operationName;
   }
 }
 
-void Tracer::Span::setTag(kj::StringPtr key, TagValue value) {
-  KJ_IF_MAYBE(d, spanData) {
-    d->tags.upsert(key, kj::mv(value), [key](TagValue& existingValue, TagValue&& newValue) {
+void SpanBuilder::setTag(kj::StringPtr key, TagValue value) {
+  KJ_IF_MAYBE(s, state) {
+    s->span.tags.upsert(key, kj::mv(value), [key](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
       [[maybe_unused]] static auto logged = [key]() {
@@ -318,12 +309,12 @@ void Tracer::Span::setTag(kj::StringPtr key, TagValue value) {
   }
 }
 
-void Tracer::Span::addLog(kj::Date timestamp, kj::StringPtr key, TagValue value) {
-  KJ_IF_MAYBE(d, spanData) {
-    if (d->logs.size() >= MAX_LOGS) {
-      ++droppedLogs;
+void SpanBuilder::addLog(kj::Date timestamp, kj::StringPtr key, TagValue value) {
+  KJ_IF_MAYBE(s, state) {
+    if (s->span.logs.size() >= Span::MAX_LOGS) {
+      ++s->span.droppedLogs;
     } else {
-      d->logs.add(Jaeger::SpanData::Log {
+      s->span.logs.add(Span::Log {
         .timestamp = timestamp,
         .tag = {
           .key = key,
@@ -332,26 +323,6 @@ void Tracer::Span::addLog(kj::Date timestamp, kj::StringPtr key, TagValue value)
       });
     }
   }
-}
-
-Tracer::Tracer(kj::EntropySource& entropySource,
-    kj::Maybe<kj::Own<Tracer>> parent, kj::Maybe<Jaeger::SpanContext> parentSpanContext,
-    kj::Maybe<Tracer::JaegerSpanSubmitter&> jaegerSpanSubmitter,
-    kj::Own<void> ownJaegerSpanSubmitter)
-    : entropySource(entropySource), parent(kj::mv(parent)),
-      parentSpanContext(kj::mv(parentSpanContext)),
-      jaegerSpanSubmitter(kj::mv(jaegerSpanSubmitter)),
-      ownJaegerSpanSubmitter(kj::mv(ownJaegerSpanSubmitter)) {
-  // If we're being asked to record Jaeger data, we also require a place to send it.
-  KJ_REQUIRE((this->parentSpanContext == nullptr) == (this->jaegerSpanSubmitter == nullptr));
-}
-
-kj::Own<Tracer> Tracer::makeSubtracer(kj::Maybe<Jaeger::SpanContext> overrideParent) {
-  if (overrideParent == nullptr) {
-    overrideParent = parentSpanContext;
-  }
-  return kj::refcounted<Tracer>(
-      entropySource, kj::addRef(*this), overrideParent, jaegerSpanSubmitter, kj::Own<void>());
 }
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
@@ -502,160 +473,6 @@ void WorkerTracer::extractTrace(rpc::Trace::Builder builder) {
 
 void WorkerTracer::setTrace(rpc::Trace::Reader reader) {
   trace->mergeFrom(reader, pipelineLogLevel);
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Date overrideStartTime,
-                              kj::Maybe<Tracer::Span&> overrideParent) {
-  kj::Maybe<Jaeger::SpanContext&> overrideParentContext;
-  KJ_IF_MAYBE(p, overrideParent) {
-    overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
-  }
-  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto delta = kj::systemPreciseCalendarClock().now() - overrideStartTime;
-    durationStartTime = kj::systemPreciseMonotonicClock().now() - delta;
-  }
-  return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParentContext);
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Date overrideStartTime,
-                              kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto delta = kj::systemPreciseCalendarClock().now() - overrideStartTime;
-    durationStartTime = kj::systemPreciseMonotonicClock().now() - delta;
-  }
-  return makeSpanImpl(operationName, overrideStartTime, durationStartTime, overrideParent);
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Maybe<Tracer::Span&> overrideParent) {
-  kj::Maybe<Jaeger::SpanContext&> overrideParentContext;
-  KJ_IF_MAYBE(p, overrideParent) {
-    overrideParentContext = p->spanData.map([](auto& d) -> auto& { return d.context; });
-  }
-  kj::Date startTime = kj::origin<kj::Date>();
-  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
-    startTime = clock.now();
-    durationStartTime = kj::systemPreciseMonotonicClock().now();
-  }
-  return makeSpanImpl(operationName, startTime, durationStartTime, overrideParentContext);
-}
-
-Tracer::Span Tracer::makeSpan(kj::StringPtr operationName,
-                              kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  kj::Date startTime = kj::origin<kj::Date>();
-  kj::TimePoint durationStartTime = kj::origin<kj::TimePoint>();
-  if (parentSpanContext != nullptr || overrideParent != nullptr) {
-    auto& clock = isPredictableModeForTest() ? kj::nullClock() : kj::systemPreciseCalendarClock();
-    startTime = clock.now();
-    durationStartTime = kj::systemPreciseMonotonicClock().now();
-  }
-  return makeSpanImpl(operationName, startTime, durationStartTime, overrideParent);
-}
-
-Tracer::Span Tracer::makeSpanImpl(kj::StringPtr operationName, kj::Date startTime,
-                                  kj::TimePoint durationStartTime,
-                                  kj::Maybe<Jaeger::SpanContext&> overrideParent) {
-  kj::Maybe<Jaeger::SpanContext&> parent =
-      parentSpanContext.map([](auto& c) -> auto& { return c; } );
-  KJ_IF_MAYBE(p, overrideParent) {
-    parent = *p;
-  }
-  kj::Maybe<Jaeger::SpanData> data;
-  KJ_IF_MAYBE(p, parent) {
-    data = Jaeger::SpanData(
-        Jaeger::SpanContext(p->traceId, makeSpanId(), p->spanId, p->flags),
-        operationName, startTime);
-  }
-  return Span(kj::addRef(*this), kj::mv(data), durationStartTime);
-}
-
-Jaeger::SpanId Tracer::makeSpanId() {
-  if (isPredictableModeForTest()) {
-    KJ_IF_MAYBE(p, parent) {
-      return (*p)->makeSpanId();
-    } else {
-      return Jaeger::SpanId(predictableJaegerSpanId++);
-    }
-  } else {
-    // TODO(perf): memcpy necessary to avoid undefined behavior?
-    uint64_t id;
-    byte buf[sizeof(id)];
-    entropySource.generate(kj::ArrayPtr<byte>(buf, sizeof(buf)));
-    memcpy(&id, buf, sizeof(id));
-    return Jaeger::SpanId(id);
-  }
-}
-
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<kj::Own<Tracer>>& tracer,
-    kj::StringPtr operationName,
-    kj::Maybe<Tracer::Span&> overrideParent) {
-  KJ_IF_MAYBE(t, tracer) {
-    // Only return a Jaeger span if this Tracer has a parent span -- i.e., we're actually being
-    // Jaeger traced.
-    if ((*t)->getParentSpanContext() != nullptr) {
-      return (*t)->makeSpan(operationName, overrideParent);
-    }
-  }
-  return nullptr;
-}
-
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<Tracer&> tracer,
-    kj::StringPtr operationName,
-    kj::Maybe<Tracer::Span&> overrideParent) {
-  KJ_IF_MAYBE(t, tracer) {
-    // Only return a Jaeger span if this Tracer has a parent span -- i.e., we're actually being
-    // Jaeger traced.
-    if (t->getParentSpanContext() != nullptr) {
-      return t->makeSpan(operationName, overrideParent);
-    }
-  }
-  return nullptr;
-}
-
-kj::Maybe<Tracer::Span> mapMakeSpan(
-    kj::Maybe<Tracer::Span&> parent,
-    kj::StringPtr operationName) {
-  KJ_IF_MAYBE(p, parent) {
-    // Only return a Jaeger span if this Tracer has a parent span -- i.e., we're actually being
-    // Jaeger traced.
-    if (p->getTracer().getParentSpanContext() != nullptr) {
-      return p->getTracer().makeSpan(operationName, parent);
-    }
-  }
-  return nullptr;
-}
-
-kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<kj::Own<Tracer>>& tracer) {
-  KJ_IF_MAYBE(t, tracer) {
-    return t->get()->getParentSpanContext();
-  } else {
-    return nullptr;
-  }
-}
-
-kj::Maybe<Jaeger::SpanContext> mapGetParentSpanContext(kj::Maybe<Tracer&> tracer) {
-  KJ_IF_MAYBE(t, tracer) {
-    return t->getParentSpanContext();
-  } else {
-    return nullptr;
-  }
-}
-
-// =======================================================================================
-
-MaybeTracer::MaybeTracer(kj::Maybe<Tracer::Span&> span) {
-  KJ_IF_MAYBE(s, span) {
-    // This is easier than trying to do it in a constructor initializer list.
-    tracer = s->getTracer().makeSubtracer(s->getSpanContext());
-  }
 }
 
 } // namespace workerd
