@@ -143,11 +143,15 @@ public:
       CompatibilityFlags::Reader featureFlags);
   // Gets a durable object by ID or creates it if it doesn't already exist.
 
+  jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
+  // Creates a subnamespace with the jurisdiction hardcoded.
+
   JSG_RESOURCE_TYPE(DurableObjectNamespace) {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
     JSG_METHOD(get);
+    JSG_METHOD(jurisdiction);
     JSG_TS_ROOT();
   }
 

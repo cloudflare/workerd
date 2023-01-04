@@ -402,6 +402,14 @@ public:
     return kj::heap<ActorIdImpl>(id, nullptr);
   }
 
+  kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) override {
+    JSG_FAIL_REQUIRE(Error, "Jurisdiction restrictions are not implemented in workerd.");
+  }
+
+  bool matchesJurisdiction(const ActorId& id) override {
+    return true;
+  }
+
 private:
   kj::byte key[SHA256_DIGEST_LENGTH];
 

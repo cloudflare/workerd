@@ -125,17 +125,26 @@ jsg::Ref<DurableObject> DurableObjectNamespace::get(
     jsg::Ref<DurableObjectId> id,
     jsg::Optional<GetDurableObjectOptions> options,
     CompatibilityFlags::Reader featureFlags) {
+  JSG_REQUIRE(idFactory->matchesJurisdiction(id->getInner()), TypeError,
+      "get called on jurisdictional subnamespace with an ID from a different jurisdiction");
+
   auto& context = IoContext::current();
   kj::Maybe<kj::String> locationHint = nullptr;
   KJ_IF_MAYBE(o, options) {
     locationHint = kj::mv(o->locationHint);
   }
+
   auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
       kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint)));
   auto requiresHost = featureFlags.getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
   return jsg::alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
+}
+
+jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(kj::String jurisdiction) {
+  return jsg::alloc<api::DurableObjectNamespace>(channel,
+      idFactory->cloneWithJurisdiction(jurisdiction));
 }
 
 }  // namespace workerd::api
