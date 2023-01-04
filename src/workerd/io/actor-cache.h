@@ -5,7 +5,7 @@
 #pragma once
 
 #include <kj/async.h>
-#include <workerd/io/actor-storage.capnp.h>
+#include <workerd/io/actor-storage.h>
 #include <workerd/io/io-context.h>
 #include <kj/one-of.h>
 #include <kj/map.h>

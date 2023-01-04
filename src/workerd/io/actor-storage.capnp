@@ -62,11 +62,9 @@ interface ActorStorage @0xd7759d7fc87c08e4 {
   }
 
   const maxKeys :UInt32 = 128;
-  # The maximum number of keys that clients should be allowed to modify in a single transaction.
-  # This should be enforced both for explicit transactions and the implicit transactions created
-  # by calls to put or delete that provide multiple keys.
-  #
-  # TODO(someday): Do we still need this limit?
+  # The maximum number of keys that clients should be allowed to modify in a single storage
+  # operation. This should be enforced for operations that access or modify multiple keys. This
+  # limit will not be enforced upon the total count of keys involved in explicit transactions.
 
   const renameLimit :UInt32 = 1000;
   # The maximum number of keys in a rename() operation.

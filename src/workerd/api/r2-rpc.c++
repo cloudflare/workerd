@@ -39,20 +39,20 @@ kj::Maybe<uint> R2Result::v4ErrorCode() {
 void R2Result::throwIfError(kj::StringPtr action,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   KJ_IF_MAYBE(e, toThrow) {
-    auto isolate = IoContext::current().getCurrentLock().getIsolate();
     // TODO(soon): Once jsg::JsPromise exists, switch to using that to tunnel out the exception. As
     // it stands today, unfortunately, all we can send back to the user is a message. R2Error isn't
     // a registered type in the runtime. When reenabling, make sure to update overrides/r2.d.ts to
     // reenable the type
 #if 0
+    auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);
     (*e)->errorForStack = v8::Global<v8::Object>(
         isolate, v8::Exception::Error(jsg::v8Str(isolate, "")).As<v8::Object>());
     isolate->ThrowException(errorType.wrapRef(kj::mv(*e)));
     throw jsg::JsExceptionThrown();
 #else
-    jsg::throwError(isolate, kj::str(action, ": ", (e)->get()->getMessage(), " (", (*e)->v4Code,
-        ')'));
+    JSG_FAIL_REQUIRE(Error, kj::str(
+        action, ": ", (e)->get()->getMessage(), " (", (*e)->v4Code, ')'));
 #endif
   }
 }

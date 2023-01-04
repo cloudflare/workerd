@@ -37,7 +37,7 @@ struct PromiseContext: public Object {
 
   void catchIt(Lock& js, Promise<int> promise) {
     promise.catch_(js, [](Lock& js, Value value) -> int {
-      throwError(js.v8Isolate, kj::str(value.getHandle(js.v8Isolate)));
+      JSG_FAIL_REQUIRE(Error, kj::str(value.getHandle(js.v8Isolate)));
     }).then(js, [](Lock& js, int i) {
       KJ_FAIL_REQUIRE("shouldn't get here");
       return kj::str("nope");
