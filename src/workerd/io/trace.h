@@ -23,6 +23,7 @@ namespace kj {
 namespace workerd {
 
 using kj::byte;
+using kj::uint;
 
 typedef rpc::Trace::Log::Level LogLevel;
 
