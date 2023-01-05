@@ -211,22 +211,6 @@ struct Transformer {
 // underlying source. When the underlying source responds to that read request, the
 // data is forwarded to all of the known branches.
 //
-// All of this works great from within JavaScript, but what about when you want to use a
-// JavaScript-backed ReadableStream to respond to a fetch request? Or interface it at all
-// with any of the existing internal streams that are based on the older ReadableStreamSource
-// API. For those cases, ReadableStreamJsController implements the `removeSource()` method to
-// acquire a `ReadableStreamJsSource` that wraps the JavaScript controller.
-//
-// The `ReadableStreamJsSource` implements the internal ReadableStreamSource API.
-//
-// Whenever tryRead is invoked this source, it will attempt to acquire an isolate lock within
-// which it will interface with the JavaScript-backed underlying controller.
-// Value streams can be used only so long as the only values they pass along happen to be
-// interpretable as bytes (so ArrayBufferViews and ArrayBuffers). These support the minimal
-// contract of tryRead including support for the minBytes argument, performing multiple reads
-// on the underlying controller if necessary, as efficiently as possible within a single
-// isolate lock.
-//
 // The story for JavaScript-backed writable streams is similar. User code passes what the
 // spec calls an "underlying sink" to the `WritableStream` object constructor. This provides
 // functions that are used to receive stream data.
@@ -288,9 +272,6 @@ struct Writable {};
 // (PipeLocked is defined within the ReadableLockImpl and WritableLockImpl classes
 // below) When the pipe completes, both will transition back to Unlocked.
 //
-// When either the removeSource() or removeSink() methods are called, the streams
-// will transition to the Locked state.
-//
 // When a ReadableStreamJsController is tee()'d, it will enter the locked state.
 
 template <typename Controller>
@@ -307,6 +288,8 @@ public:
 
   void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
   // See the comment for releaseReader in common.h for details on the use of maybeJs
+
+  bool lock();
 
   void onClose();
   void onError(jsg::Lock& js, v8::Local<v8::Value> reason);
@@ -854,11 +837,6 @@ class ReadableStreamJsController: public ReadableStreamController {
   // ReadableStreams backed by a user-code provided Underlying Source. The implementation
   // is fairly complicated and defined entirely by the streams specification.
   //
-  // One critically important aspect of this controller is that unless removeSource
-  // is called to acquire a ReadableStreamSource from this controller, the entire
-  // implementation operates completely within the JavaScript side within the isolate
-  // lock.
-  //
   // Another important thing to understand is that there are two types of JavaScript
   // backed ReadableStreams: value-oriented, and byte-oriented.
   //
@@ -943,14 +921,14 @@ public:
       WritableStreamController& destination,
       PipeToOptions options) override;
 
+  kj::Promise<void> pumpTo(jsg::Lock& js, kj::Own<WritableStreamSink>, bool end);
+
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js,
       kj::Maybe<ByobOptions> byobOptions) override;
 
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
-
-  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js) override;
 
   void setOwnerRef(ReadableStream& stream) override;
 
@@ -961,6 +939,13 @@ public:
   void visitForGc(jsg::GcVisitor& visitor) override;
 
   kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
+
+  jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+
+  kj::Own<ReadableStreamJsController> detach(jsg::Lock& js);
 
 private:
   bool hasPendingReadRequests();
@@ -980,93 +965,6 @@ private:
 
   friend ReadableLockImpl;
   friend ReadableLockImpl::PipeLocked;
-};
-
-class ReadableStreamJsSource: public kj::Refcounted,
-                              public ReadableStreamSource {
-  // The ReadableStreamJsSource is a bridge between the JavaScript-backed
-  // streams and the existing native internal streams. When an instance is
-  // retrieved from the ReadableStreamJsController, it takes over ownership of the
-  // ReadableStreamDefaultController or ReadableByteStreamController and takes over
-  // all interaction with them.
-  //
-  // The ReadableStreamDefaultController can be used only so long as the JavaScript
-  // code only enqueues ArrayBufferView or ArrayBuffer values. Everything else will
-  // cause tryRead to fail because ReadableStreamSource is only designed to support
-  // byte data.
-  //
-  // When using a ReadableByteStreamController, tryRead acts like a regular BYOB read.
-  // A single read operation is performed on the controller passing in the buffer, and
-  // the controller is expected to fill it in as much as possible.
-  //
-  // When using a ReadableStreamDefaultController, it gets a bit more complicated. If the
-  // controller returns a value that cannot be intrepreted as bytes, then the source errors
-  // and the read promise is rejected.
-  //
-  // It is possible for the underlying source to return more bytes than the current read can
-  // handle. To account for this case, the source maintains an internal byte buffer of its own.
-  // If the current read can be minimally fulfilled (minBytes) from that buffer, then it is and
-  // the read promise is resolved synchronously. Otherwise the source will read from the
-  // controller. If that returns enough data to fulfill the read request, then we're done. Whatever
-  // extra data it returns is stored in the buffer for the next read. If it does not return enough
-  // data, we'll keep pulling from the controller until it does or until the controller closes.
-public:
-  explicit ReadableStreamJsSource(StreamStates::Closed closed);
-  explicit ReadableStreamJsSource(kj::Exception errored);
-  explicit ReadableStreamJsSource(kj::Own<ValueReadable> consumer);
-  explicit ReadableStreamJsSource(kj::Own<ByteReadable> consumer);
-
-  void doClose();
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
-
-  // ReadableStreamSource implementation
-
-  void cancel(kj::Exception reason) override;
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
-
-private:
-  jsg::Promise<size_t> internalTryRead(
-      jsg::Lock& js,
-      void* buffer,
-      size_t minBytes,
-      size_t maxBytes);
-
-  jsg::Promise<void> pipeLoop(
-      jsg::Lock& js,
-      WritableStreamSink& output,
-      bool end,
-      kj::Array<kj::byte> bytes);
-
-  jsg::Promise<size_t> readFromByobController(
-      jsg::Lock& js,
-      void* buffer,
-      size_t minBytes,
-      size_t maxBytes);
-
-  jsg::Promise<size_t> readFromDefaultController(
-      jsg::Lock& js,
-      void* buffer,
-      size_t minBytes,
-      size_t maxBytes);
-
-  jsg::Promise<size_t> readLoop(
-      jsg::Lock& js,
-      kj::byte* bytes,
-      size_t minBytes,
-      size_t maxBytes,
-      size_t amount);
-
-  void maybeDrainAndClose();
-
-  IoContext& ioContext;
-  kj::OneOf<StreamStates::Closed,
-            kj::Exception,
-            kj::Own<ValueReadable>,
-            kj::Own<ByteReadable>> state;
-  std::deque<kj::byte> queue;
-  bool readPending = false;
-  bool closePending = false;
 };
 
 // =======================================================================================

@@ -330,7 +330,6 @@ jsg::Promise<void> KvNamespace::put(
     }
 
     kj::Maybe<uint64_t> expectedBodySize;
-    kj::Own<ReadableStreamSource> streamSource;
 
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
@@ -341,8 +340,7 @@ jsg::Promise<void> KvNamespace::put(
         expectedBodySize = uint64_t(data.size());
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-        streamSource = stream->removeSource(js);
-        expectedBodySize = streamSource->tryGetLength(StreamEncoding::IDENTITY);
+        expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
       }
     }
 
@@ -351,9 +349,9 @@ jsg::Promise<void> KvNamespace::put(
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr);
 
     auto promise = context.waitForOutputLocks()
-        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
-              expectedBodySize, supportedBody = kj::mv(supportedBody),
-              streamSource = kj::mv(streamSource)]() mutable {
+        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
+               headers = kj::mv(headers), expectedBodySize,
+               supportedBody = kj::mv(supportedBody)]() mutable {
       auto innerReq = client->request(
           kj::HttpMethod::PUT, urlStr,
           headers, expectedBodySize);
@@ -374,9 +372,12 @@ jsg::Promise<void> KvNamespace::put(
           writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
         }
         KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-          auto dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context);
-          writePromise = context.waitForDeferredProxy(streamSource->pumpTo(*dest, true))
-              .attach(kj::mv(streamSource), kj::mv(dest));
+          writePromise = context.run([
+              dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
+              stream = kj::mv(stream)](jsg::Lock& js) mutable {
+            return IoContext::current().waitForDeferredProxy(
+                stream->pumpTo(js, kj::mv(dest), true));
+          });
         }
       }
 

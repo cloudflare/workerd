@@ -201,12 +201,6 @@ public:
 
   jsg::Ref<ReadableStream> addRef() { return JSG_THIS; }
 
-  kj::Own<ReadableStreamSource> removeSource(jsg::Lock& js);
-  // Remove and return the underlying implementation of this ReadableStream. Throw a TypeError if
-  // this ReadableStream is disturbed or locked, otherwise this ReadableStream becomes immediately
-  // disturbed, locked, and closed. If this ReadableStream is already closed, return a null input
-  // stream. If this readable stream is errored, throw the stored error.
-
   bool isDisturbed() { return getController().isDisturbed(); }
 
   // ---------------------------------------------------------------------------
@@ -341,6 +335,28 @@ public:
     // two constructors with differing type parameters for byte-oriented and
     // value-oriented streams.
   }
+
+  jsg::Ref<ReadableStream> detach(jsg::Lock& js);
+  // Detaches this ReadableStream from it's underlying controller state, returning a
+  // new ReadableStream instance that takes over the underlying state. This is used to
+  // support the "create a proxy" of a ReadableStream algorithm in the streams spec
+  // (see https://streams.spec.whatwg.org/#readablestream-create-a-proxy). In that
+  // algorithm, it says to create a proxy of a stream by creating a new TransformStream
+  // and piping the original through it. The readable side of the created transform
+  // becomes the proxy. That is quite inefficient so instead, we create a new
+  // ReadableStream that will take over ownership of the internal state of this one,
+  // leaving this ReadableStream locked and disturbed so that it is no longer usable.
+  // The name "detach" here is used in the sense of "detaching the internal state".
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
+  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js,
+                                          kj::Own<WritableStreamSink> sink,
+                                          bool end);
+  // A potentially optimized version of pipe that sends this stream's data to the given
+  // sink. The entire stream is consumed. The ReadableStream will be left locked and
+  // disturbed and the DeferredProxy returned will take over ownership of the internal
+  // state of the readable.
 
 private:
   Controller controller;
