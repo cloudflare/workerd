@@ -22,3 +22,13 @@ build --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 # TODO(cleanup): Can we disable warnings altogether from our dependencies, without disabling them
 #   for workerd?
 build --cxxopt='-Wno-ambiguous-reversed-operator' --host_cxxopt='-Wno-ambiguous-reversed-operator'
+
+
+# optimized LTO build
+# You'll need the following packages installed: clang-15 libc++-15-dev libc++abi-15-dev
+build:thin-lto --action_env=BAZEL_COMPILER=clang-15
+build:thin-lto --action_env=CC=clang-15
+build:thin-lto --action_env=CXX=clang++-15
+build:thin-lto -c opt
+build:thin-lto --cxxopt='-flto=thin'
+build:thin-lto --linkopt='-flto=thin'

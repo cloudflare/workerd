@@ -114,7 +114,7 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2018",
-    version = "1.58.0",
+    version = "1.66.0",
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

@@ -93,6 +93,15 @@ bazel clean --expunge
 
 The cache will now be cleaned and you can try building again.
 
+#### Thin LTO build
+
+If you have clang-15 and libc++-15 packages installed you can build a higher performant release
+version of workerd:
+
+```
+bazel build --config=thin-lto //src/workerd/server:workerd
+```
+
 ### Configuring `workerd`
 
 `workerd` is configured using a config file written in Cap'n Proto text format.
