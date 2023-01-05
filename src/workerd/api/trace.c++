@@ -41,6 +41,9 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent() {
       KJ_CASE_ONEOF(queue, Trace::QueueEventInfo) {
         return kj::Maybe(jsg::alloc<QueueEventInfo>(kj::addRef(*trace), queue));
       }
+      KJ_CASE_ONEOF(email, Trace::EmailEventInfo) {
+        return kj::Maybe(jsg::alloc<EmailEventInfo>(kj::addRef(*trace), email));
+      }
       KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<CustomEventInfo>(kj::addRef(*trace), custom));
       }
@@ -186,6 +189,21 @@ kj::StringPtr TraceItem::QueueEventInfo::getQueueName() {
 
 uint32_t TraceItem::QueueEventInfo::getBatchSize() {
   return eventInfo.batchSize;
+}
+
+TraceItem::EmailEventInfo::EmailEventInfo(kj::Own<Trace> trace,
+    const Trace::EmailEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+
+kj::StringPtr TraceItem::EmailEventInfo::getMailFrom() {
+  return eventInfo.mailFrom;
+}
+
+kj::StringPtr TraceItem::EmailEventInfo::getRcptTo() {
+  return eventInfo.rcptTo;
+}
+
+uint32_t TraceItem::EmailEventInfo::getRawSize() {
+  return eventInfo.rawSize;
 }
 
 TraceItem::CustomEventInfo::CustomEventInfo(kj::Own<Trace> trace,

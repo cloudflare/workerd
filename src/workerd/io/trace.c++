@@ -93,6 +93,20 @@ void Trace::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder) 
   builder.setBatchSize(batchSize);
 }
 
+Trace::EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
+    : mailFrom(kj::mv(mailFrom)), rcptTo(kj::mv(rcptTo)), rawSize(rawSize) {}
+
+Trace::EmailEventInfo::EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader)
+    : mailFrom(kj::heapString(reader.getMailFrom())),
+      rcptTo(kj::heapString(reader.getRcptTo())),
+      rawSize(reader.getRawSize()) {}
+
+void Trace::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) {
+  builder.setMailFrom(mailFrom);
+  builder.setRcptTo(rcptTo);
+  builder.setRawSize(rawSize);
+}
+
 Trace::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode)
     : statusCode(statusCode) {}
 
@@ -175,6 +189,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto queueBuilder = eventInfoBuilder.initQueue();
         queue.copyTo(queueBuilder);
       }
+      KJ_CASE_ONEOF(email, EmailEventInfo) {
+        auto emailBuilder = eventInfoBuilder.initEmail();
+        email.copyTo(emailBuilder);
+      }
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -247,6 +265,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::QUEUE:
         eventInfo = QueueEventInfo(e.getQueue());
+        break;
+      case rpc::Trace::EventInfo::Which::EMAIL:
+        eventInfo = EmailEventInfo(e.getEmail());
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
         eventInfo = CustomEventInfo(e.getCustom());
@@ -435,6 +456,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;
