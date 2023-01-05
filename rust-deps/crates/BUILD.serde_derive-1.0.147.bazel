@@ -19,7 +19,7 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_library",
+    "rust_proc_macro",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -28,8 +28,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_library(
-    name = "getrandom",
+rust_proc_macro(
+    name = "serde_derive",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,14 +54,14 @@ rust_library(
         ],
     }),
     crate_features = [
-        "std",
+        "default",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -86,38 +86,21 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.16",
+    version = "1.0.147",
     deps = [
     ] + select_with_or({
-        # cfg(target_os = "wasi")
-        #
-        # No supported platform triples for cfg: 'cfg(target_os = "wasi")'
-        # Skipped dependencies: [{"id":"wasi 0.9.0+wasi-snapshot-preview1","target":"wasi"}]
-        #
-        # cfg(unix)
-        (
-            "@rules_rust//rust/platform:aarch64-apple-darwin",
-            "@rules_rust//rust/platform:aarch64-unknown-linux-gnu",
-            "@rules_rust//rust/platform:x86_64-apple-darwin",
-            "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
-        ): [
-            # Target Deps
-            "@crates_vendor__libc-0.2.137//:libc",
-
-            # Common Deps
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__getrandom-0.1.16//:build_script_build",
-        ],
         "//conditions:default": [
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__getrandom-0.1.16//:build_script_build",
+            "@crates_vendor__proc-macro2-1.0.47//:proc_macro2",
+            "@crates_vendor__quote-1.0.21//:quote",
+            "@crates_vendor__serde_derive-1.0.147//:build_script_build",
+            "@crates_vendor__syn-1.0.103//:syn",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "getrandom_build_script",
+    name = "serde_derive_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -136,7 +119,7 @@ cargo_build_script(
         ],
     }),
     crate_features = [
-        "std",
+        "default",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -144,7 +127,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -173,7 +156,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "0.1.16",
+    version = "1.0.147",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
@@ -189,7 +172,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "getrandom_build_script",
+    actual = "serde_derive_build_script",
     tags = [
         "manual",
     ],

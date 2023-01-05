@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "once_cell",
+    name = "clang_ast",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,15 +50,13 @@ rust_library(
         ],
     }),
     crate_features = [
-        "alloc",
-        "race",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2021",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -83,10 +81,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.15.0",
+    version = "0.1.9",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__serde-1.0.147//:serde",
         ],
     }),
 )

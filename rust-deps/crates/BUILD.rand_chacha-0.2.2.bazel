@@ -86,7 +86,7 @@ rust_library(
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__ppv-lite86-0.2.16//:ppv_lite86",
+            "@crates_vendor__ppv-lite86-0.2.17//:ppv_lite86",
             "@crates_vendor__rand_core-0.5.1//:rand_core",
         ],
     }),

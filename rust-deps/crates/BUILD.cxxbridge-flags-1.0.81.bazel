@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "getrandom",
+    name = "cxxbridge_flags",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,6 +50,7 @@ rust_library(
         ],
     }),
     crate_features = [
+        "default",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -81,29 +82,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.7",
+    version = "1.0.81",
     deps = [
     ] + select_with_or({
-        # cfg(target_os = "wasi")
-        #
-        # No supported platform triples for cfg: 'cfg(target_os = "wasi")'
-        # Skipped dependencies: [{"id":"wasi 0.11.0+wasi-snapshot-preview1","target":"wasi"}]
-        #
-        # cfg(unix)
-        (
-            "@rules_rust//rust/platform:aarch64-apple-darwin",
-            "@rules_rust//rust/platform:aarch64-unknown-linux-gnu",
-            "@rules_rust//rust/platform:x86_64-apple-darwin",
-            "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
-        ): [
-            # Target Deps
-            "@crates_vendor__libc-0.2.133//:libc",
-
-            # Common Deps
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        ],
         "//conditions:default": [
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
         ],
     }),
 )

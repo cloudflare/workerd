@@ -169,7 +169,7 @@ test("createTypeNode: function types", () => {
   typeNode = createTypeNode(type);
   assert.strictEqual(
     printNode(typeNode),
-    "(param0?: string, ...param1: any[]) => void | Promise<void>"
+    "(param1?: string, ...param2: any[]) => void | Promise<void>"
   );
 });
 

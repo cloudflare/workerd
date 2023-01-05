@@ -16,5 +16,6 @@ node_modules
 /bazel-*
 # Compiled output -> don't check in
 /compile_commands.json
+/rust-project.json
 # Directory where clangd puts its indexing work
 /.cache/

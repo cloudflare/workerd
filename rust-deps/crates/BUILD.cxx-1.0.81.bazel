@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "getrandom",
+    name = "cxx",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,6 +54,8 @@ rust_library(
         ],
     }),
     crate_features = [
+        "alloc",
+        "default",
         "std",
     ],
     crate_root = "src/lib.rs",
@@ -65,6 +67,7 @@ rust_library(
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__cxxbridge-macro-1.0.81//:cxxbridge_macro",
         ],
     }),
     rustc_env = {
@@ -86,38 +89,19 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.16",
+    version = "1.0.81",
     deps = [
     ] + select_with_or({
-        # cfg(target_os = "wasi")
-        #
-        # No supported platform triples for cfg: 'cfg(target_os = "wasi")'
-        # Skipped dependencies: [{"id":"wasi 0.9.0+wasi-snapshot-preview1","target":"wasi"}]
-        #
-        # cfg(unix)
-        (
-            "@rules_rust//rust/platform:aarch64-apple-darwin",
-            "@rules_rust//rust/platform:aarch64-unknown-linux-gnu",
-            "@rules_rust//rust/platform:x86_64-apple-darwin",
-            "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
-        ): [
-            # Target Deps
-            "@crates_vendor__libc-0.2.137//:libc",
-
-            # Common Deps
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__getrandom-0.1.16//:build_script_build",
-        ],
         "//conditions:default": [
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__getrandom-0.1.16//:build_script_build",
+            "@crates_vendor__cxx-1.0.81//:build_script_build",
+            "@crates_vendor__link-cplusplus-1.0.7//:link_cplusplus",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "getrandom_build_script",
+    name = "cxx_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -136,6 +120,8 @@ cargo_build_script(
         ],
     }),
     crate_features = [
+        "alloc",
+        "default",
         "std",
     ],
     crate_name = "build_script_build",
@@ -145,6 +131,7 @@ cargo_build_script(
         ],
     }),
     edition = "2018",
+    links = "cxxbridge1",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -173,11 +160,13 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "0.1.16",
+    version = "1.0.81",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__cc-1.0.76//:cc",
+            "@crates_vendor__cxxbridge-flags-1.0.81//:cxxbridge_flags",
         ],
     }),
 )
@@ -189,7 +178,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "getrandom_build_script",
+    actual = "cxx_build_script",
     tags = [
         "manual",
     ],

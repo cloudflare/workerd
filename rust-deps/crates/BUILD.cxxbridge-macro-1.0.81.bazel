@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_proc_macro(
-    name = "derive_more",
+    name = "cxxbridge_macro",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,32 +50,6 @@ rust_proc_macro(
         ],
     }),
     crate_features = [
-        "add",
-        "add_assign",
-        "as_mut",
-        "as_ref",
-        "constructor",
-        "convert_case",
-        "default",
-        "deref",
-        "deref_mut",
-        "display",
-        "error",
-        "from",
-        "from_str",
-        "index",
-        "index_mut",
-        "into",
-        "into_iterator",
-        "is_variant",
-        "iterator",
-        "mul",
-        "mul_assign",
-        "not",
-        "rustc_version",
-        "sum",
-        "try_into",
-        "unwrap",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -107,11 +81,10 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.99.17",
+    version = "1.0.81",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__convert_case-0.4.0//:convert_case",
             "@crates_vendor__proc-macro2-1.0.47//:proc_macro2",
             "@crates_vendor__quote-1.0.21//:quote",
             "@crates_vendor__syn-1.0.103//:syn",

@@ -465,7 +465,7 @@ public:
     JSG_METHOD_NAMED(delete, delete_);
 
     JSG_TS_OVERRIDE({
-      fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+      fetch(input: RequestInfo, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
       get: never;
       put: never;
       delete: never;
@@ -548,10 +548,10 @@ struct RequestInitializerDict {
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
               referrer, referrerPolicy, integrity, signal, observe);
-  JSG_STRUCT_TS_OVERRIDE(RequestInit {
+  JSG_STRUCT_TS_OVERRIDE(RequestInit<CfType = IncomingRequestCfProperties | RequestInitCfProperties> {
     headers?: HeadersInit;
     body?: BodyInit | null;
-    cf?: IncomingRequestCfProperties | RequestInitCfProperties;
+    cf?: CfType;
   });
 };
 

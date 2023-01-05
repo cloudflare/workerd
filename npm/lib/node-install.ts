@@ -8,24 +8,24 @@
 //     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 import {
   downloadedBinPath,
-  pkgAndSubpathForCurrentPlatform
-} from './node-platform';
+  pkgAndSubpathForCurrentPlatform,
+} from "./node-platform";
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import zlib from 'zlib';
-import https from 'https';
-import child_process from 'child_process';
+import fs from "fs";
+import os from "os";
+import path from "path";
+import zlib from "zlib";
+import https from "https";
+import child_process from "child_process";
 
 declare const LATEST_COMPATIBILITY_DATE: string;
 declare const WORKERD_VERSION: string;
 
-const toPath = path.join(__dirname, 'bin', 'workerd');
+const toPath = path.join(__dirname, "bin", "workerd");
 let isToPathJS = true;
 
 function validateBinaryVersion(...command: string[]): void {
-  command.push('--version');
+  command.push("--version");
   const stdout = child_process
     .execFileSync(command.shift()!, command, {
       // Without this, this install script strangely crashes with the error
@@ -39,7 +39,7 @@ function validateBinaryVersion(...command: string[]): void {
       // - https://nodejs.org/dist/ (download the official version of node)
       // - https://github.com/evanw/esbuild/issues/1711#issuecomment-1027554035
       //
-      stdio: 'pipe'
+      stdio: "pipe",
     })
     .toString()
     .trim();
@@ -72,10 +72,10 @@ function fetch(url: string): Promise<Buffer> {
         if (res.statusCode !== 200)
           return reject(new Error(`Server responded with ${res.statusCode}`));
         let chunks: Buffer[] = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
       })
-      .on('error', reject);
+      .on("error", reject);
   });
 }
 
@@ -88,7 +88,7 @@ function extractFileFromTarGzip(buffer: Buffer, subpath: string): Buffer {
     );
   }
   let str = (i: number, n: number) =>
-    String.fromCharCode(...buffer.subarray(i, i + n)).replace(/\0.*$/, '');
+    String.fromCharCode(...buffer.subarray(i, i + n)).replace(/\0.*$/, "");
   let offset = 0;
   subpath = `package/${subpath}`;
   while (offset < buffer.length) {
@@ -111,11 +111,11 @@ function installUsingNPM(pkg: string, subpath: string, binPath: string): void {
 
   // Create a temporary directory inside the "workerd" package with an empty
   // "package.json" file. We'll use this to run "npm install" in.
-  const libDir = path.dirname(require.resolve('workerd'));
-  const installDir = path.join(libDir, 'npm-install');
+  const libDir = path.dirname(require.resolve("workerd"));
+  const installDir = path.join(libDir, "npm-install");
   fs.mkdirSync(installDir);
   try {
-    fs.writeFileSync(path.join(installDir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(installDir, "package.json"), "{}");
 
     // Run "npm install" in the temporary directory which should download the
     // desired package. Try to avoid unnecessary log output. This uses the "npm"
@@ -124,7 +124,7 @@ function installUsingNPM(pkg: string, subpath: string, binPath: string): void {
     // for example, a custom configured npm registry and special firewall rules.
     child_process.execSync(
       `npm install --loglevel=error --prefer-offline --no-audit --progress=false ${pkg}@${WORKERD_VERSION}`,
-      { cwd: installDir, stdio: 'pipe', env }
+      { cwd: installDir, stdio: "pipe", env }
     );
 
     // Move the downloaded binary executable into place. The destination path
@@ -132,7 +132,7 @@ function installUsingNPM(pkg: string, subpath: string, binPath: string): void {
     // find the binary executable here later.
     const installedBinPath = path.join(
       installDir,
-      'node_modules',
+      "node_modules",
       pkg,
       subpath
     );
@@ -188,7 +188,7 @@ function maybeOptimizePackage(binPath: string): void {
   // This optimization also doesn't apply when npm's "--ignore-scripts" flag is
   // used since in that case this install script will not be run.
   if (!isYarn()) {
-    const tempPath = path.join(__dirname, 'bin-workerd');
+    const tempPath = path.join(__dirname, "bin-workerd");
     try {
       // First link the binary with a temporary file. If this fails and throws an
       // error, then we'll just end up doing nothing. This uses a hard link to
@@ -292,11 +292,14 @@ this. If that fails, you need to remove the "--no-optional" flag to use workerd.
 }
 
 checkAndPreparePackage().then(() => {
-  if (isToPathJS) {
-    // We need "node" before this command since it's a JavaScript file
-    validateBinaryVersion(process.execPath, toPath);
-  } else {
-    // This is no longer a JavaScript file so don't run it using "node"
-    validateBinaryVersion(toPath);
+  // Windows only runs the binary in WSL (for now), and so we can't run it directly for validation
+  if (process.platform !== "win32") {
+    if (isToPathJS) {
+      // We need "node" before this command since it's a JavaScript file
+      validateBinaryVersion(process.execPath, toPath);
+    } else {
+      // This is no longer a JavaScript file so don't run it using "node"
+      validateBinaryVersion(toPath);
+    }
   }
 });
