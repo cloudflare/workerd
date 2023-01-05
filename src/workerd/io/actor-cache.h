@@ -598,14 +598,26 @@ private:
   kj::Promise<void> flushImpl(uint retryCount = 0);
   kj::Promise<void> flushImplDeleteAll(uint retryCount = 0);
 
-  struct PutBatch;
-  struct MutedDeleteBatch;
-  struct CountedBatch;
-  kj::Promise<void> flushImplUsingSinglePut(kj::Vector<PutBatch> putBatches);
+  struct FlushBatch {
+    size_t pairCount = 0;
+    size_t wordCount = 0;
+  };
+  struct PutFlush {
+    kj::Vector<FlushBatch> batches;
+  };
+  struct MutedDeleteFlush {
+    kj::Vector<FlushBatch> batches;
+  };
+  struct CountedDeleteFlush {
+    CountedDelete& countedDelete;
+    kj::Vector<FlushBatch> batches;
+  };
+  using CountedDeleteFlushes = kj::Array<CountedDeleteFlush>;
+  kj::Promise<void> flushImplUsingSinglePut(PutFlush putFlush);
   kj::Promise<void> flushImplAlarmOnly(DirtyAlarm dirty);
   kj::Promise<void> flushImplUsingTxn(
-      kj::Vector<PutBatch> putBatches, kj::Vector<MutedDeleteBatch> mutedDeleteBatches,
-      kj::Vector<CountedBatch> countedDeletes, MaybeAlarmChange maybeAlarmChange);
+      PutFlush putFlush, MutedDeleteFlush mutedDeleteFlush,
+      CountedDeleteFlushes countedDeleteFlushes, MaybeAlarmChange maybeAlarmChange);
 
   void evictEntry(Lock& lock, Entry& entry);
   // Carefully remove a clean entry from `currentValues`, making sure to update gaps.

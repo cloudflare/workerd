@@ -2229,33 +2229,20 @@ constexpr size_t bytesToWordsRoundUp(size_t bytes) {
   return (bytes + sizeof(capnp::word) - 1) / sizeof(capnp::word);
 }
 
-struct ActorCache::PutBatch {
-  size_t count;
-  size_t wordCount;
+namespace {
+struct RpcPutBatch {
   capnp::Request<rpc::ActorStorage::Operations::PutParams,
                 rpc::ActorStorage::Operations::PutResults> request = nullptr;
   capnp::List<rpc::ActorStorage::KeyValue>::Builder list = nullptr;
 };
 
-struct ActorCache::MutedDeleteBatch {
-  size_t count;
-  size_t wordCount;
-  capnp::Request<rpc::ActorStorage::Operations::DeleteParams,
-                rpc::ActorStorage::Operations::DeleteResults> request = nullptr;
-  capnp::List<capnp::Data>::Builder list = nullptr;
-};
-
-struct ActorCache::CountedBatch {
-  CountedDelete& countedDelete;
-  uint keyCount = 0;
-  uint wordCount = 0;
+struct RpcDeleteBatch {
 
   capnp::Request<rpc::ActorStorage::Operations::DeleteParams,
                  rpc::ActorStorage::Operations::DeleteResults> request = nullptr;
   capnp::List<capnp::Data>::Builder list = nullptr;
-
-  CountedBatch(CountedDelete& countedDelete): countedDelete(countedDelete) {}
 };
+}
 
 kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   KJ_IF_MAYBE(e, maybeTerminalException) {
@@ -2303,25 +2290,31 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   //   so getting this right, without making a copy of everything upfront, could get complicated.
   //   Punting for now.
 
-  kj::Vector<PutBatch> putBatches;
-  // Batches of puts that we've already accumulated.
+  PutFlush putFlush;
+  MutedDeleteFlush mutedDeleteFlush;
 
-  size_t putCount = 0;
-  size_t putWords = 0;
-  // Number of keys to be written, and size, for the current batch that we're accumulating.
+  auto includeInCurrentBatch = [this](kj::Vector<FlushBatch>& batches, size_t words) {
+    KJ_ASSERT(words < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-  kj::Vector<MutedDeleteBatch> mutedDeleteBatches;
-  // Batches of deleted keys, where nobody is listening for a count, that we've already accumulated.
+    if (batches.empty()) {
+      // This is the first one, let's just set up a current batch.
+      batches.add(FlushBatch{});
+    } else if (auto& tailBatch = batches.back();
+        tailBatch.pairCount >= lru.options.maxKeysPerRpc
+        || ((tailBatch.wordCount + words) > MAX_ACTOR_STORAGE_RPC_WORDS)) {
+      // We've filled this batch, add a new one.
+      batches.add(FlushBatch{});
+    }
 
-  size_t mutedDeleteCount = 0;
-  size_t mutedDeleteWords = 0;
-  // Number of keys to be deleted where nobody is listening, and size, for the current batch that
-  // we're accumulating.
+    auto& batch = batches.back();
+    ++batch.pairCount;
+    batch.wordCount += words;
+  };
 
-  kj::Vector<CountedBatch> countedDeletes;
+  kj::Vector<CountedDeleteFlush> countedDeleteFlushes;
 
-  auto deferredFlushIndexCleanup = kj::defer([&countedDeletes]() {
-    for (auto& batch: countedDeletes) {
+  auto deferredFlushIndexCleanup = kj::defer([&countedDeleteFlushes]() {
+    for (auto& batch: countedDeleteFlushes) {
       batch.countedDelete.flushIndex = nullptr;
     }
   });
@@ -2329,7 +2322,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
-    auto keySize = bytesToWordsRoundUp(entry.key.size());
+    auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
     KJ_IF_MAYBE(c, entry.countedDelete) {
       if (c->get()->resultFulfiller->isWaiting()) {
@@ -2343,15 +2336,17 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         // Note that a subsequent put() call could have set entry.value to non-null, but we still
         // have to perform the delete first in order to determine the count that the delete() call
         // should return.
-        CountedBatch* batch;
+        CountedDeleteFlush* countedDeleteFlush;
         KJ_IF_MAYBE(i, c->get()->flushIndex) {
-          batch = &countedDeletes[*i];
+          countedDeleteFlush = &countedDeleteFlushes[*i];
         } else {
-          c->get()->flushIndex = countedDeletes.size();
-          batch = &countedDeletes.add(**c);
+          c->get()->flushIndex = countedDeleteFlushes.size();
+          countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
+            .countedDelete = **c,
+          });
         }
-        batch->keyCount++;
-        batch->wordCount += keySize + 1;
+        auto words = keySizeInWords + 1;
+        includeInCurrentBatch(countedDeleteFlush->batches, words);
       } else {
         // No one is waiting on this `CountedDelete` anymore so we can just drop it.
         entry.countedDelete = nullptr;
@@ -2359,23 +2354,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     }
 
     KJ_IF_MAYBE(v, entry.value) {
-      auto words = keySize + bytesToWordsRoundUp(v->size()) +
+      auto words = keySizeInWords + bytesToWordsRoundUp(v->size()) +
           capnp::sizeInWords<rpc::ActorStorage::KeyValue>();
-      if (putCount >= lru.options.maxKeysPerRpc || putWords + words > MAX_ACTOR_STORAGE_RPC_WORDS) {
-        putBatches.add(PutBatch { putCount, putWords });
-        putCount = 0;
-        putWords = 0;
-      }
-      ++putCount;
-      putWords += words;
+      includeInCurrentBatch(putFlush.batches, words);
     } else if (entry.countedDelete == nullptr) {
-      ++mutedDeleteCount;
-      mutedDeleteWords += keySize + 1;
-      if (mutedDeleteCount >= lru.options.maxKeysPerRpc) {
-        mutedDeleteBatches.add(MutedDeleteBatch { mutedDeleteCount, mutedDeleteWords });
-        mutedDeleteCount = 0;
-        mutedDeleteWords = 0;
-      }
+      auto words = keySizeInWords + 1;
+      includeInCurrentBatch(mutedDeleteFlush.batches, words);
     }
   };
 
@@ -2419,31 +2403,19 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     }
   }
 
-  if (putCount > 0) {
-    putBatches.add(PutBatch { putCount, putWords });
-    putCount = 0;
-    putWords = 0;
-  }
-
-  if (mutedDeleteCount > 0) {
-    mutedDeleteBatches.add(MutedDeleteBatch { mutedDeleteCount, mutedDeleteWords });
-    mutedDeleteCount = 0;
-    mutedDeleteWords = 0;
-  }
-
   // Actually flush out the changes.
   kj::Promise<void> flushProm = nullptr;
-  if (putBatches.size() == 1 && mutedDeleteBatches.size() == 0 && countedDeletes.size() == 0 &&
-      maybeAlarmChange.is<CleanAlarm>()) {
+  if (putFlush.batches.size() == 1 && mutedDeleteFlush.batches.size() == 0
+      && countedDeleteFlushes.size() == 0 && maybeAlarmChange.is<CleanAlarm>()) {
     // As an optimization for the common case where there are only puts and they all fit in a single
     // batch, just send a simple put rather than complicating things with a transaction.
-    flushProm = flushImplUsingSinglePut(kj::mv(putBatches));
-  } else if (putBatches.size() == 0 && mutedDeleteBatches.size() == 0 && countedDeletes.size() == 0 &&
-      maybeAlarmChange.is<DirtyAlarm>()) {
+    flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
+  } else if (putFlush.batches.size() == 0 && putFlush.batches.size() == 0
+      && countedDeleteFlushes.size() == 0 && maybeAlarmChange.is<DirtyAlarm>()) {
     flushProm = flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
   } else {
-    flushProm = flushImplUsingTxn(kj::mv(putBatches), kj::mv(mutedDeleteBatches),
-        kj::mv(countedDeletes), kj::mv(maybeAlarmChange));
+    flushProm = flushImplUsingTxn(kj::mv(putFlush), kj::mv(mutedDeleteFlush),
+        countedDeleteFlushes.releaseAsArray(), kj::mv(maybeAlarmChange));
   }
 
   // We have to remember _before_ waiting for the flush whether or not it was a pre-deleteAll()
@@ -2577,22 +2549,24 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   });
 }
 
-kj::Promise<void> ActorCache::flushImplUsingSinglePut(kj::Vector<PutBatch> putBatches) {
-  KJ_ASSERT(putBatches.size() == 1);
-  auto& batch = putBatches[0];
+kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
+  KJ_ASSERT(putFlush.batches.size() == 1);
+  auto& batch = putFlush.batches[0];
 
   KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-  batch.request = storage.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-  batch.list = batch.request.initEntries(batch.count);
+
+  RpcPutBatch rpcBatch;
+  rpcBatch.request = storage.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+  rpcBatch.list = rpcBatch.request.initEntries(batch.pairCount);
 
   size_t putCount = 0;
   auto addEntryToRpc = [&](Entry& entry) {
     KJ_ASSERT(entry.countedDelete == nullptr);
     auto& v = KJ_ASSERT_NONNULL(entry.value);
-    auto kv = batch.list[putCount++];
+    auto kv = rpcBatch.list[putCount++];
     kv.setKey(entry.key.asBytes());
     kv.setValue(v);
-    KJ_ASSERT(putCount <= batch.count);
+    KJ_ASSERT(putCount <= batch.pairCount);
     entry.state = FLUSHING;
   };
 
@@ -2606,10 +2580,13 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(kj::Vector<PutBatch> putBa
     }
   }
 
+  // We're done with the batching instructions, free them before we go async.
+  putFlush.batches.clear();
+
   // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
-  co_await putBatches[0].request.send().ignoreResult();
+  co_await rpcBatch.request.send().ignoreResult();
 }
 
 kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
@@ -2653,65 +2630,87 @@ kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
 }
 
 kj::Promise<void> ActorCache::flushImplUsingTxn(
-    kj::Vector<PutBatch> putBatches, kj::Vector<MutedDeleteBatch> mutedDeleteBatches,
-    kj::Vector<CountedBatch> countedDeletes, MaybeAlarmChange maybeAlarmChange) {
-  // Count how many unique RPC calls we need to make here.
-  uint rpcCount = putBatches.size() + mutedDeleteBatches.size() + countedDeletes.size();
-
+    PutFlush putFlush, MutedDeleteFlush mutedDeleteFlush,
+    CountedDeleteFlushes countedDeleteFlushes, MaybeAlarmChange maybeAlarmChange) {
   auto txnProm = storage.txnRequest(capnp::MessageSize { 4, 0 }).send();
   auto txn = txnProm.getTransaction();
 
+  struct RpcCountedDelete {
+    kj::Own<CountedDelete> countedDelete;
+    RpcDeleteBatch rpcDelete;
+  };
+  auto rpcCountedDeletes = kj::heapArrayBuilder<RpcCountedDelete>(countedDeleteFlushes.size());
+  auto rpcMutedDeletes = kj::heapArrayBuilder<RpcDeleteBatch>(mutedDeleteFlush.batches.size());
+  auto rpcPuts = kj::heapArrayBuilder<RpcPutBatch>(putFlush.batches.size());
   {
     // We have to make sure to do this cleanup in this helper too since countedDeletes (and its
     // contents) got moved into here.
-    auto deferredFlushIndexCleanup = kj::defer([&countedDeletes]() {
-      for (auto& batch: countedDeletes) {
+    auto deferredFlushIndexCleanup = kj::defer([&countedDeleteFlushes]() {
+      for (auto& batch: countedDeleteFlushes) {
         batch.countedDelete.flushIndex = nullptr;
       }
     });
 
-    for (auto& batch: countedDeletes) {
+    for (auto& flush: countedDeleteFlushes) {
+      KJ_ASSERT(flush.batches.size() == 1);
+      auto& batch = flush.batches.front();
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-      batch.request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-      batch.list = batch.request.initKeys(batch.keyCount);
+      auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto list = request.initKeys(batch.pairCount);
+      rpcCountedDeletes.add(RpcCountedDelete{
+        .countedDelete = kj::addRef(flush.countedDelete),
+        .rpcDelete = RpcDeleteBatch{
+          .request = kj::mv(request),
+          .list = kj::mv(list),
+        },
+      });
 
       // Reset counts to zero because we'll use them again in `addEntryToRpc` below to decide which
       // list index to fill in.
-      batch.keyCount = 0;
+      batch.pairCount = 0;
     }
-    for (auto& batch: mutedDeleteBatches) {
+    for (auto& batch: mutedDeleteFlush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-      batch.request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-      batch.list = batch.request.initKeys(batch.count);
+      auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto list = request.initKeys(batch.pairCount);
+      rpcMutedDeletes.add(RpcDeleteBatch{
+        .request = kj::mv(request),
+        .list = kj::mv(list),
+      });
     }
-    for (auto& batch: putBatches) {
+    for (auto& batch: putFlush.batches) {
       KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-      batch.request = txn.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-      batch.list = batch.request.initEntries(batch.count);
+      auto request = txn.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto list = request.initEntries(batch.pairCount);
+      rpcPuts.add(RpcPutBatch{
+        .request = kj::mv(request),
+        .list = kj::mv(list),
+      });
     }
 
     // Go back through the list and fill in the builders.
     size_t putCount = 0;
     size_t mutedDeleteCount = 0;
-    auto currentPutBatch = putBatches.begin();
-    auto currentMutedDeleteBatch = mutedDeleteBatches.begin();
+    auto currentPutBatch = rpcPuts.begin();
+    auto currentMutedDeleteBatch = rpcMutedDeletes.begin();
     auto addEntryToRpc = [&](Entry& entry) {
       KJ_IF_MAYBE(c, entry.countedDelete) {
         auto i = KJ_ASSERT_NONNULL(c->get()->flushIndex);
-        countedDeletes[i].list.set(countedDeletes[i].keyCount++, entry.key.asBytes());
+        auto j = countedDeleteFlushes[i].batches.front().pairCount++;
+        rpcCountedDeletes[i].rpcDelete.list.set(j, entry.key.asBytes());
       }
 
       KJ_IF_MAYBE(v, entry.value) {
         auto kv = currentPutBatch->list[putCount++];
         kv.setKey(entry.key.asBytes());
         kv.setValue(*v);
-        if (putCount == currentPutBatch->count) {
+        if (putCount == currentPutBatch->list.size()) {
           putCount = 0;
           ++currentPutBatch;
         }
       } else if (entry.countedDelete == nullptr) {
         currentMutedDeleteBatch->list.set(mutedDeleteCount++, entry.key.asBytes());
-        if (mutedDeleteCount == currentMutedDeleteBatch->count) {
+        if (mutedDeleteCount == currentMutedDeleteBatch->list.size()) {
           mutedDeleteCount = 0;
           ++currentMutedDeleteBatch;
         }
@@ -2729,6 +2728,15 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
       }
     }
   }
+
+  for(size_t i = 0; i < countedDeleteFlushes.size(); ++i) {
+    KJ_ASSERT(countedDeleteFlushes[i].batches.front().pairCount == rpcCountedDeletes[i].rpcDelete.list.size());
+  }
+
+  // We're done with the batching instructions, free them before we go async.
+  putFlush.batches.clear();
+  mutedDeleteFlush.batches.clear();
+  countedDeleteFlushes = nullptr;
 
   // We don't want to write anything until we know that any past reads have completed, because one
   // or more of those reads could have been on the previous value of a key that was then overwritten
@@ -2758,12 +2766,12 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   // The constant extra 2 promises are those added outside of the rpc batches, currently one
   // to work around a bug in capnp::autoreconnect, and one to actually commit the flush txn
   // A 3rd promise may be added to write the alarm time if necessary.
-
-  auto promises = kj::heapArrayBuilder<kj::Promise<void>>(rpcCount + 2 + !maybeAlarmChange.is<CleanAlarm>());
-  for (auto& cd: countedDeletes) {
-    KJ_ASSERT(cd.keyCount == cd.list.size());
-    promises.add(cd.request.send()
-        .then([&countedDelete = cd.countedDelete]
+  auto promises = kj::heapArrayBuilder<kj::Promise<void>>(
+      rpcPuts.size() + rpcMutedDeletes.size() + rpcCountedDeletes.size()
+      + 2 + !maybeAlarmChange.is<CleanAlarm>());
+  for (auto& rpcCountedDelete: rpcCountedDeletes) {
+    promises.add(rpcCountedDelete.rpcDelete.request.send()
+        .then([&countedDelete = *rpcCountedDelete.countedDelete]
               (capnp::Response<rpc::ActorStorage::Operations::DeleteResults>&& response) mutable {
       // Note that it's OK to trust the delete count even if the transaction ultimately gets rolled
       // back, because:
@@ -2773,20 +2781,20 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
       //   make it impossible for anyone to observe the bogus result.
       countedDelete.resultFulfiller->fulfill(
           countedDelete.countDeleted + response.getNumDeleted());
-    }, [&countedDelete = cd.countedDelete](kj::Exception&& e) {
+    }, [&countedDelete = *rpcCountedDelete.countedDelete](kj::Exception&& e) {
       if (e.getType() == kj::Exception::Type::DISCONNECTED) {
         // This deletion will be retried, so don't touch the fulfiller.
       } else {
         countedDelete.resultFulfiller->reject(kj::mv(e));
       }
-    }).attach(kj::addRef(cd.countedDelete)));
+    }));
   }
 
-  for (auto& batch: mutedDeleteBatches) {
+  for (auto& batch: rpcMutedDeletes) {
     promises.add(batch.request.send().ignoreResult());
   }
 
-  for (auto& batch: putBatches) {
+  for (auto& batch: rpcPuts) {
     promises.add(batch.request.send().ignoreResult());
   }
 
