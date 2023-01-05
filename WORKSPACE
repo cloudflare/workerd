@@ -60,30 +60,6 @@ http_archive(
 )
 
 # ========================================================================================
-# Protobuf
-#
-# TODO(cleanup): We only even depend on this to build jaeger.proto which isn't really used by
-#   workerd -- it's more of an internal dependency that we haven't managed to factor out. If we
-#   could eliminate it then maybe we could get rid of this heavy dependency entirely?
-#
-#   Note that we pick up a definition for `@zlib` from protobuf. We used to pick up the dependency
-#   from v8 instead but they removed that dependency (from their bazel build, at least) at commit
-#   208bda48. If we remove protobuf then we'll need to define our own version of this dependency,
-#   which entales maintaining a BUILD file for it.
-
-http_archive(
-    name = "com_google_protobuf",
-    url = "https://github.com/protocolbuffers/protobuf/releases/download/v3.19.3/protobuf-cpp-3.19.3.tar.gz",
-    strip_prefix = "protobuf-3.19.3",
-    type = "tgz",
-    sha256 = "f0cc6ae9119d4891d72bc72d44ae73308d6e2319e2ce96c10c22d2508c55c922",
-)
-
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
-
-# ========================================================================================
 # Rust bootstrap
 #
 # workerd uses some Rust libraries, especially lolhtml for implementing HtmlRewriter.

@@ -18,7 +18,6 @@ wd_cc_library(
         ":capnp",
         "@capnp-cpp//src/kj:kj-async",
         "@com_cloudflare_lol_html//:lolhtml",
-        ":jaeger-model",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
@@ -31,7 +30,6 @@ wd_cc_capnp_library(
         "actor-storage.capnp",
         "cdp.capnp",
         "compatibility-date.capnp",
-        "jaeger.capnp",
         "worker-interface.capnp",
     ],
     visibility = ["//visibility:public"],
@@ -45,22 +43,6 @@ wd_cc_capnp_library(
     name = "outcome_capnp",
     srcs = ["outcome.capnp"],
     visibility = ["//visibility:public"],
-)
-
-cc_proto_library(
-    name = "jaeger-model",
-    deps = [":jaeger-model_proto"],
-    visibility = ["//visibility:public"],
-)
-
-proto_library(
-    name = "jaeger-model_proto",
-    srcs = ["jaeger-model.proto"],
-    deps = [
-        "@com_google_protobuf//:timestamp_proto",
-        "@com_google_protobuf//:duration_proto"
-    ],
-    strip_import_prefix = "/src",
 )
 
 [kj_test(
