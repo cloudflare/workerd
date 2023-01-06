@@ -2382,22 +2382,16 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     KJ_CASE_ONEOF(_, UnknownAlarmTime){}
   }
 
+  // We have to remember _before_ waiting for the flush whether or not it was a pre-deleteAll()
+  // flush. Otherwise, if it wasn't, but someone calls deleteAll() while we're flushing, then
+  // `requestedDeleteAll` might be non-null afterwards, but that would not indicate that we were
+  // ready to issue the delete-all.
+  bool deleteAllUpcoming = requestedDeleteAll != nullptr;
   KJ_IF_MAYBE(r, requestedDeleteAll) {
-    if (r->deletedDirty.empty()) {
-      // There were no dirty entries before deleteAll() was called, so we can move on to invoking
-      // deleteAll() itself.
-      return flushImplDeleteAll();
-    }
-
     for (auto& entry: r->deletedDirty) {
       countEntry(*entry);
     }
   } else {
-    if (dirtyList.empty() && maybeAlarmChange.is<CleanAlarm>()) {
-      // Oh, nothing to do.
-      return kj::READY_NOW;
-    }
-
     for (auto& entry: dirtyList) {
       countEntry(entry);
     }
@@ -2405,24 +2399,39 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
   // Actually flush out the changes.
   kj::Promise<void> flushProm = nullptr;
-  if (putFlush.batches.size() == 1 && mutedDeleteFlush.batches.size() == 0
-      && countedDeleteFlushes.size() == 0 && maybeAlarmChange.is<CleanAlarm>()) {
-    // As an optimization for the common case where there are only puts and they all fit in a single
-    // batch, just send a simple put rather than complicating things with a transaction.
-    flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
-  } else if (putFlush.batches.size() == 0 && putFlush.batches.size() == 0
-      && countedDeleteFlushes.size() == 0 && maybeAlarmChange.is<DirtyAlarm>()) {
-    flushProm = flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
-  } else {
+  auto useTransactionToFlush = [&]() {
     flushProm = flushImplUsingTxn(kj::mv(putFlush), kj::mv(mutedDeleteFlush),
         countedDeleteFlushes.releaseAsArray(), kj::mv(maybeAlarmChange));
-  }
+  };
 
-  // We have to remember _before_ waiting for the flush whether or not it was a pre-deleteAll()
-  // flush. Otherwise, if it wasn't, but someone calls deleteAll() while we're flushing, then
-  // `requestedDeleteAll` might be non-null afterwards, but that would not indicate that we were
-  // ready to issue the delete-all.
-  bool deleteAllUpcoming = requestedDeleteAll != nullptr;
+  if (mutedDeleteFlush.batches.size() > 0 || countedDeleteFlushes.size() > 0) {
+    // We have deletes, we have to use a transaction.
+    useTransactionToFlush();
+  } else if (putFlush.batches.size() > 1) {
+    // We have more than a single batch of puts, we have to use a transaction.
+    useTransactionToFlush();
+  } else if (putFlush.batches.size() == 1) {
+    // We have a single batch of puts, can we use an optimization?
+
+    if (maybeAlarmChange.is<CleanAlarm>()) {
+      // As an optimization for the common case where there are only puts and they all fit in a
+      // single batch, just send a simple put rather than complicating things with a transaction.
+      flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
+    } else {
+      // We have an alarm to go along with our puts, we have to use a transaction.
+      useTransactionToFlush();
+    }
+  } else if (deleteAllUpcoming) {
+    // There were no dirty entries before deleteAll() was called, so we can move on to invoking
+    // deleteAll() itself.
+    return flushImplDeleteAll();
+  } else if (maybeAlarmChange.is<DirtyAlarm>()) {
+    // We only had an alarm, we can skip the transaction.
+    flushProm = flushImplAlarmOnly(maybeAlarmChange.get<DirtyAlarm>());
+  } else {
+    // Oh, nothing to do.
+    return kj::READY_NOW;
+  }
 
   return oomCanceler.wrap(kj::mv(flushProm)).then([this, deleteAllUpcoming]() -> kj::Promise<void> {
     // Success!
