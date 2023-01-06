@@ -54,6 +54,10 @@ struct CompatDate {
     const char* end = strptime(text.cStr(), "%Y-%m-%d", &t);
 
     if (end == text.end()) {
+      // On macOS, strptime() permits 0 for the day of the month. Our tests expect this to fail,
+      // so explicitly reject in this case.
+      if (t.tm_mday == 0) return nullptr;
+
       // You can see the age of strptime() here. Obviously, once upon a time, it only supported
       // 2-digit years. But WTF is up with the months being zero-based and the days being 1-based???
       // That part, I do not get.
