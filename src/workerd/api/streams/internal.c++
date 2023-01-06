@@ -1683,7 +1683,7 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
 
 kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncoding encoding) {
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return 0UL; }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return uint64_t(0); }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
     KJ_CASE_ONEOF(readable, Readable) { return readable->tryGetLength(encoding); }
   }
