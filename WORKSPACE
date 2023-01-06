@@ -60,6 +60,49 @@ http_archive(
 )
 
 # ========================================================================================
+# tcmalloc
+
+# tcmalloc requires Abseil.
+#
+# WARNING: This MUST appear before rules_fuzzing_depnedencies(), below. Otherwise,
+#   rules_fuzzing_depnedencies() will choose to pull in a different version of Abseil that is too
+#   old for tcmalloc. Absurdly, Bazel simply ignores later attempts to define the same repo name,
+#   rather than erroring out. Thus this leads to confusing compiler errors in tcmalloc complaining
+#   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
+http_archive(
+    name = "com_google_absl",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/b3162b1da62711c663d0025e2eabeb83fd1f2728.zip"],
+    strip_prefix = "abseil-cpp-b3162b1da62711c663d0025e2eabeb83fd1f2728",
+    sha256 = "d5c91248c33269fcc7ab35897315a45cfa2c37abb4c6d4ed36cb5c82f366367a",
+)
+
+# tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
+# though it is unused for our purposes.
+http_archive(
+    name = "rules_fuzzing",
+    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
+    strip_prefix = "rules_fuzzing-0.1.1",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
+)
+
+load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
+
+rules_fuzzing_dependencies()
+
+load("@rules_fuzzing//fuzzing:init.bzl", "rules_fuzzing_init")
+
+rules_fuzzing_init()
+
+# OK, now we can bring in tcmalloc itself.
+http_archive(
+    name = "com_google_tcmalloc",
+    url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+    strip_prefix = "google-tcmalloc-ca82471",
+    type = "tgz",
+    sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
+)
+
+# ========================================================================================
 # Rust bootstrap
 #
 # workerd uses some Rust libraries, especially lolhtml for implementing HtmlRewriter.

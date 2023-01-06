@@ -13,6 +13,7 @@ wd_cc_binary(
         ":workerd_capnp",
         ":workerd-meta_capnp",
     ],
+    malloc = "@com_google_tcmalloc//tcmalloc",
 )
 
 wd_cc_library(
