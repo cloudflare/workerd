@@ -49,6 +49,7 @@ struct Trace @0x8e8d911203762d34 {
     alarm @9 :AlarmEventInfo;
     queue @15 :QueueEventInfo;
     custom @13 :CustomEventInfo;
+    email @16 :EmailEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -74,6 +75,12 @@ struct Trace @0x8e8d911203762d34 {
   struct QueueEventInfo {
     queueName @0 :Text;
     batchSize @1 :UInt32;
+  }
+
+  struct EmailEventInfo {
+    mailFrom @0 :Text;
+    rcptTo @1 :Text;
+    rawSize @2 :UInt32;
   }
 
   struct CustomEventInfo {}

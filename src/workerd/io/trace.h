@@ -113,6 +113,18 @@ public:
     void copyTo(rpc::Trace::QueueEventInfo::Builder builder);
   };
 
+  class EmailEventInfo {
+  public:
+    explicit EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize);
+    EmailEventInfo(rpc::Trace::EmailEventInfo::Reader reader);
+
+    kj::String mailFrom;
+    kj::String rcptTo;
+    uint32_t rawSize;
+
+    void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
+  };
+
   class CustomEventInfo {
   public:
     explicit CustomEventInfo() {};
@@ -173,7 +185,7 @@ public:
   // We treat the origin value as "unset".
 
   typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
-          CustomEventInfo> EventInfo;
+          EmailEventInfo, CustomEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent

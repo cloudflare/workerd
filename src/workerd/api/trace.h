@@ -51,12 +51,14 @@ public:
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
+  class EmailEventInfo;
   class CustomEventInfo;
 
   explicit TraceItem(kj::Own<Trace> trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>,
-      jsg::Ref<AlarmEventInfo>, jsg::Ref<QueueEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
+      jsg::Ref<AlarmEventInfo>, jsg::Ref<QueueEventInfo>,
+      jsg::Ref<EmailEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent();
   // TODO(someday): support more event types (trace, email) via kj::OneOf.
   kj::Maybe<double> getEventTimestamp();
@@ -209,6 +211,25 @@ private:
   const Trace::QueueEventInfo& eventInfo;
 };
 
+class TraceItem::EmailEventInfo final: public jsg::Object {
+public:
+  explicit EmailEventInfo(kj::Own<Trace> trace, const Trace::EmailEventInfo& eventInfo);
+
+  kj::StringPtr getMailFrom();
+  kj::StringPtr getRcptTo();
+  uint32_t getRawSize();
+
+  JSG_RESOURCE_TYPE(EmailEventInfo) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(mailFrom, getMailFrom);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rcptTo, getRcptTo);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rawSize, getRawSize);
+  }
+
+private:
+  kj::Own<Trace> trace;
+  const Trace::EmailEventInfo& eventInfo;
+};
+
 class TraceItem::CustomEventInfo final: public jsg::Object {
 public:
   explicit CustomEventInfo(kj::Own<Trace> trace, const Trace::CustomEventInfo& eventInfo);
@@ -320,6 +341,7 @@ private:
   api::TraceItem::CustomEventInfo,            \
   api::TraceItem::ScheduledEventInfo,         \
   api::TraceItem::QueueEventInfo,             \
+  api::TraceItem::EmailEventInfo,             \
   api::TraceItem::FetchEventInfo,             \
   api::TraceItem::FetchEventInfo::Request,    \
   api::TraceItem::FetchEventInfo::Response,   \
