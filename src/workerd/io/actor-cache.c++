@@ -2322,6 +2322,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
+    entry.state = FLUSHING;
+
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
     KJ_IF_MAYBE(c, entry.countedDelete) {
@@ -2576,7 +2578,6 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
     kv.setKey(entry.key.asBytes());
     kv.setValue(v);
     KJ_ASSERT(putCount <= batch.pairCount);
-    entry.state = FLUSHING;
   };
 
   KJ_IF_MAYBE(r, requestedDeleteAll) {
@@ -2724,7 +2725,6 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
           ++currentMutedDeleteBatch;
         }
       }
-      entry.state = FLUSHING;
     };
 
     KJ_IF_MAYBE(r, requestedDeleteAll) {
