@@ -215,6 +215,11 @@ public:
   // We use v8::Local<v8::Object>'s here instead of jsg structs because we need
   // to preserve the object references within the implementation.
 
+  static jsg::Ref<ReadableStream> from(
+      jsg::Lock& js,
+      kj::OneOf<jsg::AsyncGenerator<jsg::Value>, jsg::Generator<jsg::Value>> generator,
+      CompatibilityFlags::Reader flags);
+
   bool isLocked() { return getController().isLockedToReader(); }
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
@@ -291,40 +296,86 @@ public:
 
     JSG_ASYNC_ITERABLE(values);
 
+    if (flags.getReadableStreamFrom()) {
+      JSG_STATIC_METHOD(from);
+    }
+
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
-      JSG_TS_DEFINE(interface ReadableStream<R = any> {
-        get locked(): boolean;
+      if (flags.getReadableStreamFrom()) {
+        JSG_TS_DEFINE(interface ReadableStream<R = any> {
+          get locked(): boolean;
 
-        cancel(reason?: any): Promise<void>;
+          cancel(reason?: any): Promise<void>;
 
-        getReader(): ReadableStreamDefaultReader<R>;
-        getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+          getReader(): ReadableStreamDefaultReader<R>;
+          getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
 
-        pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
-        pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+          pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+          pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
 
-        tee(): [ReadableStream<R>, ReadableStream<R>];
+          tee(): [ReadableStream<R>, ReadableStream<R>];
 
-        values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-        [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-      });
+          values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+          [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+
+          static from<T>(iterable: AsyncIterable<T> | Iterable<T>): ReadableStream<T>;
+        });
+      } else {
+        JSG_TS_DEFINE(interface ReadableStream<R = any> {
+          get locked(): boolean;
+
+          cancel(reason?: any): Promise<void>;
+
+          getReader(): ReadableStreamDefaultReader<R>;
+          getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+
+          pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+          pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+
+          tee(): [ReadableStream<R>, ReadableStream<R>];
+
+          values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+          [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+        });
+      }
     } else {
-      JSG_TS_DEFINE(interface ReadableStream<R = any> {
-        readonly locked: boolean;
+      if (flags.getReadableStreamFrom()) {
+        JSG_TS_DEFINE(interface ReadableStream<R = any> {
+          readonly locked: boolean;
 
-        cancel(reason?: any): Promise<void>;
+          cancel(reason?: any): Promise<void>;
 
-        getReader(): ReadableStreamDefaultReader<R>;
-        getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+          getReader(): ReadableStreamDefaultReader<R>;
+          getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
 
-        pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
-        pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+          pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+          pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
 
-        tee(): [ReadableStream<R>, ReadableStream<R>];
+          tee(): [ReadableStream<R>, ReadableStream<R>];
 
-        values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-        [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
-      });
+          values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+          [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+
+          static from<T>(iterable: AsyncIterable<T> | Iterable<T>): ReadableStream<T>;
+        });
+      } else {
+        JSG_TS_DEFINE(interface ReadableStream<R = any> {
+          readonly locked: boolean;
+
+          cancel(reason?: any): Promise<void>;
+
+          getReader(): ReadableStreamDefaultReader<R>;
+          getReader(options: ReadableStreamGetReaderOptions): ReadableStreamBYOBReader;
+
+          pipeThrough<T>(transform: ReadableWritablePair<T, R>, options?: StreamPipeOptions): ReadableStream<T>;
+          pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
+
+          tee(): [ReadableStream<R>, ReadableStream<R>];
+
+          values(options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+          [Symbol.asyncIterator](options?: ReadableStreamValuesOptions): AsyncIterableIterator<R>;
+        });
+      }
     }
     JSG_TS_OVERRIDE(const ReadableStream: {
       prototype: ReadableStream;
