@@ -93,9 +93,7 @@ bazel clean --expunge
 
 The cache will now be cleaned and you can try building again.
 
-#### Thin LTO build
-
-If you have clang-15 and libc++-15 packages installed you can build a higher performant release
+If you have a fairly recent clang packages installed you can build a more performant release
 version of workerd:
 
 ```
