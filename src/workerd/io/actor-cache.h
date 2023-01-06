@@ -603,13 +603,16 @@ private:
     size_t wordCount = 0;
   };
   struct PutFlush {
+    kj::Vector<Entry*> entries;
     kj::Vector<FlushBatch> batches;
   };
   struct MutedDeleteFlush {
+    kj::Vector<Entry*> entries;
     kj::Vector<FlushBatch> batches;
   };
   struct CountedDeleteFlush {
     CountedDelete& countedDelete;
+    kj::Vector<Entry*> entries;
     kj::Vector<FlushBatch> batches;
   };
   using CountedDeleteFlushes = kj::Array<CountedDeleteFlush>;
