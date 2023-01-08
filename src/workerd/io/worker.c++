@@ -1137,7 +1137,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
             // limit just to be safe. Don't add it to the rollover bank, though.
             auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
             impl->unboundScriptOrMainModule =
-                jsg::NonModuleScript::compile(script.mainScript, lock);
+                jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
           }
 
           break;

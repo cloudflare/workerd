@@ -186,6 +186,10 @@ public:
     // Content of the script (JavaScript). Pointer is valid only until the Script constructor
     // returns.
 
+    kj::StringPtr mainScriptName;
+    // Name of the script, used as the script origin for stack traces. Pointer is valid only until
+    // the Script constructor returns.
+
     kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
         compileGlobals;
     // Callback which will compile the script-level globals, returning a list of them.

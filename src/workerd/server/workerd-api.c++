@@ -155,7 +155,8 @@ const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
 
-Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader conf,
+Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
+    config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter) {
   switch (conf.which()) {
     case config::Worker::MODULES: {
@@ -176,6 +177,7 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader c
     case config::Worker::SERVICE_WORKER_SCRIPT:
       return Worker::Script::ScriptSource {
         conf.getServiceWorkerScript(),
+        name,
         [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
               .compileScriptGlobals(lock, conf, errorReporter);
@@ -191,6 +193,7 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader c
 invalid:
   return Worker::Script::ScriptSource {
     ""_kj,
+    name,
     [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate)
         -> kj::Array<Worker::Script::CompiledGlobal> {
       return nullptr;

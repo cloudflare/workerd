@@ -26,7 +26,8 @@ public:
   const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
 
-  static Worker::Script::Source extractSource(config::Worker::Reader conf,
+  static Worker::Script::Source extractSource(kj::StringPtr name,
+      config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter);
 
   struct Global {
