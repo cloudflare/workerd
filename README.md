@@ -76,6 +76,8 @@ To build `workerd`, you need:
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
 * On macOS:
   * full XCode 13+ installation
+  * Python 3.10 (3.9 does not work)
+    * A build failure can occur when using Conda or another virtual environment with Python 3.9. To solve this, you can create a virtual environment with Python 3.10 and activate it before building workerd.
 
 You may then build using:
 
