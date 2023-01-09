@@ -2306,12 +2306,6 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
   kj::Vector<CountedDeleteFlush> countedDeleteFlushes;
 
-  auto deferredFlushIndexCleanup = kj::defer([&countedDeleteFlushes]() {
-    for (auto& batch: countedDeleteFlushes) {
-      batch.countedDelete.flushIndex = nullptr;
-    }
-  });
-
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
@@ -2337,7 +2331,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         } else {
           c->get()->flushIndex = countedDeleteFlushes.size();
           countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
-            .countedDelete = **c,
+            .countedDelete = kj::addRef(**c).attach(kj::defer([&cd = *c->get()]() mutable {
+              // Note that this is attached to the `Own`, not the value. We actually want this,
+              // because it allows us to reset the `flushIndex` when *this flush* finishes,
+              // regardless of if we need to retry.
+              cd.flushIndex = nullptr;
+            })),
           });
         }
         auto words = keySizeInWords + 1;
@@ -2636,71 +2635,63 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   auto rpcCountedDeletes = kj::heapArrayBuilder<RpcCountedDelete>(countedDeleteFlushes.size());
   auto rpcMutedDeletes = kj::heapArrayBuilder<RpcDeleteRequest>(mutedDeleteFlush.batches.size());
   auto rpcPuts = kj::heapArrayBuilder<RpcPutRequest>(putFlush.batches.size());
+
+  for (auto& flush: countedDeleteFlushes) {
+    KJ_ASSERT(flush.batches.size() == 1);
+    auto entryIt = flush.entries.begin();
+    for (auto& batch: flush.batches) {
+      KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
+
+      auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto listBuilder = request.initKeys(batch.pairCount);
+      for (size_t i = 0; i < batch.pairCount; ++i) {
+        KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
+        auto& entry = **(entryIt++);
+        listBuilder.set(i, entry.key.asBytes());
+      }
+
+      rpcCountedDeletes.add(RpcCountedDelete{
+        .countedDelete = kj::mv(flush.countedDelete),
+        .rpcDelete = kj::mv(request),
+      });
+    }
+    KJ_ASSERT(entryIt == flush.entries.end());
+  }
+
   {
-    // We have to make sure to do this cleanup in this helper too since countedDeletes (and its
-    // contents) got moved into here.
-    auto deferredFlushIndexCleanup = kj::defer([&countedDeleteFlushes]() {
-      for (auto& batch: countedDeleteFlushes) {
-        batch.countedDelete.flushIndex = nullptr;
-      }
-    });
+    auto entryIt = mutedDeleteFlush.entries.begin();
+    for (auto& batch: mutedDeleteFlush.batches) {
+      KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-    for (auto& flush: countedDeleteFlushes) {
-      KJ_ASSERT(flush.batches.size() == 1);
-      auto entryIt = flush.entries.begin();
-      for (auto& batch: flush.batches) {
-        KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-
-        auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-        auto listBuilder = request.initKeys(batch.pairCount);
-        for (size_t i = 0; i < batch.pairCount; ++i) {
-          KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
-          auto& entry = **(entryIt++);
-          listBuilder.set(i, entry.key.asBytes());
-        }
-        rpcCountedDeletes.add(RpcCountedDelete{
-          .countedDelete = kj::addRef(flush.countedDelete),
-          .rpcDelete = kj::mv(request),
-        });
+      auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto listBuilder = request.initKeys(batch.pairCount);
+      for (size_t i = 0; i < batch.pairCount; ++i) {
+        KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
+        auto& entry = **(entryIt++);
+        listBuilder.set(i, entry.key.asBytes());
       }
-      KJ_ASSERT(entryIt == flush.entries.end());
+      rpcMutedDeletes.add(kj::mv(request));
     }
+    KJ_ASSERT(entryIt == mutedDeleteFlush.entries.end());
+  }
 
-    {
-      auto entryIt = mutedDeleteFlush.entries.begin();
-      for (auto& batch: mutedDeleteFlush.batches) {
-        KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
+  {
+    auto entryIt = putFlush.entries.begin();
+    for (auto& batch: putFlush.batches) {
+      KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
 
-        auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-        auto listBuilder = request.initKeys(batch.pairCount);
-        for (size_t i = 0; i < batch.pairCount; ++i) {
-          KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
-          auto& entry = **(entryIt++);
-          listBuilder.set(i, entry.key.asBytes());
-        }
-        rpcMutedDeletes.add(kj::mv(request));
+      auto request = txn.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+      auto listBuilder = request.initEntries(batch.pairCount);
+      for (auto kv : listBuilder) {
+        KJ_ASSERT(entryIt != putFlush.entries.end());
+        auto& entry = **(entryIt++);
+        auto& v = KJ_ASSERT_NONNULL(entry.value);
+        kv.setKey(entry.key.asBytes());
+        kv.setValue(v);
       }
-      KJ_ASSERT(entryIt == mutedDeleteFlush.entries.end());
+      rpcPuts.add(kj::mv(request));
     }
-
-    {
-      auto entryIt = putFlush.entries.begin();
-      for (auto& batch: putFlush.batches) {
-        KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
-
-        auto request = txn.putRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
-        auto listBuilder = request.initEntries(batch.pairCount);
-        for (auto kv : listBuilder) {
-          KJ_ASSERT(entryIt != putFlush.entries.end());
-          auto& entry = **(entryIt++);
-          auto& v = KJ_ASSERT_NONNULL(entry.value);
-          kv.setKey(entry.key.asBytes());
-          kv.setValue(v);
-        }
-        rpcPuts.add(kj::mv(request));
-      }
-      KJ_ASSERT(entryIt == putFlush.entries.end());
-    }
+    KJ_ASSERT(entryIt == putFlush.entries.end());
   }
 
   // We're done with the batching instructions, free them before we go async.

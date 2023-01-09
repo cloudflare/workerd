@@ -611,7 +611,7 @@ private:
     kj::Vector<FlushBatch> batches;
   };
   struct CountedDeleteFlush {
-    CountedDelete& countedDelete;
+    kj::Own<CountedDelete> countedDelete;
     kj::Vector<Entry*> entries;
     kj::Vector<FlushBatch> batches;
   };
