@@ -85,7 +85,13 @@ bazel build -c opt //src/workerd/server:workerd
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
 
-If you run a Bazel build before you've installed some dependencies (like clang or libc++), and then you install the dependencies, you must clean Bazel's cache, otherwise you might get strange errors:
+If you run a Bazel build before you've installed some dependencies (like clang or libc++), and then you install the dependencies, you must resync locally cached toolchains, or clean Bazel's cache, otherwise you might get strange errors:
+
+```
+bazel sync --configure
+```
+
+If that fails, you can try:
 
 ```
 bazel clean --expunge
