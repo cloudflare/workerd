@@ -1633,6 +1633,12 @@ kj::Maybe<UrlRecord> URL::parse(
 URL::URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base)
     : inner(handleConstructorParse(url, kj::mv(base))) {}
 
+URL::~URL() noexcept(false) {
+  KJ_IF_MAYBE(searchParams, maybeSearchParams) {
+    (*searchParams)->maybeUrl = nullptr;
+  }
+}
+
 jsg::UsvString URL::getOrigin() {
   KJ_SWITCH_ONEOF(inner.getOrigin()) {
     KJ_CASE_ONEOF(opaque, OpaqueOrigin) {
