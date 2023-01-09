@@ -119,45 +119,12 @@ public:
     recvHttp200(expectedResponse, loc);
   }
 
-  bool isEof() {
-    // Return true if the stream is at EOF.
-
-    if (premature != nullptr) {
-      // We still have unread data so we're definitely not at EOF.
-      return false;
-    }
-
-    char c;
-    auto promise = stream->tryRead(&c, 1, 1);
-    if (!promise.poll(ws)) {
-      // Read didn't complete immediately. We have no data available, but we're not at EOF.
-      return false;
-    }
-
-    size_t n = promise.wait(ws);
-    if (n == 0) {
-      return true;
-    } else {
-      // Oops, the stream had data available and we accidentally read a byte of it. Store that off
-      // to the side.
-      KJ_ASSERT(n == 1);
-      premature = c;
-      return false;
-    }
-  }
-
 private:
   kj::WaitScope& ws;
   kj::Own<kj::AsyncIoStream> stream;
 
-  kj::Maybe<char> premature;
-  // isEof() may prematurely read a character. Keep it off to the side for the next actual read.
-
   kj::String readAllAvailable() {
     kj::Vector<char> buffer(256);
-    KJ_IF_MAYBE(p, premature) {
-      buffer.add(*p);
-    }
 
     // Continuously try to read until there's nothing to read (or we've gone way past the size
     // expected).
@@ -223,11 +190,11 @@ public:
     }
   }
 
-  void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
+  void start() {
     // Start the server. Call before connect().
 
     KJ_REQUIRE(runTask == nullptr);
-    auto task = server.run(v8System, *config, kj::mv(drainWhen))
+    auto task = server.run(v8System, *config)
         .eagerlyEvaluate([](kj::Exception&& e) {
       KJ_FAIL_EXPECT(e);
     });
@@ -1557,58 +1524,6 @@ KJ_TEST("Server: inject headers on incoming request/response") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: drain incoming HTTP connections") {
-  TestServer test(singleWorker(R"((
-    compatibilityDate = "2022-08-17",
-    serviceWorkerScript =
-        `addEventListener("fetch", event => {
-        `  event.respondWith(new Response("hello"));
-        `})
-  ))"_kj));
-
-  auto paf = kj::newPromiseAndFulfiller<void>();
-
-  test.start(kj::mv(paf.promise));
-
-  auto conn = test.connect("test-addr");
-  auto conn2 = test.connect("test-addr");
-
-  // Send a request on each connection, get a response.
-  conn.httpGet200("/", "hello");
-  conn2.httpGet200("/", "hello");
-
-  // Send a partial request on conn2.
-  conn2.send("GET");
-
-  // No EOF yet.
-  KJ_EXPECT(!conn.isEof());
-  KJ_EXPECT(!conn2.isEof());
-
-  // Drain the server.
-  paf.fulfiller->fulfill();
-
-  // Now we get EOF on conn.
-  KJ_EXPECT(conn.isEof());
-
-  // But conn2 is still open.
-  KJ_EXPECT(!conn2.isEof());
-
-  // Finish the request on conn2.
-  conn2.send(" / HTTP/1.1\nHost: foo\n\n");
-
-  // We receive a response with Connection: close
-  conn2.recv(R"(
-    HTTP/1.1 200 OK
-    Connection: close
-    Content-Length: 5
-    Content-Type: text/plain;charset=UTF-8
-
-    hello)"_blockquote);
-
-  // And then the connection is, in fact, closed.
-  KJ_EXPECT(conn2.isEof());
-}
-
 // =======================================================================================
 // Test alternate service types
 //
@@ -2188,10 +2103,8 @@ KJ_TEST("Server: disk service allow dotfiles") {
   KJ_EXPECT(test.root->openFile(kj::Path({"secret"}))->readAllText() == "this is super-secret");
 }
 
-// =======================================================================================
-// Test Cache API
 
-KJ_TEST("Server: If no cache service is defined, access to the cache API should error") {
+KJ_TEST("Cache: If no cache service is defined, access to the cache API should error") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -2217,7 +2130,8 @@ KJ_TEST("Server: If no cache service is defined, access to the cache API should 
 
 }
 
-KJ_TEST("Server: cached response") {
+
+KJ_TEST("Cache: cached response") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2277,7 +2191,8 @@ KJ_TEST("Server: cached response") {
 
 }
 
-KJ_TEST("Server: cache name is passed through to service") {
+
+KJ_TEST("Cache: cache name is passed through to service") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2335,8 +2250,8 @@ KJ_TEST("Server: cache name is passed through to service") {
     CF-Cache-Status: HIT
 
     cached)"_blockquote);
-}
 
+}
 // =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)

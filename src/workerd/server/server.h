@@ -54,8 +54,7 @@ public:
     inspectorOverride = kj::mv(addr);
   }
 
-  kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
-                        kj::Promise<void> drainWhen = kj::NEVER_DONE);
+  kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf);
   // Runs the server using the given config.
 
 private:
@@ -96,26 +95,6 @@ private:
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
-
-  struct ListedHttpServer {
-    // An HttpServer object maintained in a linked list.
-
-    Server& owner;
-    kj::HttpServer httpServer;
-    kj::ListLink<ListedHttpServer> link;
-
-    template <typename... Params>
-    ListedHttpServer(Server& owner, Params&&... params)
-        : owner(owner), httpServer(kj::fwd<Params>(params)...) {
-      owner.httpServers.add(*this);
-    };
-    ~ListedHttpServer() noexcept(false) {
-      owner.httpServers.remove(*this);
-    }
-  };
-
-  kj::List<ListedHttpServer, &ListedHttpServer::link> httpServers;
-  // All active HttpServer objects -- used to implement drain().
 
   kj::TaskSet tasks;
   // Especially includes server loop tasks to listen on socokets. Any error is considered fatal.
