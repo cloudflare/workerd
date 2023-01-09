@@ -869,9 +869,7 @@ public:
       auto config = getConfig();
       jsg::V8System v8System(
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
-      auto promise = server.run(v8System, config,
-          // Gracefully drain when SIGTERM is received.
-          io.unixEventPort.onSignal(SIGTERM).ignoreResult());
+      auto promise = server.run(v8System, config);
       KJ_IF_MAYBE(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
@@ -1066,7 +1064,6 @@ private:
 
 int main(int argc, char* argv[]) {
   ::kj::TopLevelProcessContext context(argv[0]);
-  kj::UnixEventPort::captureSignal(SIGTERM);
   workerd::server::CliMain mainObject(context, argv);
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }
