@@ -23,6 +23,8 @@
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 
+#include <node/bundle.capnp.h>
+
 namespace workerd::server {
 
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
@@ -232,6 +234,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     Worker::ValidationErrorReporter& errorReporter) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
+  auto& featureFlags = *impl->features;
 
   auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>();
 
@@ -310,6 +313,10 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
         KJ_UNREACHABLE;
       }
     }
+  }
+
+  if (featureFlags.getNodeJsCompat()) {
+    modules->addBuiltinBundle(NODE_BUNDLE);
   }
 
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
