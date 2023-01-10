@@ -208,6 +208,12 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
     promise = (*gz)->end();
   }
 
+  KJ_IF_MAYBE(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
+    if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream->get())) {
+      casted->shutdownWrite();
+    }
+  }
+
   return promise.attach(ioContext.registerPendingEvent());
 }
 
@@ -252,11 +258,87 @@ kj::Own<WritableStreamSink> newSystemStream(
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
 }
 
+class RefcountedAsyncIoStream final : public kj::AsyncIoStream, public kj::Refcounted {
+public:
+  explicit RefcountedAsyncIoStream(kj::Own<kj::AsyncIoStream> inner);
+  void shutdownWrite() override;
+  void abortRead() override;
+  void getsockopt(int level, int option, void* value, uint* length) override;
+  void setsockopt(int level, int option, const void* value, uint length) override;
+
+  void getsockname(struct sockaddr* addr, uint* length) override;
+  void getpeername(struct sockaddr* addr, uint* length) override;
+
+  // AsyncInputStream methods:
+  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+
+  // AsyncOutputStream methods:
+  kj::Promise<void> write(const void* buffer, size_t size) override;
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override;
+
+  kj::Promise<void> whenWriteDisconnected() override;
+
+private:
+  kj::Own<kj::AsyncIoStream> inner;
+};
+
+RefcountedAsyncIoStream::RefcountedAsyncIoStream(kj::Own<kj::AsyncIoStream> inner) :
+    inner(kj::mv(inner)) {};
+
+void RefcountedAsyncIoStream::shutdownWrite() {
+  inner->shutdownWrite();
+}
+
+void RefcountedAsyncIoStream::abortRead() {
+  inner->abortRead();
+}
+
+void RefcountedAsyncIoStream::getsockopt(int level, int option, void* value, uint* length) {
+  inner->getsockopt(level, option, value, length);
+}
+
+void RefcountedAsyncIoStream::setsockopt(int level, int option, const void* value, uint length) {
+  inner->setsockopt(level, option, value, length);
+}
+
+void RefcountedAsyncIoStream::getsockname(struct sockaddr* addr, uint* length) {
+  inner->getsockname(addr, length);
+}
+
+void RefcountedAsyncIoStream::getpeername(struct sockaddr* addr, uint* length) {
+  inner->getpeername(addr, length);
+}
+
+kj::Promise<size_t> RefcountedAsyncIoStream::read(void* buffer, size_t minBytes, size_t maxBytes) {
+  return inner->read(buffer, minBytes, maxBytes);
+}
+
+kj::Promise<size_t> RefcountedAsyncIoStream::tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+  return inner->tryRead(buffer, minBytes, maxBytes);
+}
+
+kj::Promise<void> RefcountedAsyncIoStream::write(const void* buffer, size_t size) {
+  return inner->write(buffer, size);
+}
+
+kj::Promise<void> RefcountedAsyncIoStream::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+  return inner->write(pieces);
+}
+
+kj::Promise<void> RefcountedAsyncIoStream::whenWriteDisconnected() {
+  return inner->whenWriteDisconnected();
+}
+
 SystemMultiStream newSystemMultiStream(
-    kj::Own<PipelinedAsyncIoStream> rc, StreamEncoding encoding, IoContext& context) {
+    kj::Own<kj::AsyncIoStream> stream, IoContext& context) {
+
+  kj::Own<RefcountedAsyncIoStream> wrapped = kj::refcounted<RefcountedAsyncIoStream>(kj::mv(stream));
   return {
-    .readable = kj::heap<EncodedAsyncInputStream>(kj::addRef(*rc), encoding, context),
-    .writable = kj::heap<EncodedAsyncOutputStream>(kj::mv(rc), encoding, context)
+    .readable = kj::heap<EncodedAsyncInputStream>(
+        kj::addRef(*wrapped), StreamEncoding::IDENTITY, context),
+    .writable = kj::heap<EncodedAsyncOutputStream>(
+        kj::mv(wrapped), StreamEncoding::IDENTITY, context)
   };
 }
 
