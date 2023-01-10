@@ -237,6 +237,8 @@ public:
 
   URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = nullptr);
 
+  ~URL() noexcept(false) override;
+
   static inline jsg::Ref<URL> constructor(
       jsg::UsvString url,
       jsg::Optional<jsg::UsvString> base) {
