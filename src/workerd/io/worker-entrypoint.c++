@@ -176,20 +176,32 @@ kj::Promise<void> WorkerEntrypoint::request(
     return kj::mv(exception);
   }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
+
+    auto doDrain = [this,&context,incomingRequest=kj::mv(incomingRequest)]() mutable {
+      auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+      if (isPredictableModeForTest()) {
+        promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
+          auto lock = worker->getIsolate().getApiIsolate().lock();
+          lock->requestGcForTesting();
+        });
+      }
+      waitUntilTasks.add(kj::mv(promise));
+    };
+
     if (context.isFailOpen()) {
       // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
       // that purpose later.
+      //
+      // We must be careful not to drain the IncomingRequest until after all I/O spawned by this
+      // request is complete. Since failing open is itself I/O, we defer draining until after the
+      // failOpenClient has been used.
       failOpenClient = context.getHttpClientNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
-                                                     kj::mv(cfBlobJson));
+                                                     kj::mv(cfBlobJson))
+          .attach(kj::defer(kj::mv(doDrain)));
+    } else {
+      // Not failing open, so we can drain right away.
+      doDrain();
     }
-    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    if (isPredictableModeForTest()) {
-      promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
-        auto lock = worker->getIsolate().getApiIsolate().lock();
-        lock->requestGcForTesting();
-      });
-    }
-    waitUntilTasks.add(kj::mv(promise));
   })).then([this]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
