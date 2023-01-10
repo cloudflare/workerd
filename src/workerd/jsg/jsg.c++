@@ -156,6 +156,14 @@ void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
 }
 
+void Lock::setAsyncContextTrackingEnabled() {
+  IsolateBase::from(v8Isolate).setAsyncContextTrackingEnabled();
+}
+
+bool Lock::isAsyncContextTrackingEnabled() {
+  return IsolateBase::from(v8Isolate).isAsyncContextTrackingEnabled();
+}
+
 void Lock::setCommonJsExportDefault(bool exportDefault) {
   IsolateBase::from(v8Isolate).setCommonJsExportDefault({}, exportDefault);
 }
@@ -171,6 +179,10 @@ void Lock::requestGcForTesting() const {
   }
   v8Isolate->RequestGarbageCollectionForTesting(
     v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
+}
+
+v8::Local<v8::Private> Lock::getPrivateSymbolFor(Lock::PrivateSymbols symbol) {
+  return IsolateBase::from(v8Isolate).getPrivateSymbolFor(symbol);
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {
