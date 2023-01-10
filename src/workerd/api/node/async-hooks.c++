@@ -7,7 +7,6 @@
 namespace workerd::api::node {
 
 jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
-  js.setAsyncContextTrackingEnabled();
   return jsg::alloc<AsyncLocalStorage>();
 }
 
@@ -20,6 +19,8 @@ v8::Local<v8::Value> AsyncLocalStorage::run(
   for (auto arg : args) {
     argv.add(arg.getHandle(js));
   }
+
+  js.setAsyncContextTrackingEnabled();
 
   auto context = js.v8Isolate->GetCurrentContext();
 
@@ -63,7 +64,6 @@ jsg::Ref<AsyncResource> AsyncResource::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::String> type,
     jsg::Optional<Options> options) {
-  js.setAsyncContextTrackingEnabled();
   // The type and options are required as part of the Node.js API compatibility
   // but our implementation does not currently make use of them at all. It is ok
   // for us to silently ignore both here.
@@ -88,10 +88,12 @@ v8::Local<v8::Function> AsyncResource::bind(
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
   auto& frame = jsg::AsyncContextFrame::current(js);
   v8::Local<v8::Function> bound = jsg::AsyncContextFrame::wrap(js, fn, frame, thisArg);
-  // Serves the same purpose as attach() in KJ things. Ensures that we hold a reference
-  // to the AsyncResource object wrapper for as long as the function is held.
-  jsg::check(bound->SetPrivate(js.v8Isolate->GetCurrentContext(),
-             js.getPrivateSymbolFor(jsg::Lock::PrivateSymbols::SELF_REF),
+
+  // Per Node.js documentation (https://nodejs.org/dist/latest-v19.x/docs/api/async_context.html#asyncresourcebindfn-thisarg), the returned function "will have an
+  // asyncResource property referencing the AsyncResource to which the function
+  // is bound".
+  jsg::check(bound->Set(js.v8Isolate->GetCurrentContext(),
+             jsg::v8StrIntern(js.v8Isolate, "asyncResource"_kj),
              handler.wrap(js, JSG_THIS)));
   return bound;
 }

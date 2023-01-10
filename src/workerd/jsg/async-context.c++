@@ -71,10 +71,10 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::tryGetContext(
 
 AsyncContextFrame& AsyncContextFrame::current(Lock& js) {
   auto& isolateBase = IsolateBase::from(js.v8Isolate);
-  if (isolateBase.asyncFrameStack.empty()) {
+  if (isolateBase.asyncFrameStack.size() == 0) {
     return *isolateBase.getRootAsyncContext();
   }
-  return *isolateBase.asyncFrameStack.front();
+  return *isolateBase.asyncFrameStack.back();
 }
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(
@@ -91,56 +91,30 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
     kj::Maybe<v8::Local<v8::Value>> thisArg) {
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
-  auto handle = js.getPrivateSymbolFor(Lock::PrivateSymbols::ASYNC_RESOURCE);
-
-  // Let's make sure the given function has not already been wrapped. If it has,
-  // we'll explicitly throw an error since wrapping a function more than once is
-  // most likely a bug.
-  JSG_REQUIRE(!check(fn->HasPrivate(context, handle)), TypeError,
-      "This function has already been associated with an async context.");
-
-  // Because we are working directly with JS functions here and not jsg::Function,
-  // we do not have the option of using either an internal field or lambda capture.
-  // Instead, we create an opaque wrapper holding a ref to the current frame and set
-  // it as a private field on the function.
-  auto frame = kj::addRef(AsyncContextFrame::current(js));
-  KJ_ASSERT(check(fn->SetPrivate(context, handle, frame->getJSWrapper(js))));
-  KJ_IF_MAYBE(arg, thisArg) {
-    auto thisArgHandle = js.getPrivateSymbolFor(Lock::PrivateSymbols::THIS_ARG);
-    KJ_ASSERT(check(fn->SetPrivate(context, thisArgHandle, *arg)));
-  }
-
-  return jsg::check(v8::Function::New(context,
-      [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-    auto isolate = args.GetIsolate();
-    auto context = isolate->GetCurrentContext();
-    auto& js = Lock::from(isolate);
-    auto fn = args.Data().As<v8::Function>();
-    auto handle = js.getPrivateSymbolFor(Lock::PrivateSymbols::ASYNC_RESOURCE);
-    auto thisArgHandle = js.getPrivateSymbolFor(Lock::PrivateSymbols::THIS_ARG);
-
-    // We do not use the normal unwrapOpaque here since that would consume the wrapped
-    // value, and we need to be able to unwrap multiple times.
-    auto& frame = KJ_ASSERT_NONNULL(tryGetContextFrame(isolate,
-        check(fn->GetPrivate(context, handle))));
-
-    v8::Local<v8::Value> thisArg = context->Global();
-    if (fn->HasPrivate(context, thisArgHandle).FromJust()) {
-      thisArg = check(fn->GetPrivate(context, thisArgHandle));
-    }
-
-    AsyncContextFrame::Scope scope(js, frame);
+  return js.wrapReturningFunction(context, JSG_VISITABLE_LAMBDA(
+      (
+        frame = kj::addRef(AsyncContextFrame::current(js)),
+        thisArg = js.v8Ref(thisArg.orDefault(context->Global())),
+        fn = js.v8Ref(fn)
+      ),
+      (thisArg, fn),
+      (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+    auto function = fn.getHandle(js);
+    auto context = js.v8Isolate->GetCurrentContext();
 
     kj::Vector<v8::Local<v8::Value>> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {
       argv.add(args[n]);
     }
 
+    AsyncContextFrame::Scope scope(js, *frame);
     v8::Local<v8::Value> result;
-    if (fn->Call(context, thisArg, args.Length(), argv.begin()).ToLocal(&result)) {
-      args.GetReturnValue().Set(result);
+    if (function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin())
+            .ToLocal(&result)) {
+      return result;
     }
-  }, fn));
+    return js.v8Undefined();
+  }));
 }
 
 void AsyncContextFrame::attachContext(
@@ -208,12 +182,12 @@ void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
 }
 
 void IsolateBase::pushAsyncFrame(AsyncContextFrame& next) {
-  asyncFrameStack.push_front(&next);
+  asyncFrameStack.add(&next);
 }
 
 void IsolateBase::popAsyncFrame() {
-  KJ_DASSERT(!asyncFrameStack.empty(), "the async context frame stack was corrupted");
-  asyncFrameStack.pop_front();
+  KJ_DASSERT(asyncFrameStack.size() > 0, "the async context frame stack was corrupted");
+  asyncFrameStack.removeLast();
 }
 
 void IsolateBase::setAsyncContextTrackingEnabled() {
@@ -234,7 +208,7 @@ AsyncContextFrame* IsolateBase::getRootAsyncContext() {
   // because AsyncContextFrame is a Wrappable and rootAsyncFrame is a Ref.
   // Calling alloc during IsolateBase construction is not allowed because
   // Ref's constructor requires the Isolate lock to be held already.
-  KJ_ASSERT(asyncFrameStack.empty());
+  KJ_ASSERT(asyncFrameStack.size() == 0);
   rootAsyncFrame = alloc<AsyncContextFrame>(*this);
   return KJ_ASSERT_NONNULL(rootAsyncFrame).get();
 }

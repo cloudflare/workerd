@@ -1790,9 +1790,7 @@ class Isolate;
 class AsyncContextFrame;
 
 #define JSG_PRIVATE_SYMBOLS(V)       \
-  V(ASYNC_RESOURCE, "asyncResource") \
-  V(THIS_ARG, "thisArg")             \
-  V(SELF_REF, "selfRef")
+  V(ASYNC_RESOURCE, "asyncResource")
 // Defines the enum values for Lock::PrivateSymbols.
 
 class Lock {
@@ -1983,6 +1981,15 @@ public:
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
       jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
+  virtual v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
+      jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)> returningFunction) = 0;
+  // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
+  // implementation passes the FunctionCallbackInfo into the called function, any call to
+  // GetReturnValue().Set(...) to specify a return value will be ignored by the FunctorCallback
+  // wrapper. The wrapReturningFunction variation forces the wrapper to use the version that
+  // pays attention to the return value.
+  // TODO(later): See if we can easily combine wrapSimpleFunction and wrapReturningFunction
+  // into one.
 
   bool toBool(v8::Local<v8::Value> value);
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;

@@ -246,7 +246,7 @@ private:
   // for the caller to ensure that the frame is kept alive.
   void popAsyncFrame();
 
-  std::deque<AsyncContextFrame*> asyncFrameStack;
+  kj::Vector<AsyncContextFrame*> asyncFrameStack;
   kj::Maybe<Ref<AsyncContextFrame>> rootAsyncFrame;
   // The rootAsyncFrame is a maybe because it is lazily initialized.
   // We cannot create Ref's within the IsolateBase constructor and
@@ -376,6 +376,11 @@ public:
         jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)>
             simpleFunction) override {
       return jsgIsolate.wrapper->wrap(context, nullptr, kj::mv(simpleFunction));
+    }
+    v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
+        jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
+            returningFunction) override {
+      return jsgIsolate.wrapper->wrap(context, nullptr, kj::mv(returningFunction));
     }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.wrapper->template unwrap<kj::String>(

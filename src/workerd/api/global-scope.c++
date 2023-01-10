@@ -495,8 +495,10 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
   return jsg::v8StrFromLatin1(isolate, decoded.asBytes());
 }
 
-void ServiceWorkerGlobalScope::queueMicrotask(v8::Local<v8::Function> task, v8::Isolate* isolate) {
-  isolate->EnqueueMicrotask(jsg::AsyncContextFrame::wrap(jsg::Lock::from(isolate), task));
+void ServiceWorkerGlobalScope::queueMicrotask(
+    jsg::Lock& js,
+    v8::Local<v8::Function> task) {
+  js.v8Isolate->EnqueueMicrotask(jsg::AsyncContextFrame::wrap(js, task, nullptr, nullptr));
 }
 
 v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
@@ -525,27 +527,29 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
+    jsg::Lock& js,
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args,
-    v8::Isolate* isolate) {
+    jsg::Varargs args) {
+  if (js.isAsyncContextTrackingEnabled()) {
+    // If isAsyncContextTrackingEnabled returns false, then we assume that the root context
+    // is being used and we don't actually have to wrap the function.
+    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
+        js, function.getHandle(js), nullptr, nullptr));
+  }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(
       timeoutIdGenerator,
       /* repeats = */ false,
-      [function = function.addRef(isolate),
-       argv = kj::mv(argv),
-       frame = kj::addRef(jsg::AsyncContextFrame::current(jsg::Lock::from(isolate)))]
+      [function = function.addRef(js),
+       argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto isolate = js.v8Isolate;
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Isolate->GetCurrentContext();
     auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
-      return arg.getHandle(isolate);
+      return arg.getHandle(js);
     };
     auto argc = localArgs.size();
-
-    jsg::AsyncContextFrame::Scope scope(js, *frame);
 
     // Cast to void to discard the result value.
     (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
@@ -560,27 +564,29 @@ void ServiceWorkerGlobalScope::clearTimeout(kj::Maybe<TimeoutId::NumberType> tim
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
+    jsg::Lock& js,
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args,
-    v8::Isolate* isolate) {
+    jsg::Varargs args) {
+  if (js.isAsyncContextTrackingEnabled()) {
+    // If isAsyncContextTrackingEnabled returns false, then we assume that the root context
+    // is being used and we don't actually have to wrap the function.
+    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
+        js, function.getHandle(js), nullptr, nullptr));
+  }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(
       timeoutIdGenerator,
       /* repeats = */ true,
-      [function = function.addRef(isolate),
-       argv = kj::mv(argv),
-       frame = kj::addRef(jsg::AsyncContextFrame::current(jsg::Lock::from(isolate)))]
+      [function = function.addRef(js),
+       argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto isolate = js.v8Isolate;
-    auto context = isolate->GetCurrentContext();
-    auto localFunction = function.getHandle(isolate);
+    auto context = js.v8Isolate->GetCurrentContext();
+    auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
-      return arg.getHandle(isolate);
+      return arg.getHandle(js);
     };
     auto argc = localArgs.size();
-
-    jsg::AsyncContextFrame::Scope scope(js, *frame);
 
     // Cast to void to discard the result value.
     (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));

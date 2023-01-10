@@ -229,7 +229,7 @@ public:
   kj::String btoa(v8::Local<v8::Value> data, v8::Isolate* isolate);
   v8::Local<v8::String> atob(kj::String data, v8::Isolate* isolate);
 
-  void queueMicrotask(v8::Local<v8::Function> task, v8::Isolate* isolate);
+  void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::Value>> transfer;
@@ -242,22 +242,20 @@ public:
       jsg::Optional<StructuredCloneOptions> options,
       v8::Isolate* isolate);
 
-  TimeoutId::NumberType setTimeout(
-      jsg::V8Ref<v8::Function> function,
-      jsg::Optional<double> msDelay,
-      jsg::Varargs args,
-      v8::Isolate* isolate);
+  TimeoutId::NumberType setTimeout(jsg::Lock& js,
+                                   jsg::V8Ref<v8::Function> function,
+                                   jsg::Optional<double> msDelay,
+                                   jsg::Varargs args);
   void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
 
   TimeoutId::NumberType setTimeoutInternal(
       jsg::Function<void()> function,
       double msDelay);
 
-  TimeoutId::NumberType setInterval(
-      jsg::V8Ref<v8::Function> function,
-      jsg::Optional<double> msDelay,
-      jsg::Varargs args,
-      v8::Isolate* isolate);
+  TimeoutId::NumberType setInterval(jsg::Lock& js,
+                                    jsg::V8Ref<v8::Function> function,
+                                    jsg::Optional<double> msDelay,
+                                    jsg::Varargs args);
   void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) { clearTimeout(timeoutId); }
 
   jsg::Promise<jsg::Ref<Response>> fetch(

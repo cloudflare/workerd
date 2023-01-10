@@ -108,9 +108,10 @@ public:
   // If maybeStorageEntry is non-null, the associated storage cell in the new frame is
   // set to the given value.
 
-  static v8::Local<v8::Function> wrap(Lock& js, v8::Local<v8::Function> fn,
-                                      kj::Maybe<AsyncContextFrame&> maybeFrame = nullptr,
-                                      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+  static v8::Local<v8::Function> wrap(
+      Lock& js, v8::Local<v8::Function> fn,
+      kj::Maybe<AsyncContextFrame&> maybeFrame,
+      kj::Maybe<v8::Local<v8::Value>> thisArg);
   // Associates the given JavaScript function with the given AsyncContextFrame, returning
   // a wrapper function that will ensure appropriate propagation of the async context
   // when the wrapper function is called. If maybeFrame is not specified, the current()
