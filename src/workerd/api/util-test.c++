@@ -15,6 +15,16 @@ void expectUnredacted(kj::StringPtr input) {
   KJ_EXPECT(redactUrl(input) == input, redactUrl(input), input);
 }
 
+void expectCTypeParameter(kj::StringPtr input, kj::StringPtr param, kj::StringPtr expected) {
+  auto res = readContentTypeParameter(input, param);
+  KJ_ASSERT_NONNULL(res);
+
+  KJ_IF_MAYBE(valueArr, res) {
+    auto value = kj::str(*valueArr);
+    KJ_EXPECT(value == expected, value, expected);
+  }
+}
+
 KJ_TEST("redactUrl can detect hex ids") {
   // no id:
   expectUnredacted(""_kj);
@@ -51,6 +61,52 @@ KJ_TEST("redactUrl can detect base64 ids") {
 
   // not enough digits:
   expectUnredacted("https://domain/IThinkIShallNeverSee0/x"_kj);
+}
+
+KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
+
+  // normal
+  expectCTypeParameter(
+    "multipart/form-data; boundary=\"__boundary__\""_kj,
+    "boundary"_kj,
+    "__boundary__"_kj
+  );
+
+  // multiple params
+  expectCTypeParameter(
+    "multipart/form-data; charset=utf-8; boundary=\"__boundary__\""_kj,
+    "boundary"_kj,
+    "__boundary__"_kj
+  );
+
+ // param name inside value of other param
+  expectCTypeParameter(
+    "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
+    "boundary"_kj,
+    "__boundary__"_kj
+  );
+
+  // ensure param is not found
+  auto res = readContentTypeParameter(
+    "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
+    "boundary1"_kj
+  );
+  KJ_ASSERT(res == nullptr);
+
+  // no quotes
+  expectCTypeParameter(
+    "multipart/form-data; charset=\"boundary=;\"; boundary=__boundary__"_kj,
+    "boundary"_kj,
+    "__boundary__"_kj
+  );
+
+  // attribute names are case-insensitive, but values are not
+  expectCTypeParameter(
+    "multipart/form-data; charset=\"boundary=;\"; boundary=__Boundary__"_kj,
+    "Boundary"_kj,
+    "__Boundary__"_kj
+  );
+
 }
 
 }  // namespace
