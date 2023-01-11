@@ -30,7 +30,6 @@ wd_cc_library(
     deps = [
         ":workerd_capnp",
         "@capnp-cpp//src/capnp:capnpc",
-        "//src/node:bundle",
         "//src/workerd/io",
         "//src/workerd/jsg",
     ],
