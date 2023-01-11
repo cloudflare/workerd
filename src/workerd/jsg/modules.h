@@ -241,6 +241,7 @@ public:
 
   void addBuiltinBundle(Bundle::Reader bundle) {
     for (auto module: bundle.getModules()) {
+      // TODO: asChars() might be wrong for wide characters
       addBuiltinModule(module.getName(), module.getSrc().asChars(),
           module.getInternal() ? Type::INTERNAL : Type::BUILTIN);
     }
