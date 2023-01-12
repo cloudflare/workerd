@@ -9,8 +9,45 @@
 namespace workerd::api {
 
 
+bool isValidAddress(kj::StringPtr address) {
+  // This function performs some basic length and characters checks, it does not guarantee that
+  // the specified address is a valid domain. It should only be used to reject malicious
+  // addresses.
+  if (address.size() > (255 + 6) || address.size() == 0) {
+    // RFC1035 states that maximum domain name length is 255 octets. But we also add 6 to support
+    // port numbers in the address.
+    //
+    // IP addresses are always shorter, so we take the max domain length instead.
+    return false;
+  }
+
+  for (int i = 0; i < address.size(); i++) {
+    switch (address[i]) {
+      case '-':
+      case '.':
+      case ':':
+      case '_':
+      case '[': case ']': // For IPv6.
+      case '/': // To enable "unix:/" addresses (only used for testing, the proxy should reject this).
+        break;
+      default:
+        if ((address[i] >= 'a' && address[i] <= 'z') ||
+            (address[i] >= 'A' && address[i] <= 'Z') ||
+            (address[i] >= '0' && address[i] <= '9')) {
+          break;
+        }
+        return false;
+    }
+  }
+  return true;
+}
+
 jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, jsg::Ref<Fetcher> fetcher, kj::String address) {
+
+  JSG_REQUIRE(isValidAddress(address), TypeError,
+      "Specified address is empty string, contains unsupported characters or is too long.");
+
   auto& ioContext = IoContext::current();
 
   auto jsRequest = Request::constructor(js, kj::str(address), nullptr);
