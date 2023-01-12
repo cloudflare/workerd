@@ -1477,3 +1477,73 @@ type. This macro accepts a single define parameter containing one or more TypeSc
 can contain `,` outside of balanced brackets. This macro can only be used once per
 `JSG_RESOURCE_TYPE` block/`JSG_STRUCT` definition. The `declare` modifier will be added to any
 `class`, `enum`, `const`, `var` or `function` definitions if it's not already present.
+
+## Async Context Tracking
+
+JSG provides a mechanism for rudimentary async context tracking to support the implementation
+of async local storage. This is provided by the `workerd::jsg::AsyncContextFrame` class defined in
+`src/workerd/jsg/async-context.h`.
+
+`AsyncContextFrame`s form a stack. For every `v8::Isolate` there is always a root frame.
+"Entering" a frame means pushing it to the top of the stack, making it "current". Exiting
+a frame means popping it back off the top of the stack.
+
+Every `AsyncContextFrame` has a storage context. The storage context is a map of multiple
+individual storage cells, each tied to an opaque key.
+
+When a new `AsyncContextFrame` is created, the storage context of the current is propagated to the
+new resource's storage context.
+
+All JavaScript promises, timers, and microtasks propagate the async context. In JavaScript,
+we have implemented the `AsyncLocalStorage` and `AsyncResource` APIs for this purpose.
+For example:
+
+```js
+import { default as async_hooks } from 'node:async_hooks';
+const { AsyncLocalStorage } = async_hooks;
+
+const als = new AsyncLocalStorage();
+
+als.run(123, () => scheduler.wait(10)).then(() => {
+  console.log(als.getStore());  // 123
+});
+console.log(als.getStore());  // undefined
+```
+
+Any type can act as an async resource by acquiring a reference to the current Async
+Context Frame.
+
+```cpp
+jsg::Lock& js = ...;
+kj::Own<jsg::AsyncContextFrame> frame = kj::addRef(jsg::AsyncResource::current(js));
+
+// enter the async resource scope:
+{
+  jsg::AsyncContextFrame::Scope asyncScope(js, *frame);
+  // run some code synchronously...
+}
+// The async scope will exit automatically...
+```
+
+The `jsg::AsyncResource::StorageScope` can be used to temporarily set the stored value
+associated with a given storage key in the current AsyncResource's storage context:
+
+```js
+class MyStorageKey: public jsg::StorageKey {
+  // ...
+}
+
+jsg::Lock& js = ...
+jsg::Value value = ...
+
+// The storage key must be kj::Refcounted. References to the key will be retained
+// by any AsyncResources that are created within the storage scope.
+kj::Own<MyStorageKey> key = kj::refcounted<MyStorageKey>();
+
+{
+  jsg::AsyncResource::StorageScope(js, *key, value);
+  // run some code synchronously
+}
+// The storage cell will be automatically reset to the previous value
+// with the scope exits.
+```

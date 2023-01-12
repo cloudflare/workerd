@@ -1787,6 +1787,12 @@ template <typename TypeWrapper>
 class Isolate;
 // Defined in setup.h -- most code doesn't need to use these directly.
 
+class AsyncContextFrame;
+
+#define JSG_PRIVATE_SYMBOLS(V)       \
+  V(ASYNC_CONTEXT, "asyncContext")
+// Defines the enum values for Lock::PrivateSymbols.
+
 class Lock {
   // Represents an isolate lock, which allows the current thread to execute JavaScript code within
   // an isolate. A thread must lock an isolate -- obtaining an instance of `Lock` -- before it can
@@ -1975,6 +1981,15 @@ public:
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
       jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
+  virtual v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
+      jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)> returningFunction) = 0;
+  // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
+  // implementation passes the FunctionCallbackInfo into the called function, any call to
+  // GetReturnValue().Set(...) to specify a return value will be ignored by the FunctorCallback
+  // wrapper. The wrapReturningFunction variation forces the wrapper to use the version that
+  // pays attention to the return value.
+  // TODO(later): See if we can easily combine wrapSimpleFunction and wrapReturningFunction
+  // into one.
 
   bool toBool(v8::Local<v8::Value> value);
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;
@@ -2001,6 +2016,18 @@ public:
   // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
   // it will throw. If a need for a minor GC is needed look at the call in jsg.c++ and the
   // implementation in setup.c++. Use responsibly.
+
+#define V(name, _) name,
+  enum PrivateSymbols {
+    JSG_PRIVATE_SYMBOLS(V)
+    SYMBOL_COUNT,
+    // The SYMBOL_COUNT is a special token used to size the array for storing the
+    // symbol instances. It must always be the last item in the enum. To add private
+    // symbols, add values to the JSG_PRIVATE_SYMBOLS define.
+  };
+#undef V
+
+  v8::Local<v8::Private> getPrivateSymbolFor(PrivateSymbols symbol);
 
 private:
   friend class IsolateBase;
