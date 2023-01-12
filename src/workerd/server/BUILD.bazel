@@ -3,6 +3,11 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 
+config_setting(
+    name = "is_linux",
+    constraint_values = ["@platforms//os:linux"],
+)
+
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
@@ -13,7 +18,10 @@ wd_cc_binary(
         ":workerd_capnp",
         ":workerd-meta_capnp",
     ],
-    malloc = "@com_google_tcmalloc//tcmalloc",
+    malloc = select({
+        ":is_linux": "@com_google_tcmalloc//tcmalloc",
+        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
+    }),
 )
 
 wd_cc_library(
