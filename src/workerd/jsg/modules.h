@@ -7,6 +7,7 @@
 #include "jsg.h"
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <workerd/jsg/modules.capnp.h>
 
 namespace workerd::jsg {
 
@@ -236,6 +237,14 @@ public:
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
     entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
+  }
+
+  void addBuiltinBundle(Bundle::Reader bundle) {
+    for (auto module: bundle.getModules()) {
+      // TODO: asChars() might be wrong for wide characters
+      addBuiltinModule(module.getName(), module.getSrc().asChars(),
+          module.getInternal() ? Type::INTERNAL : Type::BUILTIN);
+    }
   }
 
   void addBuiltinModule(kj::StringPtr specifier,
