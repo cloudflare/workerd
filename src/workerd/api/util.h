@@ -56,8 +56,9 @@ kj::Maybe<kj::ArrayPtr<const char>> readContentTypeParameter(kj::StringPtr conte
 // would return "foobar" (without the quotes).
 //
 // Assumptions:
-//   - `contentType` has a single Content-Type parameter, e.g. "boundary" or "charset".
-//   - `contentType` has a semi-colon followed by OWS before the parameter name.
+//   - `contentType` has a semi-colon followed by OWS before the parameters.
+//   - If the wanted parameter uses quoted-string values, the correct
+//     value may not be returned.
 //
 // TODO(cleanup): Replace this function with a full kj::MimeType parser.
 

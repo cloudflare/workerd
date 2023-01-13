@@ -69,31 +69,78 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query, kj::ArrayPtr<const
 kj::Maybe<kj::ArrayPtr<const char>> readContentTypeParameter(kj::StringPtr contentType,
                                                              kj::StringPtr param) {
   KJ_IF_MAYBE(semiColon, contentType.findFirst(';')) {
+    // Get to the parameters
     contentType = contentType.slice(*semiColon + 1);
-    while (contentType.startsWith(" ")) {
-      contentType = contentType.slice(1);
-    }
 
     // The attribute name of a MIME type parameter is always case-insensitive. See definition of
     // the attribute production rule in https://tools.ietf.org/html/rfc2045#page-29
-    auto lowerContentType = toLower(kj::str(contentType));
     auto lowerParam = toLower(kj::str(param));
-    if (!lowerContentType.startsWith(lowerParam)) return nullptr;
 
-    contentType = contentType.slice(param.size());
-    if (!contentType.startsWith("=")) return nullptr;
-    contentType = contentType.slice(1);
-
-    if (contentType.size() == 0) return nullptr;
-    bool quoted = contentType[0] == '"';
-
-    if (quoted) {
-      contentType = contentType.slice(1);
-      KJ_IF_MAYBE(endQuote, contentType.findFirst('"')) {
-        return contentType.slice(0, *endQuote);
+    kj::StringPtr leftover = contentType;
+    while(true) {
+      while (leftover.startsWith(" ") || leftover.startsWith(";")) {
+        leftover = leftover.slice(1);
       }
-    } else {
-      return contentType.slice(0, contentType.size());
+
+      KJ_IF_MAYBE(equal, leftover.findFirst('=')) {
+        // Handle parameter
+        auto name = toLower(kj::str(leftover.slice(0, *equal)));
+        auto valueStart = *equal + 1;
+        kj::ArrayPtr<const char> value = nullptr;
+
+        if (leftover[valueStart] == '"') {
+          // parameter value surrounded by quotes
+          auto pos = 0;
+          auto valueStr = leftover.slice(valueStart + 1);
+
+          while(pos < valueStr.size()) {
+            if (valueStr[pos] == '\\') {
+              pos++;
+            } else if (valueStr[pos] == '"') {
+              break;
+            }
+            pos++;
+          }
+
+          if (pos >= valueStr.size()) {
+            // invalid value, no closing "
+            break;
+          }
+
+          value = leftover.slice(valueStart + 1, valueStart + 1 + pos);
+          // skip name, =, value and quotes
+          leftover = leftover.slice(name.size() + 1 + value.size() + 2);
+
+        } else {
+          // parameter value with no quotes, just glob until the next ;
+          KJ_IF_MAYBE(valueEnd, leftover.slice(valueStart).findFirst(';')) {
+            value = leftover.slice(valueStart, valueStart + *valueEnd);
+            leftover = leftover.slice(valueStart + *valueEnd + 1);
+          } else {
+            // there's nothing else
+            value = leftover.slice(valueStart);
+            leftover = leftover.slice(leftover.size());
+          }
+
+          // since there are no quotes, remove spurious whitespace at the end
+          while(value.size() > 0 && value[value.size() - 1] == ' ') {
+            value = value.slice(0, value.size() - 1);
+          }
+        }
+
+        // have we got it?
+        if (name == lowerParam && value.size() > 0) {
+          return value;
+        }
+      } else {
+        // skip to next parameter
+        KJ_IF_MAYBE(nextParam, leftover.findFirst(';')) {
+          leftover = leftover.slice(*nextParam + 1);
+        } else {
+          // we are done and we didn't find the parameter
+          break;
+        }
+      }
     }
   }
 
