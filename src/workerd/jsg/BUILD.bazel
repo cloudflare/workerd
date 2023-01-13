@@ -16,10 +16,9 @@ wd_cc_library(
     ),
     visibility = ["//visibility:public"],
     deps = [
-        ":modules_capnp",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
+        "//src/workerd/util",
     ],
 )
 
@@ -38,10 +37,10 @@ js_capnp_library(
 npm_package(
     name = "jsg_js",
     srcs = [":rtti_capnp_js"],
+    visibility = ["//visibility:public"],
     # Required to ensure source files are copied when running internal builds
     # that depend on `workerd` as an external repository
     include_external_repositories = ["workerd"],
-    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
@@ -54,12 +53,6 @@ wd_cc_library(
         # todo: move text encoding out
         "@capnp-cpp//src/capnp:capnpc",
     ],
-)
-
-wd_cc_capnp_library(
-    name = "modules_capnp",
-    srcs = ["modules.capnp"],
-    visibility = ["//visibility:public"],
 )
 
 [kj_test(
