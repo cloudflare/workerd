@@ -3285,21 +3285,20 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
   auto signalResponse = [this](kj::String requestId,
       uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
       kj::Own<kj::AsyncOutputStream> responseBody) -> kj::Own<kj::AsyncOutputStream> {
-    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics));
-    auto& isolate = const_cast<Isolate&>(*constIsolate);
+    // Note that we cannot take the isolate lock here, because if this is a worker-to-worker
+    // subrequest, the destination isolate's lock may already be held, and we can't take multiple
+    // isolate locks at once as this could lead to deadlock if the lock orders aren't consistent.
+    //
+    // Meanwhile, though, `statusText` and `headers` may point to things that will go away
+    // immediately after we return. So, let's construct our message now, so that we don't have to
+    // make redundant copies.
+    //
+    // Note that signalResponse() is only called at all if signalRequest() determined that network
+    // inspection is enabled.
 
-    if (isolate.currentInspectorSession == nullptr) {
-      return kj::mv(responseBody);
-    }
+    auto message = kj::heap<capnp::MallocMessageBuilder>();
 
-    auto& i = KJ_ASSERT_NONNULL(isolate.currentInspectorSession);
-    if (!i.isNetworkEnabled()) {
-      return kj::mv(responseBody);
-    }
-
-    capnp::MallocMessageBuilder message;
-
-    auto event = message.initRoot<cdp::Event>();
+    auto event = message->initRoot<cdp::Event>();
 
     auto params = event.initNetworkResponseReceived();
     params.setRequestId(requestId);
@@ -3356,8 +3355,6 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
     }
     headersToCDP(headers, response.initHeaders());
 
-    i.sendNotification(event);
-
     auto encoding = api::StreamEncoding::IDENTITY;
     KJ_IF_MAYBE(encodingStr, headers.get(contentEncodingHeaderId)) {
       if (*encodingStr == "gzip") {
@@ -3365,11 +3362,34 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
       }
     }
 
-    return kj::heap<ResponseStreamWrapper>(kj::atomicAddRef(*constIsolate),
-                                           kj::mv(requestId),
-                                           kj::mv(responseBody),
-                                           encoding,
-                                           *requestMetrics);
+    // Defer to a later turn of the event loop so that it's safe to take a lock.
+    return kj::newPromisedStream(kj::evalLater(
+        [this, responseBody = kj::mv(responseBody), message = kj::mv(message), event, encoding,
+         requestId = kj::mv(requestId)]
+        () mutable -> kj::Own<kj::AsyncOutputStream> {
+      // Now we know we can lock...
+      Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics));
+      auto& isolate = const_cast<Isolate&>(*constIsolate);
+
+      // We shouldn't even get here if network inspection isn't active since signalRequest() would
+      // have returned null... but double-check anyway.
+      if (isolate.currentInspectorSession == nullptr) {
+        return kj::mv(responseBody);
+      }
+
+      auto& i = KJ_ASSERT_NONNULL(isolate.currentInspectorSession);
+      if (!i.isNetworkEnabled()) {
+        return kj::mv(responseBody);
+      }
+
+      i.sendNotification(event);
+
+      return kj::heap<ResponseStreamWrapper>(kj::atomicAddRef(*constIsolate),
+                                             kj::mv(requestId),
+                                             kj::mv(responseBody),
+                                             encoding,
+                                             *requestMetrics);
+    }));
   };
   typedef decltype(signalResponse) SignalResponse;
 
