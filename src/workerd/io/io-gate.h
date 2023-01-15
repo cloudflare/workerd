@@ -280,16 +280,6 @@ private:
 // =======================================================================================
 // inline implementation details
 
-inline InputGate::Lock::Lock(InputGate& gate)
-    : gate(&gate),
-      cs(gate.isCriticalSection
-          ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
-          : nullptr) {
-  if (++gate.lockCount == 1) {
-    gate.hooks.inputGateLocked();
-  }
-}
-
 template <typename T>
 kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise) {
   auto fulfiller = lock();

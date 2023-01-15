@@ -62,6 +62,24 @@ kj::Promise<void> InputGate::onBroken() {
   }
 }
 
+InputGate::Lock::Lock(InputGate& gate)
+    : gate(&gate),
+      cs(gate.isCriticalSection
+          ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
+          : nullptr) {
+  InputGate* gateToLock = &gate;
+
+  KJ_IF_MAYBE(c, cs) {
+    if (c->get()->state == CriticalSection::REPARENTED) {
+      gateToLock = &c->get()->parentAsInputGate();
+    }
+  }
+
+  if (++gateToLock->lockCount == 1) {
+    gateToLock->hooks.inputGateLocked();
+  }
+}
+
 void InputGate::releaseLock() {
   if (isCriticalSection) {
     auto& self = static_cast<CriticalSection&>(*this);
@@ -72,6 +90,7 @@ void InputGate::releaseLock() {
       // Ensure any waiters on us have already been reparented.
       KJ_DASSERT(self.waitingChildren.size() == 0);
       KJ_DASSERT(self.waiters.size() == 0);
+      KJ_DASSERT(lockCount == 0);
 
       self.parentAsInputGate().releaseLock();
       return;

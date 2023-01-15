@@ -297,6 +297,9 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   // Lock should have been reparented, so should still work.
   KJ_ASSERT(lock.isFor(gate));
 
+  // Adding a ref and dropping it shouldn't cause trouble.
+  lock.addRef();
+
   // The gate should still be locked
   auto waiter = gate.wait();
   KJ_EXPECT(!waiter.poll(ws));
