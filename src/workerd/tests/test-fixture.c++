@@ -188,6 +188,7 @@ TestFixture::TestFixture(SetupParams params)
       scriptId,
       Worker::Script::ScriptSource {
         script,
+        "main.js"_kj,
         [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate)
             -> kj::Array<Worker::Script::CompiledGlobal> {
           return nullptr;
