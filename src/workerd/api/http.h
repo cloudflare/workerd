@@ -13,6 +13,7 @@
 #include "form-data.h"
 #include "web-socket.h"
 #include "url.h"
+#include "url-standard.h"
 #include "blob.h"
 #include <workerd/io/compatibility-date.capnp.h>
 
@@ -784,7 +785,7 @@ public:
   //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
 
   static jsg::Ref<Response> redirect(
-      jsg::Lock& js, kj::String url, jsg::Optional<int> status, CompatibilityFlags::Reader flags);
+      jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status, CompatibilityFlags::Reader flags);
   // Constructs a redirection response. `status` must be a redirect status if given, otherwise it
   // defaults to 302 (technically a non-conformity, but both Chrome and Firefox use this default).
   //

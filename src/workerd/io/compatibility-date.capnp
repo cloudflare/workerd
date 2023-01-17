@@ -245,4 +245,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables TCP sockets in workerd.
   # These are still under development and therefore subject to change.
   # WARNING: DO NOT depend on this feature as its API is still subject to change.
+
+  specCompliantResponseRedirect @23 :Bool
+      $compatEnableDate("2023-03-14")
+      $compatEnableFlag("response_redirect_url_standard")
+      $compatDisableFlag("response_redirect_url_original");
+  # The original URL implementation based on kj::Url is not compliant with the
+  # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
+  # the specCompliantUrl flag did not contemplate the redirect usage. This flag is
+  # specifically about the usage in a redirect().
 }

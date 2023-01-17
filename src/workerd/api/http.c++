@@ -1082,7 +1082,7 @@ jsg::Ref<Response> Response::constructor(
 }
 
 jsg::Ref<Response> Response::redirect(
-    jsg::Lock& js, kj::String url, jsg::Optional<int> status, CompatibilityFlags::Reader flags) {
+    jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status, CompatibilityFlags::Reader flags) {
   auto statusCode = status.orDefault(302);
   if (!isRedirectStatusCode(statusCode)) {
     JSG_FAIL_REQUIRE(RangeError,
@@ -1092,12 +1092,22 @@ jsg::Ref<Response> Response::redirect(
 
   // TODO(conform): The URL is supposed to be parsed relative to the "current setting's object's API
   //   base URL".
-  auto urlOptions = kj::Url::Options { .percentDecode = false, .allowEmpty = true };
-  auto maybeParsedUrl = kj::Url::tryParse(url, kj::Url::REMOTE_HREF, urlOptions);
-  if (maybeParsedUrl == nullptr) {
-    JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
+  kj::String parsedUrl = nullptr;
+  if (flags.getSpecCompliantResponseRedirect()) {
+    auto maybeParsedUrl = url::URL::parse(url);
+    if (maybeParsedUrl == nullptr) {
+      JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
+    }
+    parsedUrl = kj::str(KJ_ASSERT_NONNULL(kj::mv(maybeParsedUrl)).getHref());
+  } else {
+    auto urlOptions = kj::Url::Options { .percentDecode = false, .allowEmpty = true };
+    auto maybeParsedUrl = kj::Url::tryParse(kj::str(url), kj::Url::REMOTE_HREF, urlOptions);
+    if (maybeParsedUrl == nullptr) {
+      JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
+    }
+    parsedUrl = KJ_ASSERT_NONNULL(kj::mv(maybeParsedUrl)).toString();
   }
-  auto parsedUrl = KJ_ASSERT_NONNULL(kj::mv(maybeParsedUrl)).toString();
+
   if (!kj::HttpHeaders::isValidHeaderValue(parsedUrl)) {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Redirect URL cannot contain '\\r', '\\n', or '\\0': ",
         url));
