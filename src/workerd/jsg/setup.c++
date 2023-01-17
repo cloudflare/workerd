@@ -9,6 +9,7 @@
 
 #include "setup.h"
 #include "async-context.h"
+#include <workerd/util/uuid.h>
 #include <cxxabi.h>
 #include "libplatform/libplatform.h"
 #include <ucontext.h>
@@ -639,6 +640,12 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
   *pos = '\0';
   return kj::StringPtr(scratch.begin(), pos - scratch.begin());
+}
+
+kj::StringPtr IsolateBase::getUuid() {
+  // Lazily create a random UUID for this isolate.
+  KJ_IF_MAYBE(u, uuid) { return *u; }
+  return uuid.emplace(randomUUID(nullptr));
 }
 
 }  // namespace workerd::jsg

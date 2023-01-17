@@ -173,6 +173,10 @@ void Lock::requestGcForTesting() const {
     v8::Isolate::GarbageCollectionType::kFullGarbageCollection);
 }
 
+kj::StringPtr Lock::getUuid() const {
+  return IsolateBase::from(v8Isolate).getUuid();
+}
+
 v8::Local<v8::Private> Lock::getPrivateSymbolFor(Lock::PrivateSymbols symbol) {
   return IsolateBase::from(v8Isolate).getPrivateSymbolFor(symbol);
 }

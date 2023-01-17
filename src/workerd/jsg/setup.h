@@ -106,6 +106,9 @@ public:
 
   v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
 
+  kj::StringPtr getUuid();
+  // Returns a random UUID for this isolate instance.
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -136,6 +139,7 @@ private:
 
   const V8System& system;
   v8::Isolate* ptr;
+  kj::Maybe<kj::String> uuid;
   bool evalAllowed = false;
   bool captureThrowsAsRejections = false;
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
