@@ -1,5 +1,5 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@//:build/wd_api_bundle.bzl", "wd_api_bundle")
+load("@workerd//:build/wd_api_bundle.bzl", "wd_api_bundle")
 
 modules = glob(["*.ts"])
 

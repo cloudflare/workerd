@@ -35,10 +35,10 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "4a642173569caf4869150d6ec08e40644158b5148f485979bbf15244c4f09df2",
-    strip_prefix = "capnproto-capnproto-6a1dcb8/c++",
+    sha256 = "79d1ae721c79bd5679ff3036961045c410eccf6dd8199fef4767ca9c343eb438",
+    strip_prefix = "capnproto-capnproto-f557d9d/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/6a1dcb8e4b2864b95e4be43ed6314f5334d457fa"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/f557d9d728a773d954cf0586fe6e78adf828c5f4"],
 )
 
 http_archive(
@@ -171,6 +171,10 @@ crate_repositories()
 load("//rust-deps/cxxbridge_crates:crates.bzl", cxxbridge_repositories = "crate_repositories")
 
 cxxbridge_repositories()
+
+load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
+
+rust_analyzer_dependencies()
 
 # ========================================================================================
 # Node.js bootstrap

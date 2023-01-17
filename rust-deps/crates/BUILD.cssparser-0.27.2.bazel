@@ -95,7 +95,7 @@ rust_library(
             "@crates_vendor__itoa-0.4.8//:itoa",
             "@crates_vendor__matches-0.1.9//:matches",
             "@crates_vendor__phf-0.8.0//:phf",
-            "@crates_vendor__smallvec-1.9.0//:smallvec",
+            "@crates_vendor__smallvec-1.10.0//:smallvec",
         ],
     }),
 )
@@ -162,9 +162,9 @@ cargo_build_script(
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.44//:proc_macro2",
+            "@crates_vendor__proc-macro2-1.0.47//:proc_macro2",
             "@crates_vendor__quote-1.0.21//:quote",
-            "@crates_vendor__syn-1.0.101//:syn",
+            "@crates_vendor__syn-1.0.103//:syn",
         ],
     }),
 )

@@ -18,12 +18,11 @@
 #include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/node/node.h>
 #include <workerd/util/thread-scopes.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
-
-#include <node/bundle.capnp.h>
 
 namespace workerd::server {
 
@@ -65,6 +64,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_URL_STANDARD_ISOLATE_TYPES,
   EW_URLPATTERN_ISOLATE_TYPES,
   EW_WEBSOCKET_ISOLATE_TYPES,
+  EW_NODE_ISOLATE_TYPES,
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -157,7 +157,8 @@ const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
 
-Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader conf,
+Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
+    config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter) {
   switch (conf.which()) {
     case config::Worker::MODULES: {
@@ -178,6 +179,7 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader c
     case config::Worker::SERVICE_WORKER_SCRIPT:
       return Worker::Script::ScriptSource {
         conf.getServiceWorkerScript(),
+        name,
         [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
               .compileScriptGlobals(lock, conf, errorReporter);
@@ -193,6 +195,7 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(config::Worker::Reader c
 invalid:
   return Worker::Script::ScriptSource {
     ""_kj,
+    name,
     [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate)
         -> kj::Array<Worker::Script::CompiledGlobal> {
       return nullptr;
@@ -234,7 +237,6 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     Worker::ValidationErrorReporter& errorReporter) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
-  auto& featureFlags = *impl->features;
 
   auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>();
 
@@ -315,8 +317,8 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     }
   }
 
-  if (featureFlags.getNodeJsCompat()) {
-    modules->addBuiltinBundle(NODE_BUNDLE);
+  if (getFeatureFlags().getNodeJsCompat()) {
+    api::node::registerNodeJsCompatModules(*modules, getFeatureFlags());
   }
 
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);

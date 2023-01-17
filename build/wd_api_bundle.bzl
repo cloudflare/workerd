@@ -98,6 +98,6 @@ def wd_api_bundle(
         strip_include_prefix = "",
         visibility = ["//visibility:public"],
         data = data,
-        deps = ["//src/workerd/jsg:modules_capnp"],
+        deps = ["@workerd//src/workerd/jsg:modules_capnp"],
         **kwargs
     )
