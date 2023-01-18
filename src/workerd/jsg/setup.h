@@ -11,7 +11,6 @@
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
-#include <deque>
 
 namespace workerd::jsg {
 
@@ -238,19 +237,9 @@ private:
   static void promiseHook(v8::PromiseHookType type,
                           v8::Local<v8::Promise> promise,
                           v8::Local<v8::Value> parent);
-  void pushAsyncFrame(AsyncContextFrame& next);
-  // Pushes the frame onto the stack making it current. Importantly, the stack
-  // does not maintain a refcounted reference to the frame so it is important
-  // for the caller to ensure that the frame is kept alive.
-  void pushRootAsyncFrame();
-  void popAsyncFrame();
 
-  struct RootAsyncContextFrame {
-    // A sentinel for the RootAsyncContextFrame. Used only for bookkeeping
-    // in the async frame stack below.
-  };
-
-  kj::Vector<kj::OneOf<AsyncContextFrame*, RootAsyncContextFrame>> asyncFrameStack;
+  void setCurrentAsyncContextFrame(kj::Maybe<AsyncContextFrame&> maybeFrame);
+  kj::Maybe<AsyncContextFrame&> maybeCurrentAsyncContextFrame;
 
   friend class AsyncContextFrame;
 };

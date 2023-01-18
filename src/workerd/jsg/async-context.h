@@ -131,6 +131,7 @@ public:
     // AsyncContextFrame::Scope makes the given AsyncContextFrame the current in the
     // stack until the scope is destroyed.
     IsolateBase& isolate;
+    kj::Maybe<AsyncContextFrame&> prior;
     Scope(Lock& js, kj::Maybe<AsyncContextFrame&> frame = nullptr);
     Scope(v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> frame = nullptr);
     // If frame is nullptr, the root frame is assumed.
@@ -141,6 +142,7 @@ public:
   kj::Maybe<Value&> get(StorageKey& key);
   // Retrieves the value that is associated with the given key.
 
+  v8::Local<v8::Object> getJSWrapper(v8::Isolate* isolate);
   v8::Local<v8::Object> getJSWrapper(Lock& js);
   // Gets an opaque JavaScript Object wrapper object for this frame. If a wrapper
   // does not currently exist, one is created. This wrapper is only used to set a
