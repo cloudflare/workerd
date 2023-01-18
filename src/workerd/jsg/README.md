@@ -1515,11 +1515,10 @@ Context Frame.
 
 ```cpp
 jsg::Lock& js = ...;
-kj::Own<jsg::AsyncContextFrame> frame = kj::addRef(jsg::AsyncResource::current(js));
 
 // enter the async resource scope:
 {
-  jsg::AsyncContextFrame::Scope asyncScope(js, *frame);
+  jsg::AsyncContextFrame::Scope asyncScope(js, jsg::AsyncResource::current(js));
   // run some code synchronously...
 }
 // The async scope will exit automatically...

@@ -8,7 +8,7 @@
 
 namespace workerd::jsg {
 
-class AsyncContextFrame: public Wrappable {
+class AsyncContextFrame final: public Wrappable {
   // Provides for basic internal async context tracking. Eventually, it is expected that
   // this will be provided by V8 assuming that the AsyncContext proposal advances through
   // TC-39. For now, however, we implement a model that is similar but not quite identical
@@ -85,42 +85,41 @@ public:
 
     inline StorageEntry clone(Lock& js) {
       return {
-        .key = addRef(*key),
+        .key = kj::addRef(*key),
         .value = value.addRef(js)
       };
     }
   };
 
-  AsyncContextFrame(IsolateBase& isolate);
-  AsyncContextFrame(
-      Lock& js,
-      kj::Maybe<AsyncContextFrame&> maybeParent = nullptr,
-      kj::Maybe<StorageEntry> maybeStorageEntry = nullptr);
+  AsyncContextFrame(Lock& js, StorageEntry storageEntry);
 
-  static AsyncContextFrame& current(Lock& js);
-  // Returns the reference to the AsyncContextFrame currently at the top of the stack.
+  inline Ref<AsyncContextFrame> addRef() { return JSG_THIS; }
 
-  static Ref<AsyncContextFrame> create(
-      Lock& js,
-      kj::Maybe<AsyncContextFrame&> maybeParent = nullptr,
-      kj::Maybe<StorageEntry> maybeStorageEntry = nullptr);
-  // Create a new AsyncContextFrame. If maybeParent is not specified, uses the current().
-  // If maybeStorageEntry is non-null, the associated storage cell in the new frame is
-  // set to the given value.
+  static kj::Maybe<AsyncContextFrame&> current(Lock& js);
+  // Returns the reference to the AsyncContextFrame currently at the top of the stack, if any.
 
-  static v8::Local<v8::Function> wrap(
+  static Ref<AsyncContextFrame> create(Lock& js, StorageEntry storageEntry);
+  // Create a new AsyncContextFrame. The new frame inherits the storage context of the current
+  // frame (if any) and the given StorageEntry is added.
+
+  static v8::Local<v8::Function> wrapRoot(
       Lock& js, v8::Local<v8::Function> fn,
-      kj::Maybe<AsyncContextFrame&> maybeFrame,
-      kj::Maybe<v8::Local<v8::Value>> thisArg);
-  // Associates the given JavaScript function with the given AsyncContextFrame, returning
-  // a wrapper function that will ensure appropriate propagation of the async context
-  // when the wrapper function is called. If maybeFrame is not specified, the current()
-  // frame is used.
+      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+  // Wraps the given JavaScript function such that whenever the wrapper function is called,
+  // the root AsyncContextFrame will be entered.
 
-  static void attachContext(Lock& js, v8::Local<v8::Promise> promise,
-                            kj::Maybe<AsyncContextFrame&> maybeFrame = nullptr);
-  // Associates the given JavaScript promise with the given AsyncContextFrame, returning
-  // the same promise back. If maybeFrame is not specified, the current() frame is used.
+  v8::Local<v8::Function> wrap(
+      Lock& js, V8Ref<v8::Function>& fn,
+      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+  v8::Local<v8::Function> wrap(
+      Lock& js, v8::Local<v8::Function> fn,
+      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+  // Associates the given JavaScript function with this AsyncContextFrame, returning
+  // a wrapper function that will ensure appropriate propagation of the async context
+  // when the wrapper function is called.
+
+  void attachContext(Lock& js, v8::Local<v8::Promise> promise);
+  // Associates the given JavaScript promise with this AsyncContextFrame.
 
   static kj::Maybe<AsyncContextFrame&> tryGetContext(Lock& js, V8Ref<v8::Promise>& promise);
   static kj::Maybe<AsyncContextFrame&> tryGetContext(Lock& js, v8::Local<v8::Promise> promise);
@@ -141,9 +140,6 @@ public:
 
   kj::Maybe<Value&> get(StorageKey& key);
   // Retrieves the value that is associated with the given key.
-
-  bool isRoot(Lock& js) const;
-  // True only if this AsyncContextFrame is the root frame for the given isolate.
 
   v8::Local<v8::Object> getJSWrapper(Lock& js);
   // Gets an opaque JavaScript Object wrapper object for this frame. If a wrapper
