@@ -49,14 +49,22 @@ v8::Local<v8::Value> AsyncLocalStorage::exit(
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
-  KJ_IF_MAYBE(value, jsg::AsyncContextFrame::current(js).get(*key)) {
-    return value->getHandle(js);
+  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_MAYBE(value, context->get(*key)) {
+      return value->getHandle(js);
+    }
   }
   return v8::Undefined(js.v8Isolate);
 }
 
-AsyncResource::AsyncResource(jsg::Lock& js)
-    : frame(kj::addRef(jsg::AsyncContextFrame::current(js))) {}
+namespace {
+kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> tryGetFrameRef(jsg::Lock& js) {
+  return jsg::AsyncContextFrame::current(js).map(
+      [](jsg::AsyncContextFrame& frame) { return frame.addRef(); });
+}
+}  // namespace
+
+AsyncResource::AsyncResource(jsg::Lock& js) : frame(tryGetFrameRef(js)) {}
 
 jsg::Ref<AsyncResource> AsyncResource::constructor(
     jsg::Lock& js,
@@ -79,13 +87,24 @@ v8::Local<v8::Function> AsyncResource::staticBind(
           ->bind(js, fn, thisArg, handler);
 }
 
+kj::Maybe<jsg::AsyncContextFrame&> AsyncResource::getFrame() {
+  return frame.map([](jsg::Ref<jsg::AsyncContextFrame>& frame)
+      -> jsg::AsyncContextFrame& {
+    return *(frame.get());
+  });
+}
+
 v8::Local<v8::Function> AsyncResource::bind(
     jsg::Lock& js,
     v8::Local<v8::Function> fn,
     jsg::Optional<v8::Local<v8::Value>> thisArg,
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
-  auto& frame = jsg::AsyncContextFrame::current(js);
-  v8::Local<v8::Function> bound = jsg::AsyncContextFrame::wrap(js, fn, frame, thisArg);
+  v8::Local<v8::Function> bound;
+  KJ_IF_MAYBE(frame, getFrame()) {
+    bound = frame->wrap(js, fn, thisArg);
+  } else {
+    bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
+  }
 
   // Per Node.js documentation (https://nodejs.org/dist/latest-v19.x/docs/api/async_context.html#asyncresourcebindfn-thisarg), the returned function "will have an
   // asyncResource property referencing the AsyncResource to which the function
@@ -108,7 +127,7 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(
 
   auto context = js.v8Isolate->GetCurrentContext();
 
-  jsg::AsyncContextFrame::Scope scope(js, *frame);
+  jsg::AsyncContextFrame::Scope scope(js, getFrame());
 
   return jsg::check(fn->Call(
       context,

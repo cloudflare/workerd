@@ -102,7 +102,6 @@ public:
   }
 
   void setAsyncContextTrackingEnabled();
-  AsyncContextFrame* getRootAsyncContext();
 
   v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
 
@@ -247,15 +246,15 @@ private:
   // Pushes the frame onto the stack making it current. Importantly, the stack
   // does not maintain a refcounted reference to the frame so it is important
   // for the caller to ensure that the frame is kept alive.
+  void pushRootAsyncFrame();
   void popAsyncFrame();
 
-  kj::Vector<AsyncContextFrame*> asyncFrameStack;
-  kj::Maybe<Ref<AsyncContextFrame>> rootAsyncFrame;
-  // The rootAsyncFrame is a maybe because it is lazily initialized.
-  // We cannot create Ref's within the IsolateBase constructor and
-  // we don't want this to be a bare kj::Own because it might have
-  // a JS wrapper associated with it. Calling getRootAsyncContext
-  // for the first time will lazily create the root frame.
+  struct RootAsyncContextFrame {
+    // A sentinel for the RootAsyncContextFrame. Used only for bookkeeping
+    // in the async frame stack below.
+  };
+
+  kj::Vector<kj::OneOf<AsyncContextFrame*, RootAsyncContextFrame>> asyncFrameStack;
 
   friend class AsyncContextFrame;
 };
