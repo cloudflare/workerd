@@ -2195,7 +2195,9 @@ public:
   using Readable = kj::Own<T>;
 
   PumpToReader(Readable readable, kj::Own<WritableStreamSink> sink, bool end)
-    : state(kj::mv(readable)), sink(kj::mv(sink)), end(end) {
+    : state(kj::mv(readable)),
+      sink(IoContext::current().addObject(kj::mv(sink))),
+      end(end) {
     AllReaderBase* base = this;
     state.template get<Readable>()->setOwner(base);
   }
@@ -2215,7 +2217,7 @@ public:
 
 private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Readable> state;
-  kj::Own<WritableStreamSink> sink;
+  IoOwn<WritableStreamSink> sink;
   bool end;
 
   jsg::Promise<void> pumpLoop(jsg::Lock& js) {
