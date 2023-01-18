@@ -447,6 +447,16 @@ KJ_TEST("Minimal URL Parse - Not special (data URL)") {
   KJ_ASSERT(!record.special);
 }
 
+KJ_TEST("Minimal URL Parse - unknown scheme") {
+  auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("com.tapbots.Ivory.219:/request_token?code=8")));
+
+  KJ_ASSERT(record.scheme == jsg::usv("com.tapbots.ivory.219"));
+  auto& path = KJ_ASSERT_NONNULL(record.path.tryGet<kj::Array<jsg::UsvString>>());
+  KJ_ASSERT(path.size() == 1);
+  KJ_ASSERT(path[0] == jsg::usv("request_token"));
+  KJ_ASSERT(!record.special);
+}
+
 KJ_TEST("Special scheme URLS") {
   jsg::UsvString tests[] = {
     jsg::usv("http://example.org"),
