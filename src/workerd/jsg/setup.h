@@ -11,7 +11,6 @@
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
-#include <deque>
 
 namespace workerd::jsg {
 
@@ -100,8 +99,6 @@ public:
     // being used).
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
-
-  void setAsyncContextTrackingEnabled();
 
   v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
 
@@ -238,25 +235,6 @@ private:
   // use `->InstanceTemplate()->NewInstance()` to construct an object, and you can pass this to
   // `FindInstanceInPrototypeChain()` on an existing object to check whether it was created using
   // this template.
-
-  static void promiseHook(v8::PromiseHookType type,
-                          v8::Local<v8::Promise> promise,
-                          v8::Local<v8::Value> parent);
-  void pushAsyncFrame(AsyncContextFrame& next);
-  // Pushes the frame onto the stack making it current. Importantly, the stack
-  // does not maintain a refcounted reference to the frame so it is important
-  // for the caller to ensure that the frame is kept alive.
-  void pushRootAsyncFrame();
-  void popAsyncFrame();
-
-  struct RootAsyncContextFrame {
-    // A sentinel for the RootAsyncContextFrame. Used only for bookkeeping
-    // in the async frame stack below.
-  };
-
-  kj::Vector<kj::OneOf<AsyncContextFrame*, RootAsyncContextFrame>> asyncFrameStack;
-
-  friend class AsyncContextFrame;
 };
 
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);

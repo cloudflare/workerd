@@ -105,8 +105,6 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
                 jsg::Value value) {
           // If async context tracking is enabled, then we need to ensure that we enter the frame
           // associated with the promise before we invoke the unhandled rejection callback handling.
-          jsg::AsyncContextFrame::Scope scope(js,
-              jsg::AsyncContextFrame::tryGetContext(js, promise));
           auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
           dispatchEventImpl(js, kj::mv(ev));
         }) {}
@@ -496,6 +494,9 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
 void ServiceWorkerGlobalScope::queueMicrotask(
     jsg::Lock& js,
     v8::Local<v8::Function> task) {
+  // TODO(later): It currently does not appear as if v8 attaches the continuation embedder data
+  // to microtasks scheduled using EnqueueMicrotask, so we have to wrap in order to propagate
+  // the context to those.
   KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
     task = context->wrap(js, task);
   }

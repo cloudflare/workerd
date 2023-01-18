@@ -774,6 +774,7 @@ private:
     v8::Global<v8::Promise> promise;
     v8::Global<v8::Value> value;
     v8::Global<v8::Message> message;
+    kj::Maybe<Ref<AsyncContextFrame>> asyncContextFrame;
 
     inline bool isAlive() { return !promise.IsEmpty() && !value.IsEmpty(); }
 
