@@ -7,5 +7,8 @@ def kj_test(
     native.cc_test(
         name = test_name,
         srcs = [src],
-        deps = ["@capnp-cpp//src/kj:kj-test"] + deps,
+        deps = [
+            "@capnp-cpp//src/kj:kj-test",
+            "@workerd//src/workerd/util:symbolizer",
+        ] + deps,
     )
