@@ -523,8 +523,6 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options, v8::Isolate* isolate) {
-  ActorStorageLimits::checkMaxPairsCount(entries.fields.size());
-
   kj::Vector<ActorCache::KeyValuePair> kvs(entries.fields.size());
 
   uint32_t units = 0;
@@ -558,8 +556,6 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
 jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
     kj::Array<kj::String> keys, const PutOptions& options, v8::Isolate* isolate) {
-  ActorStorageLimits::checkMaxPairsCount(keys.size());
-
   for (auto& key: keys) {
     ActorStorageLimits::checkMaxKeySize(key);
   }
