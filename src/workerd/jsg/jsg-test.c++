@@ -359,4 +359,21 @@ KJ_TEST("Test JSG_CALLABLE") {
 }
 
 }  // namespace
+
+// ========================================================================================
+
+struct IsolateUuidContext: public Object {
+  JSG_RESOURCE_TYPE(IsolateUuidContext) {}
+};
+JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
+
+KJ_TEST("jsg::Lock getUuid") {
+  IsolateUuidIsolate isolate(v8System);
+  IsolateUuidIsolate::Lock lock(isolate);
+  // Returns the same value
+  KJ_ASSERT(lock.getUuid() == lock.getUuid());
+  KJ_ASSERT(isolate.getUuid() == lock.getUuid());
+  KJ_ASSERT(lock.getUuid().size() == 36);
+}
+
 }  // namespace workerd::jsg::test
