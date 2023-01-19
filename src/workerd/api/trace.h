@@ -220,9 +220,9 @@ public:
   uint32_t getRawSize();
 
   JSG_RESOURCE_TYPE(EmailEventInfo) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(mailFrom, getMailFrom);
-    JSG_READONLY_PROTOTYPE_PROPERTY(rcptTo, getRcptTo);
-    JSG_READONLY_PROTOTYPE_PROPERTY(rawSize, getRawSize);
+    JSG_READONLY_INSTANCE_PROPERTY(mailFrom, getMailFrom);
+    JSG_READONLY_INSTANCE_PROPERTY(rcptTo, getRcptTo);
+    JSG_READONLY_INSTANCE_PROPERTY(rawSize, getRawSize);
   }
 
 private:
