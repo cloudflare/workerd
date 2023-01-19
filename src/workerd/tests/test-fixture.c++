@@ -6,6 +6,7 @@
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/server/workerd-api.h>
+#include <algorithm>
 
 namespace workerd {
 
