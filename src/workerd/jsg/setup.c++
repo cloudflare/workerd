@@ -337,6 +337,9 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   v8::Locker lock(ptr);
   v8::Isolate::Scope scope(ptr);
 
+  // Clear the rootAsyncFrame reference under lock.
+  rootAsyncFrame = nullptr;
+
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();
 
