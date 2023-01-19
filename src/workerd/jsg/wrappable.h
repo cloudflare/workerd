@@ -23,6 +23,41 @@ using kj::uint;
 
 class GcVisitor;
 class HeapTracer;
+class IsolateBase;
+
+class IsolatePtr {
+  // IsolatePtr is a safe(r) wrapper around a raw v8::Isolate pointer. Will ensure
+  // that a nullptr is returned after the Isolate is Disposed or the IsolatePtr
+  // is moved away.
+public:
+  IsolatePtr() = default;
+  IsolatePtr(decltype(nullptr)) {}
+  IsolatePtr(v8::Isolate* isolate);
+  IsolatePtr(IsolatePtr& other);
+  IsolatePtr(IsolatePtr&&) = default;
+
+  inline operator v8::Isolate*() const { return get(); }
+
+  IsolatePtr& operator=(IsolatePtr& other);
+  IsolatePtr& operator=(IsolatePtr&& other) = default;
+
+  v8::Isolate* get() const;
+  inline v8::Isolate* operator->() const { return get(); }
+  inline void clear() { impl = nullptr; }
+
+private:
+  struct Impl : public kj::Refcounted {
+    kj::Maybe<v8::Isolate*> isolate;
+    Impl(v8::Isolate* isolate);
+    v8::Isolate* get() const;
+  };
+
+  void Dispose();
+
+  kj::Maybe<kj::Own<Impl>> impl;
+
+  friend class IsolateBase;
+};
 
 class Wrappable: public kj::Refcounted {
   // Base class for C++ objects which can be "wrapped" for JavaScript consumption. A JavaScript
@@ -146,7 +181,9 @@ private:
   // strongRefcount > 0), and `wrapper` is non-null, then `strongWrapper` contains a copy of
   // `wrapper`, to force it to stay alive. Otherwise, `strongWrapper` is empty.
 
-  v8::Isolate* isolate = nullptr;
+  v8::Isolate* getIsolate();
+
+  kj::Maybe<IsolatePtr> isolate;
   // Will be non-null if `wrapper` has ever been non-null.
 
   uint strongRefcount = 0;

@@ -41,10 +41,16 @@ const char* JsExceptionThrown::what() const noexcept {
   return whatBuffer.cStr();
 }
 
+Data::Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
+    : isolate(IsolateBase::from(isolate).getIsolatePtr()), handle(isolate, handle) {}
+
 void Data::destroy() {
   assertInvariant();
-  if (isolate != nullptr) {
-    if (v8::Locker::IsLocked(isolate)) {
+  auto i = isolate.get();
+  // isolate.get() can return nullptr if Data::destroy() is called while or after the
+  // associated IsolateBase has been destroyed and the v8::Isolate has been disposed.
+  if (i != nullptr) {
+    if (v8::Locker::IsLocked(i)) {
       handle.Reset();
 
       // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
@@ -75,17 +81,19 @@ void Data::destroy() {
       //
       // Note that only the v8::Global part of `handle` needs to be destroyed under isolate lock.
       // The `tracedRef` part has a trivial destructor so can be destroyed on any thread.
-      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(0));
+      auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(i->GetData(0));
       jsgIsolate.deferDestruction(v8::Global<v8::Data>(kj::mv(handle)));
     }
-    isolate = nullptr;
+    isolate.clear();
   }
 }
 
 #ifdef KJ_DEBUG
 void Data::assertInvariantImpl() {
-    // Assert that only empty values are associated with null isolates.
-  KJ_DASSERT(isolate != nullptr || handle.IsEmpty());
+  // Assert that only empty values are associated with null isolates.
+  // isolate.get() can return nullptr if it has been cleared, moved,
+  // or disposed.
+  KJ_DASSERT(isolate.get() != nullptr || handle.IsEmpty());
 }
 #endif
 

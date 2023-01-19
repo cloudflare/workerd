@@ -106,6 +106,8 @@ public:
 
   v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
 
+  inline IsolatePtr getIsolatePtr() { return ptr; }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -135,7 +137,7 @@ private:
   using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
 
   const V8System& system;
-  v8::Isolate* ptr;
+  IsolatePtr ptr;
   bool evalAllowed = false;
   bool captureThrowsAsRejections = false;
   // The Web Platform API specifications require that any API that returns a JavaScript Promise

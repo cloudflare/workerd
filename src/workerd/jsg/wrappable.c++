@@ -9,6 +9,7 @@
 #include <v8-cppgc.h>
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
+#include <workerd/util/own-util.h>
 
 namespace workerd::jsg {
 
@@ -17,6 +18,39 @@ namespace {
 static thread_local bool inCppgcShimDestructor = false;
 
 };
+
+IsolatePtr::IsolatePtr(v8::Isolate* isolate) : impl(kj::refcounted<Impl>(isolate)) {}
+
+IsolatePtr::IsolatePtr(IsolatePtr& other) : impl(mapAddRef(other.impl)) {}
+
+IsolatePtr& IsolatePtr::operator=(IsolatePtr& other) {
+  impl = other.impl.map([](kj::Own<Impl>& ptr) -> kj::Own<Impl> {
+    return kj::addRef(*ptr);
+  });
+  return *this;
+}
+
+v8::Isolate* IsolatePtr::get() const {
+  KJ_IF_MAYBE(i, impl) {
+    return (*i)->get();
+  }
+  return nullptr;
+}
+
+void IsolatePtr::Dispose() {
+  KJ_IF_MAYBE(i, impl) {
+    KJ_IF_MAYBE(isolate, (*i)->isolate) {
+      (*isolate)->Dispose();
+      (*i)->isolate = nullptr;
+    }
+  }
+}
+
+IsolatePtr::Impl::Impl(v8::Isolate* isolate) : isolate(isolate) {}
+v8::Isolate* IsolatePtr::Impl::get() const {
+  KJ_IF_MAYBE(i, isolate) {return *i;}
+  return nullptr;
+}
 
 bool HeapTracer::isInCppgcDestructor() { return inCppgcShimDestructor; }
 
@@ -170,6 +204,8 @@ void HeapTracer::clearFreelistedShims() {
 
 kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
   KJ_IF_MAYBE(shim, cppgcShim) {
+    auto isolate = getIsolate();
+    KJ_DASSERT(isolate != nullptr, "isolate either not assigned or was disposed");
     auto& tracer = HeapTracer::getTracer(isolate);
     auto result = kj::mv(KJ_ASSERT_NONNULL(shim->state.tryGet<CppgcShim::Active>()).wrappable);
     if (shouldFreelistShim) {
@@ -197,12 +233,30 @@ v8::Local<v8::Object> Wrappable::getHandle(v8::Isolate* isolate) {
   return KJ_REQUIRE_NONNULL(tryGetHandle(isolate));
 }
 
+v8::Isolate* Wrappable::getIsolate() {
+  KJ_IF_MAYBE(i, isolate) {
+    // The IsolatePtr will return nullptr if the underlying v8 Isolate has been disposed.
+    auto ptr = i->get();
+    if (ptr == nullptr) {
+      // We log this case for informational purposes. The most likely case when this
+      // happens is that a Ref<Wrappable> is being held somewhere such that it is
+      // being destroyed after the associated isolate has been disposed, which can
+      // be problematic if someone tries to interact with the wrapper.
+      KJ_LOG(INFO, "wrappable accessing isolate after it has been disposed");
+    }
+    return ptr;
+  }
+  return nullptr;
+}
+
 void Wrappable::addStrongRef() {
   KJ_DREQUIRE(v8::Isolate::TryGetCurrent() != nullptr, "referencing wrapper without isolate lock");
   if (strongRefcount++ == 0) {
     // This object previously had no strong references, but now it has one.
     KJ_IF_MAYBE(w, wrapper) {
       // Copy the traced reference into the strong reference.
+      auto isolate = getIsolate();
+      KJ_DASSERT(isolate != nullptr, "isolate either not assigned or was disposed");
       v8::HandleScope scope(isolate);
       strongWrapper.Reset(isolate, w->Get(isolate));
     } else {
@@ -214,6 +268,7 @@ void Wrappable::addStrongRef() {
   }
 }
 void Wrappable::removeStrongRef() {
+  auto isolate = getIsolate();
   KJ_DREQUIRE(isolate == nullptr || v8::Isolate::TryGetCurrent() == isolate,
               "destroying wrapper without isolate lock");
   if (--strongRefcount == 0) {
@@ -240,9 +295,12 @@ void Wrappable::maybeDeferDestruction(bool strong, kj::Own<void> ownSelf, Wrappa
 
   auto item = IsolateBase::RefToDelete(strong, kj::mv(ownSelf), self);
 
+  auto isolate = getIsolate();
   if (isolate == nullptr || v8::Locker::IsLocked(isolate)) {
     // If we never attached a wrapper and were never traced, or the isolate is already locked, then
-    // we can just destroy the Wrappable immediately.
+    // we can just destroy the Wrappable immediately. The isolate can also be nullptr here if
+    // maybeDeferDestruction is being called after the IsolateBase associated with the wrapper
+    // isolate has been destroyed.
     auto drop = kj::mv(item);
   } else {
     // Otherwise, we have a wrapper and we don't have the isolate locked.
@@ -265,7 +323,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
   auto& wrapperRef = wrapper.emplace(isolate, object);
-  this->isolate = isolate;
+  this->isolate = IsolateBase::from(isolate).getIsolatePtr();
 
   // Set a class ID so we can recognize this in HeapTracer::IsRoot(). We reuse WRAPPABLE_TAG for
   // this for lack of a reason not to, though technically we could be using a different identifier
@@ -394,9 +452,11 @@ void GcVisitor::visit(Data& value) {
       // hold a TracedReference alongside it.
       if (value.tracedHandle == nullptr) {
         // Create the TracedReference.
-        v8::HandleScope scope(parent.isolate);
+        auto isolate = parent.getIsolate();
+        KJ_DASSERT(isolate != nullptr, "isolate either not assigned or was disposed");
+        v8::HandleScope scope(isolate);
         value.tracedHandle = v8::TracedReference<v8::Data>(
-            parent.isolate, value.handle.Get(parent.isolate));
+            isolate, value.handle.Get(isolate));
 
         // Set the handle weak.
         value.handle.SetWeak();

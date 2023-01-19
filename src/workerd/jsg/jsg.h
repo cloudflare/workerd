@@ -717,7 +717,7 @@ public:
 
       other.tracedHandle = nullptr;
     }
-    other.isolate = nullptr;
+    other.isolate.clear();
     assertInvariant();
     other.assertInvariant();
   }
@@ -726,7 +726,7 @@ public:
       destroy();
       isolate = other.isolate;
       handle = kj::mv(other.handle);
-      other.isolate = nullptr;
+      other.isolate.clear();
       KJ_IF_MAYBE(t, other.tracedHandle) {
         handle.ClearWeak();
         t->Reset();
@@ -739,8 +739,7 @@ public:
   }
   KJ_DISALLOW_COPY(Data);
 
-  Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
-      : isolate(isolate), handle(isolate, handle) {}
+  Data(v8::Isolate* isolate, v8::Local<v8::Data> handle);
   v8::Local<v8::Data> getHandle(v8::Isolate* isolate) { return handle.Get(isolate); }
   v8::Local<v8::Data> getHandle(Lock& js);
   // Interact with raw V8 types.
@@ -753,7 +752,7 @@ public:
   }
 
 private:
-  v8::Isolate* isolate = nullptr;
+  IsolatePtr isolate;
   // The isolate with which the handles below are associated.
 
   v8::Global<v8::Data> handle;

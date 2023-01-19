@@ -248,7 +248,7 @@ namespace {
 IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams)
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
-      heapTracer(ptr) {
+      heapTracer(ptr.get()) {
   v8::CppHeapCreateParams params {
     .wrapper_descriptor = v8::WrapperDescriptor(
         Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
@@ -325,7 +325,7 @@ IsolateBase::~IsolateBase() noexcept(false) {
   // To be safe we call `Terminate()`.
   cppgcHeap->Terminate();
 
-  ptr->Dispose();
+  ptr.Dispose();
 }
 
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
