@@ -4,6 +4,8 @@
 import * as bufferImpl from 'node-internal:bufferImpl';
 
 export class Buffer {
+  constructor(public readonly str: string) { }
+
   public toString(): string {
     return bufferImpl.toString(this);
   }
