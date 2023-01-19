@@ -44,6 +44,47 @@ const char* JsExceptionThrown::what() const noexcept {
 Data::Data(v8::Isolate* isolate, v8::Local<v8::Data> handle)
     : isolate(IsolateBase::from(isolate).getIsolatePtr()), handle(isolate, handle) {}
 
+Data::Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
+  KJ_IF_MAYBE(t, other.tracedHandle) {
+    // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
+    // So, we need to make the handle strong.
+    handle.ClearWeak();
+
+    // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
+    // does nothing, because it doesn't know if the reference is even still valid, since it
+    // could be called during GC sweep time. But here, we know that `other` is definitely still
+    // valid, because we wouldn't be moving from an unreachable object. So we should Reset() the
+    // `TracedReference` so that V8 knows it's gone, which might make minor GCs more effective.
+    t->Reset();
+
+    other.tracedHandle = nullptr;
+  }
+  other.isolate.clear();
+  assertInvariant();
+  other.assertInvariant();
+}
+
+Data::~Data() noexcept(false) {
+  destroy();
+}
+
+Data& Data::operator=(Data&& other) {
+  if (this != &other) {
+    destroy();
+    isolate = other.isolate;
+    handle = kj::mv(other.handle);
+    other.isolate.clear();
+    KJ_IF_MAYBE(t, other.tracedHandle) {
+      handle.ClearWeak();
+      t->Reset();
+      other.tracedHandle = nullptr;
+    }
+  }
+  assertInvariant();
+  other.assertInvariant();
+  return *this;
+}
+
 void Data::destroy() {
   assertInvariant();
   auto i = isolate.get();
