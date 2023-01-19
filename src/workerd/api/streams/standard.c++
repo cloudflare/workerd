@@ -2255,15 +2255,26 @@ private:
           }
 
           jsg::BufferSource bufferSource(js, handle);
-          jsg::BackingStore backing = bufferSource.detach(js);
-          auto ptr = backing.asArrayPtr();
-
-          if (backing.size() == 0) {
+          if (bufferSource.size() == 0) {
             // Weird, but allowed. We'll skip it.
             return pumpLoop(js);
           }
 
-          auto promise = sink->write(ptr.begin(), ptr.size()).attach(kj::mv(backing));
+          kj::ArrayPtr<kj::byte> ptr = nullptr;
+          kj::Promise<void> promise = nullptr;
+          if constexpr (kj::isSameType<T, ByteReadable>()) {
+            jsg::BackingStore backing = bufferSource.detach(js);
+            ptr = backing.asArrayPtr();
+            promise = sink->write(ptr.begin(), ptr.size()).attach(kj::mv(backing));
+          } else if constexpr (kj::isSameType<T, ValueReadable>()) {
+            // We do not detach in this case because, as bad as an idea as it is,
+            // the stream spec does allow a single typedarray/arraybuffer instance
+            // to be queued multiple times when using value-oriented streams.
+            ptr = bufferSource.asArrayPtr();
+            promise = sink->write(ptr.begin(), ptr.size()).attach(kj::mv(bufferSource));
+          }
+
+          KJ_ASSERT(ptr != nullptr);
 
           auto& ioContext = IoContext::current();
           return ioContext.awaitIo(kj::mv(promise))
