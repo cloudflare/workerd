@@ -100,8 +100,6 @@ public:
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
 
-  void setAsyncContextTrackingEnabled();
-
   v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
 
 private:
@@ -233,10 +231,6 @@ private:
   // use `->InstanceTemplate()->NewInstance()` to construct an object, and you can pass this to
   // `FindInstanceInPrototypeChain()` on an existing object to check whether it was created using
   // this template.
-
-  static void promiseHook(v8::PromiseHookType type,
-                          v8::Local<v8::Promise> promise,
-                          v8::Local<v8::Value> parent);
 
   void setCurrentAsyncContextFrame(kj::Maybe<AsyncContextFrame&> maybeFrame);
   kj::Maybe<AsyncContextFrame&> maybeCurrentAsyncContextFrame;

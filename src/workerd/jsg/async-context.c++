@@ -19,9 +19,6 @@ inline void clearV8ContinuationContext(v8::Isolate* isolate) {
 
 AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
     : isolate(IsolateBase::from(js.v8Isolate)) {
-  // Lazily enables the hooks for async context tracking.
-  isolate.setAsyncContextTrackingEnabled();
-
   KJ_IF_MAYBE(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
@@ -197,88 +194,4 @@ void IsolateBase::setCurrentAsyncContextFrame(kj::Maybe<AsyncContextFrame&> mayb
     clearV8ContinuationContext(ptr);
   }
 }
-
-void IsolateBase::setAsyncContextTrackingEnabled() {
-  // Enabling async context tracking installs a relatively expensive callback on the v8 isolate
-  // that attaches additional metadata to every promise created. The additional metadata is used
-  // to implement support for the Node.js AsyncLocalStorage API. Since that is the only current
-  // use for it, we only install the promise hook when that api is used.
-  if (asyncContextTrackingEnabled) return;
-  asyncContextTrackingEnabled = true;
-  ptr->SetPromiseHook(&promiseHook);
-}
-
-void IsolateBase::promiseHook(v8::PromiseHookType type,
-                              v8::Local<v8::Promise> promise,
-                              v8::Local<v8::Value> parent) {
-  auto isolate = promise->GetIsolate();
-
-  // V8 will call the promise hook even while execution is terminating. In that
-  // case we don't want to do anything here.
-  if (isolate->IsExecutionTerminating() || isolate->IsDead()) {
-    return;
-  }
-
-  // TODO(later): The promise hook is necessary only because the v8 mechanisms
-  // for propagating continuation context do not currently work to propagate
-  // the appropriate context to the unhandledrejection events. So for now, we
-  // have to implement this hook in order to set the appropriate context on the
-  // promise when it is created.
-  auto& js = Lock::from(isolate);
-
-  // TODO(later): The try/catch block here echoes the semantics of LiftKj.
-  // We don't use LiftKj here because that currently requires a FunctionCallbackInfo,
-  // which we don't have (or want here). If we end up needing this pattern elsewhere,
-  // we can implement a variant of LiftKj that does so and switch this over to use it.
-  try {
-    switch (type) {
-      case v8::PromiseHookType::kInit: {
-        // The kInit event is triggered by v8 when a deferred Promise is created. This
-        // includes all calls to `new Promise(...)`, `then()`, `catch()`, `finally()`,
-        // uses of `await ...`, `Promise.all()`, etc.
-        // Whenever a Promise is created, we associate it with the current AsyncContextFrame.
-        KJ_IF_MAYBE(frame, AsyncContextFrame::current(js)) {
-          frame->attachContext(js, promise);
-        }
-        break;
-      }
-      case v8::PromiseHookType::kBefore: {
-        // There's nothing we need to do here.
-        break;
-      }
-      case v8::PromiseHookType::kAfter: {
-        // There's nothing we need to do here.
-        break;
-      }
-      case v8::PromiseHookType::kResolve: {
-        // This case is a bit different. As an optimization, it appears that v8 will skip
-        // the kInit, kBefore, and kAfter events for Promises that are immediately resolved (e.g.
-        // Promise.resolve, and Promise.reject) and instead will emit the kResolve event first.
-        // When this event occurs, and the promise is rejected, we need to check to see if the
-        // promise is already wrapped, and if it is not, do so.
-        KJ_IF_MAYBE(current, AsyncContextFrame::current(js)) {
-          if (promise->State() == v8::Promise::PromiseState::kRejected &&
-              AsyncContextFrame::tryGetContext(js, promise) == nullptr) {
-            current->attachContext(js, promise);
-          }
-        }
-        break;
-      }
-    }
-  } catch (JsExceptionThrown&) {
-    // Catching JsExceptionThrown implies that an exception is already scheduled on the isolate
-    // so we don't need to throw it again, just allow it to bubble up and out.
-  } catch (std::exception& ex) {
-    // This case is purely defensive and is included really just to align with the
-    // semantics in LiftKj. We'd be using LiftKj here already if that didn't require
-    // use of a FunctionCallbackInfo.
-    throwInternalError(isolate, ex.what());
-  } catch (kj::Exception& ex) {
-    throwInternalError(isolate, kj::mv(ex));
-  } catch (...) {
-    throwInternalError(isolate, kj::str("caught unknown exception of type: ",
-                                        kj::getCaughtExceptionType()));
-  }
-}
-
 }  // namespace workerd::jsg

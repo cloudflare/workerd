@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg.h"
+#include "async-context.h"
 
 namespace workerd::jsg {
 
@@ -14,6 +15,19 @@ v8::Local<T> getLocal(v8::Isolate* isolate, v8::Global<T>& global) {
   }
   return v8::Local<T>();
 };
+
+kj::Maybe<Ref<AsyncContextFrame>> getFrameRef(jsg::Lock& js) {
+  return AsyncContextFrame::current(js).map([]
+      (AsyncContextFrame& frame) -> Ref<AsyncContextFrame> {
+    return frame.addRef();
+  });
+}
+
+kj::Maybe<AsyncContextFrame&> tryGetFrame(kj::Maybe<Ref<AsyncContextFrame>>& maybeFrame) {
+  return maybeFrame.map([](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& {
+    return *frame.get();
+  });
+}
 }  // namespace
 
 UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(
@@ -26,6 +40,7 @@ UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(
       promise(js.v8Isolate, promise.getHandle(js)),
       value(js.v8Isolate, value.getHandle(js)),
       message(js.v8Isolate, message),
+      asyncContextFrame(getFrameRef(js)),
       rejectionNumber(rejectionNumber) {
   this->promise.SetWeak();
   this->value.SetWeak();
@@ -132,6 +147,8 @@ void UnhandledRejectionHandler::handledAfterRejection(
                     "rejected. (rejection #", item->rejectionNumber, ")"));
       }
 
+      AsyncContextFrame::Scope scope(js, tryGetFrame(item->asyncContextFrame));
+
       handler(js, v8::kPromiseHandlerAddedAfterReject,
               jsg::HashableV8Ref(js.v8Isolate, promise),
               js.v8Ref(js.v8Undefined()));
@@ -158,6 +175,8 @@ void UnhandledRejectionHandler::ensureProcessingWarnings(jsg::Lock& js) {
 
       auto promise = getLocal(js.v8Isolate, entry.promise);
       auto value = getLocal(js.v8Isolate, entry.value);
+
+      AsyncContextFrame::Scope scope(js, tryGetFrame(entry.asyncContextFrame));
 
       // Most of the time it shouldn't be found but there are times where it can
       // be duplicated -- such as when a promise gets rejected multiple times.

@@ -105,8 +105,6 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
                 jsg::Value value) {
           // If async context tracking is enabled, then we need to ensure that we enter the frame
           // associated with the promise before we invoke the unhandled rejection callback handling.
-          jsg::AsyncContextFrame::Scope scope(js,
-              jsg::AsyncContextFrame::tryGetContext(js, promise));
           auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
           dispatchEventImpl(js, kj::mv(ev));
         }) {}
