@@ -545,10 +545,6 @@ struct RequestInitializerDict {
   // to accept `null` as an input, so if we're doing what Chrome does, then we should accept
   // `null`.
 
-  jsg::Unimplemented observe;
-  // Functionality to exert fine-grained control over the fetch, including the ability to cancel
-  // it.
-
   jsg::Optional<bool> keepalive;
   // We do not support keepalive = true but we want to allow code to explicitly set it to the
   // default (false). Per the spec, keepalive is "a boolean indicating whether or not request can
@@ -574,7 +570,7 @@ struct RequestInitializerDict {
   // considered the default.
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
-             referrer, referrerPolicy, integrity, signal, observe,
+             referrer, referrerPolicy, integrity, signal,
              keepalive, duplex, priority);
   JSG_STRUCT_TS_OVERRIDE(RequestInit<CfType = IncomingRequestCfProperties | RequestInitCfProperties> {
     headers?: HeadersInit;
