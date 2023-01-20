@@ -904,8 +904,10 @@ public:
   jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
   // Returns the `cf` field containing Cloudflare feature flags.
 
-  jsg::WontImplement getType() { return jsg::WontImplement(); }
+  v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
+  // In discussing with other runtime implementations that do not implement CORS, it was
+  // determined that returning undefined was the best option.
 
   jsg::WontImplement getUseFinalUrl() { return jsg::WontImplement(); }
   // This is deprecated in the spec.
