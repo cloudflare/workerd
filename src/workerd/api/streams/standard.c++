@@ -2229,6 +2229,9 @@ private:
             js.resolvedPromise();
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+        if (end) {
+          sink->abort(js.exceptionToKj(errored.addRef(js)));
+        }
         return js.rejectedPromise<void>(errored.addRef(js));
       }
       KJ_CASE_ONEOF(readable, Readable) {

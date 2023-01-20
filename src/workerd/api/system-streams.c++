@@ -117,6 +117,15 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 class EncodedAsyncOutputStream final: public WritableStreamSink {
   // A wrapper around a native `kj::AsyncOutputStream` which knows the underlying encoding of the
   // stream and optimizes pumps from `EncodedAsyncInputStream`.
+  //
+  // The inner will be held on to right up until either end() or abort() is called.
+  // This is important because some AsyncOutputStream implementations perform cleanup
+  // operations equivalent to end() in their destructors (for instance HttpChunkedEntityWriter).
+  // If we wait to clear the kj::Own when the EncodedAsyncOutputStream is destroyed, and the
+  // EncodedAsyncOutputStream is owned (for instance) by an IoOwn, then the lifetime of the
+  // inner may be extended past when it should. Eventually, kj::AsyncOutputStream should
+  // probably have a distinct end() method of its own that we can defer to, but until it
+  // does, it is important for us to release it as soon as end() or abort() are called.
 
 public:
   explicit EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding,
@@ -140,7 +149,11 @@ private:
   //
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
 
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>> inner;
+  struct Ended {
+    // A sentinel indicating that the EncodedOutputStream has ended and is no longer usable.
+  };
+
+  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>, Ended> inner;
   // I use a OneOf here rather than probing with downcasts because end() must be called for
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
   // but I'm paranoid.
@@ -155,6 +168,9 @@ EncodedAsyncOutputStream::EncodedAsyncOutputStream(
     : inner(kj::mv(inner)), encoding(encoding), ioContext(context) {}
 
 kj::Promise<void> EncodedAsyncOutputStream::write(const void* buffer, size_t size) {
+  // Alternatively, we could throw here but this is erring on the side of leniency.
+  if (inner.is<Ended>()) return kj::READY_NOW;
+
   ensureIdentityEncoding();
 
   return getInner().write(buffer, size)
@@ -163,6 +179,9 @@ kj::Promise<void> EncodedAsyncOutputStream::write(const void* buffer, size_t siz
 
 kj::Promise<void> EncodedAsyncOutputStream::write(
     kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
+  // Alternatively, we could throw here but this is erring on the side of leniency.
+  if (inner.is<Ended>()) return kj::READY_NOW;
+
   ensureIdentityEncoding();
 
   return getInner().write(pieces)
@@ -171,6 +190,14 @@ kj::Promise<void> EncodedAsyncOutputStream::write(
 
 kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFrom(
     ReadableStreamSource& input, bool end) {
+
+  // If this output stream has already been ended, then there's nothing more to
+  // pump into it, just return an immediately resolved promise. Alternatively
+  // we could throw here.
+  if (inner.is<Ended>()) {
+    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> { kj::READY_NOW });
+  }
+
   KJ_IF_MAYBE(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
     // We can avoid putting our inner streams into identity encoding if the input and output both
     // have the same encoding. Since ReadableStreamSource/WritableStreamSink always pump everything
@@ -202,26 +229,32 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
 }
 
 kj::Promise<void> EncodedAsyncOutputStream::end() {
+  if (inner.is<Ended>()) return kj::READY_NOW;
+
   kj::Promise<void> promise = kj::READY_NOW;
 
   KJ_IF_MAYBE(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
-    promise = (*gz)->end();
+    promise = (*gz)->end().attach(kj::mv(*gz));
   }
 
   KJ_IF_MAYBE(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
     if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream->get())) {
       casted->shutdownWrite();
     }
+    promise = promise.attach(kj::mv(*stream));
   }
+
+  inner.init<Ended>();
 
   return promise.attach(ioContext.registerPendingEvent());
 }
 
 void EncodedAsyncOutputStream::abort(kj::Exception reason) {
-  // TODO(now): Destroy inner?
+  inner.init<Ended>();
 }
 
 void EncodedAsyncOutputStream::ensureIdentityEncoding() {
+  KJ_DASSERT(!inner.is<Ended>(), "the EncodedAsyncOutputStream has been ended or aborted");
   if (encoding == StreamEncoding::GZIP) {
     // This is safe because only a kj::AsyncOutputStream can have non-identity encoding.
     auto& stream = inner.get<kj::Own<kj::AsyncOutputStream>>();
@@ -241,6 +274,9 @@ kj::AsyncOutputStream& EncodedAsyncOutputStream::getInner() {
     }
     KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
       return *gz;
+    }
+    KJ_CASE_ONEOF(ended, Ended) {
+      KJ_FAIL_ASSERT("the EncodedAsyncOutputStream has been ended or aborted.");
     }
   }
 
