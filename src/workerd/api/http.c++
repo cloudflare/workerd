@@ -716,6 +716,18 @@ jsg::Ref<Request> Request::constructor(
               JSG_REQUIRE(integrity->size() == 0, TypeError,
                   "The integrity option must be either undefined or an empty string.");
             }
+
+            KJ_IF_MAYBE(keepalive, initDict.keepalive) {
+              JSG_REQUIRE(!(*keepalive), TypeError,
+                  "The keepalive option must be either undefined or false.");
+            }
+
+            KJ_IF_MAYBE(priority, initDict.priority) {
+              JSG_REQUIRE((*priority) == "high" ||
+                          (*priority) == "low" ||
+                          (*priority) == "auto", TypeError,
+                  "The priority option must be one of either 'high', 'low', or 'auto'");
+            }
           }
           KJ_CASE_ONEOF(otherRequest, jsg::Ref<Request>) {
             // If our initializer dictionary is another Request object, it will always have a `body`

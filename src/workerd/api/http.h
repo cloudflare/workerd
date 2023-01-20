@@ -549,8 +549,33 @@ struct RequestInitializerDict {
   // Functionality to exert fine-grained control over the fetch, including the ability to cancel
   // it.
 
+  jsg::Optional<bool> keepalive;
+  // We do not support keepalive = true but we want to allow code to explicitly set it to the
+  // default (false). Per the spec, keepalive is "a boolean indicating whether or not request can
+  // outlive the global in which it was created."
+
+  jsg::Unimplemented duplex;
+  // TODO(conform):
+  // The duplex option controls whether or not a fetch is expected to send the entire request
+  // before processing the response. The default value ("half"), which is currently the only
+  // option supported by the standard, dictates that the request is fully sent before handling
+  // the response. There are currently a proposal to add a "full" option which is the model
+  // we support. Once "full" is added, we need to update this to accept either undefined or
+  // "full", and possibly decide if we want to support the "half" option. For now we'll throw
+  // if this option is explicitly set since the only value accepted by the standard is not
+  // one that we support.
+
+  jsg::Optional<kj::String> priority;
+  // Specifies the relative priority of the request. We currently do not make use of this
+  // information but we'll go ahead and allow it to be specified since there is no harm
+  // and doing so will help ensure correct behavior later if/when it is implemented. Note
+  // that how this is implemented is entirely up to us. The only values acceptable for
+  // the priority option, however, are "high", "low", and "auto", with "auto" being
+  // considered the default.
+
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
-              referrer, referrerPolicy, integrity, signal, observe);
+             referrer, referrerPolicy, integrity, signal, observe,
+             keepalive, duplex, priority);
   JSG_STRUCT_TS_OVERRIDE(RequestInit<CfType = IncomingRequestCfProperties | RequestInitCfProperties> {
     headers?: HeadersInit;
     body?: BodyInit | null;
@@ -641,6 +666,17 @@ public:
   jsg::Optional<v8::Local<v8::Object>> getCf(jsg::Lock& js);
   // Returns the `cf` field containing Cloudflare feature flags.
 
+  bool getKeepalive() { return false; }
+
+  v8::Local<v8::Value> getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // The duplex option controls whether or not a fetch is expected to send the entire request
+  // before processing the response. The default value ("half"), which is currently the only
+  // option supported by the standard, dictates that the request is fully sent before handling
+  // the response. There are currently a proposal to add a "full" option which is the model
+  // we support. Once "full" is added, we need to update this to accept either undefined or
+  // "full", and possibly decide if we want to support the "half" option. For now, we'll
+  // explicitly return undefined for this property.
+
   v8::Local<v8::Value> getContext(jsg::Lock& js) { return js.v8Undefined(); }
   // This is deprecated in the spec and has since been removed from the spec
   // entirely. In discussions with other implementers, it was determined that
@@ -699,6 +735,8 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
+      JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
+      JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
@@ -721,6 +759,8 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
+      JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
+      JSG_READONLY_INSTANCE_PROPERTY(duplex, getDuplex);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
