@@ -2212,7 +2212,7 @@ public:
 
   kj::Promise<void> pumpTo(jsg::Lock& js) {
     auto& ioContext = IoContext::current();
-    return ioContext.awaitJs(pumpLoop(js));
+    return ioContext.awaitJs(pumpLoop(js, ioContext));
   }
 
 private:
@@ -2220,8 +2220,8 @@ private:
   IoOwn<WritableStreamSink> sink;
   bool end;
 
-  jsg::Promise<void> pumpLoop(jsg::Lock& js) {
-    auto& ioContext = IoContext::current();
+  jsg::Promise<void> pumpLoop(jsg::Lock& js, IoContext& ioContext) {
+    KJ_ASSERT(&IoContext::current() == &ioContext);
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return end ?
@@ -2241,10 +2241,11 @@ private:
         };
 
         return read(js).then(js,
-            ioContext.addFunctor([this](auto& js, ReadResult result) mutable {
+            ioContext.addFunctor([this,&ioContext](auto& js, ReadResult result) mutable {
+          KJ_ASSERT(&IoContext::current() == &ioContext);
           if (result.done) {
             doClose();
-            return pumpLoop(js);
+            return pumpLoop(js, ioContext);
           }
 
           // If we're not done, the result value must be interpretable as
@@ -2253,13 +2254,13 @@ private:
           if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
             auto error = js.v8TypeError("This ReadableStream did not return bytes.");
             doError(js, error);
-            return pumpLoop(js);
+            return pumpLoop(js, ioContext);
           }
 
           jsg::BufferSource bufferSource(js, handle);
           if (bufferSource.size() == 0) {
             // Weird, but allowed. We'll skip it.
-            return pumpLoop(js);
+            return pumpLoop(js, ioContext);
           }
 
           kj::ArrayPtr<kj::byte> ptr = nullptr;
@@ -2278,17 +2279,15 @@ private:
 
           KJ_ASSERT(ptr != nullptr);
 
-          auto& ioContext = IoContext::current();
-          return ioContext.awaitIo(kj::mv(promise))
-              .then(js, [this](jsg::Lock& js) mutable {
-            return pumpLoop(js);
-          }, [this](jsg::Lock& js, jsg::Value exception) mutable {
+          return ioContext.awaitIo(js, kj::mv(promise), [this,&ioContext](jsg::Lock& js) mutable {
+            return pumpLoop(js, ioContext);
+          }, [this,&ioContext](jsg::Lock& js, jsg::Value exception) mutable {
             doError(js, exception.getHandle(js));
-            return pumpLoop(js);
+            return pumpLoop(js, ioContext);
           });
-        }), ioContext.addFunctor([this](auto& js, jsg::Value exception) mutable {
+        }), ioContext.addFunctor([this,&ioContext](auto& js, jsg::Value exception) mutable {
           doError(js, exception.getHandle(js));
-          return pumpLoop(js);
+          return pumpLoop(js, ioContext);
         }));
       }
     }
