@@ -909,9 +909,6 @@ public:
   // In discussing with other runtime implementations that do not implement CORS, it was
   // determined that returning undefined was the best option.
 
-  jsg::WontImplement getUseFinalUrl() { return jsg::WontImplement(); }
-  // This is deprecated in the spec.
-
   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
 
@@ -934,7 +931,6 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
 
       JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
-      JSG_READONLY_PROTOTYPE_PROPERTY(useFinalUrl, getUseFinalUrl);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
       JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
@@ -949,7 +945,6 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
 
       JSG_READONLY_INSTANCE_PROPERTY(type, getType);
-      JSG_READONLY_INSTANCE_PROPERTY(useFinalUrl, getUseFinalUrl);
     }
 
     JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
