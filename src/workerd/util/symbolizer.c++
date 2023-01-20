@@ -14,6 +14,8 @@
 
 namespace kj {
 
+namespace {
+
 struct Subprocess {
   // A simple subprocess wrapper with in/out pipes.
 
@@ -74,6 +76,8 @@ struct Subprocess {
   int in;
   int out;
 };
+
+} // namespace
 
 String stringifyStackTrace(ArrayPtr<void* const> trace) {
   const char* llvmSymbolizer = getenv("LLVM_SYMBOLIZER");
