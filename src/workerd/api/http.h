@@ -641,8 +641,13 @@ public:
   jsg::Optional<v8::Local<v8::Object>> getCf(jsg::Lock& js);
   // Returns the `cf` field containing Cloudflare feature flags.
 
-  jsg::WontImplement getContext() { return jsg::WontImplement(); }
-  // This is deprecated in the spec.
+  v8::Local<v8::Value> getContext(jsg::Lock& js) { return js.v8Undefined(); }
+  // This is deprecated in the spec and has since been removed from the spec
+  // entirely. In discussions with other implementers, it was determined that
+  // simply returning undefined for these kinds of unsupported old properties
+  // was preferred to throwing.
+  // TODO(cleanup) Alternatively, we might just decide to not have this property
+  // at all.
 
   v8::Local<v8::Value> getMode(jsg::Lock& js) { return js.v8Undefined(); }
   v8::Local<v8::Value> getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
@@ -656,8 +661,15 @@ public:
   // with other implementers with the same issues, it was decided that
   // simply returning undefined for these was the best option.
 
-  jsg::Unimplemented getCache()       { return jsg::Unimplemented(); }
-  // See members of Initializer for commentary on unimplemented APIs.
+  v8::Local<v8::Value> getCache(jsg::Lock& js) { return js.v8Undefined(); }
+  // The cache mode determines how HTTP cache is used with the request.
+  // We currently do not fully implement this. Currently we will explicitly
+  // throw in the Request constructor if the option is set. For the accessor
+  // we want it to always just return undefined while it is not implemented.
+  // The spec does not provide a value to indicate "unimplemented" and all
+  // of the other values would imply semantics we do not follow. In discussion
+  // with other implementers with the same issues, it was decided that
+  // simply returning undefined for these was the best option.
 
   kj::String getIntegrity() { return kj::String(); }
   // We do not implement integrity checking at all. However, the spec says that
