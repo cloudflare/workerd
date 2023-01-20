@@ -530,8 +530,10 @@ struct RequestInitializerDict {
   // comments about `mode` and `credentials`, above), hence protecting the Referer and Origin
   // headers is not necessary, so we treat them as regular-old headers instead.
 
-  jsg::Unimplemented integrity;
+  jsg::Optional<kj::String> integrity;
   // Subresource integrity (check response against a given hash).
+  // We do not implement integrity checking, however, we will accept either an undefined
+  // or empty string value for the property. If any other value is given we will throw.
 
   jsg::Optional<kj::Maybe<jsg::Ref<AbortSignal>>> signal;
   // The spec declares this optional, but is unclear on whether it is nullable. The spec is also
@@ -644,9 +646,13 @@ public:
 
   jsg::WontImplement getMode()        { return jsg::WontImplement(); }
   jsg::WontImplement getCredentials() { return jsg::WontImplement(); }
-  jsg::Unimplemented getIntegrity()   { return jsg::Unimplemented(); }
   jsg::Unimplemented getCache()       { return jsg::Unimplemented(); }
   // See members of Initializer for commentary on unimplemented APIs.
+
+  kj::String getIntegrity() { return kj::String(); }
+  // We do not implement integrity checking at all. However, the spec says that
+  // the default value should be an empty string. When the Request object is
+  // created we verify that the given value is undefined or empty.
 
   JSG_RESOURCE_TYPE(Request, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
