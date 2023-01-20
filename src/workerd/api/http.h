@@ -644,8 +644,18 @@ public:
   jsg::WontImplement getContext() { return jsg::WontImplement(); }
   // This is deprecated in the spec.
 
-  jsg::WontImplement getMode()        { return jsg::WontImplement(); }
-  jsg::WontImplement getCredentials() { return jsg::WontImplement(); }
+  v8::Local<v8::Value> getMode(jsg::Lock& js) { return js.v8Undefined(); }
+  v8::Local<v8::Value> getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
+  // These relate to CORS support, which we do not implement. In the
+  // Request initializer we will explicitly throw if any attempt is
+  // made to specify these. For the accessors tho, we want it to always
+  // just return undefined rather than throw, which helps with code
+  // portability across multiple runtimes. The spec says that the default
+  // value for mode when not specified *should* be 'no-cors`, but that
+  // value implies strict limitations that we do not follow. In discussion
+  // with other implementers with the same issues, it was decided that
+  // simply returning undefined for these was the best option.
+
   jsg::Unimplemented getCache()       { return jsg::Unimplemented(); }
   // See members of Initializer for commentary on unimplemented APIs.
 
