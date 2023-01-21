@@ -495,8 +495,16 @@ struct Worker {
     #
     # This mode is intended for local testing purposes.
 
-    # TODO(someday): Support storage to a local directory.
-    # TODO(someday): Support storage to a database.
+    localDisk @12 :Text;
+    # ** EXPERIMENTAL; SUBJECT TO BACKWARDS-INCOMPATIBLE CHANGE **
+    #
+    # Durable Object data will be stored in a directory on local disk. This field is the name of
+    # a service, which must be a DiskDirectory service. For each Durable Object class, a
+    # subdirectory will be created using `uniqueKey` as the name. Within the directory, one or
+    # more files are created for each object, with names `<id>.<ext>`, where `.<ext>` may be any of
+    # a number of different extensions depending on the storage mode. (Currently, the main storage
+    # is a file with the extension `.sqlite`, and in certain situations extra files with the
+    # extensions `.sqlite-wal`, and `.sqlite-shm` may also be present.)
   }
 
   # TODO(someday): Support distributing objects across a cluster. At present, objects are always
