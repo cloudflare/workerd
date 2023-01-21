@@ -2019,13 +2019,13 @@ jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
 }
 
 void URLSearchParams::forEach(
-      jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg,
-      v8::Isolate* isolate) {
-  auto cb = callback.getHandle(isolate);
-  auto this_ = thisArg.map([&isolate](jsg::Value& v) { return v.getHandle(isolate); })
-      .orDefault(v8::Undefined(isolate));
-  auto query = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
+    jsg::Lock& js,
+    jsg::V8Ref<v8::Function> callback,
+    jsg::Optional<jsg::Value> thisArg) {
+  auto cb = callback.getHandle(js);
+  auto this_ = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
+      .orDefault(js.v8Undefined());
+  auto query = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
   // On each iteration of the for loop, a JavaScript callback is invokved. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
@@ -2034,11 +2034,11 @@ void URLSearchParams::forEach(
   for (int i = 0; i < list.size(); i++) {
     auto& entry = list[i];
     v8::Local<v8::Value> args[3] = {
-      jsg::v8Str(isolate, entry.value),
-      jsg::v8Str(isolate, entry.name),
+      jsg::v8Str(js.v8Isolate, entry.value),
+      jsg::v8Str(js.v8Isolate, entry.name),
       query,
     };
-    jsg::check(cb->Call(isolate->GetCurrentContext(), this_, 3, args));
+    jsg::check(cb->Call(js.v8Isolate->GetCurrentContext(), this_, 3, args));
   }
 }
 

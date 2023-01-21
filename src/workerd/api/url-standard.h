@@ -120,9 +120,9 @@ public:
                 iteratorNext<ValueIteratorType>)
 
   void forEach(
+      jsg::Lock& js,
       jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg,
-      v8::Isolate* isolate);
+      jsg::Optional<jsg::Value> thisArg);
 
   jsg::UsvString toString();
 
@@ -279,7 +279,7 @@ public:
   jsg::UsvString getHash();
   void setHash(jsg::UsvString value);
 
-  inline jsg::Ref<URLSearchParams> getSearchParams(v8::Isolate* isolate) {
+  inline jsg::Ref<URLSearchParams> getSearchParams() {
     KJ_IF_MAYBE(searchParams, maybeSearchParams) {
       return searchParams->addRef();
     }

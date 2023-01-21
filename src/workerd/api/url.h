@@ -168,9 +168,9 @@ public:
                 iteratorNext<ValueIteratorType>)
 
   void forEach(
+      jsg::Lock& js,
       jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg,
-      v8::Isolate* isolate);
+      jsg::Optional<jsg::Value> thisArg);
 
   kj::String toString();
 

@@ -586,23 +586,23 @@ void URLSearchParams::sort() {
 }
 
 void URLSearchParams::forEach(
+    jsg::Lock& js,
     jsg::V8Ref<v8::Function> callback,
-    jsg::Optional<jsg::Value> thisArg,
-    v8::Isolate* isolate) {
-  auto localCallback = callback.getHandle(isolate);
-  auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(isolate); })
-      .orDefault(v8::Undefined(isolate));
+    jsg::Optional<jsg::Value> thisArg) {
+  auto localCallback = callback.getHandle(js);
+  auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
+      .orDefault(js.v8Undefined());
   // JSG_THIS.getHandle() is guaranteed safe because `forEach()` is only called
   // from JavaScript, which means a Headers JS wrapper object must already exist.
-  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
+  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
 
-  auto context = isolate->GetCurrentContext();  // Needed later for Call().
+  auto context = js.v8Isolate->GetCurrentContext();  // Needed later for Call().
   for (int i = 0; i < this->url->query.size(); i++) {
     auto& [key, value] = this->url->query[i];
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {
-      jsg::v8Str(isolate, value),
-      jsg::v8Str(isolate, key),
+      jsg::v8Str(js.v8Isolate, value),
+      jsg::v8Str(js.v8Isolate, key),
       localParams,
     };
     // Call jsg::check() to propagate exceptions, but we don't expect any
