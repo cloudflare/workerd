@@ -104,11 +104,11 @@ TraceItem::FetchEventInfo::Request::Request(kj::Own<Trace> trace, const Trace::F
     : trace(kj::mv(trace)), eventInfo(eventInfo) {}
 
 jsg::Optional<v8::Local<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(
-    v8::Isolate* isolate) {
+    jsg::Lock& js) {
   const auto& cfJson = eventInfo.cfJson;
   if (cfJson.size() > 0) {
-    auto jsonString = jsg::v8Str(isolate, cfJson);
-    auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
+    auto jsonString = jsg::v8Str(js.v8Isolate, cfJson);
+    auto handle = jsg::check(v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsonString));
     return handle.As<v8::Object>();
   }
   return nullptr;
@@ -254,9 +254,9 @@ kj::StringPtr TraceLog::getLevel() {
   KJ_UNREACHABLE;
 }
 
-v8::Local<v8::Object> TraceLog::getMessage(v8::Isolate* isolate) {
-  auto jsonString = jsg::v8Str(isolate, log.message);
-  auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
+v8::Local<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
+  auto jsonString = jsg::v8Str(js.v8Isolate, log.message);
+  auto handle = jsg::check(v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsonString));
   return handle.As<v8::Object>();
 }
 

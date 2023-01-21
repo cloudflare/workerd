@@ -124,7 +124,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 public:
   explicit Request(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo);
 
-  jsg::Optional<v8::Local<v8::Object>> getCf(v8::Isolate* isolate);
+  jsg::Optional<v8::Local<v8::Object>> getCf(jsg::Lock& js);
   jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders();
   kj::StringPtr getMethod();
   kj::String getUrl();
@@ -247,7 +247,7 @@ public:
 
   double getTimestamp();
   kj::StringPtr getLevel();
-  v8::Local<v8::Object> getMessage(v8::Isolate* isolate);
+  v8::Local<v8::Object> getMessage(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceLog) {
     JSG_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
