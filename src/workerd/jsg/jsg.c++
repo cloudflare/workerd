@@ -128,8 +128,8 @@ kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
       v8::JSON::Stringify(v8Isolate->GetCurrentContext(), value)));
 }
 
-v8::Local<v8::String> Lock::wrapString(kj::StringPtr text) {
-  return v8Str(v8Isolate, text);
+Value Lock::wrapString(kj::StringPtr text) {
+  return Value(v8Isolate, v8Str(v8Isolate, text));
 }
 
 bool Lock::toBool(v8::Local<v8::Value> value) {

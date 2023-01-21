@@ -1977,8 +1977,8 @@ public:
 
   kj::String serializeJson(v8::Local<v8::Value> value);
 
-  v8::Local<v8::String> wrapString(kj::StringPtr text);
-  virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
+  Value wrapString(kj::StringPtr text);
+  virtual Value wrapBytes(kj::Array<byte> data) = 0;
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
       jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
   virtual v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,

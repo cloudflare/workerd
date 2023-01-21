@@ -685,15 +685,14 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
     return context.run([this,&ws,message=kj::mv(message)](Worker::Lock& wLock) mutable
         -> kj::Promise<void> {
       jsg::Lock& lock = wLock;
-      auto isolate = lock.v8Isolate;
       auto& native = *farNative;
       KJ_SWITCH_ONEOF(message) {
         KJ_CASE_ONEOF(text, kj::String) {
-          dispatchEventImpl(lock, jsg::alloc<MessageEvent>(isolate, lock.wrapString(text)));
+          dispatchEventImpl(lock, jsg::alloc<MessageEvent>(lock.wrapString(text)));
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
           dispatchEventImpl(lock,
-              jsg::alloc<MessageEvent>(isolate, lock.wrapBytes(kj::mv(data))));
+              jsg::alloc<MessageEvent>(lock.wrapBytes(kj::mv(data))));
         }
         KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
           native.closedIncoming = true;
@@ -734,7 +733,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::Value err) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
-    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(kj::mv(msg), kj::mv(err), js.v8Isolate));
+    dispatchEventImpl(js, jsg::alloc<ErrorEvent>(kj::mv(msg), kj::mv(err)));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we
     // can destroy the connection. Note that we don't set closedOutgoing = true because that flag

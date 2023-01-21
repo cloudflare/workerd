@@ -372,8 +372,8 @@ public:
           context, handle, jsg::TypeErrorContext::other());
     }
 
-    v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) override {
-      return jsgIsolate.wrapper->wrap(v8Isolate, nullptr, kj::mv(data));
+    Value wrapBytes(kj::Array<byte> data) override {
+      return Value(v8Isolate, jsgIsolate.wrapper->wrap(v8Isolate, nullptr, kj::mv(data)));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
         jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)>

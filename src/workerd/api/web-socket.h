@@ -14,10 +14,10 @@ namespace workerd::api {
 
 class MessageEvent: public Event {
 public:
-  MessageEvent(v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event("message"), data(isolate, data) {}
-  MessageEvent(kj::String type, v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event(kj::mv(type)), data(isolate, data) {}
+  MessageEvent(jsg::Value data)
+      : Event("message"), data(kj::mv(data)) {}
+  MessageEvent(kj::String type, jsg::Value data)
+      : Event(kj::mv(type)), data(kj::mv(data)) {}
 
   struct Initializer {
     v8::Local<v8::Value> data;
@@ -28,11 +28,11 @@ public:
     });
   };
   static jsg::Ref<MessageEvent> constructor(
-      kj::String type, Initializer initializer, v8::Isolate* isolate) {
-    return jsg::alloc<MessageEvent>(kj::mv(type), isolate, initializer.data);
+      jsg::Lock& js, kj::String type, Initializer initializer) {
+    return jsg::alloc<MessageEvent>(kj::mv(type), js.v8Ref(initializer.data));
   }
 
-  v8::Local<v8::Value> getData(v8::Isolate* isolate) { return data.getHandle(isolate); }
+  v8::Local<v8::Value> getData(jsg::Lock& js) { return data.getHandle(js); }
 
   jsg::Unimplemented getOrigin() { return jsg::Unimplemented(); }
   jsg::Unimplemented getLastEventId() { return jsg::Unimplemented(); }
@@ -105,8 +105,8 @@ private:
 
 class ErrorEvent: public Event {
 public:
-  ErrorEvent(kj::String&& message, jsg::Value error, v8::Isolate* isolate)
-      : Event("error"), message(kj::mv(message)), error(kj::mv(error)), isolate(isolate){}
+  ErrorEvent(kj::String&& message, jsg::Value error)
+      : Event("error"), message(kj::mv(message)), error(kj::mv(error)) {}
 
   static jsg::Ref<ErrorEvent> constructor() = delete;
 
@@ -116,7 +116,7 @@ public:
   kj::StringPtr getMessage() { return message; }
   int getLineno() { return 0; }
   int getColno() { return 0; }
-  v8::Local<v8::Value> getError() { return error.getHandle(isolate); }
+  v8::Local<v8::Value> getError(jsg::Lock& js) { return error.getHandle(js); }
 
 
   JSG_RESOURCE_TYPE(ErrorEvent) {
@@ -135,7 +135,6 @@ public:
 private:
   kj::String message;
   jsg::Value error;
-  v8::Isolate* isolate;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
