@@ -31,8 +31,8 @@ wd_cc_library(
 
 wd_cc_library(
     name = "sqlite",
-    srcs = [ "sqlite.c++" ],
-    hdrs = [ "sqlite.h" ],
+    srcs = [ "sqlite.c++", "sqlite-kv.c++" ],
+    hdrs = [ "sqlite.h", "sqlite-kv.h" ],
     visibility = ["//visibility:public"],
     deps = [
         "@sqlite3//:sqlite3",
@@ -70,6 +70,13 @@ wd_cc_library(
 
 kj_test(
     src = "sqlite-test.c++",
+    deps = [
+        ":sqlite",
+    ],
+)
+
+kj_test(
+    src = "sqlite-kv-test.c++",
     deps = [
         ":sqlite",
     ],
