@@ -48,8 +48,8 @@ public:
 
   static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
 
-  jsg::V8Ref<v8::Promise> getPromise(v8::Isolate* isolate) { return promise.addRef(isolate); }
-  jsg::Value getReason(v8::Isolate* isolate) { return reason.addRef(isolate); }
+  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) { return promise.addRef(js); }
+  jsg::Value getReason(jsg::Lock& js) { return reason.addRef(js); }
 
   JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
     JSG_INHERIT(Event);
@@ -226,8 +226,8 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::String btoa(v8::Local<v8::Value> data, v8::Isolate* isolate);
-  v8::Local<v8::String> atob(kj::String data, v8::Isolate* isolate);
+  kj::String btoa(jsg::Lock& js, v8::Local<v8::Value> data);
+  v8::Local<v8::String> atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 
@@ -238,9 +238,9 @@ public:
   };
 
   v8::Local<v8::Value> structuredClone(
+      jsg::Lock& js,
       v8::Local<v8::Value> value,
-      jsg::Optional<StructuredCloneOptions> options,
-      v8::Isolate* isolate);
+      jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
                                    jsg::V8Ref<v8::Function> function,
