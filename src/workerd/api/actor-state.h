@@ -15,6 +15,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include "util.h"
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-sqlite.h>
 
 namespace workerd::api {
 
@@ -178,6 +179,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 public:
   DurableObjectStorage(IoPtr<ActorCache> cache)
     : cache(kj::mv(cache)) {}
+  DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv)
+    : cache(kj::mv(sqliteKv)) {}
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -192,7 +195,7 @@ public:
       jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> closure,
       jsg::Optional<TransactionOptions> options);
 
-  jsg::Promise<void> deleteAll(jsg::Optional<PutOptions> options, v8::Isolate* isolate);
+  jsg::Promise<void> deleteAll(jsg::Lock& js, jsg::Optional<PutOptions> options);
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
@@ -232,7 +235,7 @@ protected:
   }
 
 private:
-  IoPtr<ActorCache> cache;
+  kj::OneOf<IoPtr<ActorCache>, IoPtr<ActorSqlite>> cache;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {

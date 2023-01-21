@@ -485,17 +485,27 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
 }
 
 jsg::Promise<void> DurableObjectStorage::deleteAll(
-    jsg::Optional<PutOptions> maybeOptions, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
-  auto deleteAll = cache->deleteAll(options);
 
-  auto& context = IoContext::current();
-  context.addTask(deleteAll.count.then([&metrics = currentActorMetrics()](uint deleted) {
-    if (deleted == 0) deleted = 1;
-    metrics.addStorageDeletes(deleted);
-  }));
+  KJ_SWITCH_ONEOF(cache) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+      auto deleteAll = actorCache->deleteAll(options);
 
-  return transformMaybeBackpressure(isolate, options, kj::mv(deleteAll.backpressure));
+      auto& context = IoContext::current();
+      context.addTask(deleteAll.count.then([&metrics = currentActorMetrics()](uint deleted) {
+        if (deleted == 0) deleted = 1;
+        metrics.addStorageDeletes(deleted);
+      }));
+
+      return transformMaybeBackpressure(js.v8Isolate, options, kj::mv(deleteAll.backpressure));
+    }
+    KJ_CASE_ONEOF(sqliteKv, IoPtr<ActorSqlite>) {
+      sqliteKv->deleteAll();
+      return js.resolvedPromise();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 void DurableObjectTransaction::deleteAll() {
@@ -572,67 +582,97 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
 }
 
 ActorCacheInterface& DurableObjectStorage::getCache(OpName op) {
-  return *cache;
+  KJ_SWITCH_ONEOF(cache) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+      return *actorCache;
+    }
+    KJ_CASE_ONEOF(sqliteKv, IoPtr<ActorSqlite>) {
+      return *sqliteKv;
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
     jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> callback,
     jsg::Optional<TransactionOptions> options) {
-  auto& context = IoContext::current();
-  auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(
-        kj::heap<ActorCache::Transaction>(*cache)));
-
-  struct TxnResult {
-    jsg::Value value;
-    bool isError;
-  };
-
-  return context.blockConcurrencyWhile(js,
-      [callback = kj::mv(callback), txn = kj::mv(txn)]
-      (jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
-    return js.resolvedPromise(txn.addRef())
-        .then(js, kj::mv(callback))
-        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::Value value) mutable {
-      // In correct usage, `context` should not have changed here, particularly because we're in
-      // a critical section so it should have been impossible for any other context to receive
-      // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
-      // does NOT guarantee it runs in the same context (the application could have returned a
-      // custom Promise and then resolved in from some other context). So let's be safe and grab
-      // IoContext::current() again here, rather than capture it in the lambda.
+  KJ_SWITCH_ONEOF(cache) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
       auto& context = IoContext::current();
-      return context.awaitIoWithInputLock(txn->maybeCommit(), [value = kj::mv(value)]() mutable {
-        return TxnResult { kj::mv(value), false };
+      auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(
+            kj::heap<ActorCache::Transaction>(*actorCache)));
+
+      struct TxnResult {
+        jsg::Value value;
+        bool isError;
+      };
+
+      return context.blockConcurrencyWhile(js,
+          [callback = kj::mv(callback), txn = kj::mv(txn)]
+          (jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
+        return js.resolvedPromise(txn.addRef())
+            .then(js, kj::mv(callback))
+            .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::Value value) mutable {
+          // In correct usage, `context` should not have changed here, particularly because we're in
+          // a critical section so it should have been impossible for any other context to receive
+          // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
+          // does NOT guarantee it runs in the same context (the application could have returned a
+          // custom Promise and then resolved in from some other context). So let's be safe and grab
+          // IoContext::current() again here, rather than capture it in the lambda.
+          auto& context = IoContext::current();
+          return context.awaitIoWithInputLock(txn->maybeCommit(), [value = kj::mv(value)]() mutable {
+            return TxnResult { kj::mv(value), false };
+          });
+        }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
+          // The transaction callback threw an exception. We don't actually want to reset the object,
+          // we only want to roll back the transaction and propagate the exception. So, we carefully
+          // pack the exception away into a value.
+          txn->maybeRollback();
+          return js.resolvedPromise(TxnResult { kj::mv(exception), true });
+        });
+      }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::Value {
+        if (result.isError) {
+          js.throwException(kj::mv(result.value));
+        } else {
+          return kj::mv(result.value);
+        }
       });
-    }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
-      // The transaction callback threw an exception. We don't actually want to reset the object,
-      // we only want to roll back the transaction and propagate the exception. So, we carefully
-      // pack the exception away into a value.
-      txn->maybeRollback();
-      return js.resolvedPromise(TxnResult { kj::mv(exception), true });
-    });
-  }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::Value {
-    if (result.isError) {
-      js.throwException(kj::mv(result.value));
-    } else {
-      return kj::mv(result.value);
     }
-  });
+    KJ_CASE_ONEOF(sqliteKv, IoPtr<ActorSqlite>) {
+      // TODO(sqlite): Implement transactions.
+      JSG_FAIL_REQUIRE(Error, "transaction() not yet implemented for SQLite-backed storage");
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
-  KJ_IF_MAYBE(p, cache->onNoPendingFlush()) {
-    // Note that we're not actually flushing since that will happen anyway once we go async. We're
-    // merely checking if we have any pending or in-flight operations, and providing a promise that
-    // resolves when they succeed. This promise only covers operations that were scheduled before
-    // this method was invoked. If the cache has to flush again later from future operations, this
-    // promise will resolve before they complete. If this promise were to reject, then the actor's
-    // output gate will be broken first and the isolate will not resume synchronous execution.
+  KJ_SWITCH_ONEOF(cache) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+      KJ_IF_MAYBE(p, actorCache->onNoPendingFlush()) {
+        // Note that we're not actually flushing since that will happen anyway once we go async. We're
+        // merely checking if we have any pending or in-flight operations, and providing a promise that
+        // resolves when they succeed. This promise only covers operations that were scheduled before
+        // this method was invoked. If the cache has to flush again later from future operations, this
+        // promise will resolve before they complete. If this promise were to reject, then the actor's
+        // output gate will be broken first and the isolate will not resume synchronous execution.
 
-    auto& context = IoContext::current();
-    return context.awaitIo(kj::mv(*p));
-  } else {
-    return js.resolvedPromise();
+        auto& context = IoContext::current();
+        return context.awaitIo(kj::mv(*p));
+      } else {
+        return js.resolvedPromise();
+      }
+    }
+    KJ_CASE_ONEOF(sqliteKv, IoPtr<ActorSqlite>) {
+      KJ_IF_MAYBE(p, sqliteKv->sync()) {
+        auto& context = IoContext::current();
+        return context.awaitIo(kj::mv(*p));
+      } else {
+        return js.resolvedPromise();
+      }
+    }
   }
+  KJ_UNREACHABLE;
 }
 
 ActorCacheInterface& DurableObjectTransaction::getCache(OpName op) {
