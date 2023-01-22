@@ -179,6 +179,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // Global object API exposed to JavaScript.
 
 public:
+  static ServiceWorkerGlobalScope& from(jsg::Lock& js);
+
   ServiceWorkerGlobalScope(v8::Isolate* isolate);
 
   void clear();

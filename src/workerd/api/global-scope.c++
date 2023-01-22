@@ -97,6 +97,12 @@ void ExecutionContext::passThroughOnException() {
   IoContext::current().setFailOpen();
 }
 
+ServiceWorkerGlobalScope& ServiceWorkerGlobalScope::from(jsg::Lock& js) {
+  auto context = js.v8Isolate->GetCurrentContext();
+  return jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+      context, context->Global());
+}
+
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
     : unhandledRejections(
         [this](jsg::Lock& js,
