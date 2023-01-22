@@ -116,10 +116,15 @@ Lock::~Lock() noexcept(false) {
   v8Isolate->SetData(2, previousData);
 }
 
+v8::Local<v8::Value> Lock::v8ParseJson(kj::StringPtr text) {
+  v8::EscapableHandleScope scope(v8Isolate);
+  return scope.Escape(jsg::check(
+      v8::JSON::Parse(v8Isolate->GetCurrentContext(), v8Str(v8Isolate, text))));
+}
+
 Value Lock::parseJson(kj::StringPtr text) {
   v8::HandleScope scope(v8Isolate);
-  return jsg::Value(v8Isolate,
-      jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), v8Str(v8Isolate, text))));
+  return jsg::Value(v8Isolate, v8ParseJson(text));
 }
 
 kj::String Lock::serializeJson(v8::Local<v8::Value> value) {

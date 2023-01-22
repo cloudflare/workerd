@@ -13,8 +13,8 @@ namespace {
 V8System v8System;
 
 struct FreezeContext: public Object {
-  void recursivelyFreeze(v8::Local<v8::Value> value, v8::Isolate* isolate) {
-    jsg::recursivelyFreeze(isolate->GetCurrentContext(), value);
+  void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value) {
+    jsg::recursivelyFreeze(js.v8Isolate, value);
   }
   JSG_RESOURCE_TYPE(FreezeContext) {
     JSG_METHOD(recursivelyFreeze);

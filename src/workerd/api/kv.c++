@@ -53,9 +53,7 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) 
       if (jsg::check(key->HasOwnProperty(context, metaName))) {
         auto metadata = jsg::check(key->Get(context, metaName));
         KJ_ASSERT(metadata->IsString());
-        auto metadataStr = metadata.As<v8::String>();
-        auto json = jsg::check(v8::JSON::Parse(context, metadataStr));
-        jsg::check(key->Set(context, metaName, json));
+        jsg::check(key->Set(context, metaName, js.v8ParseJson(js.toString(metadata))));
       }
     }
   }

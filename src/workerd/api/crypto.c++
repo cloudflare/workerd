@@ -456,7 +456,6 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
       key.getAlgorithmName());
 
   return js.evalNow([&] {
-    auto isolate = js.v8Isolate;
     auto algorithm = interpretAlgorithmParam(kj::mv(wrapAlgorithm));
 
     validateOperation(wrappingKey, algorithm.name, CryptoKeyUsageSet::wrapKey());
@@ -471,34 +470,17 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
 
     auto exportedKey = key.impl->exportKey(kj::mv(format));
 
-    kj::Array<kj::byte> bytes;
     KJ_SWITCH_ONEOF(exportedKey) {
       KJ_CASE_ONEOF(k, kj::Array<kj::byte>) {
-        bytes = kj::mv(k);
+        kj::Array<kj::byte> bytes = kj::mv(k);
+        return wrappingKey.impl->wrapKey(kj::mv(algorithm), bytes.asPtr().asConst());
       }
       KJ_CASE_ONEOF(jwk, JsonWebKey) {
-        auto jwkValue = jwkHandler.wrap(js, kj::mv(jwk));
-        auto stringified = jsg::check(v8::JSON::Stringify(isolate->GetCurrentContext(), jwkValue));
-        kj::Vector<kj::byte> converted;
-
-        auto serializedLength = stringified->Utf8Length(isolate);
-        // The WebCrypto spec would seem to indicate we need to pad AES-KW here. However, I can't
-        // find any conformance test that fails if we don't pad. I can't find anywhere within
-        // Chromium that has padding either.
-
-        converted.resize(serializedLength);
-
-        auto written = stringified->WriteUtf8(isolate, converted.asPtr().asChars().begin(),
-            serializedLength, nullptr, v8::String::NO_NULL_TERMINATION);
-
-        converted.resize(written);
-
-        bytes = converted.releaseAsArray();
+        auto str = js.serializeJson(jwkHandler.wrap(js, kj::mv(jwk))).asBytes().asConst();
+        return wrappingKey.impl->wrapKey(kj::mv(algorithm), str);
       }
     }
-
-    auto unwrappedKey = bytes.asPtr().asConst();
-    return wrappingKey.impl->wrapKey(kj::mv(algorithm), unwrappedKey);
+    KJ_UNREACHABLE;
   });
 }
 
@@ -510,7 +492,6 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js, kj::Str
     const jsg::TypeHandler<JsonWebKey>& jwkHandler) {
   auto operation = __func__;
   return js.evalNow([&]() -> jsg::Ref<CryptoKey> {
-    auto isolate = js.v8Isolate;
     auto normalizedAlgorithm = interpretAlgorithmParam(kj::mv(unwrapAlgorithm));
     auto normalizedUnwrapAlgorithm = interpretAlgorithmParam(kj::mv(unwrappedKeyAlgorithm));
 
@@ -527,12 +508,10 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js, kj::Str
     ImportKeyData importData;
 
     if (format == "jwk") {
-      auto jsonJwk = jsg::v8Str(isolate, bytes.asChars());
+      auto jwkDict = js.v8ParseJson(kj::str(bytes.asChars()));
 
-      auto jwkDict = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonJwk));
-
-      importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict), DOMDataError,
-          "Missing \"kty\" field or corrupt JSON unwrapping key?");
+      importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict),
+          DOMDataError, "Missing \"kty\" field or corrupt JSON unwrapping key?");
     } else {
       importData = kj::mv(bytes);
     }

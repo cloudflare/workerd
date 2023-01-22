@@ -651,19 +651,20 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   }
 }
 
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
+void recursivelyFreeze(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  auto context = isolate->GetCurrentContext();
   if (value->IsArray()) {
     // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).
-    v8::HandleScope scope(context->GetIsolate());
+    v8::HandleScope scope(isolate);
     auto arr = value.As<v8::Array>();
 
     for (auto i: kj::zeroTo(arr->Length())) {
-      recursivelyFreeze(context, check(arr->Get(context, i)));
+      recursivelyFreeze(isolate, check(arr->Get(context, i)));
     }
 
     check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
   } else if (value->IsObject()) {
-    v8::HandleScope scope(context->GetIsolate());
+    v8::HandleScope scope(isolate);
     auto obj = value.As<v8::Object>();
     auto names = check(obj->GetPropertyNames(context,
         v8::KeyCollectionMode::kOwnOnly,
@@ -671,7 +672,7 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
         v8::IndexFilter::kIncludeIndices));
 
     for (auto i: kj::zeroTo(names->Length())) {
-      recursivelyFreeze(context,
+      recursivelyFreeze(isolate,
           check(obj->Get(context, check(names->Get(context, i)))));
     }
 

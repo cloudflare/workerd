@@ -173,7 +173,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer);
 kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView);
 // View the contents of the given v8::ArrayBuffer/ArrayBufferView as an ArrayPtr<byte>.
 
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
+void recursivelyFreeze(v8::Isolate* isolate, v8::Local<v8::Value> value);
 // Freeze the given object and all its members, making it recursively immutable.
 //
 // WARNING: This function is unsafe to call on user-provided content since if the value is cyclic

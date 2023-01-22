@@ -123,9 +123,7 @@ struct WorkerdApiIsolate::Impl {
 
   static v8::Local<v8::Value> compileJsonGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
-    return jsg::check(v8::JSON::Parse(
-        lock.v8Isolate->GetCurrentContext(),
-        lock.wrapNoContext(reader)));
+    return lock.parseJson(lock.wrapNoContext(reader));
   };
 
 };
@@ -457,8 +455,7 @@ void WorkerdApiIsolate::compileGlobals(
 
     KJ_SWITCH_ONEOF(global.value) {
       KJ_CASE_ONEOF(json, Global::Json) {
-        v8::Local<v8::String> string = lock.wrap(context, kj::mv(json.text));
-        value = jsg::check(v8::JSON::Parse(context, string));
+        value = lock.parseJson(lock.wrap(context, kj::mv(json.text)));
       }
 
       KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
@@ -491,14 +488,12 @@ void WorkerdApiIsolate::compileGlobals(
             keyData = kj::heapArray(data.asPtr());
           }
           KJ_CASE_ONEOF(json, Global::Json) {
-            v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
-            v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
+            auto obj = lock.parseJson(lock.wrap(context, kj::mv(json.text)));
             keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
           }
         }
 
-        v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
-        v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
+        auto algo = lock.parseJson(lock.wrap(context, kj::mv(key.algorithm.text)));
         auto importKeyAlgo = lock.unwrap<
             kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
 

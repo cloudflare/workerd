@@ -364,6 +364,10 @@ public:
       return jsgIsolate.wrapper->wrap(v8Isolate, nullptr, kj::fwd<T>(value));
     }
 
+    v8::Local<v8::Value> parseJson(v8::Local<v8::String> str) {
+      return jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), str));
+    }
+
     template <typename T>
     auto unwrap(v8::Local<v8::Context> context, v8::Local<v8::Value> handle) {
       // Convert a JavaScript value to a C++ value, or throw a JS exception if the type doesn't

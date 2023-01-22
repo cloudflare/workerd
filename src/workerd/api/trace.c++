@@ -107,8 +107,8 @@ jsg::Optional<v8::Local<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(
     jsg::Lock& js) {
   const auto& cfJson = eventInfo.cfJson;
   if (cfJson.size() > 0) {
-    auto jsonString = jsg::v8Str(js.v8Isolate, cfJson);
-    auto handle = jsg::check(v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsonString));
+    auto handle = js.v8ParseJson(cfJson);
+    KJ_ASSERT(handle->IsObject());
     return handle.As<v8::Object>();
   }
   return nullptr;
@@ -255,8 +255,8 @@ kj::StringPtr TraceLog::getLevel() {
 }
 
 v8::Local<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
-  auto jsonString = jsg::v8Str(js.v8Isolate, log.message);
-  auto handle = jsg::check(v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsonString));
+  auto handle = js.v8ParseJson(log.message);
+  KJ_ASSERT(handle->IsObject());
   return handle.As<v8::Object>();
 }
 

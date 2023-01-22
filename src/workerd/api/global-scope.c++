@@ -148,7 +148,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
     auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
     // For the inbound request, we make the `cf` blob immutable.
-    jsg::recursivelyFreeze(isolate->GetCurrentContext(), handle);
+    jsg::recursivelyFreeze(isolate, handle);
     KJ_ASSERT(handle->IsObject());
     cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
   }
