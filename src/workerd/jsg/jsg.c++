@@ -116,6 +116,17 @@ Lock::~Lock() noexcept(false) {
   v8Isolate->SetData(2, previousData);
 }
 
+v8::Local<v8::Value> Lock::call(v8::Local<v8::Function> fn,
+                                v8::Local<v8::Value> thisArg,
+                                kj::ArrayPtr<v8::Local<v8::Value>> args) {
+  return check(fn->Call(v8Context(), thisArg, args.size(), args.begin()));
+}
+
+v8::Local<v8::Value> Lock::call(v8::Local<v8::Function> fn,
+                                kj::ArrayPtr<v8::Local<v8::Value>> args) {
+  return call(fn, v8Isolate->GetCurrentContext()->Global(), args);
+}
+
 v8::Local<v8::Value> Lock::v8ParseJson(kj::StringPtr text) {
   v8::EscapableHandleScope scope(v8Isolate);
   return scope.Escape(jsg::check(

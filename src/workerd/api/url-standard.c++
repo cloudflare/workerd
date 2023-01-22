@@ -2033,12 +2033,10 @@ void URLSearchParams::forEach(
   // are added to the search params unconditionally on each iteration.
   for (int i = 0; i < list.size(); i++) {
     auto& entry = list[i];
-    v8::Local<v8::Value> args[3] = {
+    (void)js.call(cb, this_,
       jsg::v8Str(js.v8Isolate, entry.value),
       jsg::v8Str(js.v8Isolate, entry.name),
-      query,
-    };
-    jsg::check(cb->Call(js.v8Isolate->GetCurrentContext(), this_, 3, args));
+      query);
   }
 }
 

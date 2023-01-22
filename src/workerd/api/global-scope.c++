@@ -98,9 +98,8 @@ void ExecutionContext::passThroughOnException() {
 }
 
 ServiceWorkerGlobalScope& ServiceWorkerGlobalScope::from(jsg::Lock& js) {
-  auto context = js.v8Isolate->GetCurrentContext();
   return jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
-      context, context->Global());
+      js.v8Context(), js.v8Global());
 }
 
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
@@ -555,15 +554,12 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
       [function = function.addRef(js),
        argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto context = js.v8Isolate->GetCurrentContext();
-    auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
       return arg.getHandle(js);
     };
-    auto argc = localArgs.size();
 
     // Cast to void to discard the result value.
-    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+    (void)js.call(function.getHandle(js), localArgs);
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
@@ -595,15 +591,12 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
       [function = function.addRef(js),
        argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto context = js.v8Isolate->GetCurrentContext();
-    auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
       return arg.getHandle(js);
     };
-    auto argc = localArgs.size();
 
     // Cast to void to discard the result value.
-    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+    (void)js.call(function.getHandle(js), localArgs);
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }

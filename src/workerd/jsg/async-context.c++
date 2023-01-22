@@ -101,17 +101,13 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
       ),
       (frame, thisArg, fn),
       (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-    auto function = fn.getHandle(js);
-    auto context = js.v8Isolate->GetCurrentContext();
-
     kj::Vector<v8::Local<v8::Value>> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {
       argv.add(args[n]);
     }
 
     AsyncContextFrame::Scope scope(js, *frame);
-    v8::Local<v8::Value> result;
-    return check(function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin()));
+    return js.call(fn.getHandle(js), thisArg.getHandle(js), argv.asPtr());
   }));
 }
 

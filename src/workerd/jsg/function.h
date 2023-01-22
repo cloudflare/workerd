@@ -383,7 +383,8 @@ public:
         typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
       };
 
-      auto result = check(func->Call(context, receiver, sizeof...(Args), argv));
+      auto result = js.call(func, receiver,
+          kj::ArrayPtr<v8::Local<v8::Value>>(argv, sizeof...(Args)));
       if constexpr(!isVoid<Ret>()) {
         return typeWrapper.template unwrap<Ret>(
             context, result, TypeErrorContext::callbackReturn());

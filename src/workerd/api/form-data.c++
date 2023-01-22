@@ -412,19 +412,15 @@ void FormData::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
-  auto context = isolate->GetCurrentContext();  // Needed later for Call().
   for (int i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
-    static constexpr auto ARG_COUNT = 3;
-
-    v8::Local<v8::Value> args[ARG_COUNT] = {
-      handler.wrap(js, clone(value)),
-      jsg::v8Str(isolate, key),
-      localParams,
-    };
     // Call jsg::check() to propagate exceptions, but we don't expect any
     // particular return value.
-    jsg::check(localCallback->Call(context, localThisArg, ARG_COUNT, args));
+    js.call(localCallback,
+            localThisArg,
+            handler.wrap(js, clone(value)),
+            jsg::v8Str(isolate, key),
+            localParams);
   }
 }
 

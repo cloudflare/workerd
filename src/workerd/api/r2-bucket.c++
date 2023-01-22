@@ -48,10 +48,10 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
       context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
   KJ_REQUIRE(converted->IsDate());
   const auto stringify = jsg::check(converted.template As<v8::Date>()->Get(
-      context, jsg::v8Str(isolate, "toUTCString")));
+      context, jsg::v8StrIntern(isolate, "toUTCString")));
   JSG_REQUIRE(stringify->IsFunction(), TypeError, "toUTCString on a Date is not a function");
-  const auto stringified = jsg::check(stringify.template As<v8::Function>()->Call(
-      context, stringify, 0, nullptr));
+
+  const auto stringified = js.call(stringify.template As<v8::Function>());
   JSG_REQUIRE(stringified->IsString(), TypeError, "toUTCString on a Date did not return a string");
 
   const auto str = stringified.template As<v8::String>();

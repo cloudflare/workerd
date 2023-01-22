@@ -334,17 +334,11 @@ void Headers::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
-  auto context = isolate->GetCurrentContext();  // Needed later for Call().
   for (auto& entry: getDisplayedHeaders()) {
-    static constexpr auto ARG_COUNT = 3;
-    v8::Local<v8::Value> args[ARG_COUNT] = {
+    (void)js.call(localCallback, localThisArg,
       jsg::v8Str(isolate, entry.value),
       jsg::v8Str(isolate, entry.key),
-      localHeaders,
-    };
-    // Call jsg::check() to propagate exceptions, but we don't expect any
-    // particular return value.
-    jsg::check(localCallback->Call(context, localThisArg, ARG_COUNT, args));
+      localHeaders);
   }
 }
 

@@ -596,18 +596,12 @@ void URLSearchParams::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
 
-  auto context = js.v8Isolate->GetCurrentContext();  // Needed later for Call().
   for (int i = 0; i < this->url->query.size(); i++) {
     auto& [key, value] = this->url->query[i];
-    static constexpr auto ARG_COUNT = 3;
-    v8::Local<v8::Value> args[ARG_COUNT] = {
+    (void)js.call(localCallback, localThisArg,
       jsg::v8Str(js.v8Isolate, value),
       jsg::v8Str(js.v8Isolate, key),
-      localParams,
-    };
-    // Call jsg::check() to propagate exceptions, but we don't expect any
-    // particular return value.
-    jsg::check(localCallback->Call(context, localThisArg, ARG_COUNT, args));
+      localParams);
   }
 }
 

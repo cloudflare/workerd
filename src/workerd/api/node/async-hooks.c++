@@ -20,15 +20,9 @@ v8::Local<v8::Value> AsyncLocalStorage::run(
     argv.add(arg.getHandle(js));
   }
 
-  auto context = js.v8Isolate->GetCurrentContext();
-
   jsg::AsyncContextFrame::StorageScope scope(js, *key, js.v8Ref(store));
 
-  return jsg::check(callback->Call(
-      context,
-      context->Global(),
-      argv.size(),
-      argv.begin()));
+  return js.call(callback, argv.asPtr());
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::exit(
@@ -106,15 +100,9 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(
     argv.add(arg.getHandle(js));
   }
 
-  auto context = js.v8Isolate->GetCurrentContext();
-
   jsg::AsyncContextFrame::Scope scope(js, *frame);
 
-  return jsg::check(fn->Call(
-      context,
-      thisArg.orDefault(context->Global()),
-      argv.size(),
-      argv.begin()));
+  return js.call(fn, thisArg.orDefault(js.v8Global()), argv.asPtr());
 }
 
 }  // namespace workerd::api::node

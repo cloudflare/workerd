@@ -1969,6 +1969,8 @@ public:
   // eliminate direct use as much as possible.
 
   v8::Local<v8::Value> v8Undefined();
+  v8::Local<v8::Object> v8Global();
+  v8::Local<v8::Context> v8Context();
 
   v8::Local<v8::Value> v8Error(kj::StringPtr message);
   v8::Local<v8::Value> v8TypeError(kj::StringPtr message);
@@ -2013,6 +2015,33 @@ public:
 
   // ---------------------------------------------------------------------------
   // Misc. Stuff
+
+  v8::Local<v8::Value> call(v8::Local<v8::Function> fn,
+                            v8::Local<v8::Value> thisArg = v8::Local<v8::Value>()) {
+    if (thisArg.IsEmpty()) thisArg = v8Isolate->GetCurrentContext()->Global();
+    return call(fn, thisArg, kj::Array<v8::Local<v8::Value>>());
+  }
+
+  template <typename... Args>
+  v8::Local<v8::Value> call(v8::Local<v8::Function> fn, v8::Local<Args>... args) {
+    return call(fn, v8Isolate->GetCurrentContext()->Global(), kj::fwd<Args...>(args...));
+  }
+
+  template <typename... Args>
+  v8::Local<v8::Value> call(v8::Local<v8::Function> fn,
+                            v8::Local<v8::Value> thisArg,
+                            v8::Local<Args>... args) {
+    v8::Local<v8::Value> argv[sizeof...(Args)] = {args...};
+    return call(fn, thisArg, kj::ArrayPtr<v8::Local<v8::Value>>(argv, sizeof...(Args)));
+  }
+
+  v8::Local<v8::Value> call(v8::Local<v8::Function> fn,
+                            v8::Local<v8::Value> thisArg,
+                            kj::ArrayPtr<v8::Local<v8::Value>> args);
+
+  v8::Local<v8::Value> call(v8::Local<v8::Function> fn,
+                            kj::ArrayPtr<v8::Local<v8::Value>> args);
+  // Calls a given JS function. If a thisArg is not provided, the global is used.
 
   void requestGcForTesting() const;
   // Sends an immediate request for full GC, this function is to ONLY be used in testing, otherwise
@@ -2070,6 +2099,14 @@ inline Data Lock::v8Data(v8::Local<v8::Data> local) {
 
 inline v8::Local<v8::Value> Lock::v8Undefined() {
   return v8::Undefined(v8Isolate);
+}
+
+inline v8::Local<v8::Object> Lock::v8Global() {
+  return v8Isolate->GetCurrentContext()->Global();
+}
+
+inline v8::Local<v8::Context> Lock::v8Context() {
+  return v8Isolate->GetCurrentContext();
 }
 
 inline Data Data::addRef(jsg::Lock& js) {
