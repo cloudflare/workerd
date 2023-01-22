@@ -170,7 +170,10 @@ public:
 
   kj::String toString();
 
+  inline uint getSize() { return url->query.size(); }
+
   JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
     JSG_METHOD(append);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(get);

@@ -123,7 +123,10 @@ public:
 
   jsg::UsvString toString();
 
+  inline uint getSize() { return list.size(); }
+
   JSG_RESOURCE_TYPE(URLSearchParams) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
     JSG_METHOD(append);
     JSG_METHOD_NAMED(delete, delete_);
     JSG_METHOD(get);
