@@ -25,11 +25,11 @@ static bool isWholeNumber(double x) {
 // concerns about the user overriding the methods we're invoking.
 static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
   auto isolate = js.v8Isolate;
-  const auto context = isolate->GetCurrentContext();
+  const auto context = js.v8Context();
   const auto tmp = jsg::check(v8::Date::New(context, 0));
   KJ_REQUIRE(tmp->IsDate());
   const auto constructor = jsg::check(tmp.template As<v8::Date>()->Get(
-      context, jsg::v8Str(isolate, "constructor")));
+      context, jsg::v8StrIntern(isolate, "constructor"_kj)));
   JSG_REQUIRE(constructor->IsFunction(), TypeError, "Date.constructor is not a function");
   v8::Local<v8::Value> argv = jsg::v8Str(isolate, value);
   const auto converted = jsg::check(
@@ -43,12 +43,12 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
   // NOTE: If you need toISOString just unify it into this function as the only difference will be
   // the function name called.
   auto isolate = js.v8Isolate;
-  const auto context = isolate->GetCurrentContext();
+  const auto context = js.v8Context();
   const auto converted = jsg::check(v8::Date::New(
       context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
   KJ_REQUIRE(converted->IsDate());
   const auto stringify = jsg::check(converted.template As<v8::Date>()->Get(
-      context, jsg::v8StrIntern(isolate, "toUTCString")));
+      context, jsg::v8StrIntern(isolate, "toUTCString"_kj)));
   JSG_REQUIRE(stringify->IsFunction(), TypeError, "toUTCString on a Date is not a function");
 
   const auto stringified = js.call(stringify.template As<v8::Function>());

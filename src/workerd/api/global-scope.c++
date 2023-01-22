@@ -471,7 +471,7 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(
 }
 
 kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, v8::Local<v8::Value> data) {
-  auto str = jsg::check(data->ToString(js.v8Isolate->GetCurrentContext()));
+  auto str = jsg::check(data->ToString(js.v8Context()));
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's

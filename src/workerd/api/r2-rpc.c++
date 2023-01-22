@@ -26,7 +26,7 @@ static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
 v8::Local<v8::Value> R2Error::getStack(jsg::Lock& js) {
   auto stackString = jsg::v8StrIntern(js.v8Isolate, "stack"_kj);
   return jsg::check(KJ_ASSERT_NONNULL(errorForStack).Get(js.v8Isolate)->Get(
-      js.v8Isolate->GetCurrentContext(), stackString));
+      js.v8Context(), stackString));
 }
 
 kj::Maybe<uint> R2Result::v4ErrorCode() {
@@ -47,7 +47,7 @@ void R2Result::throwIfError(kj::StringPtr action,
     auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);
     (*e)->errorForStack = v8::Global<v8::Object>(
-        isolate, v8::Exception::Error(jsg::v8Str(isolate, "")).As<v8::Object>());
+        isolate, v8::Exception::Error(v8::String::Empty(isolate)).As<v8::Object>());
     isolate->ThrowException(errorType.wrapRef(kj::mv(*e)));
     throw jsg::JsExceptionThrown();
 #else

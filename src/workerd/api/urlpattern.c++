@@ -388,7 +388,7 @@ Part::Modifier maybeTokenToModifier(kj::Maybe<Token&> modifierToken) {
 // TODO (later): Investigate whether there is a more efficient way to handle this.
 bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& component) {
   auto handle = component.regex.getHandle(js);
-  auto context = js.v8Isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   const auto checkIt = [&handle, &js, &context](const char* name) {
     return !jsg::check(handle->Exec(context, jsg::v8Str(js.v8Isolate, name)))->IsNullOrUndefined();
@@ -1125,9 +1125,8 @@ RegexAndNameList generateRegularExpressionAndNameList(
   // regular expression syntax is invalid as opposed to the default SyntaxError
   // that V8 throws.
   return js.tryCatch([&]() {
-    auto context = js.v8Isolate->GetCurrentContext();
     return RegexAndNameList {
-      js.v8Ref(jsg::check(v8::RegExp::New(context,
+      js.v8Ref(jsg::check(v8::RegExp::New(js.v8Context(),
                         v8Str(js.v8Isolate, result.finish()),
                         v8::RegExp::Flags::kUnicode)).As<v8::RegExp>()),
       nameList.releaseAsArray(),
@@ -1830,11 +1829,9 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
     jsg::UsvStringPtr input) {
   using Groups = jsg::Dict<jsg::UsvString, jsg::UsvString>;
 
-  auto context = js.v8Isolate->GetCurrentContext();
-
   auto execResult =
       jsg::check(component.regex.getHandle(js)->Exec(
-          context, jsg::v8Str(js.v8Isolate, input)));
+          js.v8Context(), jsg::v8Str(js.v8Isolate, input)));
 
   if (execResult->IsNullOrUndefined()) {
     return nullptr;
@@ -1849,7 +1846,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
   kj::Vector<Groups::Field> fields(length - 1);
 
   while (index < length) {
-    auto value = jsg::check(resultsArray->Get(context, index));
+    auto value = jsg::check(resultsArray->Get(js.v8Context(), index));
     fields.add(Groups::Field {
       .name = jsg::usv(component.nameList[index - 1]),
       .value = value->IsUndefined() ? jsg::usv() : jsg::usv(js.v8Isolate, value),
