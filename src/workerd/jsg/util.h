@@ -208,6 +208,8 @@ v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
     return check(v8::String::NewFromTwoByte(isolate, ptr.begin(), newType, ptr.size()));
   } else if constexpr (kj::isSameType<const char, T>()) {
     return check(v8::String::NewFromUtf8(isolate, ptr.begin(), newType, ptr.size()));
+  } else if constexpr (kj::isSameType<char, T>()) {
+    return check(v8::String::NewFromUtf8(isolate, ptr.begin(), newType, ptr.size()));
   } else {
     KJ_UNREACHABLE;
   }
