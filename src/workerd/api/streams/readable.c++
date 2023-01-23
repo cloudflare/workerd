@@ -460,8 +460,8 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
     kj::Own<WritableStreamSink> sink,
     bool end) {
   return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
-    KJ_REQUIRE(!isDisturbed(), "The ReadableStream has already been read.");
-    KJ_REQUIRE(!isLocked(), "The ReadableStream has been locked to a reader.");
+    JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
+    JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
 
     KJ_SWITCH_ONEOF(controller) {
       KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
