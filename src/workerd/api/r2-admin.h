@@ -62,10 +62,12 @@ public:
   };
 
   jsg::Promise<jsg::Ref<R2Bucket>> create(jsg::Lock& js, kj::String name,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+      CompatibilityFlags::Reader compatFlags);
   jsg::Ref<R2Bucket> get(jsg::Lock& js, kj::String name);
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String bucketName,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+      CompatibilityFlags::Reader compatFlags);
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<RetrievedBucket>>& retrievedBucketType,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
