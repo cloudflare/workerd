@@ -25,7 +25,9 @@ public:
 
   kj::Maybe<v8::ScriptCompiler::CachedData&> find(const void* key) const {
     return cache.lockShared()->find(key).map([](auto& data)
-        -> v8::ScriptCompiler::CachedData& { return *data; });
+        -> v8::ScriptCompiler::CachedData& {
+      return *data;
+    });
   }
 
   static const CompileCache& get() {
@@ -328,23 +330,25 @@ v8::Local<v8::Module> compileEsmModule(
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
     contentStr = jsg::check(jsg::newExternalOneByteString(js, content));
 
-    const auto& compileCache = CompileCache::get();
-    KJ_IF_MAYBE(cached, compileCache.find(content.begin())) {
-      v8::ScriptCompiler::Source source(contentStr, origin, cached);
-      v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
-      KJ_DEFER(if (source.GetCachedData()->rejected) {
-        KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
-        js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: Internal error"));
-      });
-      return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
-    }
+    // TODO(bug): The cache is failing under certain conditions. Disabling this logic
+    // for now until it can be debugged.
+    // const auto& compileCache = CompileCache::get();
+    // KJ_IF_MAYBE(cached, compileCache.find(content.begin())) {
+    //   v8::ScriptCompiler::Source source(contentStr, origin, cached);
+    //   v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
+    //   KJ_DEFER(if (source.GetCachedData()->rejected) {
+    //     KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
+    //     js.throwException(KJ_EXCEPTION(FAILED, "jsg.Error: Internal error"));
+    //   });
+    //   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
+    // }
 
     v8::ScriptCompiler::Source source(contentStr, origin);
     auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 
     auto cachedData = std::unique_ptr<v8::ScriptCompiler::CachedData>(
         v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript()));
-    compileCache.add(content.begin(), kj::mv(cachedData));
+    // compileCache.add(content.begin(), kj::mv(cachedData));
     return module;
   }
 
