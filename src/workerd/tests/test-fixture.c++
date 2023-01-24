@@ -1,12 +1,17 @@
-#include "test-fixture.h"
+#include <algorithm>
+
+#include <workerd/api/global-scope.h>
 #include <workerd/io/actor-cache.h>
-#include "workerd/io/io-channels.h"
-#include "workerd/io/limit-enforcer.h"
-#include "workerd/io/observer.h"
+#include <workerd/io/io-channels.h>
+#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/server/workerd-api.h>
-#include <algorithm>
+#include <workerd/server/workerd-api.h>
+
+#include "test-fixture.h"
+
 
 namespace workerd {
 
@@ -81,11 +86,12 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
   TimerChannel& timer;
 };
 
-static constexpr kj::StringPtr script = R"SCRIPT(
-  addEventListener("fetch", event => {
-    event.respondWith(new Response("OK"));
-  });
+static constexpr kj::StringPtr mainModuleSource = R"SCRIPT(
+  export default {
+    fetch(request) { return new Response("OK"); },
+  };
 )SCRIPT"_kj;
+static constexpr kj::StringPtr mainModuleName = "main"_kj;
 
 static constexpr kj::StringPtr scriptId = "script"_kj;
 
@@ -160,11 +166,85 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
 
 };
 
+struct MockErrorReporter final: public Worker::ValidationErrorReporter {
+  void addError(kj::String error) override {
+    KJ_FAIL_REQUIRE("unexpected error", error);
+  }
+
+  void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
+    KJ_FAIL_REQUIRE("addHandler not implemented", exportName.orDefault("<empty>"), type);
+  }
+};
+
+inline server::config::Worker::Reader buildConfig(
+    TestFixture::SetupParams& params,
+    capnp::MallocMessageBuilder& arena) {
+  auto config = arena.initRoot<server::config::Worker>();
+  auto modules = config.initModules(1);
+  modules[0].setName(mainModuleName);
+  modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
+  return config;
+}
+
+struct MemoryOutputStream final: kj::AsyncOutputStream, public kj::Refcounted  {
+  kj::Vector<byte> content;
+
+  kj::Promise<void> write(const void* buffer, size_t size) override {
+    auto ptr = reinterpret_cast<const byte*>(buffer);
+    content.addAll(ptr, ptr + size);
+    return kj::READY_NOW;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::String str() {
+    return kj::str(content.asPtr().asChars());
+  }
+};
+
+struct MockResponse final: public kj::HttpService::Response {
+  uint statusCode = 0;
+  kj::StringPtr statusText;
+  kj::Own<MemoryOutputStream> body = kj::refcounted<MemoryOutputStream>();
+
+  kj::Own<kj::AsyncOutputStream> send(uint statusCode, kj::StringPtr statusText,
+                                      const kj::HttpHeaders &headers,
+                                      kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+    this->statusCode = statusCode;
+    this->statusText = statusText;
+    return kj::addRef(*body);
+  }
+
+  kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders &headers) override {
+    KJ_FAIL_REQUIRE("NOT SUPPORTED");
+  }
+};
+
+struct MemoryInputStream final: public kj::AsyncInputStream {
+  kj::ArrayPtr<const byte> data;
+
+  MemoryInputStream(kj::ArrayPtr<const byte> data) : data(data) { }
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto toRead = kj::min(data.size(), maxBytes);
+    memcpy(buffer, data.begin(), toRead);
+    data = data.slice(toRead, data.size());
+    return toRead;
+  }
+};
+
 } // namespace
 
 
 TestFixture::TestFixture(SetupParams params)
   : params(params),
+    config(buildConfig(params, configArena)),
     io(params.waitScope == nullptr ? kj::Maybe(kj::setupAsyncIo()) : kj::Maybe<kj::AsyncIoContext>(nullptr)),
     timer(kj::heap<MockTimer>()),
     timerChannel(kj::heap<MockTimerChannel>()),
@@ -174,6 +254,7 @@ TestFixture::TestFixture(SetupParams params)
       capnp::HttpOverCapnpFactory::HeaderIdBundle(headerTableBuilder)),
     threadContext(*timer, *entropySource, threadContextHeaderBundle, httpOverCapnpFactory, byteStreamFactory, false),
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
+    errorReporter(kj::heap<MockErrorReporter>()),
     apiIsolate(kj::heap<server::WorkerdApiIsolate>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
@@ -187,14 +268,7 @@ TestFixture::TestFixture(SetupParams params)
     workerScript(kj::atomicRefcounted<Worker::Script>(
       kj::atomicAddRef(*workerIsolate),
       scriptId,
-      Worker::Script::ScriptSource {
-        script,
-        "main.js"_kj,
-        [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate)
-            -> kj::Array<Worker::Script::CompiledGlobal> {
-          return nullptr;
-        }
-      },
+      server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
       kj::atomicAddRef(*workerScript),
@@ -207,7 +281,8 @@ TestFixture::TestFixture(SetupParams params)
       Worker::LockType(Worker::Lock::TakeSynchronously(nullptr))
     )),
     errorHandler(kj::heap<DummyErrorHandler>()),
-    waitUntilTasks(*errorHandler) { }
+    waitUntilTasks(*errorHandler),
+    headerTable(headerTableBuilder.build()) { }
 
 void TestFixture::runInIoContext(
     kj::Function<kj::Promise<void>(const Environment&)>&& callback,
@@ -248,6 +323,28 @@ kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
       kj::refcounted<RequestObserver>(), nullptr);
   incomingRequest->delivered();
   return incomingRequest;
+}
+
+TestFixture::Response TestFixture::runRequest(
+    kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body) {
+  kj::HttpHeaders requestHeaders(*headerTable);
+  MockResponse response;
+  MemoryInputStream requestBody(body.asBytes());
+
+  runInIoContext([&](const TestFixture::Environment& env) {
+    auto& globalScope = env.lock.getGlobalScope();
+    return globalScope.request(
+        method,
+        url,
+        requestHeaders,
+        requestBody,
+        response,
+        nullptr,
+        env.lock,
+        env.lock.getExportedHandler(nullptr, nullptr));
+  });
+
+  return { .statusCode = response.statusCode, .body = response.body->str() };
 }
 
 v8::Local<v8::Value> TestFixture::V8Environment::compileAndRunScript(

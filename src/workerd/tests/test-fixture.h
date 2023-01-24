@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg-test.h>
+#include <workerd/server/workerd.capnp.h>
 
 namespace workerd {
 
@@ -18,6 +19,7 @@ struct TestFixture {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
     kj::Maybe<CompatibilityFlags::Reader> featureFlags;
+    kj::Maybe<kj::StringPtr> mainModuleSource;
   };
 
   TestFixture(SetupParams params = { });
@@ -74,10 +76,19 @@ struct TestFixture {
       kj::ArrayPtr<kj::StringPtr> errorsToIgnore);
   // Special void version of runInIoContext that ignores exceptions with given descriptions.
 
+  struct Response {
+    uint statusCode;
+    kj::String body;
+  };
+
+  Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
+  // Performs HTTP request on the default module handler, and waits for full response.
+
 private:
   SetupParams params;
-  kj::Maybe<kj::AsyncIoContext> io;
   capnp::MallocMessageBuilder configArena;
+  workerd::server::config::Worker::Reader config;
+  kj::Maybe<kj::AsyncIoContext> io;
   capnp::MallocMessageBuilder workerBundleArena;
   kj::Own<kj::Timer> timer;
   kj::Own<TimerChannel> timerChannel;
@@ -88,15 +99,16 @@ private:
   capnp::HttpOverCapnpFactory httpOverCapnpFactory;
   ThreadContext threadContext;
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
+  kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<Worker::ApiIsolate> apiIsolate;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
   kj::TaskSet waitUntilTasks;
+  kj::Own<kj::HttpHeaderTable> headerTable;
 
   kj::Own<IoContext::IncomingRequest> createIncomingRequest();
 };
 
 }  // namespace workerd
-

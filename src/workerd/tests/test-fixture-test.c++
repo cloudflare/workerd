@@ -202,5 +202,43 @@ KJ_TEST("compileAndInstantiateModule") {
   KJ_EXPECT(runCount == 1);
 }
 
+KJ_TEST("runRequest") {
+  TestFixture fixture({
+    .mainModuleSource = R"SCRIPT(
+      export default {
+        async fetch(request) {
+          const body = await(await request.blob()).text();
+          return new Response(`${request.method} ${request.url} ${body}`, { status: 202 });
+        },
+      };
+    )SCRIPT"_kj});
+
+  auto result = fixture.runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj);
+  KJ_EXPECT(result.statusCode == 202);
+  KJ_EXPECT(result.body == "POST http://www.example.com TEST"_kj);
+}
+
+KJ_TEST("module import failure") {
+  KJ_EXPECT_LOG(ERROR, "script startup threw exception");
+
+  try {
+    TestFixture fixture({
+      .mainModuleSource = R"SCRIPT(
+        import * from "bad-module";
+
+        export default {
+          async fetch(request) {
+            return new Response("OK");
+          },
+        };
+      )SCRIPT"_kj});
+
+    KJ_FAIL_REQUIRE("exception expected");
+  } catch (kj::Exception& e) {
+    KJ_EXPECT(e.getDescription() == "script startup threw exception"_kj);
+  }
+}
+
+
 } // namespace
 } // namespace workerd
