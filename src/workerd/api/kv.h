@@ -88,14 +88,15 @@ public:
   // OneOf to differentiate between primitives and objects, and check the object for the types that
   // we specifically support later.
 
-  using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, jsg::Ref<ReadableStream>>;
+  using PutSupportedTypes = kj::OneOf<kj::String, jsg::BufferSource, jsg::Ref<ReadableStream>>;
 
   jsg::Promise<void> put(
       jsg::Lock& js,
       kj::String name,
       PutBody body,
       jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<PutSupportedTypes>& putTypeHandler);
+      const jsg::TypeHandler<PutSupportedTypes>& putTypeHandler,
+      CompatibilityFlags::Reader featureFlags);
 
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String name);
 

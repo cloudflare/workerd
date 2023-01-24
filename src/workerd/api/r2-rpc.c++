@@ -130,7 +130,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
 
 kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> supportedBody, kj::Maybe<uint64_t> streamSize, kj::String metadataPayload,
-    kj::Maybe<kj::String> path) {
+    kj::Maybe<kj::String> path, CompatibilityFlags::Reader featureFlags) {
   // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
   // reusable?
   auto& context = IoContext::current();
@@ -143,6 +143,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   }
 
   kj::Maybe<uint64_t> expectedBodySize;
+  kj::Maybe<jsg::BackingStore> maybeBackingStore;
 
   KJ_IF_MAYBE(b, supportedBody) {
     KJ_SWITCH_ONEOF(*b) {
@@ -162,9 +163,17 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
         expectedBodySize = text.value.size();
         KJ_REQUIRE(streamSize == nullptr);
       }
-      KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
+      KJ_CASE_ONEOF(data, jsg::BufferSource) {
         expectedBodySize = data.size();
         KJ_REQUIRE(streamSize == nullptr);
+        // We want to either detach or copy the given ArrayBuffer/TypedArray
+        // in order to prevent the possibility of post-call modification.
+        if (featureFlags.getDetachArrayBufferOnPut()) {
+          maybeBackingStore = data.detach(js);
+        } else {
+          // In this case, we'll copy the buffer source given.
+          maybeBackingStore = data.cloneBackingStore(js);
+        }
       }
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
         expectedBodySize = data->getSize();
@@ -183,7 +192,8 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   return context.waitForOutputLocks()
       .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
       metadataPayload = kj::mv(metadataPayload), headers = kj::mv(headers),
-      expectedBodySize, supportedBody = kj::mv(supportedBody)]
+      expectedBodySize, supportedBody = kj::mv(supportedBody),
+      maybeBackingStore = kj::mv(maybeBackingStore)]
       () mutable {
     uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
     auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, combinedSize);
@@ -199,16 +209,23 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
     return req.body->write(metadataPayload.begin(), metadataPayload.size())
         .attach(kj::mv(metadataPayload))
         .then([&context, supportedBody = kj::mv(supportedBody),
-               reqBody = kj::mv(req.body)]() mutable -> kj::Promise<void> {
+               reqBody = kj::mv(req.body),
+               maybeBackingStore = kj::mv(maybeBackingStore)]() mutable -> kj::Promise<void> {
       KJ_IF_MAYBE(b, supportedBody) {
         KJ_SWITCH_ONEOF(*b) {
           KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
             return reqBody->write(text.value.begin(), text.value.size())
                 .attach(kj::mv(text.value), kj::mv(reqBody));
           }
-          KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            return reqBody->write(data.begin(), data.size())
-                .attach(kj::mv(data), kj::mv(reqBody));
+          KJ_CASE_ONEOF(data, jsg::BufferSource) {
+            // maybeBackingStore was set outside of this lambda above,
+            // before entering the promise continuation. data here might
+            // have been copied or detached.
+            auto& backing = KJ_ASSERT_NONNULL(maybeBackingStore);
+            return reqBody->write(
+                backing.asArrayPtr().begin(),
+                backing.size())
+                .attach(kj::mv(backing), kj::mv(reqBody));
           }
           KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
             auto data = blob->getData();
