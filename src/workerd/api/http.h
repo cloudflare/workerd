@@ -545,33 +545,32 @@ struct RequestInitializerDict {
   // to accept `null` as an input, so if we're doing what Chrome does, then we should accept
   // `null`.
 
-  jsg::Optional<bool> keepalive;
-  // We do not support keepalive = true but we want to allow code to explicitly set it to the
-  // default (false). Per the spec, keepalive is "a boolean indicating whether or not request can
-  // outlive the global in which it was created."
+  // jsg::Optional<bool> keepalive;
+  // TODO(conform): Won't support?
+  // We do not support keepalive currently and may never?
+  // Per the spec, keepalive is "a boolean indicating whether or not request can
+  // outlive the global in which it was created." We could choose to explicitly indicate
+  // that we do not support this option but for now we'll just ignore it.
 
-  jsg::Unimplemented duplex;
-  // TODO(conform):
+  // jsg::Optional<kj::String> duplex;
+  // TODO(conform): Might support later?
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
   // option supported by the standard, dictates that the request is fully sent before handling
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
-  // "full", and possibly decide if we want to support the "half" option. For now we'll throw
-  // if this option is explicitly set since the only value accepted by the standard is not
-  // one that we support.
+  // "full", and possibly decide if we want to support the "half" option. For now we'll just
+  // ignore this option. Enabling this option later might require a compatibility flag.
 
-  jsg::Optional<kj::String> priority;
+  // jsg::Optional<kj::String> priority;
+  // TODO(conform): Might support later?
   // Specifies the relative priority of the request. We currently do not make use of this
-  // information but we'll go ahead and allow it to be specified since there is no harm
-  // and doing so will help ensure correct behavior later if/when it is implemented. Note
-  // that how this is implemented is entirely up to us. The only values acceptable for
-  // the priority option, however, are "high", "low", and "auto", with "auto" being
-  // considered the default.
+  // information. Per the spec, the only values acceptable for the priority option are
+  // "high", "low", and "auto", with "auto" being considered the default. For now we'll just
+  // ignore this option. Enabling this option later might require a compatibility flag.
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
-             referrer, referrerPolicy, integrity, signal,
-             keepalive, duplex, priority);
+             referrer, referrerPolicy, integrity, signal);
   JSG_STRUCT_TS_OVERRIDE(RequestInit<CfType = IncomingRequestCfProperties | RequestInitCfProperties> {
     headers?: HeadersInit;
     body?: BodyInit | null;
@@ -663,26 +662,21 @@ public:
   // Returns the `cf` field containing Cloudflare feature flags.
 
   bool getKeepalive() { return false; }
+  // We do not implement support for the keepalive option but we do want to at least provide
+  // the standard property, hard-coded to always be false.
 
-  v8::Local<v8::Value> getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // v8::Local<v8::Value> getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // TODO(conform): Might implement?
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
   // option supported by the standard, dictates that the request is fully sent before handling
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
-  // "full", and possibly decide if we want to support the "half" option. For now, we'll
-  // explicitly return undefined for this property.
+  // "full", and possibly decide if we want to support the "half" option.
 
-  v8::Local<v8::Value> getContext(jsg::Lock& js) { return js.v8Undefined(); }
-  // This is deprecated in the spec and has since been removed from the spec
-  // entirely. In discussions with other implementers, it was determined that
-  // simply returning undefined for these kinds of unsupported old properties
-  // was preferred to throwing.
-  // TODO(cleanup) Alternatively, we might just decide to not have this property
-  // at all.
-
-  v8::Local<v8::Value> getMode(jsg::Lock& js) { return js.v8Undefined(); }
-  v8::Local<v8::Value> getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
+  // v8::Local<v8::Value> getMode(jsg::Lock& js) { return js.v8Undefined(); }
+  // v8::Local<v8::Value> getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
+  // TODO(conform): Won't implement?
   // These relate to CORS support, which we do not implement. In the
   // Request initializer we will explicitly throw if any attempt is
   // made to specify these. For the accessors tho, we want it to always
@@ -693,7 +687,8 @@ public:
   // with other implementers with the same issues, it was decided that
   // simply returning undefined for these was the best option.
 
-  v8::Local<v8::Value> getCache(jsg::Lock& js) { return js.v8Undefined(); }
+  // v8::Local<v8::Value> getCache(jsg::Lock& js) { return js.v8Undefined(); }
+  // TODO(conform): Won't implement?
   // The cache mode determines how HTTP cache is used with the request.
   // We currently do not fully implement this. Currently we will explicitly
   // throw in the Request constructor if the option is set. For the accessor
@@ -726,13 +721,14 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(signal, getThisSignal);
       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
 
-      JSG_READONLY_PROTOTYPE_PROPERTY(context, getContext);
-      JSG_READONLY_PROTOTYPE_PROPERTY(mode, getMode);
-      JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
+      // TODO(conform): These are standard properties that we do not implement (see descriptions
+      // above).
+      // JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
+      // JSG_READONLY_PROTOTYPE_PROPERTY(mode, getMode);
+      // JSG_READONLY_PROTOTYPE_PROPERTY(credentials, getCredentials);
+      // JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
-      JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
-      JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
@@ -750,13 +746,14 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(signal, getThisSignal);
       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
 
-      JSG_READONLY_INSTANCE_PROPERTY(context, getContext);
-      JSG_READONLY_INSTANCE_PROPERTY(mode, getMode);
-      JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
+      // TODO(conform): These are standard properties that we do not implement (see descriptions
+      // above).
+      // JSG_READONLY_INSTANCE_PROPERTY(duplex, getDuplex);
+      // JSG_READONLY_INSTANCE_PROPERTY(mode, getMode);
+      // JSG_READONLY_INSTANCE_PROPERTY(credentials, getCredentials);
+      // JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
-      JSG_READONLY_INSTANCE_PROPERTY(cache, getCache);
       JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
-      JSG_READONLY_INSTANCE_PROPERTY(duplex, getDuplex);
 
       JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
         constructor(input: RequestInfo, init?: RequestInit);
@@ -904,10 +901,11 @@ public:
   jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
   // Returns the `cf` field containing Cloudflare feature flags.
 
-  v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
+  // v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
+  // TODO(conform): Won't implement?
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
-  // determined that returning undefined was the best option.
+  // determined that just have this property as undefined is the best option.
 
   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -930,7 +928,9 @@ public:
 
       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
 
-      JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
+      // TODO(conform): This is a standard properties that we do not implement (see description
+      // above).
+      // JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
       JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
@@ -944,7 +944,9 @@ public:
 
       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
 
-      JSG_READONLY_INSTANCE_PROPERTY(type, getType);
+      // TODO(conform): This is a standard properties that we do not implement (see description
+      // above).
+      // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
     }
 
     JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
