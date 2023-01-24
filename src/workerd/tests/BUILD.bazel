@@ -5,6 +5,7 @@ wd_cc_library(
     name = "test-fixture",
     srcs = ["test-fixture.c++"],
     hdrs = ["test-fixture.h"],
+    visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/io",
         "//src/workerd/jsg",
