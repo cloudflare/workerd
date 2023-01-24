@@ -18,7 +18,8 @@ jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
 }
 
 jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+    CompatibilityFlags::Reader compatFlags) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "r2_delete"_kj);
 
@@ -35,7 +36,7 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   auto requestJson = json.encode(requestBuilder);
 
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
-                                    kj::mv(requestJson), nullptr);
+                                    kj::mv(requestJson), nullptr, compatFlags);
 
   return context.awaitIo(kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType]
@@ -111,7 +112,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
 }
 
 jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+    CompatibilityFlags::Reader compatFlags) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "r2_delete"_kj);
 
@@ -128,7 +130,7 @@ jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
   auto requestJson = json.encode(requestBuilder);
 
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
-                                    kj::mv(requestJson), nullptr);
+                                    kj::mv(requestJson), nullptr, compatFlags);
 
   return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) mutable {
     r2Result.throwIfError("deleteBucket", errorType);

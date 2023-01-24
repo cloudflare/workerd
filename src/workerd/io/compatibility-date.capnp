@@ -254,4 +254,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
   # the specCompliantUrl flag did not contemplate the redirect usage. This flag is
   # specifically about the usage in a redirect().
+
+  detachArrayBufferOnPut @24 :Bool
+      $compatEnableDate("2023-03-01")
+      $compatEnableFlag("detach_arraybuffer_on_kv_r2_put")
+      $compatDisableFlag("copy_arraybuffer_on_kv_r2_put");
+  # The original implementations of K2 and R2 put allow TypedArray/ArrayBuffer
+  # passed in as the value to be modified after the call. That original behavior
+  # is modified with this flag. When disabled, the ArrayBuffer is copied on put.
+  # When enabled, the ArrayBuffer is detached.
 }

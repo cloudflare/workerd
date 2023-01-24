@@ -20,7 +20,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
   jsg::Lock& js,
   int partNumber,
   R2PutValue value,
-  const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+  CompatibilityFlags::Reader featureFlags) {
   return js.evalNow([&] {
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
       "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
@@ -46,7 +47,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
     auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
 
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
-                                      kj::mv(requestJson), kj::mv(bucket));
+                                      kj::mv(requestJson), kj::mv(bucket), featureFlags);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, partNumber]
@@ -69,7 +70,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
 jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
   jsg::Lock& js,
   kj::Array<UploadedPart> uploadedParts,
-  const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+  CompatibilityFlags::Reader featureFlags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_completeMultipartUpload"_kj);
@@ -101,7 +103,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
     auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
 
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+        kj::mv(bucket), featureFlags);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType]
@@ -116,7 +118,9 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
   });
 }
 
-jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
+    CompatibilityFlags::Reader featureFlags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_abortMultipartUpload"_kj);
@@ -137,7 +141,7 @@ jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandle
     auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
 
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+        kj::mv(bucket), featureFlags);
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {

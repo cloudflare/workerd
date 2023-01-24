@@ -190,6 +190,9 @@ public:
     byteLength -= bytes;
   }
 
+  BackingStore clone(Lock& js);
+  // Copy this backing store.
+
 private:
   std::shared_ptr<v8::BackingStore> backingStore;
   size_t byteLength;
@@ -285,9 +288,14 @@ public:
   BackingStore detach(Lock& js);
   // Removes the BackingStore from the BufferSource and severs its connection to
   // the ArrayBuffer/ArrayBufferView handle.
-  // It's worth mentioning that detach wcan throw application-visible exceptions
+  // It's worth mentioning that detach can throw application-visible exceptions
   // in the case the ArrayBuffer cannot be detached. Any detaching should be
-  // performance as early as possible in an API method implementation.
+  // performed as early as possible in an API method implementation.
+
+  BackingStore cloneBackingStore(Lock& js);
+  // Copies the underlying backing store into a new instance.
+  // An application-visible exception can be thrown if the BufferSource was
+  // already detached.
 
   v8::Local<v8::Value> getHandle(Lock& js);
 
