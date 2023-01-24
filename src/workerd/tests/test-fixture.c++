@@ -326,7 +326,7 @@ kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
 }
 
 TestFixture::Response TestFixture::runRequest(
-      kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body) {
+    kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body) {
   kj::HttpHeaders requestHeaders(*headerTable);
   MockResponse response;
   MemoryInputStream requestBody(body.asBytes());
@@ -334,14 +334,14 @@ TestFixture::Response TestFixture::runRequest(
   runInIoContext([&](const TestFixture::Environment& env) {
     auto& globalScope = env.lock.getGlobalScope();
     return globalScope.request(
-      method,
-      url,
-      requestHeaders,
-      requestBody,
-      response,
-      nullptr,
-      env.lock,
-      env.lock.getExportedHandler(nullptr, nullptr));
+        method,
+        url,
+        requestHeaders,
+        requestBody,
+        response,
+        nullptr,
+        env.lock,
+        env.lock.getExportedHandler(nullptr, nullptr));
   });
 
   return { .statusCode = response.statusCode, .body = response.body->str() };

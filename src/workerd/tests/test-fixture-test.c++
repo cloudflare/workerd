@@ -222,16 +222,16 @@ KJ_TEST("module import failure") {
   KJ_EXPECT_LOG(ERROR, "script startup threw exception");
 
   try {
-  TestFixture fixture({
-    .mainModuleSource = R"SCRIPT(
-      import * from "bad-module";
+    TestFixture fixture({
+      .mainModuleSource = R"SCRIPT(
+        import * from "bad-module";
 
-      export default {
-        async fetch(request) {
-          return new Response("OK");
-        },
-      };
-    )SCRIPT"_kj});
+        export default {
+          async fetch(request) {
+            return new Response("OK");
+          },
+        };
+      )SCRIPT"_kj});
 
     KJ_FAIL_REQUIRE("exception expected");
   } catch (kj::Exception& e) {
