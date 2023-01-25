@@ -1,3 +1,5 @@
+#ifndef EKAM_BUILD
+
 #include <cstdint>
 #include <errno.h>
 #include <stdio.h>
@@ -135,3 +137,5 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
 }
 
 } // kj
+
+#endif  // EKAM_BUILD
