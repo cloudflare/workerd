@@ -121,7 +121,6 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
     }
 
     AsyncContextFrame::Scope scope(js, nullptr);
-    v8::Local<v8::Value> result;
     return check(function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin()));
   }));
 }
