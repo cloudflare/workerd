@@ -12,14 +12,6 @@ namespace {
 V8System v8System;
 
 struct BufferSourceContext: public Object {
-
-  BufferSource cloneBackingStore(Lock& js, BufferSource buf) {
-    auto backing = buf.cloneBackingStore(js);
-    KJ_ASSERT(backing.size() == buf.size());
-    KJ_ASSERT(backing.getElementSize() == buf.getElementSize());
-    return BufferSource(js, kj::mv(backing));
-  }
-
   BufferSource takeBufferSource(BufferSource buf) {
     auto ptr = buf.asArrayPtr();
     KJ_ASSERT(!buf.isDetached());
@@ -68,7 +60,6 @@ struct BufferSourceContext: public Object {
     JSG_METHOD(takeUint8Array);
     JSG_METHOD(makeBufferSource);
     JSG_METHOD(makeArrayBuffer);
-    JSG_METHOD(cloneBackingStore);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
@@ -134,19 +125,6 @@ KJ_TEST("BufferSource works") {
       "const u2 = takeUint8Array(u8);"
       "u8.byteLength === 0 && u2.byteLength === 1 && u2 instanceof Uint8Array && "
       "u2.buffer.byteLength === 4 && u2.byteOffset === 1 && u8 !== u2",
-      "boolean",
-      "true");
-
-  e.expectEval(
-      "const u8 = new Uint8Array(4); "
-      "u8.fill(1); "
-      "const other = cloneBackingStore(u8); "
-      "if (!(other instanceof Uint8Array)) throw new Error('wrong type'); "
-      "if (other.byteLength !== u8.byteLength) throw new Error('wrong length'); "
-      "for (let n = 0; n < u8.byteLength; n++) { "
-      "  if (u8[n] !== other[n]) throw new Error('wrong value'); "
-      "} "
-      "true;",
       "boolean",
       "true");
 }

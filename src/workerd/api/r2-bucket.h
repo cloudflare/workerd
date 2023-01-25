@@ -304,13 +304,11 @@ public:
   );
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
       kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-      CompatibilityFlags::Reader featureFlags
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(
       jsg::Lock& js, kj::String key, jsg::Optional<MultipartOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-      CompatibilityFlags::Reader featureFlags
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
   jsg::Ref<R2MultipartUpload> resumeMultipartUpload(
       jsg::Lock& js, kj::String key, kj::String uploadId,
@@ -318,8 +316,7 @@ public:
   );
   jsg::Promise<void> delete_(
       jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-      CompatibilityFlags::Reader featureFlags
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
   );
   jsg::Promise<ListResult> list(
       jsg::Lock& js, jsg::Optional<ListOptions> options,
