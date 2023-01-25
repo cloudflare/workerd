@@ -30,7 +30,9 @@ The following is a minimal `tsconfig.json` for use alongside this package:
 
 ### Compatibility dates
 
-The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). Using different compatibility dates affects the runtime types available to your Worker, and so it's important you specify the correct entrypoint to the `workers-types` package to match your compatibility date (which is usually set in your `wrangler.toml` configuration file). `workers-types` currently exposes 7 entrypoints to choose from:
+![Entrypoints for compatibility dates](./entrypoints.svg)
+
+The Cloudflare Workers runtime manages backwards compatibility through the use of [Compatibility Dates](https://developers.cloudflare.com/workers/platform/compatibility-dates/). Using different compatibility dates affects the runtime types available to your Worker, and so it's important you specify the correct entrypoint to the `workers-types` package to match your compatibility date (which is usually set in your `wrangler.toml` configuration file). `workers-types` currently exposes the following entrypoints to choose from:
 
 - `@cloudflare/workers-types`
 
@@ -50,7 +52,15 @@ The Cloudflare Workers runtime manages backwards compatibility through the use o
 
 - `@cloudflare/workers-types/2022-08-04`
 
-  This entrypoint exposes the runtime types for a compatibility date after `2022-08-04`.
+  This entrypoint exposes the runtime types for a compatibility date between `2022-08-04` and `2022-10-31`.
+
+- `@cloudflare/workers-types/2022-10-31`
+
+  This entrypoint exposes the runtime types for a compatibility date between `2022-10-31` and `2022-11-30`.
+
+- `@cloudflare/workers-types/2022-11-30`
+
+  This entrypoint exposes the runtime types for a compatibility date after `2022-11-30`.
 
 - `@cloudflare/workers-types/experimental`
 
