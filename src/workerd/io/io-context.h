@@ -1282,12 +1282,10 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 
   auto [ jsPromise, resolver ] = jsg::newPromiseAndResolver<Result>(isolate);
 
-  // In the then() continuations below we grab a reference to the jsg::AsyncContextFrame
-  // that is current when awaitIo is called and restore that frame when the promise is
-  // resolved. Why? The reasoning is straight forward: for promises, the context is captured
-  // when then is called, ensuring that when the continuation executes, it is running in that
-  // same context. When resolver.reject() or resolver.resolve() are called, v8 will pick up
-  // whatever the current context is and use it.
+  // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
+  // and pass it into the then(). If the promise is rejected, and there is no rejection
+  // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
+  // that event needs to be done within the appropriate frame to propagate the correct context.
 
   if constexpr (jsg::isVoid<T>()) {
     addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
