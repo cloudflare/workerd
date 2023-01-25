@@ -823,9 +823,6 @@ public:
 
   kj::Promise<void> rollback();
 
-  size_t size() { return changes.size(); }
-  // Returns the number of changed keys in this transaction so far.
-
 private:
   ActorCache& cache;
 
@@ -843,7 +840,7 @@ private:
     inline bool matches(const Change& row, KeyPtr key) const { return row.entry->key == key; }
   };
 
-  kj::Table<Change, kj::TreeIndex<ChangeTableCallbacks>> changes;
+  kj::Table<Change, kj::TreeIndex<ChangeTableCallbacks>> entriesToWrite;
 
   kj::Maybe<DirtyAlarmWithOptions> alarmChange;
 
