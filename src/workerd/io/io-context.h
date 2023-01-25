@@ -12,6 +12,7 @@
 
 #include "trace.h"
 #include "worker.h"
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <v8.h>
 #include "io-gate.h"
@@ -1276,18 +1277,30 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 
   typedef MaybeIoOwn<addIoOwn, T> Result;
 
-  v8::Isolate* isolate = getCurrentLock().getIsolate();
+  auto& lock = getCurrentLock();
+  v8::Isolate* isolate = lock.getIsolate();
+
   auto [ jsPromise, resolver ] = jsg::newPromiseAndResolver<Result>(isolate);
+
+  // In the then() continuations below we grab a reference to the jsg::AsyncContextFrame
+  // that is current when awaitIo is called and restore that frame when the promise is
+  // resolved. Why? The reasoning is straight forward: for promises, the context is captured
+  // when then is called, ensuring that when the continuation executes, it is running in that
+  // same context. When resolver.reject() or resolver.resolve() are called, v8 will pick up
+  // whatever the current context is and use it.
 
   if constexpr (jsg::isVoid<T>()) {
     addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
       return nullptr;
     }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
       return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs)]
+    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
             (kj::Maybe<kj::Exception>&& maybeException) mutable {
       return run([resolver = kj::mv(resolver),
-                  maybeException = kj::mv(maybeException)](Worker::Lock& lock) mutable {
+                  maybeException = kj::mv(maybeException),
+                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         KJ_IF_MAYBE(exception, maybeException) {
           resolver.reject(lock, kj::mv(*exception));
         } else {
@@ -1301,10 +1314,13 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
       return kj::mv(result);
     }, [](kj::Exception&& exception) -> ResultOrException {
       return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs)]
+    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
             (ResultOrException&& resultOrException) mutable {
       return run([this, resolver = kj::mv(resolver),
-                  resultOrException = kj::mv(resultOrException)](Worker::Lock& lock) mutable {
+                  resultOrException = kj::mv(resultOrException),
+                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         KJ_SWITCH_ONEOF(resultOrException) {
           KJ_CASE_ONEOF(result, T) {
             if constexpr (addIoOwn) {

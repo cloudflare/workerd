@@ -111,6 +111,10 @@ public:
   static kj::Maybe<AsyncContextFrame&> current(v8::Isolate* isolate);
   // Returns the reference to the AsyncContextFrame currently at the top of the stack, if any.
 
+  static kj::Maybe<Ref<AsyncContextFrame>> currentRef(Lock& js);
+  // Convenience variation on current() that returns the result wrapped in a Ref for when we
+  // need to make sure the frame stays alive.
+
   static Ref<AsyncContextFrame> create(Lock& js, StorageEntry storageEntry);
   // Create a new AsyncContextFrame. The new frame inherits the storage context of the current
   // frame (if any) and the given StorageEntry is added.
@@ -138,6 +142,7 @@ public:
     kj::Maybe<AsyncContextFrame&> prior;
     Scope(Lock& js, kj::Maybe<AsyncContextFrame&> frame = nullptr);
     Scope(v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> frame = nullptr);
+    Scope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& frame);
     // If frame is nullptr, the root frame is assumed.
     ~Scope() noexcept(false);
     KJ_DISALLOW_COPY(Scope);

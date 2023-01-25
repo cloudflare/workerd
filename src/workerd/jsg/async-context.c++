@@ -43,6 +43,12 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(Lock& js) {
   return current(js.v8Isolate);
 }
 
+kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(Lock& js) {
+  return jsg::AsyncContextFrame::current(js).map([](jsg::AsyncContextFrame& frame) {
+    return frame.addRef();
+  });
+}
+
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
   auto value = isolate->GetCurrentContext()->GetContinuationPreservedEmbedderData();
   KJ_IF_MAYBE(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
@@ -134,6 +140,11 @@ AsyncContextFrame::Scope::Scope(v8::Isolate* ptr, kj::Maybe<AsyncContextFrame&> 
       prior(AsyncContextFrame::current(ptr)) {
   maybeSetV8ContinuationContext(isolate, maybeFrame);
 }
+
+AsyncContextFrame::Scope::Scope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& resource)
+    : Scope(js.v8Isolate, resource.map([](Ref<AsyncContextFrame>& frame) -> AsyncContextFrame& {
+      return *frame.get();
+    })) {}
 
 AsyncContextFrame::Scope::~Scope() noexcept(false) {
   maybeSetV8ContinuationContext(isolate, prior);
