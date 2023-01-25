@@ -33,6 +33,8 @@ wd_cc_binary(
     deps = [":api_encoder_lib"],
 )
 
+# All compatibility dates that changed public facing types.
+# Remember to update `npm/workers-types/README.md` when adding new dates here.
 compat_dates = [
     # Oldest compatibility date, with no flags enabled
     ("2021-01-01", "oldest"),
@@ -42,9 +44,14 @@ compat_dates = [
     ("2022-01-31", "2022-01-31"),
     # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
     ("2022-03-21", "2022-03-21"),
-    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#r2-bucket-list-respects-the-include-option
     ("2022-08-04", "2022-08-04"),
-    # Latest compatibility date
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#new-url-parser-implementation
+    ("2022-10-31", "2022-10-31"),
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#streams-constructors
+    # https://developers.cloudflare.com/workers/platform/compatibility-dates/#compliant-transformstream-constructor
+    ("2022-11-30", "2022-11-30"),
+    # Latest compatibility date (note these types should be the same as the previous entry)
     ("2030-01-01", "experimental"),
 ]
 
