@@ -258,9 +258,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   detachArrayBufferOnPut @24 :Bool
       $compatEnableDate("2023-03-01")
       $compatEnableFlag("detach_arraybuffer_on_kv_r2_put")
-      $compatDisableFlag("copy_arraybuffer_on_kv_r2_put");
+      $compatDisableFlag("no_detach_arraybuffer_on_kv_r2_put")
+      $experimental;
   # The original implementations of K2 and R2 put allow TypedArray/ArrayBuffer
   # passed in as the value to be modified after the call. That original behavior
-  # is modified with this flag. When disabled, the ArrayBuffer is copied on put.
-  # When enabled, the ArrayBuffer is detached.
+  # is modified with this flag. When enabled, the ArrayBuffer is detached.
 }

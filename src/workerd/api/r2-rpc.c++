@@ -166,14 +166,13 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
       KJ_CASE_ONEOF(data, jsg::BufferSource) {
         expectedBodySize = data.size();
         KJ_REQUIRE(streamSize == nullptr);
-        // We want to either detach or copy the given ArrayBuffer/TypedArray
-        // in order to prevent the possibility of post-call modification.
         if (featureFlags.getDetachArrayBufferOnPut()) {
+          // Detach the given ArrayBuffer/TypedArray to prevent the possibility of
+          // post-call modification.
           maybeBackingStore = data.detach(js);
-        } else {
-          // In this case, we'll copy the buffer source given.
-          maybeBackingStore = data.cloneBackingStore(js);
         }
+        // TODO(later): We may want to consider copying when the detach flag is not
+        // set but there are concerns over performance so for now we'll just ignore.
       }
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
         expectedBodySize = data->getSize();
@@ -218,14 +217,19 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
                 .attach(kj::mv(text.value), kj::mv(reqBody));
           }
           KJ_CASE_ONEOF(data, jsg::BufferSource) {
-            // maybeBackingStore was set outside of this lambda above,
-            // before entering the promise continuation. data here might
-            // have been copied or detached.
-            auto& backing = KJ_ASSERT_NONNULL(maybeBackingStore);
-            return reqBody->write(
-                backing.asArrayPtr().begin(),
-                backing.size())
-                .attach(kj::mv(backing), kj::mv(reqBody));
+            KJ_IF_MAYBE(backing, maybeBackingStore) {
+              // maybeBackingStore was set outside of this lambda above,
+              // before entering the promise continuation.
+              return reqBody->write(
+                  backing->asArrayPtr().begin(),
+                  backing->size())
+                  .attach(kj::mv(backing), kj::mv(reqBody));
+            } else {
+              return reqBody->write(
+                  data.asArrayPtr().begin(),
+                  data.size())
+                  .attach(kj::mv(data), kj::mv(reqBody));
+            }
           }
           KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
             auto data = blob->getData();

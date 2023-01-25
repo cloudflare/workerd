@@ -340,14 +340,13 @@ jsg::Promise<void> KvNamespace::put(
       }
       KJ_CASE_ONEOF(data, jsg::BufferSource) {
         expectedBodySize = uint64_t(data.size());
-        // We want to either detach or copy the given ArrayBuffer/TypedArray
-        // in order to prevent the possibility of post-call modification.
+        // Detach the given ArrayBuffer/TypedArray to prevent the possibility of
+        // post-call modification.
         if (featureFlags.getDetachArrayBufferOnPut()) {
           maybeBackingStore = data.detach(js);
-        } else {
-          // In this case, we'll copy the buffer source given.
-          maybeBackingStore = data.cloneBackingStore(js);
         }
+        // TODO(later): We may want to consider copying when the detach flag is not
+        // set but there are concerns over performance so for now we'll just ignore.
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
@@ -380,13 +379,17 @@ jsg::Promise<void> KvNamespace::put(
           writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
         }
         KJ_CASE_ONEOF(data, jsg::BufferSource) {
-          // maybeBackingStore was set outside of this lambda above,
-          // before entering the promise continuation. data here might
-          // have been copied or detached.
-          auto& backing = KJ_ASSERT_NONNULL(maybeBackingStore);
-          writePromise = req.body->write(
-              backing.asArrayPtr().begin(),
-              backing.size()).attach(kj::mv(maybeBackingStore));
+          KJ_IF_MAYBE(backing, maybeBackingStore) {
+            // maybeBackingStore was set outside of this lambda above,
+            // before entering the promise continuation.
+            writePromise = req.body->write(
+                backing->asArrayPtr().begin(),
+                backing->size()).attach(kj::mv(maybeBackingStore));
+          } else {
+            writePromise = req.body->write(
+                data.asArrayPtr().begin(),
+                data.size()).attach(kj::mv(data));
+          }
         }
         KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
           writePromise = context.run([
