@@ -476,6 +476,9 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
         return wrappingKey.impl->wrapKey(kj::mv(algorithm), bytes.asPtr().asConst());
       }
       KJ_CASE_ONEOF(jwk, JsonWebKey) {
+        // TODO(conform): The WebCrypto spec would seem to indicate we need to pad AES-KW here.
+        // However, I can't find any conformance test that fails if we don't pad. I can't find
+        // anywhere within Chromium that has padding either.
         auto str = js.serializeJson(jwkHandler.wrap(js, kj::mv(jwk))).asBytes().asConst();
         return wrappingKey.impl->wrapKey(kj::mv(algorithm), str);
       }

@@ -2023,11 +2023,6 @@ public:
   }
 
   template <typename... Args>
-  v8::Local<v8::Value> call(v8::Local<v8::Function> fn, v8::Local<Args>... args) {
-    return call(fn, v8Isolate->GetCurrentContext()->Global(), kj::fwd<Args...>(args...));
-  }
-
-  template <typename... Args>
   v8::Local<v8::Value> call(v8::Local<v8::Function> fn,
                             v8::Local<v8::Value> thisArg,
                             v8::Local<Args>... args) {
