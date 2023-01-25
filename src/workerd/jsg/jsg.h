@@ -1789,10 +1789,6 @@ class Isolate;
 
 class AsyncContextFrame;
 
-#define JSG_PRIVATE_SYMBOLS(V)       \
-  V(ASYNC_CONTEXT, "asyncContext")
-// Defines the enum values for Lock::PrivateSymbols.
-
 class Lock {
   // Represents an isolate lock, which allows the current thread to execute JavaScript code within
   // an isolate. A thread must lock an isolate -- obtaining an instance of `Lock` -- before it can
@@ -2020,18 +2016,6 @@ public:
   kj::StringPtr getUuid() const;
   // Returns a random UUID for this isolate instance. This is largely intended for logging and
   // diagnostic purposes.
-
-#define V(name, _) name,
-  enum PrivateSymbols {
-    JSG_PRIVATE_SYMBOLS(V)
-    SYMBOL_COUNT,
-    // The SYMBOL_COUNT is a special token used to size the array for storing the
-    // symbol instances. It must always be the last item in the enum. To add private
-    // symbols, add values to the JSG_PRIVATE_SYMBOLS define.
-  };
-#undef V
-
-  v8::Local<v8::Private> getPrivateSymbolFor(PrivateSymbols symbol);
 
 private:
   friend class IsolateBase;

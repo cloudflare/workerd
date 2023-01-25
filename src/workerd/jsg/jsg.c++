@@ -177,10 +177,6 @@ kj::StringPtr Lock::getUuid() const {
   return IsolateBase::from(v8Isolate).getUuid();
 }
 
-v8::Local<v8::Private> Lock::getPrivateSymbolFor(Lock::PrivateSymbols symbol) {
-  return IsolateBase::from(v8Isolate).getPrivateSymbolFor(symbol);
-}
-
 Name Lock::newSymbol(kj::StringPtr symbol) {
   return Name(*this, v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, symbol)));
 }

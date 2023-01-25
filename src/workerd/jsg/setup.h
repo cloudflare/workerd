@@ -100,8 +100,6 @@ public:
     KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
   }
 
-  v8::Local<v8::Private> getPrivateSymbolFor(Lock::PrivateSymbols symbol);
-
   kj::StringPtr getUuid();
   // Returns a random UUID for this isolate instance.
 
@@ -151,9 +149,6 @@ private:
   v8::Global<v8::FunctionTemplate> opaqueTemplate;
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.
-
-  // Keep the size here in sync w
-  kj::Maybe<V8Ref<v8::Private>> privateSymbols[Lock::PrivateSymbols::SYMBOL_COUNT];
 
   static constexpr auto DESTRUCTION_QUEUE_INITIAL_SIZE = 8;
   // We expect queues to remain relatively small -- 8 is the largest size I have observed from local

@@ -496,7 +496,8 @@ void ServiceWorkerGlobalScope::queueMicrotask(
     v8::Local<v8::Function> task) {
   // TODO(later): It currently does not appear as if v8 attaches the continuation embedder data
   // to microtasks scheduled using EnqueueMicrotask, so we have to wrap in order to propagate
-  // the context to those.
+  // the context to those. Once V8 is fixed to correctly associate continuation data with
+  // microtasks automatically, we can remove this workaround.
   KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
     task = context->wrap(js, task);
   }

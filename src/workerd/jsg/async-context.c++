@@ -39,27 +39,6 @@ AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
   });
 }
 
-kj::Maybe<AsyncContextFrame&> AsyncContextFrame::tryGetContext(
-    Lock& js,
-    v8::Local<v8::Promise> promise) {
-  auto handle = js.getPrivateSymbolFor(Lock::PrivateSymbols::ASYNC_CONTEXT);
-  // We do not use the normal unwrapOpaque here since that would consume the wrapped
-  // value, and we need to be able to unwrap multiple times.
-  auto ref = check(promise->GetPrivate(js.v8Isolate->GetCurrentContext(), handle));
-  KJ_IF_MAYBE(wrappable, Wrappable::tryUnwrapOpaque(js.v8Isolate, ref)) {
-    AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(wrappable);
-    KJ_ASSERT(frame != nullptr);
-    return *frame;
-  }
-  return nullptr;
-}
-
-kj::Maybe<AsyncContextFrame&> AsyncContextFrame::tryGetContext(
-    Lock& js,
-    V8Ref<v8::Promise>& promise) {
-  return tryGetContext(js, promise.getHandle(js));
-}
-
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(Lock& js) {
   return current(js.v8Isolate);
 }
@@ -139,13 +118,6 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
     v8::Local<v8::Value> result;
     return check(function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin()));
   }));
-}
-
-void AsyncContextFrame::attachContext(Lock& js, v8::Local<v8::Promise> promise) {
-  auto handle = js.getPrivateSymbolFor(Lock::PrivateSymbols::ASYNC_CONTEXT);
-  auto context = js.v8Isolate->GetCurrentContext();
-  KJ_DASSERT(!check(promise->HasPrivate(context, handle)));
-  KJ_ASSERT(check(promise->SetPrivate(context, handle, getJSWrapper(js))));
 }
 
 kj::Maybe<Value&> AsyncContextFrame::get(StorageKey& key) {

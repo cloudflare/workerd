@@ -27,11 +27,11 @@ class AsyncContextFrame final: public Wrappable {
   // Every async resource maintains a reference to the Async Context Frame that was current
   // at the moment the resource is created.
   //
-  // Frames form a stack. The default frame is the Root. We "enter" a frame by pushing it
-  // onto to top of the stack (making it "current"), then perform some action within that
+  // Frames form a logical stack. The default frame is the Root. We "enter" a frame by pushing
+  // it onto to top of the stack (making it "current"), then perform some action within that
   // frame, then "exit" by popping it back off the stack. The Root is associated with the
-  // Isolate itself such that every isolate always has at least one frame on the stack at
-  // all times. In Node.js terms, the "Async Context Frame" would be most closely aligned
+  // Isolate itself such that every isolate always has at least one frame logically on the stack
+  // at all times. In Node.js terms, the "Async Context Frame" would be most closely aligned
   // with the concept of an "execution context" or "execution scope".
   //
   // Every Frame has a storage context. The current frame determines the currently active
@@ -44,11 +44,23 @@ class AsyncContextFrame final: public Wrappable {
   // default is whichever frame is current when the new frame is created. When the new frame
   // is created, it inherits a copy storage context of the parent.
   //
-  // AsyncContextFrame's are Wrappables because for certain kinds of async resources
-  // like promises or JS functions, we have to be able to store a reference to the frame
-  // using an opaque private property rather than an internal field or lambda capture.
-  // In such cases, we attach an opaque JS wrapper to the frame and use that opaque
-  // wrapper to hold the frame reference.
+  // To implement all of this, however, we depend largely on an obscure v8 API on the
+  // v8::Context object called SetContinuationPreservedEmbedderData and
+  // GetContinuationPreservedEmbedderData. An AsyncContextFrame is a Wrappables because
+  // because instances of AsyncContextFrame are set as the continuation-preserved embedder
+  // data and that API requires a JS value.
+  //
+  // AsyncContextFrame::current() returns the current frame or nullptr. Returning nullptr
+  // implies that we are in the "root" frame.
+  //
+  // AsyncContextFrame::StorageScope is created on stack to create a new frame and set
+  // a stored value in the storage context before entering it.
+  //
+  // AsyncContextFrame::Scope is created on the stack to temporarily enter an existing
+  // frame.
+  //
+  // AsyncContextFrame::StorageKey is used to define a storage cell within the storage
+  // context.
 public:
   class StorageKey: public kj::Refcounted {
     // An opaque key that identifies an async-local storage cell within the frame.
@@ -119,15 +131,6 @@ public:
   // a wrapper function that will ensure appropriate propagation of the async context
   // when the wrapper function is called.
 
-  void attachContext(Lock& js, v8::Local<v8::Promise> promise);
-  // Associates the given JavaScript promise with this AsyncContextFrame.
-
-  static kj::Maybe<AsyncContextFrame&> tryGetContext(Lock& js, V8Ref<v8::Promise>& promise);
-  static kj::Maybe<AsyncContextFrame&> tryGetContext(Lock& js, v8::Local<v8::Promise> promise);
-  // Returns a reference to the AsyncContextFrame that was current when the JS Promise
-  // was created. When async context tracking is enabled, this should always return a
-  // non-null value.
-
   struct Scope {
     // AsyncContextFrame::Scope makes the given AsyncContextFrame the current in the
     // stack until the scope is destroyed.
@@ -146,9 +149,7 @@ public:
   v8::Local<v8::Object> getJSWrapper(v8::Isolate* isolate);
   v8::Local<v8::Object> getJSWrapper(Lock& js);
   // Gets an opaque JavaScript Object wrapper object for this frame. If a wrapper
-  // does not currently exist, one is created. This wrapper is only used to set a
-  // private reference to the frame on JS objects like promises and functions.
-  // See the attachContext and wrap functions for details.
+  // does not currently exist, one is created.
 
   struct StorageScope {
     // Creates a new AsyncContextFrame with a new value for the given
