@@ -297,6 +297,8 @@ private:
 
   bool canceled = false;
 
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> maybeAsyncContext;
+
   bool isPoisoned() {
     // If a call to `lol-html` returned an error or propagated a user error from a handler
     // (LOL_HTML_STOP for instance); we consider its instance as poisoned. Future calls to
@@ -392,7 +394,8 @@ Rewriter::Rewriter(
     CompatibilityFlags::Reader featureFlags)
     : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this, featureFlags)),
       inner(kj::mv(inner)),
-      ioContext(IoContext::current()) {}
+      ioContext(IoContext::current()),
+      maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 // The stack size floor enforced by kj. We could go lower,
 // but it'd always be increased to this anyway.
@@ -550,6 +553,11 @@ template <typename T, typename CType>
 kj::Promise<void> Rewriter::thunkPromise( CType* content, RegisteredHandler& registeredHandler) {
   return ioContext.run(
       [this,content,&registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
+    // We enter the AsyncContextFrame that was current when the Rewriter was created
+    // (when transform() was called). If someone wants, instead, to use the context
+    // that was current when on(...) is called, the ElementHandler can use AsyncResource
+    // (or eventually the standard AsyncContext once that lands).
+    jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
     auto jsContent = jsg::alloc<T>(*content, *this);
     auto scope = HTMLRewriter::TokenScope(jsContent);
     auto value = registeredHandler.callback(lock, kj::mv(jsContent));
