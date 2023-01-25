@@ -5,13 +5,20 @@ wd_cc_library(
     name = "util",
     srcs = glob(
         ["*.c++"],
-        exclude = ["*-test.c++", "capnp-mock.c++"],
+        exclude = [
+            "*-test.c++",
+            "capnp-mock.c++",
+            "symbolizer.c++",
+        ],
     ),
-    hdrs = glob(["*.h"], exclude = ["capnp-mock.h"]),
+    hdrs = glob(
+        ["*.h"],
+        exclude = ["capnp-mock.h"],
+    ),
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@capnp-cpp//src/kj/compat:kj-tls",
@@ -27,6 +34,16 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
     ],
+)
+
+wd_cc_library(
+    name = "symbolizer",
+    srcs = ["symbolizer.c++"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+    alwayslink = 1,
 )
 
 [kj_test(
