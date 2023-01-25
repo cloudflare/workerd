@@ -453,6 +453,49 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
                      eh.getCtx(lock.getIsolate()));
 }
 
+void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
+    kj::OneOf<kj::String, kj::Array<byte>> message,
+    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+
+  KJ_IF_MAYBE(h, exportedHandler) {
+    KJ_IF_MAYBE(handler, h->webSocketMessage) {
+      auto promise = (*handler)(lock, event->getWebSocket(lock), kj::mv(message));
+      event->waitUntil(kj::mv(promise));
+    }
+    // We want to deliver a message, but if no webSocketMessage handler is exported, we shouldn't fail
+  }
+}
+
+void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
+    kj::String reason,
+    int code,
+    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+
+  KJ_IF_MAYBE(h, exportedHandler) {
+    KJ_IF_MAYBE(handler, h->webSocketClose) {
+      auto promise = (*handler)(lock, event->getWebSocket(lock), kj::mv(reason), code);
+      event->waitUntil(kj::mv(promise));
+    }
+    // We want to deliver close, but if no webSocketClose handler is exported, we shouldn't fail
+  }
+}
+
+void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  auto event = jsg::alloc<HibernatableWebSocketEvent>();
+
+  KJ_IF_MAYBE(h, exportedHandler) {
+    KJ_IF_MAYBE(handler, h->webSocketError) {
+      auto promise = (*handler)(lock, event->getWebSocket(lock), event->getError(lock));
+      event->waitUntil(kj::mv(promise));
+    }
+    // We want to deliver an error, but if no webSocketError handler is exported, we shouldn't fail
+  }
+}
+
 void ServiceWorkerGlobalScope::emitPromiseRejection(
     jsg::Lock& js,
     v8::PromiseRejectEvent event,
