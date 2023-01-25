@@ -1570,9 +1570,12 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
   auto [result, resolver] = jsg::newPromiseAndResolver<T>(js.v8Isolate);
 
-  addTask(cs->wait().then([this, callback = kj::mv(callback)]
+  addTask(cs->wait().then([this, callback = kj::mv(callback),
+                           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
                           (InputGate::Lock inputLock) mutable {
-    return run([this, callback = kj::mv(callback)](Worker::Lock& lock) mutable {
+    return run([this, callback = kj::mv(callback),
+                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       auto cb = kj::mv(callback);
 
       // Remember that this can throw synchronously, and it's important that we catch such throws
@@ -1591,12 +1594,16 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
 
       return awaitJs(kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
     }, kj::mv(inputLock));
-  }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver)](T&& value) mutable {
+  }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver),
+           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
     auto inputLock = cs->succeeded();
-    return run([value = kj::mv(value), resolver = kj::mv(resolver)](Worker::Lock& lock) mutable {
+    return run([value = kj::mv(value),resolver = kj::mv(resolver),
+                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       resolver.resolve(kj::mv(value));
     }, kj::mv(inputLock));
-  }, [cs = kj::mv(cs2)](kj::Exception&& e) mutable {
+  }, [cs = kj::mv(cs2)]
+     (kj::Exception&& e) mutable {
     // Annotate as broken for periodic metrics.
     auto msg = e.getDescription();
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
