@@ -28,17 +28,12 @@ class R2MultipartUpload: public jsg::Object {
 
     jsg::Promise<UploadedPart> uploadPart(
         jsg::Lock& js, int partNumber, R2PutValue value,
-        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-        CompatibilityFlags::Reader featureFlags
+        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
     );
-    jsg::Promise<void> abort(
-        jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-        CompatibilityFlags::Reader featureFlags
-    );
+    jsg::Promise<void> abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
     jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> complete(
         jsg::Lock& js, kj::Array<UploadedPart> uploadedParts,
-        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-        CompatibilityFlags::Reader featureFlags
+        const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
     );
 
     JSG_RESOURCE_TYPE(R2MultipartUpload) {

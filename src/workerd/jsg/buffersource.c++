@@ -82,17 +82,6 @@ bool BackingStore::operator==(const BackingStore& other) {
          byteOffset == other.byteOffset;
 }
 
-BackingStore BackingStore::clone(Lock& js) {
-  auto newBacking = BackingStore::alloc(js, byteLength);
-  auto src = asArrayPtr();
-  newBacking.elementSize = elementSize;
-  newBacking.ctor = ctor;
-  newBacking.integerType = integerType;
-  auto dest = newBacking.asArrayPtr();
-  std::copy(src.begin(), src.end(), dest.begin());
-  return newBacking;
-}
-
 BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
     : handle(js.v8Ref(handle)),
       maybeBackingStore(BackingStore(
@@ -126,14 +115,6 @@ BackingStore BufferSource::detach(Lock& js) {
   buffer->Detach();
 
   return kj::mv(backingStore);
-}
-
-BackingStore BufferSource::cloneBackingStore(Lock& js) {
-  auto& backingStore =
-      JSG_REQUIRE_NONNULL(maybeBackingStore,
-                          TypeError,
-                          "This BufferSource has been detached.");
-  return backingStore.clone(js);
 }
 
 bool BufferSource::canDetach(Lock& js) {

@@ -383,69 +383,6 @@ is separate the `v8::BackingStore` from the original `TypedArray`/`BufferSource`
 original can no longer be used to read or mutate the data. This is important is cases where ownership
 of the data storage must transfer and cannot be shared.
 
-#### Considerations Synchronous vs. Asynchronous APIs
-
-Because the `kj::Array<kj::byte>` type mapping shares the underlying memory with a JavaScript
-`ArrayBuffer`, care must be taken when using the type mapping with asynchronous APIs. For example,
-consider the following case:
-
-```cpp
-class Foo : public jsg::Object {
-public:
-  static jsg::Ref<Foo> constructor() { return jsg::alloc<Foo>(); }
-  jsg::Promise<void> doSomething(jsg::Lock& js, kj::Array<kj::byte> data) {
-    return awaitSomePromise().then(js, [data = kj::mv(data)](jsg::Lock& js) {
-      // do something with the data...
-    });
-  }
-};
-```
-
-In this case, a script could call the `doSomething(...)` method passing in an `ArrayBuffer` or
-`TypedArray` *then* modify it. If those modifications occur before the promise continuation is
-trigged, the contination would get the modified version of the data rather than the version that
-was passed at the time `doSomething(...)` was called.
-
-```js
-const foo = new Foo();
-const u8 = new Uint8Array(10);
-u8.fill(1);
-const p = foo.doSomething(u8);
-// The continuation inside p might see all 2's instead of all 1's!!
-u8.fill(2);
-await p;
-```
-
-As a general rule, only use the `kj::Array<kj::byte>` mapping in *synchronous* APIs where the
-bytes are going to be consumed immediately. And for *asynchronous* APIs, where consuming the bytes
-may happen at some point in the future, it is best to use `jsg::BufferSource` and either copy or
-detach the underlying `jsg::BackingStore`:
-
-```cpp
-class Foo : public jsg::Object {
-public:
-  static jsg::Ref<Foo> constructor() { return jsg::alloc<Foo>(); }
-  jsg::Promise<void> doSomething(jsg::Lock& js, jsg::BufferSource data) {
-    auto backing = data.detach(js);
-    // or copy:
-    // as a BackingStore:
-    // auto backing = data.cloneBackingStore(js);
-    //
-    // as a kj::Array<kj::byte>:
-    // auto backing = data.cloneBackingStore(js);
-    // auto array = backing.asArrayPtr().attach(kj::mv(backing));
-
-    return awaitSomePromise().then(js, [backing = kj::mv(backing)](jsg::Lock& js) {
-      // do something with the backing...
-    });
-  }
-};
-```
-
-Detaching the `jsg::BackingStore` has the benefit of being more performant but has the
-observable side-effect of transitioning the passed in `ArrayBuffer` or `TypedArray` into
-a zero-length, "detached" state.
-
 ### Functions (`jsg::Function<Ret(Args...)>`)
 
 The `jsg::Function<Ret(Args...)>` type provides a wrapper around JavaScript functions, making it

@@ -48,7 +48,7 @@ private:
   friend struct R2Result;
 };
 
-using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>, jsg::BufferSource,
+using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<kj::byte>,
                              jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
 
 struct R2Result {
@@ -82,7 +82,6 @@ kj::Promise<R2Result> doR2HTTPPutRequest(
     kj::Maybe<uint64_t> streamSize,
     // Deprecated. For internal beta API only.
     kj::String metadataPayload,
-    kj::Maybe<kj::String> path,
-    CompatibilityFlags::Reader featureFlags);
+    kj::Maybe<kj::String> path);
 
 } // namespace workerd::api

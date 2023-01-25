@@ -359,8 +359,7 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
 
 jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>>
 R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
-    jsg::Optional<PutOptions> options, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<PutOptions> options, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto cancelReader = kj::defer([&] {
       KJ_IF_MAYBE(v, value) {
@@ -526,7 +525,7 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
 
     cancelReader.cancel();
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
-                                      kj::mv(requestJson), kj::mv(bucket), featureFlags);
+                                      kj::mv(requestJson), kj::mv(bucket));
 
     return context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
@@ -547,10 +546,8 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
   });
 }
 
-jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(
-    jsg::Lock& js, kj::String key,
-    jsg::Optional<MultipartOptions> options, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::Lock& js, kj::String key,
+    jsg::Optional<MultipartOptions> options, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     auto client = context.getHttpClient(
@@ -614,7 +611,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(
     auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
 
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket), featureFlags);
+        kj::mv(bucket));
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, key=kj::mv(key), this] (jsg::Lock& js, R2Result r2Result) mutable {
@@ -637,10 +634,8 @@ jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
     return jsg::alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
 }
 
-jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
-    kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
     auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_delete"_kj);
@@ -670,7 +665,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
 
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket), featureFlags);
+        kj::mv(bucket));
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {
