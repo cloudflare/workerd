@@ -8,7 +8,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 $Cxx.allowCancellation;
 
-const supportedCompatibilityDate :Text = "2023-01-15";
+const supportedCompatibilityDate :Text = "2023-01-24";
 # Newest compatibility date that can safely be set using code compiled from this repo. Trying to
 # run a Worker with a newer compatibility date than this will fail.
 #
@@ -254,4 +254,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
   # the specCompliantUrl flag did not contemplate the redirect usage. This flag is
   # specifically about the usage in a redirect().
+
+  actorMapEvictionShorterTimeout @24 :Bool
+      $compatEnableDate("2023-01-24");
+  # Enables deferred proxying in Durable Objects.
+  # While disabled, the eviction timeout will be remain as it has historically, preventing
+  # deferred proxying from kicking in.
 }
