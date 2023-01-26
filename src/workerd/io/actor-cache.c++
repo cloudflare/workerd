@@ -3101,14 +3101,25 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
     kj::Array<Key> keys, WriteOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
 
+  if (keys.size() == 0) {
+    return 0u;
+  }
+
   uint count = 0;
-  kj::Vector<Key> keysToCount;
+  kj::Vector<kj::Vector<Key>> keysToCount;
+  auto startNewBatch = [&]() {
+    return &keysToCount.add();
+  };
+  auto currentBatch = startNewBatch();
 
   {
     auto lock = cache.lru.cleanList.lockExclusive();
     for (auto& key: keys) {
       KJ_IF_MAYBE(keyToCount, putImpl(lock, kj::mv(key), nullptr, options, count)) {
-        keysToCount.add(cloneKey(*keyToCount));
+        if (currentBatch->size() >= cache.lru.options.maxKeysPerRpc) {
+          currentBatch = startNewBatch();
+        }
+        currentBatch->add(cloneKey(*keyToCount));
       }
     }
   }
@@ -3116,18 +3127,40 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
   if (keysToCount.size() == 0) {
     return count;
   } else {
-    // Unfortunately, to find out the count, we have to do a read.
-    KJ_SWITCH_ONEOF(cache.get(keysToCount.releaseAsArray(), {})) {
-      KJ_CASE_ONEOF(results, GetResultList) {
-        return kj::implicitCast<uint>(count + results.size());
-      }
-      KJ_CASE_ONEOF(promise, kj::Promise<GetResultList>) {
-        return promise.then([count](GetResultList results) mutable {
-          return kj::implicitCast<uint>(count + results.size());
-        });
+    // HACK: Since we allow deletes of larger than our maxKeysPerRpc but these deletes can provoke
+    // gets, we need to batch said gets. This all would be much simpler if our default get behavior
+    // did batching/sync.
+    kj::Maybe<kj::Promise<uint>> maybeTotalPromise;
+    for(auto& batch : keysToCount) {
+      // Unfortunately, to find out the count, we have to do a read. Note that even returning this
+      // value separate from a committed transaction means that non-transaction storage ops can make
+      // the value incorrect.
+      KJ_SWITCH_ONEOF(cache.get(batch.releaseAsArray(), {})) {
+        KJ_CASE_ONEOF(results, GetResultList) {
+          count = count + results.size();
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<GetResultList>) {
+          if (maybeTotalPromise == nullptr) {
+            // We had to do a remote get, start a promise
+            maybeTotalPromise.emplace(0);
+          }
+          maybeTotalPromise = KJ_ASSERT_NONNULL(maybeTotalPromise).then(
+              [promise = kj::mv(promise)](uint previousResult) mutable -> kj::Promise<uint> {
+            return promise.then([previousResult](GetResultList results) mutable -> uint {
+              return previousResult + kj::implicitCast<uint>(results.size());
+            });
+          });
+        }
       }
     }
-    KJ_UNREACHABLE;
+
+    KJ_IF_MAYBE(totalPromise, maybeTotalPromise) {
+      return totalPromise->then([count](uint result){
+        return count + result;
+      });
+    } else {
+      return count;
+    }
   }
 }
 
