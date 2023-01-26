@@ -61,7 +61,7 @@ public:
   // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
   // unnecessary string allocation. Not part of the JS interface.
 
-  kj::Array<DisplayedHeader> getDisplayedHeaders();
+  kj::Array<DisplayedHeader> getDisplayedHeaders(CompatibilityFlags::Reader featureFlags);
   // Returns headers with lower-case name and comma-concatenated duplicates.
 
   using ByteStringPair = jsg::Sequence<jsg::ByteString>;
@@ -84,13 +84,20 @@ public:
   static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
   kj::Maybe<jsg::ByteString> get(jsg::ByteString name);
   kj::ArrayPtr<jsg::ByteString> getAll(jsg::ByteString name);
+  // getAll is a legacy non-standard extension API that we introduced before
+  // getSetCookie() was defined. We continue to support it for backwards
+  // compatibility but users really ought to be using getSetCookie() now.
+  kj::ArrayPtr<jsg::ByteString> getSetCookie();
+  // The Set-Cookie header is special in that it is the only HTTP header that
+  // is not permitted to be combined into a single instance.
   bool has(jsg::ByteString name);
   void set(jsg::ByteString name, jsg::ByteString value);
   void append(jsg::ByteString name, jsg::ByteString value);
   void delete_(jsg::ByteString name);
   void forEach(jsg::Lock& js,
       jsg::V8Ref<v8::Function>,
-      jsg::Optional<jsg::Value>);
+      jsg::Optional<jsg::Value>,
+      CompatibilityFlags::Reader featureFlags);
 
   JSG_ITERATOR(EntryIterator, entries,
                 kj::Array<jsg::ByteString>,
@@ -107,9 +114,12 @@ public:
 
   // JavaScript API.
 
-  JSG_RESOURCE_TYPE(Headers) {
+  JSG_RESOURCE_TYPE(Headers, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(getAll);
+    if (flags.getHttpHeadersGetSetCookie()) {
+      JSG_METHOD(getSetCookie);
+    }
     JSG_METHOD(has);
     JSG_METHOD(set);
     JSG_METHOD(append);

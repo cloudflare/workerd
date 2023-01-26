@@ -2006,15 +2006,21 @@ void URLSearchParams::sort() {
   update();
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<URLSearchParams::EntryIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<URLSearchParams::KeyIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<URLSearchParams::ValueIterator>(IteratorState { JSG_THIS });
 }
 

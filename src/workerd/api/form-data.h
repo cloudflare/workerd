@@ -8,6 +8,7 @@
 #include <kj/compat/url.h>
 #include <workerd/jsg/jsg.h>
 #include "blob.h"
+#include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
 

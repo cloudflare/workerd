@@ -921,7 +921,7 @@ private:
       JSG_ITERABLE(self);                                                                      \
     }                                                                                           \
   };                                                                                            \
-  jsg::Ref<Name> Label(jsg::Lock&);
+  jsg::Ref<Name> Label(jsg::Lock&, CompatibilityFlags::Reader featureFlags);
 // The JSG_ITERATOR macro provides a mechanism for easily implementing JavaScript-style iterators
 // for JSG_RESOURCE_TYPES.
 //

@@ -8,6 +8,7 @@
 #include "form-data.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/string.h>
+#include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
   // The original URL implementation based on kj::Url is not compliant with the

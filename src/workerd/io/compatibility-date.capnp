@@ -274,4 +274,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Experimental, allows getting a durable object stub that ensures the object already exists.
   # This is currently a work in progress mechanism that is not yet available for use in workerd.
+
+  httpHeadersGetSetCookie @26 :Bool
+      $compatEnableFlag("http_headers_getsetcookie")
+      $compatDisableFlag("no_http_headers_getsetcookie")
+      $compatEnableDate("2023-03-01");
+  # Enables the new headers.getSetCookie() API and the corresponding changes in behavior for
+  # the Header objects keys() and entries() iterators.
 }
