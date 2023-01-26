@@ -28,7 +28,6 @@ bool isValidAddress(kj::StringPtr address) {
       case ':':
       case '_':
       case '[': case ']': // For IPv6.
-      case '/': // To enable "unix:/" addresses (only used for testing, the proxy should reject this).
         break;
       default:
         if ((address[i] >= 'a' && address[i] <= 'z') ||
