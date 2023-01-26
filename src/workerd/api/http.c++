@@ -711,6 +711,12 @@ jsg::Ref<Request> Request::constructor(
             if (initDict.body != nullptr) {
               ignoreInputBody = true;
             }
+
+            KJ_IF_MAYBE(integrity, initDict.integrity) {
+              JSG_REQUIRE(integrity->size() == 0, TypeError,
+                  "Subrequest integrity checking is not implemented. "
+                  "The integrity option must be either undefined or an empty string.");
+            }
           }
           KJ_CASE_ONEOF(otherRequest, jsg::Ref<Request>) {
             // If our initializer dictionary is another Request object, it will always have a `body`
