@@ -50,6 +50,16 @@ public:
   // not implement any spectre mitigations.
 };
 
+enum class ActorGetMode {
+  // Behavior mode for getting an actor
+
+  GET_OR_CREATE,
+  // Creates the actor if it does not already exist, otherwise gets the existing actor.
+
+  GET_EXISTING
+  // Get an already-created actor, throwing an error if it does not exist.
+};
+
 class ActorIdFactory {
   // An abstract class that implements generation of global actor IDs in a particular namespace.
   //
@@ -177,7 +187,7 @@ public:
   };
 
   virtual kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint) = 0;
+      kj::Maybe<kj::String> locationHint, ActorGetMode mode) = 0;
   // Get an actor stub from the given namespace for the actor with the given ID.
   //
   // `id` must have been constructed using one of the `ActorIdFactory` instances corresponding to

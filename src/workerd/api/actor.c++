@@ -57,10 +57,12 @@ public:
   GlobalActorOutgoingFactory(
       uint channelId,
       jsg::Ref<DurableObjectId> id,
-      kj::Maybe<kj::String> locationHint)
+      kj::Maybe<kj::String> locationHint,
+      ActorGetMode mode)
     : channelId(channelId),
       id(kj::mv(id)),
-      locationHint(kj::mv(locationHint)) {}
+      locationHint(kj::mv(locationHint)),
+      mode(mode) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -68,7 +70,8 @@ public:
     // Lazily initialize actorChannel
     if (actorChannel == nullptr) {
       auto& context = IoContext::current();
-      actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint));
+      actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint),
+          mode);
     }
 
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
@@ -92,6 +95,7 @@ private:
   uint channelId;
   jsg::Ref<DurableObjectId> id;
   kj::Maybe<kj::String> locationHint;
+  ActorGetMode mode;
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
@@ -133,6 +137,21 @@ jsg::Ref<DurableObject> DurableObjectNamespace::get(
     jsg::Ref<DurableObjectId> id,
     jsg::Optional<GetDurableObjectOptions> options,
     CompatibilityFlags::Reader featureFlags) {
+  return getImpl(ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options), kj::mv(featureFlags));
+}
+
+jsg::Ref<DurableObject> DurableObjectNamespace::getExisting(
+    jsg::Ref<DurableObjectId> id,
+    jsg::Optional<GetDurableObjectOptions> options,
+    CompatibilityFlags::Reader featureFlags) {
+  return getImpl(ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options), kj::mv(featureFlags));
+}
+
+jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
+    ActorGetMode mode,
+    jsg::Ref<DurableObjectId> id,
+    jsg::Optional<GetDurableObjectOptions> options,
+    CompatibilityFlags::Reader featureFlags) {
   JSG_REQUIRE(idFactory->matchesJurisdiction(id->getInner()), TypeError,
       "get called on jurisdictional subnamespace with an ID from a different jurisdiction");
 
@@ -143,7 +162,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::get(
   }
 
   auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
-      kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint)));
+      kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint), mode));
   auto requiresHost = featureFlags.getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;

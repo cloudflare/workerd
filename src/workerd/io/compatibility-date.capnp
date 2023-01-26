@@ -268,4 +268,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # development. Don't use this for backwards-incompatible changes; give them their own flag.
   # WARNING: Any feature blocked by this flag is subject to change at any time, including
   # removal. Do not ignore this warning.
+
+  durableObjectGetExisting @25 :Bool
+      $compatEnableFlag("durable_object_get_existing")
+      $experimental;
+  # Experimental, allows getting a durable object stub that ensures the object already exists.
+  # This is currently a work in progress mechanism that is not yet available for use in workerd.
 }
