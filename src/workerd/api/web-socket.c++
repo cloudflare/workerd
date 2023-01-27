@@ -11,8 +11,6 @@
 
 namespace workerd::api {
 
-
-
 kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
   // TODO(someday) We might care more about this `OneOf` than its which, that probably means
   // returning a kj::String instead.
@@ -24,6 +22,34 @@ kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
     KJ_CASE_ONEOF(r, WebSocket::Released) return "Released";
   }
   KJ_UNREACHABLE;
+}
+
+IoOwn<WebSocket::Native> WebSocket::initNative(IoContext& ioContext, kj::WebSocket& ws) {
+  auto nativeObj = kj::heap<Native>();
+  nativeObj->state.init<Accepted>(Accepted::Hibernatable{.ws = ws}, *nativeObj, ioContext);
+  return ioContext.addObject(kj::mv(nativeObj));
+}
+
+WebSocket::WebSocket(jsg::Lock& js,
+    IoContext& ioContext,
+    kj::WebSocket& ws,
+    HibernationPackage package)
+    : url(kj::mv(package.url)),
+      protocol(kj::mv(package.protocol)),
+      extensions(kj::mv(package.extensions)),
+      serializedAttachment(kj::mv(package.serializedAttachment)),
+      farNative(initNative(ioContext, ws)),
+      outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
+      locality(LOCAL) {}
+  // This constructor is used when reinstantiating a websocket that had been hibernating, which is
+  // why we can go straight to the Accepted state. However, note that we are actually in the
+  // `Hibernatable` "sub-state"!
+
+jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
+    jsg::Lock& js,
+    kj::WebSocket& ws,
+    HibernationPackage package) {
+  return jsg::alloc<WebSocket>(js, IoContext::current(), ws, kj::mv(package));
 }
 
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
@@ -262,8 +288,14 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
   JSG_REQUIRE(!native.state.is<Released>(), TypeError,
       "Can't return WebSocket that was already used in a response.");
-  JSG_REQUIRE(!native.state.is<Accepted>(), TypeError,
-      "Can't return WebSocket in a Response after calling accept().");
+  KJ_IF_MAYBE(state, native.state.tryGet<Accepted>()) {
+    if (state->isHibernatable()) {
+      JSG_FAIL_REQUIRE(TypeError,
+          "Can't return WebSocket in a Response after calling acceptWebSocket().");
+    } else {
+      JSG_FAIL_REQUIRE(TypeError, "Can't return WebSocket in a Response after calling accept().");
+    }
+  }
 
   // Tear down the IoOwn since we now need to extend the WebSocket to a `DeferredProxy` promise.
   // This works because the `DeferredProxy` ends on the same event loop, but after the request
@@ -308,7 +340,9 @@ void WebSocket::accept(jsg::Lock& js) {
   JSG_REQUIRE(!native.state.is<Released>(), TypeError,
       "Can't accept() WebSocket that was already used in a response.");
 
-  if (native.state.is<Accepted>()) {
+  KJ_IF_MAYBE(accepted, native.state.tryGet<Accepted>()) {
+    JSG_REQUIRE(!accepted->isHibernatable(), TypeError,
+        "Can't accept() WebSocket after enabling hibernation.");
     // Technically, this means it's okay to invoke `accept()` once a `new WebSocket()` resolves to
     // an established connection. This is probably okay? It might spare the worker devs a class of
     // errors they do not care care about.
@@ -325,37 +359,9 @@ void WebSocket::internalAccept(jsg::Lock& js) {
   return startReadLoop(js);
 }
 
-WebSocket::Accepted::Accepted(
-    kj::Own<kj::WebSocket> wsParam, Native& native, IoContext& context)
+WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, IoContext& context)
     : ws(kj::mv(wsParam)),
-      whenAbortedTask(kj::evalNow([&]() { return ws->whenAborted(); })
-          .catch_([](kj::Exception&& e) {
-        // whenAborted() is theoretically not supposed to throw, but some code paths, like
-        // AbortableWebSocket and Cap'n Proto disconnects, may end up throwing DISCONNECTED. Treat
-        // exceptions the same as if `whenAborted()` finished normally -- but log if it's not
-        // DISCONNECTED.
-        if (e.getType() != kj::Exception::Type::DISCONNECTED) {
-          LOG_EXCEPTION("webSocketWhenAborted", e);
-        }
-      }).then([this, &native]() {
-        // Other end disconnected prematurely. We may be able to clean up our state.
-        native.outgoingAborted = true;
-        if (!native.isPumping && native.closedIncoming) {
-          // We can safely destroy the underlying WebSocket as it is no longer in use.
-          // HACK: Replacing the state will delete `whenAbortedTask`, which is the task that is
-          //   currently executing, which will crash. We know we're at the end of the task here
-          //   so detach it as a work-around.
-          whenAbortedTask.detach([](auto&&) {});
-          native.state.init<Released>();
-        } else {
-          // Either we haven't received the incoming disconnect yet, or there are writes
-          // in-flight. In either case, we need to wait for those to happen before we destroy the
-          // underlying object, or we might have a UAF situation. Those other operations should
-          // fail shortly and notice the `outgoingAborted` flag when they do.
-        }
-      }).eagerlyEvaluate([](kj::Exception&& e) {
-        LOG_EXCEPTION("webSocketWhenAborted", e);
-      })) {
+      whenAbortedTask(createAbortTask(native, context)) {
   KJ_IF_MAYBE(a, context.getActor()) {
     auto& metrics = a->getMetrics();
     metrics.webSocketAccepted();
@@ -364,6 +370,50 @@ WebSocket::Accepted::Accepted(
     // there.
     actorMetrics = kj::addRef(metrics);
   }
+}
+
+WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& context)
+    : ws(wsParam),
+      whenAbortedTask(createAbortTask(native, context)) {
+  KJ_IF_MAYBE(a, context.getActor()) {
+    auto& metrics = a->getMetrics();
+    metrics.webSocketAccepted();
+
+    // Save the metrics object for the destructor since the IoContext may not be accessible
+    // there.
+    actorMetrics = kj::addRef(metrics);
+  }
+}
+
+kj::Promise<void> WebSocket::Accepted::createAbortTask(Native& native, IoContext& context) {
+  return kj::evalNow([&]() { return ws->whenAborted(); })
+      .catch_([](kj::Exception&& e) {
+    // whenAborted() is theoretically not supposed to throw, but some code paths, like
+    // AbortableWebSocket and Cap'n Proto disconnects, may end up throwing DISCONNECTED. Treat
+    // exceptions the same as if `whenAborted()` finished normally -- but log if it's not
+    // DISCONNECTED.
+    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
+      LOG_EXCEPTION("webSocketWhenAborted", e);
+    }
+  }).then([this, &native]() {
+    // Other end disconnected prematurely. We may be able to clean up our state.
+    native.outgoingAborted = true;
+    if (!native.isPumping && native.closedIncoming) {
+      // We can safely destroy the underlying WebSocket as it is no longer in use.
+      // HACK: Replacing the state will delete `whenAbortedTask`, which is the task that is
+      //   currently executing, which will crash. We know we're at the end of the task here
+      //   so detach it as a work-around.
+      whenAbortedTask.detach([](auto&&) {});
+      native.state.init<Released>();
+    } else {
+      // Either we haven't received the incoming disconnect yet, or there are writes
+      // in-flight. In either case, we need to wait for those to happen before we destroy the
+      // underlying object, or we might have a UAF situation. Those other operations should
+      // fail shortly and notice the `outgoingAborted` flag when they do.
+    }
+  }).eagerlyEvaluate([](kj::Exception&& e) {
+    LOG_EXCEPTION("webSocketWhenAborted", e);
+  });
 }
 
 WebSocket::Accepted::~Accepted() noexcept(false) {
@@ -382,7 +432,9 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
   // in awaitIo() below, but we don't want the KJ exception converted to JavaScript before we can
   // examine it.
   kj::Promise<kj::Maybe<kj::Exception>> promise = kj::evalNow([&] {
-    auto& ws = *KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws;
+    // Note that we'll throw if the websocket has enabled hibernation.
+    auto& ws = *KJ_REQUIRE_NONNULL(
+        KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
     return readLoop(ws);
   }).then([]() -> kj::Maybe<kj::Exception> { return nullptr; },
           [](kj::Exception&& e) -> kj::Maybe<kj::Exception> { return kj::mv(e); });
@@ -420,12 +472,8 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
         dispatchEventImpl(js, jsg::alloc<CloseEvent>(
             1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
-        if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
-          // There are no further messages to send, so we can discard the underlying connection.
-          auto& native = *farNative;
-          KJ_ASSERT(native.state.is<Accepted>());
-          native.state.init<Released>();
-        }
+        // If there are no further messages to send, so we can discard the underlying connection.
+        tryReleaseNative(js);
       } else {
         native.closedIncoming = true;
         reportError(js, kj::cp(*e));
@@ -441,7 +489,7 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
   if (native.outgoingAborted || native.state.is<Released>()) {
     // Per the spec, we should silently ignore send()s that happen after the connection is closed.
     // NOTE: The spec claims send() should also silently ignore messages sent after a close message
-    //   has been sent or received cleanly. We ignore tihs advice:
+    //   has been sent or received cleanly. We ignore this advice:
     // * If close has been sent, i.e. close() has been called, then calling send() is clearly a
     //   bug, and we'd like to help people debug, so we throw an exception above. (This point is
     //   debatable, we could change it.)
@@ -449,9 +497,16 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
     //   The spec seems broken here. What if you need to send a couple final messages for a clean
     //   shutdown?
     return;
+  } else if (awaitingHibernatableError()) {
+    // Ready for the hibernatable error event state, after encountering an error, the websocket
+    // isn't able to send outbound messages; let's release it.
+    tryReleaseNative(js);
+    return;
   }
+
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
-      "You must call accept() on this WebSocket before sending messages.");
+      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "\
+      "messages.");
 
   auto maybeOutputLock = IoContext::current().waitForOutputLocksIfNecessary();
   auto msg = [&]() -> kj::WebSocket::Message {
@@ -490,10 +545,17 @@ void WebSocket::close(
   if (native.closedOutgoing || native.outgoingAborted || native.state.is<Released>()) {
     // See comments in send(), above, which also apply here. Note that we opt to ignore a
     // double-close() per spec, whereas send()-after-close() throws (off-spec).
+
+    return;
+  } else if (awaitingHibernatableError()) {
+    // Ready for the hibernatable error event state, after encountering an error, the websocket
+    // isn't able to send outbound messages; let's release it.
+    tryReleaseNative(js);
     return;
   }
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
-      "You must call accept() on this WebSocket before sending messages.");
+      "You must call one of accept() or state.acceptWebSocket() on this WebSocket before sending "\
+      "messages.");
 
   assertNoError(js);
 
@@ -573,6 +635,31 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
   return extensions.map([](kj::StringPtr value){ return value; });
 }
 
+kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) {
+  return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment) {
+    jsg::Deserializer deserializer(js.v8Isolate, attachment, nullptr, nullptr,
+        jsg::Deserializer::Options {
+      .version = 15,
+      .readHeader = true,
+    });
+
+    return deserializer.readValue();
+  });
+}
+
+void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment) {
+  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+    .version = 15,
+    .omitHeader = false,
+  });
+  serializer.write(attachment);
+  auto released = serializer.release();
+  JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
+      "A WebSocket 'attachment' cannot be larger than ",  MAX_ATTACHMENT_SIZE, " bytes." \
+      "'attachment' was ", released.data.size(), " bytes.");
+  serializedAttachment = kj::mv(released.data);
+}
+
 void WebSocket::dispatchOpen(jsg::Lock& js) {
   dispatchEventImpl(js, jsg::alloc<Event>("open"));
 }
@@ -594,9 +681,14 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
     context.awaitIoLegacy(kj::mv(promise)).then(js, [this, thisHandle = JSG_THIS](jsg::Lock& js) {
       auto& native = *farNative;
       if (native.outgoingAborted) {
-        // Apparently, the peer stopped accepting messages (probably, disconnected entirely), but
-        // this didn't cause our writes to fail, maybe due to timing. Let's set the error now.
-        reportError(js, KJ_EXCEPTION(DISCONNECTED, "WebSocket peer disconnected"));
+        if (awaitingHibernatableRelease()) {
+          // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
+          tryReleaseNative(js);
+        } else {
+          // Apparently, the peer stopped accepting messages (probably, disconnected entirely), but
+          // this didn't cause our writes to fail, maybe due to timing. Let's set the error now.
+          reportError(js, KJ_EXCEPTION(DISCONNECTED, "WebSocket peer disconnected"));
+        }
       } else if (native.closedIncoming && native.closedOutgoing) {
         if (native.state.is<Accepted>()) {
           // Native WebSocket no longer needed; release.
@@ -608,7 +700,12 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
         }
       }
     }, [this](jsg::Lock& js, jsg::Value&& exception) mutable {
-      reportError(js, kj::mv(exception));
+      if (awaitingHibernatableRelease()) {
+        // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
+        tryReleaseNative(js);
+      } else {
+        reportError(js, kj::mv(exception));
+      }
     });
   }
 }
@@ -714,11 +811,8 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
         KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
           native.closedIncoming = true;
           dispatchEventImpl(lock, jsg::alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
-          if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
-            // Native WebSocket no longer needed; release.
-            KJ_ASSERT(native.state.is<Accepted>());
-            native.state.init<Released>();
-          }
+          // Native WebSocket no longer needed; release.
+          tryReleaseNative(lock);
           return kj::READY_NOW;
         }
       }
@@ -730,9 +824,15 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
 
 jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   auto pipe = kj::newWebSocketPipe();
-  return jsg::alloc<WebSocketPair>(
+  auto pair = jsg::alloc<WebSocketPair>(
       jsg::alloc<WebSocket>(kj::mv(pipe.ends[0]), WebSocket::LOCAL),
       jsg::alloc<WebSocket>(kj::mv(pipe.ends[1]), WebSocket::LOCAL));
+  auto first = pair->getFirst();
+  auto second = pair->getSecond();
+
+  first->setMaybePair(second.addRef());
+  second->setMaybePair(first.addRef());
+  return kj::mv(pair);
 }
 
 void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
