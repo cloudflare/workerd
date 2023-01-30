@@ -2645,7 +2645,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
       auto request = txn.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
       auto listBuilder = request.initKeys(batch.pairCount);
       for (size_t i = 0; i < batch.pairCount; ++i) {
-        KJ_ASSERT(entryIt != mutedDeleteFlush.entries.end());
+        KJ_ASSERT(entryIt != flush.entries.end());
         auto& entry = **(entryIt++);
         listBuilder.set(i, entry.key.asBytes());
       }
