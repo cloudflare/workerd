@@ -236,11 +236,18 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // destructed soon.
 
 public:
+  enum class InspectorPolicy {
+    // Determines whether a devtools inspector client can be attached.
+    DISALLOW,
+    ALLOW_UNTRUSTED,
+    ALLOW_FULLY_TRUSTED,
+  };
+
   explicit Isolate(kj::Own<ApiIsolate> apiIsolate,
                    kj::Own<IsolateObserver>&& metrics,
                    kj::StringPtr id,
                    kj::Own<IsolateLimitEnforcer> limitEnforcer,
-                   bool allowInspector);
+                   InspectorPolicy inspectorPolicy);
   // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
   // Usually it matches the script ID. An exception is preview isolates: there, each preview
   // session has one isolate which may load many iterations of the script (this allows the

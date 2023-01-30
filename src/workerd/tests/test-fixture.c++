@@ -264,7 +264,7 @@ TestFixture::TestFixture(SetupParams params)
       kj::atomicRefcounted<IsolateObserver>(),
       scriptId,
       kj::mv(isolateLimitEnforcer),
-      false)),
+      Worker::Isolate::InspectorPolicy::DISALLOW)),
     workerScript(kj::atomicRefcounted<Worker::Script>(
       kj::atomicAddRef(*workerIsolate),
       scriptId,

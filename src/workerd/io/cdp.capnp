@@ -337,14 +337,6 @@ struct Profiler {
 
 struct HeapProfiler {
   struct Command {
-    struct Enable {
-      struct Params {}
-      struct Result {}
-    }
-    struct Disable {
-      struct Params {}
-      struct Result {}
-    }
     struct TakeHeapSnapshot {
       struct Params {
         reportProgress @0 : Bool;
@@ -391,9 +383,7 @@ struct Command $Json.discriminator(name = "method") {
     profilerEnable @6 :Method(Profiler.Command.Enable.Params, Profiler.Command.Enable.Result) $Json.name("Profiler.enable") $Json.flatten();
     profilerStart @7 :Method(Profiler.Command.Start.Params, Profiler.Command.Start.Result) $Json.name("Profiler.start") $Json.flatten();
     profilerStop @8 :Method(Profiler.Command.Stop.Params, Profiler.Command.Stop.Result) $Json.name("Profiler.stop") $Json.flatten();
-    heapProfilerEnable @9 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Enable.Result) $Json.name("HeapProfiler.enable") $Json.flatten();
-    heapProfilerDisable @10 : Method(HeapProfiler.Command.Enable.Params, HeapProfiler.Command.Disable.Result) $Json.name("HeapProfiler.disable") $Json.flatten();
-    takeHeapSnapshot @11 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
+    takeHeapSnapshot @9 : Method(HeapProfiler.Command.TakeHeapSnapshot.Params, HeapProfiler.Command.TakeHeapSnapshot.Result) $Json.name("HeapProfiler.takeHeapSnapshot") $Json.flatten();
   }
 }
 
