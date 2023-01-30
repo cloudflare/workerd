@@ -2666,11 +2666,10 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
 
 Worker::Actor::Actor(const Worker& worker, Actor::Id actorId,
     bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
-    kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, LockType lockType,
+    kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics)
     : worker(kj::atomicAddRef(worker)) {
-  Worker::Lock lock(worker, lockType);
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(persistent),
                         kj::mv(makeStorage), timerChannel, kj::mv(metrics));
 
