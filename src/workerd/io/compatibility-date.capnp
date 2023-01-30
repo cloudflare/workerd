@@ -254,4 +254,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # WHATWG URL Standard, leading to a number of issues reported by users. Unfortunately,
   # the specCompliantUrl flag did not contemplate the redirect usage. This flag is
   # specifically about the usage in a redirect().
+
+  workerdExperimental @24 :Bool
+      $compatEnableFlag("experimental")
+      $experimental;
+  # Experimental, do not use.
+  # This is a catch-all compatibility flag for experimental development within workerd
+  # that is not covered by another more-specific compatibility flag. It is the intention
+  # of this flag to always have the $experimental attribute.
+  # This is intended to guard new features that do not introduce any backwards-compatibility
+  # concerns (e.g. they only add a new API), and therefore do not need a compat flag of their own
+  # in the long term, but where we still want to guard access to the feature while it is in
+  # development. Don't use this for backwards-incompatible changes; give them their own flag.
+  # WARNING: Any feature blocked by this flag is subject to change at any time, including
+  # removal. Do not ignore this warning.
 }
