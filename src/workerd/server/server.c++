@@ -190,6 +190,9 @@ public:
       IoChannelFactory::SubrequestMetadata metadata) = 0;
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
+
+  virtual bool hasHandler(kj::StringPtr handlerName) = 0;
+  // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
 };
 
 // =======================================================================================
@@ -435,6 +438,10 @@ public:
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     JSG_FAIL_REQUIRE(Error, "Service cannot handle requests because its config is invalid.");
   }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return false;
+  }
 };
 
 kj::Own<Server::Service> Server::makeInvalidConfigService() {
@@ -510,6 +517,10 @@ public:
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::heap<WorkerInterfaceImpl>(*this, kj::mv(metadata));
+  }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return handlerName == "fetch"_kj || handlerName == "connect"_kj;
   }
 
 private:
@@ -656,6 +667,10 @@ public:
     return { this, kj::NullDisposer::instance };
   }
 
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return handlerName == "fetch"_kj || handlerName == "connect"_kj;
+  }
+
 private:
   kj::Own<kj::Network> network;
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
@@ -728,6 +743,10 @@ public:
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return { this, kj::NullDisposer::instance };
+  }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return handlerName == "fetch"_kj;
   }
 
 private:
@@ -1132,16 +1151,18 @@ public:
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
   WorkerService(ThreadContext& threadContext, kj::Own<const Worker> worker,
-                kj::HashSet<kj::String> namedEntrypointsParam,
+                kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
+                kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
                 const kj::HashMap<kj::String, ActorConfig>& actorClasses,
                 LinkCallback linkCallback)
       : threadContext(threadContext), worker(kj::mv(worker)),
+        defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         ioChannels(kj::mv(linkCallback)),
         waitUntilTasks(*this) {
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
-      kj::StringPtr epPtr = ep;
-      namedEntrypoints.insert(kj::mv(ep), EntrypointService(*this, epPtr));
+      kj::StringPtr epPtr = ep.key;
+      namedEntrypoints.insert(kj::mv(ep.key), EntrypointService(*this, epPtr, kj::mv(ep.value)));
     }
 
     actorNamespaces.reserve(actorClasses.size());
@@ -1168,6 +1189,14 @@ public:
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata) override {
     return startRequest(kj::mv(metadata), nullptr);
+  }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    KJ_IF_MAYBE(h, defaultEntrypointHandlers) {
+      return h->contains(handlerName);
+    } else {
+      return false;
+    }
   }
 
   kj::Own<WorkerInterface> startRequest(
@@ -1256,21 +1285,28 @@ public:
 private:
   class EntrypointService final: public Service {
   public:
-    EntrypointService(WorkerService& worker, kj::StringPtr entrypoint)
-        : worker(worker), entrypoint(entrypoint) {}
+    EntrypointService(WorkerService& worker, kj::StringPtr entrypoint,
+                      kj::HashSet<kj::String> handlers)
+        : worker(worker), entrypoint(entrypoint), handlers(kj::mv(handlers)) {}
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata) override {
       return worker.startRequest(kj::mv(metadata), entrypoint);
     }
 
+    bool hasHandler(kj::StringPtr handlerName) override {
+      return handlers.contains(handlerName);
+    }
+
   private:
     WorkerService& worker;
     kj::StringPtr entrypoint;
+    kj::HashSet<kj::String> handlers;
   };
 
   ThreadContext& threadContext;
   kj::Own<const Worker> worker;
+  kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
   kj::HashMap<kj::StringPtr, ActorNamespace> actorNamespaces;
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
@@ -1487,19 +1523,23 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     Server& server;
     kj::StringPtr name;
 
-    kj::HashSet<kj::String> namedEntrypoints;
-    bool hasDefaultEntrypoint = false;
+    kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
+    kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
+    // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
 
     void addError(kj::String error) override {
       server.reportConfigError(kj::str("service ", name, ": ", error));
     }
 
     void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
+      kj::HashSet<kj::String>* set;
       KJ_IF_MAYBE(e, exportName) {
-        namedEntrypoints.findOrCreate(*e, [&]() { return kj::str(*e); });
+        set = &namedEntrypoints.findOrCreate(*e,
+            [&]() -> decltype(namedEntrypoints)::Entry { return { kj::str(*e), {} }; });
       } else {
-        hasDefaultEntrypoint = true;
+        set = &defaultEntrypoint.emplace();
       }
+      set->insert(kj::str(type));
     }
   };
 
@@ -1911,6 +1951,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   };
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
+                                 kj::mv(errorReporter.defaultEntrypoint),
                                  kj::mv(errorReporter.namedEntrypoints), localActorConfigs,
                                  kj::mv(linkCallback));
 }
