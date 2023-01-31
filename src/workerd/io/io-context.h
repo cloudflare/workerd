@@ -12,6 +12,7 @@
 
 #include "trace.h"
 #include "worker.h"
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <v8.h>
 #include "io-gate.h"
@@ -1276,18 +1277,28 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 
   typedef MaybeIoOwn<addIoOwn, T> Result;
 
-  v8::Isolate* isolate = getCurrentLock().getIsolate();
+  auto& lock = getCurrentLock();
+  v8::Isolate* isolate = lock.getIsolate();
+
   auto [ jsPromise, resolver ] = jsg::newPromiseAndResolver<Result>(isolate);
+
+  // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
+  // and pass it into the then(). If the promise is rejected, and there is no rejection
+  // handler attached to it, an unhandledrejection event will be scheduled, and scheduling
+  // that event needs to be done within the appropriate frame to propagate the correct context.
 
   if constexpr (jsg::isVoid<T>()) {
     addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
       return nullptr;
     }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
       return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs)]
+    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
             (kj::Maybe<kj::Exception>&& maybeException) mutable {
       return run([resolver = kj::mv(resolver),
-                  maybeException = kj::mv(maybeException)](Worker::Lock& lock) mutable {
+                  maybeException = kj::mv(maybeException),
+                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         KJ_IF_MAYBE(exception, maybeException) {
           resolver.reject(lock, kj::mv(*exception));
         } else {
@@ -1301,10 +1312,13 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
       return kj::mv(result);
     }, [](kj::Exception&& exception) -> ResultOrException {
       return kj::mv(exception);
-    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs)]
+    }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
+             maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
             (ResultOrException&& resultOrException) mutable {
       return run([this, resolver = kj::mv(resolver),
-                  resultOrException = kj::mv(resultOrException)](Worker::Lock& lock) mutable {
+                  resultOrException = kj::mv(resultOrException),
+                  maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+        jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
         KJ_SWITCH_ONEOF(resultOrException) {
           KJ_CASE_ONEOF(result, T) {
             if constexpr (addIoOwn) {
@@ -1554,9 +1568,12 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
   auto [result, resolver] = jsg::newPromiseAndResolver<T>(js.v8Isolate);
 
-  addTask(cs->wait().then([this, callback = kj::mv(callback)]
+  addTask(cs->wait().then([this, callback = kj::mv(callback),
+                           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]
                           (InputGate::Lock inputLock) mutable {
-    return run([this, callback = kj::mv(callback)](Worker::Lock& lock) mutable {
+    return run([this, callback = kj::mv(callback),
+                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       auto cb = kj::mv(callback);
 
       // Remember that this can throw synchronously, and it's important that we catch such throws
@@ -1575,12 +1592,16 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
 
       return awaitJs(kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
     }, kj::mv(inputLock));
-  }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver)](T&& value) mutable {
+  }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver),
+           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
     auto inputLock = cs->succeeded();
-    return run([value = kj::mv(value), resolver = kj::mv(resolver)](Worker::Lock& lock) mutable {
+    return run([value = kj::mv(value),resolver = kj::mv(resolver),
+                maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+      jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       resolver.resolve(kj::mv(value));
     }, kj::mv(inputLock));
-  }, [cs = kj::mv(cs2)](kj::Exception&& e) mutable {
+  }, [cs = kj::mv(cs2)]
+     (kj::Exception&& e) mutable {
     // Annotate as broken for periodic metrics.
     auto msg = e.getDescription();
     if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {

@@ -105,12 +105,6 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(v8::Isolate* isolate)
                 jsg::Value value) {
           // If async context tracking is enabled, then we need to ensure that we enter the frame
           // associated with the promise before we invoke the unhandled rejection callback handling.
-          kj::Maybe<jsg::AsyncContextFrame::Scope> maybeScope;
-          KJ_IF_MAYBE(context, jsg::AsyncContextFrame::tryGetContext(js, promise)) {
-            if (!context->isRoot(js)) {
-              maybeScope.emplace(js, jsg::AsyncContextFrame::tryGetContext(js, promise));
-            }
-          }
           auto ev = jsg::alloc<PromiseRejectionEvent>(event, kj::mv(promise), kj::mv(value));
           dispatchEventImpl(js, kj::mv(ev));
         }) {}
@@ -500,7 +494,14 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
 void ServiceWorkerGlobalScope::queueMicrotask(
     jsg::Lock& js,
     v8::Local<v8::Function> task) {
-  js.v8Isolate->EnqueueMicrotask(jsg::AsyncContextFrame::wrap(js, task, nullptr, nullptr));
+  // TODO(later): It currently does not appear as if v8 attaches the continuation embedder data
+  // to microtasks scheduled using EnqueueMicrotask, so we have to wrap in order to propagate
+  // the context to those. Once V8 is fixed to correctly associate continuation data with
+  // microtasks automatically, we can remove this workaround.
+  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
+    task = context->wrap(js, task);
+  }
+  js.v8Isolate->EnqueueMicrotask(task);
 }
 
 v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
@@ -533,14 +534,8 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
     jsg::Varargs args) {
-  auto& context = jsg::AsyncContextFrame::current(js);
-  if (!context.isRoot(js)) {
-    // If the AsyncContextFrame is the root frame, we do not have to wrap it at all.
-    // This is because setInterval/setTimeout callbacks are always invoked by the
-    // system. If there is no AsyncContextFrame::Scope on the stack, it will always
-    // use the root frame.
-    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
-        js, function.getHandle(js), nullptr, nullptr));
+  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
+    function = js.v8Ref(context->wrap(js, function));
   }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(
@@ -573,14 +568,8 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
     jsg::V8Ref<v8::Function> function,
     jsg::Optional<double> msDelay,
     jsg::Varargs args) {
-  auto& context = jsg::AsyncContextFrame::current(js);
-  if (!context.isRoot(js)) {
-    // If the AsyncContextFrame is the root frame, we do not have to wrap it at all.
-    // This is because setInterval/setTimeout callbacks are always invoked by the
-    // system. If there is no AsyncContextFrame::Scope on the stack, it will always
-    // use the root frame.
-    function = js.v8Ref(jsg::AsyncContextFrame::current(js).wrap(
-        js, function.getHandle(js), nullptr, nullptr));
+  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
+    function = js.v8Ref(context->wrap(js, function));
   }
   auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
   auto timeoutId = IoContext::current().setTimeoutImpl(

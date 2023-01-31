@@ -194,8 +194,16 @@ public:
     }
   }
 
+  kj::Maybe<jsg::AsyncContextFrame&> getFrame();
+  // Returns the jsg::AsyncContextFrame captured when the AsyncResource was created,
+  // if any.
+
 private:
-  kj::Own<jsg::AsyncContextFrame> frame;
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> frame;
+
+  inline void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(frame);
+  }
 };
 
 class AsyncHooksModule final: public jsg::Object {

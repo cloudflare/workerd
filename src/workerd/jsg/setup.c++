@@ -338,9 +338,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   v8::Locker lock(ptr);
   v8::Isolate::Scope scope(ptr);
 
-  // Clear the rootAsyncFrame reference under lock.
-  rootAsyncFrame = nullptr;
-
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();
 
@@ -357,11 +354,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
 
   // Destroy all wrappers.
   heapTracer.clearWrappers();
-
-  // Clear any cached private symbols here while we are in the isolate lock.
-  for (auto& maybeSymbol : privateSymbols) {
-    maybeSymbol = nullptr;
-  }
 }
 
 void IsolateBase::fatalError(const char* location, const char* message) {
@@ -510,30 +502,6 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       break;
     }
   }
-}
-
-v8::Local<v8::Private> IsolateBase::getPrivateSymbolFor(Lock::PrivateSymbols symbol) {
-  KJ_ASSERT(symbol != Lock::PrivateSymbols::SYMBOL_COUNT);
-  int pos = static_cast<int>(symbol);
-  // If the private symbol has already been retrieved before, it will be memoized in
-  // the privateSymbols array. Just grab the reference and return it.
-  KJ_IF_MAYBE(i, privateSymbols[pos]) {
-    return i->getHandle(ptr);
-  }
-  // Otherwise, we have to ask v8 for the symbol. The list of symbols available is
-  // defined by the JSG_PRIVATE_SYMBOLS define in jsg.h.
-  v8::Local<v8::Private> handle;
-  switch (symbol) {
-#define V(name, val) \
-  case Lock::PrivateSymbols::name: \
-    handle = v8::Private::ForApi(ptr, v8StrIntern(ptr, #val)); break;
-    JSG_PRIVATE_SYMBOLS(V)
-#undef V
-    default:
-      KJ_UNREACHABLE;
-  }
-  privateSymbols[pos] = V8Ref(ptr, handle);
-  return handle;
 }
 
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch) {
