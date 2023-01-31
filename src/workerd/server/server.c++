@@ -656,16 +656,6 @@ public:
     return { this, kj::NullDisposer::instance };
   }
 
-  kj::Promise<void> connect(
-      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-      ConnectResponse& tunnel) override {
-    // This code is hit when the global `connect` function is called in a JS worker script.
-    // It represents a proxy-less TCP connection, which means we can simply defer the handling of
-    // the connection to the service adapter (likely NetworkHttpClient). Its behaviour will be to
-    // connect directly to the host over TCP.
-    return serviceAdapter->connect(host, headers, connection, tunnel);
-  }
-
 private:
   kj::Own<kj::Network> network;
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
@@ -676,6 +666,16 @@ private:
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
     return serviceAdapter->request(method, url, headers, requestBody, response);
+  }
+
+  kj::Promise<void> connect(
+      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+      ConnectResponse& tunnel) override {
+    // This code is hit when the global `connect` function is called in a JS worker script.
+    // It represents a proxy-less TCP connection, which means we can simply defer the handling of
+    // the connection to the service adapter (likely NetworkHttpClient). Its behaviour will be to
+    // connect directly to the host over TCP.
+    return serviceAdapter->connect(host, headers, connection, tunnel);
   }
 
   void prewarm(kj::StringPtr url) override {}
