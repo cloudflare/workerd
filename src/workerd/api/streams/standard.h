@@ -76,10 +76,6 @@ struct UnderlyingSource {
     pull?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
     cancel?: (reason: any) => void | Promise<void>;
   });
-
-  kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
-  // The maybeTransformer field here is part of the internal implementation of
-  // TransformStream. Specifically, this field is not exposed to JavaScript.
 };
 
 struct UnderlyingSink {
@@ -106,11 +102,6 @@ struct UnderlyingSink {
     abort?: (reason: any) => void | Promise<void>;
     close?: () => void | Promise<void>;
   });
-
-
-  kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
-  // The maybeTransformer field here is part of the internal implementation of
-  // TransformStream. Specifically, this field is not exposed to JavaScript.
 };
 
 struct Transformer {
@@ -966,7 +957,6 @@ private:
   ReadableLockImpl lock;
   // The lock state is separate because a closed or errored stream can still be locked.
 
-  kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
   bool disturbed = false;
 
   friend ReadableLockImpl;
@@ -1108,7 +1098,6 @@ private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
   kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
-  kj::Maybe<jsg::Ref<TransformStreamDefaultController>> maybeTransformer;
 
   friend WritableLockImpl;
 };

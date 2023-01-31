@@ -36,22 +36,24 @@ jsg::Ref<TransformStream> TransformStream::constructor(
         UnderlyingSource {
           .type = nullptr,
           .autoAllocateChunkSize = nullptr,
-          .start = jsg::Function<UnderlyingSource::StartAlgorithm>(
-              // The C++ reference here is safe because the controller instance is guaranteed
-              // to live as long as the ReadableStream instance. Likewise in each of the other
-              // lambdas used below.
-              [&controller = *controller](jsg::Lock& js, auto c) {
-                return controller.getStartPromise();
-              }),
-          .pull = jsg::Function<UnderlyingSource::PullAlgorithm>(
-              [&controller = *controller](jsg::Lock& js, auto c) {
-                return controller.pull(js);
-              }),
-          .cancel = jsg::Function<UnderlyingSource::CancelAlgorithm>(
-              [&controller = *controller](jsg::Lock& js, auto reason) {
-                return controller.cancel(js, reason);
-              }),
-          .maybeTransformer = controller.addRef(),
+          .start = jsg::Function<UnderlyingSource::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto c) mutable {
+            return controller->getStartPromise();
+          })),
+          .pull = jsg::Function<UnderlyingSource::PullAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto c) mutable {
+            return controller->pull(js);
+          })),
+          .cancel = jsg::Function<UnderlyingSource::CancelAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto reason) mutable {
+            return controller->cancel(js, reason);
+          })),
         },
         kj::mv(maybeReadableStrategy),
         kj::cp(flags));
@@ -60,23 +62,30 @@ jsg::Ref<TransformStream> TransformStream::constructor(
         js,
         UnderlyingSink {
           .type = nullptr,
-          .start = jsg::Function<UnderlyingSink::StartAlgorithm>(
-              [&controller = *controller](jsg::Lock& js, auto c){
-                return controller.getStartPromise();
-              }),
-          .write = jsg::Function<UnderlyingSink::WriteAlgorithm>(
-              [&controller = *controller](jsg::Lock& js, auto chunk, auto c) {
-                return controller.write(js, chunk);
-              }),
-          .abort = jsg::Function<UnderlyingSink::AbortAlgorithm>(
-              [&controller = *controller](jsg::Lock& js, auto reason) {
-                return controller.abort(js, reason);
-              }),
-          .close = jsg::Function<UnderlyingSink::CloseAlgorithm>(
-              [&controller = *controller](jsg::Lock& js) {
-                return controller.close(js);
-              }),
-          .maybeTransformer = controller.addRef(),
+          .start = jsg::Function<UnderlyingSink::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto c) mutable {
+            return controller->getStartPromise();
+          })),
+          .write = jsg::Function<UnderlyingSink::WriteAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto chunk, auto c) mutable {
+            return controller->write(js, chunk);
+          })),
+          .abort = jsg::Function<UnderlyingSink::AbortAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js, auto reason) mutable {
+            return controller->abort(js, reason);
+          })),
+          .close = jsg::Function<UnderlyingSink::CloseAlgorithm>(JSG_VISITABLE_LAMBDA(
+              (controller = controller.addRef()),
+              (controller),
+              (jsg::Lock& js) mutable {
+            return controller->close(js);
+          })),
         },
         kj::mv(maybeWritableStrategy),
         kj::mv(flags));

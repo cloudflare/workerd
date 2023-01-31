@@ -1969,8 +1969,6 @@ void ReadableStreamJsController::setup(
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
   auto type = underlyingSource.type.map([](kj::StringPtr s) { return s; }).orDefault(""_kj);
 
-  maybeTransformer = kj::mv(underlyingSource.maybeTransformer);
-
   if (type == "bytes") {
     auto autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(
         UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE);
@@ -2014,7 +2012,7 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(*consumer);
     }
   }
-  visitor.visit(lock, maybeTransformer);
+  visitor.visit(lock);
 };
 
 kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
@@ -2396,8 +2394,6 @@ kj::Own<ReadableStreamJsController> ReadableStreamJsController::detach(jsg::Lock
     }
   }
 
-  controller->maybeTransformer = kj::mv(maybeTransformer);
-
   return kj::mv(controller);
 }
 
@@ -2672,7 +2668,6 @@ void WritableStreamJsController::setup(
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
 
-  maybeTransformer = kj::mv(underlyingSink.maybeTransformer);
   state = jsg::alloc<WritableStreamDefaultController>(*this);
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
@@ -2860,7 +2855,7 @@ void WritableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(controller);
     }
   }
-  visitor.visit(maybeAbortPromise, lock, maybeTransformer);
+  visitor.visit(maybeAbortPromise, lock);
 }
 
 // =======================================================================================
