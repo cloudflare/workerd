@@ -711,12 +711,6 @@ jsg::Ref<Request> Request::constructor(
             if (initDict.body != nullptr) {
               ignoreInputBody = true;
             }
-
-            KJ_IF_MAYBE(integrity, initDict.integrity) {
-              JSG_REQUIRE(integrity->size() == 0, TypeError,
-                  "Subrequest integrity checking is not implemented. "
-                  "The integrity option must be either undefined or an empty string.");
-            }
           }
           KJ_CASE_ONEOF(otherRequest, jsg::Ref<Request>) {
             // If our initializer dictionary is another Request object, it will always have a `body`
@@ -755,6 +749,12 @@ jsg::Ref<Request> Request::constructor(
   KJ_IF_MAYBE(i, init) {
     KJ_SWITCH_ONEOF(*i) {
       KJ_CASE_ONEOF(initDict, InitializerDict) {
+        KJ_IF_MAYBE(integrity, initDict.integrity) {
+          JSG_REQUIRE(integrity->size() == 0, TypeError,
+              "Subrequest integrity checking is not implemented. "
+              "The integrity option must be either undefined or an empty string.");
+        }
+
         KJ_IF_MAYBE(m, initDict.method) {
           auto originalMethod = kj::str(*m);
           KJ_IF_MAYBE(code, tryParseHttpMethod(*m)) {
