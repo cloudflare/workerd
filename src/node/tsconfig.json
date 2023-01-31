@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [ "ESNext" ],
+    "lib": [ "ESNext", "DOM" ],
     "alwaysStrict": true,
     "strict": true,
     "allowUnreachableCode": false,
@@ -16,6 +16,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "strictNullChecks": true,
+    "esModuleInterop": true,
     "types": [
       // todo: consume generated workerd types
       // "@cloudflare/workers-types"

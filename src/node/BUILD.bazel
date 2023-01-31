@@ -30,6 +30,6 @@ wd_api_bundle(
     internal_modules = dict([(
         m.removesuffix(".ts") + ".js",
         "node-internal:" + m.removeprefix("internal/").removesuffix(".ts"),
-    ) for m in internal_modules]),
+    ) for m in internal_modules if not m.endswith(".d.ts")]),
     schema_id = "0xbcc8f57c63814005",
 )
