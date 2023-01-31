@@ -166,8 +166,10 @@ kj::Promise<void> WorkerEntrypoint::request(
         cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
   }).then([this](api::DeferredProxy<void> deferredProxy) {
     proxyTask = kj::mv(deferredProxy.proxyTask);
+    KJ_DBG("Proxying request?");
   }).exclusiveJoin(context.onAbort())
       .catch_([this,&context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+      KJ_DBG("Abort?", exception);
     // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
@@ -176,6 +178,7 @@ kj::Promise<void> WorkerEntrypoint::request(
     return kj::mv(exception);
   }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
+    KJ_DBG("Request cancelled but allowing to continue");
     if (context.isFailOpen()) {
       // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
       // that purpose later.
@@ -200,10 +203,12 @@ kj::Promise<void> WorkerEntrypoint::request(
     }
   }).attach(kj::defer([this]() mutable {
     // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
+    KJ_DBG("Request cancelled - cancelling proxyTask if there is one");
     proxyTask = nullptr;
   })).catch_([this,wrappedResponse = kj::mv(wrappedResponse),isActor,
               method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
              (kj::Exception&& exception) mutable -> kj::Promise<void> {
+    KJ_DBG("Request failed", exception);
     // Don't return errors to end user.
 
     auto isInternalException = !jsg::isTunneledException(exception.getDescription())

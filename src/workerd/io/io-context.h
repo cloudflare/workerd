@@ -312,6 +312,9 @@ public:
     return *getCurrentIncomingRequest().metrics;
   }
 
+  void setDebugContext(kj::String context) { this->debugContext = kj::mv(context); }
+  kj::String debugContext;
+
   const kj::Maybe<WorkerTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return nullptr;
     return getCurrentIncomingRequest().getWorkerTracer();

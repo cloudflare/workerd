@@ -69,6 +69,7 @@ jsg::Unimplemented Cache::addAll(kj::Array<Request::Info> requests) {
 jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
     jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options,
     CompatibilityFlags::Reader flags) {
+  KJ_LOG(DBG, "cache.match");
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   if (context.isFiddle()) {
@@ -86,18 +87,28 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>(nullptr));
     }
 
+    KJ_LOG(DBG, "Making outgoing catch request");
+
     auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
                                     "cache_match"_kj);
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
+    kj::Vector<kj::String> headersToLog;
+    requestHeaders.forEach([&headersToLog](kj::StringPtr key, kj::StringPtr value) {
+      headersToLog.add(kj::str(key, " = ", value));
+    });
     requestHeaders.set(context.getHeaderIds().cacheControl, "only-if-cached");
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
-    return context.awaitIo(js, kj::mv(nativeRequest.response),
+    return context.awaitIo(js, kj::mv(nativeRequest.response).attach(kj::defer([headers = kj::mv(headersToLog)] {
+      KJ_LOG(DBG, "Destroying cache response promise", headers);
+    })),
         [httpClient = kj::mv(httpClient), &context, flags = kj::mv(flags)]
         (jsg::Lock& js, kj::HttpClient::Response&& response)
         mutable -> jsg::Optional<jsg::Ref<Response>> {
+      KJ_LOG(DBG, "Receiving cache response");
+
       response.body = response.body.attach(kj::mv(httpClient));
 
       kj::StringPtr cacheStatus;
@@ -140,6 +151,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
 
 jsg::Promise<void> Cache::put(
     jsg::Lock& js, Request::Info requestOrUrl, jsg::Ref<Response> jsResponse) {
+  KJ_LOG(DBG, "cache.put");
+
   // Send a PUT request to the cache whose URL is the original request URL and whose body is the
   // HTTP response we'd like to cache for that request.
   //
@@ -534,6 +547,7 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
   }
+  KJ_LOG(DBG, "cache.open", cacheName);
 
   return js.resolvedPromise(jsg::alloc<Cache>(kj::mv(cacheName)));
 }

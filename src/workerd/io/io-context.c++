@@ -12,6 +12,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/own-util.h>
 #include <map>
+#include <random>
 
 namespace workerd {
 
@@ -269,6 +270,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     return;
   }
 
+  KJ_LOG(DBG, "Destroying I/O context for request", context->worker->getScript().getId(), context->debugContext);
+
   if (&context->incomingRequests.front() == this) {
     // We're the current request, make sure to consume CPU time attribution.
     context->limitEnforcer->reportMetrics(*metrics);
@@ -289,6 +292,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
 }
 
 IoContext::~IoContext() noexcept(false) {
+  KJ_LOG(DBG, "Destroying I/O context", worker->getScript().getId(), debugContext);
   // Kill the sentinel so that no weak references can refer to this IoContext anymore.
   selfRef->kill();
 }
@@ -458,7 +462,17 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     }
   }
 
-  waitUntilTasks.add(kj::mv(promise));
+  static std::random_device rd;
+
+  auto waitUntilCookie = std::uniform_int_distribution<uint64_t>()(rd);
+  KJ_LOG(DBG, "Adding waitUntil", waitUntilCookie, debugContext);
+  waitUntilTasks.add(kj::mv(promise).then([=] {
+    KJ_LOG(DBG, "Finished waitUntil gracefully", waitUntilCookie, debugContext);
+  }, [=](kj::Exception&& e) {
+    KJ_LOG(DBG, "Finished waitUntil with exception", waitUntilCookie, debugContext, e);
+  }).attach(kj::defer([this, waitUntilCookie]() {
+    KJ_LOG(DBG, "Finished waitUntil", waitUntilCookie, debugContext);
+  })));
 }
 
 kj::Promise<void> IoContext::IncomingRequest::drain() {
@@ -484,10 +498,16 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    timeoutPromise = context->limitEnforcer->limitDrain();
+    timeoutPromise = context->limitEnforcer->limitDrain().then([] {
+      KJ_LOG(DBG, "TIMEOUT IO CONTEXT");
+    });
   }
   return context->waitUntilTasks.onEmpty().exclusiveJoin(kj::mv(timeoutPromise))
-      .exclusiveJoin(context->abortPromise.addBranch().then([]{}, [](kj::Exception&&){}));
+      .exclusiveJoin(context->abortPromise.addBranch().then([]{
+        KJ_LOG(DBG, "IO CONTEXT abortpromise");
+      }, [](kj::Exception&& e){
+        KJ_LOG(DBG, "IO CONTEXT abortpromise exception", e);
+      }));
 }
 
 kj::Promise<bool> IoContext::IncomingRequest::finishScheduled() {

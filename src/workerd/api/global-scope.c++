@@ -134,6 +134,12 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
   }
 
+  kj::Vector<kj::String> headersCopy;
+  headers.forEach([&headersCopy](kj::StringPtr key, kj::StringPtr value) {
+    headersCopy.add(kj::str(key, '=', value));
+  });
+  ioContext.setDebugContext(kj::str(headersCopy));
+
   auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
