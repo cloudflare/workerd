@@ -1414,7 +1414,9 @@ private:
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint) override {
+      kj::Maybe<kj::String> locationHint, ActorGetMode mode) override {
+    JSG_REQUIRE(mode == ActorGetMode::GET_OR_CREATE, Error,
+        "workerd only supports GET_OR_CREATE mode for getting actor stubs");
     auto& channels = KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(),
         "link() has not been called");
 

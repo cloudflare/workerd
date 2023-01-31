@@ -75,7 +75,7 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint) override {
+      kj::Maybe<kj::String> locationHint, ActorGetMode mode) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
 

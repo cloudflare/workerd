@@ -143,14 +143,24 @@ public:
       CompatibilityFlags::Reader featureFlags);
   // Gets a durable object by ID or creates it if it doesn't already exist.
 
+  jsg::Ref<DurableObject> getExisting(
+      jsg::Ref<DurableObjectId> id,
+      jsg::Optional<GetDurableObjectOptions> options,
+      CompatibilityFlags::Reader featureFlags);
+  // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
+  // by cloudflare only.
+
   jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
   // Creates a subnamespace with the jurisdiction hardcoded.
 
-  JSG_RESOURCE_TYPE(DurableObjectNamespace) {
+  JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
     JSG_METHOD(get);
+    if (flags.getDurableObjectGetExisting()) {
+      JSG_METHOD(getExisting);
+    }
     JSG_METHOD(jurisdiction);
     JSG_TS_ROOT();
   }
@@ -158,6 +168,12 @@ public:
 private:
   uint channel;
   kj::Own<ActorIdFactory> idFactory;
+
+  jsg::Ref<DurableObject> getImpl(
+      ActorGetMode mode,
+      jsg::Ref<DurableObjectId> id,
+      jsg::Optional<GetDurableObjectOptions> options,
+      CompatibilityFlags::Reader featureFlags);
 };
 
 #define EW_ACTOR_ISOLATE_TYPES                      \
