@@ -125,6 +125,11 @@ public:
   // Wraps the given JavaScript function such that whenever the wrapper function is called,
   // the root AsyncContextFrame will be entered.
 
+  static v8::Local<v8::Function> wrapSnapshot(Lock& js);
+  // Returns a function that captures the current frame and calls the function passed
+  // in as an argument within that captured context. Equivalent to wrapping a function
+  // with the signature (cb, ...args) => cb(...args).
+
   v8::Local<v8::Function> wrap(
       Lock& js, V8Ref<v8::Function>& fn,
       kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);

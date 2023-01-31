@@ -57,6 +57,18 @@ v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
   return v8::Undefined(js.v8Isolate);
 }
 
+v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Function> fn) {
+  KJ_IF_MAYBE(frame, jsg::AsyncContextFrame::current(js)) {
+    return frame->wrap(js, fn);
+  } else {
+    return jsg::AsyncContextFrame::wrapRoot(js, fn);
+  }
+}
+
+v8::Local<v8::Function> AsyncLocalStorage::snapshot(jsg::Lock& js) {
+  return jsg::AsyncContextFrame::wrapSnapshot(js);
+}
+
 namespace {
 kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> tryGetFrameRef(jsg::Lock& js) {
   return jsg::AsyncContextFrame::current(js).map(

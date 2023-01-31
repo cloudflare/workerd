@@ -69,6 +69,28 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
   return wrap(js, fn.getHandle(js), thisArg);
 }
 
+v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js) {
+  auto isolate = js.v8Isolate;
+  auto context = isolate->GetCurrentContext();
+
+  return js.wrapReturningFunction(context, JSG_VISITABLE_LAMBDA(
+    (frame = AsyncContextFrame::currentRef(js)),
+    (frame),
+    (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+      auto context = js.v8Isolate->GetCurrentContext();
+      JSG_REQUIRE(args[0]->IsFunction(), TypeError, "The first argument must be a function");
+      auto fn = args[0].As<v8::Function>();
+      kj::Vector<v8::Local<v8::Value>> argv(args.Length() - 1);
+      for (int n = 1; n < args.Length(); n++) {
+        argv.add(args[n]);
+      }
+
+      AsyncContextFrame::Scope scope(js, frame);
+      return check(fn->Call(context, context->Global(), argv.size(), argv.begin()));
+    }
+  ));
+}
+
 v8::Local<v8::Function> AsyncContextFrame::wrap(
     Lock& js,
     v8::Local<v8::Function> fn,
@@ -93,7 +115,6 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
     }
 
     AsyncContextFrame::Scope scope(js, *frame.get());
-    v8::Local<v8::Value> result;
     return check(function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin()));
   }));
 }
