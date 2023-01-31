@@ -9,8 +9,8 @@ namespace workerd::api::node {
 template <typename TypeWrapper>
 void registerNodeJsCompatModules(
     workerd::jsg::ModuleRegistryImpl<TypeWrapper>& registry, auto featureFlags) {
-  registry.template addBuiltinModule<AsyncHooksModule>("node:async_hooks",
-      workerd::jsg::ModuleRegistry::Type::BUILTIN);
+  registry.template addBuiltinModule<AsyncHooksModule>("node-internal:async_hooks",
+      workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
   registry.addBuiltinBundle(NODE_BUNDLE);
 }
