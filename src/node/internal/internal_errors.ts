@@ -307,6 +307,32 @@ export class ERR_INVALID_THIS extends NodeTypeError {
   }
 }
 
+export class ERR_BUFFER_OUT_OF_BOUNDS extends NodeRangeError {
+  constructor(name?: string) {
+    super(
+      "ERR_BUFFER_OUT_OF_BOUNDS",
+      name
+        ? `"${name}" is outside of buffer bounds`
+        : "Attempt to access memory outside buffer bounds",
+    );
+  }
+}
+
+export class ERR_INVALID_BUFFER_SIZE extends NodeRangeError {
+  constructor(size: number) {
+    super(
+      "ERR_INVALID_BUFFER_SIZE",
+      `Buffer size must be a multiple of ${size}-bits`,
+    );
+  }
+}
+
+export class ERR_UNKNOWN_ENCODING extends NodeTypeError {
+  constructor(x: string) {
+    super("ERR_UNKNOWN_ENCODING", `Unknown encoding: ${x}`);
+  }
+}
+
 export class AbortError extends Error {
   code: string;
 
@@ -321,9 +347,12 @@ export class AbortError extends Error {
 }
 
 export default {
+  ERR_BUFFER_OUT_OF_BOUNDS,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_INVALID_BUFFER_SIZE,
   ERR_INVALID_THIS,
   ERR_OUT_OF_RANGE,
   ERR_UNHANDLED_ERROR,
+  ERR_UNKNOWN_ENCODING,
 };

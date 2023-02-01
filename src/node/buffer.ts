@@ -1,12 +1,5 @@
-// NOTE: this file is a temporary placeholder to test ts/workerd integration.
-// It will be rewritten/replaced with a real one eventually.
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
 
-import * as bufferImpl from 'node-internal:bufferImpl';
-
-export class Buffer {
-  constructor(public readonly str: string) { }
-
-  public toString(): string {
-    return bufferImpl.toString(this);
-  }
-}
+export * from 'node-internal:internal_buffer';
