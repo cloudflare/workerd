@@ -72,6 +72,14 @@ public:
   virtual kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) = 0;
   // Trigger an alarm event with the given scheduled (unix timestamp) time.
 
+  virtual kj::Promise<bool> test() { return nullptr; }
+  // Run the test handler. The returned promise resolves to true or false to indicate that the test
+  // passed or failed. In the case of a failure, information should have already been written to
+  // stderr and to the devtools; there is no need for the caller to write anything further. (If the
+  // promise rejects, this indicates a bug in the test harness itself.)
+  //
+  // TODO(someday): Produce a structured test report?
+
   static constexpr auto ALARM_RETRY_START_SECONDS = 2; // not a duration so we can left shift it
   static constexpr auto ALARM_RETRY_MAX_TRIES = 6;
   // These two constants are shared by multiple systems that invoke alarms (the production

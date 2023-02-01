@@ -234,7 +234,8 @@ public:
   // to be called after the client has received a response or disconnected.
   //
   // This method is also used by some custom event handlers (see WorkerInterface::CustomEvent) that
-  // need similar behavior.
+  // need similar behavior, as well as the test handler. TODO(cleanup): Rename to something more
+  // generic?
 
   RequestObserver& getMetrics() { return *metrics; }
 

@@ -413,6 +413,30 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
   return promise;
 }
 
+kj::Promise<bool> WorkerEntrypoint::test() {
+  auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
+                                "test() can only be called once"));
+  this->incomingRequest = nullptr;
+  incomingRequest->delivered();
+
+  auto& context = incomingRequest->getContext();
+
+  context.addWaitUntil(context.run(
+      [entrypointName=entrypointName, &context, &metrics = incomingRequest->getMetrics()]
+      (Worker::Lock& lock) mutable -> kj::Promise<void> {
+    return context.awaitJs(lock.getGlobalScope()
+        .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
+  }));
+
+  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
+    auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
+    return outcome == EventOutcome::OK;
+  }).attach(kj::mv(incomingRequest));
+
+  maybeAddGcPassForTest(context, promise);
+  return promise;
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result>
     WorkerEntrypoint::customEvent(kj::Own<CustomEvent> event) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,

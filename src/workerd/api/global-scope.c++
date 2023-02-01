@@ -439,6 +439,20 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
   }
 }
 
+jsg::Promise<void> ServiceWorkerGlobalScope::test(
+    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+  // TODO(someday): For Service Workers syntax, do we want addEventListener("test")? Not supporting
+  //   it for now.
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Tests are not currently supported with Service Workers syntax.");
+
+  auto& testHandler = JSG_REQUIRE_NONNULL(eh.test, Error,
+      "Entrypoint does not export a test() function.");
+
+  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock),
+                     eh.getCtx(lock.getIsolate()));
+}
+
 void ServiceWorkerGlobalScope::emitPromiseRejection(
     jsg::Lock& js,
     v8::PromiseRejectEvent event,
