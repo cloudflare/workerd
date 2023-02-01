@@ -2196,6 +2196,7 @@ kj::Promise<void> Server::listenHttp(
 }
 
 // =======================================================================================
+// Server::run()
 
 kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config,
                               kj::Promise<void> drainWhen) {
@@ -2215,6 +2216,21 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     }
   }).fork();
 
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+
+  auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
+
+  // We should have registered all headers synchronously. This is important becaues we want to
+  // be able to start handling requests as soon as the services are available, even if some other
+  // services take longer to get ready.
+  auto ownHeaderTable = headerTableBuilder.build();
+
+  return listenPromise.exclusiveJoin(kj::mv(fatalPromise)).attach(kj::mv(ownHeaderTable));
+}
+
+void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
+                           kj::HttpHeaderTable::Builder& headerTableBuilder,
+                           kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure inspector.
 
@@ -2334,7 +2350,11 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
   for (auto& service: services) {
     service.value->link();
   }
+}
 
+kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
+                                          kj::HttpHeaderTable::Builder& headerTableBuilder,
+                                          kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Start sockets
 
@@ -2437,14 +2457,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
         "override provided on the command line."));
   }
 
-  // We should have registered all headers synchronously. This is important becaues we want to
-  // be able to start handling requests as soon as the services are available, even if some other
-  // services take longer to get ready.
-  auto ownHeaderTable = headerTableBuilder.build();
-
-  // Wait until startup tasks finish. Note we may start serving requests on some services in
-  // the meantime.
-  return tasks.onEmpty().exclusiveJoin(kj::mv(fatalPromise)).attach(kj::mv(ownHeaderTable));
+  return tasks.onEmpty();
 }
 
 }  // namespace workerd::server

@@ -161,6 +161,14 @@ private:
 
   kj::Maybe<kj::Own<InspectorService>> maybeInspectorService;
   kj::Own<InspectorService> makeInspectorService(kj::HttpHeaderTable::Builder& headerTableBuilder);
+
+  void startServices(jsg::V8System& v8System, config::Config::Reader config,
+                     kj::HttpHeaderTable::Builder& headerTableBuilder,
+                     kj::ForkedPromise<void>& forkedDrainWhen);
+
+  kj::Promise<void> listenOnSockets(config::Config::Reader config,
+                                    kj::HttpHeaderTable::Builder& headerTableBuilder,
+                                    kj::ForkedPromise<void>& forkedDrainWhen);
 };
 
 }  // namespace workerd::server
