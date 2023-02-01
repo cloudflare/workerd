@@ -2428,7 +2428,11 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
   } else if (mutedDeleteFlush.batches.size() == 1) {
     // Same as for puts, but for muted deletes.
-    flushProm = flushImplUsingSingleDelete(kj::mv(mutedDeleteFlush));
+    flushProm = flushImplUsingSingleMutedDelete(kj::mv(mutedDeleteFlush));
+  } else if (countedDeleteFlushes.size() == 1 && countedDeleteFlushes[0].batches.size() == 1) {
+    // Same as for puts, but for muted deletes.
+    flushProm = flushImplUsingSingleCountedDelete(kj::mv(countedDeleteFlushes[0]));
+    countedDeleteFlushes.clear();
   } else {
     // None of the special cases above triggered. Default to using a transaction in all other cases,
     // such as when there are so many keys to be flushed that they don't fit into a single batch.
@@ -2587,7 +2591,7 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   co_await request.send().ignoreResult();
 }
 
-kj::Promise<void> ActorCache::flushImplUsingSingleDelete(MutedDeleteFlush mutedFlush) {
+kj::Promise<void> ActorCache::flushImplUsingSingleMutedDelete(MutedDeleteFlush mutedFlush) {
   KJ_ASSERT(mutedFlush.batches.size() == 1);
   auto& batch = mutedFlush.batches[0];
 
@@ -2610,6 +2614,43 @@ kj::Promise<void> ActorCache::flushImplUsingSingleDelete(MutedDeleteFlush mutedF
   // reads before actually sending the write. The same exact logic applies here.
   co_await waitForPastReads();
   co_await request.send().ignoreResult();
+}
+
+kj::Promise<void> ActorCache::flushImplUsingSingleCountedDelete(CountedDeleteFlush countedFlush) {
+  KJ_ASSERT(countedFlush.batches.size() == 1);
+  auto& batch = countedFlush.batches[0];
+
+  KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
+  KJ_ASSERT(batch.pairCount == countedFlush.entries.size());
+
+  auto request = storage.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+  auto listBuilder = request.initKeys(batch.pairCount);
+  auto entryIt = countedFlush.entries.begin();
+  for (size_t i = 0; i < batch.pairCount; ++i) {
+    auto& entry = **(entryIt++);
+    listBuilder.set(i, entry.key.asBytes());
+  }
+
+  // We're done with the batching instructions, free them before we go async.
+  countedFlush.entries.clear();
+  countedFlush.batches.clear();
+
+  auto countedDelete = kj::mv(countedFlush.countedDelete);
+
+  // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
+  // reads before actually sending the write. The same exact logic applies here.
+  co_await waitForPastReads();
+  try {
+    auto response = co_await request.send();
+    countedDelete->resultFulfiller->fulfill(response.getNumDeleted());
+  } catch (kj::Exception& e) {
+    if (e.getType() == kj::Exception::Type::DISCONNECTED) {
+      // This deletion will be retried, so don't touch the fulfiller.
+    } else {
+      countedDelete->resultFulfiller->reject(kj::cp(e));
+    }
+    throw kj::mv(e);
+  }
 }
 
 kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {

@@ -424,18 +424,14 @@ KJ_TEST("ActorCache more deletes") {
     // Value is immediately in cache.
     KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
 
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-
-    KJ_ASSERT(!promise.poll(ws));
-    mockTxn->expectCall("delete", ws)
-        .withParams(CAPNP(keys = ["foo"]))
-        .thenReturn(CAPNP(numDeleted = 1));
+    auto mockDelete = mockStorage->expectCall("delete", ws)
+        .withParams(CAPNP(keys = ["foo"]));
 
     // Still in cache during flush.
+    KJ_ASSERT(!promise.poll(ws));
     KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
 
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
+    kj::mv(mockDelete).thenReturn(CAPNP(numDeleted = 1));
 
     // Delete call returned true due to numDeleted = 1.
     KJ_ASSERT(promise.wait(ws));
@@ -448,12 +444,9 @@ KJ_TEST("ActorCache more deletes") {
   {
     auto promise = expectUncached(test.delete_("bar"));
 
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["bar"]))
         .thenReturn(CAPNP(numDeleted = 0));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
 
     // Delete call returned false due to numDeleted = 0.
     KJ_ASSERT(!promise.wait(ws));
@@ -2366,12 +2359,9 @@ KJ_TEST("ActorCache list() delete endpoint") {
 
   // Acknowledge the delete transaction.
   {
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["qux"]))
       .thenReturn(CAPNP(numDeleted = 1));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   KJ_ASSERT(deletePromise.wait(ws) == 1);
@@ -2418,12 +2408,9 @@ KJ_TEST("ActorCache list() delete endpoint empty range") {
 
   // Acknowledge the delete transaction.
   {
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["qux"]))
       .thenReturn(CAPNP(numDeleted = 1));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   KJ_ASSERT(deletePromise.wait(ws) == 1);
@@ -2507,11 +2494,8 @@ KJ_TEST("ActorCache list() end of first block deleted at inopportune time") {
   // Do a delete, wait for the commit... and then hold it open.
   auto deletePromise = expectUncached(test.delete_("corge"));
 
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectCall("delete", ws)
-      .withParams(CAPNP(keys = ["corge"]))
-      .thenReturn(CAPNP());
-  auto commitCall = mockTxn->expectCall("commit", ws);
+  auto mockDelete = mockStorage->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["corge"]));
 
   // Now do a list.
   auto promise = expectUncached(test.list("bar", "qux"));
@@ -2526,8 +2510,7 @@ KJ_TEST("ActorCache list() end of first block deleted at inopportune time") {
 
     // Let the delete finish. So now the last key in the first block is cached as a negative
     // clean entry.
-    kj::mv(commitCall).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
+    kj::mv(mockDelete).thenReturn(CAPNP());
 
     // Continue on.
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
@@ -3450,11 +3433,8 @@ KJ_TEST("ActorCache listReverse() end of first block deleted at inopportune time
   // Do a delete, wait for the commit... and then hold it open.
   auto deletePromise = expectUncached(test.delete_("corge"));
 
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectCall("delete", ws)
-      .withParams(CAPNP(keys = ["corge"]))
-      .thenReturn(CAPNP());
-  auto commitCall = mockTxn->expectCall("commit", ws);
+  auto mockDelete = mockStorage->expectCall("delete", ws)
+      .withParams(CAPNP(keys = ["corge"]));
 
   // Now do a list.
   auto promise = expectUncached(test.listReverse("bar", "qux"));
@@ -3469,8 +3449,7 @@ KJ_TEST("ActorCache listReverse() end of first block deleted at inopportune time
 
     // Let the delete finish. So now the last key in the first block is cached as a negative
     // clean entry.
-    kj::mv(commitCall).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
+    kj::mv(mockDelete).thenReturn(CAPNP());
 
     // Continue on.
     stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
