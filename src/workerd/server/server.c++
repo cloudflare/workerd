@@ -1176,6 +1176,10 @@ public:
     return namedEntrypoints.find(name);
   }
 
+  kj::Array<kj::StringPtr> getEntrypointNames() {
+    return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
+  }
+
   void link() override {
     LinkCallback callback = kj::mv(KJ_REQUIRE_NONNULL(
         ioChannels.tryGet<LinkCallback>(), "already called link()"));
@@ -2458,6 +2462,172 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   }
 
   return tasks.onEmpty();
+}
+
+// =======================================================================================
+// Server::test()
+
+namespace {
+
+class GlobFilter {
+  // Implements glob filters. Copied from kj/test.{h,c++}, modified only to avoid copying the
+  // pattern in the constructor.
+  //
+  // TODO(cleanup): Should this be a public API in KJ?
+
+public:
+  explicit GlobFilter(kj::StringPtr pattern): pattern(pattern) {}
+
+  bool matches(kj::StringPtr name) {
+    // Get out your computer science books. We're implementing a non-deterministic finite automaton.
+    //
+    // Our NDFA has one "state" corresponding to each character in the pattern.
+    //
+    // As you may recall, an NDFA can be transformed into a DFA where every state in the DFA
+    // represents some combination of states in the NDFA. Therefore, we actually have to store a
+    // list of states here. (Actually, what we really want is a set of states, but because our
+    // patterns are mostly non-cyclic a list of states should work fine and be a bit more efficient.)
+
+    // Our state list starts out pointing only at the start of the pattern.
+    states.resize(0);
+    states.add(0);
+
+    kj::Vector<uint> scratch;
+
+    // Iterate through each character in the name.
+    for (char c: name) {
+      // Pull the current set of states off to the side, so that we can populate `states` with the
+      // new set of states.
+      kj::Vector<uint> oldStates = kj::mv(states);
+      states = kj::mv(scratch);
+      states.resize(0);
+
+      // The pattern can omit a leading path. So if we're at a '/' then enter the state machine at
+      // the beginning on the next char.
+      if (c == '/' || c == '\\') {
+        states.add(0);
+      }
+
+      // Process each state.
+      for (uint state: oldStates) {
+        applyState(c, state);
+      }
+
+      // Store the previous state vector for reuse.
+      scratch = kj::mv(oldStates);
+    }
+
+    // If any one state is at the end of the pattern (or at a wildcard just before the end of the
+    // pattern), we have a match.
+    for (uint state: states) {
+      while (state < pattern.size() && pattern[state] == '*') {
+        ++state;
+      }
+      if (state == pattern.size()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+private:
+  kj::StringPtr pattern;
+  kj::Vector<uint> states;
+
+  void applyState(char c, int state) {
+    if (state < pattern.size()) {
+      switch (pattern[state]) {
+        case '*':
+          // At a '*', we both re-add the current state and attempt to match the *next* state.
+          if (c != '/' && c != '\\') {  // '*' doesn't match '/'.
+            states.add(state);
+          }
+          applyState(c, state + 1);
+          break;
+
+        case '?':
+          // A '?' matches one character (never a '/').
+          if (c != '/' && c != '\\') {
+            states.add(state + 1);
+          }
+          break;
+
+        default:
+          // Any other character matches only itself.
+          if (c == pattern[state]) {
+            states.add(state + 1);
+          }
+          break;
+      }
+    }
+  }
+};
+
+}  // namespace
+
+kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader config,
+                               kj::StringPtr servicePattern,
+                               kj::StringPtr entrypointPattern) {
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
+  invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
+
+  auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
+  this->fatalFulfiller = kj::mv(fatalFulfiller);
+
+  auto forkedDrainWhen = kj::Promise<void>(kj::READY_NOW).fork();
+
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+
+  auto ownHeaderTable = headerTableBuilder.build();
+
+  // TODO(someday): If the inspector is enabled, pause and wait for an inspector connection before
+  //   proceeding?
+
+  GlobFilter serviceGlob(servicePattern);
+  GlobFilter entrypointGlob(entrypointPattern);
+
+  uint passCount = 0, failCount = 0;
+
+  auto doTest = [&](Service& service, kj::StringPtr name) -> kj::Promise<void> {
+    // TODO(soon): Better way of reporting test results, KJ_LOG is ugly. We should probably have
+    //   some sort of callback interface. It would be nice to report the exceptions thrown through
+    //   that interface too... can we? Use a tracer maybe?
+    KJ_LOG(INFO, kj::str("[ TEST ] "_kj, name));
+    auto req = service.startRequest({});
+    bool result = co_await req->test();
+    if (result) {
+      ++passCount;
+    } else {
+      ++failCount;
+    }
+    KJ_LOG(INFO, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name));
+  };
+
+  for (auto& service: services) {
+    if (serviceGlob.matches(service.key)) {
+      if (service.value->hasHandler("test"_kj) && entrypointGlob.matches("default"_kj)) {
+        co_await doTest(*service.value, service.key);
+      }
+
+      if (WorkerService* worker = dynamic_cast<WorkerService*>(service.value.get())) {
+        for (auto& name: worker->getEntrypointNames()) {
+          if (entrypointGlob.matches(name)) {
+            Service& ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name));
+            if (ep.hasHandler("test"_kj)) {
+              co_await doTest(ep, kj::str(service.key, ':', name));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (passCount + failCount == 0) {
+    KJ_LOG(ERROR, "No tests found!");
+  }
+
+  co_return passCount > 0 && failCount == 0;
 }
 
 }  // namespace workerd::server
