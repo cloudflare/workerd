@@ -299,12 +299,9 @@ KJ_TEST("ActorCache single-key basics") {
   {
     KJ_ASSERT(expectCached(test.delete_("foo")));
 
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["foo"]))
         .thenReturn(CAPNP(numDeleted = 1));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   {
@@ -362,12 +359,9 @@ KJ_TEST("ActorCache multi-key basics") {
   {
     KJ_ASSERT(expectCached(test.delete_({"foo"_kj, "bar"_kj, "baz"_kj, "qux"_kj})) == 2);
 
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["foo", "bar"]))
         .thenReturn(CAPNP(numDeleted = 2));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   {
@@ -488,12 +482,9 @@ KJ_TEST("ActorCache more deletes") {
   {
     KJ_ASSERT(expectCached(test.delete_("foo")));
 
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["foo"]))
         .thenReturn(CAPNP(numDeleted = 1));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
@@ -2502,12 +2493,9 @@ KJ_TEST("ActorCache list() interleave streaming with other ops") {
         .thenReturn(CAPNP());
   }
   {
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["garply"]))
         .thenReturn(CAPNP());
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 }
 
@@ -3380,12 +3368,9 @@ KJ_TEST("ActorCache listReverse() delete endpoint") {
 
   // Acknowledge the delete transaction.
   {
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["corge"]))
       .thenReturn(CAPNP(numDeleted = 1));
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 
   {
@@ -3451,12 +3436,9 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
         .thenReturn(CAPNP());
   }
   {
-    auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-    mockTxn->expectCall("delete", ws)
+    mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["bar"]))
         .thenReturn(CAPNP());
-    mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-    mockTxn->expectDropped(ws);
   }
 }
 
@@ -4969,16 +4951,11 @@ KJ_TEST("ActorCache can wait for flush") {
     test.delete_("foo");
 
     verify([&](){
-      auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
       return InFlightRequest {
-        .op = mockTxn->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
-        .maybeTxn = kj::mv(mockTxn),
+        .op = mockStorage->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
       };
     }, [&](auto req) {
-      auto& mockTxn = KJ_ASSERT_NONNULL(req.maybeTxn);
       kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1));
-      mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-      mockTxn->expectDropped(ws);
     }, {
       .skipSecondOperation = false,
     });
@@ -5005,16 +4982,11 @@ KJ_TEST("ActorCache can wait for flush") {
     test.delete_("foo", ActorCacheWriteOptions{.allowUnconfirmed = true});
 
     verify([&](){
-      auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
       return InFlightRequest {
-        .op = mockTxn->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
-        .maybeTxn = kj::mv(mockTxn),
+        .op = mockStorage->expectCall("delete", ws).withParams(CAPNP(keys = ["foo"])),
       };
     }, [&](auto req) {
-      auto& mockTxn = KJ_ASSERT_NONNULL(req.maybeTxn);
       kj::mv(req.op).thenReturn(CAPNP(numDeleted = 1));
-      mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
-      mockTxn->expectDropped(ws);
     }, {
       .skipSecondOperation = false,
     });
