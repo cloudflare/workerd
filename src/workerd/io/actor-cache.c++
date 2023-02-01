@@ -2426,6 +2426,9 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     // As an optimization for the common case where there are only puts and they all fit in a
     // single batch, just send a simple put rather than complicating things with a transaction.
     flushProm = flushImplUsingSinglePut(kj::mv(putFlush));
+  } else if (mutedDeleteFlush.batches.size() == 1) {
+    // Same as for puts, but for muted deletes.
+    flushProm = flushImplUsingSingleDelete(kj::mv(mutedDeleteFlush));
   } else {
     // None of the special cases above triggered. Default to using a transaction in all other cases,
     // such as when there are so many keys to be flushed that they don't fit into a single batch.
@@ -2577,6 +2580,31 @@ kj::Promise<void> ActorCache::flushImplUsingSinglePut(PutFlush putFlush) {
   // We're done with the batching instructions, free them before we go async.
   putFlush.entries.clear();
   putFlush.batches.clear();
+
+  // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
+  // reads before actually sending the write. The same exact logic applies here.
+  co_await waitForPastReads();
+  co_await request.send().ignoreResult();
+}
+
+kj::Promise<void> ActorCache::flushImplUsingSingleDelete(MutedDeleteFlush mutedFlush) {
+  KJ_ASSERT(mutedFlush.batches.size() == 1);
+  auto& batch = mutedFlush.batches[0];
+
+  KJ_ASSERT(batch.wordCount < MAX_ACTOR_STORAGE_RPC_WORDS);
+  KJ_ASSERT(batch.pairCount == mutedFlush.entries.size());
+
+  auto request = storage.deleteRequest(capnp::MessageSize { 4 + batch.wordCount, 0 });
+  auto listBuilder = request.initKeys(batch.pairCount);
+  auto entryIt = mutedFlush.entries.begin();
+  for (size_t i = 0; i < batch.pairCount; ++i) {
+    auto& entry = **(entryIt++);
+    listBuilder.set(i, entry.key.asBytes());
+  }
+
+  // We're done with the batching instructions, free them before we go async.
+  mutedFlush.entries.clear();
+  mutedFlush.batches.clear();
 
   // See the comment in flushImplUsingTxn for why we need to construct our RPC and then wait on
   // reads before actually sending the write. The same exact logic applies here.

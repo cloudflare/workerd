@@ -617,6 +617,7 @@ private:
   };
   using CountedDeleteFlushes = kj::Array<CountedDeleteFlush>;
   kj::Promise<void> flushImplUsingSinglePut(PutFlush putFlush);
+  kj::Promise<void> flushImplUsingSingleDelete(MutedDeleteFlush mutedFlush);
   kj::Promise<void> flushImplAlarmOnly(DirtyAlarm dirty);
   kj::Promise<void> flushImplUsingTxn(
       PutFlush putFlush, MutedDeleteFlush mutedDeleteFlush,
