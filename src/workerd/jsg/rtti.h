@@ -505,6 +505,9 @@ struct MemberCounter {
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyInstanceProperty() { ++count; }
 
+  template<typename T>
+  inline void registerReadonlyInstanceProperty(kj::StringPtr, T value) { ++count; }
+
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() { ++count; }
 
@@ -572,6 +575,14 @@ struct MembersBuilder {
     prop.setReadonly(true);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
+  }
+
+  template<typename T>
+  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {
+    auto prop = members[index++].initProperty();
+    prop.setName(name);
+    prop.setReadonly(true);
+    BuildRtti<Configuration, T>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>

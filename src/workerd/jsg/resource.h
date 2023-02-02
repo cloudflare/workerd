@@ -759,6 +759,13 @@ struct ResourceTypeBuilder {
                             v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
   }
 
+  template<typename T>
+  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {
+    auto v8Name = v8StrIntern(isolate, name);
+    auto v8Value = typeWrapper.wrap(isolate, nullptr, kj::mv(value));
+    instance->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
+  }
+
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
@@ -795,7 +802,7 @@ struct ResourceTypeBuilder {
     // The main difference between this and a read-only property is that a static constant has no
     // getter but is simply a primitive value set at constructor creation time.
 
-    auto v8Name = v8Str(isolate, name, v8::NewStringType::kInternalized);
+    auto v8Name = v8StrIntern(isolate, name);
     auto v8Value = typeWrapper.wrap(isolate, nullptr, kj::mv(value));
 
     constructor->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
