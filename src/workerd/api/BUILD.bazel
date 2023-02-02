@@ -1,5 +1,6 @@
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_test.bzl", "wd_test")
 
 filegroup(
     name = "srcs",
@@ -50,3 +51,10 @@ kj_test(
     src = "node/buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
+
+[wd_test(
+    src = f,
+    data = [f.removesuffix(".capnp") + ".js"],
+) for f in glob(
+    ["**/*-test.capnp"],
+)]
