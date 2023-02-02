@@ -136,10 +136,10 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
     void customizeIsolate(v8::Isolate* isolate) override {}
     ActorCacheSharedLruOptions getActorCacheLruOptions() override {
       return {
-        .softLimit = 16ull << 20,
-        .hardLimit = 128ull << 20,
+        .softLimit = 16 * (1ull << 20), // 16 MiB
+        .hardLimit = 128 * (1ull << 20), // 128 MiB
         .staleTimeout = 30 * kj::SECONDS,
-        .dirtyKeySoftLimit = 64,
+        .dirtyListByteLimit = 8 * (1ull << 20), // 8 MiB
         .maxKeysPerRpc = 128,
         .neverFlush = true
       };

@@ -451,7 +451,32 @@ private:
   const SharedLru& lru;
   OutputGate& gate;
 
-  kj::List<Entry, &Entry::link> dirtyList;
+  class DirtyList {
+    // Wrapper around kj::List that keeps track of the total size of all elements.
+  public:
+    void add(Entry& entry) {
+      inner.add(entry);
+      innerSize += entry.size();
+    }
+
+    void remove(Entry& entry) {
+      inner.remove(entry);
+      innerSize -= entry.size();
+    }
+
+    size_t sizeInBytes() {
+      return innerSize;
+    }
+
+    auto begin() { return inner.begin(); }
+    auto end() { return inner.end(); }
+
+  private:
+    kj::List<Entry, &Entry::link> inner;
+    size_t innerSize = 0;
+  };
+
+  DirtyList dirtyList;
   // List of entries in DIRTY or FLUSHING state. New dirty entries are added to the end. If any
   // FLUSHING entries are present, they always appear strictly before DIRTY entries.
 
@@ -727,8 +752,8 @@ struct ActorCacheSharedLruOptions {
   // Time period after which a value that hasn't been accessed at all should be evicted even if
   // the total cache size is below `softLimit`.
 
-  size_t dirtyKeySoftLimit;
-  // How many keys in a particular ActorCache can be dirty before backpressure is applied on the
+  size_t dirtyListByteLimit;
+  // How many bytes in a particular ActorCache can be dirty before backpressure is applied on the
   // app.
 
   size_t maxKeysPerRpc;
