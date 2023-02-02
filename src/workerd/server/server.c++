@@ -1563,7 +1563,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::atomicRefcounted<IsolateObserver>(),
       name,
       kj::mv(limitEnforcer),
-      maybeInspectorService != nullptr);
+      // For workerd, if the inspector is enabled, it is always fully trusted.
+      maybeInspectorService != nullptr ?
+          Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED :
+          Worker::Isolate::InspectorPolicy::DISALLOW);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.

@@ -515,6 +515,7 @@ struct Worker::Isolate::Impl {
   IsolateObserver& metrics;
   InspectorClient inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
+  InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
@@ -701,13 +702,14 @@ struct Worker::Isolate::Impl {
   //   inspector needs to be notified. JSG doesn't know about these things.
 
   Impl(const ApiIsolate& apiIsolate, IsolateObserver& metrics,
-       IsolateLimitEnforcer& limitEnforcer, bool allowInspector)
+       IsolateLimitEnforcer& limitEnforcer, InspectorPolicy inspectorPolicy)
       : metrics(metrics),
+        inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     auto lock = apiIsolate.lock();
     limitEnforcer.customizeIsolate(lock->v8Isolate);
 
-    if (allowInspector) {
+    if (inspectorPolicy != InspectorPolicy::DISALLOW) {
       // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
       KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
       inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
@@ -969,13 +971,13 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
                          kj::Own<IsolateObserver>&& metricsParam,
                          kj::StringPtr id,
                          kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
-                         bool allowInspector)
+                         InspectorPolicy inspectorPolicy)
     : id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       apiIsolate(kj::mv(apiIsolateParam)),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(apiIsolate->getFeatureFlags()))),
       metrics(kj::mv(metricsParam)),
-      impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, allowInspector)),
+      impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(kj::atomicRefcounted<WeakIsolateRef>(this)) {
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -2089,16 +2091,6 @@ public:
                     CpuProfilerDisposer::instance);
                 break;
               }
-              case cdp::Command::HEAP_PROFILER_ENABLE: {
-                // There's nothing to do here but we don't want to report
-                // it as unknown.
-                break;
-              }
-              case cdp::Command::HEAP_PROFILER_DISABLE: {
-                // There's nothing to do here but we don't want to report
-                // it as unknown.
-                break;
-              }
               case cdp::Command::TAKE_HEAP_SNAPSHOT: {
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
@@ -2294,7 +2286,9 @@ private:
         : isolate(kj::mv(isolateParam)),
           session(KJ_ASSERT_NONNULL(isolate->impl->inspector)
               ->connect(1, self, v8_inspector::StringView(),
-                        v8_inspector::V8Inspector::kUntrusted)) {}
+                        isolate->impl->inspectorPolicy == InspectorPolicy::ALLOW_UNTRUSTED ?
+                            v8_inspector::V8Inspector::kUntrusted :
+                            v8_inspector::V8Inspector::kFullyTrusted)) {}
     ~State() noexcept(false) {
       if (session != nullptr) {
         KJ_LOG(ERROR, "Deleting InspectorChannelImpl::State without having called "
