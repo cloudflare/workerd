@@ -24,6 +24,7 @@
     "paths": {
       "node:*": ["./*"],
       "node-internal:*": ["./internal/*"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
   "include": [

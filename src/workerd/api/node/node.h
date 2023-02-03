@@ -1,6 +1,7 @@
 #pragma once
 
 #include "async-hooks.h"
+#include "buffer.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
@@ -34,11 +35,17 @@ void registerNodeJsCompatModules(
       workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<AsyncHooksModule>("node-internal:async_hooks",
       workerd::jsg::ModuleRegistry::Type::INTERNAL);
+
+  if (featureFlags.getWorkerdExperimental()) {
+    registry.template addBuiltinModule<BufferUtil>("node-internal:buffer",
+        workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  }
+
   registry.addBuiltinBundle(NODE_BUNDLE);
 }
 
 #define EW_NODE_ISOLATE_TYPES      \
   api::node::CompatibilityFlags,   \
+  EW_NODE_BUFFER_ISOLATE_TYPES,    \
   EW_NODE_ASYNCHOOKS_ISOLATE_TYPES
-
 }  // namespace workerd::api::node

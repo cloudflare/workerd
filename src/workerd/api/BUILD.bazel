@@ -41,10 +41,12 @@ wd_cc_capnp_library(
     ],
 ) for f in glob(
     ["**/*-test.c++"],
-    exclude = ["node/node-test.c++"],
+    exclude = [
+        "node/*-test.c++"
+    ],
 )]
 
 kj_test(
-    src = "node/node-test.c++",
+    src = "node/buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
