@@ -369,6 +369,11 @@ interface IncomingRequestCfPropertiesBotManagementBase {
    * A boolean value that's true if the request matches [file extensions](https://developers.cloudflare.com/bots/reference/static-resources/) for many types of static resources.
    */
   staticResource: boolean;
+  /**
+   * List of IDs that correlate to the Bot Management heuristic detections made on a request (you can have multiple heuristic detections on the same request).
+   * Use this field to explicitly match a specific heuristic or to exclude a heuristic in a rule.
+   */
+  detectionIds: number[];
 }
 
 interface IncomingRequestCfPropertiesBotManagement {
