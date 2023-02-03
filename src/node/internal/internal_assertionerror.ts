@@ -22,6 +22,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+/* todo: the following is adopted code, enabling linting one day */
+/* eslint-disable */
+
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
 
 let blue = "";

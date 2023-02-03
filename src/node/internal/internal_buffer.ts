@@ -8,6 +8,9 @@ if (!CompatibilityFlags.workerdExperimental) {
   throw new Error('node:buffer is experimental.');
 }
 
+/* todo: the following is adopted code, enabling linting one day */
+/* eslint-disable */
+
 import {
   ERR_BUFFER_OUT_OF_BOUNDS,
   ERR_OUT_OF_RANGE,

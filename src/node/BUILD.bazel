@@ -1,19 +1,26 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@workerd//:build/wd_api_bundle.bzl", "wd_api_bundle")
+load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 
 modules = glob(["*.ts"])
 
 internal_modules = glob(["internal/*.ts"])
 
+srcs = modules + internal_modules
+
+eslintrc_json = ":.eslintrc.json"
+
+tsconfig_json = ":tsconfig.json"
+
 ts_config(
-    name = "node@tsconfig",
-    src = ":tsconfig.json",
+    name = "tsconfig",
+    src = tsconfig_json,
 )
 
 ts_project(
     name = "node",
-    srcs = modules + internal_modules,
-    tsconfig = "node@tsconfig",
+    srcs = srcs,
+    tsconfig = ":tsconfig",
 )
 
 wd_api_bundle(
@@ -32,4 +39,19 @@ wd_api_bundle(
         "node-internal:" + m.removeprefix("internal/").removesuffix(".ts"),
     ) for m in internal_modules if not m.endswith(".d.ts")]),
     schema_id = "0xbcc8f57c63814005",
+)
+
+eslint_bin.eslint_test(
+    name = "eslint",
+    args = [
+        "--config $(location {})".format(eslintrc_json),
+        "-f stylish",
+        "--report-unused-disable-directives"
+    ] + ["$(location " + src + ")" for src in srcs],
+    data = srcs + [
+        eslintrc_json,
+        tsconfig_json,
+        "//:node_modules/@typescript-eslint/eslint-plugin",
+    ],
+    tags = ["lint"],
 )
