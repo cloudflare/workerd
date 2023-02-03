@@ -194,7 +194,7 @@ struct ActorCacheTestOptions {
   size_t softLimit = 512 * 1024;
   size_t hardLimit = 1024 * 1024;
   kj::Duration staleTimeout = 1 * kj::SECONDS;
-  size_t dirtyKeySoftLimit = 1024;
+  size_t dirtyListByteLimit = 64 * 1024;
   size_t maxKeysPerRpc = 128;
   bool noCache = false;
   bool neverFlush = false;
@@ -221,7 +221,7 @@ struct ActorCacheTest: public ActorCacheConvenienceWrappers {
       : ActorCacheConvenienceWrappers(cache),
         ws(loop), mockStorage(kj::mv(mockPair.mock)),
         lru({options.softLimit, options.hardLimit,
-             options.staleTimeout, options.dirtyKeySoftLimit, options.maxKeysPerRpc,
+             options.staleTimeout, options.dirtyListByteLimit, options.maxKeysPerRpc,
              options.noCache, options.neverFlush}),
         cache(kj::mv(mockPair.client), lru, gate),
         gateBrokenPromise(options.monitorOutputGate
@@ -3700,7 +3700,8 @@ KJ_TEST("ActorCache evict on timeout") {
 }
 
 KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
-  ActorCacheTest test({.dirtyKeySoftLimit = 2});
+  // Each Entry below ends up being about ~126 bytes, so a limit of 256 allows for 2 entries.
+  ActorCacheTest test({.dirtyListByteLimit = 256});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -4529,7 +4530,7 @@ KJ_TEST("ActorCache list stream cancellation") {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {
-        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyKeySoftLimit,
+        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyListByteLimit,
         options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);
@@ -4559,7 +4560,7 @@ KJ_TEST("ActorCache list stream cancellation") {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {
-        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyKeySoftLimit,
+        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyListByteLimit,
         options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);
@@ -4589,7 +4590,7 @@ KJ_TEST("ActorCache list stream cancellation") {
     // We allocate `lru` on the heap to assist valgrind in being able to detect when it is used
     // after free.
     auto lru = kj::heap<ActorCache::SharedLru>(ActorCache::SharedLru::Options {
-        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyKeySoftLimit,
+        options.softLimit, options.hardLimit, options.staleTimeout, options.dirtyListByteLimit,
         options.maxKeysPerRpc});
     OutputGate gate;
     ActorCache cache(mockClient, *lru, gate);

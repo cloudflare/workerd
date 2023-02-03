@@ -160,7 +160,7 @@ kj::Maybe<ActorCache::DeferredAlarmDeleter> ActorCache::armAlarmHandler(kj::Date
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
-  if (dirtyList.size() > lru.options.dirtyKeySoftLimit && !lru.options.neverFlush) {
+  if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
     return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
       KJ_IF_MAYBE(p, getBackpressure()) {
@@ -173,12 +173,12 @@ kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
 
   // At one point, we tried applying backpressure if the total cache size was greater than
   // `softLimit`. This turned out to be a bad idea. If the cache is over the limit due to dirty
-  // entries waiting to be flushed, then `dirtyKeySoftLimit` will actually kick in first (since
-  // it's typically 64 keys, which equates to at most 2MB of data). So if the cache is over the
-  // soft limit (which is typically more like 16MB), it could only be because a very large read
-  // operation has loaded a bunch of entries into memory but hasn't delivered them to the app yet.
-  // In this case, if we apply backpressure, then the app cannot make progress and therefore cannot
-  // receive the result of these reads! So it will just deadlock.
+  // entries waiting to be flushed, then `dirtyListByteLimit` will actually kick in first (since
+  // it's by default 8MB of data). So if the cache is over the soft limit (which is typically more
+  // like 16MB), it could only be because a very large read operation has loaded a bunch of entries
+  // into memory but hasn't delivered them to the app yet. In this case, if we apply backpressure,
+  // then the app cannot make progress and therefore cannot receive the result of these reads! So it
+  // will just deadlock.
   //
   // Hence, it only makes sense to wait for dirty entries to be flushed, not to wait for overall
   // size to go down.
