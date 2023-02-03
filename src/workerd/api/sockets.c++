@@ -53,30 +53,10 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   kj::Own<WorkerInterface> client = fetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kj);
 
-  // Note that we intentionally leave it up to the connect() implementation to decide what is a
-  // valid address. This means that people using `workerd`, for example, can arrange to connect
-  // to Unix sockets (if they define a "Network" service that permits local connections, which
-  // the default internet service will not). Also, hypothetically, in W2W communications, the
-  // address could be an arbitrary string which the receiving Worker can validate however it wants.
-  //
-  // TODO(soon): This results in an "internal error" in the case that the address couldn't parse,
-  //   which is not a great experience. Should we attempt to validate the address here to give a
-  //   better error? But that takes away the backend's flexibility to define its own address
-  //   format. Maybe that's good though? It's more consistent with fetch(), which requires a
-  //   valid URL even for W2W. The only other way we can get good errors here is if we use string
-  //   matching to detect KJ's invalid-address error message, which seems pretty gross but could
-  //   work. Note that if we do decide to validate addresses, we should not try to use KJ's
-  //   `parseAddress()` but instead decide for ourselves what format we want to permit here, maybe
-  //   as a regex.
-
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = kj::newHttpClient(*client);
   auto request = httpClient->connect(address, *headers);
-  // TODO(soon): If `request.status` resolves to have a statusCode < 200 || >= 300, arrange for the
-  //   the Socket to throw an appropriate error. Right now in this circumstance,
-  //   `request.connection`'s operations will throw KJ exceptions which will be exposed to the
-  //   script as internal errors.
 
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(kj::mv(request.connection), ioContext);
@@ -87,7 +67,12 @@ jsg::Ref<Socket> connectImplNoOutputLock(
       jsg::newPromiseAndResolver<void>(ioContext.getCurrentLock().getIsolate()));
   closeFulfiller->promise.markAsHandled();
 
-  return jsg::alloc<Socket>(js, kj::mv(readable), kj::mv(writable), kj::mv(closeFulfiller));
+  auto result = jsg::alloc<Socket>(
+      js, kj::mv(readable), kj::mv(writable), kj::mv(closeFulfiller));
+  // `handleProxyStatus` needs an initialised refcount to use `JSG_THIS`, hence it cannot be
+  // called in Socket's constructor.
+  result->handleProxyStatus(js, kj::mv(request.status));
+  return result;
 }
 
 jsg::Ref<Socket> connectImpl(
@@ -117,6 +102,22 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
       return js.resolvedPromise();
     });
   }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
+}
+
+void Socket::handleProxyStatus(
+    jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
+  auto& context = IoContext::current();
+  auto result = context.awaitIo(js, kj::mv(status),
+      [this, self = JSG_THIS](jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
+    if (status.statusCode < 200 || status.statusCode >= 300) {
+      // If the status indicates an unsucessful connection we need to reject the `closeFulfiller`
+      // with an exception. This will reject the socket's `closed` promise.
+      auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+        kj::str(JSG_EXCEPTION(Error) ": proxy request failed"));
+      resolveFulfiller(js, exc);
+    }
+  });
+  result.markAsHandled();
 }
 
 }  // namespace workerd::api

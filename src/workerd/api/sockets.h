@@ -21,8 +21,7 @@ public:
       kj::Own<jsg::PromiseResolverPair<void>> close)
       : readable(kj::mv(readable)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
-        closedPromise(kj::mv(closeFulfiller->promise)) {
-  };
+        closedPromise(kj::mv(closeFulfiller->promise)) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -32,6 +31,10 @@ public:
 
   jsg::Promise<void> close(jsg::Lock& js);
   // Closes the socket connection.
+
+  void handleProxyStatus(
+      jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
+  // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
 
   JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {
     JSG_READONLY_INSTANCE_PROPERTY(readable, getReadable);
@@ -48,6 +51,8 @@ private:
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
+
+
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_MAYBE(err, maybeErr) {
