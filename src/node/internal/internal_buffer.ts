@@ -304,7 +304,7 @@ Buffer.isBuffer = function isBuffer(b: unknown) {
   return b != null && (b as any)[kIsBuffer] && b !== Buffer.prototype;
 };
 
-function compare(a: Buffer|Uint8Array, b: Buffer|Uint8Array) {
+export function compare(a: Buffer|Uint8Array, b: Buffer|Uint8Array) {
   if (isInstance(a, Uint8Array)) {
     const buf = a as Uint8Array;
     a = fromArrayBuffer(buf.buffer, buf.byteOffset, buf.byteLength);
