@@ -12,8 +12,14 @@ import {
   ERR_FALSY_VALUE_REJECTION
 } from 'node-internal:internal_errors';
 
-export const types = internalTypes;
+export {
+  format
+} from 'node-internal:internal_format';
 
+import { format } from 'node-internal:internal_format';
+
+export const types = internalTypes;
+;
 const callbackifyOnRejected = (reason: unknown, cb : Function) => {
   if (!reason) {
     reason = new ERR_FALSY_VALUE_REJECTION(`${reason}`);
@@ -120,4 +126,5 @@ export default {
   types,
   callbackify,
   promisify,
+  format,
 };

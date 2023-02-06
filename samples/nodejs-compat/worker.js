@@ -1,7 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
-import { ok, deepStrictEqual, throws } from 'node:assert';
-import { callbackify, promisify } from 'node:util';
+import {
+  ok,
+  deepStrictEqual,
+  throws,
+} from 'node:assert';
+import {
+  callbackify,
+  promisify,
+  format,
+} from 'node:util';
 
 // Callback function
 function doSomething(a, cb) {
@@ -51,9 +59,9 @@ export default {
         }
       });
       throws(() => {
-        throw new Error('boom');
+        // util.format
+        throw new Error(format('%s', 'boom'));
       }, new Error('boom'));
-
       // The buffer module...
       const buffer = Buffer.concat([Buffer.from('Hello '), Buffer.from('There')], 12);
       buffer.fill(Buffer.from('!!'), 11);
