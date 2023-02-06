@@ -1,33 +1,33 @@
 // Type definitions for c++ implementation
 
-type CompareOptions = {
+interface CompareOptions {
   aStart?: number;
   aEnd?: number;
   bStart?: number;
   bEnd?: number
-};
+}
 
-export function byteLength(value: string) : number;
-export function compare(a: Uint8Array, b: Uint8Array, options? : CompareOptions) : number;
-export function concat(list: Uint8Array[], length: number) : ArrayBuffer;
-export function decodeString(value: string, encoding: string) : ArrayBuffer;
+export function byteLength(value: string): number;
+export function compare(a: Uint8Array, b: Uint8Array, options?: CompareOptions): number;
+export function concat(list: Uint8Array[], length: number): ArrayBuffer;
+export function decodeString(value: string, encoding: string): ArrayBuffer;
 export function fillImpl(buffer: Uint8Array,
                          value: string | BufferSource,
                          start: number,
                          end: number,
-                         encoding?: string) : void;
+                         encoding?: string): void;
 export function indexOf(buffer: Uint8Array,
-                        value : string | Uint8Array,
-                        byteOffset? : number,
-                        encoding? : string,
-                        findLast? : boolean) : number | undefined;
-export function swap(buffer: Uint8Array, size: 16|32|64) : void;
+                        value: string | Uint8Array,
+                        byteOffset?: number,
+                        encoding?: string,
+                        findLast?: boolean): number | undefined;
+export function swap(buffer: Uint8Array, size: 16|32|64): void;
 export function toString(buffer: Uint8Array,
                          start: number,
                          end: number,
-                         encoding: string) : string;
+                         encoding: string): string;
 export function write(buffer: Uint8Array,
                       value: string,
                       offset: number,
                       length: number,
-                      encoding: string) : void;
+                      encoding: string): void;
