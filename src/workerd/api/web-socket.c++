@@ -437,22 +437,22 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
   JSG_REQUIRE(native.state.is<Accepted>(), TypeError,
       "You must call accept() on this WebSocket before sending messages.");
 
-  KJ_SWITCH_ONEOF(message) {
-    KJ_CASE_ONEOF(text, kj::String) {
-      outgoingMessages->insert(GatedMessage{
-          IoContext::current().waitForOutputLocksIfNecessary(),
-          kj::mv(text),
-      });
-      break;
+  auto maybeOutputLock = IoContext::current().waitForOutputLocksIfNecessary();
+  auto msg = [&]() -> kj::WebSocket::Message {
+    KJ_SWITCH_ONEOF(message) {
+      KJ_CASE_ONEOF(text, kj::String) {
+        return kj::mv(text);
+        break;
+      }
+      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+        return kj::mv(data);
+        break;
+      }
     }
-    KJ_CASE_ONEOF(data, kj::Array<byte>) {
-      outgoingMessages->insert(GatedMessage{
-          IoContext::current().waitForOutputLocksIfNecessary(),
-          kj::mv(data),
-      });
-      break;
-    }
-  }
+
+    KJ_UNREACHABLE;
+  }();
+  outgoingMessages->insert(GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg)});
 
   ensurePumping(js);
 }
