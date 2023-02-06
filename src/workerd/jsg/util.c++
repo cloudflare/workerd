@@ -51,7 +51,7 @@ kj::String typeName(const std::type_info& type) {
 
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
   KJ_LOG(ERROR, internalMessage);
-  return v8::Exception::Error(v8Str(isolate, "internal error"));
+  return v8::Exception::Error(v8StrIntern(isolate, "internal error"));
 }
 
 namespace {
@@ -84,7 +84,7 @@ kj::Maybe<v8::Local<v8::Value>> tryMakeDomException(v8::Isolate* isolate,
     return check(value->ToObject(context));
   };
   const auto getInterned = [isolate, context](v8::Local<v8::Object> object, const char* s) {
-    auto name = v8Str(isolate, s, v8::NewStringType::kInternalized);
+    auto name = v8StrIntern(isolate, s);
     return check(object->Get(context, name));
   };
 
@@ -119,7 +119,7 @@ bool setRemoteError(v8::Isolate* isolate, v8::Local<v8::Value>& exception) {
   return jsg::check(
     obj->Set(
       isolate->GetCurrentContext(),
-      jsg::v8Str(isolate, "remote"_kj, v8::NewStringType::kInternalized),
+      jsg::v8StrIntern(isolate, "remote"_kj),
       v8::True(isolate)));
 }
 
@@ -129,7 +129,7 @@ bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exce
   return jsg::check(
     obj->Set(
       isolate->GetCurrentContext(),
-      jsg::v8Str(isolate, "durableObjectReset"_kj, v8::NewStringType::kInternalized),
+      jsg::v8StrIntern(isolate, "durableObjectReset"_kj),
       v8::True(isolate)));
 }
 
@@ -344,7 +344,7 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
       }
     }
     // unrecognized exception type
-    result.handle = v8::Exception::Error(v8Str(isolate, "internal error"));
+    result.handle = v8::Exception::Error(v8StrIntern(isolate, "internal error"));
     result.isInternal = true;
   } while (false);
 #undef HANDLE_V8_ERROR
