@@ -220,6 +220,26 @@ struct TunneledContext: public Object {
     JSG_REQUIRE(s.startsWith(";"), DOMOperationError,
         "thrown from ", kj::str("throwTunneledMacroOperationErrorWithExpectation"));
   }
+  // Test that the error types mapped to WasmCompileError are handled correctly
+  void throwTunneledCompileError() {
+    KJ_FAIL_REQUIRE("jsg.CompileError: thrown from throwTunneledCompileError");
+  }
+  void throwTunneledLinkError() {
+    KJ_FAIL_REQUIRE("jsg.LinkError: thrown from throwTunneledLinkError");
+  }
+  void throwTunneledRuntimeError() {
+    KJ_FAIL_REQUIRE("jsg.RuntimeError: thrown from throwTunneledRuntimeError");
+  }
+  // Test that only valid DOM exceptions are processed
+  void throwTunneledDOMException() {
+    KJ_FAIL_REQUIRE("jsg.DOMException(Some error): thrown from throwTunneledDOMException");
+  }
+  void throwTunneledInvalidDOMException() {
+    KJ_FAIL_REQUIRE("jsg.DOMException: thrown from throwTunneledInvalidDOMException");
+  }
+  void throwTunneledGarbledDOMException() {
+    KJ_FAIL_REQUIRE("jsg.DOMException(: thrown from throwTunneledGarbledDOMException");
+  }
 
   JSG_RESOURCE_TYPE(TunneledContext) {
     JSG_NESTED_TYPE(DOMException);
@@ -240,6 +260,12 @@ struct TunneledContext: public Object {
     JSG_METHOD(throwTunneledMacroTypeErrorWithExpectation);
     JSG_METHOD(throwTunneledMacroOperationError);
     JSG_METHOD(throwTunneledMacroOperationErrorWithExpectation);
+    JSG_METHOD(throwTunneledCompileError);
+    JSG_METHOD(throwTunneledLinkError);
+    JSG_METHOD(throwTunneledRuntimeError);
+    JSG_METHOD(throwTunneledDOMException);
+    JSG_METHOD(throwTunneledInvalidDOMException);
+    JSG_METHOD(throwTunneledGarbledDOMException);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
@@ -311,6 +337,36 @@ KJ_TEST("throw tunneled exception") {
       "throwTunneledMacroOperationErrorWithExpectation()",
       "throws", "OperationError: thrown from throwTunneledMacroOperationErrorWithExpectation"
   );
+  e.expectEval(
+      "throwTunneledCompileError()",
+      "throws", "CompileError: thrown from throwTunneledCompileError"
+  );
+  e.expectEval(
+      "throwTunneledLinkError()",
+      "throws", "CompileError: thrown from throwTunneledLinkError"
+  );
+  e.expectEval(
+      "throwTunneledRuntimeError()",
+      "throws", "CompileError: thrown from throwTunneledRuntimeError"
+  );
+  e.expectEval(
+      "throwTunneledDOMException()",
+      "throws", "Some error: thrown from throwTunneledDOMException"
+  );
+  {
+    KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledInvalidDOMException");
+    e.expectEval(
+        "throwTunneledInvalidDOMException()",
+        "throws", "Error: internal error"
+    );
+  }
+  {
+    KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledGarbledDOMException");
+    e.expectEval(
+        "throwTunneledGarbledDOMException()",
+        "throws", "Error: internal error"
+    );
+  }
 }
 
 KJ_TEST("runTunnelingExceptions") {

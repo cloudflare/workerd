@@ -315,54 +315,39 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
   result.isFromRemote = tunneledInfo.isFromRemote;
   result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
 
-  // TODO(cleanup): This code has gotten pretty ugly, could probably use some refactoring.
-  if (errorType.startsWith("Error")) {
-    auto message = appMessage(errorType.slice(strlen("Error")));
-    result.handle = v8::Exception::Error(v8Str(isolate, message));
-  } else if (errorType.startsWith("RangeError")) {
-    auto message = appMessage(errorType.slice(strlen("RangeError")));
-    result.handle = v8::Exception::RangeError(v8Str(isolate, message));
-  } else if (errorType.startsWith("TypeError")) {
-    auto message = appMessage(errorType.slice(strlen("TypeError")));
-    result.handle = v8::Exception::TypeError(v8Str(isolate, message));
-  } else if (errorType.startsWith("SyntaxError")) {
-    auto message = appMessage(errorType.slice(strlen("SyntaxError")));
-    result.handle = v8::Exception::SyntaxError(v8Str(isolate, message));
-  } else if (errorType.startsWith("ReferenceError")) {
-    auto message = appMessage(errorType.slice(strlen("ReferenceError")));
-    result.handle = v8::Exception::ReferenceError(v8Str(isolate, message));
-  } else if (errorType.startsWith("CompileError")) {
-    auto message = appMessage(errorType.slice(strlen("CompileError")));
-    result.handle = v8::Exception::WasmCompileError(v8Str(isolate, message));
-  } else if (errorType.startsWith("LinkError")) {
-    auto message = appMessage(errorType.slice(strlen("LinkError")));
-    result.handle = v8::Exception::WasmCompileError(v8Str(isolate, message));
-  } else if (errorType.startsWith("RuntimeError")) {
-    auto message = appMessage(errorType.slice(strlen("RuntimeError")));
-    result.handle = v8::Exception::WasmCompileError(v8Str(isolate, message));
-  } else if (errorType.startsWith("DOMException")) {
-    errorType = errorType.slice(strlen("DOMException"));
+#define HANDLE_V8_ERROR(error_name, error_type) \
+  if (errorType.startsWith(error_name)) { \
+    auto message = appMessage(errorType.slice(strlen(error_name))); \
+    result.handle = v8::Exception::error_type(v8Str(isolate, message)); \
+    break; \
+  }
+
+  do {
+    HANDLE_V8_ERROR("Error", Error);
+    HANDLE_V8_ERROR("RangeError", RangeError);
+    HANDLE_V8_ERROR("TypeError", TypeError);
+    HANDLE_V8_ERROR("SyntaxError", SyntaxError);
+    HANDLE_V8_ERROR("ReferenceError", ReferenceError);
+    HANDLE_V8_ERROR("CompileError", WasmCompileError);
+    HANDLE_V8_ERROR("LinkError", WasmCompileError);
+    HANDLE_V8_ERROR("RuntimeError", WasmCompileError);
+
     // DOMExceptions require a parenthesized error name argument, like DOMException(SyntaxError).
-    if (errorType.startsWith("(")) {
+    if (errorType.startsWith("DOMException(")) {
+      errorType = errorType.slice(strlen("DOMException("));
+      // Check for closing brace
       KJ_IF_MAYBE(closeParen, errorType.findFirst(')')) {
-        auto errorName = kj::str(errorType.slice(1, *closeParen));
-        auto message = appMessage(errorType.slice(2 + errorName.size()));
+        auto errorName = kj::str(errorType.slice(0, *closeParen));
+        auto message = appMessage(errorType.slice(1 + *closeParen));
         result.handle = tryMakeDomExceptionOrDefaultError(isolate, message, errorName);
-      } else {
-        // no closing parenthesis
-        result.handle = v8::Exception::Error(v8Str(isolate, "internal error"));
-        result.isInternal = true;
+        break;
       }
-    } else {
-      // no opening parenthesis
-      result.handle = v8::Exception::Error(v8Str(isolate, "internal error"));
-      result.isInternal = true;
     }
-  } else {
     // unrecognized exception type
     result.handle = v8::Exception::Error(v8Str(isolate, "internal error"));
     result.isInternal = true;
-  }
+  } while (false);
+#undef HANDLE_V8_ERROR
 
   if (result.isFromRemote) {
     setRemoteError(isolate, result.handle);
