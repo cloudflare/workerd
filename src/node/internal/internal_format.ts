@@ -23,6 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+/* todo: the following is adopted code, enabling linting one day */
+/* eslint-disable */
+
 export function format(...args: [string, unknown[]?]) {
   return formatInternal(...args);
 }

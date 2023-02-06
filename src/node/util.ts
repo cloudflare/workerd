@@ -9,7 +9,8 @@ import {
 } from 'node-internal:validators';
 
 import {
-  ERR_FALSY_VALUE_REJECTION
+  ERR_FALSY_VALUE_REJECTION,
+  ERR_INVALID_ARG_TYPE,
 } from 'node-internal:internal_errors';
 
 export {
@@ -19,7 +20,7 @@ export {
 import { format } from 'node-internal:internal_format';
 
 export const types = internalTypes;
-;
+
 const callbackifyOnRejected = (reason: unknown, cb : Function) => {
   if (!reason) {
     reason = new ERR_FALSY_VALUE_REJECTION(`${reason}`);
@@ -122,9 +123,63 @@ export function promisify(original: Function): Function {
 
 promisify.custom = kCustomPromisifiedSymbol;
 
+export function inherits(ctor: Function, superCtor: Function) {
+
+  if (ctor === undefined || ctor === null)
+    throw new ERR_INVALID_ARG_TYPE('ctor', 'Function', ctor);
+
+  if (superCtor === undefined || superCtor === null)
+    throw new ERR_INVALID_ARG_TYPE('superCtor', 'Function', superCtor);
+
+  if (superCtor.prototype === undefined) {
+    throw new ERR_INVALID_ARG_TYPE('superCtor.prototype',
+                                   'Object', superCtor.prototype);
+  }
+  Object.defineProperty(ctor, 'super_', {
+    value: superCtor,
+    writable: true,
+    configurable: true
+  });
+  Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
+}
+
+export function _extend(target: Object, source: Object) {
+  // Don't do anything if source isn't an object
+  if (source === null || typeof source !== 'object') return target;
+
+  const keys = Object.keys(source);
+  let i = keys.length;
+  while (i--) {
+    (target as any)[keys[i]!] = (source as any)[keys[i]!];
+  }
+  return target;
+}
+
 export default {
   types,
   callbackify,
   promisify,
   format,
+  inherits,
+  _extend,
 };
+
+// Node.js util APIs we're currently not supporting
+// TODO(soon): Revisit these
+//
+// inspect -- the primary use case for inspect is debug/development output. Node.js'
+//            implementation if very complex/sophisticated and it's just not clear
+//            yet if the use cases for it make sense in workerd. It's better to omit
+//            it entirely for now while we decide if we ultimately do want to implement
+//            a port / analog of the Node.js algorithm.
+// debug/debuglog -- The semantics of these depend on configuration through environment
+//                   variables to enable specific debug categories. We have no notion
+//                   of that in the runtime currently and it's not yet clear if we should.
+// deprecate -- Not clear how broadly this is used in the ecosystem outside of node.js
+// getSystemErrorMap/getSystemErrorName -- libuv specific. No use in workerd?
+// is{Type} variants -- these are deprecated in Node. Use util.types
+// stripVTControlCharacters -- No use in workerd?
+// toUSVString -- Not clear how broadly this is used in the ecosystem outside of node.js.
+//                also this is soon to be obsoleted by toWellFormed in the language.
+// transferableAbortSignal/transferableAbortController -- postMessage and worker threads
+//      are not implemented in workerd. No use case for these.
