@@ -126,17 +126,13 @@ Sqlite::Query::Query(Sqlite& db, kj::StringPtr sqlCode, kj::ArrayPtr<const Value
 }
 
 Sqlite::Query::~Query() noexcept(false) {
-  if (statement == nullptr) {
-    // Object was moved away.
-  } else {
-    // The error code returned by sqlite3_reset() actually represents the last error encountered
-    // when stepping the statement. This doesn't mean that the reset failed.
-    sqlite3_reset(statement);
+  // The error code returned by sqlite3_reset() actually represents the last error encountered
+  // when stepping the statement. This doesn't mean that the reset failed.
+  sqlite3_reset(statement);
 
-    // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
-    // should be interpreted, so we ignore it.
-    sqlite3_clear_bindings(statement);
-  }
+  // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
+  // should be interpreted, so we ignore it.
+  sqlite3_clear_bindings(statement);
 }
 
 void Sqlite::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {

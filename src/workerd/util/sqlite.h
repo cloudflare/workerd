@@ -36,10 +36,7 @@ public:
   Sqlite(Vfs& vfs, kj::PathPtr path);
   Sqlite(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
   ~Sqlite() noexcept(false);
-
-  Sqlite(Sqlite&& other): db(other.db) { other.db = nullptr; }
-  Sqlite& operator=(Sqlite&& other) { db = other.db; other.db = nullptr; return *this; }
-  KJ_DISALLOW_COPY(Sqlite);
+  KJ_DISALLOW_COPY_AND_MOVE(Sqlite);
 
   operator sqlite3*() { return db; }
   // Allows a Sqlite object to be passed directly into SQLite API functions where `sqlite*` is
@@ -51,9 +48,8 @@ public:
 
   template <typename... Params>
   Query run(kj::StringPtr sqlCode, Params&&... bindings);
-  // Convenience method to start a query. This is equivalent to:
-  //
-  //     Sqlite::Query(db, sqlCode, bindings...);
+  // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
+  // but may be more efficient for the one-off use caes.
 
 private:
   sqlite3* db;
@@ -62,6 +58,8 @@ private:
 };
 
 class Sqlite::Statement {
+  // Represents a prepared SQL statement, which can be executed many times.
+
 public:
   template <typename... Params>
   Query run(Params&&... bindings);
@@ -87,8 +85,8 @@ class Sqlite::Query {
   // the stack.
 
 public:
-  typedef kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
-                    decltype(nullptr)> ValuePtr;
+  using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
+                             decltype(nullptr)>;
 
   Query(Sqlite& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings);
   // Begin a query executing a prepared statement.
@@ -109,14 +107,8 @@ public:
   // These versions of the constructor accept the binding values as positional parameters. This
   // may be convenient when the number of bindings is statically known.
 
-  Query(Query&& other)
-      : db(other.db), ownStatement(kj::mv(other.ownStatement)),
-        statement(other.statement), done(other.done) { other.statement = nullptr; }
-  // Move construction is supported mainly so that Sqlite::query() can return a Query.
-
   ~Query() noexcept(false);
-
-  KJ_DISALLOW_COPY(Query);
+  KJ_DISALLOW_COPY_AND_MOVE(Query);
 
   bool isDone() { return done; }
   // If true, there are no more rows. (When true, the methods below must not be called.)
