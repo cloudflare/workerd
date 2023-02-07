@@ -1224,8 +1224,11 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
     KJ_IF_MAYBE(s, state) {
-      auto releaseMe = kj::mv(*s);
-      return releaseMe.cancel(js, kj::mv(maybeReason));
+      KJ_DEFER({
+        auto released KJ_UNUSED = kj::mv(*s);
+        state = nullptr;
+      });
+      return s->cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
@@ -1374,6 +1377,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
         // owner state once this scope exits. This ByteReadable will no longer
         // be usable once this is done.
         auto released KJ_UNUSED = kj::mv(*s);
+        state = nullptr;
       });
 
       return s->cancel(js, kj::mv(maybeReason));
