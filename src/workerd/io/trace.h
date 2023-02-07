@@ -457,6 +457,13 @@ public:
   bool isObserved() { return observer != nullptr; }
   // Useful to skip unnecessary code when not observed.
 
+  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  // Get the underlying SpanObserver representing the span.
+  //
+  // This is needed in particular when making outbound network requests that must be annotated with
+  // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
+  // the `SpanObserver` to the expected observer type in order to extract the trace ID.
+
   SpanBuilder newChild(kj::StringPtr operationName,
       kj::Date startTime = kj::systemPreciseCalendarClock().now());
   // Create a new child span.
