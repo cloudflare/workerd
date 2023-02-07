@@ -21,20 +21,19 @@ KJ_TEST("SQLite backed by in-memory directory") {
     // TODO(sqlite): Do this automatically and don't permit it via run().
     db.run("PRAGMA journal_mode=WAL;");
 
-    db.run(R"(
-      CREATE TABLE people (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE
-      );
-    )");
-
     {
       auto query = db.run(R"(
+        CREATE TABLE people (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE
+        );
+
         INSERT INTO people (id, name, email)
-        VALUES (123, "Bob", "bob@example.com"),
-              (321, "Alice", "alice@example.com");
-      )");
+        VALUES (?, ?, ?),
+              (?, ?, ?);
+      )", 123, "Bob"_kj, "bob@example.com"_kj,
+          321, "Alice"_kj, "alice@example.com"_kj);
 
       KJ_EXPECT(query.changeCount() == 2);
     }

@@ -50,14 +50,27 @@ public:
   template <typename... Params>
   Query run(kj::StringPtr sqlCode, Params&&... bindings);
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
-  // but may be more efficient for the one-off use caes.
+  // except:
+  // - It may be more efficient for one-off use caes.
+  // - The code can include multiple statements, separated by semicolons. The bindings and returned
+  //   `Query` object are both associated with the last statement. This is particulary convenient
+  //   for doing database initialization such as creating several tables at once.
 
 private:
   sqlite3* db;
 
   void close();
 
-  static kj::Own<sqlite3_stmt> prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags);
+  enum Multi { SINGLE, MULTI };
+
+  static kj::Own<sqlite3_stmt> prepareSql(
+      sqlite3* db, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
+  // Helper to call sqlite3_prepare_v3().
+  //
+  // In SINGLE mode, an exception is thrown if `sqlCode` contains multiple statements.
+  //
+  // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
+  // is executed immediately. The returned object represents the last statement.
 };
 
 class Sqlite::Statement {
@@ -108,7 +121,7 @@ public:
   }
   template <typename... Params>
   Query(Sqlite& db, kj::StringPtr sqlCode, Params&&... bindings)
-      : db(db), ownStatement(prepareSql(db, sqlCode, 0)), statement(ownStatement) {
+      : db(db), ownStatement(prepareSql(db, sqlCode, 0, MULTI)), statement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   // These versions of the constructor accept the binding values as positional parameters. This

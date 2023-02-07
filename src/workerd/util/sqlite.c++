@@ -97,22 +97,51 @@ Sqlite::~Sqlite() noexcept(false) {
   KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) { break; }
 }
 
-kj::Own<sqlite3_stmt> Sqlite::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags) {
-  sqlite3_stmt* result;
-  const char* tail;
+kj::Own<sqlite3_stmt> Sqlite::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags,
+                                         Multi multi) {
+  for (;;) {
+    sqlite3_stmt* result;
+    const char* tail;
 
-  SQLITE_CALL(sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail));
-  KJ_REQUIRE(result != nullptr, "SQL code did not contain a statement", sqlCode);
-  auto ownResult = ownSqlite(result);
+    SQLITE_CALL(sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail));
+    KJ_REQUIRE(result != nullptr, "SQL code did not contain a statement", sqlCode);
+    auto ownResult = ownSqlite(result);
 
-  while (*tail == ' ' || *tail == '\n') ++tail;
-  KJ_REQUIRE(tail == sqlCode.end(), "sqlite statement had leftover code", tail);
+    while (*tail == ' ' || *tail == '\n') ++tail;
 
-  return ownResult;
+    switch (multi) {
+      case SINGLE:
+        KJ_REQUIRE(tail == sqlCode.end(), "sqlite statement had leftover code", tail);
+        break;
+
+      case MULTI:
+        if (tail != sqlCode.end()) {
+          KJ_REQUIRE(sqlite3_bind_parameter_count(result) == 0,
+              "only the last statement in a multi-statement query can have parameters");
+
+          // This isn't the last statement in the code. Execute it immediately.
+          int err = sqlite3_step(result);
+          if (err == SQLITE_DONE) {
+            // good
+          } else if (err == SQLITE_ROW) {
+            // Intermediate statement returned results. We will discard.
+          } else {
+            SQLITE_CALL_FAILED("sqlite3_step()", err);
+          }
+
+          // Reduce `sqlCode` to include only what we haven't already executed.
+          sqlCode = kj::StringPtr(tail, sqlCode.end());
+          continue;
+        }
+        break;
+    }
+
+    return ownResult;
+  }
 }
 
 Sqlite::Statement Sqlite::prepare(kj::StringPtr sqlCode) {
-  return Statement(*this, prepareSql(db, sqlCode, SQLITE_PREPARE_PERSISTENT));
+  return Statement(*this, prepareSql(db, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
 Sqlite::Query::Query(Sqlite& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings)
@@ -121,18 +150,22 @@ Sqlite::Query::Query(Sqlite& db, Statement& statement, kj::ArrayPtr<const ValueP
 }
 
 Sqlite::Query::Query(Sqlite& db, kj::StringPtr sqlCode, kj::ArrayPtr<const ValuePtr> bindings)
-    : db(db), ownStatement(prepareSql(db, sqlCode, 0)), statement(ownStatement) {
+    : db(db), ownStatement(prepareSql(db, sqlCode, 0, SINGLE)), statement(ownStatement) {
   init(bindings);
 }
 
 Sqlite::Query::~Query() noexcept(false) {
-  // The error code returned by sqlite3_reset() actually represents the last error encountered
-  // when stepping the statement. This doesn't mean that the reset failed.
-  sqlite3_reset(statement);
+  // We only need to reset the statement if we don't own it. If we own it, it's about to be
+  // destroyed anyway.
+  if (ownStatement.get() == nullptr) {
+    // The error code returned by sqlite3_reset() actually represents the last error encountered
+    // when stepping the statement. This doesn't mean that the reset failed.
+    sqlite3_reset(statement);
 
-  // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
-  // should be interpreted, so we ignore it.
-  sqlite3_clear_bindings(statement);
+    // sqlite3_clear_bindings() returns int, but there is no documentation on how the return code
+    // should be interpreted, so we ignore it.
+    sqlite3_clear_bindings(statement);
+  }
 }
 
 void Sqlite::Query::checkRequirements(size_t size) {
