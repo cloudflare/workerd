@@ -20,7 +20,7 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
-class Sqlite {
+class SqliteDatabase {
   // C++/KJ API for SQLite.
   //
   // In addition to providing a more modern C++ interface vs. the classic C API, this API layers
@@ -34,13 +34,13 @@ public:
   class Query;
   class Statement;
 
-  Sqlite(Vfs& vfs, kj::PathPtr path);
-  Sqlite(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
-  ~Sqlite() noexcept(false);
-  KJ_DISALLOW_COPY_AND_MOVE(Sqlite);
+  SqliteDatabase(Vfs& vfs, kj::PathPtr path);
+  SqliteDatabase(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
+  ~SqliteDatabase() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
   operator sqlite3*() { return db; }
-  // Allows a Sqlite object to be passed directly into SQLite API functions where `sqlite*` is
+  // Allows a SqliteDatabase to be passed directly into SQLite API functions where `sqlite*` is
   // expected.
 
   Statement prepare(kj::StringPtr sqlCode);
@@ -73,7 +73,7 @@ private:
   // is executed immediately. The returned object represents the last statement.
 };
 
-class Sqlite::Statement {
+class SqliteDatabase::Statement {
   // Represents a prepared SQL statement, which can be executed many times.
 
 public:
@@ -81,20 +81,20 @@ public:
   Query run(Params&&... bindings);
   // Convenience method to start a query. This is equivalent to:
   //
-  //     Sqlite::Query(db, statement, bindings...);
+  //     SqliteDatabase::Query(db, statement, bindings...);
 
   operator sqlite3_stmt*() { return stmt; }
 
 private:
-  Sqlite& db;
+  SqliteDatabase& db;
   kj::Own<sqlite3_stmt> stmt;
 
-  Statement(Sqlite& db, kj::Own<sqlite3_stmt> stmt): db(db), stmt(kj::mv(stmt)) {}
+  Statement(SqliteDatabase& db, kj::Own<sqlite3_stmt> stmt): db(db), stmt(kj::mv(stmt)) {}
 
-  friend class Sqlite;
+  friend class SqliteDatabase;
 };
 
-class Sqlite::Query {
+class SqliteDatabase::Query {
   // Represents one SQLite query.
   //
   // Only one Query can exist at a time, for a given database. It should probably be allocated on
@@ -104,23 +104,23 @@ public:
   using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
                              decltype(nullptr)>;
 
-  Query(Sqlite& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings);
   // Begin a query executing a prepared statement.
   //
   // `bindings` are the value to fill into `?`s in the statement. The `bindings` array itself
   // need only live until the constructor returns, but any strings or blobs it points to must
   // remain valid until the Query is destroyed.
 
-  Query(Sqlite& db, kj::StringPtr sqlCode, kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db, kj::StringPtr sqlCode, kj::ArrayPtr<const ValuePtr> bindings);
   // Begin a one-off query executing some code directly.
 
   template <typename... Params>
-  Query(Sqlite& db, Statement& statement, Params&&... bindings)
+  Query(SqliteDatabase& db, Statement& statement, Params&&... bindings)
       : db(db), statement(statement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
-  Query(Sqlite& db, kj::StringPtr sqlCode, Params&&... bindings)
+  Query(SqliteDatabase& db, kj::StringPtr sqlCode, Params&&... bindings)
       : db(db), ownStatement(prepareSql(db, sqlCode, 0, MULTI)), statement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
@@ -203,7 +203,7 @@ private:
   }
 };
 
-class Sqlite::Vfs {
+class SqliteDatabase::Vfs {
   // Implements a SQLite VFS based on a KJ directory.
   //
   // If the directory is detected to be a disk directory (i.e. getFd() or getWin32Handle() returns
@@ -252,16 +252,16 @@ private:
   sqlite3_vfs makeKjVfs();
   // Create a VFS definition that actually delegates to the KJ filesystem.
 
-  friend class Sqlite;
+  friend class SqliteDatabase;
 };
 
 template <typename... Params>
-Sqlite::Query Sqlite::run(kj::StringPtr sqlCode, Params&&... params) {
+SqliteDatabase::Query SqliteDatabase::run(kj::StringPtr sqlCode, Params&&... params) {
   return Query(*this, sqlCode, kj::fwd<Params>(params)...);
 }
 
 template <typename... Params>
-Sqlite::Query Sqlite::Statement::run(Params&&... params) {
+SqliteDatabase::Query SqliteDatabase::Statement::run(Params&&... params) {
   return Query(db, *this, kj::fwd<Params>(params)...);
 }
 

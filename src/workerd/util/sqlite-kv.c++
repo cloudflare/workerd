@@ -6,9 +6,9 @@
 
 namespace workerd {
 
-SqliteKv::SqliteKv(Sqlite& db, bool): db(db) {}
+SqliteKv::SqliteKv(SqliteDatabase& db, bool): db(db) {}
 
-Sqlite& SqliteKv::ensureInitialized(Sqlite& db) {
+SqliteDatabase& SqliteKv::ensureInitialized(SqliteDatabase& db) {
   // TODO(sqlite): Do this automatically at a lower layer?
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -35,7 +35,7 @@ bool SqliteKv::get(KeyPtr key, kj::FunctionParam<void(ValuePtr)> callback) {
 
 uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
                     kj::FunctionParam<void(KeyPtr, ValuePtr)> callback) {
-  auto iterate = [&](Sqlite::Query&& query) {
+  auto iterate = [&](SqliteDatabase::Query&& query) {
     size_t count = 0;
     while (!query.isDone()) {
       callback(query.getText(0), query.getBlob(1));

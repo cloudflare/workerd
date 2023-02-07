@@ -13,10 +13,10 @@ namespace {
 
 KJ_TEST("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
-  Sqlite::Vfs vfs(*dir);
+  SqliteDatabase::Vfs vfs(*dir);
 
   {
-    Sqlite db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
     // TODO(sqlite): Do this automatically and don't permit it via run().
     db.run("PRAGMA journal_mode=WAL;");
@@ -99,7 +99,7 @@ KJ_TEST("SQLite backed by in-memory directory") {
 
   // Open it again and make sure tha data is still there!
   {
-    Sqlite db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
     {
       auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);
@@ -153,10 +153,10 @@ KJ_TEST("SQLite backed by real disk") {
   // in a unit test, using real disk.
 
   TempDirOnDisk dir;
-  Sqlite::Vfs vfs(*dir);
+  SqliteDatabase::Vfs vfs(*dir);
 
   {
-    Sqlite db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
     // TODO(sqlite): Do this automatically and don't permit it via run().
     db.run("PRAGMA journal_mode=WAL;");
@@ -211,7 +211,7 @@ KJ_TEST("SQLite backed by real disk") {
 
   // Open it again and make sure tha data is still there!
   {
-    Sqlite db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
     {
       auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);

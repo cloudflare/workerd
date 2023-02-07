@@ -18,7 +18,7 @@ class SqliteKv {
   // obnoxious about of string allocation.)
 
 public:
-  explicit SqliteKv(Sqlite& db): SqliteKv(ensureInitialized(db), true) {}
+  explicit SqliteKv(SqliteDatabase& db): SqliteKv(ensureInitialized(db), true) {}
 
   typedef kj::StringPtr KeyPtr;
   typedef kj::ArrayPtr<const kj::byte> ValuePtr;
@@ -52,70 +52,70 @@ public:
   //   byte blobs or strings containing NUL bytes.
 
 private:
-  Sqlite& db;
+  SqliteDatabase& db;
 
-  Sqlite::Statement stmtGet = db.prepare(R"(
+  SqliteDatabase::Statement stmtGet = db.prepare(R"(
     SELECT value FROM _cf_KV WHERE key = ?
   )");
-  Sqlite::Statement stmtPut = db.prepare(R"(
+  SqliteDatabase::Statement stmtPut = db.prepare(R"(
     INSERT INTO _cf_KV VALUES(?, ?)
       ON CONFLICT DO UPDATE SET value = excluded.value;
   )");
-  Sqlite::Statement stmtDelete = db.prepare(R"(
+  SqliteDatabase::Statement stmtDelete = db.prepare(R"(
     DELETE FROM _cf_KV WHERE key = ?
   )");
-  Sqlite::Statement stmtList = db.prepare(R"(
+  SqliteDatabase::Statement stmtList = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ?
     ORDER BY key
   )");
-  Sqlite::Statement stmtListEnd = db.prepare(R"(
+  SqliteDatabase::Statement stmtListEnd = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ? AND key < ?
     ORDER BY key
   )");
-  Sqlite::Statement stmtListLimit = db.prepare(R"(
+  SqliteDatabase::Statement stmtListLimit = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ?
     ORDER BY key
     LIMIT ?
   )");
-  Sqlite::Statement stmtListEndLimit = db.prepare(R"(
+  SqliteDatabase::Statement stmtListEndLimit = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ? AND key < ?
     ORDER BY key
     LIMIT ?
   )");
-  Sqlite::Statement stmtListReverse = db.prepare(R"(
+  SqliteDatabase::Statement stmtListReverse = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ?
     ORDER BY key DESC
   )");
-  Sqlite::Statement stmtListEndReverse = db.prepare(R"(
+  SqliteDatabase::Statement stmtListEndReverse = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ? AND key < ?
     ORDER BY key DESC
   )");
-  Sqlite::Statement stmtListLimitReverse = db.prepare(R"(
+  SqliteDatabase::Statement stmtListLimitReverse = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ?
     ORDER BY key DESC
     LIMIT ?
   )");
-  Sqlite::Statement stmtListEndLimitReverse = db.prepare(R"(
+  SqliteDatabase::Statement stmtListEndLimitReverse = db.prepare(R"(
     SELECT * FROM _cf_KV
     WHERE key >= ? AND key < ?
     ORDER BY key DESC
     LIMIT ?
   )");
-  Sqlite::Statement stmtDeleteAll = db.prepare(R"(
+  SqliteDatabase::Statement stmtDeleteAll = db.prepare(R"(
     DELETE FROM _cf_KV
   )");
 
-  Sqlite& ensureInitialized(Sqlite& db);
+  SqliteDatabase& ensureInitialized(SqliteDatabase& db);
   // Make sure the KV table is created, then return the same object.
 
-  SqliteKv(Sqlite& db, bool);
+  SqliteKv(SqliteDatabase& db, bool);
 };
 
 }  // namespace workerd

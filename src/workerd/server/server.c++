@@ -1150,7 +1150,7 @@ public:
     kj::Array<Service*> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Maybe<Service&> cache;
-    kj::Maybe<kj::Own<Sqlite::Vfs>> actorStorage;
+    kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
@@ -1336,7 +1336,7 @@ private:
   ThreadContext& threadContext;
 
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
-  // LinkedIoChannels owns the Sqlite::Vfs, so make sure it is destroyed last.
+  // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
@@ -1982,7 +1982,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
           reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
               "to the service \"", diskName, "\", but that service is not a local disk service."));
         } else KJ_IF_MAYBE(dir, diskSvc->getWritable()) {
-          result.actorStorage = kj::heap<Sqlite::Vfs>(*dir);
+          result.actorStorage = kj::heap<SqliteDatabase::Vfs>(*dir);
         } else {
           reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
               "to the disk service \"", diskName, "\", but that service is defined read-only."));

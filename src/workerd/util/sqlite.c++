@@ -63,12 +63,12 @@ kj::Own<T> ownSqlite(T* obj) {
 
 // =======================================================================================
 
-Sqlite::Sqlite(Vfs& vfs, kj::PathPtr path) {
+SqliteDatabase::SqliteDatabase(Vfs& vfs, kj::PathPtr path) {
   SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
                                    SQLITE_OPEN_READONLY, vfs.getName().cStr()));
 }
 
-Sqlite::Sqlite(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
+SqliteDatabase::SqliteDatabase(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
   int flags = SQLITE_OPEN_READWRITE;
   if (kj::has(mode, kj::WriteMode::CREATE)) {
     flags |= SQLITE_OPEN_CREATE;
@@ -85,7 +85,7 @@ Sqlite::Sqlite(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
                                    flags, vfs.getName().cStr()));
 }
 
-Sqlite::~Sqlite() noexcept(false) {
+SqliteDatabase::~SqliteDatabase() noexcept(false) {
   auto err = sqlite3_close(db);
   if (err == SQLITE_BUSY) {
     KJ_LOG(ERROR, "sqlite database destroyed while dependent objects still exist");
@@ -97,8 +97,8 @@ Sqlite::~Sqlite() noexcept(false) {
   KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) { break; }
 }
 
-kj::Own<sqlite3_stmt> Sqlite::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags,
-                                         Multi multi) {
+kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags,
+                                                 Multi multi) {
   for (;;) {
     sqlite3_stmt* result;
     const char* tail;
@@ -140,21 +140,23 @@ kj::Own<sqlite3_stmt> Sqlite::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uin
   }
 }
 
-Sqlite::Statement Sqlite::prepare(kj::StringPtr sqlCode) {
+SqliteDatabase::Statement SqliteDatabase::prepare(kj::StringPtr sqlCode) {
   return Statement(*this, prepareSql(db, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-Sqlite::Query::Query(Sqlite& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings)
+SqliteDatabase::Query::Query(SqliteDatabase& db, Statement& statement,
+                             kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), statement(statement) {
   init(bindings);
 }
 
-Sqlite::Query::Query(Sqlite& db, kj::StringPtr sqlCode, kj::ArrayPtr<const ValuePtr> bindings)
+SqliteDatabase::Query::Query(SqliteDatabase& db, kj::StringPtr sqlCode,
+                             kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), ownStatement(prepareSql(db, sqlCode, 0, SINGLE)), statement(ownStatement) {
   init(bindings);
 }
 
-Sqlite::Query::~Query() noexcept(false) {
+SqliteDatabase::Query::~Query() noexcept(false) {
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
   if (ownStatement.get() == nullptr) {
@@ -168,13 +170,13 @@ Sqlite::Query::~Query() noexcept(false) {
   }
 }
 
-void Sqlite::Query::checkRequirements(size_t size) {
+void SqliteDatabase::Query::checkRequirements(size_t size) {
   KJ_REQUIRE(!sqlite3_stmt_busy(statement), "only one Query can run at a time");
   KJ_REQUIRE(size == sqlite3_bind_parameter_count(statement),
       "wrong number of bindings for SQLite query");
 }
 
-void Sqlite::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
+void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
   checkRequirements(bindings.size());
 
   for (auto i: kj::indices(bindings)) {
@@ -184,7 +186,7 @@ void Sqlite::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
   nextRow();
 }
 
-void Sqlite::Query::bind(uint i, ValuePtr value) {
+void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(blob, kj::ArrayPtr<const byte>) {
       SQLITE_CALL(sqlite3_bind_blob(statement, i+1, blob.begin(), blob.size(), SQLITE_STATIC));
@@ -204,27 +206,27 @@ void Sqlite::Query::bind(uint i, ValuePtr value) {
   }
 }
 
-void Sqlite::Query::bind(uint i, kj::ArrayPtr<const byte> value) {
+void SqliteDatabase::Query::bind(uint i, kj::ArrayPtr<const byte> value) {
   SQLITE_CALL(sqlite3_bind_blob(statement, i+1, value.begin(), value.size(), SQLITE_STATIC));
 }
 
-void Sqlite::Query::bind(uint i, kj::StringPtr value) {
+void SqliteDatabase::Query::bind(uint i, kj::StringPtr value) {
   SQLITE_CALL(sqlite3_bind_text(statement, i+1, value.begin(), value.size(), SQLITE_STATIC));
 }
 
-void Sqlite::Query::bind(uint i, int64_t value) {
+void SqliteDatabase::Query::bind(uint i, int64_t value) {
   SQLITE_CALL(sqlite3_bind_int64(statement, i+1, value));
 }
 
-void Sqlite::Query::bind(uint i, double value) {
+void SqliteDatabase::Query::bind(uint i, double value) {
   SQLITE_CALL(sqlite3_bind_double(statement, i+1, value));
 }
 
-void Sqlite::Query::bind(uint i, decltype(nullptr)) {
+void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
   SQLITE_CALL(sqlite3_bind_null(statement, i+1));
 }
 
-void Sqlite::Query::nextRow() {
+void SqliteDatabase::Query::nextRow() {
   int err = sqlite3_step(statement);
   if (err == SQLITE_DONE) {
     done = true;
@@ -233,18 +235,18 @@ void Sqlite::Query::nextRow() {
   }
 }
 
-uint Sqlite::Query::changeCount() {
+uint SqliteDatabase::Query::changeCount() {
   KJ_REQUIRE(done);
   KJ_DREQUIRE(columnCount() == 0,
       "changeCount() can only be called on INSERT/UPDATE/DELETE queries");
   return sqlite3_changes(db);
 }
 
-uint Sqlite::Query::columnCount() {
+uint SqliteDatabase::Query::columnCount() {
   return sqlite3_column_count(statement);
 }
 
-Sqlite::Query::ValuePtr Sqlite::Query::getValue(uint column) {
+SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
   switch (sqlite3_column_type(statement, column)) {
     case SQLITE_INTEGER: return getInt64(column);
     case SQLITE_FLOAT:   return getDouble(column);
@@ -255,29 +257,29 @@ Sqlite::Query::ValuePtr Sqlite::Query::getValue(uint column) {
   KJ_UNREACHABLE;
 }
 
-kj::ArrayPtr<const byte> Sqlite::Query::getBlob(uint column) {
+kj::ArrayPtr<const byte> SqliteDatabase::Query::getBlob(uint column) {
   const byte* ptr = reinterpret_cast<const byte*>(sqlite3_column_blob(statement, column));
   return kj::arrayPtr(ptr, sqlite3_column_bytes(statement, column));
 }
 
-kj::StringPtr Sqlite::Query::getText(uint column) {
+kj::StringPtr SqliteDatabase::Query::getText(uint column) {
   const char* ptr = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
   return kj::StringPtr(ptr, sqlite3_column_bytes(statement, column));
 }
 
-int Sqlite::Query::getInt(uint column) {
+int SqliteDatabase::Query::getInt(uint column) {
   return sqlite3_column_int(statement, column);
 }
 
-int64_t Sqlite::Query::getInt64(uint column) {
+int64_t SqliteDatabase::Query::getInt64(uint column) {
   return sqlite3_column_int64(statement, column);
 }
 
-double Sqlite::Query::getDouble(uint column) {
+double SqliteDatabase::Query::getDouble(uint column) {
   return sqlite3_column_double(statement, column);
 }
 
-bool Sqlite::Query::isNull(uint column) {
+bool SqliteDatabase::Query::isNull(uint column) {
   return sqlite3_column_type(statement, column) == SQLITE_NULL;
 }
 
@@ -348,7 +350,7 @@ static int replaced_lstat(const char* path, struct stat* stats) {
 
 };
 
-struct Sqlite::Vfs::WrappedNativeFileImpl: public sqlite3_file {
+struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
   // The sqlite3_file implementation we use when wrapping the native filesystem.
 
   int rootFd;
@@ -361,14 +363,15 @@ struct Sqlite::Vfs::WrappedNativeFileImpl: public sqlite3_file {
 
 template <typename Result, typename... Params,
           Result (*sqlite3_vfs::*slot)(sqlite3_vfs* vfs, Params...)>
-struct Sqlite::Vfs::MethodWrapperHack<Result (*sqlite3_vfs::*)(sqlite3_vfs* vfs, Params...), slot> {
+struct SqliteDatabase::Vfs::MethodWrapperHack<
+    Result (*sqlite3_vfs::*)(sqlite3_vfs* vfs, Params...), slot> {
   // This completely nutso template generates wrapper functions for each of the function pointer
   // members of sqlite3_vfs. The wrapper function temporarily sets `currentVfsRoot` to the FD
-  // of the directory from the Sqlite::Vfs instance in use, then invokes the same function on
-  // the underlying native VFS.
+  // of the directory from the SqliteDatabase::Vfs instance in use, then invokes the same function
+  // on the underlying native VFS.
 
   static Result wrapper(sqlite3_vfs* vfs, Params... params) noexcept {
-    auto& self = *reinterpret_cast<Sqlite::Vfs*>(vfs->pAppData);
+    auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
     KJ_ASSERT(currentVfsRoot == AT_FDCWD);
     currentVfsRoot = self.rootFd;
     KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -378,7 +381,7 @@ struct Sqlite::Vfs::MethodWrapperHack<Result (*sqlite3_vfs::*)(sqlite3_vfs* vfs,
 
 template <typename Result, typename... Params,
           Result (*sqlite3_io_methods::*slot)(sqlite3_file* file, Params...)>
-struct Sqlite::Vfs::MethodWrapperHack<
+struct SqliteDatabase::Vfs::MethodWrapperHack<
     Result (*sqlite3_io_methods::*)(sqlite3_file* file, Params...), slot> {
   // Specialization of MethodWrapperHack for wrapping methods of sqlite_file, aka
   // sqlite3_io_methods. Unfortunately, some file methods go back and perform filesystem ops. In
@@ -395,7 +398,7 @@ struct Sqlite::Vfs::MethodWrapperHack<
   }
 };
 
-const sqlite3_io_methods Sqlite::Vfs::WrappedNativeFileImpl::METHOD_TABLE = {
+const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABLE = {
   .iVersion = 3,
 
 #define WRAP(name) \
@@ -425,7 +428,7 @@ const sqlite3_io_methods Sqlite::Vfs::WrappedNativeFileImpl::METHOD_TABLE = {
 #undef WRAP
 };
 
-sqlite3_vfs Sqlite::Vfs::makeWrappedNativeVfs() {
+sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
   // The native VFS gives us the ability to override its syscalls. We need to do so, in
   // particular to force them to use the *at() versions of the calls that accept a directory FD
   // to use as the root.
@@ -478,7 +481,7 @@ sqlite3_vfs Sqlite::Vfs::makeWrappedNativeVfs() {
       file->pMethods = nullptr;
 
       // Set up currentVfsRoot.
-      auto& self = *reinterpret_cast<Sqlite::Vfs*>(vfs->pAppData);
+      auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
       KJ_ASSERT(currentVfsRoot == AT_FDCWD);
       currentVfsRoot = self.rootFd;
       KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -540,7 +543,7 @@ sqlite3_vfs Sqlite::Vfs::makeWrappedNativeVfs() {
 //
 // WARNING: Since KJ filesystem does not implement locking, this implementation ignores all locks.
 
-struct Sqlite::Vfs::FileImpl: public sqlite3_file {
+struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   // Implementation of sqlite3_file.
   //
   // Weirdly, for sqlite3_file, SQLite uses a C++-like inheritance approach, with a separate
@@ -568,7 +571,7 @@ struct Sqlite::Vfs::FileImpl: public sqlite3_file {
   static const sqlite3_io_methods FILE_METHOD_TABLE;
 };
 
-const sqlite3_io_methods Sqlite::Vfs::FileImpl::FILE_METHOD_TABLE = {
+const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   .iVersion = 3,
 #define WRAP_METHOD(errorCode, block) \
   auto& self KJ_UNUSED = *static_cast<FileImpl*>(file); \
@@ -734,7 +737,7 @@ const sqlite3_io_methods Sqlite::Vfs::FileImpl::FILE_METHOD_TABLE = {
 #undef WRAP_METHOD
 };
 
-sqlite3_vfs Sqlite::Vfs::makeKjVfs() {
+sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
   // SQLite VFS implementation based on abstract `kj::Directory`. This is used only when the
   // directory is NOT a true disk directory.
   //
@@ -755,7 +758,7 @@ sqlite3_vfs Sqlite::Vfs::makeKjVfs() {
     .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block) \
-      auto& self KJ_UNUSED = *static_cast<Sqlite::Vfs*>(vfs->pAppData); \
+      auto& self KJ_UNUSED = *static_cast<SqliteDatabase::Vfs*>(vfs->pAppData); \
       try block catch (kj::Exception& e) { \
         KJ_LOG(ERROR, "SQLite VFS I/O error", e); \
         return errorCode; \
@@ -870,7 +873,7 @@ sqlite3_vfs Sqlite::Vfs::makeKjVfs() {
 
 // -----------------------------------------------------------------------------
 
-Sqlite::Vfs::Vfs(const kj::Directory& directory)
+SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
     : directory(directory), name(kj::str("kj-", &directory)),
       native(*sqlite3_vfs_find(nullptr)) {
   KJ_IF_MAYBE(fd, directory.getFd()) {
@@ -882,7 +885,7 @@ Sqlite::Vfs::Vfs(const kj::Directory& directory)
   sqlite3_vfs_register(vfs, false);
 }
 
-Sqlite::Vfs::~Vfs() noexcept(false) {
+SqliteDatabase::Vfs::~Vfs() noexcept(false) {
   sqlite3_vfs_unregister(vfs);
 }
 

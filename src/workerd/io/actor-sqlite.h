@@ -19,7 +19,7 @@ class ActorSqlite final: public ActorCacheInterface {
   //   here is easier and not too costly.
 
 public:
-  ActorSqlite(Sqlite::Vfs& vfs, kj::PathPtr path)
+  ActorSqlite(SqliteDatabase::Vfs& vfs, kj::PathPtr path)
       : db(vfs, path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
         kv(db) {}
 
@@ -47,7 +47,7 @@ public:
   // TODO(sqlite): synk() should wait for replication if applicable.
 
 private:
-  Sqlite db;
+  SqliteDatabase db;
   SqliteKv kv;
 };
 

@@ -10,8 +10,8 @@ namespace {
 
 KJ_TEST("SQLite-KV") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
-  Sqlite::Vfs vfs(*dir);
-  Sqlite db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
   SqliteKv kv(db);
 
   kv.put("foo", "abc"_kj.asBytes());
