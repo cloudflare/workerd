@@ -7,6 +7,7 @@
 #include <kj/filesystem.h>
 #include <kj/async.h>
 #include <kj/one-of.h>
+#include <utility>
 
 struct sqlite3;
 struct sqlite3_vfs;
@@ -55,6 +56,8 @@ private:
   sqlite3* db;
 
   void close();
+
+  static kj::Own<sqlite3_stmt> prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags);
 };
 
 class Sqlite::Statement {
@@ -100,10 +103,14 @@ public:
 
   template <typename... Params>
   Query(Sqlite& db, Statement& statement, Params&&... bindings)
-      : Query(db, statement, {ValuePtr(bindings)...}) {}
+      : db(db), statement(statement) {
+    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
+  }
   template <typename... Params>
   Query(Sqlite& db, kj::StringPtr sqlCode, Params&&... bindings)
-      : Query(db, sqlCode, {ValuePtr(bindings)...}) {}
+      : db(db), ownStatement(prepareSql(db, sqlCode, 0)), statement(ownStatement) {
+    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
+  }
   // These versions of the constructor accept the binding values as positional parameters. This
   // may be convenient when the number of bindings is statically known.
 
@@ -159,7 +166,28 @@ private:
   sqlite3_stmt* statement;
   bool done = false;
 
+  void checkRequirements(size_t size);
+
   void init(kj::ArrayPtr<const ValuePtr> bindings);
+
+  void bind(uint column, ValuePtr value);
+  void bind(uint column, kj::ArrayPtr<const byte> value);
+  void bind(uint column, kj::StringPtr value);
+  void bind(uint column, int64_t value);
+  void bind(uint column, double value);
+  void bind(uint column, decltype(nullptr));
+
+  inline void bind(uint column, int value) { bind(column, static_cast<int64_t>(value)); }
+  inline void bind(uint column, uint value) { bind(column, static_cast<int64_t>(value)); }
+  inline void bind(uint column, float value) { bind(column, static_cast<double>(value)); }
+  // Some reasonable automatic conversions.
+
+  template <typename... T, size_t... i>
+  void bindAll(std::index_sequence<i...>, T&&... value) {
+    checkRequirements(sizeof...(T));
+    (bind(i, value), ...);
+    nextRow();
+  }
 };
 
 class Sqlite::Vfs {

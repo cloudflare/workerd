@@ -97,7 +97,7 @@ Sqlite::~Sqlite() noexcept(false) {
   KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) { break; }
 }
 
-static kj::Own<sqlite3_stmt> prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags) {
+kj::Own<sqlite3_stmt> Sqlite::prepareSql(sqlite3* db, kj::StringPtr sqlCode, uint prepFlags) {
   sqlite3_stmt* result;
   const char* tail;
 
@@ -135,33 +135,60 @@ Sqlite::Query::~Query() noexcept(false) {
   sqlite3_clear_bindings(statement);
 }
 
-void Sqlite::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
+void Sqlite::Query::checkRequirements(size_t size) {
   KJ_REQUIRE(!sqlite3_stmt_busy(statement), "only one Query can run at a time");
-
-  KJ_REQUIRE(bindings.size() == sqlite3_bind_parameter_count(statement),
+  KJ_REQUIRE(size == sqlite3_bind_parameter_count(statement),
       "wrong number of bindings for SQLite query");
+}
+
+void Sqlite::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
+  checkRequirements(bindings.size());
 
   for (auto i: kj::indices(bindings)) {
-    KJ_SWITCH_ONEOF(bindings[i]) {
-      KJ_CASE_ONEOF(blob, kj::ArrayPtr<const byte>) {
-        SQLITE_CALL(sqlite3_bind_blob(statement, i+1, blob.begin(), blob.size(), SQLITE_STATIC));
-      }
-      KJ_CASE_ONEOF(text, kj::StringPtr) {
-        SQLITE_CALL(sqlite3_bind_text(statement, i+1, text.begin(), text.size(), SQLITE_STATIC));
-      }
-      KJ_CASE_ONEOF(n, int64_t) {
-        SQLITE_CALL(sqlite3_bind_int64(statement, i+1, n));
-      }
-      KJ_CASE_ONEOF(x, double) {
-        SQLITE_CALL(sqlite3_bind_double(statement, i+1, x));
-      }
-      KJ_CASE_ONEOF(_, decltype(nullptr)) {
-        SQLITE_CALL(sqlite3_bind_null(statement, i+1));
-      }
-    }
+    bind(i, bindings[i]);
   }
 
   nextRow();
+}
+
+void Sqlite::Query::bind(uint i, ValuePtr value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(blob, kj::ArrayPtr<const byte>) {
+      SQLITE_CALL(sqlite3_bind_blob(statement, i+1, blob.begin(), blob.size(), SQLITE_STATIC));
+    }
+    KJ_CASE_ONEOF(text, kj::StringPtr) {
+      SQLITE_CALL(sqlite3_bind_text(statement, i+1, text.begin(), text.size(), SQLITE_STATIC));
+    }
+    KJ_CASE_ONEOF(n, int64_t) {
+      SQLITE_CALL(sqlite3_bind_int64(statement, i+1, n));
+    }
+    KJ_CASE_ONEOF(x, double) {
+      SQLITE_CALL(sqlite3_bind_double(statement, i+1, x));
+    }
+    KJ_CASE_ONEOF(_, decltype(nullptr)) {
+      SQLITE_CALL(sqlite3_bind_null(statement, i+1));
+    }
+  }
+}
+
+void Sqlite::Query::bind(uint i, kj::ArrayPtr<const byte> value) {
+  SQLITE_CALL(sqlite3_bind_blob(statement, i+1, value.begin(), value.size(), SQLITE_STATIC));
+}
+
+void Sqlite::Query::bind(uint i, kj::StringPtr value) {
+  SQLITE_CALL(sqlite3_bind_text(statement, i+1, value.begin(), value.size(), SQLITE_STATIC));
+}
+
+void Sqlite::Query::bind(uint i, int64_t value) {
+  SQLITE_CALL(sqlite3_bind_int64(statement, i+1, value));
+}
+
+void Sqlite::Query::bind(uint i, double value) {
+  SQLITE_CALL(sqlite3_bind_double(statement, i+1, value));
+}
+
+void Sqlite::Query::bind(uint i, decltype(nullptr)) {
+  SQLITE_CALL(sqlite3_bind_null(statement, i+1));
 }
 
 void Sqlite::Query::nextRow() {
