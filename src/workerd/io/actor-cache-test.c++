@@ -4492,6 +4492,102 @@ KJ_TEST("ActorCache transaction output gate bypass on one put but not the next")
   gatePromise.wait(ws);
 }
 
+KJ_TEST("ActorCache transaction multiple put batches") {
+  ActorCacheTest test({.maxKeysPerRpc = 2});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  // Do a transaction with enough puts to batch.
+  ActorCache::Transaction txn(test.cache);
+  ActorCacheConvenienceWrappers eztxn(txn);
+  eztxn.put({{"foo", "123"}, {"bar", "456"}, {"baz", "789"}});
+
+  // Poll the wait scope to make sure we haven't slipped through to the cache already.
+  ws.poll();
+
+  eztxn.put({{"qux", "555"}, {"corge", "999"}});
+  txn.commit();
+
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "foo", value = "123"),
+                                    (key = "bar", value = "456")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "baz", value = "789"),
+                                    (key = "qux", value = "555")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("put", ws)
+      .withParams(CAPNP(entries = [(key = "corge", value = "999")]))
+      .thenReturn(CAPNP());
+  mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+  mockTxn->expectDropped(ws);
+}
+
+
+KJ_TEST("ActorCache transaction multiple counted delete batches") {
+  // Do a transaction with a big counted delete. The rpc getMultiple and delete should batch
+  // according to maxKeysPerRpc.
+
+  ActorCacheTest test({.maxKeysPerRpc = 2});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  ActorCache::Transaction txn(test.cache);
+  ActorCacheConvenienceWrappers eztxn(txn);
+
+  {
+    // Load one of our values to delete into the cache itself which will avoid rpc deletes for
+    // counting.
+    test.put("count2", "2");
+    mockStorage->expectCall("put", ws)
+        .withParams(CAPNP(entries = [(key = "count2", value = "2")]))
+        .thenReturn(CAPNP());
+  }
+
+  {
+    // Load one of our values to delete into the transaction which will avoid even talking to the
+    // cache.
+    eztxn.put("count3", "3");
+  }
+
+  auto deletePromise = eztxn.delete_(
+      {"count1"_kj, "count2"_kj, "count3"_kj, "count4"_kj, "count5"_kj}).get<kj::Promise<uint>>();
+
+  mockStorage->expectCall("getMultiple", ws)
+      // Note that this batch is smaller because "count2" was known to the actor cache.
+      .withParams(CAPNP(keys = ["count1"]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {
+    // Pretend that "count1" already exists but was not in the cache.
+    stream.call("values", CAPNP(list = [(key = "count1", value = "1")]))
+        .expectReturns(CAPNP(), ws);
+    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+  }).expectCanceled();
+  mockStorage->expectCall("getMultiple", ws)
+      .withParams(CAPNP(keys = ["count4", "count5"]), "stream"_kj)
+      .useCallback("stream", [&](MockClient stream) {
+    stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+  }).expectCanceled();
+
+  // For hacky reasons, we are able to observe the counted delete before we submit the
+  // transaction.
+  KJ_EXPECT(deletePromise.wait(ws) == 3);
+
+  txn.commit();
+
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
+  mockTxn->expectCall("delete", ws)
+      // "count3" comes first because it entered the transaction first.
+      .withParams(CAPNP(keys = ["count3", "count1"]))
+      .thenReturn(CAPNP(numDeleted = 1));
+  mockTxn->expectCall("delete", ws)
+      // Neither "count4" or "count5" are deleted because we observed them in the get.
+      .withParams(CAPNP(keys = ["count2"]))
+      .thenReturn(CAPNP(numDeleted = 1));
+  mockTxn->expectCall("commit", ws).thenReturn(CAPNP());
+  mockTxn->expectDropped(ws);
+}
+
 KJ_TEST("ActorCache transaction negative list range returns nothing") {
   ActorCacheTest test({.monitorOutputGate = false});
 

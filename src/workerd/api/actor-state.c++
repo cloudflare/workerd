@@ -638,10 +638,6 @@ ActorCacheInterface& DurableObjectTransaction::getCache(OpName op) {
   auto& result = *JSG_REQUIRE_NONNULL(cacheTxn, Error,
       kj::str("Cannot call ", op,
       " on transaction that has already committed: did you move `txn` outside of the closure?"));
-
-  const auto maxKeys = rpc::ActorStorage::MAX_KEYS;
-  JSG_REQUIRE(result.size() < maxKeys || readOnlyOp(op),
-      Error, kj::str("Maximum number of keys modified in a transaction is ", maxKeys, "."));
   return result;
 }
 

@@ -2958,10 +2958,10 @@ ActorCache::Transaction::~Transaction() noexcept(false) {
 kj::Maybe<kj::Promise<void>> ActorCache::Transaction::commit() {
   {
     auto lock = cache.lru.cleanList.lockExclusive();
-    for (auto& change: changes) {
+    for (auto& change: entriesToWrite) {
       cache.putImpl(lock, kj::mv(change.entry), change.options, nullptr);
     }
-    changes.clear();
+    entriesToWrite.clear();
     cache.evictOrOomIfNeeded(lock);
   }
 
@@ -2974,7 +2974,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::commit() {
 }
 
 kj::Promise<void> ActorCache::Transaction::rollback() {
-  changes.clear();
+  entriesToWrite.clear();
   alarmChange = nullptr;
   return kj::READY_NOW;
 }
@@ -2985,7 +2985,7 @@ kj::Promise<void> ActorCache::Transaction::rollback() {
 kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>>>
     ActorCache::Transaction::get(Key key, ReadOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
-  KJ_IF_MAYBE(change, changes.find(key)) {
+  KJ_IF_MAYBE(change, entriesToWrite.find(key)) {
     return change->entry->value.map([&](ValuePtr value) {
       return value.attach(kj::atomicAddRef(*change->entry));
     });
@@ -3002,7 +3002,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   kj::Vector<Key> keysToFetch;
 
   for (auto& key: keys) {
-    KJ_IF_MAYBE(change, changes.find(key)) {
+    KJ_IF_MAYBE(change, entriesToWrite.find(key)) {
       changedEntries.add(kj::atomicAddRef(*change->entry));
     } else {
       keysToFetch.add(kj::mv(key));
@@ -3035,8 +3035,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     // No results in these cases, just return.
     return ActorCache::GetResultList(kj::mv(changedEntries), {}, GetResultList::REVERSE);
   }
-  auto beginIter = changes.seek(begin);
-  auto endIter = seekOrEnd(changes, end);
+  auto beginIter = entriesToWrite.seek(begin);
+  auto endIter = seekOrEnd(entriesToWrite, end);
   uint positiveCount = 0;
   // TODO(cleanup): Add `iterRange()` to KJ's public interface.
   for (auto& change: kj::_::iterRange(beginIter, endIter)) {
@@ -3064,8 +3064,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     // No results in these cases, just return.
     return ActorCache::GetResultList(kj::mv(changedEntries), {}, GetResultList::REVERSE);
   }
-  auto beginIter = changes.seek(begin);
-  auto endIter = seekOrEnd(changes, end);
+  auto beginIter = entriesToWrite.seek(begin);
+  auto endIter = seekOrEnd(entriesToWrite, end);
   uint positiveCount = 0;
   for (auto iter = endIter; iter != beginIter;) {
     --iter;
@@ -3172,14 +3172,25 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
     kj::Array<Key> keys, WriteOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
 
+  if (keys.size() == 0) {
+    return 0u;
+  }
+
   uint count = 0;
-  kj::Vector<Key> keysToCount;
+  kj::Vector<kj::Vector<Key>> keysToCount;
+  auto startNewBatch = [&]() {
+    return &keysToCount.add();
+  };
+  auto currentBatch = startNewBatch();
 
   {
     auto lock = cache.lru.cleanList.lockExclusive();
     for (auto& key: keys) {
       KJ_IF_MAYBE(keyToCount, putImpl(lock, kj::mv(key), nullptr, options, count)) {
-        keysToCount.add(cloneKey(*keyToCount));
+        if (currentBatch->size() >= cache.lru.options.maxKeysPerRpc) {
+          currentBatch = startNewBatch();
+        }
+        currentBatch->add(cloneKey(*keyToCount));
       }
     }
   }
@@ -3187,18 +3198,40 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
   if (keysToCount.size() == 0) {
     return count;
   } else {
-    // Unfortunately, to find out the count, we have to do a read.
-    KJ_SWITCH_ONEOF(cache.get(keysToCount.releaseAsArray(), {})) {
-      KJ_CASE_ONEOF(results, GetResultList) {
-        return kj::implicitCast<uint>(count + results.size());
-      }
-      KJ_CASE_ONEOF(promise, kj::Promise<GetResultList>) {
-        return promise.then([count](GetResultList results) mutable {
-          return kj::implicitCast<uint>(count + results.size());
-        });
+    // HACK: Since we allow deletes of larger than our maxKeysPerRpc but these deletes can provoke
+    // gets, we need to batch said gets. This all would be much simpler if our default get behavior
+    // did batching/sync.
+    kj::Maybe<kj::Promise<uint>> maybeTotalPromise;
+    for(auto& batch : keysToCount) {
+      // Unfortunately, to find out the count, we have to do a read. Note that even returning this
+      // value separate from a committed transaction means that non-transaction storage ops can make
+      // the value incorrect.
+      KJ_SWITCH_ONEOF(cache.get(batch.releaseAsArray(), {})) {
+        KJ_CASE_ONEOF(results, GetResultList) {
+          count = count + results.size();
+        }
+        KJ_CASE_ONEOF(promise, kj::Promise<GetResultList>) {
+          if (maybeTotalPromise == nullptr) {
+            // We had to do a remote get, start a promise
+            maybeTotalPromise.emplace(0);
+          }
+          maybeTotalPromise = KJ_ASSERT_NONNULL(maybeTotalPromise).then(
+              [promise = kj::mv(promise)](uint previousResult) mutable -> kj::Promise<uint> {
+            return promise.then([previousResult](GetResultList results) mutable -> uint {
+              return previousResult + kj::implicitCast<uint>(results.size());
+            });
+          });
+        }
       }
     }
-    KJ_UNREACHABLE;
+
+    KJ_IF_MAYBE(totalPromise, maybeTotalPromise) {
+      return totalPromise->then([count](uint result){
+        return count + result;
+      });
+    } else {
+      return count;
+    }
   }
 }
 
@@ -3211,7 +3244,7 @@ kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
     options
   };
   bool replaced = false;
-  auto& slot = changes.upsert(kj::mv(change), [&](auto& existing, auto&& replacement) {
+  auto& slot = entriesToWrite.upsert(kj::mv(change), [&](auto& existing, auto&& replacement) {
     replaced = true;
     KJ_IF_MAYBE(c, count) {
       *c += existing.entry->value != nullptr;
