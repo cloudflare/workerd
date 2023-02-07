@@ -293,7 +293,8 @@ Trace::Exception::Exception(rpc::Trace::Exception::Reader reader)
 
 SpanBuilder& SpanBuilder::operator=(SpanBuilder &&other) {
   end();
-  state = kj::mv(other.state);
+  observer = kj::mv(other.observer);
+  span = kj::mv(other.span);
   return *this;
 }
 
@@ -302,22 +303,24 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 }
 
 void SpanBuilder::end() {
-  KJ_IF_MAYBE(s, state) {
-    s->span.endTime = kj::systemPreciseCalendarClock().now();
-    s->observer->report(s->span);
-    state = nullptr;
+  KJ_IF_MAYBE(o, observer) {
+    KJ_IF_MAYBE(s, span) {
+      s->endTime = kj::systemPreciseCalendarClock().now();
+      (**o).report(*s);
+      span = nullptr;
+    }
   }
 }
 
 void SpanBuilder::setOperationName(kj::StringPtr operationName) {
-  KJ_IF_MAYBE(s, state) {
-    s->span.operationName = operationName;
+  KJ_IF_MAYBE(s, span) {
+    s->operationName = operationName;
   }
 }
 
 void SpanBuilder::setTag(kj::StringPtr key, TagValue value) {
-  KJ_IF_MAYBE(s, state) {
-    s->span.tags.upsert(key, kj::mv(value), [key](TagValue& existingValue, TagValue&& newValue) {
+  KJ_IF_MAYBE(s, span) {
+    s->tags.upsert(key, kj::mv(value), [key](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
       [[maybe_unused]] static auto logged = [key]() {
@@ -330,11 +333,11 @@ void SpanBuilder::setTag(kj::StringPtr key, TagValue value) {
 }
 
 void SpanBuilder::addLog(kj::Date timestamp, kj::StringPtr key, TagValue value) {
-  KJ_IF_MAYBE(s, state) {
-    if (s->span.logs.size() >= Span::MAX_LOGS) {
-      ++s->span.droppedLogs;
+  KJ_IF_MAYBE(s, span) {
+    if (s->logs.size() >= Span::MAX_LOGS) {
+      ++s->droppedLogs;
     } else {
-      s->span.logs.add(Span::Log {
+      s->logs.add(Span::Log {
         .timestamp = timestamp,
         .tag = {
           .key = key,

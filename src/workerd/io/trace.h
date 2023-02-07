@@ -428,12 +428,17 @@ class SpanBuilder {
 
 public:
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::StringPtr operationName,
-                       kj::Date startTime = kj::systemPreciseCalendarClock().now())
-      { KJ_IF_MAYBE(o, observer) { state.emplace(kj::mv(*o), operationName, startTime); } }
+                       kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
+    if (observer != nullptr) {
+      this->observer = kj::mv(observer);
+      span.emplace(operationName, startTime);
+    }
+  }
   // Create a new top-level span that will report to the given observer. If the observer is null,
   // no data is collected.
   //
-  // `operationName` should be a string literal with infinite lifetime.
+  // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
+  // attached to the observer observing this span.
 
   SpanBuilder(decltype(nullptr)) {}
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
@@ -449,7 +454,7 @@ public:
   // useful to be able to submit early. The SpanBuilder ignores all further method calls after this
   // is invoked.
 
-  bool isObserved() { return state != nullptr; }
+  bool isObserved() { return observer != nullptr; }
   // Useful to skip unnecessary code when not observed.
 
   SpanBuilder newChild(kj::StringPtr operationName,
@@ -476,18 +481,9 @@ public:
   // duplicate keys.
 
 private:
-  struct State {
-    kj::Own<SpanObserver> observer;
-    // The observer, or null if not being observed.
-
-    Span span;
-    // The under-construction span.
-
-    State(kj::Own<SpanObserver> observer, kj::StringPtr operationName,
-          kj::Date startTime)
-        : observer(kj::mv(observer)), span(operationName, startTime) {}
-  };
-  kj::Maybe<State> state;
+  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Maybe<Span> span;
+  // The under-construction span, or null if the span has ended.
 
   friend class SpanParent;
 };
@@ -513,8 +509,7 @@ public:
 };
 
 inline SpanParent::SpanParent(SpanBuilder& builder)
-    : observer(builder.state.map(
-          [](SpanBuilder::State& state) { return kj::addRef(*state.observer); })) {}
+    : observer(mapAddRef(builder.observer)) {}
 
 inline SpanParent SpanParent::addRef() {
   return SpanParent(mapAddRef(observer));
@@ -526,7 +521,7 @@ inline SpanBuilder SpanParent::newChild(kj::StringPtr operationName, kj::Date st
 }
 
 inline SpanBuilder SpanBuilder::newChild(kj::StringPtr operationName, kj::Date startTime) {
-  return SpanBuilder(state.map([](State& state) { return state.observer->newChild(); }),
+  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
                      operationName, startTime);
 }
 
