@@ -195,7 +195,7 @@ void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
       SQLITE_CALL(sqlite3_bind_text(statement, i+1, text.begin(), text.size(), SQLITE_STATIC));
     }
     KJ_CASE_ONEOF(n, int64_t) {
-      SQLITE_CALL(sqlite3_bind_int64(statement, i+1, n));
+      SQLITE_CALL(sqlite3_bind_int64(statement, i+1, static_cast<long long>(n)));
     }
     KJ_CASE_ONEOF(x, double) {
       SQLITE_CALL(sqlite3_bind_double(statement, i+1, x));
@@ -214,7 +214,7 @@ void SqliteDatabase::Query::bind(uint i, kj::StringPtr value) {
   SQLITE_CALL(sqlite3_bind_text(statement, i+1, value.begin(), value.size(), SQLITE_STATIC));
 }
 
-void SqliteDatabase::Query::bind(uint i, int64_t value) {
+void SqliteDatabase::Query::bind(uint i, long long value) {
   SQLITE_CALL(sqlite3_bind_int64(statement, i+1, value));
 }
 

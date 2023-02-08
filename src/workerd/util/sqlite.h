@@ -186,12 +186,13 @@ private:
   void bind(uint column, ValuePtr value);
   void bind(uint column, kj::ArrayPtr<const byte> value);
   void bind(uint column, kj::StringPtr value);
-  void bind(uint column, int64_t value);
+  void bind(uint column, long long value);
   void bind(uint column, double value);
   void bind(uint column, decltype(nullptr));
 
-  inline void bind(uint column, int value) { bind(column, static_cast<int64_t>(value)); }
-  inline void bind(uint column, uint value) { bind(column, static_cast<int64_t>(value)); }
+  inline void bind(uint column, int value) { bind(column, static_cast<long long>(value)); }
+  inline void bind(uint column, uint value) { bind(column, static_cast<long long>(value)); }
+  inline void bind(uint column, long value) { bind(column, static_cast<long long>(value)); }
   inline void bind(uint column, float value) { bind(column, static_cast<double>(value)); }
   // Some reasonable automatic conversions.
 
