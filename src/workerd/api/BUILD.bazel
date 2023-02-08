@@ -54,7 +54,7 @@ kj_test(
 
 [wd_test(
     src = f,
-    data = [f.removesuffix(".capnp") + ".js"],
+    data = [f.removesuffix(".wd-test") + ".js"],
 ) for f in glob(
-    ["**/*-test.capnp"],
+    ["**/*.wd-test"],
 )]

@@ -8,7 +8,8 @@ def wd_test(
 
     Args:
      src: A .capnp config file defining the test. (`name` will be derived from this if not
-        specified.)
+        specified.) The extension `.wd-test` is also permitted instead of `.capnp`, in order to
+        avoid confusing other build systems that may assume a `.capnp` file should be complied.
      data: Files which the .capnp config file may embed. Typically JavaScript files.
      args: Additional arguments to pass to `workerd`. Typically used to pass `--experimental`.
     """
@@ -25,7 +26,7 @@ def wd_test(
 
     # Default name based on src.
     if name == None:
-        name = src.removesuffix(".capnp")
+        name = src.removesuffix(".capnp").removesuffix(".wd-test")
 
     _wd_test(
         name = name,
