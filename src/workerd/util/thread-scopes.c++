@@ -14,6 +14,8 @@ namespace {
 
 thread_local uint allowV8BackgroundThreadScopeCount = 0;
 thread_local uint isolateShutdownThreadScopeCount = 0;
+// XXX: Do we have other global vars? Is there a better place for this?
+kj::Maybe<kj::String> globalTlsSystemCerts;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
@@ -63,6 +65,14 @@ bool isPredictableModeForTest() {
 
 void setPredictableModeForTest() {
   predictableMode = true;
+}
+
+void initGlobalTlsSystemCerts() {
+  globalTlsSystemCerts = KJ_ASSERT_NONNULL(kj::readTlsSystemCerts());
+}
+
+kj::Maybe<kj::StringPtr> getGlobalTlsSystemCerts() {
+  return globalTlsSystemCerts;
 }
 
 ThreadProgressCounter::ThreadProgressCounter(uint64_t& counter)

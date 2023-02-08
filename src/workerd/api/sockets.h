@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include "http.h"
+#include <kj/compat/tls.h>
 
 
 namespace workerd::api {
@@ -17,17 +18,19 @@ struct SocketAddress {
 };
 
 struct SocketOptions {
-  jsg::Unimplemented tls; // TODO(later): TCP socket options need to be implemented.
+  bool tls;
   JSG_STRUCT(tls);
 };
 
 class Socket: public jsg::Object {
 public:
   Socket(jsg::Lock& js, jsg::Ref<ReadableStream> readable, jsg::Ref<WritableStream> writable,
-      kj::Own<jsg::PromiseResolverPair<void>> close)
+      kj::Own<jsg::PromiseResolverPair<void>> close,
+      kj::Maybe<kj::Array<kj::TlsCertificate>> systemCerts)
       : readable(kj::mv(readable)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
-        closedPromise(kj::mv(closeFulfiller->promise)) { };
+        closedPromise(kj::mv(closeFulfiller->promise)),
+        systemCerts(kj::mv(systemCerts)) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -55,6 +58,7 @@ private:
   kj::Own<jsg::PromiseResolverPair<void>> closeFulfiller;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
+  kj::Maybe<kj::Array<kj::TlsCertificate>> systemCerts;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
 
@@ -80,10 +84,12 @@ private:
 };
 
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address);
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
+    jsg::Optional<SocketOptions> options);
 
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
+    jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags);
 
 #define EW_SOCKETS_ISOLATE_TYPES     \

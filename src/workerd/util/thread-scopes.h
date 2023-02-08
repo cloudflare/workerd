@@ -14,6 +14,7 @@
 
 #include <kj/common.h>
 #include <inttypes.h>
+#include <kj/compat/tls.h>
 
 namespace workerd {
 
@@ -63,6 +64,9 @@ void setPredictableModeForTest();
 // Tracks whether the process should run in "predictable mode" for testing purposes. This causes
 // random number generators to return static results instead, changes some timers to return zero,
 // etc. This should only be used in tests.
+
+void initGlobalTlsSystemCerts();
+kj::Maybe<kj::StringPtr> getGlobalTlsSystemCerts();
 
 class ThreadProgressCounter {
   // RAII class which allows the thread's active watchdog to observe forward progress through

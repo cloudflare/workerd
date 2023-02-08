@@ -4,6 +4,7 @@
 
 #include "sockets.h"
 #include "system-streams.h"
+#include <workerd/util/thread-scopes.h>
 
 
 namespace workerd::api {
@@ -39,8 +40,24 @@ bool isValidHost(kj::StringPtr host) {
   return true;
 }
 
+kj::Maybe<kj::String> getHost(kj::StringPtr address) {
+  // Simple address parser which extracts the hostname. Intentionally simple as its likely we will
+  // not need this in the long-term (if we decide to change `connect` api to take host/port
+  // separately).
+  auto portIndex = address.findFirst(':');
+  if (portIndex == nullptr) {
+    return kj::str(address);
+  }
+  if (portIndex != address.findLast(':')) {
+    return nullptr;
+  }
+
+  return kj::str(address.slice(0, KJ_ASSERT_NONNULL(portIndex)));
+}
+
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address) {
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
+    jsg::Optional<SocketOptions> options) {
 
   auto addressStr = kj::str("");
   KJ_SWITCH_ONEOF(address) {
@@ -65,9 +82,36 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = kj::newHttpClient(*client);
   auto request = httpClient->connect(addressStr, *headers);
+  auto socketStream = kj::mv(request.connection);
+  kj::Maybe<kj::Array<kj::TlsCertificate>> systemCerts;
+  KJ_IF_MAYBE(opts, options) {
+    if (opts->tls) {
+      // Configure a default TLS context.
+      kj::TlsContext::Options options;
+      KJ_IF_MAYBE(certs, getGlobalTlsSystemCerts()) {
+        // We have a custom list of certificates to use. Parse them and use them instead of
+        // the system trust store. This is used upstream.
+        options.useSystemTrustStore = false;
+        systemCerts = kj::parseCertificatesList(*certs);
+        KJ_REQUIRE(KJ_ASSERT_NONNULL(systemCerts).size() > 0, "No certificates parsed");
+        options.trustedCertificates = KJ_ASSERT_NONNULL(systemCerts).asPtr();
+      } else {
+        options.useSystemTrustStore = true;
+      }
+
+      auto tls = kj::heap<kj::TlsContext>(kj::mv(options));
+      auto maybeHost = getHost(addressStr);
+      // TODO(later): Allow custom host to be specified in Socket options.
+      auto host = kj::mv(JSG_REQUIRE_NONNULL(maybeHost, TypeError,
+          "Specified address has no hostname, cannot establish TLS connection."));
+      // Wrap the socket stream in the TLS context.
+      socketStream = kj::newPromisedStream(
+          tls->wrapClient(kj::mv(socketStream), host).attach(kj::mv(tls)));
+    }
+  }
 
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(kj::mv(request.connection), ioContext);
+  auto sysStreams = newSystemMultiStream(kj::mv(socketStream), ioContext);
   auto readable = jsg::alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable));
 
@@ -76,7 +120,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   closeFulfiller->promise.markAsHandled();
 
   auto result = jsg::alloc<Socket>(
-      js, kj::mv(readable), kj::mv(writable), kj::mv(closeFulfiller));
+      js, kj::mv(readable), kj::mv(writable), kj::mv(closeFulfiller), kj::mv(systemCerts));
   // `handleProxyStatus` needs an initialised refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor.
   result->handleProxyStatus(js, kj::mv(request.status));
@@ -85,6 +129,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
+    jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags) {
   // `connect()` should be hidden when the feature flag is off, so we shouldn't even get here.
   KJ_ASSERT(featureFlags.getTcpSocketsSupport());
@@ -96,7 +141,7 @@ jsg::Ref<Socket> connectImpl(
     actualFetcher = jsg::alloc<Fetcher>(
         IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
   }
-  return connectImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(address));
+  return connectImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(address), kj::mv(options));
 }
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
