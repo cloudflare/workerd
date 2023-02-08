@@ -371,7 +371,6 @@ interface IncomingRequestCfPropertiesBotManagementBase {
   staticResource: boolean;
   /**
    * List of IDs that correlate to the Bot Management heuristic detections made on a request (you can have multiple heuristic detections on the same request).
-   * Use this field to explicitly match a specific heuristic or to exclude a heuristic in a rule.
    */
   detectionIds: number[];
 }
