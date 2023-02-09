@@ -2217,7 +2217,7 @@ public:
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override {
     if (!isErroredOrClosed()) {
-      state.template init<StreamStates::Errored>(js.v8Ref(reason));
+      state.template init<kj::Exception>(js.exceptionToKj(js.v8Ref(reason)));
     }
   }
 
@@ -2248,8 +2248,8 @@ public:
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return KJ_EXCEPTION(FAILED, "stream has already been consumed");
       }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.exceptionToKj(errored.addRef(js));
+      KJ_CASE_ONEOF(errored, kj::Exception) {
+        return kj::cp(errored);
       }
     }
     KJ_UNREACHABLE;
@@ -2274,13 +2274,13 @@ private:
   };
 
   struct Pumping {};
-  kj::OneOf<Readable, Pumping, StreamStates::Closed, StreamStates::Errored> state;
+  kj::OneOf<Readable, Pumping, StreamStates::Closed, kj::Exception> state;
   kj::Own<WritableStreamSink> sink;
   kj::Own<WeakRef> ref;
   bool end;
 
   bool isErroredOrClosed() {
-    return state.template is<StreamStates::Errored>() ||
+    return state.template is<kj::Exception>() ||
            state.template is<StreamStates::Closed>();
   }
 
@@ -2299,11 +2299,11 @@ private:
             ioContext.awaitIoLegacy(sink->end().attach(kj::mv(sink))) :
             js.resolvedPromise();
       }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      KJ_CASE_ONEOF(errored, kj::Exception) {
         if (end) {
-          sink->abort(js.exceptionToKj(errored.addRef(js)));
+          sink->abort(kj::cp(errored));
         }
-        return js.rejectedPromise<void>(errored.addRef(js));
+        return js.rejectedPromise<void>(js.exceptionToJs(kj::cp(errored)));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
         const auto read = [&](auto& js) {
