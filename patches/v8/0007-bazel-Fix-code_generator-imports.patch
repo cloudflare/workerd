@@ -1,0 +1,28 @@
+From f9ade1c696ab83f30f0f2af1c3c2836240cc412e Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 8 Mar 2023 16:15:31 -0500
+Subject: [PATCH] [PATCH] [bazel] Fix v8 code_generator imports
+
+---
+ BUILD.bazel | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index f216a1811da..5d32cbe019e 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -3424,6 +3424,11 @@ py_binary(
+     deps = [
+         requirement("jinja2"),
+     ],
++    # The code_generator complains about not finding pdl.py, so amend the list
++    # of include directories. Not sure why this is needed only with bazel v6.
++    imports = [
++        "third_party/inspector_protocol/",
++    ],
+ )
+ 
+ genrule(
+-- 
+2.37.1 (Apple Git-137.1)
+
