@@ -1024,9 +1024,16 @@ public:
     auto& publicKeyImpl = kj::downcast<EllipticKey>(*publicKey->impl);
 
     // Adapted from https://wiki.openssl.org/index.php/Elliptic_Curve_Diffie_Hellman:
-    auto privateEcKey = EVP_PKEY_get0_EC_KEY(getEvpPkey());
-    auto publicEcPoint = EC_KEY_get0_public_key(EVP_PKEY_get0_EC_KEY(publicKeyImpl.getEvpPkey()));
-    auto fieldSize = EC_GROUP_get_degree(EC_KEY_get0_group(privateEcKey));
+    auto& privateEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
+        InternalDOMOperationError, "Not elliptic curve data backing key",
+        tryDescribeOpensslErrors());
+    auto& publicEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(publicKeyImpl.getEvpPkey()),
+        InternalDOMOperationError, "Not elliptic curve data backing key",
+        tryDescribeOpensslErrors());
+    auto& publicEcPoint = JSG_REQUIRE_NONNULL(EC_KEY_get0_public_key(&publicEcKey),
+        DOMOperationError, "No public elliptic curve key data in this key",
+        tryDescribeOpensslErrors());
+    auto fieldSize = EC_GROUP_get_degree(EC_KEY_get0_group(&privateEcKey));
 
     // Assuming that `fieldSize` will always be a sane value since it's related to the keys we
     // construct in C++ (i.e. not untrusted user input).
@@ -1035,7 +1042,7 @@ public:
     sharedSecret.resize(
         integerCeilDivision<std::make_unsigned<decltype(fieldSize)>::type>(fieldSize, 8u));
     auto written = ECDH_compute_key(sharedSecret.begin(), sharedSecret.capacity(),
-        publicEcPoint, privateEcKey, nullptr);
+        &publicEcPoint, &privateEcKey, nullptr);
     JSG_REQUIRE(written > 0, DOMOperationError, "Failed to generate shared ECDH secret",
         tryDescribeOpensslErrors());
 
@@ -1409,7 +1416,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
       InternalDOMOperationError, "Error importing EC key", internalDescribeOpensslErrors());
   auto point = OSSL_NEW(EC_POINT, group);
   OSSLCALL(EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr));
-  EC_KEY_set_public_key(ecKey, point);
+  OSSLCALL(EC_KEY_set_public_key(ecKey, point));
 
   if (keyDataJwk.d != nullptr) {
     // This is a private key.
