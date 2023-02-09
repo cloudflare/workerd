@@ -389,8 +389,11 @@ private:
   };
   kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
 
-  inline PipeLocked& getPipe() {
-    return KJ_ASSERT_NONNULL(state.template tryGet<PipeLocked>());
+  inline kj::Maybe<PipeLocked&> tryGetPipe() {
+    KJ_IF_MAYBE(locked, state.template tryGet<PipeLocked>()) {
+      return *locked;
+    }
+    return nullptr;
   }
 
   friend Controller;
