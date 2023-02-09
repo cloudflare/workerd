@@ -9,14 +9,16 @@
 namespace workerd::jsg {
 
 Ref<DOMException> DOMException::constructor(
-    Lock& js,
+    const v8::FunctionCallbackInfo<v8::Value>& args,
     Optional<kj::String> message,
     Optional<kj::String> name) {
-  kj::String errMessage = kj::mv(message).orDefault([&] { return kj::String(); });
-  return jsg::alloc<DOMException>(
-      kj::mv(errMessage),
-      kj::mv(name).orDefault([] { return kj::str("Error"); }),
-      js.v8Ref(v8::Exception::Error(v8Str(js.v8Isolate, errMessage)).As<v8::Object>()));
+  auto exception = jsg::alloc<DOMException>(
+      kj::mv(message).orDefault([&] { return kj::String(); }),
+      kj::mv(name).orDefault([] { return kj::str("Error"); }));
+  // Uses the built-in Error.captureStackTrace method to attach the stack
+  // to the wrapper object associated with this DOMException.
+  captureStackTrace(args.GetIsolate(), args.This());
+  return kj::mv(exception);
 }
 
 kj::StringPtr DOMException::getName() {
@@ -38,16 +40,6 @@ int DOMException::getCode() {
     return code->second;
   }
   return 0;
-}
-
-v8::Local<v8::Value> DOMException::getStack(Lock& js) {
-  return check(errorForStack.getHandle(js)->Get(
-      js.v8Isolate->GetCurrentContext(),
-      v8StrIntern(js.v8Isolate, "stack")));
-}
-
-void DOMException::visitForGc(GcVisitor& visitor) {
-  visitor.visit(errorForStack);
 }
 
 }  // namespace workerd::jsg

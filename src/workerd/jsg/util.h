@@ -415,4 +415,6 @@ v8::MaybeLocal<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
 
+void captureStackTrace(v8::Isolate* isolate, v8::Local<v8::Object> target);
+
 }  // namespace workerd::jsg
