@@ -1200,8 +1200,8 @@ public:
       // lock and take a lock on the target isolate before constructing the actor. Even if these
       // are the same isolate (as is commonly the case), we really don't want to do this stuff
       // synchronously, so this has the effect of pushing off to a later turn of the event loop.
-      auto promise = service.worker->takeAsyncLockWithoutRequest(nullptr)
-          .then([this, id = kj::mv(id)](Worker::AsyncLock lock) mutable -> kj::Own<ActorChannel> {
+      auto promise = service.worker->takeAsyncLockWithoutRequest(nullptr).then(
+          [this, id = kj::mv(id)](Worker::AsyncLock asyncLock) mutable -> kj::Own<ActorChannel> {
         kj::String idStr;
         KJ_SWITCH_ONEOF(id) {
           KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
@@ -1228,6 +1228,8 @@ public:
           };
 
           TimerChannel& timerChannel = service;
+
+          Worker::Lock lock(*service.worker, asyncLock);
           auto newActor = kj::refcounted<Worker::Actor>(
               *service.worker, kj::mv(id), true, kj::mv(persistent),
               className, kj::mv(makeStorage), lock,

@@ -637,7 +637,7 @@ public:
 
   Actor(const Worker& worker, Id actorId,
         bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
-        kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, LockType lockType,
+        kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
         TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
