@@ -69,10 +69,6 @@ class URLSearchParams: public jsg::Object {
   // data. It can be used by itself or with URL (every URL object has a searchParams
   // attribute that is kept in sync).
 private:
-  using EntryIteratorType = kj::Array<jsg::UsvStringPtr>;
-  using KeyIteratorType = jsg::UsvStringPtr;
-  using ValueIteratorType = jsg::UsvStringPtr;
-
   struct IteratorState {
     jsg::Ref<URLSearchParams> parent;
     uint index = 0;
@@ -107,17 +103,17 @@ public:
   void sort();
 
   JSG_ITERATOR(EntryIterator, entries,
-                EntryIteratorType,
-                IteratorState,
-                iteratorNext<EntryIteratorType>)
+               kj::Array<jsg::UsvStringPtr>,
+               IteratorState,
+               entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-                KeyIteratorType,
-                IteratorState,
-                iteratorNext<KeyIteratorType>)
+               jsg::UsvStringPtr,
+               IteratorState,
+               keyIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-                ValueIteratorType,
-                IteratorState,
-                iteratorNext<ValueIteratorType>)
+               jsg::UsvStringPtr,
+               IteratorState,
+               valueIteratorNext)
 
   void forEach(
       jsg::V8Ref<v8::Function> callback,
@@ -177,21 +173,29 @@ private:
   void init(Initializer init);
   void parse(jsg::UsvStringPtr input);
 
-  template <typename Type>
-  static kj::Maybe<Type> iteratorNext(jsg::Lock& js, IteratorState& state) {
+  static kj::Maybe<kj::Array<jsg::UsvStringPtr>> entryIteratorNext(
+      jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->list.size()) {
       return nullptr;
     }
     auto& entry = state.parent->list[state.index++];
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr<jsg::UsvStringPtr>(entry.name, entry.value);
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return entry.name.asPtr();
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return entry.value.asPtr();
-    } else {
-      KJ_UNREACHABLE;
+    return kj::arr<jsg::UsvStringPtr>(entry.name, entry.value);
+  }
+
+  static kj::Maybe<jsg::UsvStringPtr> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
+    if (state.index >= state.parent->list.size()) {
+      return nullptr;
     }
+    auto& entry = state.parent->list[state.index++];
+    return entry.name.asPtr();
+  }
+
+  static kj::Maybe<jsg::UsvStringPtr> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
+    if (state.index >= state.parent->list.size()) {
+      return nullptr;
+    }
+    auto& entry = state.parent->list[state.index++];
+    return entry.value.asPtr();
   }
 
   friend class URL;

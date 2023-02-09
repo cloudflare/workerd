@@ -21,10 +21,6 @@ namespace workerd::api {
 
 class Headers: public jsg::Object {
 private:
-  using EntryIteratorType = kj::Array<jsg::ByteString>;
-  using KeyIteratorType = jsg::ByteString;
-  using ValueIteratorType = jsg::ByteString;
-
   template <typename T>
   struct IteratorState {
     kj::Array<T> copy;
@@ -97,17 +93,17 @@ public:
       jsg::Optional<jsg::Value>);
 
   JSG_ITERATOR(EntryIterator, entries,
-                EntryIteratorType,
+                kj::Array<jsg::ByteString>,
                 IteratorState<DisplayedHeader>,
-                iteratorNext<EntryIteratorType>)
+                entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-                KeyIteratorType,
+                jsg::ByteString,
                 IteratorState<jsg::ByteString>,
-                iteratorNext<KeyIteratorType>)
+                keyOrValueIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-                ValueIteratorType,
+                jsg::ByteString,
                 IteratorState<jsg::ByteString>,
-                iteratorNext<KeyIteratorType>)
+                keyOrValueIteratorNext)
 
   // JavaScript API.
 
@@ -171,21 +167,20 @@ private:
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
   }
 
-  template <typename Type>
-  static kj::Maybe<Type> iteratorNext(jsg::Lock& js, auto& state) {
+  static kj::Maybe<kj::Array<jsg::ByteString>> entryIteratorNext(jsg::Lock& js, auto& state) {
     if (state.cursor == state.copy.end()) {
       return nullptr;
     }
     auto& ret = *state.cursor++;
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return kj::mv(ret);
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return kj::mv(ret);
-    } else {
-      KJ_UNREACHABLE;
+    return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
+  }
+
+  static kj::Maybe<jsg::ByteString> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
+    if (state.cursor == state.copy.end()) {
+      return nullptr;
     }
+    auto& ret = *state.cursor++;
+    return kj::mv(ret);
   }
 };
 

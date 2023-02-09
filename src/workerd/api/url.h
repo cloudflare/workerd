@@ -124,10 +124,6 @@ private:
 class URLSearchParams: public jsg::Object {
   // TODO(cleanup): Combine implementation with FormData?
 private:
-  using EntryIteratorType = kj::Array<kj::String>;
-  using KeyIteratorType = kj::String;
-  using ValueIteratorType = kj::String;
-
   struct IteratorState {
     jsg::Ref<URLSearchParams> parent;
     uint index = 0;
@@ -155,17 +151,17 @@ public:
   void sort();
 
   JSG_ITERATOR(EntryIterator, entries,
-                EntryIteratorType,
+                kj::Array<kj::String>,
                 IteratorState,
-                iteratorNext<EntryIteratorType>)
+                entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-                KeyIteratorType,
+                kj::String,
                 IteratorState,
-                iteratorNext<KeyIteratorType>)
+                keyIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-                ValueIteratorType,
+                kj::String,
                 IteratorState,
-                iteratorNext<ValueIteratorType>)
+                valueIteratorNext)
 
   void forEach(
       jsg::V8Ref<v8::Function> callback,
@@ -217,21 +213,28 @@ public:
 private:
   kj::Own<URL::RefcountedUrl> url;
 
-  template <typename Type>
-  static kj::Maybe<Type> iteratorNext(jsg::Lock& js, IteratorState& state) {
+  static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
       return nullptr;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr(kj::str(key), kj::str(value));
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return kj::str(key);
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return kj::str(value);
-    } else {
-      KJ_UNREACHABLE;
+    return kj::arr(kj::str(key), kj::str(value));
+  }
+
+  static kj::Maybe<kj::String> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
+    if (state.index >= state.parent->url->query.size()) {
+      return nullptr;
     }
+    auto& [key, value] = state.parent->url->query[state.index++];
+    return kj::str(key);
+  }
+
+  static kj::Maybe<kj::String> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
+    if (state.index >= state.parent->url->query.size()) {
+      return nullptr;
+    }
+    auto& [key, value] = state.parent->url->query[state.index++];
+    return kj::str(value);
   }
 };
 
