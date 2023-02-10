@@ -280,7 +280,7 @@ kj::Promise<void> WorkerEntrypoint::request(
             // the server.
             !jsg::isTunneledException(e.getDescription()) &&
             !jsg::isDoNotLogException(e.getDescription())) {
-          KJ_LOG(ERROR, "fail-open fallback failed", e);
+          LOG_EXCEPTION("failOpenFallback", e);
         }
         if (!wrappedResponse->isSent()) {
           kj::HttpHeaders headers(threadContext.getHeaderTable());
