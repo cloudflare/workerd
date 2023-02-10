@@ -2872,7 +2872,9 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
-  auto& pipeLock = lock.getPipe();
+  auto maybePipeLock = lock.tryGetPipe();
+  if (maybePipeLock == nullptr) return js.resolvedPromise();
+  auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
   auto preventAbort = pipeLock.preventAbort;
   auto preventCancel = pipeLock.preventCancel;
   auto preventClose = pipeLock.preventClose;
@@ -2960,7 +2962,9 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   return pipeLock.source.read(js).then(js,
       [this, preventCancel, pipeThrough, &source]
           (jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
-    auto& pipeLock = lock.getPipe();
+    auto maybePipeLock = lock.tryGetPipe();
+    if (maybePipeLock == nullptr) return js.resolvedPromise();
+    auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
 
     KJ_IF_MAYBE(promise, pipeLock.checkSignal(js, *this)) {
       lock.releasePipeLock();
