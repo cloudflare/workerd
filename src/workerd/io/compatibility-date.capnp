@@ -278,4 +278,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2023-03-01");
   # Enables the new headers.getSetCookie() API and the corresponding changes in behavior for
   # the Header objects keys() and entries() iterators.
+
+  dispatchExceptionTunneling @27 :Bool
+      $compatEnableDate("2023-03-01")
+      $compatEnableFlag("dynamic_dispatch_tunnel_exceptions")
+      $compatDisableFlag("dynamic_dispatch_treat_exceptions_as_500");
+  # Enables the tunneling of exceptions from a dynamic dispatch callee back into the caller.
+  # Previously any uncaught exception in the callee would be returned to the caller as an empty
+  # HTTP 500 response.
 }
