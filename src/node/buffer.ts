@@ -3,3 +3,4 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export * from 'node-internal:internal_buffer';
+export { default } from 'node-internal:internal_buffer';
