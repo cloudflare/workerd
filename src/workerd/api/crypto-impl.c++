@@ -65,22 +65,36 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
   // in the queue might have been accidentally left there by previous, unrelated operations.
   // Unfortunately BoringSSL's ERR_error_string() and friends produce unfriendly strings that
   // mostly just tell you the error constant name, which isn't what we want to throw at users.
-  switch (ERR_GET_REASON(ERR_peek_last_error())) {
+  switch(ERR_GET_LIB(ERR_peek_last_error())) {
+    // The error code defines overlap between the different boringssl libraries (for example, we
+    // have EC_R_INVALID_ENCODING == RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY), so we must check the
+    // library code.
+    case ERR_LIB_EC:
+      switch (ERR_GET_REASON(ERR_peek_last_error())) {
 #define MAP_ERROR(CODE, TEXT) \
-    case CODE: \
-      ERR_clear_error(); \
-      kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line, \
-          kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT)));
+        case CODE: \
+          ERR_clear_error(); \
+          kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line, \
+              kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT)));
 
-    MAP_ERROR(EC_R_INVALID_ENCODING, "Invalid point encoding.")
-    MAP_ERROR(EC_R_INVALID_COMPRESSED_POINT, "Invalid compressed point.")
-    MAP_ERROR(EC_R_POINT_IS_NOT_ON_CURVE, "Point is not on curve.")
-
-    MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
+        MAP_ERROR(EC_R_INVALID_ENCODING, "Invalid point encoding.")
+        MAP_ERROR(EC_R_INVALID_COMPRESSED_POINT, "Invalid compressed point.")
+        MAP_ERROR(EC_R_POINT_IS_NOT_ON_CURVE, "Point is not on curve.")
+        default:
+          break;
+      };
+      break;
+    case ERR_LIB_RSA:
+      switch (ERR_GET_REASON(ERR_peek_last_error())) {
+        MAP_ERROR(RSA_R_DATA_LEN_NOT_EQUAL_TO_MOD_LEN, "Invalid RSA signature.");
 #undef MAP_ERROR
 
+        default:
+          break;
+      };
+      break;
     default:
-      // move on
+      // not an error code to be converted to app error, move on
       break;
   };
 
