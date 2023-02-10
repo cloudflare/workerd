@@ -1368,4 +1368,13 @@ void IoContext::writeLogfwdr(uint channel,
       .attach(registerPendingEvent()));
 }
 
+void IoContext::requireCurrentOrThrowJs() {
+  JSG_REQUIRE(isCurrent(),
+      Error,
+      "Cannot perform I/O on behalf of a different request. I/O objects (such as "
+      "streams, request/response bodies, and others) created in the context of one request "
+      "handler cannot be accessed from a different request's handler. This is a limitation "
+      "of Cloudflare Workers which allows us to improve overall performance.");
+}
+
 }  // namespace workerd
