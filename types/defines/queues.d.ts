@@ -14,6 +14,14 @@ interface Message<Body = unknown> {
    * The body of the message.
    */
   readonly body: Body;
+  /**
+   * Marks message to be retried.
+   */
+  retry(): void;
+  /**
+   * Marks message acknowledged.
+   */
+  ack(): void;
 }
 
 /**
@@ -32,6 +40,10 @@ interface MessageBatch<Body = unknown> {
    * Marks every message to be retried in the next batch.
    */
   retryAll(): void;
+  /**
+   * Marks every message acknowledged in the batch.
+   */
+  ackAll(): void;
 }
 
 /**
