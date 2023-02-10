@@ -71,7 +71,7 @@ function createAssertionError(
   return error;
 }
 
-export function assert(actual: unknown, message?: string | Error): asserts actual {
+function assert(actual: unknown, message?: string | Error): asserts actual {
   if (arguments.length === 0) {
     throw new AssertionError({
       message: "No value argument passed to `assert.ok()`",
