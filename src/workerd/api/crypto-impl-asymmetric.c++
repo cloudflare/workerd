@@ -1025,10 +1025,10 @@ public:
 
     // Adapted from https://wiki.openssl.org/index.php/Elliptic_Curve_Diffie_Hellman:
     auto& privateEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
-        InternalDOMOperationError, "Not elliptic curve data backing key",
+        InternalDOMOperationError, "No elliptic curve data backing key",
         tryDescribeOpensslErrors());
     auto& publicEcKey = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(publicKeyImpl.getEvpPkey()),
-        InternalDOMOperationError, "Not elliptic curve data backing key",
+        InternalDOMOperationError, "No elliptic curve data backing key",
         tryDescribeOpensslErrors());
     auto& publicEcPoint = JSG_REQUIRE_NONNULL(EC_KEY_get0_public_key(&publicEcKey),
         DOMOperationError, "No public elliptic curve key data in this key",
@@ -1212,7 +1212,7 @@ private:
 
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()), DOMOperationError,
-        "Not elliptic curve data backing key", tryDescribeOpensslErrors());
+        "No elliptic curve data backing key", tryDescribeOpensslErrors());
 
     const auto& group = JSG_REQUIRE_NONNULL(EC_KEY_get0_group(&ec), DOMOperationError,
         "No elliptic curve group in this key", tryDescribeOpensslErrors());
@@ -1250,7 +1250,7 @@ private:
         "Raw export of elliptic curve keys is only allowed for public keys.");
 
     const EC_KEY& ec = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_EC_KEY(getEvpPkey()),
-        InternalDOMOperationError, "Not elliptic curve data backing key",
+        InternalDOMOperationError, "No elliptic curve data backing key",
         tryDescribeOpensslErrors());
     const auto& group = JSG_REQUIRE_NONNULL(EC_KEY_get0_group(&ec), InternalDOMOperationError,
         "No elliptic curve group in this key", tryDescribeOpensslErrors());
