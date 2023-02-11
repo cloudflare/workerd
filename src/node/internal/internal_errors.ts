@@ -417,9 +417,18 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
   }
 }
 
+export class ERR_FALSY_VALUE_REJECTION extends NodeError {
+  reason: string;
+  constructor(reason: string) {
+    super("ERR_FALSY_VALUE_REJECTION", "Promise was rejected with falsy value");
+    this.reason = reason;
+  }
+}
+
 export default {
   ERR_AMBIGUOUS_ARGUMENT,
   ERR_BUFFER_OUT_OF_BOUNDS,
+  ERR_FALSY_VALUE_REJECTION,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INVALID_BUFFER_SIZE,
