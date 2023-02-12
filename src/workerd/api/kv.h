@@ -129,8 +129,8 @@ public:
       get(key: Key, type: "stream"): Promise<ReadableStream | null>;
       get(key: Key, options?: KVNamespaceGetOptions<"text">): Promise<string | null>;
       get<ExpectedValue = unknown>(key: Key, options?: KVNamespaceGetOptions<"json">): Promise<ExpectedValue | null>;
-      get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<string | null>;
-      get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<string | null>;
+      get(key: Key, options?: KVNamespaceGetOptions<"arrayBuffer">): Promise<ArrayBuffer | null>;
+      get(key: Key, options?: KVNamespaceGetOptions<"stream">): Promise<ReadableStream | null>;
 
       list<Metadata = unknown>(options?: KVNamespaceListOptions): Promise<KVNamespaceListResult<Metadata, Key>>;
 
