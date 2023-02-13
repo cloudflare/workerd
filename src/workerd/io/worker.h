@@ -504,7 +504,8 @@ enum class UncaughtExceptionSource {
 
   ASYNC_TASK,
   REQUEST_HANDLER,
-  TRACE_HANDLER
+  TRACE_HANDLER,
+  ALARM_HANDLER,
 };
 kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value);
 

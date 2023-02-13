@@ -398,10 +398,11 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
       auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
       persistent.cancelDeferredAlarmDeletion();
 
-      if (auto desc = e.getDescription();
-          !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-        LOG_EXCEPTION("alarmRun"_kj, e);
-      }
+      context.getMetrics().reportFailure(e);
+
+      // This will include the error in inspector/tracers and log to syslog if internal.
+      context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
+
       EventOutcome outcome = EventOutcome::EXCEPTION;
       KJ_IF_MAYBE(status, context.getLimitEnforcer().getLimitsExceeded()) {
         outcome = *status;
