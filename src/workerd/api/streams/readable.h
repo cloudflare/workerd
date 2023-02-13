@@ -48,6 +48,7 @@ private:
   // ReadableStream remains in the "reader locked" state, per the spec.
   struct Released {};
 
+  IoContext& ioContext;
   ReadableStreamController::Reader& reader;
 
   kj::OneOf<Initial, Attached, StreamStates::Closed, Released> state = Initial();
@@ -175,6 +176,7 @@ class ReadableStream: public jsg::Object {
 private:
 
   struct AsyncIteratorState {
+    IoContext& ioContext;
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
   };
@@ -359,6 +361,7 @@ public:
   // state of the readable.
 
 private:
+  IoContext& ioContext;
   Controller controller;
   kj::Maybe<jsg::Promise<void>> maybePipeThrough;
 

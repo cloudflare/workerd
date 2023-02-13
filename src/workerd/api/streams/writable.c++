@@ -7,7 +7,8 @@
 
 namespace workerd::api {
 
-WritableStreamDefaultWriter::WritableStreamDefaultWriter() {}
+WritableStreamDefaultWriter::WritableStreamDefaultWriter()
+    : ioContext(IoContext::current()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
   KJ_IF_MAYBE(stream, state.tryGet<Attached>()) {
@@ -31,6 +32,7 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStreamDefaultWriter::constructor(
 jsg::Promise<void> WritableStreamDefaultWriter::abort(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> reason) {
+  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -60,6 +62,7 @@ void WritableStreamDefaultWriter::attach(
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -106,6 +109,7 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getClose
 }
 
 kj::Maybe<int> WritableStreamDefaultWriter::getDesiredSize(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -133,6 +137,8 @@ void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& st
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
+  // TODO(soon): Releasing the lock should cancel any pending writes.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -159,6 +165,7 @@ void WritableStreamDefaultWriter::replaceReadyPromise(jsg::Promise<void> readyPr
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v8::Value> chunk) {
+  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this writer was never attached");
@@ -187,11 +194,14 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
 WritableStream::WritableStream(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> sink)
-    : controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)))) {
+    : ioContext(ioContext),
+      controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)))) {
   getController().setOwnerRef(*this);
 }
 
-WritableStream::WritableStream(Controller controller) : controller(kj::mv(controller)) {
+WritableStream::WritableStream(Controller controller)
+    : ioContext(IoContext::current()),
+      controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
 }
 
@@ -208,6 +218,7 @@ WritableStreamController& WritableStream::getController() {
 }
 
 kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
   return JSG_REQUIRE_NONNULL(
       getController().removeSink(js),
       TypeError,
@@ -217,6 +228,7 @@ kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
 jsg::Promise<void> WritableStream::abort(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> reason) {
+  ioContext.requireCurrentOrThrowJs();
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
@@ -225,6 +237,7 @@ jsg::Promise<void> WritableStream::abort(
 }
 
 jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
   if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
@@ -233,6 +246,7 @@ jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
 }
 
 jsg::Ref<WritableStreamDefaultWriter> WritableStream::getWriter(jsg::Lock& js) {
+  ioContext.requireCurrentOrThrowJs();
   return WritableStreamDefaultWriter::constructor(js, JSG_THIS);
 }
 

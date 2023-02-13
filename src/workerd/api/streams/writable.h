@@ -87,6 +87,7 @@ private:
   // WritableStream remains in the "writer locked" state, per the spec.
   struct Released {};
 
+  IoContext& ioContext;
   kj::OneOf<Initial, Attached, Released, StreamStates::Closed> state = Initial();
 
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
@@ -151,6 +152,7 @@ public:
   }
 
 private:
+  IoContext& ioContext;
   Controller controller;
 
   void visitForGc(jsg::GcVisitor& visitor) {

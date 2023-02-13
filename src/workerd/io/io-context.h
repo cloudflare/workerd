@@ -428,6 +428,9 @@ public:
   bool isCurrent();
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
 
+  void requireCurrentOrThrowJs();
+  // Like requireCurrent() but throws a JS error if this IoContext is not the current.
+
   class WeakRef : public kj::Refcounted {
     // A WeakRef is a weak reference to a IoContext. Note that because IoContext is not
     // itself ref-counted, we cannot follow the usual pattern of a weak reference that potentially
