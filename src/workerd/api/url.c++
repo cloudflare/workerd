@@ -611,15 +611,21 @@ void URLSearchParams::forEach(
   }
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
 }
 

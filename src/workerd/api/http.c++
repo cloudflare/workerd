@@ -161,15 +161,40 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
   return headers.find(name) != headers.end();
 }
 
-kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders() {
-  auto headersCopy = KJ_MAP(mapEntry, headers) {
-    const auto& header = mapEntry.second;
-    return DisplayedHeader {
-      jsg::ByteString(kj::str(header.key)),
-      jsg::ByteString(kj::strArray(header.values, ", "))
+kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
+    CompatibilityFlags::Reader featureFlags) {
+
+  if (featureFlags.getHttpHeadersGetSetCookie()) {
+    kj::Vector<Headers::DisplayedHeader> copy;
+    for (auto& entry : headers) {
+      if (entry.first == "set-cookie") {
+        // For set-cookie entries, we iterate each individually without
+        // combining them.
+        for (auto& value : entry.second.values) {
+          copy.add(Headers::DisplayedHeader {
+            .key = jsg::ByteString(kj::str(entry.first)),
+            .value = jsg::ByteString(kj::str(value)),
+          });
+        }
+      } else {
+        copy.add(Headers::DisplayedHeader {
+          .key = jsg::ByteString(kj::str(entry.first)),
+          .value = jsg::ByteString(kj::strArray(entry.second.values, ", "))
+        });
+      }
+    }
+    return copy.releaseAsArray();
+  } else {
+    // The old behavior before the standard getSetCookie() API was introduced...
+    auto headersCopy = KJ_MAP(mapEntry, headers) {
+      const auto& header = mapEntry.second;
+      return DisplayedHeader {
+        jsg::ByteString(kj::str(header.key)),
+        jsg::ByteString(kj::strArray(header.values, ", "))
+      };
     };
-  };
-  return headersCopy;
+    return headersCopy;
+  }
 }
 
 jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer> init) {
@@ -227,6 +252,15 @@ kj::Maybe<jsg::ByteString> Headers::get(jsg::ByteString name) {
   }
 }
 
+kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
+  auto iter = headers.find("set-cookie");
+  if (iter == headers.end()) {
+    return nullptr;
+  } else {
+    return iter->second.values.asPtr();
+  }
+}
+
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
   requireValidHeaderName(name);
 
@@ -234,12 +268,10 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
     JSG_FAIL_REQUIRE(TypeError, "getAll() can only be used with the header name \"Set-Cookie\".");
   }
 
-  auto iter = headers.find(toLower(kj::mv(name)));
-  if (iter == headers.end()) {
-    return nullptr;
-  } else {
-    return iter->second.values.asPtr();
-  }
+  // getSetCookie() is the standard API here. getAll(...) is our legacy non-standard extension
+  // for the same use case. We continue to support getAll for backwards compatibility but moving
+  // forward users really should be using getSetCookie.
+  return getSetCookie();
 }
 
 bool Headers::has(jsg::ByteString name) {
@@ -304,26 +336,68 @@ void Headers::delete_(jsg::ByteString name) {
 //   applied to the header map elements? We'd still copy the whole data structure to avoid iterator
 //   invalidation, but the elements would be cheaper to copy.
 
-jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock&) {
-  return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> { getDisplayedHeaders() });
+jsg::Ref<Headers::EntryIterator> Headers::entries(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
+  return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> {
+    getDisplayedHeaders(featureFlags)
+  });
 }
-jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock&) {
-  auto keysCopy = KJ_MAP(mapEntry, headers) {
-    return jsg::ByteString(kj::str(mapEntry.second.key));
-  };
-  return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
+jsg::Ref<Headers::KeyIterator> Headers::keys(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
+  if (featureFlags.getHttpHeadersGetSetCookie()) {
+    kj::Vector<jsg::ByteString> keysCopy;
+    for (auto& entry : headers) {
+      // Set-Cookie headers must be handled specially. They should never be combined into a
+      // single value, so the values iterator must separate them. It seems a bit silly, but
+      // the keys iterator can end up having multiple set-cookie instances.
+      if (entry.first == "set-cookie") {
+        for (auto n = 0; n < entry.second.values.size(); n++) {
+          keysCopy.add(jsg::ByteString(kj::str(entry.first)));
+        }
+      } else {
+        keysCopy.add(jsg::ByteString(kj::str(entry.first)));
+      }
+    }
+    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { keysCopy.releaseAsArray() });
+  } else {
+    auto keysCopy = KJ_MAP(mapEntry, headers) {
+      return jsg::ByteString(kj::str(mapEntry.second.key));
+    };
+    return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
+  }
 }
-jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock&) {
-  auto valuesCopy = KJ_MAP(mapEntry, headers) {
-    return jsg::ByteString(kj::strArray(mapEntry.second.values, ", "));
-  };
-  return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> { kj::mv(valuesCopy) });
+jsg::Ref<Headers::ValueIterator> Headers::values(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
+  if (featureFlags.getHttpHeadersGetSetCookie()) {
+    kj::Vector<jsg::ByteString> values;
+    for (auto& entry : headers) {
+      // Set-Cookie headers must be handled specially. They should never be combined into a
+      // single value, so the values iterator must separate them.
+      if (entry.first == "set-cookie") {
+        for (auto& value : entry.second.values) {
+          values.add(jsg::ByteString(kj::str(value)));
+        }
+      } else {
+        values.add(jsg::ByteString(kj::strArray(entry.second.values, ", ")));
+      }
+    }
+    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> { values.releaseAsArray() });
+  } else {
+    auto valuesCopy = KJ_MAP(mapEntry, headers) {
+      return jsg::ByteString(kj::strArray(mapEntry.second.values, ", "));
+    };
+    return jsg::alloc<ValueIterator>(IteratorState<jsg::ByteString> { kj::mv(valuesCopy) });
+  }
 }
 
 void Headers::forEach(
     jsg::Lock& js,
     jsg::V8Ref<v8::Function> callback,
-    jsg::Optional<jsg::Value> thisArg) {
+    jsg::Optional<jsg::Value> thisArg,
+    CompatibilityFlags::Reader featureFlags) {
   auto localCallback = callback.getHandle(js);
   auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
       .orDefault(js.v8Undefined());
@@ -335,7 +409,7 @@ void Headers::forEach(
   auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
   auto context = isolate->GetCurrentContext();  // Needed later for Call().
-  for (auto& entry: getDisplayedHeaders()) {
+  for (auto& entry: getDisplayedHeaders(featureFlags)) {
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {
       jsg::v8Str(isolate, entry.value),

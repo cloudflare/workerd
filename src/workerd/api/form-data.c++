@@ -389,15 +389,21 @@ void FormData::set(kj::String name,
   }
 }
 
-jsg::Ref<FormData::EntryIterator> FormData::entries(jsg::Lock&) {
+jsg::Ref<FormData::EntryIterator> FormData::entries(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<EntryIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<FormData::KeyIterator> FormData::keys(jsg::Lock&) {
+jsg::Ref<FormData::KeyIterator> FormData::keys(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<KeyIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
+jsg::Ref<FormData::ValueIterator> FormData::values(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<ValueIterator>(IteratorState { JSG_THIS });
 }
 
