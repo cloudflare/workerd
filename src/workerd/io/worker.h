@@ -703,7 +703,7 @@ public:
 
   const Worker& getWorker() { return *worker; }
 
-  bool hasAlarmHandler();
+  void assertCanSetAlarm();
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
 
   kj::Promise<WorkerInterface::AlarmResult> dedupAlarm(
