@@ -15,6 +15,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/thread-scopes.h>
 
 namespace workerd::api {
 
@@ -139,11 +140,17 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
   KJ_IF_MAYBE(c, cfBlobJson) {
     auto jsonString = jsg::v8Str(isolate, *c);
+    auto context = isolate->GetCurrentContext();
 
-    auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
+    auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
+    KJ_ASSERT(handle->IsObject());
+
+    maybeWrapBotManagement(isolate, handle.As<v8::Object>());
+
+    NoRequestCfProxyLoggingScope noLoggingScope;
     // For the inbound request, we make the `cf` blob immutable.
     jsg::recursivelyFreeze(isolate->GetCurrentContext(), handle);
-    KJ_ASSERT(handle->IsObject());
+
     cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
   }
 
@@ -573,6 +580,12 @@ v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
     });
   }
 
+  // On the off chance the user is cloning the request.cf metadata, let's make sure
+  // any proxied logging is disabled here. Note that in this case we are not adding
+  // the proxied property handler to the resulting object which means they could
+  // clone the object and access proxied fields we'd normally log but that seems to
+  // be an edge case not worth handling here.
+  NoRequestCfProxyLoggingScope noLoggingScope;
   return jsg::structuredClone(value, isolate, transfers);
 }
 

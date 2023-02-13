@@ -140,4 +140,8 @@ inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> p
   return promise.then([]() { return DeferredProxy<void> { kj::READY_NOW }; });
 }
 
+kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
+    jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf);
+void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle);
+
 }  // namespace workerd::api
