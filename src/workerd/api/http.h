@@ -353,6 +353,8 @@ struct RequestInitializerDict;
 
 class Socket;
 struct SocketOptions;
+struct SocketAddress;
+typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 
 class Fetcher: public jsg::Object {
   // A capability to send HTTP requests to some destination other than the public internet.
@@ -429,7 +431,7 @@ public:
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options,
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
       CompatibilityFlags::Reader featureFlags);
 
   jsg::Promise<jsg::Ref<Response>> fetch(

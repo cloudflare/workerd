@@ -264,7 +264,7 @@ public:
       CompatibilityFlags::Reader featureFlags);
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options,
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
       CompatibilityFlags::Reader featureFlags);
 
   jsg::Ref<ServiceWorkerGlobalScope> getSelf() {
