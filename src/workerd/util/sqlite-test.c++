@@ -11,6 +11,80 @@
 namespace workerd {
 namespace {
 
+void setupSql(SqliteDatabase& db) {
+  // Initialize the database with some data.
+
+  // TODO(sqlite): Do this automatically and don't permit it via run().
+  db.run("PRAGMA journal_mode=WAL;");
+
+  {
+    auto query = db.run(R"(
+      CREATE TABLE people (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE
+      );
+
+      INSERT INTO people (id, name, email)
+      VALUES (?, ?, ?),
+            (?, ?, ?);
+    )", 123, "Bob"_kj, "bob@example.com"_kj,
+        321, "Alice"_kj, "alice@example.com"_kj);
+
+    KJ_EXPECT(query.changeCount() == 2);
+  }
+}
+
+void checkSql(SqliteDatabase& db) {
+  // Do some read-only queries on `db` to check that it's in the state that `setupSql()` ought to
+  // have left it in.
+
+  {
+    auto query = db.run("SELECT * FROM people ORDER BY name");
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.columnCount() == 3);
+    KJ_EXPECT(query.getInt(0) == 321);
+    KJ_EXPECT(query.getText(1) == "Alice");
+    KJ_EXPECT(query.getText(2) == "alice@example.com");
+
+    query.nextRow();
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 123);
+    KJ_EXPECT(query.getText(1) == "Bob");
+    KJ_EXPECT(query.getText(2) == "bob@example.com");
+
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+  }
+
+  {
+    auto query = db.run("SELECT * FROM people WHERE people.id = ?", 123l);
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.columnCount() == 3);
+    KJ_EXPECT(query.getInt(0) == 123);
+    KJ_EXPECT(query.getText(1) == "Bob");
+    KJ_EXPECT(query.getText(2) == "bob@example.com");
+
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+  }
+
+  {
+    auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);
+
+    KJ_ASSERT(!query.isDone());
+    KJ_ASSERT(query.columnCount() == 3);
+    KJ_EXPECT(query.getInt(0) == 321);
+    KJ_EXPECT(query.getText(1) == "Alice");
+    KJ_EXPECT(query.getText(2) == "alice@example.com");
+
+    query.nextRow();
+    KJ_EXPECT(query.isDone());
+  }
+}
+
 KJ_TEST("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -18,70 +92,8 @@ KJ_TEST("SQLite backed by in-memory directory") {
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-    // TODO(sqlite): Do this automatically and don't permit it via run().
-    db.run("PRAGMA journal_mode=WAL;");
-
-    {
-      auto query = db.run(R"(
-        CREATE TABLE people (
-          id INTEGER PRIMARY KEY,
-          name TEXT NOT NULL,
-          email TEXT NOT NULL UNIQUE
-        );
-
-        INSERT INTO people (id, name, email)
-        VALUES (?, ?, ?),
-              (?, ?, ?);
-      )", 123, "Bob"_kj, "bob@example.com"_kj,
-          321, "Alice"_kj, "alice@example.com"_kj);
-
-      KJ_EXPECT(query.changeCount() == 2);
-    }
-
-    {
-      auto query = db.run("SELECT * FROM people ORDER BY name");
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 321);
-      KJ_EXPECT(query.getText(1) == "Alice");
-      KJ_EXPECT(query.getText(2) == "alice@example.com");
-
-      query.nextRow();
-      KJ_ASSERT(!query.isDone());
-      KJ_EXPECT(query.getInt(0) == 123);
-      KJ_EXPECT(query.getText(1) == "Bob");
-      KJ_EXPECT(query.getText(2) == "bob@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
-
-    {
-      auto query = db.run("SELECT * FROM people WHERE people.id = ?", 123l);
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 123);
-      KJ_EXPECT(query.getText(1) == "Bob");
-      KJ_EXPECT(query.getText(2) == "bob@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
-
-    {
-      auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 321);
-      KJ_EXPECT(query.getText(1) == "Alice");
-      KJ_EXPECT(query.getText(2) == "alice@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
+    setupSql(db);
+    checkSql(db);
 
     {
       auto files = dir->listNames();
@@ -101,18 +113,7 @@ KJ_TEST("SQLite backed by in-memory directory") {
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
-    {
-      auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 321);
-      KJ_EXPECT(query.getText(1) == "Alice");
-      KJ_EXPECT(query.getText(2) == "alice@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
+    checkSql(db);
   }
 }
 
@@ -158,41 +159,8 @@ KJ_TEST("SQLite backed by real disk") {
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
-    // TODO(sqlite): Do this automatically and don't permit it via run().
-    db.run("PRAGMA journal_mode=WAL;");
-
-    db.run(R"(
-      CREATE TABLE people (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE
-      );
-    )");
-
-    db.run(R"(
-      INSERT INTO people (id, name, email)
-      VALUES (123, "Bob", "bob@example.com"),
-             (321, "Alice", "alice@example.com");
-    )");
-
-    {
-      auto query = db.run("SELECT * FROM people ORDER BY name");
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 321);
-      KJ_EXPECT(query.getText(1) == "Alice");
-      KJ_EXPECT(query.getText(2) == "alice@example.com");
-
-      query.nextRow();
-      KJ_ASSERT(!query.isDone());
-      KJ_EXPECT(query.getInt(0) == 123);
-      KJ_EXPECT(query.getText(1) == "Bob");
-      KJ_EXPECT(query.getText(2) == "bob@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
+    setupSql(db);
+    checkSql(db);
 
     {
       auto files = dir->listNames();
@@ -213,18 +181,7 @@ KJ_TEST("SQLite backed by real disk") {
   {
     SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
 
-    {
-      auto query = db.run("SELECT * FROM people WHERE people.name = ?", "Alice"_kj);
-
-      KJ_ASSERT(!query.isDone());
-      KJ_ASSERT(query.columnCount() == 3);
-      KJ_EXPECT(query.getInt(0) == 321);
-      KJ_EXPECT(query.getText(1) == "Alice");
-      KJ_EXPECT(query.getText(2) == "alice@example.com");
-
-      query.nextRow();
-      KJ_EXPECT(query.isDone());
-    }
+    checkSql(db);
   }
 }
 
