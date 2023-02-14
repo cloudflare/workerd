@@ -103,6 +103,59 @@ public:
         "Asymmetric signing requires a private key.");
 
     auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
+    if (getAlgorithmName() == "RSASSA-PKCS1-v1_5") {
+      // RSASSA-PKCS1-v1_5 requires the RSA key to be at least as big as the digest size
+      // plus a 15 to 19 byte digest-specific prefix (see boringssl's RSA_add_pkcs1_prefix) plus 11
+      // bytes for padding (see RSA_PKCS1_PADDING_SIZE). For simplicity, require the key to be at
+      // least 32 bytes larger than the hash digest.
+      // Similar checks could also be adopted for more detailed error handling in verify(), but the
+      // current approach should be sufficient to avoid internal errors.
+      RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMDataError,
+          "Missing RSA key", tryDescribeOpensslErrors());
+
+      // TODO(soon): Use more thorough checks for now to detect if requiring 32 bytes beyond the
+      // digest size would break existing scripts. Prefix sizes derived from boringssl's
+      // kPKCS1SigPrefixes.
+#define RSA_PKCS1_PADDING_SIZE 11
+#define RSA_PKCS1_MD5_PREFIX_SIZE 18
+#define RSA_PKCS1_SHA1_PREFIX_SIZE 15
+#define RSA_PKCS1_SHA_PREFIX_SIZE 19
+
+      const auto& hashName = lookupDigestAlgorithm(chooseHash(algorithm.hash)).first;
+      auto paddingOverhead = RSA_PKCS1_PADDING_SIZE;
+      if (hashName == "MD5") {
+        paddingOverhead += RSA_PKCS1_MD5_PREFIX_SIZE;
+      } else if (hashName == "SHA-1") {
+        paddingOverhead += RSA_PKCS1_SHA1_PREFIX_SIZE;
+      } else {
+        paddingOverhead += RSA_PKCS1_SHA_PREFIX_SIZE;
+      }
+
+      JSG_REQUIRE(EVP_MD_size(type) + paddingOverhead <= RSA_size(&rsa), DOMOperationError,
+          "key too small for signing with given digest");
+      if (RSA_size(&rsa) < EVP_MD_size(type) + 32) {
+        static bool logOnce KJ_UNUSED = ([rsa] {
+          KJ_LOG(WARNING, "Signing with peculiar key size of ", RSA_size(&rsa), " bytes");
+          return true;
+        })();
+      }
+
+      // JSG_REQUIRE(EVP_MD_size(type) + 32 <= RSA_size(&rsa), DOMOperationError,
+      //     "key too small for signing with given digest");
+    } else if (getAlgorithmName() == "RSA-PSS") {
+      // Similarly, RSA-PSS requires keys to be at least the size of the digest and salt plus 2
+      // bytes, see https://developer.mozilla.org/en-US/docs/Web/API/RsaPssParams for details.
+      RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMDataError,
+          "Missing RSA key", tryDescribeOpensslErrors());
+      auto salt = JSG_REQUIRE_NONNULL(algorithm.saltLength, DOMDataError,
+          "Failed to provide salt for RSA-PSS key operation which requires a salt");
+      JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative (provided ",
+          salt, ").");
+      JSG_REQUIRE(EVP_MD_size(type) + 2 <= RSA_size(&rsa), DOMOperationError,
+          "key too small for signing with given digest");
+      JSG_REQUIRE(salt <= RSA_size(&rsa) - EVP_MD_size(type) - 2, DOMOperationError,
+          "key too small for signing with given digest and salt length");
+    }
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
