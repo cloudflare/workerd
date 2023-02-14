@@ -23,20 +23,23 @@ public:
   typedef kj::StringPtr KeyPtr;
   typedef kj::ArrayPtr<const kj::byte> ValuePtr;
 
-  bool get(KeyPtr key, kj::FunctionParam<void(ValuePtr)> callback);
-  // Search for a match for the given key. Calls the callback function with the result, if found.
-  // This is intended to avoid the need to copy the bytes, if the caller would just parse them and
-  // drop them immediately anyway. Returns true if there was a match, false if not.
+  template <typename Func>
+  bool get(KeyPtr key, Func&& callback);
+  // Search for a match for the given key. Calls the callback function with the result (a ValuePtr)
+  // if found. This is intended to avoid the need to copy the bytes, if the caller would just parse
+  // them and drop them immediately anyway. Returns true if there was a match, false if not.
 
   enum Order {
     FORWARD,
     REVERSE
   };
 
+  template <typename Func>
   uint list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
-            kj::FunctionParam<void(KeyPtr, ValuePtr)> callback);
-  // Search for all knows keys and values in a range, calling the callback for each one seen.
-  // `end` and `limit` can be null to request no constraint be enforced.
+            Func&& callback);
+  // Search for all knows keys and values in a range, calling the callback (with KeyPtr and
+  // ValuePtr parameters) for each one seen. `end` and `limit` can be null to request no constraint
+  // be enforced.
 
   void put(KeyPtr key, ValuePtr value);
   // Store a value into the table.
@@ -117,5 +120,68 @@ private:
 
   SqliteKv(SqliteDatabase& db, bool);
 };
+
+// =======================================================================================
+// inline implementation details
+//
+// We define these two methods as templates rather than ues kj::Function since they're not too
+// complicated and avoiding the virtual call is nice. Plus in list()'s case, the actual call sites
+// pass constants for `order` so the `order ==` branch can be eliminated.
+
+template <typename Func>
+bool SqliteKv::get(KeyPtr key, Func&& callback) {
+  auto query = stmtGet.run(key);
+
+  if (query.isDone()) {
+    return false;
+  } else {
+    callback(query.getBlob(0));
+    return true;
+  }
+}
+
+template <typename Func>
+uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order,
+                    Func&& callback) {
+  auto iterate = [&](SqliteDatabase::Query&& query) {
+    size_t count = 0;
+    while (!query.isDone()) {
+      callback(query.getText(0), query.getBlob(1));
+      query.nextRow();
+      ++count;
+    }
+    return count;
+  };
+
+  if (order == Order::FORWARD) {
+    KJ_IF_MAYBE(e, end) {
+      KJ_IF_MAYBE(l, limit) {
+        return iterate(stmtListEndLimit.run(begin, *e, (int64_t)*l));
+      } else {
+        return iterate(stmtListEnd.run(begin, *e));
+      }
+    } else {
+      KJ_IF_MAYBE(l, limit) {
+        return iterate(stmtListLimit.run(begin, (int64_t)*l));
+      } else {
+        return iterate(stmtList.run(begin));
+      }
+    }
+  } else {
+    KJ_IF_MAYBE(e, end) {
+      KJ_IF_MAYBE(l, limit) {
+        return iterate(stmtListEndLimitReverse.run(begin, *e, (int64_t)*l));
+      } else {
+        return iterate(stmtListEndReverse.run(begin, *e));
+      }
+    } else {
+      KJ_IF_MAYBE(l, limit) {
+        return iterate(stmtListLimitReverse.run(begin, (int64_t)*l));
+      } else {
+        return iterate(stmtListReverse.run(begin));
+      }
+    }
+  }
+}
 
 }  // namespace workerd
