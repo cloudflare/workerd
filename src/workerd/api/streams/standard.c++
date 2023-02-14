@@ -3197,14 +3197,19 @@ jsg::Promise<void> TransformStreamDefaultController::write(
   if (backpressure) {
     auto chunkRef = js.v8Ref(chunk);
     return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved().then(js,
-        JSG_VISITABLE_LAMBDA((this, chunkRef = kj::mv(chunkRef), self = JSG_THIS),
-                              (chunkRef, self), (jsg::Lock& js) {
-      auto& writableController = getWritableController();
-      KJ_IF_MAYBE(error, writableController.isErroring(js)) {
-        return js.rejectedPromise<void>(*error);
+        JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref = JSG_THIS),
+                             (chunkRef, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
+      KJ_IF_MAYBE(writableController, ref->maybeWritableController) {
+        KJ_IF_MAYBE(error, writableController->isErroring(js)) {
+          return js.rejectedPromise<void>(*error);
+        }
+        KJ_ASSERT(writableController->isWritable());
+        return ref->performTransform(js, chunkRef.getHandle(js));
+      } else {
+        // This case should not happen in general, this is purely defensive.
+        return js.rejectedPromise<void>(KJ_EXCEPTION(FAILED,
+            "jsg.TypeError: Writing to the TransformStream failed."));
       }
-      KJ_ASSERT(writableController.isWritable());
-      return performTransform(js, chunkRef.getHandle(js));
     }));
   }
   return performTransform(js, chunk);
@@ -3218,27 +3223,24 @@ jsg::Promise<void> TransformStreamDefaultController::abort(
 }
 
 jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
-  auto onSuccess = [this, ref=JSG_THIS](jsg::Lock& js) -> jsg::Promise<void> {
-    auto& readableController = getReadableController();
+  auto onSuccess = JSG_VISITALBE((ref=JSG_THIS), (ref), (jsg::Lock& js) -> jsg::Promise<void> {
+    auto& readableController = ref->getReadableController();
 
     // Allows for a graceful close of the readable side. Close will
     // complete once all of the queued data is read or the stream
     // errors.
     readableController.close(js);
     return js.resolvedPromise();
-  };
+  });
 
-  auto onFailure = [this, ref=JSG_THIS](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
-    error(js, reason.getHandle(js));
+  auto onFailure = JSG_VISITABLE_LAMBDA(
+      (ref=JSG_THIS),(ref),(jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+    ref->error(js, reason.getHandle(js));
     return js.rejectedPromise<void>(kj::mv(reason));
-  };
+  });
 
   return jscontroller::maybeRunAlgorithm(
-      js,
-      algorithms.flush,
-      kj::mv(onSuccess),
-      kj::mv(onFailure),
-      JSG_THIS);
+      js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
@@ -3264,10 +3266,11 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
         [](jsg::Lock& js) -> jsg::Promise<void> {
           return js.resolvedPromise();
         },
-        [this, ref=JSG_THIS](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
-          error(js, reason.getHandle(js));
+        JSG_VISITABLE_LAMBDA(
+            (ref=JSG_THIS),(ref),(jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+          ref->error(js, reason.getHandle(js));
           return js.rejectedPromise<void>(kj::mv(reason));
-        },
+        }),
         chunk,
         JSG_THIS);
   }
@@ -3348,14 +3351,14 @@ void TransformStreamDefaultController::init(
   algorithms.starting = jscontroller::maybeRunAlgorithm(
       js,
       transformer.start,
-      [this](jsg::Lock& js) {
-        algorithms.starting = nullptr;
-        startPromise.resolver.resolve();
-      },
-      [this](jsg::Lock& js, jsg::Value reason) {
-        algorithms.starting = nullptr;
-        startPromise.resolver.reject(reason.getHandle(js));
-      },
+      JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
+        ref->algorithms.starting = nullptr;
+        ref->startPromise.resolver.resolve();
+      }),
+      JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value reason) {
+        ref->algorithms.starting = nullptr;
+        ref->startPromise.resolver.reject(reason.getHandle(js));
+      }),
       JSG_THIS);
 }
 
