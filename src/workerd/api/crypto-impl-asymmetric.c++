@@ -657,11 +657,35 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
   return asUnsigned;
 }
 
-void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent) {
+void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
+    bool warnImport = false) {
   // The W3C standard itself doesn't describe any parameter validation but the conformance tests
   // do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
   // with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
   // library might be expected to handle such cases on its own, no?).
+
+  // TODO(soon): We should also enforce these limitations on imported keys. To see if this breaks
+  // existing scripts only provide a warning in sentry for now.
+  if (warnImport) {
+    if (modulusLength % 8 || modulusLength < 256 || modulusLength > 16384) {
+      static bool logOnce KJ_UNUSED = ([modulusLength] {
+        KJ_LOG(WARNING, "Imported RSA key has invalid modulus length ", modulusLength, ".");
+        return true;
+      })();
+    }
+    KJ_IF_MAYBE(v, fromBignum<unsigned>(publicExponent)) {
+      if (*v != 3 && *v != 65537) {
+        static bool logOnce KJ_UNUSED = ([v] {
+          KJ_LOG(WARNING, "Imported RSA key has invalid publicExponent ", *v,".");
+          return true;
+        })();
+      }
+    } else {
+      JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
+          "got a number larger than 2^32.");
+    }
+    return;
+  }
 
   // Use Chromium's limits for RSA keygen to avoid infinite loops:
   // * Key sizes a multiple of 8 bits.
@@ -888,6 +912,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
 
+  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
+  validateRsaParams(modulusLength, publicExponent, true);
+
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
@@ -953,6 +980,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
 
   auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
+
+  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
+  validateRsaParams(modulusLength, publicExponent, true);
 
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = "RSA-RAW"_kj,
