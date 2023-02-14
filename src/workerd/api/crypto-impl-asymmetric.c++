@@ -551,9 +551,22 @@ public:
 
     auto size = RSA_size(rsa);
 
+    // RSA encryption/decryption requires the key value to be strictly larger than the value to be
+    // signed. Ideally we would enforce this by checking that the key size is larger than the input
+    // size – having both the same size makes it highly likely that some values are higher than the
+    // key value – but there are scripts and test cases that depend on signing data with keys of
+    // the same size.
     JSG_REQUIRE(data.size() <= size, DOMDataError,
-        "Blind Signing requires presigned data (", data.size(), " bytes) to be the smaller than "
+        "Blind Signing requires presigned data (", data.size(), " bytes) to be smaller than "
         "the key (", size, " bytes).");
+    if (data.size() == size) {
+      auto dataVal = OSSLCALL_OWN(BIGNUM, BN_bin2bn(data.begin(), data.size(), nullptr),
+          InternalDOMOperationError, "Error converting presigned data",
+          internalDescribeOpensslErrors());
+      JSG_REQUIRE(BN_ucmp(dataVal, rsa->n) < 0, DOMDataError,
+          "Blind Signing requires presigned data value to be strictly smaller than RSA key"
+          "modulus, consider using a larger key size.");
+    }
 
     auto signature = kj::heapArray<kj::byte>(size);
     size_t signatureSize = 0;
