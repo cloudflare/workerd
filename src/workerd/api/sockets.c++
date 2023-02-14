@@ -9,30 +9,28 @@
 namespace workerd::api {
 
 
-bool isValidAddress(kj::StringPtr address) {
+bool isValidHost(kj::StringPtr host) {
   // This function performs some basic length and characters checks, it does not guarantee that
-  // the specified address is a valid domain. It should only be used to reject malicious
-  // addresses.
-  if (address.size() > (255 + 6) || address.size() == 0) {
-    // RFC1035 states that maximum domain name length is 255 octets. But we also add 6 to support
-    // port numbers in the address.
+  // the specified host is a valid domain. It should only be used to reject malicious
+  // hosts.
+  if (host.size() > 255 || host.size() == 0) {
+    // RFC1035 states that maximum domain name length is 255 octets.
     //
     // IP addresses are always shorter, so we take the max domain length instead.
     return false;
   }
 
-  for (int i = 0; i < address.size(); i++) {
-    switch (address[i]) {
+  for (int i = 0; i < host.size(); i++) {
+    switch (host[i]) {
       case '-':
       case '.':
-      case ':':
       case '_':
-      case '[': case ']': // For IPv6.
+      case '[': case ']': case ':': // For IPv6.
         break;
       default:
-        if ((address[i] >= 'a' && address[i] <= 'z') ||
-            (address[i] >= 'A' && address[i] <= 'Z') ||
-            (address[i] >= '0' && address[i] <= '9')) {
+        if ((host[i] >= 'a' && host[i] <= 'z') ||
+            (host[i] >= 'A' && host[i] <= 'Z') ||
+            (host[i] >= '0' && host[i] <= '9')) {
           break;
         }
         return false;
@@ -42,21 +40,31 @@ bool isValidAddress(kj::StringPtr address) {
 }
 
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, kj::String address) {
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address) {
 
-  JSG_REQUIRE(isValidAddress(address), TypeError,
+  auto addressStr = kj::str("");
+  KJ_SWITCH_ONEOF(address) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      addressStr = kj::mv(str);
+    }
+    KJ_CASE_ONEOF(record, SocketAddress) {
+      addressStr = kj::str(record.hostname, ":", record.port);
+    }
+  }
+
+  JSG_REQUIRE(isValidHost(addressStr), TypeError,
       "Specified address is empty string, contains unsupported characters or is too long.");
 
   auto& ioContext = IoContext::current();
 
-  auto jsRequest = Request::constructor(js, kj::str(address), nullptr);
+  auto jsRequest = Request::constructor(js, kj::str(addressStr), nullptr);
   kj::Own<WorkerInterface> client = fetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kj);
 
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = kj::newHttpClient(*client);
-  auto request = httpClient->connect(address, *headers);
+  auto request = httpClient->connect(addressStr, *headers);
 
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(kj::mv(request.connection), ioContext);
@@ -76,7 +84,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 }
 
 jsg::Ref<Socket> connectImpl(
-    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::String address,
+    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     CompatibilityFlags::Reader featureFlags) {
   // `connect()` should be hidden when the feature flag is off, so we shouldn't even get here.
   KJ_ASSERT(featureFlags.getTcpSocketsSupport());

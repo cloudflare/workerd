@@ -600,7 +600,7 @@ jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
 }
 
 jsg::Ref<Socket> ServiceWorkerGlobalScope::connect(
-    jsg::Lock& js, kj::String address, jsg::Optional<SocketOptions> options,
+    jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags) {
   return connectImpl(js, nullptr, kj::mv(address), featureFlags);
 }

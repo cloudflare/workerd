@@ -10,6 +10,12 @@
 
 namespace workerd::api {
 
+struct SocketAddress {
+  kj::String hostname;
+  uint16_t port;
+  JSG_STRUCT(hostname, port);
+};
+
 struct SocketOptions {
   jsg::Unimplemented tls; // TODO(later): TCP socket options need to be implemented.
   JSG_STRUCT(tls);
@@ -74,15 +80,16 @@ private:
 };
 
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, kj::String address);
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address);
 
 jsg::Ref<Socket> connectImpl(
-    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, kj::String address,
+    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     CompatibilityFlags::Reader featureFlags);
 
-#define EW_SOCKETS_ISOLATE_TYPES         \
+#define EW_SOCKETS_ISOLATE_TYPES     \
   api::Socket,                       \
-  api::SocketOptions
+  api::SocketOptions,                \
+  api::SocketAddress
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
