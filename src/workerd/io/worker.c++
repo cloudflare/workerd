@@ -2821,8 +2821,33 @@ kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
   });
 }
 
-bool Worker::Actor::hasAlarmHandler() {
-  return getHandler().map([](auto& h) { return h.alarm != nullptr; }).orDefault(false);
+void Worker::Actor::assertCanSetAlarm() {
+  KJ_SWITCH_ONEOF(impl->classInstance) {
+    KJ_CASE_ONEOF(_, Impl::NoClass) {
+      // Once upon a time, we allowed actors without classes. Let's make a nicer message if we
+      // we somehow see a classless actor attempt to run an alarm in the wild.
+      JSG_FAIL_REQUIRE(TypeError,
+          "Your Durable Object must be class-based in order to call setAlarm()");
+    }
+    KJ_CASE_ONEOF(_, DurableObjectConstructor*) {
+      KJ_FAIL_ASSERT("setAlarm() invoked before Durable Object ctor");
+    }
+    KJ_CASE_ONEOF(_, Impl::Initializing) {
+      // We don't explicitly know if we have an alarm handler or not, so just let it happen. We'll
+      // handle it when we go to run the alarm.
+      return;
+    }
+    KJ_CASE_ONEOF(handler, api::ExportedHandler) {
+      JSG_REQUIRE(handler.alarm != nullptr, TypeError,
+          "Your Durable Object class must have an alarm() handler in order to call setAlarm()");
+      return;
+    }
+    KJ_CASE_ONEOF(exception, kj::Exception) {
+      // We've failed in the ctor, might as well just throw that exception for now.
+      kj::throwFatalException(kj::cp(exception));
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime) {

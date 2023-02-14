@@ -231,11 +231,8 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
 
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
     jsg::Optional<GetAlarmOptions> maybeOptions, v8::Isolate* isolate) {
-
-  if (!IoContext::current().getActorOrThrow().hasAlarmHandler()) {
-    return jsg::resolvedPromise<kj::Maybe<double>>(isolate, nullptr);
-  }
-
+  // Even if we do not have an alarm handler, we might once have had one. It's fine to return
+  // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions.map([](auto& o) {
     return GetOptions {
       .allowConcurrency = o.allowConcurrency,
@@ -400,8 +397,11 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
   JSG_REQUIRE(scheduledTime > kj::origin<kj::Date>(), TypeError,
     "setAlarm() cannot be called with an alarm time <= 0");
 
-  JSG_REQUIRE(IoContext::current().getActorOrThrow().hasAlarmHandler(), TypeError,
-    "Your Durable Object class must have an alarm() handler in order to call setAlarm()");
+  // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
+  // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
+  // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
+  // is better than throwing even if we do have an alarm handler.
+  IoContext::current().getActorOrThrow().assertCanSetAlarm();
 
   auto options = configureOptions(maybeOptions.map([](auto& o) {
     return PutOptions {
@@ -470,6 +470,8 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
 
 jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
     jsg::Optional<SetAlarmOptions> maybeOptions, v8::Isolate* isolate) {
+  // Even if we do not have an alarm handler, we might once have had one. It's fine to remove that
+  // alarm or noop on the absence of one.
   auto options = configureOptions(maybeOptions.map([](auto& o) {
     return PutOptions {
       .allowConcurrency = o.allowConcurrency,
