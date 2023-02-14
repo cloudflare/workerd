@@ -661,6 +661,20 @@ private:
 
 }  // namespace jscontroller
 
+template <typename T>
+class WeakRef: public kj::Refcounted {
+  // Used to allow the TransformStreamDefaultController to hold safe
+  // weak refs to the ReadableStreamDefaultController and WritableStreamJsController.
+public:
+  WeakRef(T& ref) : ref(ref) {}
+  KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
+  kj::Maybe<T&> tryGet() { return ref; }
+private:
+  void reset() { ref = nullptr; }
+  kj::Maybe<T&> ref;
+  friend T;
+};
+
 // =======================================================================================
 
 class ReadableStreamDefaultController: public jsg::Object {
@@ -673,6 +687,7 @@ public:
 
   ReadableStreamDefaultController(UnderlyingSource underlyingSource,
                                   StreamQueuingStrategy queuingStrategy);
+  ~ReadableStreamDefaultController() noexcept(false) { weakRef->reset(); }
 
   void start(jsg::Lock& js);
 
@@ -706,9 +721,14 @@ public:
     });
   }
 
+  kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef() {
+    return kj::addRef(*weakRef);
+  }
+
 private:
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
+  kj::Own<WeakRef<ReadableStreamDefaultController>> weakRef;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -1043,7 +1063,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
-  ~WritableStreamJsController() noexcept(false) override {}
+  ~WritableStreamJsController() noexcept(false) override { weakRef->reset(); }
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Optional<v8::Local<v8::Value>> reason) override;
@@ -1099,6 +1119,10 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
+  kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
+    return kj::addRef(*weakRef);
+  }
+
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
@@ -1107,6 +1131,7 @@ private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
   kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
+  kj::Own<WeakRef<WritableStreamJsController>> weakRef;
 
   friend WritableLockImpl;
 };
@@ -1114,6 +1139,22 @@ private:
 // =======================================================================================
 
 class TransformStreamDefaultController: public jsg::Object {
+  // The relationship between the TransformStreamDefaultController and the
+  // readable/writable streams associated with it can be complicated.
+  // Strong references to the TransformStreamDefaultController are held by
+  // the *algorithms* passed into the readable and writable streams using
+  // JSG_VISITABLE_LAMBDAs. When those algorithms are cleared, the strong
+  // references holding the TransformStreamDefaultController are freed.
+  // However, user code can do silly things like hold the Transform controller
+  // long after both the readable and writable sides have been gc'd.
+  //
+  // We do not want to create a strong reference cycle between the various
+  // controllers so we use weak refs within the transform controller to
+  // safely reference the readable and writable sides. If either side goes
+  // away cleanly (using the algorithms) the weak references are cleared.
+  // If either side goes away due to garbage collection while the transform
+  // controller is still alive, the weak references are cleared. The transform
+  // controller then safely handles the disappearance of either side.
 public:
   TransformStreamDefaultController(jsg::Lock& js);
 
@@ -1182,20 +1223,14 @@ private:
                                        v8::Local<v8::Value> chunk);
   void setBackpressure(jsg::Lock& js, bool newBackpressure);
 
-  inline ReadableStreamDefaultController& getReadableController() {
-    return *KJ_ASSERT_NONNULL(maybeReadableController);
-  }
-
-  inline WritableStreamJsController& getWritableController() {
-    return KJ_ASSERT_NONNULL(maybeWritableController);
-  }
-
-  void errorNoIoContextCheck(jsg::Lock& js, v8::Local<v8::Value> reason);
-
   kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
-  kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> maybeReadableController;
-  kj::Maybe<WritableStreamJsController&> maybeWritableController;
+
+  kj::Maybe<ReadableStreamDefaultController&> tryGetReadableController();
+  kj::Maybe<WritableStreamJsController&> tryGetWritableController();
+
+  kj::Maybe<kj::Own<WeakRef<ReadableStreamDefaultController>>> maybeReadableController;
+  kj::Maybe<kj::Own<WeakRef<WritableStreamJsController>>> maybeWritableController;
   Algorithms algorithms;
   bool backpressure = false;
   kj::Maybe<jsg::PromiseResolverPair<void>> maybeBackpressureChange;
