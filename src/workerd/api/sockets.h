@@ -43,9 +43,9 @@ public:
   // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
 
   JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {
-    JSG_READONLY_INSTANCE_PROPERTY(readable, getReadable);
-    JSG_READONLY_INSTANCE_PROPERTY(writable, getWritable);
-    JSG_READONLY_INSTANCE_PROPERTY(closed, getClosed);
+    JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
+    JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
+    JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_METHOD(close);
   }
 
