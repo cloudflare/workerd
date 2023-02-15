@@ -446,9 +446,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
       // jsg::Promises and not kj::Promises, so that it doesn't look like I/O at all, and there's
       // no need to drop the isolate lock and take it again every time some data is read/written.
       // That's a larger refactor, though.
-      auto& ioContext = IoContext::current();
-      return ioContext.awaitIoLegacy(kj::mv(promise)).then(js,
-          ioContext.addFunctor([this,store = kj::mv(store), byteOffset, byteLength]
+      return IoContext::current().awaitIoLegacy(kj::mv(promise)).then(js,
+          [this, store = kj::mv(store), byteOffset, byteLength]
           (jsg::Lock& js, size_t amount) mutable -> jsg::Promise<ReadResult> {
         readPending = false;
         KJ_ASSERT(amount <= byteLength);
@@ -466,14 +465,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           .value = js.v8Ref(ui8Handle.As<v8::Value>()),
           .done = false
         });
-      }), ioContext.addFunctor(
-          [this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<ReadResult> {
+      }, [this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<ReadResult> {
         readPending = false;
         if (!state.is<StreamStates::Errored>()) {
           doError(js, reason.getHandle(js));
         }
         return js.rejectedPromise<ReadResult>(kj::mv(reason));
-      }));
+      });
 
     }
   }
@@ -1204,16 +1202,13 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // no need to drop the isolate lock and take it again every time some data is read/written.
       // That's a larger refactor, though.
       return ioContext.awaitIoLegacy(kj::mv(promise)).then(js,
-          ioContext.addFunctor(
-            [this, check, maybeAbort](jsg::Lock& js) -> jsg::Promise<void> {
+          [this, check, maybeAbort](jsg::Lock& js) -> jsg::Promise<void> {
         auto& request = check();
         maybeResolvePromise(request.promise);
         queue.pop_front();
         maybeAbort(js, request);
         return writeLoop(js, IoContext::current());
-      }), ioContext.addFunctor(
-            [this, check, maybeAbort](jsg::Lock& js, jsg::Value reason)
-                -> jsg::Promise<void> {
+      }, [this, check, maybeAbort](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
           auto handle = reason.getHandle(js);
           auto& request = check();
           auto& writable = state.get<Writable>();
@@ -1225,7 +1220,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           }
           return js.resolvedPromise();
         }
-      ));
+      );
     }
     KJ_CASE_ONEOF(request, Pipe) {
       // The destination should still be Writable, because the only way to transition to an
@@ -1276,10 +1271,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // loop to pass the data into the destination.
 
       const auto handlePromise =
-          [this, &ioContext, check = makeChecker(request), preventAbort = request.preventAbort]
+          [this, check = makeChecker(request), preventAbort = request.preventAbort]
           (jsg::Lock& js, auto promise) {
-        return promise.then(js,
-          ioContext.addFunctor([this, check](jsg::Lock& js) mutable {
+        return promise.then(js, [this, check](jsg::Lock& js) mutable {
           // Under some conditions, the clean up has already happened.
           if (queue.empty()) return js.resolvedPromise();
 
@@ -1314,7 +1308,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
             writeState.init<Unlocked>();
           }
           return js.resolvedPromise();
-        }), ioContext.addFunctor([this, check, preventAbort]
+        }, [this, check, preventAbort]
             (jsg::Lock& js, jsg::Value reason) mutable {
           auto handle = reason.getHandle(js);
           auto& request = check();
@@ -1333,7 +1327,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
           }
           doError(js, handle);
           return js.resolvedPromise();
-        }));
+        });
       };
 
       KJ_IF_MAYBE(promise, request.source.tryPumpTo(*writable, !request.preventClose)) {
@@ -1354,18 +1348,18 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       auto check = makeChecker(request);
 
       return ioContext.awaitIo(writable->end()).then(js,
-          ioContext.addFunctor([this, check](jsg::Lock& js) {
+          [this, check](jsg::Lock& js) {
         auto& request = check();
         maybeResolvePromise(request.promise);
         queue.pop_front();
         finishClose(js);
-      }), ioContext.addFunctor([this, check](jsg::Lock& js, jsg::Value reason) {
+      }, [this, check](jsg::Lock& js, jsg::Value reason) {
         auto handle = reason.getHandle(js);
         auto& request = check();
         maybeRejectPromise<void>(request.promise, handle);
         queue.pop_front();
         finishError(js, handle);
-      }));
+      });
     }
   }
 
@@ -1429,8 +1423,6 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
   // should explore if there are ways of making this more efficient. For the most part, however,
   // every read from the source must call into JavaScript to advance the ReadableStream.
 
-  auto& ioContext = IoContext::current();
-
   if (checkSignal(js)) {
     // If the signal is triggered, checkSignal will handle erroring the source and destination.
     return js.resolvedPromise();
@@ -1475,12 +1467,11 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
       KJ_ASSERT(!parent.state.is<StreamStates::Errored>());
       if (!parent.isClosedOrClosing()) {
         // We'll only be here if the sink is in the Writable state.
-        auto& ioContext = IoContext::current();
-        return ioContext.awaitIo(parent.state.get<Writable>()->end(), []{}).then(js,
-            ioContext.addFunctor([this](jsg::Lock& js) { parent.finishClose(js); }),
-            ioContext.addFunctor([this](jsg::Lock& js, jsg::Value reason) {
+        return IoContext::current().awaitIo(parent.state.get<Writable>()->end(), []{}).then(js,
+            [this](jsg::Lock& js) { parent.finishClose(js); },
+            [this](jsg::Lock& js, jsg::Value reason) {
               parent.finishError(js, reason.getHandle(js));
-            }));
+            });
       }
       parent.writeState.init<Unlocked>();
     }
@@ -1501,8 +1492,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
   }
 
   return source.read(js).then(js,
-      ioContext.addFunctor(
-        [this](jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
+      [this](jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
     if (checkSignal(js) || result.done) {
       return js.resolvedPromise();
     }
@@ -1529,10 +1519,10 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     parent.state.get<Writable>()->abort(js.exceptionToKj(js.v8Ref(error)));
     // The error condition will be handled at the start of the next iteration.
     return pipeLoop(js);
-  }), ioContext.addFunctor([this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
+  }, [this](jsg::Lock& js, jsg::Value reason) -> jsg::Promise<void> {
     // The error will be processed and propagated in the next iteration.
     return pipeLoop(js);
-  }));
+  });
 }
 
 void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value> reason) {

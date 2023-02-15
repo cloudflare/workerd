@@ -707,7 +707,6 @@ public:
   }
 
 private:
-  IoContext& ioContext;
   ReadableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -776,7 +775,6 @@ private:
     void updateView(jsg::Lock& js);
   };
 
-  IoContext& ioContext;
   kj::Maybe<Impl> maybeImpl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -825,7 +823,6 @@ public:
   }
 
 private:
-  IoContext& ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
@@ -869,9 +866,10 @@ public:
   using DefaultController = jscontroller::DefaultController;
   using ReadableLockImpl = jscontroller::ReadableLockImpl<ReadableStreamJsController>;
 
-  KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
+  explicit ReadableStreamJsController() = default;
+  ReadableStreamJsController(ReadableStreamJsController&& other) = default;
+  ReadableStreamJsController& operator=(ReadableStreamJsController&& other) = default;
 
-  explicit ReadableStreamJsController() : ioContext(IoContext::current()) {}
   explicit ReadableStreamJsController(StreamStates::Closed closed);
   explicit ReadableStreamJsController(StreamStates::Errored errored);
   explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
@@ -952,7 +950,6 @@ public:
 private:
   bool hasPendingReadRequests();
 
-  IoContext& ioContext;
   kj::Maybe<ReadableStream&> owner;
 
   kj::OneOf<StreamStates::Closed,
@@ -1011,7 +1008,6 @@ public:
   }
 
 private:
-  IoContext& ioContext;
   WritableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -1039,7 +1035,8 @@ public:
 
   explicit WritableStreamJsController(StreamStates::Errored errored);
 
-  KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
+  WritableStreamJsController(WritableStreamJsController&& other) = default;
+  WritableStreamJsController& operator=(WritableStreamJsController&& other) = default;
 
   ~WritableStreamJsController() noexcept(false) override {}
 
@@ -1100,7 +1097,6 @@ public:
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
-  IoContext& ioContext;
   kj::Maybe<WritableStream&> owner;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
@@ -1114,8 +1110,7 @@ private:
 class TransformStreamDefaultController: public jsg::Object {
 public:
   TransformStreamDefaultController(jsg::Lock& js)
-      : ioContext(IoContext::current()),
-        startPromise(js.newPromiseAndResolver<void>()) {}
+      : startPromise(js.newPromiseAndResolver<void>()) {}
 
   void init(jsg::Lock& js,
             jsg::Ref<ReadableStream>& readable,
@@ -1190,9 +1185,6 @@ private:
     return KJ_ASSERT_NONNULL(maybeWritableController);
   }
 
-  void errorNoIoContextCheck(jsg::Lock& js, v8::Local<v8::Value> reason);
-
-  IoContext& ioContext;
   jsg::PromiseResolverPair<void> startPromise;
   kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> maybeReadableController;
   kj::Maybe<WritableStreamJsController&> maybeWritableController;
