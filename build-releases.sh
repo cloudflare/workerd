@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Note: this _must_ be run on an Apple Silicon machine, since the macOS ARM build cannot be dockerised due to macOS license restrictions
 
-rm -rf workerd-*
+rm -f workerd-darwin-arm64
+rm -f workerd-linux-arm64
 
 # Get the tag associated with the latest release, to ensure parity between binaries
 TAG_NAME=$(curl -sL https://api.github.com/repos/cloudflare/workerd/releases/latest | jq -r ".tag_name")
