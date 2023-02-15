@@ -793,6 +793,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
       publicExponent.size(), nullptr), InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
+  // TODO(later): boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds
+  // down to the closest multiple of 128 bits. This can easily cause confusion when non-standard
+  // key sizes are requested. Ideally we would throw an error when trying to create keys where the
+  // size would be rounded down, but this would likely break existing scripts.
+  // The modulusLength field of the resulting CryptoKey will be incorrect when the key size is
+  // rounded down, but since it is not currently used this is acceptable.
   OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
   auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
