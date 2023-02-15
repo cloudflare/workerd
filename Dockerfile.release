@@ -1,0 +1,17 @@
+FROM node:bullseye AS builder
+
+WORKDIR /workerd
+
+RUN apt-get update
+RUN apt-get install -y curl clang libc++-dev libc++abi-dev
+
+COPY . .
+COPY .bazel-cache /bazel-disk-cache
+RUN npm install -g pnpm
+RUN pnpm install
+
+RUN pnpm exec bazelisk build --disk_cache=/bazel-disk-cache -c opt //src/workerd/server:workerd
+
+FROM scratch as artifact
+COPY --from=builder /workerd/bazel-bin/src/workerd/server/workerd /workerd-linux-arm64
+COPY --from=builder /bazel-disk-cache /.bazel-cache

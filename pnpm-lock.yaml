@@ -1,6 +1,7 @@
 lockfileVersion: 5.4
 
 specifiers:
+  '@bazel/bazelisk': '1.12'
   '@types/debug': ^4.1.7
   '@types/node': ^18.7.18
   '@types/prettier': ^2.7.1
@@ -22,6 +23,7 @@ dependencies:
   typescript: 4.7.4
 
 devDependencies:
+  '@bazel/bazelisk': 1.12.1
   '@types/debug': 4.1.7
   '@types/node': 18.8.5
   '@types/prettier': 2.7.1
@@ -35,6 +37,11 @@ devDependencies:
   eslint-plugin-prettier: 4.2.1_hvbqyfstm4urdpm6ffpwfka4e4
 
 packages:
+
+  /@bazel/bazelisk/1.12.1:
+    resolution: {integrity: sha512-TGCwVeIiVeQUP6yLpxAg8yluFOC+tBQnWw5l8lqwMxKhRtOA+WaH1CJKAXeCBAaS2MxohhkXq44zj/7AM+t2jg==}
+    hasBin: true
+    dev: true
 
   /@esbuild/android-arm/0.15.10:
     resolution: {integrity: sha512-FNONeQPy/ox+5NBkcSbYJxoXj9GWu8gVGJTVmUyoOCKQFDTrHVKgNSzChdNt0I8Aj/iKcsDf2r9BFwv+FSNUXg==}

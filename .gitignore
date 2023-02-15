@@ -19,3 +19,7 @@ node_modules
 /rust-project.json
 # Directory where clangd puts its indexing work
 /.cache/
+
+/.bazel-cache
+
+/workerd-*
