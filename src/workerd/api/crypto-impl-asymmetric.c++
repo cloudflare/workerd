@@ -624,6 +624,7 @@ public:
     auto signature = kj::heapArray<kj::byte>(size);
     size_t signatureSize = 0;
 
+    // Use raw RSA, no padding
     OSSLCALL(RSA_decrypt(rsa, &signatureSize, signature.begin(), size, data.begin(), data.size(),
         RSA_NO_PADDING));
 
@@ -992,6 +993,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
+  // Note that in this context raw refers to the RSA-RAW algorithm, not to keys represented by raw
+  // data. Importing raw keys is currently not supported for this algorithm.
   CryptoKeyUsageSet allowedUsages = CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify();
   auto [evpPkey, keyType, usages] = importAsymmetric(
       kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
@@ -1534,6 +1537,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
 ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
     kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
     CryptoKeyUsageSet allowedUsages) {
+  // Import an elliptic key represented by raw data, only public keys are supported.
   JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
       "Expected raw EC key but instead got a Json Web Key.");
 
