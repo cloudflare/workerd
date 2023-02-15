@@ -1,7 +1,10 @@
 #! /bin/bash
 set -euo pipefail
 
-# Note: this _must_ be run on an Apple Silicon machine, since the macOS ARM build cannot be dockerised due to macOS license restrictions
+if [[ $(uname -m) == 'x86_64' ]]; then
+  echo "This _must_ be run on an Apple Silicon machine, since the macOS ARM build cannot be dockerised due to macOS license restrictions"
+  exit 1
+fi
 
 rm -f workerd-darwin-arm64
 rm -f workerd-linux-arm64
