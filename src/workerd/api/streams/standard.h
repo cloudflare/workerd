@@ -707,7 +707,7 @@ public:
   }
 
 private:
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -776,7 +776,7 @@ private:
     void updateView(jsg::Lock& js);
   };
 
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   kj::Maybe<Impl> maybeImpl;
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -825,7 +825,7 @@ public:
   }
 
 private:
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
 
@@ -871,7 +871,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
 
-  explicit ReadableStreamJsController() : ioContext(IoContext::current()) {}
+  explicit ReadableStreamJsController();
   explicit ReadableStreamJsController(StreamStates::Closed closed);
   explicit ReadableStreamJsController(StreamStates::Errored errored);
   explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
@@ -952,7 +952,9 @@ public:
 private:
   bool hasPendingReadRequests();
 
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
+  // If the stream was created within the scope of a request, we want to treat it as I/O
+  // and make sure it is not advanced from the scope of a different request.
   kj::Maybe<ReadableStream&> owner;
 
   kj::OneOf<StreamStates::Closed,
@@ -1011,7 +1013,7 @@ public:
   }
 
 private:
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   WritableImpl impl;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -1100,7 +1102,7 @@ public:
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   kj::Maybe<WritableStream&> owner;
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
   WritableLockImpl lock;
@@ -1113,9 +1115,7 @@ private:
 
 class TransformStreamDefaultController: public jsg::Object {
 public:
-  TransformStreamDefaultController(jsg::Lock& js)
-      : ioContext(IoContext::current()),
-        startPromise(js.newPromiseAndResolver<void>()) {}
+  TransformStreamDefaultController(jsg::Lock& js);
 
   void init(jsg::Lock& js,
             jsg::Ref<ReadableStream>& readable,
@@ -1192,7 +1192,7 @@ private:
 
   void errorNoIoContextCheck(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  IoContext& ioContext;
+  kj::Maybe<IoContext&> ioContext;
   jsg::PromiseResolverPair<void> startPromise;
   kj::Maybe<jsg::Ref<ReadableStreamDefaultController>> maybeReadableController;
   kj::Maybe<WritableStreamJsController&> maybeWritableController;

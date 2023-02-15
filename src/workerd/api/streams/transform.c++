@@ -8,6 +8,16 @@
 
 namespace workerd::api {
 
+namespace {
+    template <typename T>
+jsg::Function<T> maybeAddFunctor(auto t) {
+  if (IoContext::hasCurrent()) {
+    return jsg::Function<T>(IoContext::current().addFunctor(kj::mv(t)));
+  }
+  return jsg::Function<T>(kj::mv(t));
+}
+}
+
 jsg::Ref<TransformStream> TransformStream::constructor(
     jsg::Lock& js,
     jsg::Optional<Transformer> maybeTransformer,
@@ -29,35 +39,32 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     // Persistent references to the TransformStreamDefaultController are held by both
     // the readable and writable sides. The actual TransformStream object can be dropped
     // and allowed to be garbage collected.
+
     auto controller = jsg::alloc<TransformStreamDefaultController>(js);
-    auto& ioContext = IoContext::current();
 
     auto readable = ReadableStream::constructor(
         js,
         UnderlyingSource {
           .type = nullptr,
           .autoAllocateChunkSize = nullptr,
-          .start = jsg::Function<UnderlyingSource::StartAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto c) mutable {
             return controller->getStartPromise();
-          }))),
-          .pull = jsg::Function<UnderlyingSource::PullAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          })),
+          .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto c) mutable {
             return controller->pull(js);
-          }))),
-          .cancel = jsg::Function<UnderlyingSource::CancelAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          })),
+          .cancel = maybeAddFunctor<UnderlyingSource::CancelAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto reason) mutable {
             return controller->cancel(js, reason);
-          }))),
+          })),
         },
         kj::mv(maybeReadableStrategy),
         kj::cp(flags));
@@ -66,34 +73,30 @@ jsg::Ref<TransformStream> TransformStream::constructor(
         js,
         UnderlyingSink {
           .type = nullptr,
-          .start = jsg::Function<UnderlyingSink::StartAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto c) mutable {
             return controller->getStartPromise();
-          }))),
-          .write = jsg::Function<UnderlyingSink::WriteAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          })),
+          .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto chunk, auto c) mutable {
             return controller->write(js, chunk);
-          }))),
-          .abort = jsg::Function<UnderlyingSink::AbortAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          })),
+          .abort = maybeAddFunctor<UnderlyingSink::AbortAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto reason) mutable {
             return controller->abort(js, reason);
-          }))),
-          .close = jsg::Function<UnderlyingSink::CloseAlgorithm>(
-              ioContext.addFunctor(JSG_VISITABLE_LAMBDA(
+          })),
+          .close = maybeAddFunctor<UnderlyingSink::CloseAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js) mutable {
             return controller->close(js);
-          }))),
+          })),
         },
         kj::mv(maybeWritableStrategy),
         kj::mv(flags));
