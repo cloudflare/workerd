@@ -2557,7 +2557,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       }
       return kj::mv(e);
     } else {
-      KJ_LOG(ERROR, e);
+      LOG_EXCEPTION("actorCacheFlush", e);
       return KJ_EXCEPTION(FAILED, "broken.outputGateBroken; jsg.Error: Internal error in Durable "
           "Object storage write caused object to be reset.");
     }
@@ -2938,7 +2938,7 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       e.setDescription(kj::str("broken.outputGateBroken; ", msg));
       return kj::mv(e);
     } else {
-      KJ_LOG(ERROR, "ActorCache deleteAll() failed", e);
+      LOG_EXCEPTION("actorCacheDeleteAll", e);
       return KJ_EXCEPTION(FAILED,
           "broken.outputGateBroken; jsg.Error: Internal error in Durable Object storage deleteAll() caused object to be "
           "reset.");
