@@ -47,11 +47,10 @@ public:
 
   jsg::Optional<uint32_t> indexOf(jsg::Lock& js,
                                   kj::Array<kj::byte> buffer,
-                                  kj::OneOf<v8::Local<v8::String>,
-                                            jsg::BufferSource> value,
-                                  jsg::Optional<int32_t> byteOffset,
-                                  jsg::Optional<kj::String> encoding,
-                                  bool findLast = false);
+                                  kj::OneOf<v8::Local<v8::String>, jsg::BufferSource> value,
+                                  int32_t byteOffset,
+                                  kj::String encoding,
+                                  bool isForward);
 
   void swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size);
 

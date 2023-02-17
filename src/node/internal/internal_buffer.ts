@@ -1,3 +1,8 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+//
+
 // Copyright 2018-2023 the Deno authors. All rights reserved. MIT license.
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 // Copyright Feross Aboukhadijeh, and other contributors. All rights reserved. MIT license.
@@ -31,6 +36,10 @@ import {
 import {
   normalizeEncoding,
 } from 'node-internal:internal_utils';
+
+import {
+  validateString,
+} from 'node-internal:validators';
 
 // Temporary buffers to convert numbers.
 const float32Array = new Float32Array(1);
@@ -276,12 +285,18 @@ Buffer.from = from;
 
 function alloc(size: number, fill?: FillValue, encoding?: string) : Buffer {
   validateNumber(size, "size");
+  if (Number.isNaN(size)) {
+    throw new ERR_INVALID_ARG_VALUE.RangeError('size', size);
+  }
   if (size >= kMaxLength) {
     throw new ERR_OUT_OF_RANGE("size", `0 to ${kMaxLength}`, size);
   }
 
   const buffer = createBuffer(size);
   if (fill !== undefined) {
+    if (encoding !== undefined) {
+      validateString(encoding, 'encoding');
+    }
     return buffer.fill(fill, encoding);
   }
   return buffer;
@@ -337,7 +352,7 @@ Buffer.isEncoding = function isEncoding(encoding: unknown) {
 
 Buffer.concat = function concat(list: (Buffer|Uint8Array)[], length?: number) {
   if (!Array.isArray(list)) {
-    throw new ERR_INVALID_ARG_TYPE("list", "Array", list);
+    throw new ERR_INVALID_ARG_TYPE("list", "(Buffer|Uint8Array)[]", list);
   }
 
   if (list.length === 0) return alloc(0);
@@ -345,7 +360,7 @@ Buffer.concat = function concat(list: (Buffer|Uint8Array)[], length?: number) {
   if (length === undefined) {
     length = 0;
     for (let i = 0; i < list.length; i++) {
-      if (list[i].length) {
+      if (list[i].length !== undefined) {
         length += list[i].length;
       } else {
         throw new ERR_INVALID_ARG_TYPE('list', '(Buffer|Uint8Array)[]', list[i]);
@@ -380,12 +395,12 @@ function byteLength(string: string|ArrayBufferView|ArrayBuffer|SharedArrayBuffer
   }
 
   string = `${string}`;
-  const normalizedEncoding = normalizeEncoding(encoding);
+  let normalizedEncoding = normalizeEncoding(encoding);
   if (!Buffer.isEncoding(normalizedEncoding)) {
-    throw new ERR_UNKNOWN_ENCODING(encoding as string);
+    normalizedEncoding = "utf8";
   }
 
-  switch (encoding) {
+  switch (normalizedEncoding) {
     case 'ascii':
       // Fall through
     case 'latin1':
@@ -462,7 +477,7 @@ Buffer.prototype.toString = function toString(
     return "";
   }
 
-  const normalizedEncoding = normalizeEncoding(encoding);
+  const normalizedEncoding = normalizeEncoding(`${encoding}`);
   if (!Buffer.isEncoding(normalizedEncoding)) {
     throw new ERR_UNKNOWN_ENCODING(encoding as string);
   }
@@ -547,50 +562,77 @@ function includes(
 
 Buffer.prototype.includes = includes;
 
+
+// Finds either the first index of `val` in `buffer` at offset >= `byteOffset`,
+// OR the last index of `val` in `buffer` at offset <= `byteOffset`.
+//
+// Arguments:
+// - buffer - a Buffer to search
+// - val - a string, Buffer, or number
+// - byteOffset - an index into `buffer`; will be clamped to an int32
+// - encoding - an optional encoding, relevant if val is a string
+// - dir - true for indexOf, false for lastIndexOf
 function bidirectionalIndexOf(
-    buf: Uint8Array,
-    val: string|number|Buffer|Uint8Array,
-    byteOffset?: number|string,
-    encoding?: string,
-    findLast?: boolean) {
-  let normalizedEncoding : string | undefined;
-  if (typeof val === 'number') {
-    byteOffset = byteOffset as number | 0;
-    if (!findLast) {
-      return Uint8Array.prototype.indexOf.call(buf, val as number, byteOffset as number);
-    } else {
-      return Uint8Array.prototype.lastIndexOf.call(buf, val as number, byteOffset as number);
-    }
-  } else if (typeof val === 'string') {
-    if (typeof byteOffset === 'string') {
-      encoding = byteOffset;
-      byteOffset = 0;
-    }
-    normalizedEncoding = normalizeEncoding(encoding);
-    if (!Buffer.isEncoding(normalizedEncoding)) {
-      throw new ERR_UNKNOWN_ENCODING(encoding as string);
-    }
-  } else if (!Buffer.isBuffer(val) && !isUint8Array(val)) {
+  buffer: Uint8Array,
+  val: string|number|Buffer|Uint8Array,
+  byteOffset: number|string|undefined,
+  encoding: string|undefined,
+  dir: boolean|undefined) {
+
+  if (Buffer.isBuffer(val) && !isUint8Array(val)) {
     throw new ERR_INVALID_ARG_TYPE('val', ['string', 'number', 'Buffer', 'Uint8Array'], val);
   }
-  byteOffset = byteOffset as number | 0;
 
-  const result = bufferUtil.indexOf(buf, val, byteOffset as number, normalizedEncoding, findLast);
+  if (typeof byteOffset === 'string') {
+    encoding = byteOffset;
+    byteOffset = undefined;
+  } else if (byteOffset as number > 0x7fffffff) {
+    byteOffset = 0x7fffffff;
+  } else if (byteOffset as number < -0x80000000) {
+    byteOffset = -0x80000000;
+  }
+  // Coerce to Number. Values like null and [] become 0.
+  byteOffset = +(byteOffset as number);
+  // If the offset is undefined, "foo", {}, coerces to NaN, search whole buffer.
+  if (Number.isNaN(byteOffset)) {
+    byteOffset = dir ? 0 : (buffer.length || buffer.byteLength);
+  }
+  dir = !!dir;  // Cast to bool.
+
+  if (typeof val === 'number') {
+    val = (val >>> 0) & 0xff;
+    if (dir) {
+      return Uint8Array.prototype.indexOf.call(buffer, val, byteOffset);
+    } else {
+      return Uint8Array.prototype.lastIndexOf.call(buffer, val, byteOffset);
+    }
+  }
+
+  if (typeof val !== 'string' && !isUint8Array(val) && !Buffer.isBuffer(val)) {
+    throw new ERR_INVALID_ARG_TYPE('value', ['number', 'string', 'Buffer', 'Uint8Array'], val);
+  }
+
+  let normalizedEncoding = normalizeEncoding(encoding);
+  if (!Buffer.isEncoding(normalizedEncoding)) {
+    throw new ERR_UNKNOWN_ENCODING(encoding as string);
+  }
+
+  const result = bufferUtil.indexOf(buffer, val, byteOffset, normalizedEncoding, dir);
   return result == null ? -1 : result;
-};
+}
 
 Buffer.prototype.indexOf = function indexOf(
     val: string|number|Buffer|Uint8Array,
     byteOffset?: number|string,
     encoding?: string) {
-  return bidirectionalIndexOf(this, val, byteOffset, encoding, false);
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, true);
 };
 
 Buffer.prototype.lastIndexOf = function lastIndexOf(
     val: string|number|Buffer|Uint8Array,
     byteOffset?: number|string,
     encoding?: string) {
-  return bidirectionalIndexOf(this, val, byteOffset, encoding, true);
+  return bidirectionalIndexOf(this, val, byteOffset, encoding, false);
 };
 
 Buffer.prototype.asciiSlice = function asciiSlice(offset: number, length: number) {
@@ -711,25 +753,38 @@ Buffer.prototype.write = function write(string: StringLike,
                                         length?: number | string,
                                         encoding?: string) {
   string = `${string}`;
-  if (arguments.length === 1) {
+  if (offset === undefined) {
     // Buffer#write(string)
     return bufferUtil.write(this, string as string, 0, this.length, "utf8");
   }
 
-  if (typeof offset === 'string') {
-    encoding = offset as string;
-    offset = 0;
+  if (length === undefined && typeof offset === 'string') {
+    // Buffer#write(string, encoding)
+    encoding = offset;
     length = this.length;
-  } else if (typeof length === 'string') {
-    offset = (offset as number) | 0;
-    encoding = length as string;
-    length = this.length - offset;
-  }
-  offset ??= 0;
-  length ??= this.length - offset;
+    offset = 0;
+  } else {
+    // Buffer#write(string, offset[, length][, encoding])
+    validateOffset(offset as number, 'offset', 0, this.length);
 
-  validateOffset(offset as number, "offset", 0, this.length);
-  validateOffset(length as number, "length", 0, this.length - (offset as number));
+    const remaining = this.length - (offset as number);
+
+    if (length === undefined) {
+      length = remaining;
+    } else if (typeof length === 'string') {
+      encoding = length;
+      length = remaining;
+    } else {
+      validateOffset(length, 'length', 0, this.length);
+      if (length > remaining) {
+        length = remaining;
+      }
+    }
+  }
+
+  if (!encoding) {
+    return bufferUtil.write(this, string as string, offset as number, length as number, "utf8");
+  }
 
   const normalizedEncoding = normalizeEncoding(encoding);
   if (!Buffer.isEncoding(normalizedEncoding)) {
@@ -1281,7 +1336,6 @@ Buffer.prototype.copy = function copy(
   sourceStart?: number,
   sourceEnd?: number,
 ) {
-
   if (!isUint8Array(target)) {
     throw new ERR_INVALID_ARG_TYPE("target", ["Buffer", "Uint8Array"], target);
   }
@@ -1331,11 +1385,11 @@ Buffer.prototype.copy = function copy(
   }
 
   const len = (sourceEnd as number) - (sourceStart as number);
-
   if (this === target) {
     this.copyWithin(targetStart as number, sourceStart as number, sourceEnd as number);
   } else {
-    this.set(target, this.subarray(sourceStart, sourceEnd), targetStart);
+    const sub = this.subarray(sourceStart, sourceEnd);
+    target.set(sub, targetStart);
   }
 
   return len;
@@ -1343,10 +1397,9 @@ Buffer.prototype.copy = function copy(
 
 Buffer.prototype.fill = function fill(
     val: string|number|Buffer|Uint8Array,
-    start?: number,
+    start?: number|string,
     end?: number,
     encoding?: string) {
-
   let normalizedEncoding : string | undefined;
   if (typeof val === "string") {
     if (typeof start === "string") {
@@ -1369,6 +1422,16 @@ Buffer.prototype.fill = function fill(
     }
   }
 
+  if (start !== undefined) {
+    validateNumber(start, 'start');
+  }
+  if (end !== undefined) {
+    validateNumber(end, 'end');
+  }
+
+  if ((end as number) < 0 || (end as number) > this.length) {
+    throw new ERR_OUT_OF_RANGE('end', `0 to ${this.length}`, end);
+  }
   if ((start as number) < 0 || this.length < (start as number) || this.length < (end as number)) {
     throw new ERR_OUT_OF_RANGE('start', '0 to end', start);
   }
@@ -1379,15 +1442,20 @@ Buffer.prototype.fill = function fill(
   end = end === void 0 ? this.length : end >>> 0;
 
   if (typeof val === "string") {
-    return bufferUtil.fillImpl(this,
-                val as string,
-                start as number,
-                end as number,
-                normalizedEncoding);
+    bufferUtil.fillImpl(this,
+                        val as string,
+                        start as number,
+                        end as number,
+                        normalizedEncoding);
+    return this;
   }
 
   if (isArrayBufferView(val)) {
-    return bufferUtil.fillImpl(this, val as ArrayBufferView, start as number, end as number);
+    if (val.byteLength === 0) {
+      throw new ERR_INVALID_ARG_VALUE('value', 'zero-length');
+    }
+    bufferUtil.fillImpl(this, val as ArrayBufferView, start as number, end as number);
+    return this;
   }
 
   if (typeof val === "number") {
