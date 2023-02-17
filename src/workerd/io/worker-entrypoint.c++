@@ -183,12 +183,7 @@ kj::Promise<void> WorkerEntrypoint::request(
                                                      kj::mv(cfBlobJson));
     }
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    if (isPredictableModeForTest()) {
-      promise = promise.then([worker = kj::atomicAddRef(context.getWorker())]() {
-        auto lock = worker->getIsolate().getApiIsolate().lock();
-        lock->requestGcForTesting();
-      });
-    }
+    maybeAddGcPassForTest(context, promise);
     waitUntilTasks.add(kj::mv(promise));
   })).then([this]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
@@ -369,13 +364,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     };
   }).attach(kj::mv(incomingRequest));
 
-  if (isPredictableModeForTest()) {
-    promise = promise.then([worker = kj::atomicAddRef(context.getWorker())](auto res) {
-      auto lock = worker->getIsolate().getApiIsolate().lock();
-      lock->requestGcForTesting();
-      return res;
-    });
-  }
+  maybeAddGcPassForTest(context, promise);
 
   return promise;
 }
@@ -419,14 +408,32 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
     });
   });
 
-  if (isPredictableModeForTest()) {
-    promise = promise.then([worker = kj::atomicAddRef(context.getWorker())](auto res) {
-      auto lock = worker->getIsolate().getApiIsolate().lock();
-      lock->requestGcForTesting();
-      return res;
-    });
-  }
+  maybeAddGcPassForTest(context, promise);
 
+  return promise;
+}
+
+kj::Promise<bool> WorkerEntrypoint::test() {
+  auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
+                                "test() can only be called once"));
+  this->incomingRequest = nullptr;
+  incomingRequest->delivered();
+
+  auto& context = incomingRequest->getContext();
+
+  context.addWaitUntil(context.run(
+      [entrypointName=entrypointName, &context, &metrics = incomingRequest->getMetrics()]
+      (Worker::Lock& lock) mutable -> kj::Promise<void> {
+    return context.awaitJs(lock.getGlobalScope()
+        .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
+  }));
+
+  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
+    auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
+    return outcome == EventOutcome::OK;
+  }).attach(kj::mv(incomingRequest));
+
+  maybeAddGcPassForTest(context, promise);
   return promise;
 }
 
@@ -437,17 +444,35 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   this->incomingRequest = nullptr;
 
   auto& context = incomingRequest->getContext();
-  auto worker = kj::atomicAddRef(context.getWorker());
   auto promise = event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));
 
-  if (isPredictableModeForTest()) {
-    promise = promise.then([worker = kj::mv(worker)](auto res) {
-      auto lock = worker->getIsolate().getApiIsolate().lock();
-      lock->requestGcForTesting();
-      return res;
-    });
-  }
+  // TODO(cleanup): In theory `context` may have been destroyed by now if `event->run()` dropped
+  //   the `incomingRequest` synchronously. No current implementation does that, and
+  //   maybeAddGcPassForTest() is a no-op outside of tests, so I'm ignoring the theoretical problem
+  //   for now. Otherwise we will need to `atomicAddRef()` the `Worker` at some point earlier on
+  //   but I'd like to avoid that in the non-test case.
+  maybeAddGcPassForTest(context, promise);
   return promise;
+}
+
+template <typename T>
+void WorkerEntrypoint::maybeAddGcPassForTest(
+    IoContext& context, kj::Promise<T>& promise) {
+  if (isPredictableModeForTest()) {
+    auto worker = kj::atomicAddRef(context.getWorker());
+    if constexpr (kj::isSameType<T, void>()) {
+      promise = promise.then([worker = kj::mv(worker)]() {
+        auto lock = worker->getIsolate().getApiIsolate().lock();
+        lock->requestGcForTesting();
+      });
+    } else {
+      promise = promise.then([worker = kj::mv(worker)](auto res) {
+        auto lock = worker->getIsolate().getApiIsolate().lock();
+        lock->requestGcForTesting();
+        return res;
+      });
+    }
+  }
 }
 
 } // namespace workerd

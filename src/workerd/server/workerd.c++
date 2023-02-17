@@ -530,6 +530,8 @@ public:
               "run the server")
           .addSubCommand("compile", KJ_BIND_METHOD(*this, getCompile),
               "create a self-contained binary")
+          .addSubCommand("test", KJ_BIND_METHOD(*this, getTest),
+              "run unit tests")
           .build();
       // TODO(someday):
       // "validate": Loads the config and parses all the code to report errors, but then exits
@@ -540,11 +542,11 @@ public:
       auto builder = kj::MainBuilder(context, getVersionString(),
             "Serve requests based on the compiled config.",
             "This binary has an embedded configuration.");
-      return addServeOptionsAndBuild(builder);
+      return addServeOptions(builder);
     }
   }
 
-  kj::MainBuilder& addConfigParsingOptions(kj::MainBuilder& builder) {
+  kj::MainBuilder& addConfigParsingOptionsNoConstName(kj::MainBuilder& builder) {
     return builder
         .addOptionWithArg({'I', "import-path"}, CLI_METHOD(addImportPath), "<dir>",
                           "Add <dir> to the list of directories searched for non-relative "
@@ -554,18 +556,16 @@ public:
                    "message, rather than the usual text format. This is particularly useful when "
                    "driving the server from higher-level tooling that automatically generates a "
                    "config.")
-        .expectArg("<config-file>", CLI_METHOD(parseConfigFile))
+        .expectArg("<config-file>", CLI_METHOD(parseConfigFile));
+  }
+
+  kj::MainBuilder& addConfigParsingOptions(kj::MainBuilder& builder) {
+    return addConfigParsingOptionsNoConstName(builder)
         .expectOptionalArg("<const-name>", CLI_METHOD(setConstName));
   }
 
-  kj::MainFunc addServeOptionsAndBuild(kj::MainBuilder& builder) {
+  kj::MainBuilder& addServeOrTestOptions(kj::MainBuilder& builder) {
     return builder
-        .addOptionWithArg({'s', "socket-addr"}, CLI_METHOD(overrideSocketAddr), "<name>=<addr>",
-                          "Override the socket named <name> to bind to the address <addr> instead "
-                          "of the address specified in the config file.")
-        .addOptionWithArg({'S', "socket-fd"}, CLI_METHOD(overrideSocketFd), "<name>=<fd>",
-                          "Override the socket named <name> to listen on the already-open socket "
-                          "descriptor <fd> instead of the address specified in the config file.")
         .addOptionWithArg({'d', "directory-path"}, CLI_METHOD(overrideDirectory), "<name>=<path>",
                           "Override the directory named <name> to point to <path> instead of the "
                           "path specified in the config file.")
@@ -579,7 +579,17 @@ public:
                    "Useful for development, but not recommended in production.")
         .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
-                   "compatibility in a future release.")
+                   "compatibility in a future release.");
+  }
+
+  kj::MainFunc addServeOptions(kj::MainBuilder& builder) {
+    return addServeOrTestOptions(builder)
+        .addOptionWithArg({'s', "socket-addr"}, CLI_METHOD(overrideSocketAddr), "<name>=<addr>",
+                          "Override the socket named <name> to bind to the address <addr> instead "
+                          "of the address specified in the config file.")
+        .addOptionWithArg({'S', "socket-fd"}, CLI_METHOD(overrideSocketFd), "<name>=<fd>",
+                          "Override the socket named <name> to listen on the already-open socket "
+                          "descriptor <fd> instead of the address specified in the config file.")
         .callAfterParsing(CLI_METHOD(serve))
         .build();
   }
@@ -588,7 +598,48 @@ public:
     auto builder = kj::MainBuilder(context, getVersionString(),
           "Serve requests based on a config.",
           "Serves requests based on the configuration specified in <config-file>.");
-    return addServeOptionsAndBuild(addConfigParsingOptions(builder));
+    return addServeOptions(addConfigParsingOptions(builder));
+  }
+
+  kj::MainFunc getTest() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+          "Runs tests based on a config.",
+          "Runs tests for services defined in <config-file>. <filter>, if given, specifies "
+          "exactly which tests to run. It has one of the following formats:\n"
+          "    <service-pattern>\n"
+          "    <service-pattern>:<entrypoint-pattern>\n"
+          "    <const-name>:<service-pattern>:<entrypoint-pattern>\n"
+          "<service-pattern> is a glob pattern matching names of services which should be tested. "
+          "If not specified, '*' is assumed (which matches all services). <entrypoint-pattern> "
+          "is a glob pattern matching entrypoints within each service which should be tested; "
+          "again, the default is '*'. <const-name> has the same meaning as for the `serve` "
+          "command (this is rarely used).\n"
+          "\n"
+          "Tests can be defined by exporting a function called `test` instead of (or in addition "
+          "to) `fetch`. Example:\n"
+          "    export default {\n"
+          "      async test(ctrl, env, ctx) {\n"
+          "        if (1 + 1 != 2) {\n"
+          "          throw new Error('math is broken!');\n"
+          "        }\n"
+          "      }\n"
+          "    }\n"
+          "The test passes if the test function completes without throwing. Multiple tests can "
+          "be exported under different entrypoint names:\n"
+          "    export let test1 = {\n"
+          "      async test(ctrl, env, ctx) {\n"
+          "        ...\n"
+          "      }\n"
+          "    }\n"
+          "    export let test2 = {\n"
+          "      async test(ctrl, env, ctx) {\n"
+          "        ...\n"
+          "      }\n"
+          "    }\n");
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
+        .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
   }
 
   kj::MainFunc getCompile() {
@@ -768,6 +819,39 @@ public:
     config = constSchema.as<config::Config>();
   }
 
+  void setTestFilter(kj::StringPtr filter) {
+    kj::Vector<kj::String> parts;
+
+    for (;;) {
+      KJ_IF_MAYBE(pos, filter.findFirst(':')) {
+        parts.add(kj::str(filter.slice(0, *pos)));
+        filter = filter.slice(*pos + 1);
+      } else {
+        parts.add(kj::str(filter));
+        break;
+      }
+    }
+
+    switch (parts.size()) {
+      case 0:
+        KJ_UNREACHABLE;
+      case 1:
+        testServicePattern = kj::mv(parts[0]);
+        break;
+      case 2:
+        testServicePattern = kj::mv(parts[0]);
+        testEntrypointPattern = kj::mv(parts[1]);
+        break;
+      case 3:
+        setConstName(parts[0]);
+        testServicePattern = kj::mv(parts[1]);
+        testEntrypointPattern = kj::mv(parts[2]);
+        break;
+      default:
+        CLI_ERROR("Too many colons.");
+    }
+  }
+
   void compile() {
     if (hadErrors) {
       // Errors were already reported with context.error(), so contex.exit() will exit with a
@@ -851,7 +935,8 @@ public:
     }
   }
 
-  [[noreturn]] void serve() noexcept {
+  template <typename Func>
+  [[noreturn]] void serveImpl(Func&& func) noexcept {
     if (hadErrors) {
       // Can't start, stuff is broken.
       KJ_IF_MAYBE(w, watcher) {
@@ -869,9 +954,7 @@ public:
       auto config = getConfig();
       jsg::V8System v8System(
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
-      auto promise = server.run(v8System, config,
-          // Gracefully drain when SIGTERM is received.
-          io.unixEventPort.onSignal(SIGTERM).ignoreResult());
+      auto promise = func(v8System, config);
       KJ_IF_MAYBE(w, watcher) {
         promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
           // Watch succeeded.
@@ -881,6 +964,38 @@ public:
       promise.wait(io.waitScope);
       context.exit();
     }
+  }
+
+  [[noreturn]] void serve() noexcept {
+    serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
+      return server.run(v8System, config,
+          // Gracefully drain when SIGTERM is received.
+          io.unixEventPort.onSignal(SIGTERM).ignoreResult());
+    });
+  }
+
+  [[noreturn]] void test() noexcept {
+    // Always turn on info logging when running tests so that uncaught exceptions are displayed.
+    // TODO(beta): This can be removed once we improve our error logging story.
+    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+
+    serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
+      return server.test(v8System, config,
+          testServicePattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj),
+          testEntrypointPattern.map([](auto& s) -> kj::StringPtr { return s; }).orDefault("*"_kj))
+          .then([this](bool result) -> kj::Promise<void> {
+        if (!result) {
+          context.error("Tests failed!");
+        }
+
+        if (watcher == nullptr) {
+          return kj::READY_NOW;
+        } else {
+          // Pause forever waiting for watcher.
+          return kj::NEVER_DONE;
+        }
+      });
+    });
   }
 
   [[noreturn]] void reloadFromConfigChange() {
@@ -932,6 +1047,9 @@ private:
   kj::Maybe<config::Config::Reader> config;
 
   kj::Vector<int> inheritedFds;
+
+  kj::Maybe<kj::String> testServicePattern;
+  kj::Maybe<kj::String> testEntrypointPattern;
 
   Server server;
 

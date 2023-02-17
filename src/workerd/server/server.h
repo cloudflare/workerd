@@ -58,6 +58,15 @@ public:
                         kj::Promise<void> drainWhen = kj::NEVER_DONE);
   // Runs the server using the given config.
 
+  kj::Promise<bool> test(jsg::V8System& v8System, config::Config::Reader conf,
+                         kj::StringPtr servicePattern = "*"_kj,
+                         kj::StringPtr entrypointPattern = "*"_kj);
+  // Executes one or more tests. By default, all exported test handlers from all entrypoints to
+  // all services in the config are executed. Glob patterns can be specified to match specific
+  // service and entrypoint names.
+  //
+  // The returned promise resolves true if at least one test ran and no tests failed.
+
 private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -161,6 +170,14 @@ private:
 
   kj::Maybe<kj::Own<InspectorService>> maybeInspectorService;
   kj::Own<InspectorService> makeInspectorService(kj::HttpHeaderTable::Builder& headerTableBuilder);
+
+  void startServices(jsg::V8System& v8System, config::Config::Reader config,
+                     kj::HttpHeaderTable::Builder& headerTableBuilder,
+                     kj::ForkedPromise<void>& forkedDrainWhen);
+
+  kj::Promise<void> listenOnSockets(config::Config::Reader config,
+                                    kj::HttpHeaderTable::Builder& headerTableBuilder,
+                                    kj::ForkedPromise<void>& forkedDrainWhen);
 };
 
 }  // namespace workerd::server

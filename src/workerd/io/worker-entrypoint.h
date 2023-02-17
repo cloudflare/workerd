@@ -54,6 +54,7 @@ public:
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<bool> test() override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
 private:
@@ -81,6 +82,9 @@ private:
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+
+  template <typename T>
+  void maybeAddGcPassForTest(IoContext& context, kj::Promise<T>& promise);
 
 public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,

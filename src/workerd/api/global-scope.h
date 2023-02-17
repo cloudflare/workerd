@@ -103,6 +103,15 @@ public:
   // (EventTarget's constructor confuses the hasConstructorMethod in resource.h)
 };
 
+class TestController: public jsg::Object {
+  // Controller type for test handler.
+  //
+  // At present, this has no methods. It is defined for consistency with other handlers and on the
+  // assumption that we'll probably want to put something here someday.
+public:
+  JSG_RESOURCE_TYPE(TestController) {}
+};
+
 class ExecutionContext: public jsg::Object {
 public:
   void waitUntil(kj::Promise<void> promise);
@@ -137,10 +146,15 @@ struct ExportedHandler {
   // Alarms are only exported on DOs, which receive env bindings from the constructor
   jsg::LenientOptional<jsg::Function<AlarmHandler>> alarm;
 
+  typedef jsg::Promise<void> TestHandler(
+      jsg::Ref<TestController> controller, jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<TestHandler>> test;
+
   jsg::SelfRef self;
   // Self-ref potentially allows extracting other custom handlers from the object.
 
-  JSG_STRUCT(fetch, trace, scheduled, alarm, self);
+  JSG_STRUCT(fetch, trace, scheduled, alarm, test, self);
 
   JSG_STRUCT_TS_ROOT();
   // ExportedHandler isn't included in the global scope, but we still want to
@@ -151,6 +165,7 @@ struct ExportedHandler {
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
+    type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
   );
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown> {
     fetch?: ExportedHandlerFetchHandler<Env>;
@@ -158,6 +173,7 @@ struct ExportedHandler {
     scheduled?: ExportedHandlerScheduledHandler<Env>;
     alarm: never;
     queue?: ExportedHandlerQueueHandler<Env, QueueMessage>;
+    test?: ExportedHandlerTestHandler<Env>;
   });
   // Make `env` parameter generic
 
@@ -216,6 +232,12 @@ public:
       kj::Date scheduledTime,
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
   // Received runAlarm (called from C++, not JS).
+
+  jsg::Promise<void> test(
+      Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+  // Received test() (called from C++, not JS). See WorkerInterface::test(). This version returns
+  // a jsg::Promise<void>; it fails if an exception is thrown. WorkerEntrypoint will catch these
+  // and report them.
 
   void emitPromiseRejection(
       jsg::Lock& js,
@@ -545,6 +567,7 @@ private:
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                    \
   api::WorkerGlobalScope,                                \
   api::ServiceWorkerGlobalScope,                         \
+  api::TestController,                                   \
   api::ExecutionContext,                                 \
   api::ExportedHandler,                                  \
   api::ServiceWorkerGlobalScope::StructuredCloneOptions, \

@@ -2,10 +2,27 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag")
+load("@bazel_skylib//lib:selects.bzl", "selects")
 
 config_setting(
     name = "is_linux",
     constraint_values = ["@platforms//os:linux"],
+)
+
+# Flag that can be used to force-disable tcmalloc. Mainly used for ASAN builds.
+# TODO(cleanup): This feels ugly but I've exceeded my timebox for fighting Bazel for now.
+bool_flag(
+    name = "use_tcmalloc",
+    build_setting_default = True,
+)
+config_setting(
+    name = "set_use_tcmalloc",
+    flag_values = {"use_tcmalloc": "True"},
+)
+selects.config_setting_group(
+    name = "really_use_tcmalloc",
+    match_all = [":set_use_tcmalloc", ":is_linux"],
 )
 
 wd_cc_binary(
@@ -19,7 +36,7 @@ wd_cc_binary(
         ":workerd-meta_capnp",
     ],
     malloc = select({
-        ":is_linux": "@com_google_tcmalloc//tcmalloc",
+        ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
         "//conditions:default": "@bazel_tools//tools/cpp:malloc",
     }),
 )

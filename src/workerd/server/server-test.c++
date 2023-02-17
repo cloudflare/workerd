@@ -2354,6 +2354,111 @@ KJ_TEST("Server: cache name is passed through to service") {
 }
 
 // =======================================================================================
+// Test the test command
+
+KJ_TEST("Server: cache name is passed through to service") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async test(controller, env, ctx) {}
+                `}
+                `export let fail = {
+                `  async test(controller, env, ctx) {
+                `    throw new Error("ded");
+                `  }
+                `}
+                `export let nonTest = {
+                `  async fetch(req, env, ctx) {
+                `    return new Response("ok");
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+      ( name = "another",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async test(controller, env, ctx) {
+                `    console.log(env.MESSAGE);
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "MESSAGE", text = "other test" ),
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
+    KJ_EXPECT(test.server.test(v8System, *test.config, "hello", "default").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(INFO, "Error: ded");
+    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "fail").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(INFO, "Error: ded");
+    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "hello", "*").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
+    KJ_EXPECT_LOG(INFO, "[ TEST ] another");
+    KJ_EXPECT_LOG(INFO, "other test");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] another");
+    KJ_EXPECT(test.server.test(v8System, *test.config, "*", "default").wait(test.ws));
+  }
+
+  {
+    TestServer test(config);
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] hello");
+    KJ_EXPECT_LOG(INFO, "[ TEST ] hello:fail");
+    KJ_EXPECT_LOG(INFO, "Error: ded");
+    KJ_EXPECT_LOG(INFO, "[ FAIL ] hello:fail");
+    KJ_EXPECT_LOG(INFO, "[ TEST ] another");
+    KJ_EXPECT_LOG(INFO, "other test");
+    KJ_EXPECT_LOG(INFO, "[ PASS ] another");
+    KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
+  }
+}
+
+// =======================================================================================
 
 // TODO(beta): Test TLS (send and receive)
 // TODO(beta): Test CLI overrides
