@@ -1,0 +1,8 @@
+cc_library(
+    name = "sqlite3",
+    hdrs = ["sqlite3.h", "sqlite3ext.h"],
+    srcs = ["sqlite3.c"],
+    visibility = ["//visibility:public"],
+    include_prefix = ".",
+    copts = ["-w"],  # Ignore all warnings. This is not our code, we can't fix the warnings.
+)

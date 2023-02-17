@@ -20,6 +20,7 @@
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-sqlite.h>
 #include <workerd/api/actor-state.h>
 #include "workerd-api.h"
 
@@ -745,6 +746,8 @@ public:
     return { this, kj::NullDisposer::instance };
   }
 
+  kj::Maybe<const kj::Directory&> getWritable() { return writable; }
+
   bool hasHandler(kj::StringPtr handlerName) override {
     return handlerName == "fetch"_kj;
   }
@@ -1147,6 +1150,7 @@ public:
     kj::Array<Service*> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Maybe<Service&> cache;
+    kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
@@ -1155,9 +1159,10 @@ public:
                 kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
                 const kj::HashMap<kj::String, ActorConfig>& actorClasses,
                 LinkCallback linkCallback)
-      : threadContext(threadContext), worker(kj::mv(worker)),
-        defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
+      : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
+        worker(kj::mv(worker)),
+        defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         waitUntilTasks(*this) {
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
@@ -1248,16 +1253,34 @@ public:
         }
 
         auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() {
+          auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
+          kj::Maybe<ActorSqlite&> actorSqlite;
+
           auto persistent = config.tryGet<Durable>().map([&](const Durable& d) {
-            // TODO(someday): Implement some sort of actual durable storage. For now we force
-            //   `ActorCache` into `neverFlush` mode so that all state is kept in-memory.
-            return rpc::ActorStorage::Stage::Client(kj::heap<EmptyReadOnlyActorStorageImpl>());
+            kj::Own<ActorSqlite> ownSqlite;
+            KJ_IF_MAYBE(as, channels.actorStorage) {
+              ownSqlite = kj::heap<ActorSqlite>(**as,
+                  kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}));
+              actorSqlite = *ownSqlite;
+            }
+
+            // TODO(sqlite)(cleanup): This isn't actually used when using local disk storage. Can
+            //   we make it go away? For now we use it as a convenient place to attach the
+            //   ActorSqlite object so that it sticks around for the appropriate lifetime.
+            return rpc::ActorStorage::Stage::Client(
+                kj::heap<EmptyReadOnlyActorStorageImpl>().attach(kj::mv(ownSqlite)));
           });
 
-          auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
-                                ActorCache& actorCache)
+          auto makeStorage = [actorSqlite](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
+                                           ActorCache& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
-            return jsg::alloc<api::DurableObjectStorage>(IoContext::current().addObject(actorCache));
+            KJ_IF_MAYBE(a, actorSqlite) {
+              return jsg::alloc<api::DurableObjectStorage>(
+                  IoContext::current().addObject(*a));
+            } else {
+              return jsg::alloc<api::DurableObjectStorage>(
+                  IoContext::current().addObject(actorCache));
+            }
           };
 
           TimerChannel& timerChannel = service;
@@ -1268,6 +1291,8 @@ public:
               className, kj::mv(makeStorage), lock,
               timerChannel, kj::refcounted<ActorObserver>());
 
+          // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
+          //   a minute of inactivity...
           return kj::HashMap<kj::String, kj::Own<Worker::Actor>>::Entry {
             kj::mv(idStr), kj::mv(newActor)
           };
@@ -1309,11 +1334,14 @@ private:
   };
 
   ThreadContext& threadContext;
+
+  kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
+  // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
+
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
   kj::HashMap<kj::StringPtr, ActorNamespace> actorNamespaces;
-  kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
   kj::TaskSet waitUntilTasks;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
@@ -1902,6 +1930,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto linkCallback =
       [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
        actorChannels = kj::mv(actorChannels)](WorkerService& workerService) mutable {
+    WorkerService::LinkedIoChannels result;
+
     auto services = kj::heapArrayBuilder<Service*>(subrequestChannels.size() +
               IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
 
@@ -1918,7 +1948,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       services.add(&lookupService(channel.designator, kj::mv(channel.errorContext)));
     }
 
-    auto actors = KJ_MAP(channel, actorChannels) -> kj::Maybe<WorkerService::ActorNamespace&> {
+    result.subrequest = services.finish();
+
+    result.actor = KJ_MAP(channel, actorChannels) -> kj::Maybe<WorkerService::ActorNamespace&> {
       WorkerService* targetService = &workerService;
       if (channel.designator.hasServiceName()) {
         auto& svc = KJ_UNWRAP_OR(this->services.find(channel.designator.getServiceName()), {
@@ -1937,21 +1969,31 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     };
 
     if (conf.hasCacheApiOutbound()) {
-      Service& cacheApi = lookupService(conf.getCacheApiOutbound(),
-                                        kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
-
-      return WorkerService::LinkedIoChannels{
-          .subrequest = services.finish(),
-          .actor = kj::mv(actors),
-          .cache = &cacheApi
-      };
-    } else {
-      return WorkerService::LinkedIoChannels{
-          .subrequest = services.finish(),
-          .actor = kj::mv(actors)
-      };
+      result.cache = lookupService(conf.getCacheApiOutbound(),
+                                   kj::str("Worker \"", name, "\"'s cacheApiOutbound"));
     }
 
+    auto actorStorageConf = conf.getDurableObjectStorage();
+    if (actorStorageConf.isLocalDisk()) {
+      kj::StringPtr diskName = actorStorageConf.getLocalDisk();
+      KJ_IF_MAYBE(svc, this->services.find(actorStorageConf.getLocalDisk())) {
+        auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc->get());
+        if (diskSvc == nullptr) {
+          reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
+              "to the service \"", diskName, "\", but that service is not a local disk service."));
+        } else KJ_IF_MAYBE(dir, diskSvc->getWritable()) {
+          result.actorStorage = kj::heap<SqliteDatabase::Vfs>(*dir);
+        } else {
+          reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
+              "to the disk service \"", diskName, "\", but that service is defined read-only."));
+        }
+      } else {
+        reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
+            "to a service \"", diskName, "\", but no such service is defined."));
+      }
+    }
+
+    return result;
   };
 
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
@@ -2301,6 +2343,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
           }
           goto validDurableObjectStorage;
         case config::Worker::DurableObjectStorage::IN_MEMORY:
+        case config::Worker::DurableObjectStorage::LOCAL_DISK:
           goto validDurableObjectStorage;
       }
       reportConfigError(kj::str(

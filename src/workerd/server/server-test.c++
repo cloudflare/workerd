@@ -1229,7 +1229,7 @@ KJ_TEST("Server: invalid entrypoint") {
           "has no such named entrypoint.\n");
 }
 
-KJ_TEST("Server: Durable Objects") {
+KJ_TEST("Server: Durable Objects (in memory)") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1292,6 +1292,130 @@ KJ_TEST("Server: Durable Objects") {
       "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 3");
   conn.httpGet200("/bar",
       "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
+}
+
+KJ_TEST("Server: Durable Objects (on disk)") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName(request.url)
+                `    let actor = env.ns.get(id)
+                `    return await actor.fetch(request)
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.storage = state.storage;
+                `    this.id = state.id;
+                `  }
+                `  async fetch(request) {
+                `    let count = (await this.storage.get("foo")) || 0;
+                `    this.storage.put("foo", count + 1);
+                `    return new Response(this.id + ": " + request.url + " " + count);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "/var/do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  // Create a directory outside of the test scope which we can use across multiple TestServers.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"var"_kj, "do-storage"_kj}), kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT,
+        *dir, nullptr, kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 0");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 1");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 2");
+    conn.httpGet200("/bar",
+        "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 0");
+    conn.httpGet200("/bar",
+        "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 1");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 3");
+    conn.httpGet200("/bar",
+        "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
+
+    // The storage directory contains .sqlite and .sqlite-wal files for both objects. Note that
+    // the `-shm` files are missing because SQLite doesn't actually tell the VFS to create these
+    // as separate files, it leaves it up to the VFS to decide how shared memory works, and our
+    // KJ-wrapping VFS currently doesn't put this in SHM files. If we were using a real disk
+    // directory, though, they would be there.
+    KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 4);
+    KJ_EXPECT(dir->exists(kj::Path({"mykey",
+      "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite"})));
+    KJ_EXPECT(dir->exists(kj::Path({"mykey",
+      "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite-wal"})));
+    KJ_EXPECT(dir->exists(kj::Path({"mykey",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234.sqlite"})));
+    KJ_EXPECT(dir->exists(kj::Path({"mykey",
+      "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234.sqlite-wal"})));
+  }
+
+  // Having torn everything down, the WAL files should be gone.
+  KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 2);
+  KJ_EXPECT(dir->exists(kj::Path({"mykey",
+    "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite"})));
+  KJ_EXPECT(dir->exists(kj::Path({"mykey",
+    "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234.sqlite"})));
+
+  // Let's start a new server and verify it can load the files from disk.
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"var"_kj, "do-storage"_kj}), kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT,
+        *dir, nullptr, kj::TransferMode::LINK);
+
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 4");
+    conn.httpGet200("/",
+        "59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234: http://foo/ 5");
+    conn.httpGet200("/bar",
+        "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 3");
+  }
 }
 
 KJ_TEST("Server: Ephemeral Objects") {

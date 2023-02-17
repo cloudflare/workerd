@@ -59,6 +59,15 @@ http_archive(
     build_file = "//:build/BUILD.lol-html",
 )
 
+http_archive(
+    name = "sqlite3",
+    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
+    strip_prefix = "sqlite-amalgamation-3400100",
+    type = "zip",
+    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
+    build_file = "//:build/BUILD.sqlite3",
+)
+
 # ========================================================================================
 # tcmalloc
 
