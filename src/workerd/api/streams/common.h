@@ -599,4 +599,11 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
   return kj::mv(prp.promise);
 }
 
+inline kj::Maybe<IoContext&> tryGetIoContext() {
+  if (IoContext::hasCurrent()) {
+    return IoContext::current();
+  }
+  return nullptr;
+}
+
 }  // namespace workerd::api

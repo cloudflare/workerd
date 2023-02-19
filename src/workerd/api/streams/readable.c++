@@ -8,7 +8,7 @@
 namespace workerd::api {
 
 ReaderImpl::ReaderImpl(ReadableStreamController::Reader& reader) :
-    ioContext(IoContext::current()),
+    ioContext(tryGetIoContext()),
     reader(reader) {}
 
 ReaderImpl::~ReaderImpl() noexcept(false) {
@@ -51,7 +51,6 @@ void ReaderImpl::detach() {
 jsg::Promise<void> ReaderImpl::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
@@ -84,7 +83,6 @@ void ReaderImpl::lockToStream(jsg::Lock& js, ReadableStream& stream) {
 jsg::Promise<ReadResult> ReaderImpl::read(
     jsg::Lock& js,
     kj::Maybe<ReadableStreamController::ByobOptions> byobOptions) {
-  ioContext.requireCurrentOrThrowJs();
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
       KJ_FAIL_ASSERT("this reader was never attached");
@@ -131,7 +129,6 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
-  ioContext.requireCurrentOrThrowJs();
   // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
   // modification to the spec that we have not yet implemented.
   KJ_SWITCH_ONEOF(state) {
@@ -300,7 +297,7 @@ ReadableStream::ReadableStream(
 }
 
 ReadableStream::ReadableStream(Controller controller)
-    : ioContext(IoContext::current()), controller(kj::mv(controller)) {
+    : ioContext(tryGetIoContext()), controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
 }
 
@@ -319,7 +316,6 @@ ReadableStreamController& ReadableStream::getController() {
 jsg::Promise<void> ReadableStream::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  ioContext.requireCurrentOrThrowJs();
   if (getController().isLockedToReader()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
@@ -330,7 +326,6 @@ jsg::Promise<void> ReadableStream::cancel(
 ReadableStream::Reader ReadableStream::getReader(
     jsg::Lock& js,
     jsg::Optional<GetReaderOptions> options) {
-  ioContext.requireCurrentOrThrowJs();
   JSG_REQUIRE(!isLocked(), TypeError, "This ReadableStream is currently locked to a reader.");
 
   bool isByob = false;
@@ -354,7 +349,6 @@ ReadableStream::Reader ReadableStream::getReader(
 jsg::Ref<ReadableStream::ReadableStreamAsyncIterator> ReadableStream::values(
     jsg::Lock& js,
     jsg::Optional<ValuesOptions> options) {
-  ioContext.requireCurrentOrThrowJs();
   static auto defaultOptions = ValuesOptions {};
   return jsg::alloc<ReadableStreamAsyncIterator>(AsyncIteratorState {
     .ioContext = ioContext,
@@ -367,8 +361,8 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
     jsg::Lock& js,
     Transform transform,
     jsg::Optional<PipeToOptions> maybeOptions) {
-  ioContext.requireCurrentOrThrowJs();
   auto& controller = getController();
+
   auto& destination = transform.writable->getController();
   JSG_REQUIRE(!controller.isLockedToReader(), TypeError,
                "This ReadableStream is currently locked to a reader.");
@@ -393,7 +387,6 @@ jsg::Promise<void> ReadableStream::pipeTo(
     jsg::Lock& js,
     jsg::Ref<WritableStream> destination,
     jsg::Optional<PipeToOptions> maybeOptions) {
-  ioContext.requireCurrentOrThrowJs();
   if (getController().isLockedToReader()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
@@ -409,7 +402,6 @@ jsg::Promise<void> ReadableStream::pipeTo(
 }
 
 kj::Array<jsg::Ref<ReadableStream>> ReadableStream::tee(jsg::Lock& js) {
-  ioContext.requireCurrentOrThrowJs();
   JSG_REQUIRE(!isLocked(), TypeError, "This ReadableStream is currently locked to a reader,");
   auto tee = getController().tee(js);
   return kj::arr(kj::mv(tee.branch1), kj::mv(tee.branch2));
@@ -418,7 +410,6 @@ kj::Array<jsg::Ref<ReadableStream>> ReadableStream::tee(jsg::Lock& js) {
 jsg::Promise<kj::Maybe<jsg::Value>> ReadableStream::nextFunction(
     jsg::Lock& js,
     AsyncIteratorState& state) {
-  state.ioContext.requireCurrentOrThrowJs();
   return state.reader->read(js).then(js,
       [reader = state.reader.addRef()](jsg::Lock& js, ReadResult result) mutable {
     if (result.done) {
@@ -433,7 +424,6 @@ jsg::Promise<void> ReadableStream::returnFunction(
     jsg::Lock& js,
     AsyncIteratorState& state,
     jsg::Optional<jsg::Value> value) {
-  state.ioContext.requireCurrentOrThrowJs();
   if (state.reader.get() != nullptr) {
     auto reader = kj::mv(state.reader);
     if (!state.preventCancel) {
@@ -454,7 +444,6 @@ jsg::Promise<void> ReadableStream::returnFunction(
 }
 
 jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js) {
-  ioContext.requireCurrentOrThrowJs();
   JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
   KJ_SWITCH_ONEOF(controller) {
@@ -478,7 +467,8 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
     jsg::Lock& js,
     kj::Own<WritableStreamSink> sink,
     bool end) {
-  ioContext.requireCurrentOrThrowJs();
+  JSG_REQUIRE(IoContext::hasCurrent(), Error,
+      "Unable to consume this ReadableStream outside of a request");
   return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
     JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
     JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
@@ -526,7 +516,6 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                Error,
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
-
   auto stream = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>());
   static_cast<ReadableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
