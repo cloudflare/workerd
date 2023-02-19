@@ -46,6 +46,15 @@ public:
 
   v8::Local<v8::Value> getStore(jsg::Lock& js);
 
+  static v8::Local<v8::Function> bind(jsg::Lock& js, v8::Local<v8::Function> fn);
+  // Binds the given function to the current async context frame such that
+  // whenever the function is called, the bound frame is entered.
+
+  static v8::Local<v8::Function> snapshot(jsg::Lock& js);
+  // Returns a function bound to the current async context frame that calls
+  // the function passed to it as the only argument within that frame.
+  // Equivalent to AsyncLocalStorage.bind((cb, ...args) => cb(...args)).
+
   inline void enterWith(jsg::Lock&, v8::Local<v8::Value>) {
     KJ_UNIMPLEMENTED("asyncLocalStorage.enterWith() is not implemented");
   }
@@ -60,6 +69,8 @@ public:
     JSG_METHOD(getStore);
     JSG_METHOD(enterWith);
     JSG_METHOD(disable);
+    JSG_STATIC_METHOD(bind);
+    JSG_STATIC_METHOD(snapshot);
 
     if (flags.getNodeJsCompat()) {
       JSG_TS_OVERRIDE(AsyncLocalStorage<T> {
@@ -68,6 +79,8 @@ public:
         exit<R, TArgs extends any[]>(callback: (...args: TArgs) => R, ...args: TArgs): R;
         disable(): void;
         enterWith(store: T): void;
+        static bind<Func extends (...args: any[]) => any>(fn: Func): Func;
+        static snapshot<R, TArgs extends any[]>() : ((...args: TArgs) => R, ...args: TArgs) => R;
       });
     } else {
       JSG_TS_OVERRIDE(type AsyncLocalStorage = never);
@@ -80,6 +93,10 @@ private:
 
 
 class AsyncResource final: public jsg::Object {
+  // Note: The AsyncResource class is provided for Node.js backwards compatibility.
+  // The class can be replaced entirely for async context tracking using the
+  // AsyncLocalStorage.bind() and AsyncLocalStorage.snapshot() APIs.
+  //
   // The AsyncResource class is an object that user code can use to define its own
   // async resources for the purpose of storage context propagation. For instance,
   // let's imagine that we have an EventTarget and we want to register two event listeners
