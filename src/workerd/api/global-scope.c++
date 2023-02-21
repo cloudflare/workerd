@@ -389,8 +389,10 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(
     auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
     auto alarmResultPromise = context
-        .run([exportedHandler, &alarm](Worker::Lock& lock)
-        -> kj::Promise<WorkerInterface::AlarmResult> {
+        .run([exportedHandler, &alarm,
+              maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)]
+             (Worker::Lock& lock) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
+      jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       return alarm(lock).then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
         return WorkerInterface::AlarmResult {
           .retry = false,

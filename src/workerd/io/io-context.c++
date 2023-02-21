@@ -161,6 +161,7 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
       waitUntilTasks(*this),
+      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
       timeoutManager(kj::heap<TimeoutManagerImpl>()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
@@ -917,7 +918,28 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   return getIoChannelFactory().getCache();
 }
 
+jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(jsg::Lock& js) {
+  auto context = js.v8Isolate->GetCurrentContext();
+  auto ioOwnSpanParent = IoContext::current().addObject(kj::heap(getMetrics().getSpan()));
+  auto spanHandle = jsg::wrapOpaque(context, kj::mv(ioOwnSpanParent));
+  return jsg::AsyncContextFrame::StorageScope(js, *traceAsyncContextKey, js.v8Ref(spanHandle));
+}
+
 SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+  // If called while lock is held, try to use the trace info stored in the async context.
+  KJ_IF_MAYBE (js, currentLock) {
+    KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*js)) {
+      KJ_IF_MAYBE (value, frame->get(*traceAsyncContextKey)) {
+        auto handle = value->getHandle(*js);
+        jsg::Lock& jsgLock = *js;
+        auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(jsgLock.v8Isolate, handle);
+        return spanParent->newChild(operationName);
+      }
+    }
+  }
+
+  // If async context is unavailable (unset, or JS lock is not held), fall back to heuristic of
+  // using the trace info from the most recent active request.
   return getMetrics().getSpan().newChild(operationName);
 }
 
