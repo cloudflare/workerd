@@ -82,6 +82,20 @@ public:
         JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END,
                      Error,
                      "Decompression failed.");
+
+        // TODO(soon): The spec requires that a TypeError is produced if there is trailing data
+        // after the end of the compression stream. This is a potentially breaking change, so just
+        // put out a warning for now. Later, make it an error and provide a test to confirm that
+        // input with trailing data causes a TypeError.
+        JSG_WARN_ONCE_IF(result == Z_STREAM_END && ctx.avail_in > 0,
+            "Trailing bytes after end of compressed data");
+
+        // TODO(soon): Same applies to closing a stream before the complete decompressed data is
+        // available. Once this is converted to an error, provide a test case checking that
+        // providing incomplete compressed data results in a TypeError.
+        JSG_WARN_ONCE_IF(flush == Z_FINISH && result == Z_BUF_ERROR &&
+            ctx.avail_out == sizeof(buffer),
+            "Called close() on a decompression stream with incomplete data");
         break;
       default:
         KJ_UNREACHABLE;
