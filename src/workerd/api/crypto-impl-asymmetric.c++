@@ -103,6 +103,59 @@ public:
         "Asymmetric signing requires a private key.");
 
     auto type = lookupDigestAlgorithm(chooseHash(algorithm.hash)).second;
+    if (getAlgorithmName() == "RSASSA-PKCS1-v1_5") {
+      // RSASSA-PKCS1-v1_5 requires the RSA key to be at least as big as the digest size
+      // plus a 15 to 19 byte digest-specific prefix (see boringssl's RSA_add_pkcs1_prefix) plus 11
+      // bytes for padding (see RSA_PKCS1_PADDING_SIZE). For simplicity, require the key to be at
+      // least 32 bytes larger than the hash digest.
+      // Similar checks could also be adopted for more detailed error handling in verify(), but the
+      // current approach should be sufficient to avoid internal errors.
+      RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMDataError,
+          "Missing RSA key", tryDescribeOpensslErrors());
+
+      // TODO(soon): Use more thorough checks for now to detect if requiring 32 bytes beyond the
+      // digest size would break existing scripts. Prefix sizes derived from boringssl's
+      // kPKCS1SigPrefixes.
+#define RSA_PKCS1_PADDING_SIZE 11
+#define RSA_PKCS1_MD5_PREFIX_SIZE 18
+#define RSA_PKCS1_SHA1_PREFIX_SIZE 15
+#define RSA_PKCS1_SHA_PREFIX_SIZE 19
+
+      const auto& hashName = lookupDigestAlgorithm(chooseHash(algorithm.hash)).first;
+      auto paddingOverhead = RSA_PKCS1_PADDING_SIZE;
+      if (hashName == "MD5") {
+        paddingOverhead += RSA_PKCS1_MD5_PREFIX_SIZE;
+      } else if (hashName == "SHA-1") {
+        paddingOverhead += RSA_PKCS1_SHA1_PREFIX_SIZE;
+      } else {
+        paddingOverhead += RSA_PKCS1_SHA_PREFIX_SIZE;
+      }
+
+      JSG_REQUIRE(EVP_MD_size(type) + paddingOverhead <= RSA_size(&rsa), DOMOperationError,
+          "key too small for signing with given digest");
+      if (RSA_size(&rsa) < EVP_MD_size(type) + 32) {
+        static bool logOnce KJ_UNUSED = ([rsa] {
+          KJ_LOG(WARNING, "Signing with peculiar key size of ", RSA_size(&rsa), " bytes");
+          return true;
+        })();
+      }
+
+      // JSG_REQUIRE(EVP_MD_size(type) + 32 <= RSA_size(&rsa), DOMOperationError,
+      //     "key too small for signing with given digest");
+    } else if (getAlgorithmName() == "RSA-PSS") {
+      // Similarly, RSA-PSS requires keys to be at least the size of the digest and salt plus 2
+      // bytes, see https://developer.mozilla.org/en-US/docs/Web/API/RsaPssParams for details.
+      RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMDataError,
+          "Missing RSA key", tryDescribeOpensslErrors());
+      auto salt = JSG_REQUIRE_NONNULL(algorithm.saltLength, DOMDataError,
+          "Failed to provide salt for RSA-PSS key operation which requires a salt");
+      JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative (provided ",
+          salt, ").");
+      JSG_REQUIRE(EVP_MD_size(type) + 2 <= RSA_size(&rsa), DOMOperationError,
+          "key too small for signing with given digest");
+      JSG_REQUIRE(salt <= RSA_size(&rsa) - EVP_MD_size(type) - 2, DOMOperationError,
+          "key too small for signing with given digest and salt length");
+    }
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
@@ -551,13 +604,27 @@ public:
 
     auto size = RSA_size(rsa);
 
+    // RSA encryption/decryption requires the key value to be strictly larger than the value to be
+    // signed. Ideally we would enforce this by checking that the key size is larger than the input
+    // size – having both the same size makes it highly likely that some values are higher than the
+    // key value – but there are scripts and test cases that depend on signing data with keys of
+    // the same size.
     JSG_REQUIRE(data.size() <= size, DOMDataError,
-        "Blind Signing requires presigned data (", data.size(), " bytes) to be the smaller than "
+        "Blind Signing requires presigned data (", data.size(), " bytes) to be smaller than "
         "the key (", size, " bytes).");
+    if (data.size() == size) {
+      auto dataVal = OSSLCALL_OWN(BIGNUM, BN_bin2bn(data.begin(), data.size(), nullptr),
+          InternalDOMOperationError, "Error converting presigned data",
+          internalDescribeOpensslErrors());
+      JSG_REQUIRE(BN_ucmp(dataVal, rsa->n) < 0, DOMDataError,
+          "Blind Signing requires presigned data value to be strictly smaller than RSA key"
+          "modulus, consider using a larger key size.");
+    }
 
     auto signature = kj::heapArray<kj::byte>(size);
     size_t signatureSize = 0;
 
+    // Use raw RSA, no padding
     OSSLCALL(RSA_decrypt(rsa, &signatureSize, signature.begin(), size, data.begin(), data.size(),
         RSA_NO_PADDING));
 
@@ -644,11 +711,35 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
   return asUnsigned;
 }
 
-void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent) {
+void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
+    bool warnImport = false) {
   // The W3C standard itself doesn't describe any parameter validation but the conformance tests
   // do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
   // with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
   // library might be expected to handle such cases on its own, no?).
+
+  // TODO(soon): We should also enforce these limitations on imported keys. To see if this breaks
+  // existing scripts only provide a warning in sentry for now.
+  if (warnImport) {
+    if (modulusLength % 8 || modulusLength < 256 || modulusLength > 16384) {
+      static bool logOnce KJ_UNUSED = ([modulusLength] {
+        KJ_LOG(WARNING, "Imported RSA key has invalid modulus length ", modulusLength, ".");
+        return true;
+      })();
+    }
+    KJ_IF_MAYBE(v, fromBignum<unsigned>(publicExponent)) {
+      if (*v != 3 && *v != 65537) {
+        static bool logOnce KJ_UNUSED = ([v] {
+          KJ_LOG(WARNING, "Imported RSA key has invalid publicExponent ", *v,".");
+          return true;
+        })();
+      }
+    } else {
+      JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
+          "got a number larger than 2^32.");
+    }
+    return;
+  }
 
   // Use Chromium's limits for RSA keygen to avoid infinite loops:
   // * Key sizes a multiple of 8 bits.
@@ -702,6 +793,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
       publicExponent.size(), nullptr), InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
+  // TODO(later): boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds
+  // down to the closest multiple of 128 bits. This can easily cause confusion when non-standard
+  // key sizes are requested. Ideally we would throw an error when trying to create keys where the
+  // size would be rounded down, but this would likely break existing scripts.
+  // The modulusLength field of the resulting CryptoKey will be incorrect when the key size is
+  // rounded down, but since it is not currently used this is acceptable.
   OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
   auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
@@ -875,6 +972,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
 
+  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
+  validateRsaParams(modulusLength, publicExponent, true);
+
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = normalizedName,
     .modulusLength = static_cast<uint16_t>(modulusLength),
@@ -899,6 +999,8 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
+  // Note that in this context raw refers to the RSA-RAW algorithm, not to keys represented by raw
+  // data. Importing raw keys is currently not supported for this algorithm.
   CryptoKeyUsageSet allowedUsages = CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify();
   auto [evpPkey, keyType, usages] = importAsymmetric(
       kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
@@ -940,6 +1042,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
 
   auto publicExponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
+
+  // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
+  validateRsaParams(modulusLength, publicExponent, true);
 
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = "RSA-RAW"_kj,
@@ -1438,6 +1543,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
 ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
     kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
     CryptoKeyUsageSet allowedUsages) {
+  // Import an elliptic key represented by raw data, only public keys are supported.
   JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
       "Expected raw EC key but instead got a Json Web Key.");
 
