@@ -346,9 +346,7 @@ private:
   void ensurePumping(jsg::Lock& js);
 
   static kj::Promise<void> pump(
-      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws);
-  static kj::Promise<void> pumpAfterFrontOutputLock(
-      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws);
+      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native);
   // Write messages from `outgoingMessages` into `ws`.
   //
   // These are not necessarily called under isolate lock, but they are called on the given
