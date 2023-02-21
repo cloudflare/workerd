@@ -865,6 +865,8 @@ function isValidThenable(maybeThennable: any): boolean {
   return isThenable && typeof maybeThennable !== "function";
 }
 
+export { AssertionError };
+
 Object.assign(strict, {
   AssertionError,
   deepEqual: deepStrictEqual,
