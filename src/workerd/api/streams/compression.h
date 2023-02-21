@@ -19,7 +19,7 @@ public:
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
-      constructor(format: "gzip" | "deflate");
+      constructor(format: "gzip" | "deflate" | "deflate-raw");
     });
   }
 };
@@ -34,7 +34,7 @@ public:
     JSG_INHERIT(TransformStream);
 
     JSG_TS_OVERRIDE(extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
-      constructor(format: "gzip" | "deflate");
+      constructor(format: "gzip" | "deflate" | "deflate-raw");
     });
   }
 };

@@ -1442,7 +1442,7 @@ Here are some example overrides demonstrating these rules:
 
 - ```ts
   extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> {
-    constructor(format: "gzip" | "deflate");
+    constructor(format: "gzip" | "deflate" | "deflate-raw");
   }
   ```
   Adds `ArrayBuffer | ArrayBufferView` and `Uint8Array` as type arguments to the generated type's
