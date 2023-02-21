@@ -957,6 +957,13 @@ public:
                          v8Str(isolate, "FinalizationRegistry"_kj,
                                v8::NewStringType::kInternalized)));
 
+    // Capture a reference to the Error.captureStackTrace method for use with DOMException.
+    auto name = v8StrIntern(isolate, "captureStackTrace");
+    auto error = check(global->Get(context, v8StrIntern(isolate, "Error")));
+    auto capture = check(error.As<v8::Object>()->Get(context, name));
+    KJ_ASSERT(capture->IsFunction());
+    check(global->SetPrivate(context, v8::Private::ForApi(isolate, name), capture));
+
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
 

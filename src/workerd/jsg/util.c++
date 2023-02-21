@@ -808,27 +808,12 @@ v8::MaybeLocal<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const
 
 void captureStackTrace(v8::Isolate* isolate, v8::Local<v8::Object> target) {
   auto context = isolate->GetCurrentContext();
-  auto global = context->Global();
-
-  auto name = v8StrIntern(isolate, "captureStackTrace");
-  // This is a bit of a hacky trick. The context has this additional "extra bindings object"
-  // attached to it that v8 uses to expose some built ins. For instance, it is used by Node.js
-  // to get access to the Trace and IsTraceCategoryEnabled built-in functions. We use it here
-  // to cache the reference to the Error.captureStackTrace function.
-  auto extras = context->GetExtrasBindingObject();
-  v8::Local<v8::Value> maybeCaptureFn = check(extras->Get(context, name));
-  if (maybeCaptureFn->IsUndefined()) {
-    auto error = check(global->Get(context, v8StrIntern(isolate, "Error")));
-    JSG_REQUIRE(error->IsFunction(), TypeError, "The Error global is not a constructor.");
-    auto capture = check(error.As<v8::Object>()->Get(context, name));
-    JSG_REQUIRE(capture->IsFunction(), TypeError, "Error.captureStackTrace is not a function.");
-    check(extras->Set(context, name, capture));
-    maybeCaptureFn = capture;
-  }
-
-  auto fn = maybeCaptureFn.As<v8::Function>();
+  v8::Local<v8::Function> captureFn =
+      check(context->Global()->GetPrivate(context,
+          v8::Private::ForApi(isolate, v8StrIntern(isolate, "captureStackTrace"))))
+              .As<v8::Function>();
   v8::Local<v8::Value> arg = target;
-  check(fn->Call(context, global, 1, &arg));
+  check(captureFn->Call(context, context->Global(), 1, &arg));
 }
 
 }  // namespace workerd::jsg
