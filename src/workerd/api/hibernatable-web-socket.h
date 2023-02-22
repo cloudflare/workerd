@@ -22,7 +22,6 @@ public:
 
   static jsg::Ref<HibernatableWebSocketEvent> constructor(kj::String type) = delete;
 
-  // TODO(soon): return correct ws instead of the current stub implementation
   jsg::Ref<WebSocket> getWebSocket(jsg::Lock& lock);
 
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {

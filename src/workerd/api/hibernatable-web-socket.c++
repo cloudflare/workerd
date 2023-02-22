@@ -5,6 +5,7 @@
 #include "hibernatable-web-socket.h"
 #include <workerd/api/global-scope.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/io/hibernation-manager.h>
 
 namespace workerd::api {
 
@@ -12,9 +13,11 @@ HibernatableWebSocketEvent::HibernatableWebSocketEvent()
     : ExtendableEvent("webSocketMessage") {};
 
 jsg::Ref<WebSocket> HibernatableWebSocketEvent::getWebSocket(jsg::Lock& lock) {
-  // This is just a stub implementation and is to be replaced once the new websocket manager
-  // needs it
-  return jsg::alloc<WebSocket>(kj::str(""), WebSocket::Locality::LOCAL);
+  auto& manager = static_cast<HibernationManagerImpl&>(
+      KJ_REQUIRE_NONNULL(
+          KJ_REQUIRE_NONNULL(IoContext::current().getActor()).getHibernationManager()));
+  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(manager.webSocketForEventHandler);
+  return hibernatableWebSocket.getActiveOrUnhibernate(lock);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(

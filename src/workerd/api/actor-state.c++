@@ -14,6 +14,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include "sql.h"
 #include <workerd/api/web-socket.h>
+#include <workerd/io/hibernation-manager.h>
 
 namespace workerd::api {
 
@@ -759,7 +760,9 @@ void DurableObjectState::acceptWebSocket(
   // We need to get a HibernationManager to give the websocket to.
   auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
   if (a.getHibernationManager() == nullptr) {
-    // TODO(now): Actually set the hibernation manager.
+    a.setHibernationManager(
+        kj::refcounted<HibernationManagerImpl>(
+            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
   }
   // HibernationManager's acceptWebSocket() will throw if the websocket is in an incompatible state.
   // Note that not providing a tag is equivalent to providing an empty tag array.

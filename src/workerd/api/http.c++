@@ -1338,7 +1338,18 @@ kj::Promise<DeferredProxy<void>> Response::send(
     }
 
     auto clientSocket = outer.acceptWebSocket(outHeaders);
-    return (*ws)->couple(kj::mv(clientSocket));
+    auto wsPromise = (*ws)->couple(kj::mv(clientSocket));
+
+    KJ_IF_MAYBE(a, context.getActor()) {
+      KJ_IF_MAYBE(hib, (*a).getHibernationManager()) {
+        // We attach a reference to the deferred proxy task so the HibernationManager lives at least
+        // as long as the websocket connection.
+        // The actor still retains its reference to the manager, so any subsequent requests prior
+        // to hibernation will not need to re-obtain a reference.
+        wsPromise = wsPromise.attach(kj::addRef(*hib));
+      }
+    }
+    return wsPromise;
   } else KJ_IF_MAYBE(jsBody, getBody()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding);
     auto maybeLength = (*jsBody)->tryGetLength(encoding);
