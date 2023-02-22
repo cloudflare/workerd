@@ -9,6 +9,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/io/hibernation-manager.h>
 
 namespace workerd {
 
