@@ -1341,7 +1341,14 @@ kj::Promise<DeferredProxy<void>> Response::send(
     }
 
     auto clientSocket = outer.acceptWebSocket(outHeaders);
-    return (*ws)->couple(kj::mv(clientSocket));
+    auto wsPromise = (*ws)->couple(kj::mv(clientSocket));
+
+    KJ_IF_MAYBE(a, context.getActor()) {
+      KJ_IF_MAYBE(hib, (*a).getHibernationManager()) {
+        wsPromise = wsPromise.attach(kj::mv(hib));
+      }
+    }
+    return wsPromise;
   } else KJ_IF_MAYBE(jsBody, getBody()) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding);
     auto maybeLength = (*jsBody)->tryGetLength(encoding);
