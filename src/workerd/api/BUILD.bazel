@@ -55,6 +55,7 @@ kj_test(
 [wd_test(
     src = f,
     data = [f.removesuffix(".wd-test") + ".js"],
+    args = ["--experimental"],
 ) for f in glob(
     ["**/*.wd-test"],
 )]
