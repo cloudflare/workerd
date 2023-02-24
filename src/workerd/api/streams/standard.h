@@ -1063,7 +1063,12 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
-  ~WritableStreamJsController() noexcept(false) override { weakRef->reset(); }
+  ~WritableStreamJsController() noexcept(false) override {
+    weakRef->reset();
+    KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
+      (*controller)->setOwner(nullptr);
+    }
+  }
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Optional<v8::Local<v8::Value>> reason) override;
