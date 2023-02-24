@@ -82,6 +82,20 @@ public:
         JSG_REQUIRE(result == Z_OK || result == Z_BUF_ERROR || result == Z_STREAM_END,
                      Error,
                      "Decompression failed.");
+
+        // TODO(soon): The spec requires that a TypeError is produced if there is trailing data
+        // after the end of the compression stream. This is a potentially breaking change, so just
+        // put out a warning for now. Later, make it an error and provide a test to confirm that
+        // input with trailing data causes a TypeError.
+        JSG_WARN_ONCE_IF(result == Z_STREAM_END && ctx.avail_in > 0,
+            "Trailing bytes after end of compressed data");
+
+        // TODO(soon): Same applies to closing a stream before the complete decompressed data is
+        // available. Once this is converted to an error, provide a test case checking that
+        // providing incomplete compressed data results in a TypeError.
+        JSG_WARN_ONCE_IF(flush == Z_FINISH && result == Z_BUF_ERROR &&
+            ctx.avail_out == sizeof(buffer),
+            "Called close() on a decompression stream with incomplete data");
         break;
       default:
         KJ_UNREACHABLE;
@@ -98,11 +112,15 @@ private:
     // We use a windowBits value of 15 combined with the magic value
     // for the compression format type. For gzip, the magic value is
     // 16, so the value returned is 15 + 16. For deflate, the magic
-    // value is 15.
+    // value is 15. For raw deflate (i.e. deflate without a zlib header)
+    // the negative windowBits value is used, so -15. See the comments for
+    // deflateInit2() in zlib.h for details.
     static constexpr auto GZIP = 16;
     static constexpr auto DEFLATE = 15;
+    static constexpr auto DEFLATE_RAW = -15;
     if (format == "gzip") return DEFLATE + GZIP;
     else if (format == "deflate") return DEFLATE;
+    else if (format == "deflate-raw") return DEFLATE_RAW;
     KJ_UNREACHABLE;
   }
 
@@ -361,8 +379,8 @@ private:
 jsg::Ref<CompressionStream> CompressionStream::constructor(
     jsg::Lock& js,
     kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip", TypeError,
-               "The compression format must be either 'deflate' or 'gzip'.");
+  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
+               "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
       kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format));
@@ -378,8 +396,8 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(
     jsg::Lock& js,
     kj::String format) {
-  JSG_REQUIRE(format == "deflate" || format == "gzip", TypeError,
-               "The compression format must be either 'deflate' or 'gzip'.");
+  JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
+               "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
   auto readableSide =
       kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format));
   auto writableSide = kj::addRef(*readableSide);

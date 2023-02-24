@@ -29,7 +29,7 @@ function compileOverride(
     // Use existing name and type classification, may merge members
     // Examples:
     // - `extends EventTarget<WorkerGlobalScopeEventMap>`
-    // - `extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format: "gzip" | "deflate"); }`
+    // - `extends TransformStream<ArrayBuffer | ArrayBufferView, Uint8Array> { constructor(format: "gzip" | "deflate" | "deflate-raw"); }`
     // - `{ json<T>(): Promise<T>; }`
     override = `class ${name} ${override}`;
   } else if (override.startsWith("<")) {
