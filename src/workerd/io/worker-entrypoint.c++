@@ -155,15 +155,15 @@ kj::Promise<void> WorkerEntrypoint::request(
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
-
   return context.run(
       [this, &context, method, url, &headers, &requestBody,
        &metrics = incomingRequest->getMetrics(),
        &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
       (Worker::Lock& lock) mutable {
+    auto handler = lock.getExportedHandler(entrypointName, context.getActor());
     return lock.getGlobalScope().request(
         method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
+        cfBlobJson, lock, handler);
   }).then([this](api::DeferredProxy<void> deferredProxy) {
     proxyTask = kj::mv(deferredProxy.proxyTask);
   }).exclusiveJoin(context.onAbort())

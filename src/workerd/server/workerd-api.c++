@@ -152,6 +152,11 @@ jsg::Dict<NamedExport> WorkerdApiIsolate::unwrapExports(
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .unwrap<jsg::Dict<NamedExport>>(lock.v8Isolate->GetCurrentContext(), moduleNamespace);
 }
+api::ExportedHandler WorkerdApiIsolate::unwrapHandler(
+    jsg::Lock& lock, v8::Local<v8::Value> handler) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .unwrap<api::ExportedHandler>(lock.v8Isolate->GetCurrentContext(), handler);
+}
 const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
     WorkerdApiIsolate::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
@@ -167,9 +172,9 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
         errorReporter.addError(kj::str("Modules list cannot be empty."));
         goto invalid;
       }
-
       return Worker::Script::ModulesSource {
         modules[0].getName(),
+        conf.hasUnwrapWith() ? kj::str(conf.getUnwrapWith()) : kj::Maybe<kj::String>(),
         [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
               .compileModules(lock, conf, errorReporter);
@@ -526,6 +531,17 @@ void WorkerdApiIsolate::compileGlobals(
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
         value = lock.wrap(context, kj::heapArray(data.asPtr()));
       }
+    }
+
+    KJ_IF_MAYBE(wrapWith, global.wrapWith) {
+      auto& moduleInfo = KJ_REQUIRE_NONNULL(jsg::ModuleRegistry::from(lock)->resolve(lockParam, kj::Path::parse(*wrapWith)));
+      auto module = moduleInfo.module.getHandle(lock);
+      jsg::instantiateModule(lock, module);
+      v8::Local<v8::Object> ns = module->GetModuleNamespace()->ToObject(context).ToLocalChecked();
+      auto wrapFn = ns->Get(context, jsg::v8Str(lock.v8Isolate, "wrap")).ToLocalChecked();
+      KJ_ASSERT(wrapFn->IsFunction());
+      auto args = kj::arr(value);
+      value = v8::Function::Cast(*wrapFn)->Call(context, context->Global(), args.size(), args.begin()).ToLocalChecked();
     }
 
     KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");

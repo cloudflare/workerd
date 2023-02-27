@@ -9,6 +9,7 @@
 #include "basics.h"
 #include "http.h"
 #include "encoding.h"
+#include "src/workerd/jsg/jsg.h"
 #include "url.h"
 #include "url-standard.h"
 #include "urlpattern.h"

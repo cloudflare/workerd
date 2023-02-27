@@ -330,6 +330,8 @@ struct Worker {
       # TODO(someday): dispatch, analyticsEngine, other new features
     }
 
+    wrapWith @14 :Text;
+
     struct Type {
       # Specifies the type of a parameter binding.
 
@@ -509,6 +511,8 @@ struct Worker {
 
   # TODO(someday): Support distributing objects across a cluster. At present, objects are always
   #   local to one instance of the runtime.
+
+  unwrapWith @13 :Text;
 }
 
 struct ExternalServer {

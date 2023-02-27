@@ -822,6 +822,8 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
 struct Worker::Script::Impl {
   kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
 
+  kj::Maybe<kj::String> unwrapWith;
+
   kj::Array<CompiledGlobal> globals;
 
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> moduleContext;
@@ -1151,6 +1153,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
           impl->setModuleRegistry(lock, modules.compileModules(lock, *isolate->apiIsolate));
 
           impl->unboundScriptOrMainModule = kj::Path::parse(modules.mainModule);
+          KJ_IF_MAYBE(unwrapWith, modules.unwrapWith) {
+            impl->unwrapWith = kj::str(*unwrapWith);
+          }
+
           break;
         }
       }
@@ -1384,13 +1390,36 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   obj.env = jsg::Value(lock.v8Isolate, bindingsScope);
                   obj.ctx = jsg::alloc<api::ExecutionContext>();
 
-                  if (handler.name == "default") {
-                    // The default export is given the string name "default". I guess that means that
-                    // you can't actually name an export "default"? Anyway, this is our default
-                    // handler.
-                    impl->defaultHandler = kj::mv(obj);
+                  KJ_IF_MAYBE(unwrapWith, script->impl->unwrapWith) {
+                    auto& moduleInfo = KJ_REQUIRE_NONNULL(jsg::ModuleRegistry::from(lock)->resolve(lock, kj::Path::parse(*unwrapWith)));
+                    auto module = moduleInfo.module.getHandle(lock);
+                    jsg::instantiateModule(lock, module);
+                    v8::Local<v8::Object> ns = module->GetModuleNamespace()->ToObject(context).ToLocalChecked();
+                    auto unwrapFn = ns->Get(context, jsg::v8Str(lock.v8Isolate, "unwrap")).ToLocalChecked();
+                    KJ_ASSERT(unwrapFn->IsFunction());
+                    auto args = kj::arr(obj.self.getHandle(lock.v8Isolate).As<v8::Value>());
+                    auto value = v8::Function::Cast(*unwrapFn)->Call(context, context->Global(), args.size(), args.begin()).ToLocalChecked();
+                    auto h = script->isolate->apiIsolate->unwrapHandler(lock, value);
+                    h.env = jsg::Value(lock.v8Isolate, bindingsScope);
+                    h.ctx = jsg::alloc<api::ExecutionContext>();
+
+                    if (handler.name == "default") {
+                      // The default export is given the string name "default". I guess that means that
+                      // you can't actually name an export "default"? Anyway, this is our default
+                      // handler.
+                      impl->defaultHandler = kj::mv(h);
+                    } else {
+                      impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(h));
+                    }
                   } else {
-                    impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                    if (handler.name == "default") {
+                      // The default export is given the string name "default". I guess that means that
+                      // you can't actually name an export "default"? Anyway, this is our default
+                      // handler.
+                      impl->defaultHandler = kj::mv(obj);
+                    } else {
+                      impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                    }
                   }
                 }
                 KJ_CASE_ONEOF(cls, DurableObjectConstructor) {

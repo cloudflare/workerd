@@ -175,6 +175,7 @@ public:
   const Isolate& getIsolate() const { return *isolate; }
 
   bool isModular() const;
+  kj::Maybe<const jsg::ModuleRegistry&> getModuleRegistry() const;
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -198,6 +199,8 @@ public:
     kj::StringPtr mainModule;
     // Path to the main module, which can be looked up in thne module registry. Pointer is valid
     // only until the Script constructor returns.
+
+    kj::Maybe<kj::String> unwrapWith;
 
     kj::Function<kj::Own<jsg::ModuleRegistry>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
         compileModules;
@@ -479,6 +482,9 @@ public:
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
   // Given a module's export namespace, return all the top-level exports.
+
+  virtual api::ExportedHandler unwrapHandler(
+      jsg::Lock& lock, v8::Local<v8::Value> handler) const = 0;
 
   struct ErrorInterface {
     // Convenience struct for accessing typical Error properties.

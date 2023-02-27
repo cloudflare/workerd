@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "src/workerd/api/global-scope.h"
 #include <workerd/io/worker.h>
 #include <workerd/api/analytics-engine.h>
 #include <workerd/server/workerd.capnp.h>
@@ -23,6 +24,8 @@ public:
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const override;
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
+  api::ExportedHandler unwrapHandler(
+      jsg::Lock& lock, v8::Local<v8::Value> handler) const override;
   const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
 
@@ -119,6 +122,7 @@ public:
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
               DurableActorNamespace, kj::String, kj::Array<byte>> value;
+    kj::Maybe<kj::String> wrapWith;
 
     Global clone() const;
   };

@@ -1672,7 +1672,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     auto addGlobal = [&](auto&& value) {
       globals.add(Global {
         .name = kj::str(bindingName),
-        .value = kj::mv(value)
+        .value = kj::mv(value),
+        .wrapWith = binding.hasWrapWith() ? kj::str(binding.getWrapWith()) : nullptr,
       });
     };
 
@@ -1913,7 +1914,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto worker = kj::atomicRefcounted<Worker>(
       kj::mv(script),
       kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
+      [&](jsg::Lock& lock,  const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
         return kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileGlobals(
             lock, globals, target, 1);
       },
