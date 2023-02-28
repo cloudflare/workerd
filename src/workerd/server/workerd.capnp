@@ -327,10 +327,10 @@ struct Worker {
       # R2 bucket and admin API bindings. Similar to KV namespaces, these turn operations into
       # HTTP requests aimed at the named service.
 
+      wrapped @14 :WrappedBinding;
+
       # TODO(someday): dispatch, analyticsEngine, other new features
     }
-
-    wrapWith @14 :Text;
 
     struct Type {
       # Specifies the type of a parameter binding.
@@ -421,6 +421,11 @@ struct Worker {
         wrapKey @6;
         unwrapKey @7;
       }
+    }
+
+    struct WrappedBinding {
+      innerBindings @0 :List(Binding);
+      wrapWith @1 :Text;
     }
   }
 

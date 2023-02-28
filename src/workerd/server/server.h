@@ -23,6 +23,10 @@ namespace workerd::server {
 
 using kj::uint;
 
+struct Durable { kj::String uniqueKey; };
+struct Ephemeral {};
+using ActorConfig = kj::OneOf<Durable, Ephemeral>;
+
 class Server: private kj::TaskSet::ErrorHandler {
   // Implements the single-tenant Workers Runtime server / CLI.
   //
@@ -92,10 +96,6 @@ private:
 
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
-
-  struct Durable { kj::String uniqueKey; };
-  struct Ephemeral {};
-  using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
   kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
   // Information about all known actor namespaces. Maps serviceName -> className -> config.

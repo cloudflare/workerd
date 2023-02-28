@@ -15,7 +15,13 @@ const helloWorld :Workerd.Worker = (
   ],
   compatibilityDate = "2022-09-16",
   bindings = [
-    ( name = "server", service = "server", wrapWith = "jsonRpc" )
+    (
+      name = "server",
+      wrapped = (
+        innerBindings = [ (name = "target", service = "server") ],
+        wrapWith = "jsonRpc",
+      )
+    )
   ],
 );
 

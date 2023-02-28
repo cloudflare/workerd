@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "workerd-api.h"
+#include "src/workerd/jsg/jsg.h"
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
@@ -25,6 +26,11 @@
 #include <openssl/rand.h>
 
 namespace workerd::server {
+
+struct HasWrap {
+  jsg::Function<jsg::Value(jsg::Dict<jsg::Value>)> wrap;
+  JSG_STRUCT(wrap);
+};
 
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   // Declares the listing of host object types and structs that the jsg
@@ -70,7 +76,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
   Worker::ApiIsolate::ErrorInterface,
   jsg::CommonJsModuleObject,
-  jsg::CommonJsModuleContext);
+  jsg::CommonJsModuleContext,
+  HasWrap);
 
 struct WorkerdApiIsolate::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
@@ -443,6 +450,107 @@ private:
   }
 };
 
+v8::Local<v8::Value> createValue(
+    JsgWorkerdIsolate::Lock& lock,
+    const WorkerdApiIsolate::Global& global,
+    CompatibilityFlags::Reader featureFlags) {
+  using Global = WorkerdApiIsolate::Global;
+  auto context = lock.v8Isolate->GetCurrentContext();
+  v8::Local<v8::Value> value;
+
+  KJ_SWITCH_ONEOF(global.value) {
+    KJ_CASE_ONEOF(json, Global::Json) {
+      v8::Local<v8::String> string = lock.wrap(context, kj::mv(json.text));
+      value = jsg::check(v8::JSON::Parse(context, string));
+    }
+
+    KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
+      value = lock.wrap(context, jsg::alloc<api::Fetcher>(
+          pipeline.channel,
+          pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
+                                : api::Fetcher::RequiresHostAndProtocol::NO,
+          pipeline.isInHouse));
+    }
+
+    KJ_CASE_ONEOF(ns, Global::KvNamespace) {
+      value = lock.wrap(context, jsg::alloc<api::KvNamespace>(
+          kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
+    }
+
+    KJ_CASE_ONEOF(r2, Global::R2Bucket) {
+      value = lock.wrap(context,
+          jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+    }
+
+    KJ_CASE_ONEOF(r2a, Global::R2Admin) {
+      value = lock.wrap(context,
+          jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
+    }
+
+    KJ_CASE_ONEOF(key, Global::CryptoKey) {
+      api::SubtleCrypto::ImportKeyData keyData;
+      KJ_SWITCH_ONEOF(key.keyData) {
+        KJ_CASE_ONEOF(data, kj::Array<byte>) {
+          keyData = kj::heapArray(data.asPtr());
+        }
+        KJ_CASE_ONEOF(json, Global::Json) {
+          v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
+          v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
+          keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
+        }
+      }
+
+      v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
+      v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
+      auto importKeyAlgo = lock.unwrap<
+          kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
+
+      jsg::Ref<api::CryptoKey> importedKey = api::SubtleCrypto().importKeySync(lock,
+          key.format, kj::mv(keyData),
+          api::interpretAlgorithmParam(kj::mv(importKeyAlgo)),
+          key.extractable, key.usages);
+
+      value = lock.wrap(context, kj::mv(importedKey));
+    }
+
+    KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
+      value = lock.wrap(context, jsg::alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
+    }
+
+    KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
+      value = lock.wrap(context, jsg::alloc<api::DurableObjectNamespace>(ns.actorChannel,
+          kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+    }
+
+    KJ_CASE_ONEOF(text, kj::String) {
+      value = lock.wrap(context, kj::mv(text));
+    }
+
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      value = lock.wrap(context, kj::heapArray(data.asPtr()));
+    }
+
+    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
+      auto& moduleInfo = KJ_REQUIRE_NONNULL(jsg::ModuleRegistry::from(lock)->resolve(lock, kj::Path::parse(wrapped.wrapWith)));
+      auto module = moduleInfo.module.getHandle(lock);
+      jsg::instantiateModule(lock, module);
+      auto ns = module->GetModuleNamespace();
+      auto wrapper = lock.unwrap<HasWrap>(context, ns);
+      kj::Vector<jsg::Dict<jsg::Value>::Field> innerBindings;
+      for (const auto& innerBinding: wrapped.innerBindings) {
+        innerBindings.add(jsg::Dict<jsg::Value>::Field{
+          .name = kj::str(innerBinding.name),
+          .value = jsg::Value(lock.v8Isolate, createValue(lock, innerBinding, featureFlags)),
+        });
+      }
+      auto v = wrapper.wrap(lock, jsg::Dict<jsg::Value>{ .fields = innerBindings.releaseAsArray() });
+      value = v.getHandle(lock);
+    }
+  }
+
+  return value;
+}
+
 void WorkerdApiIsolate::compileGlobals(
     jsg::Lock& lockParam, kj::ArrayPtr<const Global> globals,
     v8::Local<v8::Object> target,
@@ -457,92 +565,7 @@ void WorkerdApiIsolate::compileGlobals(
 
     // Don't use String's usual TypeHandler here because we want to intern the string.
     auto name = jsg::v8StrIntern(lock.v8Isolate, global.name);
-
-    v8::Local<v8::Value> value;
-
-    KJ_SWITCH_ONEOF(global.value) {
-      KJ_CASE_ONEOF(json, Global::Json) {
-        v8::Local<v8::String> string = lock.wrap(context, kj::mv(json.text));
-        value = jsg::check(v8::JSON::Parse(context, string));
-      }
-
-      KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-        value = lock.wrap(context, jsg::alloc<api::Fetcher>(
-            pipeline.channel,
-            pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
-                                  : api::Fetcher::RequiresHostAndProtocol::NO,
-            pipeline.isInHouse));
-      }
-
-      KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::KvNamespace>(
-            kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
-      }
-
-      KJ_CASE_ONEOF(r2, Global::R2Bucket) {
-        value = lock.wrap(context,
-            jsg::alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
-      }
-
-      KJ_CASE_ONEOF(r2a, Global::R2Admin) {
-        value = lock.wrap(context,
-            jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
-      }
-
-      KJ_CASE_ONEOF(key, Global::CryptoKey) {
-        api::SubtleCrypto::ImportKeyData keyData;
-        KJ_SWITCH_ONEOF(key.keyData) {
-          KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            keyData = kj::heapArray(data.asPtr());
-          }
-          KJ_CASE_ONEOF(json, Global::Json) {
-            v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
-            v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
-            keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
-          }
-        }
-
-        v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
-        v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
-        auto importKeyAlgo = lock.unwrap<
-            kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
-
-        jsg::Ref<api::CryptoKey> importedKey = api::SubtleCrypto().importKeySync(lock,
-            key.format, kj::mv(keyData),
-            api::interpretAlgorithmParam(kj::mv(importKeyAlgo)),
-            key.extractable, key.usages);
-
-        value = lock.wrap(context, kj::mv(importedKey));
-      }
-
-      KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
-      }
-
-      KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-        value = lock.wrap(context, jsg::alloc<api::DurableObjectNamespace>(ns.actorChannel,
-            kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
-      }
-
-      KJ_CASE_ONEOF(text, kj::String) {
-        value = lock.wrap(context, kj::mv(text));
-      }
-
-      KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        value = lock.wrap(context, kj::heapArray(data.asPtr()));
-      }
-    }
-
-    KJ_IF_MAYBE(wrapWith, global.wrapWith) {
-      auto& moduleInfo = KJ_REQUIRE_NONNULL(jsg::ModuleRegistry::from(lock)->resolve(lockParam, kj::Path::parse(*wrapWith)));
-      auto module = moduleInfo.module.getHandle(lock);
-      jsg::instantiateModule(lock, module);
-      v8::Local<v8::Object> ns = module->GetModuleNamespace()->ToObject(context).ToLocalChecked();
-      auto wrapFn = ns->Get(context, jsg::v8Str(lock.v8Isolate, "wrap")).ToLocalChecked();
-      KJ_ASSERT(wrapFn->IsFunction());
-      auto args = kj::arr(value);
-      value = v8::Function::Cast(*wrapFn)->Call(context, context->Global(), args.size(), args.begin()).ToLocalChecked();
-    }
+    auto value = createValue(lock, global, featureFlags);
 
     KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
     bool setResult = jsg::check(target->Set(context, name, value));
@@ -590,6 +613,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
       result.value = kj::heapArray(data.asPtr());
+    }
+    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
+      KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
     }
   }
 
