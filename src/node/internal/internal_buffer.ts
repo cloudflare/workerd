@@ -7,12 +7,6 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 // Copyright Feross Aboukhadijeh, and other contributors. All rights reserved. MIT license.
 
-// TODO(soon): Remove this once buffer is out of experimental
-import { default as CompatibilityFlags } from 'workerd:compatibility-flags';
-if (!CompatibilityFlags.workerdExperimental) {
-  throw new Error('node:buffer is experimental.');
-}
-
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 

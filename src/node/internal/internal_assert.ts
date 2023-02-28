@@ -27,12 +27,6 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* eslint-disable */
 
-// TODO(soon): Remove this once assert is out of experimental
-import { default as CompatibilityFlags } from 'workerd:compatibility-flags';
-if (!CompatibilityFlags.workerdExperimental) {
-  throw new Error('node:buffer is experimental.');
-}
-
 import {
   AssertionError,
   AssertionErrorConstructorOptions,

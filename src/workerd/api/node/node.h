@@ -31,15 +31,28 @@ public:
 template <typename TypeWrapper>
 void registerNodeJsCompatModules(
     workerd::jsg::ModuleRegistryImpl<TypeWrapper>& registry, auto featureFlags) {
-  registry.template addBuiltinModule<CompatibilityFlags>("workerd:compatibility-flags",
-      workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  registry.template addBuiltinModule<AsyncHooksModule>("node-internal:async_hooks",
-      workerd::jsg::ModuleRegistry::Type::INTERNAL);
+
+#define NODEJS_MODULES(V)                                                       \
+  V(CompatibilityFlags, "workerd:compatibility-flags")                          \
+  V(AsyncHooksModule, "node-internal:async_hooks")                              \
+  V(BufferUtil, "node-internal:buffer")
+
+#define NODEJS_MODULES_EXPERIMENTAL(V)
+// Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
+// node.js compat C++ modules that should be guarded by the experimental compat
+// flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
+
+#define V(T, N)                                                                 \
+  registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
+
+  NODEJS_MODULES(V)
 
   if (featureFlags.getWorkerdExperimental()) {
-    registry.template addBuiltinModule<BufferUtil>("node-internal:buffer",
-        workerd::jsg::ModuleRegistry::Type::INTERNAL);
+    NODEJS_MODULES_EXPERIMENTAL(V)
   }
+
+#undef V
+#undef NODEJS_MODULES
 
   registry.addBuiltinBundle(NODE_BUNDLE);
 }
