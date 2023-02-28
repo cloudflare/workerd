@@ -3,3 +3,5 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export * from 'node-internal:internal_assert';
+import { default as assert } from 'node-internal:internal_assert';
+export default assert;
