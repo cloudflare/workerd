@@ -222,7 +222,8 @@ async function downloadDirectlyFromNPM(
 ): Promise<void> {
   // If that fails, the user could have npm configured incorrectly or could not
   // have npm installed. Try downloading directly from npm as a last resort.
-  const url = `https://registry.npmjs.org/${pkg}/-/${pkg}-${WORKERD_VERSION}.tgz`;
+  const unscopedPkg = pkg.substring(pkg.indexOf("/") + 1);
+  const url = `https://registry.npmjs.org/${pkg}/-/${unscopedPkg}-${WORKERD_VERSION}.tgz`;
   console.error(`[workerd] Trying to download ${JSON.stringify(url)}`);
   try {
     fs.writeFileSync(
