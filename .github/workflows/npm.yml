@@ -106,7 +106,7 @@ jobs:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-shim
-        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node16 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
