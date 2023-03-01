@@ -301,6 +301,10 @@ ReadableStream::ReadableStream(Controller controller)
   getController().setOwnerRef(*this);
 }
 
+void ReadableStream::initEofResolverPair(jsg::Lock& js) {
+  eofResolverPair = js.newPromiseAndResolver<void>();
+}
+
 ReadableStreamController& ReadableStream::getController() {
   KJ_SWITCH_ONEOF(controller) {
     KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {

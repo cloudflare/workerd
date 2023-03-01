@@ -456,6 +456,11 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           if (!state.is<StreamStates::Errored>()) {
             doClose();
           }
+          KJ_IF_MAYBE(o, owner) {
+            KJ_IF_MAYBE(pair, o->eofResolverPair) {
+              pair->resolver.resolve();
+            }
+          }
           return js.resolvedPromise(ReadResult { .done = true });
         }
         // Return a slice so the script can see how many bytes were read.
