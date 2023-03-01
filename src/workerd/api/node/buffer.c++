@@ -514,6 +514,48 @@ jsg::Optional<uint32_t> indexOfString(
   return result;
 }
 
+v8::Local<v8::String> toStringImpl(
+    jsg::Lock& js,
+    kj::ArrayPtr<kj::byte> bytes,
+    uint32_t start,
+    uint32_t end,
+    Encoding encoding) {
+  auto slice = bytes.slice(start, end);
+  if (slice.size() == 0) return v8::String::Empty(js.v8Isolate);
+  switch (encoding) {
+    case Encoding::ASCII: {
+      // TODO(perf): We can look at making this more performant later.
+      // Essentially we have to modify the buffer such that every byte
+      // has the highest bit turned off. Whee! Node.js has a faster
+      // algorithm that it implements so we can likely adopt that.
+      kj::Array<kj::byte> copy = KJ_MAP(b, slice) -> kj::byte { return b & 0x7f; };
+      return jsg::v8StrFromLatin1(js.v8Isolate, copy);
+    }
+    case Encoding::LATIN1: {
+      return jsg::v8StrFromLatin1(js.v8Isolate, slice);
+    }
+    case Encoding::UTF8: {
+      return jsg::v8Str(js.v8Isolate, slice.asChars());
+    }
+    case Encoding::UTF16LE: {
+      // TODO(soon): Using just the slice here results in v8 hitting an IsAligned assertion.
+      auto data = kj::heapArray<uint16_t>(
+          reinterpret_cast<uint16_t*>(slice.begin()), slice.size() / 2);
+      return jsg::v8Str<uint16_t>(js.v8Isolate, data);
+    }
+    case Encoding::BASE64: {
+      return jsg::v8Str(js.v8Isolate, kj::encodeBase64(slice));
+    }
+    case Encoding::BASE64URL: {
+      return jsg::v8Str(js.v8Isolate, kj::encodeBase64Url(slice));
+    }
+    case Encoding::HEX: {
+      return jsg::v8Str(js.v8Isolate, kj::encodeHex(slice));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace
 
 jsg::Optional<uint32_t> BufferUtil::indexOf(
@@ -551,40 +593,7 @@ v8::Local<v8::String> BufferUtil::toString(
     uint32_t start,
     uint32_t end,
     kj::String encoding) {
-  auto slice = bytes.slice(start, end);
-  if (slice.size() == 0) return v8::String::Empty(js.v8Isolate);
-  switch (getEncoding(encoding)) {
-    case Encoding::ASCII: {
-      // TODO(perf): We can look at making this more performant later.
-      // Essentially we have to modify the buffer such that every byte
-      // has the highest bit turned off. Whee! Node.js has a faster
-      // algorithm that it implements so we can likely adopt that.
-      kj::Array<kj::byte> copy = KJ_MAP(b, slice) -> kj::byte { return b & 0x7f; };
-      return jsg::v8StrFromLatin1(js.v8Isolate, copy);
-    }
-    case Encoding::LATIN1: {
-      return jsg::v8StrFromLatin1(js.v8Isolate, slice);
-    }
-    case Encoding::UTF8: {
-      return jsg::v8Str(js.v8Isolate, slice.asChars());
-    }
-    case Encoding::UTF16LE: {
-      // TODO(soon): Using just the slice here results in v8 hitting an IsAligned assertion.
-      auto data = kj::heapArray<uint16_t>(
-          reinterpret_cast<uint16_t*>(slice.begin()), slice.size() / 2);
-      return jsg::v8Str<uint16_t>(js.v8Isolate, data);
-    }
-    case Encoding::BASE64: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeBase64(slice));
-    }
-    case Encoding::BASE64URL: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeBase64Url(slice));
-    }
-    case Encoding::HEX: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeHex(slice));
-    }
-  }
-  KJ_UNREACHABLE;
+  return toStringImpl(js, bytes, start, end, getEncoding(encoding));
 }
 
 uint32_t BufferUtil::write(
@@ -595,6 +604,250 @@ uint32_t BufferUtil::write(
     uint32_t length,
     kj::String encoding) {
   return writeInto(js, buffer, string, offset, length, getEncoding(encoding));
+}
+
+// ======================================================================================
+// StringDecoder
+//
+// It's helpful to review a bit about how the implementation works here.
+//
+// StringDecoder is a streaming decoder that ensures that multi-byte characters are correctly
+// handled. So, for instance, let's suppose I have the utf8 bytes for a euro symbol (0xe2, 0x82,
+// 0xac), but I only get those one at a time... StringDecoder will ensure that those are correctly
+// handled over multiple calls to write(...)...
+//
+//   const sd = new StringDecoder();
+//   let results = '';
+//   results += sd.write(new Uint8Array([0xe2]));  // results.length === 0
+//   results += sd.write(new Uint8Array([0x82]));  // results.length === 0
+//   results += sd.write(new Uint8Array([0xac]));  // results.length === 1
+//   results += sd.end();
+//
+// Internally, the decoder allocates a small 7 byte buffer (the state) argument below.
+//
+// The first four bytes of the state are used to hold partial bytes received on the previous
+// write. The fifth byte in state is a count of the number of missing bytes we need to complete
+// the character. The sixth byte in state is the number of bytes that have been encoded into the
+// first four. The seventh byte in state identifies the Encoding and matches the values of the
+// Encoding enum.
+//
+// So, in our example above, initially the first six bytes of the state are [0x00, 0x00, 0x00,
+// 0x00, 0x00, 0x00]
+//
+// After the first call to write above, the state is updated to: [0xe2, 0x00, 0x00, 0x00, 0x02,
+// 0x01]
+//
+// After the second call to write, the state is updated to: [0xe2, 0x82, 0x00, 0x00, 0x01, 0x02]
+//
+// After the third call to write, the pending multibyte character is completed, the state becomes:
+// [0xe2, 0x82, 0xac, 0x00, 0x00, 0x00] ... while the bytes are still in state, the buffered bytes
+// and bytes needed are zeroed out. Since the character is completed on that third write, it is
+// included in the returned string.
+//
+// The implementation here is taken nearly verbatim from Node.js with a few adaptations. The code
+// from Node.js has remained largely unchanged for years and is well-proven.
+
+namespace {
+inline kj::byte getMissingBytes(kj::ArrayPtr<kj::byte> state) {
+  return state[BufferUtil::kMissingBytes];
+}
+
+inline kj::byte getBufferedBytes(kj::ArrayPtr<kj::byte> state) {
+  return state[BufferUtil::kBufferedBytes];
+}
+
+inline kj::byte* getIncompleteCharacterBuffer(kj::ArrayPtr<kj::byte> state) {
+  return state.begin() + BufferUtil::kIncompleteCharactersStart;
+}
+
+inline Encoding getEncoding(kj::ArrayPtr<kj::byte> state) {
+  return static_cast<Encoding>(state[BufferUtil::kEncoding]);
+}
+
+v8::Local<v8::String> getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> state) {
+  KJ_ASSERT(getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd);
+  auto ret = toStringImpl(js, state,
+                          BufferUtil::kIncompleteCharactersStart,
+                          BufferUtil::kIncompleteCharactersStart + getBufferedBytes(state),
+                          getEncoding(state));
+  state[BufferUtil::kBufferedBytes] = 0;
+  return ret;
+}
+}  // namespace
+
+v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
+                                         kj::Array<kj::byte> bytes,
+                                         kj::Array<kj::byte> state) {
+  KJ_ASSERT(state.size() == BufferUtil::kSize);
+  auto enc = getEncoding(state);
+  if (enc == Encoding::ASCII || enc == Encoding::LATIN1 || enc == Encoding::HEX) {
+    // For ascii, latin1, and hex, we can just use the regular
+    // toString option since there will never be a case where
+    // these have left-over characters.
+    return toStringImpl(js, bytes, 0, bytes.size(), enc);
+  }
+
+  v8::Local<v8::String> prepend;
+  v8::Local<v8::String> body;
+  auto nread = bytes.size();
+  auto data = bytes.begin();
+  if (getMissingBytes(state) > 0) {
+    KJ_ASSERT(getMissingBytes(state) + getBufferedBytes(state) <=
+              BufferUtil::kIncompleteCharactersEnd);
+    if (enc == Encoding::UTF8) {
+      // For UTF-8, we need special treatment to algin with the V8 decoder:
+      // If an incomplete character is found at a chunk boundary, we use
+      // its remainder and pass it to V8 as-is.
+      for (size_t i = 0; i < nread && i < getMissingBytes(state); ++i) {
+        if ((bytes[i] & 0xC0) != 0x80) {
+          // This byte is not a continuation byte even though it should have
+          // been one. We stop decoding of the incomplete character at this
+          // point (but still use the rest of the incomplete bytes from this
+          // chunk) and assume that the new, unexpected byte starts a new one.
+          state[kMissingBytes] = 0;
+          memcpy(getIncompleteCharacterBuffer(state) + getBufferedBytes(state), data, i);
+          state[kBufferedBytes] += i;
+          data += i;
+          nread -= i;
+          break;
+        }
+      }
+    }
+
+    size_t found_bytes = std::min(nread, static_cast<size_t>(getMissingBytes(state)));
+    memcpy(getIncompleteCharacterBuffer(state) + getBufferedBytes(state), data, found_bytes);
+    // Adjust the two buffers.
+    data += found_bytes;
+    nread -= found_bytes;
+
+    state[kMissingBytes] -= found_bytes;
+    state[kBufferedBytes] += found_bytes;
+
+    if (getMissingBytes(state) == 0) {
+      // If no more bytes are missing, create a small string that we will later prepend.
+      prepend = getBufferedString(js, state);
+    }
+  }
+
+  if (nread == 0) {
+    body = !prepend.IsEmpty() ? prepend : v8::String::Empty(js.v8Isolate);
+    prepend = v8::Local<v8::String>();
+  } else {
+    KJ_ASSERT(getMissingBytes(state) == 0);
+    KJ_ASSERT(getBufferedBytes(state) == 0);
+
+    // See whether there is a character that we may have to cut off and
+    // finish when receiving the next chunk.
+    if (enc == Encoding::UTF8 && data[nread - 1] & 0x80) {
+      // This is UTF-8 encoded data and we ended on a non-ASCII UTF-8 byte.
+      // This means we'll need to figure out where the character to which
+      // the byte belongs begins.
+      for (size_t i = nread - 1; ; --i) {
+        KJ_ASSERT(i < nread);
+        state[kBufferedBytes]++;
+        if ((data[i] & 0xC0) == 0x80) {
+          // This byte does not start a character (a "trailing" byte).
+          if (state[kBufferedBytes] >= 4 || i == 0) {
+            // We either have more then 4 trailing bytes (which means
+            // the current character would not be inside the range for
+            // valid Unicode, and in particular cannot be represented
+            // through JavaScript's UTF-16-based approach to strings), or the
+            // current buffer does not contain the start of an UTF-8 character
+            // at all. Either way, this is invalid UTF8 and we can just
+            // let the engine's decoder handle it.
+            state[kBufferedBytes] = 0;
+            break;
+          }
+        } else {
+          // Found the first byte of a UTF-8 character. By looking at the
+          // upper bits we can tell how long the character *should* be.
+          if ((data[i] & 0xE0) == 0xC0) {
+            state[kMissingBytes] = 2;
+          } else if ((data[i] & 0xF0) == 0xE0) {
+            state[kMissingBytes] = 3;
+          } else if ((data[i] & 0xF8) == 0xF0) {
+            state[kMissingBytes] = 4;
+          } else {
+            // This lead byte would indicate a character outside of the
+            // representable range.
+            state[kBufferedBytes] = 0;
+            break;
+          }
+
+          if (getBufferedBytes(state) >= getMissingBytes(state)) {
+            // Received more or exactly as many trailing bytes than the lead
+            // character would indicate. In the "==" case, we have valid
+            // data and don't need to slice anything off;
+            // in the ">" case, this is invalid UTF-8 anyway.
+            state[kMissingBytes] = 0;
+            state[kBufferedBytes] = 0;
+          }
+
+          state[kMissingBytes] -= state[kBufferedBytes];
+          break;
+        }
+      }
+    } else if (enc == Encoding::UTF16LE) {
+      if ((nread % 2) == 1) {
+        // We got half a codepoint, and need the second byte of it.
+        state[kBufferedBytes] = 1;
+        state[kMissingBytes] = 1;
+      } else if ((data[nread - 1] & 0xFC) == 0xD8) {
+        // Half a split UTF-16 character.
+        state[kBufferedBytes] = 2;
+        state[kMissingBytes] = 2;
+      }
+    } else if (enc == Encoding::BASE64 || enc == Encoding::BASE64URL) {
+      state[kBufferedBytes] = nread % 3;
+      if (state[kBufferedBytes] > 0)
+        state[kMissingBytes] = 3 - getBufferedBytes(state);
+    }
+
+    if (getBufferedBytes(state) > 0) {
+      // Copy the requested number of buffered bytes from the end of the
+      // input into the incomplete character buffer.
+      nread -= getBufferedBytes(state);
+      memcpy(getIncompleteCharacterBuffer(state), data + nread, getBufferedBytes(state));
+    }
+
+    if (nread > 0) {
+      body = toStringImpl(js, kj::ArrayPtr<kj::byte>(data, data + nread), 0, nread, enc);
+    } else {
+      body = v8::String::Empty(js.v8Isolate);
+    }
+  }
+
+  if (prepend.IsEmpty()) {
+    return body;
+  } else {
+    return v8::String::Concat(js.v8Isolate, prepend, body);
+  }
+
+  return v8::String::Empty(js.v8Isolate);
+}
+
+v8::Local<v8::String> BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state) {
+  KJ_ASSERT(state.size() == BufferUtil::kSize);
+  auto enc = getEncoding(state);
+  if (enc == Encoding::ASCII || enc == Encoding::HEX || enc == Encoding::LATIN1) {
+    KJ_ASSERT(getMissingBytes(state) == 0);
+    KJ_ASSERT(getBufferedBytes(state) == 0);
+  }
+
+  if (enc == Encoding::UTF16LE && getBufferedBytes(state) % 2 == 1) {
+    // Ignore a single trailing byte, like the JS decoder does.
+    state[kMissingBytes]--;
+    state[kBufferedBytes]--;
+  }
+
+  if (getBufferedBytes(state) == 0) {
+    return v8::String::Empty(js.v8Isolate);
+  }
+
+  auto ret = getBufferedString(js, state);
+  state[kMissingBytes] = 0;
+
+  return ret;
 }
 
 }  // namespace workerd::api::node {

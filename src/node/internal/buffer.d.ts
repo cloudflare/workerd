@@ -31,3 +31,5 @@ export function write(buffer: Uint8Array,
                       offset: number,
                       length: number,
                       encoding: string): void;
+export function decode(buffer: Uint8Array, state: Uint8Array): string;
+export function flush(state: Uint8Array): string;

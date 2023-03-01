@@ -283,6 +283,15 @@ function fromArrayBuffer(obj: ArrayBufferLike,
 
 Buffer.from = from;
 
+function of(...args: number[]) {
+  const buf = Buffer.alloc(args.length);
+  for (let k = 0; k < args.length; k++)
+    buf[k] = args[k];
+  return buf;
+}
+
+Buffer.of = of;
+
 function alloc(size: number, fill?: FillValue, encoding?: string) : Buffer {
   validateNumber(size, "size");
   if (Number.isNaN(size)) {
@@ -344,11 +353,13 @@ export function compare(a: Buffer|Uint8Array, b: Buffer|Uint8Array) {
 
 Buffer.compare = compare;
 
-Buffer.isEncoding = function isEncoding(encoding: unknown) {
+export function isEncoding(encoding: unknown) {
   return typeof encoding === "string" &&
     encoding.length !== 0 &&
     normalizeEncoding(encoding) !== undefined;
 };
+
+Buffer.isEncoding = isEncoding;
 
 Buffer.concat = function concat(list: (Buffer|Uint8Array)[], length?: number) {
   if (!Array.isArray(list)) {
