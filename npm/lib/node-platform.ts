@@ -58,7 +58,7 @@ function pkgForSomeOtherPlatform(): string | null {
 
 export function downloadedBinPath(pkg: string, subpath: string): string {
   const libDir = path.dirname(require.resolve("workerd"));
-  return path.join(libDir, `downloaded-${pkg}-${path.basename(subpath)}`);
+  return path.join(libDir, `downloaded-${pkg.replace("/", "-")}-${path.basename(subpath)}`);
 }
 
 export function generateBinPath(): { binPath: string } {
@@ -160,7 +160,7 @@ by workerd to install the correct binary executable for your current platform.`)
       "node_modules",
       ".cache",
       "workerd",
-      `pnpapi-${pkg}-${WORKERD_VERSION}-${path.basename(subpath)}`
+      `pnpapi-${pkg.replace("/", "-")}-${WORKERD_VERSION}-${path.basename(subpath)}`
     );
     if (!fs.existsSync(binTargetPath)) {
       fs.mkdirSync(path.dirname(binTargetPath), { recursive: true });
