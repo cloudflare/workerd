@@ -4,4 +4,4 @@
 //
 
 export * from 'node-internal:events';
-
+export { default } from 'node-internal:events';
