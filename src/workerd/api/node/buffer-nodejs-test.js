@@ -40,6 +40,15 @@ import {
   constants,
 } from 'node:buffer';
 
+import * as buffer from 'node:buffer';
+if (buffer.Buffer !== Buffer ||
+    buffer.SlowBuffer !== SlowBuffer ||
+    buffer.kMaxLength !== kMaxLength ||
+    buffer.kStringMaxLength !== kStringMaxLength ||
+    buffer.constants !== constants) {
+  throw new Error('Incorrect default exports');
+}
+
 const { MAX_LENGTH, MAX_STRING_LENGTH } = constants;
 
 export const simpleAlloc = {

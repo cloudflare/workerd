@@ -473,3 +473,93 @@ export const stringDecoderFuzz = {
       runSingleFuzzTest();
   }
 };
+
+export const stringDecoderHacking = {
+  test(ctrl, env, ctx) {
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym] = "not a buffer";
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      name: 'TypeError'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym] = Buffer.alloc(1);
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Invalid StringDecoder'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym] = Buffer.alloc(9);
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Invalid StringDecoder'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym][5] = 100;
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Buffered bytes cannot exceed 4'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym][4] = 100;
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Missing bytes cannot exceed 4'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym][6] = 100;
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Invalid StringDecoder state'
+    });
+
+    throws(() => {
+      const sd = new StringDecoder();
+      const sym = Object.getOwnPropertySymbols(sd)[0];
+      sd[sym][4] = 3;
+      sd[sym][5] = 2;
+      sd.write(Buffer.from("this shouldn't crash"));
+    }, {
+      message: 'Invalid StringDecoder state'
+    });
+
+
+    {
+      // fuzz a bit with random values
+      const messages = [
+        "Invalid StringDecoder state",
+        "Missing bytes cannot exceed 4",
+        "Buffered bytes cannot exceed 4",
+      ];
+      for (let n = 0; n < 255; n++) {
+        try {
+          const sd = new StringDecoder();
+          const sym = Object.getOwnPropertySymbols(sd)[0];
+          crypto.getRandomValues(sd[sym]);
+          sd.write(Buffer.from("this shouldn't crash"));
+        } catch (err) {
+          if (!messages.includes(err.message)) {
+            throw err;
+          }
+        }
+      }
+    }
+  }
+};

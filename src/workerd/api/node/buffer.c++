@@ -649,10 +649,14 @@ uint32_t BufferUtil::write(
 
 namespace {
 inline kj::byte getMissingBytes(kj::ArrayPtr<kj::byte> state) {
+  JSG_REQUIRE(state[BufferUtil::kMissingBytes] <=
+              BufferUtil::kIncompleteCharactersEnd, Error, "Missing bytes cannot exceed 4");
   return state[BufferUtil::kMissingBytes];
 }
 
 inline kj::byte getBufferedBytes(kj::ArrayPtr<kj::byte> state) {
+  JSG_REQUIRE(state[BufferUtil::kBufferedBytes] <=
+              BufferUtil::kIncompleteCharactersEnd, Error, "Buffered bytes cannot exceed 4");
   return state[BufferUtil::kBufferedBytes];
 }
 
@@ -661,11 +665,14 @@ inline kj::byte* getIncompleteCharacterBuffer(kj::ArrayPtr<kj::byte> state) {
 }
 
 inline Encoding getEncoding(kj::ArrayPtr<kj::byte> state) {
+  JSG_REQUIRE(state[BufferUtil::kEncoding] <= static_cast<kj::byte>(Encoding::HEX),
+              Error, "Invalid StringDecoder state");
   return static_cast<Encoding>(state[BufferUtil::kEncoding]);
 }
 
 v8::Local<v8::String> getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> state) {
-  KJ_ASSERT(getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd);
+  JSG_REQUIRE(getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd, Error,
+              "Invalid StringDecoder state");
   auto ret = toStringImpl(js, state,
                           BufferUtil::kIncompleteCharactersStart,
                           BufferUtil::kIncompleteCharactersStart + getBufferedBytes(state),
@@ -678,7 +685,7 @@ v8::Local<v8::String> getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> st
 v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
                                          kj::Array<kj::byte> bytes,
                                          kj::Array<kj::byte> state) {
-  KJ_ASSERT(state.size() == BufferUtil::kSize);
+  JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
   auto enc = getEncoding(state);
   if (enc == Encoding::ASCII || enc == Encoding::LATIN1 || enc == Encoding::HEX) {
     // For ascii, latin1, and hex, we can just use the regular
@@ -692,8 +699,8 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
   auto nread = bytes.size();
   auto data = bytes.begin();
   if (getMissingBytes(state) > 0) {
-    KJ_ASSERT(getMissingBytes(state) + getBufferedBytes(state) <=
-              BufferUtil::kIncompleteCharactersEnd);
+    JSG_REQUIRE(getMissingBytes(state) + getBufferedBytes(state) <=
+              BufferUtil::kIncompleteCharactersEnd, Error, "Invalid StringDecoder state");
     if (enc == Encoding::UTF8) {
       // For UTF-8, we need special treatment to algin with the V8 decoder:
       // If an incomplete character is found at a chunk boundary, we use
@@ -733,8 +740,8 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
     body = !prepend.IsEmpty() ? prepend : v8::String::Empty(js.v8Isolate);
     prepend = v8::Local<v8::String>();
   } else {
-    KJ_ASSERT(getMissingBytes(state) == 0);
-    KJ_ASSERT(getBufferedBytes(state) == 0);
+    JSG_REQUIRE(getMissingBytes(state) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getBufferedBytes(state) == 0, Error, "Invalid StringDecoder state");
 
     // See whether there is a character that we may have to cut off and
     // finish when receiving the next chunk.
@@ -743,7 +750,7 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
       // This means we'll need to figure out where the character to which
       // the byte belongs begins.
       for (size_t i = nread - 1; ; --i) {
-        KJ_ASSERT(i < nread);
+        JSG_REQUIRE(i < nread, Error, "Invalid StringDecoder state");
         state[kBufferedBytes]++;
         if ((data[i] & 0xC0) == 0x80) {
           // This byte does not start a character (a "trailing" byte).
@@ -827,11 +834,11 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
 }
 
 v8::Local<v8::String> BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state) {
-  KJ_ASSERT(state.size() == BufferUtil::kSize);
+  JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
   auto enc = getEncoding(state);
   if (enc == Encoding::ASCII || enc == Encoding::HEX || enc == Encoding::LATIN1) {
-    KJ_ASSERT(getMissingBytes(state) == 0);
-    KJ_ASSERT(getBufferedBytes(state) == 0);
+    JSG_REQUIRE(getMissingBytes(state) == 0, Error, "Invalid StringDecoder state");
+    JSG_REQUIRE(getBufferedBytes(state) == 0, Error, "Invalid StringDecoder state");
   }
 
   if (enc == Encoding::UTF16LE && getBufferedBytes(state) % 2 == 1) {
