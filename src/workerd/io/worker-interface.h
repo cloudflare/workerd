@@ -41,7 +41,8 @@ public:
   virtual kj::Promise<void> connect(kj::StringPtr host,
                                     const kj::HttpHeaders& headers,
                                     kj::AsyncIoStream& connection,
-                                    ConnectResponse& response) = 0;
+                                    ConnectResponse& response,
+                                    kj::HttpConnectSettings settings) = 0;
   // This is the same as the inherited HttpService::connect(), but we override it to be
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
   // than get the default implementation which throws an unimplemented exception.
@@ -153,7 +154,8 @@ public:
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
-      kj::AsyncIoStream& connection, ConnectResponse& response) override;
+      kj::AsyncIoStream& connection, ConnectResponse& response,
+      kj::HttpConnectSettings settings) override;
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
@@ -184,7 +186,7 @@ public:
 
   kj::Promise<void> connect(
     kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-    ConnectResponse& tunnel) override;
+    ConnectResponse& tunnel, kj::HttpConnectSettings settings) override;
 
   void prewarm(kj::StringPtr url) override;
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;

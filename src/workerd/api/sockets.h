@@ -17,9 +17,9 @@ struct SocketAddress {
 };
 
 struct SocketOptions {
-  jsg::Unimplemented tls; // TODO(later): TCP socket options need to be implemented.
+  bool useSecureTransport = false;
   bool allowHalfOpen = false;
-  JSG_STRUCT(tls, allowHalfOpen);
+  JSG_STRUCT(useSecureTransport, allowHalfOpen);
 };
 
 class Socket: public jsg::Object {

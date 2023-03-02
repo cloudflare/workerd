@@ -311,7 +311,8 @@ kj::Promise<void> WorkerEntrypoint::request(
 }
 
 kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
-    kj::AsyncIoStream& connection, ConnectResponse& response) {
+    kj::AsyncIoStream& connection, ConnectResponse& response,
+    kj::HttpConnectSettings settings) {
   KJ_UNIMPLEMENTED("Incoming CONNECT on a worker not supported");
 }
 
