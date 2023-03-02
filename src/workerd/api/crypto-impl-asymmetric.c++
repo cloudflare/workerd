@@ -255,11 +255,18 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_REQUIRE(keyDataJwk.oth == nullptr, DOMNotSupportedError,
           "Multi-prime private keys not supported.");
     } else {
-      // Public key.
+      // Public key. If the given key is an ECDH key allow usages to contain deriveBits and
+      // deriveKey. While these usages appear to not be needed in the public key for the
+      // operations, users may be confused when they can't import a public key to be used alongside
+      // a private key for derive*() operations when such a usage is specified.
+      // The derive* functions check that baseKey is a private key, so imported public keys can't
+      // be mistakenly used as private keys regardless of the usages field.
       keyType = "public";
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
-              keyUsages, allowedUsages & CryptoKeyUsageSet::publicKeyMask());
+                                      keyUsages, allowedUsages & (normalizedName == "ECDH" ?
+                                      CryptoKeyUsageSet::derivationKeyMask() :
+                                      CryptoKeyUsageSet::publicKeyMask()));
     }
 
     if (keyUsages.size() > 0) {
@@ -332,7 +339,9 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
     }
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
-                                    keyUsages, allowedUsages & CryptoKeyUsageSet::publicKeyMask());
+                                    keyUsages, allowedUsages & (normalizedName == "ECDH" ?
+                                    CryptoKeyUsageSet::derivationKeyMask() :
+                                    CryptoKeyUsageSet::publicKeyMask()));
     return { kj::mv(evpPkey), "public"_kj, usages };
   } else if (format == "pkcs8") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
@@ -1549,13 +1558,6 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
   const auto& raw = keyData.get<kj::Array<kj::byte>>();
 
-  if (normalizedName == "ECDH"_kj) {
-    // ECDH publicKeys only support deriveBits and deriveKey.
-    KJ_ASSERT(allowedUsages <= (CryptoKeyUsageSet::deriveBits() |
-                                CryptoKeyUsageSet::deriveKey()));
-  } else {
-    KJ_ASSERT(allowedUsages <= CryptoKeyUsageSet::publicKeyMask());
-  }
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
   // TODO(revisit once this is standardized): NodeJS appears to support importing raw for private
@@ -1659,7 +1661,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages,
-                                  CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits());
+                                  CryptoKeyUsageSet::derivationKeyMask());
   return EllipticKey::generateElliptic(normalizedName, kj::mv(algorithm), extractable, usages, {});
 }
 
@@ -1680,10 +1682,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
           [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
         return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
-      }, CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits());
+      }, CryptoKeyUsageSet::derivationKeyMask());
     } else {
       return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages,
-          CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits());
+          CryptoKeyUsageSet::derivationKeyMask());
     }
   }();
 

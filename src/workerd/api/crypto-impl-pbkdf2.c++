@@ -80,7 +80,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importPbkdf2(
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importSecret,
-          keyUsages, CryptoKeyUsageSet::deriveKey() | CryptoKeyUsageSet::deriveBits());
+          keyUsages, CryptoKeyUsageSet::derivationKeyMask());
 
   JSG_REQUIRE(!extractable, DOMSyntaxError, "PBKDF2 key cannot be extractable.");
   JSG_REQUIRE(format == "raw", DOMNotSupportedError,
