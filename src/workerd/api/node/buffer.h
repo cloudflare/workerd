@@ -67,6 +67,20 @@ public:
                  uint32_t length,
                  kj::String encoding);
 
+  enum NativeDecoderFields {
+    kIncompleteCharactersStart = 0,
+    kIncompleteCharactersEnd = 4,
+    kMissingBytes = 4,
+    kBufferedBytes = 5,
+    kEncoding = 6,
+    kSize = 7,
+  };
+
+  v8::Local<v8::String> decode(jsg::Lock& js,
+                               kj::Array<kj::byte> bytes,
+                               kj::Array<kj::byte> state);
+  v8::Local<v8::String> flush(jsg::Lock& js, kj::Array<kj::byte> state);
+
   JSG_RESOURCE_TYPE(BufferUtil) {
     JSG_METHOD(byteLength);
     JSG_METHOD(compare);
@@ -77,6 +91,10 @@ public:
     JSG_METHOD(swap);
     JSG_METHOD(toString);
     JSG_METHOD(write);
+
+    // For StringDecoder
+    JSG_METHOD(decode);
+    JSG_METHOD(flush);
   }
 };
 

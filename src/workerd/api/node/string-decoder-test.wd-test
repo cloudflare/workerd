@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "string-decoder-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "string-decoder-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      )
+    ),
+  ],
+);
