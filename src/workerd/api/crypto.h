@@ -41,6 +41,10 @@ public:
     return decrypt() | sign() | unwrapKey() | deriveKey() | deriveBits();
   }
 
+  static constexpr CryptoKeyUsageSet derivationKeyMask() {
+    return deriveKey() | deriveBits();
+  }
+
   CryptoKeyUsageSet() : set(0) {}
 
   CryptoKeyUsageSet operator&(CryptoKeyUsageSet other) const { return set & other.set; }

@@ -67,7 +67,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importSecret,
-          keyUsages, CryptoKeyUsageSet::deriveBits() | CryptoKeyUsageSet::deriveKey());
+          keyUsages, CryptoKeyUsageSet::derivationKeyMask());
 
   JSG_REQUIRE(!extractable, DOMSyntaxError, "HKDF key cannot be extractable.");
   JSG_REQUIRE(format == "raw", DOMNotSupportedError, "HKDF key must be imported "
