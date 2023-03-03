@@ -70,11 +70,12 @@ Windows users should run `workerd` under WSL (1 or 2).
 
 To build `workerd`, you need:
 
-* [Bazel](https://bazel.build/)
-* Python 3 and distutils (e.g. packages `python3` and `python3-distutils` on Debian Bullseye)
+* [Bazel](https://bazel.build/) version 5.3.0
+  * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), this version will automatically be downloaded and used.
 * On Linux:
   * Clang 11+ (e.g. package `clang` on Debian Bullseye)
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
+  * Python 3 and distutils (e.g. packages `python3` and `python3-distutils` on Debian Bullseye)
 * On macOS:
   * full XCode 13+ installation
 
