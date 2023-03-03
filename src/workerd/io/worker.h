@@ -15,6 +15,7 @@
 #include <kj/mutex.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/actor-storage.capnp.h>
+#include <workerd/io/request-tracker.h>
 
 namespace v8 { class Isolate; }
 
@@ -637,7 +638,7 @@ public:
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
-  Actor(const Worker& worker, Id actorId,
+  Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
         bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
         TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
@@ -712,8 +713,18 @@ public:
   // Runs an alarm in this actor. This function will handle deduplicating multiple alarms. If this
   // isn't a duplicate alarm, func will be called to run the alarm.
 
+  kj::Own<Worker::Actor> addRef() {
+    KJ_IF_MAYBE(t, tracker) {
+      return kj::addRef(*this).attach(t->startRequest());
+    } else {
+      return kj::addRef(*this);
+    }
+  }
 private:
   kj::Own<const Worker> worker;
+
+  // TODO(soon): Provide a RequestTracker in workerd so this can no longer be a Maybe
+  kj::Maybe<RequestTracker&> tracker;
   struct Impl;
   kj::Own<Impl> impl;
 
