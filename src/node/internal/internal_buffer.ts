@@ -73,14 +73,104 @@ function createBuffer(length: number) : Buffer {
   }
   const buf = new Uint8Array(length);
   Object.setPrototypeOf(buf, Buffer.prototype);
-  return buf;
+  return buf as Buffer;
 }
 
 type WithImplicitCoercion<T> = | T | { valueOf(): T; };
 type StringLike = WithImplicitCoercion<string> | { [Symbol.toPrimitive](hint: "string"): string; };
 type ArrayBufferLike = WithImplicitCoercion<ArrayBuffer| SharedArrayBuffer>;
 type BufferSource = StringLike|ArrayBufferLike|Uint8Array|ReadonlyArray<number>;
-type Buffer = typeof Buffer.prototype;
+
+export interface Buffer extends Uint8Array {
+  readonly buffer: ArrayBuffer;
+  readonly parent: ArrayBuffer;
+  readonly byteOffset: number;
+  readonly length: number;
+  compare(target: Uint8Array,
+          targetStart?: number,
+          targetEnd?: number,
+          sourceStart?: number,
+          sourceEnd?: number): number;
+  copy(target: Uint8Array,
+       targetStart?: number,
+       sourceStart?: number,
+       sourceEnd?: number): number;
+  equals(other: Uint8Array): boolean;
+  fill(value: number, offset?: number, end?: number): this;
+  fill(value: string, encoding?: string): this;
+  fill(value: string, offset?: number, end?: number, encoding?: string): this;
+  fill(value: Uint8Array, offset?: number, end?: number): this;
+  includes(value: number, byteOffset?: number): boolean;
+  includes(value: string, encoding?: string): boolean;
+  includes(value: string, byteOffset?: number, encoding?: string): boolean;
+  includes(value: Uint8Array, byteOffset?: number): boolean;
+  indexOf(value: number, byteOffset?: number): number;
+  indexOf(value: string, encoding?: string): number;
+  indexOf(value: string, byteOffset?: number, encoding?: string): number;
+  indexOf(value: Uint8Array, byteOffset?: number): number;
+  lastIndexOf(value: number, byteOffset?: number): number;
+  lastIndexOf(value: string, encoding?: string): number;
+  lastIndexOf(value: string, byteOffset?: number, encoding?: string): number;
+  lastIndexOf(value: Uint8Array, byteOffset?: number): number;
+  readBigInt64BE(offset?: number) : bigint;
+  readBigInt64LE(offset?: number) : bigint;
+  readBigUInt64BE(offset?: number) : bigint;
+  readBigUInt64LE(offset?: number) : bigint;
+  readDoubleBE(offset?: number) : number;
+  readDoubleLE(offset?: number) : number;
+  readFloatBE(offset?: number) : number;
+  readFloatLE(offset?: number) : number;
+  readInt8(offset?: number) : number;
+  readInt16BE(offset?: number) : number;
+  readInt16LE(offset?: number) : number;
+  readInt32BE(offset?: number) : number;
+  readInt32LE(offset?: number) : number;
+  readIntBE(offset?: number, byteLength?: number) : number;
+  readIntLE(offset?: number, byteLength?: number) : number;
+  readUInt8(offset?: number) : number;
+  readUInt16BE(offset?: number) : number;
+  readUInt16LE(offset?: number) : number;
+  readUInt32BE(offset?: number) : number;
+  readUInt32LE(offset?: number) : number;
+  readUIntBE(offset?: number, byteLength?: number) : number;
+  readUIntLE(offset?: number, byteLength?: number) : number;
+  swap16(): this;
+  swap32(): this;
+  swap64(): this;
+  toJSON(): {type: 'Buffer', data: number[]};
+  toString(encoding?: string, start?: number, end?: number): string;
+  write(string: string, encoding?: string): number;
+  write(string: string, offset?: number, encoding?: string): number;
+  write(string: string, offset?: number, length?: number, encoding?: string): number;
+  writeBigInt64BE(value: bigint, offset?: number): number;
+  writeBigInt64LE(value: bigint, offset?: number): number;
+  writeBigUInt64BE(value: bigint, offset?: number): number;
+  writeBigUInt64LE(value: bigint, offset?: number): number;
+  writeDoubleBE(value: number, offset?: number): number;
+  writeDoubleLE(value: number, offset?: number): number;
+  writeFloatBE(value: number, offset?: number): number;
+  writeFloatLE(value: number, offset?: number): number;
+  writeInt8(value: number, offset?: number): number;
+  writeInt16BE(value: number, offset?: number): number;
+  writeInt16LE(value: number, offset?: number): number;
+  writeInt32BE(value: number, offset?: number): number;
+  writeInt32LE(value: number, offset?: number): number;
+  writeIntBE(value: number, offset?: number, byteLength?: number): number;
+  writeIntLE(value: number, offset?: number, byteLength?: number): number;
+  writeUInt8(value: number, offset?: number): number;
+  writeUInt16BE(value: number, offset?: number): number;
+  writeUInt16LE(value: number, offset?: number): number;
+  writeUInt32BE(value: number, offset?: number): number;
+  writeUInt32LE(value: number, offset?: number): number;
+  writeUIntBE(value: number, offset?: number, byteLength?: number): number;
+  writeUIntLE(value: number, offset?: number, byteLength?: number): number;
+  new (array:Iterable<number>): Buffer;
+  new (arrayBuffer: ArrayBufferLike, byteOffset?: number, length?: number): Buffer;
+  new (buffer: ArrayBufferView): Buffer;
+  new (size: number): Buffer;
+  new (string: string, encoding?: string): Buffer;
+};
+
 type FillValue = string|number|ArrayBufferView;
 
 export function Buffer(value: number) : Buffer;
@@ -151,12 +241,12 @@ function _from(value: BufferSource,
                encodingOrOffset? : string|number,
                length?: number) : Buffer {
   if (typeof value === "string") {
-    return fromString(value, encodingOrOffset as string | undefined);
+    return fromString(value, encodingOrOffset as string | undefined) as Buffer;
   }
 
   if (typeof value === "object" && value != null) {
     if (isAnyArrayBuffer(value)) {
-      return fromArrayBuffer(value as ArrayBufferLike, encodingOrOffset as number, length);
+      return fromArrayBuffer(value as ArrayBufferLike, encodingOrOffset as number, length) as Buffer;
     }
 
     const valueOf = value?.valueOf();
@@ -165,25 +255,23 @@ function _from(value: BufferSource,
       return _from(valueOf as BufferSource, encodingOrOffset, length);
     }
 
-    if ((value as ArrayBufferLike|Buffer|Object).length !== undefined ||
-         isAnyArrayBuffer((value as ArrayBufferLike|Buffer|Object).buffer)) {
-      if (typeof (value as ArrayBufferLike|Buffer|Object).length !== "number") {
+    if ((value as any).length !== undefined || isAnyArrayBuffer((value as any).buffer)) {
+      if (typeof (value as any).length !== "number") {
         return createBuffer(0);
       }
 
-      return fromArrayLike(value as ArrayBufferLike|Buffer|Object);
+      return fromArrayLike(value as any) as Buffer;
     }
 
-    if ((value as ArrayBufferLike|Buffer|Object).type === "Buffer" &&
-         Array.isArray((value as ArrayBufferLike|Buffer|Object).data)) {
-      return fromArrayLike((value as ArrayBufferLike|Buffer|Object).data);
+    if ((value as any).type === "Buffer" && Array.isArray((value as any).data)) {
+      return fromArrayLike((value as any).data) as Buffer;
     }
 
     const toPrimitive = (value as any)[Symbol.toPrimitive];
     if (typeof toPrimitive === "function") {
       const primitive = toPrimitive("string");
       if (typeof primitive === "string") {
-        return fromString(primitive, encodingOrOffset as string | undefined);
+        return fromString(primitive, encodingOrOffset as string | undefined) as Buffer;
       }
     }
   }
@@ -280,7 +368,7 @@ Buffer.from = from;
 function of(...args: number[]) {
   const buf = Buffer.alloc(args.length);
   for (let k = 0; k < args.length; k++)
-    buf[k] = args[k];
+    buf[k] = args[k]!;
   return buf;
 }
 
@@ -300,7 +388,7 @@ function alloc(size: number, fill?: FillValue, encoding?: string) : Buffer {
     if (encoding !== undefined) {
       validateString(encoding, 'encoding');
     }
-    return buffer.fill(fill, encoding);
+    return buffer.fill(fill as any, encoding);
   }
   return buffer;
 }
@@ -365,8 +453,8 @@ Buffer.concat = function concat(list: (Buffer|Uint8Array)[], length?: number) {
   if (length === undefined) {
     length = 0;
     for (let i = 0; i < list.length; i++) {
-      if (list[i].length !== undefined) {
-        length += list[i].length;
+      if (list[i]!.length !== undefined) {
+        length += list[i]!.length;
       } else {
         throw new ERR_INVALID_ARG_TYPE('list', '(Buffer|Uint8Array)[]', list[i]);
       }
@@ -562,7 +650,7 @@ function includes(
     val: string|number|Buffer|Uint8Array,
     byteOffset?: number,
     encoding?: string) {
-  return this.indexOf(val, byteOffset, encoding) !== -1;
+  return this.indexOf(val as any, byteOffset, encoding) !== -1;
 }
 
 Buffer.prototype.includes = includes;
@@ -910,8 +998,8 @@ Buffer.prototype.readUint32LE =
       }
 
       return first +
-        this[++offset] * 2 ** 8 +
-        this[++offset] * 2 ** 16 +
+        this[++offset]! * 2 ** 8 +
+        this[++offset]! * 2 ** 16 +
         last * 2 ** 24;
     };
 
@@ -927,11 +1015,11 @@ Buffer.prototype.readBigUint64LE =
       if (first === undefined || last === undefined) {
         boundsError(offset, this.length - 8);
       }
-      const lo = first + this[++offset] * 2 ** 8 +
-        this[++offset] * 2 ** 16 +
-        this[++offset] * 2 ** 24;
-      const hi = this[++offset] + this[++offset] * 2 ** 8 +
-        this[++offset] * 2 ** 16 + last * 2 ** 24;
+      const lo = first + this[++offset]! * 2 ** 8 +
+        this[++offset]! * 2 ** 16 +
+        this[++offset]! * 2 ** 24;
+      const hi = this[++offset]! + this[++offset]! * 2 ** 8 +
+        this[++offset]! * 2 ** 16 + last * 2 ** 24;
       return BigInt(lo) + (BigInt(hi) << BigInt(32));
     };
 
@@ -945,10 +1033,10 @@ Buffer.prototype.readBigUint64BE =
       if (first === undefined || last === undefined) {
         boundsError(offset, this.length - 8);
       }
-      const hi = first * 2 ** 24 + this[++offset] * 2 ** 16 +
-        this[++offset] * 2 ** 8 + this[++offset];
-      const lo = this[++offset] * 2 ** 24 + this[++offset] * 2 ** 16 +
-        this[++offset] * 2 ** 8 + last;
+      const hi = first * 2 ** 24 + this[++offset]! * 2 ** 16 +
+        this[++offset]! * 2 ** 8 + this[++offset]!;
+      const lo = this[++offset]! * 2 ** 24 + this[++offset]! * 2 ** 16 +
+        this[++offset]! * 2 ** 8 + last;
       return (BigInt(hi) << BigInt(32)) + BigInt(lo);
     };
 
@@ -1059,12 +1147,12 @@ Buffer.prototype.readBigInt64LE = function readBigInt64LE(this: Buffer, offset: 
   if (first === undefined || last === undefined) {
     boundsError(offset, this.length - 8);
   }
-  const val = this[offset + 4] + this[offset + 5] * 2 ** 8 +
-    this[offset + 6] * 2 ** 16 + (last << 24);
+  const val = this[offset + 4]! + this[offset + 5]! * 2 ** 8 +
+    this[offset + 6]! * 2 ** 16 + (last << 24);
   return (BigInt(val) << BigInt(32)) +
     BigInt(
-      first + this[++offset] * 2 ** 8 + this[++offset] * 2 ** 16 +
-        this[++offset] * 2 ** 24,
+      first + this[++offset]! * 2 ** 8 + this[++offset]! * 2 ** 16 +
+        this[++offset]! * 2 ** 24,
     );
 };
 
@@ -1076,12 +1164,12 @@ Buffer.prototype.readBigInt64BE = function readBigInt64BE(this: Buffer, offset: 
   if (first === undefined || last === undefined) {
     boundsError(offset, this.length - 8);
   }
-  const val = (first << 24) + this[++offset] * 2 ** 16 +
-    this[++offset] * 2 ** 8 + this[++offset];
+  const val = (first << 24) + this[++offset]! * 2 ** 16 +
+    this[++offset]! * 2 ** 8 + this[++offset]!;
   return (BigInt(val) << BigInt(32)) +
     BigInt(
-      this[++offset] * 2 ** 24 + this[++offset] * 2 ** 16 +
-        this[++offset] * 2 ** 8 + last,
+      this[++offset]! * 2 ** 24 + this[++offset]! * 2 ** 16 +
+        this[++offset]! * 2 ** 8 + last,
     );
 };
 
@@ -1456,7 +1544,7 @@ Buffer.prototype.fill = function fill(
   }
 
   if (isArrayBufferView(val)) {
-    if (val.byteLength === 0) {
+    if ((val as ArrayBufferView).byteLength === 0) {
       throw new ERR_INVALID_ARG_VALUE('value', 'zero-length');
     }
     bufferUtil.fillImpl(this, val as ArrayBufferView, start as number, end as number);
@@ -1470,7 +1558,7 @@ Buffer.prototype.fill = function fill(
   }
   val ??= 0;
 
-  Uint8Array.prototype.fill.call(this, val, start, end);
+  Uint8Array.prototype.fill.call(this, val as number, start, end);
 
   return this;
 };
@@ -1526,10 +1614,10 @@ function readUInt48LE(buf: Buffer|Uint8Array, offset: number = 0) {
   }
 
   return first +
-    buf[++offset] * 2 ** 8 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 24 +
-    (buf[++offset] + last * 2 ** 8) * 2 ** 32;
+    buf[++offset]! * 2 ** 8 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 24 +
+    (buf[++offset]! + last * 2 ** 8) * 2 ** 32;
 }
 
 function readUInt40LE(buf: Buffer|Uint8Array, offset: number = 0) {
@@ -1541,9 +1629,9 @@ function readUInt40LE(buf: Buffer|Uint8Array, offset: number = 0) {
   }
 
   return first +
-    buf[++offset] * 2 ** 8 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 24 +
+    buf[++offset]! * 2 ** 8 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 24 +
     last * 2 ** 32;
 }
 
@@ -1555,7 +1643,7 @@ function readUInt24LE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 3);
   }
 
-  return first + buf[++offset] * 2 ** 8 + last * 2 ** 16;
+  return first + buf[++offset]! * 2 ** 8 + last * 2 ** 16;
 }
 
 function readUInt48BE(buf: Buffer|Uint8Array, offset: number = 0) {
@@ -1566,10 +1654,10 @@ function readUInt48BE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 6);
   }
 
-  return (first * 2 ** 8 + buf[++offset]) * 2 ** 32 +
-    buf[++offset] * 2 ** 24 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 8 +
+  return (first * 2 ** 8 + buf[++offset]!) * 2 ** 32 +
+    buf[++offset]! * 2 ** 24 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 8 +
     last;
 }
 
@@ -1582,9 +1670,9 @@ function readUInt40BE(buf: Buffer|Uint8Array, offset: number = 0) {
   }
 
   return first * 2 ** 32 +
-    buf[++offset] * 2 ** 24 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 8 +
+    buf[++offset]! * 2 ** 24 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 8 +
     last;
 }
 
@@ -1596,7 +1684,7 @@ function readUInt24BE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 3);
   }
 
-  return first * 2 ** 16 + buf[++offset] * 2 ** 8 + last;
+  return first * 2 ** 16 + buf[++offset]! * 2 ** 8 + last;
 }
 
 function readUInt16BE(this: Buffer, offset: number = 0) {
@@ -1619,8 +1707,8 @@ function readUInt32BE(this: Buffer, offset: number = 0) {
   }
 
   return first * 2 ** 24 +
-    this[++offset] * 2 ** 16 +
-    this[++offset] * 2 ** 8 +
+    this[++offset]! * 2 ** 16 +
+    this[++offset]! * 2 ** 8 +
     last;
 }
 
@@ -1633,12 +1721,12 @@ function readDoubleBackwards(buffer: Buffer|Uint8Array, offset: number = 0) {
   }
 
   uInt8Float64Array[7] = first;
-  uInt8Float64Array[6] = buffer[++offset];
-  uInt8Float64Array[5] = buffer[++offset];
-  uInt8Float64Array[4] = buffer[++offset];
-  uInt8Float64Array[3] = buffer[++offset];
-  uInt8Float64Array[2] = buffer[++offset];
-  uInt8Float64Array[1] = buffer[++offset];
+  uInt8Float64Array[6] = buffer[++offset]!;
+  uInt8Float64Array[5] = buffer[++offset]!;
+  uInt8Float64Array[4] = buffer[++offset]!;
+  uInt8Float64Array[3] = buffer[++offset]!;
+  uInt8Float64Array[2] = buffer[++offset]!;
+  uInt8Float64Array[1] = buffer[++offset]!;
   uInt8Float64Array[0] = last;
   return float64Array[0];
 }
@@ -1652,45 +1740,45 @@ function readDoubleForwards(buffer: Buffer|Uint8Array, offset: number = 0) {
   }
 
   uInt8Float64Array[0] = first;
-  uInt8Float64Array[1] = buffer[++offset];
-  uInt8Float64Array[2] = buffer[++offset];
-  uInt8Float64Array[3] = buffer[++offset];
-  uInt8Float64Array[4] = buffer[++offset];
-  uInt8Float64Array[5] = buffer[++offset];
-  uInt8Float64Array[6] = buffer[++offset];
+  uInt8Float64Array[1] = buffer[++offset]!;
+  uInt8Float64Array[2] = buffer[++offset]!;
+  uInt8Float64Array[3] = buffer[++offset]!;
+  uInt8Float64Array[4] = buffer[++offset]!;
+  uInt8Float64Array[5] = buffer[++offset]!;
+  uInt8Float64Array[6] = buffer[++offset]!;
   uInt8Float64Array[7] = last;
   return float64Array[0];
 }
 
 function writeDoubleForwards(buffer: Buffer|Uint8Array, val: number, offset: number = 0) {
   val = +val;
-  checkBounds(buffer, offset, 7);
+  checkBounds(buffer as any, offset, 7);
 
   float64Array[0] = val;
-  buffer[offset++] = uInt8Float64Array[0];
-  buffer[offset++] = uInt8Float64Array[1];
-  buffer[offset++] = uInt8Float64Array[2];
-  buffer[offset++] = uInt8Float64Array[3];
-  buffer[offset++] = uInt8Float64Array[4];
-  buffer[offset++] = uInt8Float64Array[5];
-  buffer[offset++] = uInt8Float64Array[6];
-  buffer[offset++] = uInt8Float64Array[7];
+  buffer[offset++] = uInt8Float64Array[0]!;
+  buffer[offset++] = uInt8Float64Array[1]!;
+  buffer[offset++] = uInt8Float64Array[2]!;
+  buffer[offset++] = uInt8Float64Array[3]!;
+  buffer[offset++] = uInt8Float64Array[4]!;
+  buffer[offset++] = uInt8Float64Array[5]!;
+  buffer[offset++] = uInt8Float64Array[6]!;
+  buffer[offset++] = uInt8Float64Array[7]!;
   return offset;
 }
 
 function writeDoubleBackwards(buffer: Buffer|Uint8Array, val: number, offset: number = 0) {
   val = +val;
-  checkBounds(buffer, offset, 7);
+  checkBounds(buffer as any, offset, 7);
 
   float64Array[0] = val;
-  buffer[offset++] = uInt8Float64Array[7];
-  buffer[offset++] = uInt8Float64Array[6];
-  buffer[offset++] = uInt8Float64Array[5];
-  buffer[offset++] = uInt8Float64Array[4];
-  buffer[offset++] = uInt8Float64Array[3];
-  buffer[offset++] = uInt8Float64Array[2];
-  buffer[offset++] = uInt8Float64Array[1];
-  buffer[offset++] = uInt8Float64Array[0];
+  buffer[offset++] = uInt8Float64Array[7]!;
+  buffer[offset++] = uInt8Float64Array[6]!;
+  buffer[offset++] = uInt8Float64Array[5]!;
+  buffer[offset++] = uInt8Float64Array[4]!;
+  buffer[offset++] = uInt8Float64Array[3]!;
+  buffer[offset++] = uInt8Float64Array[2]!;
+  buffer[offset++] = uInt8Float64Array[1]!;
+  buffer[offset++] = uInt8Float64Array[0]!;
   return offset;
 }
 
@@ -1703,8 +1791,8 @@ function readFloatBackwards(buffer: Buffer|Uint8Array, offset: number = 0) {
   }
 
   uInt8Float32Array[3] = first;
-  uInt8Float32Array[2] = buffer[++offset];
-  uInt8Float32Array[1] = buffer[++offset];
+  uInt8Float32Array[2] = buffer[++offset]!;
+  uInt8Float32Array[1] = buffer[++offset]!;
   uInt8Float32Array[0] = last;
   return float32Array[0];
 }
@@ -1718,33 +1806,33 @@ function readFloatForwards(buffer: Buffer|Uint8Array, offset: number = 0) {
   }
 
   uInt8Float32Array[0] = first;
-  uInt8Float32Array[1] = buffer[++offset];
-  uInt8Float32Array[2] = buffer[++offset];
+  uInt8Float32Array[1] = buffer[++offset]!;
+  uInt8Float32Array[2] = buffer[++offset]!;
   uInt8Float32Array[3] = last;
   return float32Array[0];
 }
 
 function writeFloatForwards(buffer: Buffer|Uint8Array, val: number, offset: number = 0) {
   val = +val;
-  checkBounds(buffer, offset, 3);
+  checkBounds(buffer as any, offset, 3);
 
   float32Array[0] = val;
-  buffer[offset++] = uInt8Float32Array[0];
-  buffer[offset++] = uInt8Float32Array[1];
-  buffer[offset++] = uInt8Float32Array[2];
-  buffer[offset++] = uInt8Float32Array[3];
+  buffer[offset++] = uInt8Float32Array[0]!;
+  buffer[offset++] = uInt8Float32Array[1]!;
+  buffer[offset++] = uInt8Float32Array[2]!;
+  buffer[offset++] = uInt8Float32Array[3]!;
   return offset;
 }
 
 function writeFloatBackwards(buffer: Buffer|Uint8Array, val: number, offset: number = 0) {
   val = +val;
-  checkBounds(buffer, offset, 3);
+  checkBounds(buffer as any, offset, 3);
 
   float32Array[0] = val;
-  buffer[offset++] = uInt8Float32Array[3];
-  buffer[offset++] = uInt8Float32Array[2];
-  buffer[offset++] = uInt8Float32Array[1];
-  buffer[offset++] = uInt8Float32Array[0];
+  buffer[offset++] = uInt8Float32Array[3]!;
+  buffer[offset++] = uInt8Float32Array[2]!;
+  buffer[offset++] = uInt8Float32Array[1]!;
+  buffer[offset++] = uInt8Float32Array[0]!;
   return offset;
 }
 
@@ -1756,7 +1844,7 @@ function readInt24LE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 3);
   }
 
-  const val = first + buf[++offset] * 2 ** 8 + last * 2 ** 16;
+  const val = first + buf[++offset]! * 2 ** 8 + last * 2 ** 16;
   return val | (val & 2 ** 23) * 0x1fe;
 }
 
@@ -1770,9 +1858,9 @@ function readInt40LE(buf: Buffer|Uint8Array, offset: number = 0) {
 
   return (last | (last & 2 ** 7) * 0x1fffffe) * 2 ** 32 +
     first +
-    buf[++offset] * 2 ** 8 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 24;
+    buf[++offset]! * 2 ** 8 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 24;
 }
 
 function readInt48LE(buf: Buffer|Uint8Array, offset: number = 0) {
@@ -1783,12 +1871,12 @@ function readInt48LE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 6);
   }
 
-  const val = buf[offset + 4] + last * 2 ** 8;
+  const val = buf[offset + 4]! + last * 2 ** 8;
   return (val | (val & 2 ** 15) * 0x1fffe) * 2 ** 32 +
     first +
-    buf[++offset] * 2 ** 8 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 24;
+    buf[++offset]! * 2 ** 8 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 24;
 }
 
 function readInt24BE(buf: Buffer|Uint8Array, offset: number = 0) {
@@ -1799,7 +1887,7 @@ function readInt24BE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 3);
   }
 
-  const val = first * 2 ** 16 + buf[++offset] * 2 ** 8 + last;
+  const val = first * 2 ** 16 + buf[++offset]! * 2 ** 8 + last;
   return val | (val & 2 ** 23) * 0x1fe;
 }
 
@@ -1811,11 +1899,11 @@ function readInt48BE(buf: Buffer|Uint8Array, offset: number = 0) {
     boundsError(offset, buf.length - 6);
   }
 
-  const val = buf[++offset] + first * 2 ** 8;
+  const val = buf[++offset]! + first * 2 ** 8;
   return (val | (val & 2 ** 15) * 0x1fffe) * 2 ** 32 +
-    buf[++offset] * 2 ** 24 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 8 +
+    buf[++offset]! * 2 ** 24 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 8 +
     last;
 }
 
@@ -1828,9 +1916,9 @@ function readInt40BE(buf: Buffer|Uint8Array, offset: number = 0) {
   }
 
   return (first | (first & 2 ** 7) * 0x1fffffe) * 2 ** 32 +
-    buf[++offset] * 2 ** 24 +
-    buf[++offset] * 2 ** 16 +
-    buf[++offset] * 2 ** 8 +
+    buf[++offset]! * 2 ** 24 +
+    buf[++offset]! * 2 ** 16 +
+    buf[++offset]! * 2 ** 8 +
     last;
 }
 

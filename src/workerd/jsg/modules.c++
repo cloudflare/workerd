@@ -55,7 +55,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   auto& js = jsg::Lock::from(isolate);
   v8::MaybeLocal<v8::Module> result;
 
-  KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
+  js.tryCatch([&] {
     auto registry = getModulesForResolveCallback(isolate);
     KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
 
@@ -74,11 +74,10 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         "No such module \"", targetPath.toString(),
         "\".\n  imported from \"", ref.specifier.toString(), "\"")
         .module.getHandle(js);
-
-  })) {
-    isolate->ThrowException(makeInternalError(isolate, kj::mv(*exception)));
+  }, [&](Value value) {
+    isolate->ThrowException(value.getHandle(js));
     result = v8::MaybeLocal<v8::Module>();
-  }
+  });
 
   return result;
 }
@@ -279,9 +278,9 @@ void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
+
   jsg::check(module->InstantiateModule(context, &resolveCallback));
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
-
   isolate->PerformMicrotaskCheckpoint();
 
   switch (prom->State()) {

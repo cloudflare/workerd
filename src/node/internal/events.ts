@@ -60,7 +60,27 @@ export interface EventEmitterOptions {
   captureRejections? : boolean;
 };
 
-type EventEmitter = typeof EventEmitter;
+export type EventName = string|symbol;
+export type EventCallback = (...args: any[]) => unknown;
+export interface EventEmitter {
+  addListener(eventName: EventName, listener: EventCallback): EventEmitter;
+  emit(eventName: EventName, ...args: unknown[]): void;
+  eventNames() : EventName[];
+  getMaxListeners(): number;
+  listenerCount(eventName: EventName): number;
+  listeners(eventName: EventName): EventCallback[];
+  off(eventName: EventName, listener: EventCallback): EventEmitter;
+  on(eventName: EventName, listener: EventCallback): EventEmitter;
+  once(eventName: EventName, listener: EventCallback): EventEmitter;
+  prependListener(eventName: EventName, listener: EventCallback): EventEmitter;
+  prependOnceListener(eventName: EventName, listener: EventCallback): EventEmitter;
+  removeAllListeners(eventName?: EventName): EventEmitter;
+  removeListener(eventName: EventName, listener: EventCallback): EventEmitter;
+  setMaxListeners(n: number): EventEmitter;
+  rawListeners(eventName: EventName): EventCallback[];
+  [kRejection](err: unknown, eventName: EventName, ...args: unknown[]) : void;
+};
+
 type AsyncResource = typeof AsyncResource;
 
 declare var EventTarget : Function;

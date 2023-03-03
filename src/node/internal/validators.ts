@@ -31,7 +31,11 @@
 // import { hideStackFrames } from "node-internal:hide-stack-frames";
 import { isArrayBufferView } from "node-internal:internal_types";
 import { normalizeEncoding } from "node-internal:internal_utils";
-import { default as codes } from "node-internal:internal_errors";
+import {
+  ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_OUT_OF_RANGE,
+} from "node-internal:internal_errors";
 
 // TODO(someday): Not current implementing parseFileMode, validatePort
 
@@ -40,7 +44,7 @@ export const isUint32 = (value: any) => value === (value >>> 0);
 
 export function validateBuffer(buffer: unknown, name = "buffer") {
   if (!isArrayBufferView(buffer)) {
-    throw new codes.ERR_INVALID_ARG_TYPE(
+    throw new ERR_INVALID_ARG_TYPE(
       name,
       ["Buffer", "TypedArray", "DataView"],
       buffer,
@@ -54,13 +58,13 @@ export function validateInteger(
     min = Number.MIN_SAFE_INTEGER,
     max = Number.MAX_SAFE_INTEGER) {
   if (typeof value !== "number") {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "number", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "number", value);
   }
   if (!Number.isInteger(value)) {
-    throw new codes.ERR_OUT_OF_RANGE(name, "an integer", value);
+    throw new ERR_OUT_OF_RANGE(name, "an integer", value);
   }
   if (value < min || value > max) {
-    throw new codes.ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+    throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
   }
 }
 
@@ -82,64 +86,64 @@ export function validateObject(value: unknown, name: string, options: ValidateOb
       !allowFunction || typeof value !== "function"
     ))
   ) {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "Object", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "Object", value);
   }
 };
 
 export function validateInt32(value: any, name: string, min = -2147483648, max = 2147483647) {
   if (!isInt32(value)) {
     if (typeof value !== "number") {
-      throw new codes.ERR_INVALID_ARG_TYPE(name, "number", value);
+      throw new ERR_INVALID_ARG_TYPE(name, "number", value);
     }
 
     if (!Number.isInteger(value)) {
-      throw new codes.ERR_OUT_OF_RANGE(name, "an integer", value);
+      throw new ERR_OUT_OF_RANGE(name, "an integer", value);
     }
 
-    throw new codes.ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+    throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
   }
 
   if (value < min || value > max) {
-    throw new codes.ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
+    throw new ERR_OUT_OF_RANGE(name, `>= ${min} && <= ${max}`, value);
   }
 }
 
 export function validateUint32(value: unknown, name: string, positive?: boolean) {
   if (!isUint32(value)) {
     if (typeof value !== "number") {
-      throw new codes.ERR_INVALID_ARG_TYPE(name, "number", value);
+      throw new ERR_INVALID_ARG_TYPE(name, "number", value);
     }
     if (!Number.isInteger(value)) {
-      throw new codes.ERR_OUT_OF_RANGE(name, "an integer", value);
+      throw new ERR_OUT_OF_RANGE(name, "an integer", value);
     }
     const min = positive ? 1 : 0;
     // 2 ** 32 === 4294967296
-    throw new codes.ERR_OUT_OF_RANGE(
+    throw new ERR_OUT_OF_RANGE(
       name,
       `>= ${min} && < 4294967296`,
       value,
     );
   }
   if (positive && value === 0) {
-    throw new codes.ERR_OUT_OF_RANGE(name, ">= 1 && < 4294967296", value);
+    throw new ERR_OUT_OF_RANGE(name, ">= 1 && < 4294967296", value);
   }
 }
 
 export function validateString(value: unknown, name: string) {
   if (typeof value !== "string") {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "string", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "string", value);
   }
 }
 
 export function validateNumber(value: unknown, name: string) {
   if (typeof value !== "number") {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "number", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "number", value);
   }
 }
 
 export function validateBoolean(value: unknown, name: string) {
   if (typeof value !== "boolean") {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "boolean", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "boolean", value);
   }
 }
 
@@ -154,7 +158,7 @@ export function validateOneOf(value: unknown, name: string, oneOf: any[]) {
     );
     const reason = "must be one of: " + allowed;
 
-    throw new codes.ERR_INVALID_ARG_VALUE(name, value, reason);
+    throw new ERR_INVALID_ARG_VALUE(name, value, reason);
   }
 }
 
@@ -163,7 +167,7 @@ export function validateEncoding(data: unknown, encoding: string): void {
   const length = (data as any).length;
 
   if (normalizedEncoding === "hex" && length % 2 !== 0) {
-    throw new codes.ERR_INVALID_ARG_VALUE(
+    throw new ERR_INVALID_ARG_VALUE(
       "encoding",
       encoding,
       `is invalid for data of length ${length}`,
@@ -178,23 +182,23 @@ export function validateAbortSignal(signal: unknown, name: string) {
       typeof signal !== "object" ||
       !("aborted" in signal))
   ) {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "AbortSignal", signal);
+    throw new ERR_INVALID_ARG_TYPE(name, "AbortSignal", signal);
   }
 };
 
 export function validateFunction(value: unknown, name: string) {
   if (typeof value !== "function") {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "Function", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "Function", value);
   }
 }
 
 export function validateArray(value: unknown, name: string, minLength = 0) {
   if (!Array.isArray(value)) {
-    throw new codes.ERR_INVALID_ARG_TYPE(name, "Array", value);
+    throw new ERR_INVALID_ARG_TYPE(name, "Array", value);
   }
   if (value.length < minLength) {
     const reason = `must be longer than ${minLength}`;
-    throw new codes.ERR_INVALID_ARG_VALUE(name, value, reason);
+    throw new ERR_INVALID_ARG_VALUE(name, value, reason);
   }
 }
 
