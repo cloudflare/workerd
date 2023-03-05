@@ -774,7 +774,9 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
           KJ_REQUIRE(!(flags & SQLITE_OPEN_CREATE), "create readonly file? what?");
 
           auto path = kj::Path::parse(zName);
-          auto kjFile = self.directory.openFile(path);
+          auto kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path), {
+            return SQLITE_CANTOPEN;
+          });
 
           kj::ctor(target, kj::mv(kjFile));
         } else {
@@ -793,11 +795,13 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
                 mode = kj::WriteMode::CREATE | kj::WriteMode::MODIFY;
               }
             } else {
-                mode = kj::WriteMode::MODIFY;
+              mode = kj::WriteMode::MODIFY;
             }
 
             auto path = kj::Path::parse(zName);
-            kjFile = self.directory.openFile(path, mode);
+            kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path, mode), {
+              return SQLITE_CANTOPEN;
+            });
 
             if (flags & SQLITE_OPEN_DELETEONCLOSE) {
               self.directory.remove(path);
