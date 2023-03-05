@@ -63,12 +63,12 @@ kj::Own<T> ownSqlite(T* obj) {
 
 // =======================================================================================
 
-SqliteDatabase::SqliteDatabase(Vfs& vfs, kj::PathPtr path) {
+SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
   SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
                                    SQLITE_OPEN_READONLY, vfs.getName().cStr()));
 }
 
-SqliteDatabase::SqliteDatabase(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
+SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
   int flags = SQLITE_OPEN_READWRITE;
   if (kj::has(mode, kj::WriteMode::CREATE)) {
     flags |= SQLITE_OPEN_CREATE;
