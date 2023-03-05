@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <sqlite3.h>
 #include <kj/vector.h>
+#include <kj/map.h>
+#include <kj/mutex.h>
+#include <atomic>
 
 namespace workerd {
 
@@ -540,8 +543,6 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
 // This is used only when given a `kj::Directory` that does NOT represent a native file, i.e.
 // one where `getFd()` returns null. This is mainly used for unit tests which want to use in-memory
 // directories.
-//
-// WARNING: Since KJ filesystem does not implement locking, this implementation ignores all locks.
 
 struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   // Implementation of sqlite3_file.
@@ -555,18 +556,22 @@ struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   kj::Maybe<const kj::File&> writableFile;
   kj::Own<const kj::ReadableFile> file;
 
-  kj::Vector<kj::Array<byte>> shmRegions;
+  kj::Maybe<kj::Own<Lock>> lock;
   // Rather complicatedly, SQLite doesn't consider the -shm file to be a separate file that it
-  // opens via the VFS, but rather a facet of the database file itself. This implementation, since
-  // it doesn't support locking anyway, allocates shm regions entirely in memory.
+  // opens via the VFS, but rather a facet of the database file itself. We implement it using an
+  // entirely different interface anyawy.
+  //
+  // We leave this null if the file is not the main database file.
 
-  FileImpl(kj::Own<const kj::File> file)
+  FileImpl(kj::Own<const kj::File> file, kj::Maybe<kj::Own<Lock>> lock)
       : sqlite3_file { .pMethods = &FILE_METHOD_TABLE },
         writableFile(*file),
-        file(kj::mv(file)) {}
-  FileImpl(kj::Own<const kj::ReadableFile> file)
+        file(kj::mv(file)),
+        lock(kj::mv(lock)) {}
+  FileImpl(kj::Own<const kj::ReadableFile> file, kj::Maybe<kj::Own<Lock>> lock)
       : sqlite3_file { .pMethods = &FILE_METHOD_TABLE },
-        file(kj::mv(file)) {}
+        file(kj::mv(file)),
+        lock(kj::mv(lock)) {}
 
   static const sqlite3_io_methods FILE_METHOD_TABLE;
 };
@@ -640,22 +645,41 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   },
 
   .xLock = [](sqlite3_file* file, int level) noexcept -> int {
-    // Locks not implemented.
-    return SQLITE_OK;
+    // Verify that our enum's values match the SQLite constants. (We didn't want to include
+    // sqlite3.h in our header, so defined a parallel enum.)
+    static_assert(Lock::UNLOCKED == SQLITE_LOCK_NONE);
+    static_assert(Lock::SHARED == SQLITE_LOCK_SHARED);
+    static_assert(Lock::RESERVED == SQLITE_LOCK_RESERVED);
+    static_assert(Lock::PENDING == SQLITE_LOCK_PENDING);
+    static_assert(Lock::EXCLUSIVE == SQLITE_LOCK_EXCLUSIVE);
+
+    WRAP_METHOD(SQLITE_IOERR_LOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xLock called on file that isn't main database?");
+      if (lock.tryIncreaseLevel(static_cast<Lock::Level>(level))) {
+        return SQLITE_OK;
+      } else {
+        return SQLITE_BUSY;
+      }
+    });
   },
 
   .xUnlock = [](sqlite3_file* file, int level) noexcept -> int {
-    // Locks not implemented.
-    return SQLITE_OK;
+    WRAP_METHOD(SQLITE_IOERR_UNLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xLock called on file that isn't main database?");
+      lock.decreaseLevel(static_cast<Lock::Level>(level));
+      return SQLITE_OK;
+    });
   },
 
   .xCheckReservedLock = [](sqlite3_file* file, int *pResOut) noexcept -> int {
-    // Locks not implemented.
-    //
-    // We always report that there is no reserved lock. Hopefully this doesn't confuse SQLite when
-    // it thinks it has taken a reserved lock itself.
-    *pResOut = false;
-    return SQLITE_OK;
+    WRAP_METHOD(SQLITE_IOERR_CHECKRESERVEDLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xLock called on file that isn't main database?");
+      *pResOut = lock.checkReservedLock();
+      return SQLITE_OK;
+    });
   },
 
   .xFileControl = [](sqlite3_file* file, int op, void *pArg) noexcept -> int {
@@ -683,35 +707,55 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   .xShmMap = [](sqlite3_file* file, int iRegion, int szRegion, int bExtend,
                 void volatile** pp) noexcept -> int {
     WRAP_METHOD(SQLITE_IOERR_SHMMAP, {
-      if (iRegion >= self.shmRegions.size()) {
-        if (bExtend) {
-          self.shmRegions.resize(iRegion + 1);
-        } else {
-          *pp = nullptr;
-          return SQLITE_OK;
-        }
-      }
-      if (self.shmRegions[iRegion].size() == 0) {
-        self.shmRegions[iRegion] = kj::heapArray<byte>(szRegion);
+      KJ_ASSERT(iRegion >= 0);
+      KJ_ASSERT(szRegion >= 0);
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xShmMap called on file that isn't main database?");
+
+      auto bytes = lock.getSharedMemoryRegion(iRegion, szRegion, bExtend);
+      if (bytes == nullptr) {
+        *pp = nullptr;
       } else {
-        // Presumably regions cannot change size.
-        KJ_ASSERT(self.shmRegions[iRegion].size() == szRegion);
+        *pp = bytes.begin();
       }
-      *pp = self.shmRegions[iRegion].begin();
       return SQLITE_OK;
     });
   },
   .xShmLock = [](sqlite3_file* file, int offset, int n, int flags) noexcept -> int {
-    // Locking not implemented.
-    return SQLITE_OK;
+    WRAP_METHOD(SQLITE_IOERR_SHMLOCK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xShmMap called on file that isn't main database?");
+      if (flags & SQLITE_SHM_LOCK) {
+        if (flags & SQLITE_SHM_EXCLUSIVE) {
+          if (!lock.tryLockWalExclusive(offset, n)) return SQLITE_BUSY;
+        } else {
+          KJ_ASSERT(flags & SQLITE_SHM_SHARED);
+          if (!lock.tryLockWalShared(offset, n)) return SQLITE_BUSY;
+        }
+      } else {
+        KJ_ASSERT(flags & SQLITE_SHM_UNLOCK);
+        if (flags & SQLITE_SHM_EXCLUSIVE) {
+          lock.unlockWalExclusive(offset, n);
+        } else {
+          KJ_ASSERT(flags & SQLITE_SHM_SHARED);
+          lock.unlockWalShared(offset, n);
+        }
+      }
+      return SQLITE_OK;
+    });
   },
   .xShmBarrier = [](sqlite3_file*) noexcept -> void {
-    // Locking not implemented.
+    // I don't quite get why this is virtualized. The native implementation does
+    // __sync_synchronize() (equivalent to below, I think) and also "for redundancy" locks and
+    // unlocks a mutex.
+    std::atomic_thread_fence(std::memory_order_acq_rel);
   },
   .xShmUnmap = [](sqlite3_file* file, int deleteFlag) noexcept -> int {
     WRAP_METHOD(SQLITE_OK, {
+      auto& lock = *KJ_ASSERT_NONNULL(self.lock,
+          "xShmMap called on file that isn't main database?");
       if (deleteFlag) {
-        self.shmRegions.clear();
+        lock.clearSharedMemory();
       }
       return SQLITE_OK;  // return value is ignored by sqlite
     });
@@ -777,14 +821,20 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
           auto kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path), {
             return SQLITE_CANTOPEN;
           });
+          kj::Maybe<kj::Own<Lock>> lock;
+          if (flags & SQLITE_OPEN_MAIN_DB) {
+            lock = self.lockManager.lock(path, *kjFile);
+          }
 
-          kj::ctor(target, kj::mv(kjFile));
+          kj::ctor(target, kj::mv(kjFile), kj::mv(lock));
         } else {
           kj::Own<const kj::File> kjFile;
+          kj::Maybe<kj::Own<Lock>> lock;
 
           if (zName == nullptr) {
             // Open a temp file.
             KJ_ASSERT(flags & SQLITE_OPEN_DELETEONCLOSE);
+            KJ_ASSERT(!(flags & SQLITE_OPEN_MAIN_DB), "main DB can't be a temporary file");
             kjFile = self.directory.createTemporary();
           } else {
             kj::WriteMode mode;
@@ -802,13 +852,16 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path, mode), {
               return SQLITE_CANTOPEN;
             });
+            if (flags & SQLITE_OPEN_MAIN_DB) {
+              lock = self.lockManager.lock(path, *kjFile);
+            }
 
             if (flags & SQLITE_OPEN_DELETEONCLOSE) {
               self.directory.remove(path);
             }
           }
 
-          kj::ctor(target, kj::mv(kjFile));
+          kj::ctor(target, kj::mv(kjFile), kj::mv(lock));
         }
 
         // In theory if read-write was requested, but failed, we should retry read-only, and then
@@ -877,8 +930,236 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 
 // -----------------------------------------------------------------------------
 
+class SqliteDatabase::Vfs::DefaultLockManager final
+    : public SqliteDatabase::LockManager {
+public:
+  kj::Own<Lock> lock(kj::PathPtr path, const kj::ReadableFile& mainDatabaseFile) const override {
+    return kj::heap<LockImpl>(*this, path);
+  }
+
+private:
+  class LockImpl;
+  struct LockState;
+  using LockMap = kj::HashMap<kj::PathPtr, LockState*>;
+  kj::MutexGuarded<LockMap> lockMap;
+
+  struct LockState: public kj::Refcounted {
+    // Note: The refcount of this object is protected by `lockMap`'s mutex.
+
+    struct Guarded {
+      kj::Vector<kj::Array<byte>> regions;
+
+      uint sharedLockCount = 0;
+      bool hasReserved = false;
+      bool hasPendingOrExclusive = false;
+
+      uint walLocks[Lock::WAL_LOCK_COUNT] = {0, 0, 0, 0, 0, 0, 0, 0};
+      // Each slot contains the count of shared locks, or kj::maxValue if an exclusive lock is
+      // held.
+    };
+
+    const kj::Path path;
+    kj::MutexGuarded<Guarded> guarded;
+
+    LockState(kj::Path path): path(kj::mv(path)) {}
+  };
+
+  class LockImpl final: public Lock {
+  public:
+    LockImpl(const DefaultLockManager& lockManager, kj::PathPtr path)
+        : lockManager(lockManager) {
+      auto mlock = lockManager.lockMap.lockExclusive();
+      auto& slot = mlock->findOrCreate(path, [&]() {
+        state = kj::refcounted<LockState>(path.clone());
+        return LockMap::Entry {
+          .key = state->path,
+          .value = state.get()
+        };
+      });
+      if (state.get() == nullptr) {
+        state = kj::addRef(*slot);
+      }
+    }
+
+    ~LockImpl() noexcept(false) {
+      // It's important that we drop the state object under lock to ensure no other thread is
+      // in the process of grabbing it out of the map at the same time. Since we have to take a
+      // lock here anyway, `LockState` uses regular non-atomic refcounts rather than atomic.
+      auto mlock = lockManager.lockMap.lockExclusive();
+      auto stateToDrop = kj::mv(state);
+      if (!stateToDrop->isShared()) {
+        mlock->erase(stateToDrop->path);
+      }
+    }
+
+    bool tryIncreaseLevel(Level newLevel) override {
+      if (newLevel <= currentLevel) return true;
+
+      auto slock = state->guarded.lockExclusive();
+
+      if (currentLevel < SHARED) {
+        if (slock->hasPendingOrExclusive) {
+          return false;
+        }
+        ++slock->sharedLockCount;
+        currentLevel = SHARED;
+      }
+
+      if (newLevel == SHARED) {
+        return true;
+      }
+
+      if (newLevel == RESERVED) {
+        if (slock->hasReserved || slock->hasPendingOrExclusive) {
+          return false;
+        }
+        if (currentLevel == SHARED) {
+          KJ_ASSERT(slock->sharedLockCount > 0);
+          --slock->sharedLockCount;
+        }
+        slock->hasReserved = true;
+        currentLevel = RESERVED;
+        return true;
+      }
+
+      // Requesting PENDING or EXCLUSIVE. If EXCLUSIVE, we still have to transition through
+      // PENDING first, if we're not there already.
+      if (currentLevel < PENDING) {
+        if (currentLevel != RESERVED && slock->hasReserved) {
+          return false;
+        }
+        if (slock->hasPendingOrExclusive) {
+          return false;
+        }
+        if (currentLevel == SHARED) {
+          KJ_ASSERT(slock->sharedLockCount > 0);
+          --slock->sharedLockCount;
+        }
+        slock->hasReserved = false;
+        slock->hasPendingOrExclusive = true;
+        currentLevel = PENDING;
+      }
+
+      if (newLevel == EXCLUSIVE) {
+        if (slock->sharedLockCount > 0) {
+          return false;
+        }
+        currentLevel = EXCLUSIVE;
+      }
+
+      return true;
+    }
+
+    void decreaseLevel(Level newLevel) override {
+      if (newLevel >= currentLevel) return;
+      KJ_REQUIRE(newLevel <= SHARED);
+
+      auto slock = state->guarded.lockExclusive();
+      if (currentLevel >= PENDING) {
+        slock->hasPendingOrExclusive = false;
+      }
+      if (currentLevel == RESERVED) {
+        slock->hasReserved = false;
+      }
+      if (currentLevel == SHARED && newLevel == UNLOCKED) {
+        KJ_ASSERT(slock->sharedLockCount > 0);
+        --slock->sharedLockCount;
+      }
+      if (newLevel == SHARED) {
+        ++slock->sharedLockCount;
+      }
+      currentLevel = newLevel;
+    }
+
+    bool checkReservedLock() override {
+      return state->guarded.lockShared()->hasReserved;
+    }
+
+    kj::ArrayPtr<byte> getSharedMemoryRegion(uint index, uint size, bool extend) override {
+      if (extend) {
+        auto slock = state->guarded.lockExclusive();
+
+        while (index >= slock->regions.size()) {
+          auto newRegion = kj::heapArray<byte>(size);
+          memset(newRegion.begin(), 0, size);
+          slock->regions.add(kj::mv(newRegion));
+        }
+
+        return slock->regions[index];
+      } else {
+        auto slock = state->guarded.lockShared();
+
+        if (index >= slock->regions.size()) {
+          return nullptr;
+        } else {
+          kj::ArrayPtr<const byte> region = slock->regions[index];
+          // const_cast OK because the caller will carefully control access to shared memory.
+          return kj::arrayPtr(const_cast<byte*>(region.begin()), region.size());
+        }
+      }
+    }
+
+    void clearSharedMemory() override {
+      auto slock = state->guarded.lockExclusive();
+      slock->regions.clear();
+    }
+
+    bool tryLockWalShared(uint start, uint count) override {
+      auto slock = state->guarded.lockExclusive();
+
+      for (uint i = start; i < start + count; i++) {
+        if (slock->walLocks[i] == (uint)kj::maxValue) {
+          // blocked by exclusive lock
+          return false;
+        }
+      }
+      for (uint i = start; i < start + count; i++) {
+        ++slock->walLocks[i];
+      }
+      return true;
+    }
+    bool tryLockWalExclusive(uint start, uint count) override {
+      auto slock = state->guarded.lockExclusive();
+
+      for (uint i = start; i < start + count; i++) {
+        if (slock->walLocks[i] != 0) {
+          // blocked by another lock
+          return false;
+        }
+      }
+      for (uint i = start; i < start + count; i++) {
+        slock->walLocks[i] = kj::maxValue;
+      }
+      return true;
+    }
+
+    void unlockWalShared(uint start, uint count) override {
+      auto slock = state->guarded.lockExclusive();
+      for (uint i = start; i < start + count; i++) {
+        KJ_ASSERT(slock->walLocks[i] != 0);
+        --slock->walLocks[i];
+      }
+    }
+    void unlockWalExclusive(uint start, uint count) override {
+      auto slock = state->guarded.lockExclusive();
+      for (uint i = start; i < start + count; i++) {
+        KJ_REQUIRE(slock->walLocks[i] == (uint)kj::maxValue);
+        slock->walLocks[i] = 0;
+      }
+    }
+
+  private:
+    const DefaultLockManager& lockManager;
+    kj::Own<LockState> state;
+    Level currentLevel = UNLOCKED;
+  };
+};
+
 SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
-    : directory(directory), name(kj::str("kj-", &directory)),
+    : directory(directory),
+      ownLockManager(kj::heap<DefaultLockManager>()),
+      lockManager(*ownLockManager),
+      name(kj::str("kj-", &directory)),
       native(*sqlite3_vfs_find(nullptr)) {
   KJ_IF_MAYBE(fd, directory.getFd()) {
     rootFd = *fd;
@@ -886,6 +1167,16 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
   } else {
     vfs = kj::heap(makeKjVfs());
   }
+  sqlite3_vfs_register(vfs, false);
+}
+
+SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, const LockManager& lockManager)
+    : directory(directory),
+      lockManager(lockManager),
+      name(kj::str("kj-", &directory)),
+      native(*sqlite3_vfs_find(nullptr)),
+      // Always use KJ VFS when using a custom LockManager.
+      vfs(kj::heap(makeKjVfs())) {
   sqlite3_vfs_register(vfs, false);
 }
 
