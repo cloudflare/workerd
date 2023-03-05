@@ -34,8 +34,8 @@ public:
   class Query;
   class Statement;
 
-  SqliteDatabase(Vfs& vfs, kj::PathPtr path);
-  SqliteDatabase(Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -214,12 +214,14 @@ class SqliteDatabase::Vfs {
   // If the directory is not a disk directory, then the VFS will actually use the KJ APIs, but
   // some features will be missing. Most importantly, as of this writing, KJ filesystem APIs do
   // not support locks, so all locking will be ignored.
+  //
+  // An instance of `Vfs` can safely be used across multiple threads.
 
 public:
   explicit Vfs(const kj::Directory& directory);
   ~Vfs() noexcept(false);
 
-  kj::StringPtr getName() { return name; }
+  kj::StringPtr getName() const { return name; }
   // Unfortunately, all SQLite VFSes must be registered in a global list with unique names, and
   // then the _name_ must be passed to sqlite3_open_v2() to use it when opening a database. This is
   // dumb, you should instead be able to simply pass the sqlite3_vfs* when opening the database,
