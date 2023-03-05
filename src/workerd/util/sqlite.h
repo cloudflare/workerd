@@ -33,6 +33,8 @@ public:
   class Vfs;
   class Query;
   class Statement;
+  class Lock;
+  class LockManager;
 
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path);
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
@@ -219,6 +221,26 @@ class SqliteDatabase::Vfs {
 
 public:
   explicit Vfs(const kj::Directory& directory);
+  // Create a VFS backed by the given kj::Directory.
+  //
+  // If the directory is a real disk directory (i.e. getFd() returns non-null), then this will
+  // use SQLite's native filesystem implementation AND locking implementation. This is what you
+  // want when opening a database that could simultaneously be opened by other programs which may
+  // not be using this wrapper library.
+  //
+  // If the directory is NOT a real disk directory, this constructor will only arrange to do
+  // locking between clients that use the same Vfs object. This makes sense for in-memory temporary
+  // filesystems and other cases where the application can ensure all clients are using the same
+  // Vfs. If, somehow, the same database file is opened for write via two different `Vfs` instances,
+  // it will likely become corrupted.
+
+  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager);
+  // Create a VFS with custom lock management.
+  //
+  // Unlike the other constructor, this version never uses SQLite's native VFS implementation.
+  // `lockManager` will be responsible for coordinating access between multiple concurrent clients
+  // of the same database.
+
   ~Vfs() noexcept(false);
 
   kj::StringPtr getName() const { return name; }
@@ -234,6 +256,8 @@ public:
 
 private:
   const kj::Directory& directory;
+  kj::Own<LockManager> ownLockManager;
+  const LockManager& lockManager;
   kj::String name;
 
   sqlite3_vfs& native;  // the system's default VFS implementation
@@ -256,6 +280,112 @@ private:
   // Create a VFS definition that actually delegates to the KJ filesystem.
 
   friend class SqliteDatabase;
+  class DefaultLockManager;
+};
+
+class SqliteDatabase::LockManager {
+public:
+  virtual kj::Own<Lock> lock(kj::PathPtr path, const kj::ReadableFile& mainDatabaseFile) const = 0;
+  // Obtain a lock for the given database path. The main database file is also provided in case
+  // it is useful. This method only creates the `Lock` object; it's level starts out as UNLOCKED,
+  // meaning no actual lock is held yet.
+  //
+  // `lock()` is only invoked for main database files. SQLite opens other files (journal, WAL); no
+  // `Lock` object is obtained for these.
+  //
+  // If the same database file is opened multiple times via the same `Vfs`, a separate `Lock`
+  // will be obtained each time, so that these locks can coordinate between databases in the
+  // same process. Since typically these databases would be in separate threads, the `lock()`
+  // method is thread-safe (hence `const`). However, a `Lock` instance itself is only accessed
+  // from the calling thread.
+};
+
+class SqliteDatabase::Lock {
+  // Implements file locks and shared memory space used to coordination between clients of a
+  // particular database. It is expected that if the database is accessible from other processes,
+  // this object will coordinate with them.
+  //
+  // When using a Vfs based on a regular disk directory, this class isn't used; instead, SQLite's
+  // native implementation kicks in, which is based on advisory file locks at the OS level, as well
+  // as mmaped shared memory from a file next to the database with suffix `-shm`.
+
+public:
+  enum Level {
+    // The main database can be locked at one of these levels.
+    //
+    // See the SQLite documentation for an explanation of lock levels:
+    //     https://www.sqlite.org/lockingv3.html
+    //
+    // Note, however, that this locking scheme is mostly unused in WAL mode, which everyone should
+    // be using now. In WAL mode, clients almost always have only a `SHARED` lock. It is inreased
+    // to `EXCLUSIVE` only when shutting down the database, in order to safely delete the WAL and
+    // WAL-index (-shm) files.
+
+    UNLOCKED,
+    SHARED,
+    RESERVED,
+    PENDING,
+    EXCLUSIVE
+  };
+
+  virtual bool tryIncreaseLevel(Level level) = 0;
+  // Increase the lock's level. Returns false if the requested level is not available. This
+  // method never blocks; SQLite takes care of retrying if needed. Per SQLite docs, if an attempt
+  // to request an EXCLUSIVE lock fails because of other shared locks (but not other exclusive
+  // locks), the lock will still have transitioned to the PENDING state, which prevents new shared
+  // locks from being taken.
+  //
+  // The Lock starts an level UNLOCKED.
+
+  virtual void decreaseLevel(Level level) = 0;
+  // Reduce the lock's level. `level` is either UNLOCKED or SHARED.
+
+  virtual bool checkReservedLock() = 0;
+  // Check if any client has a RESERVED lock on the database.
+
+  virtual kj::ArrayPtr<byte> getSharedMemoryRegion(uint index, uint size, bool extend) = 0;
+  // Get a shared memory region. All regions have the same size, so `size` will be the same for
+  // every call. If `index` exceeds the number of regions that exist so far, and `extend` is false,
+  // this returns an empty array, but if `extend` is true, all regions through the given index are
+  // created (containing zeros).
+  //
+  // The returned array is valid until the object is destroyed, or clearSharedMemory() is called.
+
+  virtual void clearSharedMemory() = 0;
+  // Deletes all shared memory regions.
+  //
+  // Called when shutting down the last database client or converting away from WAL mode. The
+  // caller will obtain an exclusive lock before calling this.
+  //
+  // The LockManager is also allowed to discard shared memory automatically any time it knows for
+  // sure that there are no clients.
+
+  virtual bool tryLockWalShared(uint start, uint count) = 0;
+  virtual bool tryLockWalExclusive(uint start, uint count) = 0;
+  // Attempt to obtain shared or exclusive locks for the given WAL-mode lock indices, which are in
+  // the range [0, WAL_LOCK_COUNT). Returns true if the locks were successfully obtained (for all
+  // of them), false if at least one lock wasn't available (in which case no change was made). A
+  // shared lock can be obtained as long as there are no exclusive locks. An exclusive lock can be
+  // obtained as long as there are no other locks of any kind.
+  //
+  // The caller may request a shared lock multiple times, in which case it is expected to unlock
+  // the same number of times.
+
+  virtual void unlockWalShared(uint start, uint count) = 0;
+  virtual void unlockWalExclusive(uint start, uint count) = 0;
+  // Release a previously-obtained WAL-mode lock.
+
+  static constexpr uint WAL_LOCK_COUNT = 8;
+  // There are exactly this many WAL-mode locks.
+
+  static constexpr uint RESERVED_LOCK_BYTES_OFFSET = 120;
+  // SQLite sets aside bytes [120, 128) of the first shared memory region for use by the WAL locking
+  // implementation. SQLite will never touch these bytes. This may or may not be needed by your
+  // implementation. SQLite's native implementation on Windows acquires locks on these specific
+  // bytes because Windows file locks are mandatory, meaning they actually block concurrent reads
+  // and writes. SQLite really wants "advisory" locks which block other locks but don't actually
+  // block reads and writes. So, it applies the mandatory locks to these bytes which are never
+  // otherwise read nor written.
 };
 
 template <typename... Params>

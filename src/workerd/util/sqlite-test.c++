@@ -4,9 +4,11 @@
 
 #include "sqlite.h"
 #include <kj/test.h>
+#include <kj/thread.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <atomic>
 
 namespace workerd {
 namespace {
@@ -183,6 +185,91 @@ KJ_TEST("SQLite backed by real disk") {
 
     checkSql(db);
   }
+}
+
+void doLockTest(bool walMode) {
+  // Tests that concurrent database clients don't clobber each other. This verifies that the
+  // LockManager interface is able to protect concurrent access and that our default implementation
+  // works.
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  if (walMode) {
+    db.run("PRAGMA journal_mode=WAL;");
+  }
+
+  db.run(R"(
+    CREATE TABLE foo (
+      id INTEGER PRIMARY KEY,
+      counter INTEGER
+    );
+
+    INSERT INTO foo VALUES (0, 1)
+  )");
+
+  static constexpr auto GET_COUNT = "SELECT counter FROM foo WHERE id = 0"_kj;
+  static constexpr auto INCREMENT = "UPDATE foo SET counter = counter + 1 WHERE id = 0"_kj;
+
+  KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 1);
+
+  // Concurrent write allowed, as long as we're not writing at the same time.
+  kj::Thread([&vfs = vfs]() noexcept {
+    SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+    KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 1);
+    db2.run(INCREMENT);
+    KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 2);
+  });
+
+  KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 2);
+
+  std::atomic<bool> stop = false;
+  std::atomic<uint> counter = 2;
+
+  {
+    // Arrange for two threads to increment in a loop simultaneously. Eventually one will fail with
+    // a conflict.
+    kj::Thread thread([&vfs = vfs, &stop, &counter]() noexcept {
+      KJ_DEFER(stop.store(true, std::memory_order_relaxed););
+      SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
+      while (!stop.load(std::memory_order_relaxed)) {
+        KJ_IF_MAYBE(e, kj::runCatchingExceptions([&]() {
+          db2.run(INCREMENT);
+          counter.fetch_add(1, std::memory_order_relaxed);
+        })) {
+          KJ_EXPECT(kj::_::hasSubstring(e->getDescription(), "database is locked"), *e);
+          break;
+        }
+      }
+    });
+
+    {
+      KJ_DEFER(stop.store(true, std::memory_order_relaxed););
+
+      while (!stop.load(std::memory_order_relaxed)) {
+        KJ_IF_MAYBE(e, kj::runCatchingExceptions([&]() {
+          db.run(INCREMENT);
+          counter.fetch_add(1, std::memory_order_relaxed);
+        })) {
+          KJ_EXPECT(kj::_::hasSubstring(e->getDescription(), "database is locked"), *e);
+          break;
+        }
+      }
+    }
+  }
+
+  // The final value should be consistent with the number of increments that succeeded.
+  KJ_EXPECT(db.run(GET_COUNT).getInt(0) == counter.load(std::memory_order_relaxed));
+}
+
+KJ_TEST("SQLite locks: rollback journal mode") {
+  doLockTest(false);
+}
+
+KJ_TEST("SQLite locks: WAL mode") {
+  doLockTest(true);
 }
 
 }  // namespace
