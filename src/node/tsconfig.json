@@ -5,6 +5,7 @@
     "lib": [ "ESNext", "DOM" ],
     "alwaysStrict": true,
     "strict": true,
+    "allowJs": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "exactOptionalPropertyTypes": true,
