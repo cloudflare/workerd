@@ -148,6 +148,29 @@ addEventListener("fetch", event => {
 
 [There is also a library of sample config files.](samples)
 
+To enable [streams](https://github.com/cloudflare/workerd/tree/main/src/workerd/api/streams) in [helloworld](https://github.com/cloudflare/workerd/blob/main/samples/helloworld) sample, e.g., to do something like 
+
+```javascript
+async function handle(request) {
+  let n = 0;
+  return new Response(new ReadableStream({
+    async pull(controller) {
+      for (; n < 255; n++) {
+        controller.enqueue(new Uint8Array([n])); 
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      c.close();
+    }
+  }), responseInit);
+}
+
+```
+
+
+modify the [config.capnp](https://github.com/cloudflare/workerd/blob/main/samples/helloworld/config.capnp) file to set the `"compatibilityDate"` to [`"2022-11-30"`](https://developers.cloudflare.com/workers/platform/compatibility-dates/#streams-constructors), _or_ include `compatibilityFlags = ["streams_enable_constructors"]` on the line following `"compatibilityDate"`.
+
+
+
 (TODO: Provide a more extended tutorial.)
 
 ### Running `workerd`
