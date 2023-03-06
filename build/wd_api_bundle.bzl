@@ -1,4 +1,5 @@
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 
 CAPNP_TEMPLATE = """@{schema_id};
 
@@ -60,6 +61,20 @@ gen_api_bundle_capnpn = rule(
     },
 )
 
+def _copy_modules(modules):
+    """Copy files from the modules map to the current package.
+
+    Returns new module map using file copies.
+    This is necessary since capnp compiler doesn't allow embeds outside of current subidrectory.
+    """
+    for m in modules:
+        copy_file(
+            name = modules[m].replace(":", "_") + "@copy",
+            src = m,
+            out = modules[m].replace(":", "_"),
+        )
+    return dict([(modules[m].replace(":", "_"), modules[m]) for m in modules])
+
 def wd_api_bundle(
         name,
         schema_id,
@@ -80,6 +95,10 @@ def wd_api_bundle(
      schema_id: capnpn schema id
      **kwargs: rest of cc_capnp_library arguments
     """
+
+    builtin_modules = _copy_modules(builtin_modules)
+    internal_modules = _copy_modules(internal_modules)
+
     data = list(builtin_modules) + list(internal_modules)
 
     gen_api_bundle_capnpn(
