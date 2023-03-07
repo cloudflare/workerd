@@ -255,12 +255,13 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_REQUIRE(keyDataJwk.oth == nullptr, DOMNotSupportedError,
           "Multi-prime private keys not supported.");
     } else {
-      // Public key. If the given key is an ECDH key allow usages to contain deriveBits and
-      // deriveKey. While these usages appear to not be needed in the public key for the
-      // operations, users may be confused when they can't import a public key to be used alongside
-      // a private key for derive*() operations when such a usage is specified.
-      // The derive* functions check that baseKey is a private key, so imported public keys can't
-      // be mistakenly used as private keys regardless of the usages field.
+      // Public key.
+      // TODO(soon): The usage set is required to be empty for public ECDH keys, which is not being
+      // checked for currently. See if any code relies on the current behavior and require an empty
+      // an empty set otherwise (i.e. change to allowedUsages = CryptoKeyUsageSet()). Same applies
+      // for spki-based and raw ECDH key imports.
+      JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+            "importing jwk-based public ECDH key with non-empty usages");
       keyType = "public";
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
@@ -337,6 +338,8 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
           " trailing bytes after SPKI input.");
     }
+    JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+        "importing spki-based public ECDH key with non-empty usages");
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
@@ -1558,6 +1561,8 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
   const auto& raw = keyData.get<kj::Array<kj::byte>>();
 
+  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+      "importing raw ECDH key with non-empty usages");
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
   // TODO(revisit once this is standardized): NodeJS appears to support importing raw for private
