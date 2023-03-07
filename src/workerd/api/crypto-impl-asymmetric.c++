@@ -255,18 +255,12 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_REQUIRE(keyDataJwk.oth == nullptr, DOMNotSupportedError,
           "Multi-prime private keys not supported.");
     } else {
-      // Public key. If the given key is an ECDH key allow usages to contain deriveBits and
-      // deriveKey. While these usages appear to not be needed in the public key for the
-      // operations, users may be confused when they can't import a public key to be used alongside
-      // a private key for derive*() operations when such a usage is specified.
-      // The derive* functions check that baseKey is a private key, so imported public keys can't
-      // be mistakenly used as private keys regardless of the usages field.
+      // Public key. The usage set is required to be empty for public ECDH keys.
       keyType = "public";
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                       keyUsages, allowedUsages & (normalizedName == "ECDH" ?
-                                      CryptoKeyUsageSet::derivationKeyMask() :
-                                      CryptoKeyUsageSet::publicKeyMask()));
+                                      CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
     }
 
     if (keyUsages.size() > 0) {
@@ -340,8 +334,7 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
-                                    CryptoKeyUsageSet::derivationKeyMask() :
-                                    CryptoKeyUsageSet::publicKeyMask()));
+                                    CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
     return { kj::mv(evpPkey), "public"_kj, usages };
   } else if (format == "pkcs8") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
@@ -1684,6 +1677,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
         return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
       }, CryptoKeyUsageSet::derivationKeyMask());
     } else {
+      // TODO(soon): The usage set is required to be empty for public ECDH keys, this should also
+      // apply for raw imports. See if any code relies on the current behavior and require an empty
+      // set otherwise (i.e. change to allowedUsages = CryptoKeyUsageSet())
+      JSG_WARN_ONCE_IF(allowedUsages.size() != 0),
+            "importing raw ECDH key with non-empty usages");
       return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages,
           CryptoKeyUsageSet::derivationKeyMask());
     }
