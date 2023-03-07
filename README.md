@@ -132,7 +132,17 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   serviceWorkerScript = embed "hello.js",
-  compatibilityDate = "2022-09-16",
+  
+  # Compatibility dates and flags allow you to
+  # opt-in to backwards-incompatible changes.
+  #
+  # https://developers.cloudflare.com/workers/platform/compatibility-dates/
+  compatibilityDate = "2023-02-28",
+  
+  # The http_headers_getsetcookie flag is enabled by default
+  # as of 2023-03-01, which our compatibility date is older
+  # than, so we can enable it individually.
+  compatibilityFlags = ["http_headers_getsetcookie"],
 );
 ```
 

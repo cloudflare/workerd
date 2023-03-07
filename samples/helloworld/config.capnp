@@ -28,5 +28,5 @@ const helloWorldExample :Workerd.Config = (
 
 const helloWorld :Workerd.Worker = (
   serviceWorkerScript = embed "worker.js",
-  compatibilityDate = "2022-09-16",
+  compatibilityDate = "2023-02-28",
 );
