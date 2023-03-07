@@ -1880,7 +1880,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImpl(
 jsg::Ref<Socket> Fetcher::connect(
     jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags) {
-  return connectImpl(js, JSG_THIS, kj::mv(address), featureFlags);
+  return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options), featureFlags);
 }
 
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(

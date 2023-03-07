@@ -360,6 +360,11 @@ public:
   // disturbed and the DeferredProxy returned will take over ownership of the internal
   // state of the readable.
 
+  kj::Maybe<jsg::PromiseResolverPair<void>> eofResolverPair;
+  // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
+  void initEofResolverPair(jsg::Lock& js);
+  // By default the eofResolverPair is not initialised, calling this method will initialise it so
+  // that the signalling is active.
 private:
   kj::Maybe<IoContext&> ioContext;
   Controller controller;
@@ -367,6 +372,10 @@ private:
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(getController(), maybePipeThrough);
+    KJ_IF_MAYBE(pair, eofResolverPair) {
+      visitor.visit(pair->resolver);
+      visitor.visit(pair->promise);
+    }
   }
 };
 
