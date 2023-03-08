@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "worker.h"
-#include "promise-wrapper.h"
+#include <workerd/io/worker.h>
+#include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/global-scope.h>

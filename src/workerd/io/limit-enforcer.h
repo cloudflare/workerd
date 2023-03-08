@@ -5,7 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include "observer.h"
+#include <workerd/io/observer.h>
 
 namespace workerd {
 

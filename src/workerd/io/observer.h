@@ -11,7 +11,7 @@
 #include <kj/exception.h>
 #include <kj/time.h>
 #include <kj/compat/http.h>
-#include "trace.h"
+#include <workerd/io/trace.h>
 
 namespace workerd {
 

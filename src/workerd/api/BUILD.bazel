@@ -43,7 +43,7 @@ wd_cc_capnp_library(
 ) for f in glob(
     ["**/*-test.c++"],
     exclude = [
-        "node/*-test.c++"
+        "node/*-test.c++",
     ],
 )]
 
@@ -54,8 +54,8 @@ kj_test(
 
 [wd_test(
     src = f,
-    data = [f.removesuffix(".wd-test") + ".js"],
     args = ["--experimental"],
+    data = [f.removesuffix(".wd-test") + ".js"],
 ) for f in glob(
     ["**/*.wd-test"],
 )]

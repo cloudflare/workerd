@@ -4,7 +4,7 @@
 
 #include "io-context.h"
 #include <workerd/io/io-gate.h>
-#include "worker.h"
+#include <workerd/io/worker.h>
 #include <kj/threadlocal.h>
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>

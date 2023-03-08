@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "trace.h"
+#include <workerd/io/trace.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
 #include <kj/debug.h>

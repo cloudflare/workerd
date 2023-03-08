@@ -10,16 +10,16 @@
 #include <kj/function.h>
 #include <kj/map.h>
 
-#include "trace.h"
-#include "worker.h"
+#include <workerd/io/trace.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <v8.h>
-#include "io-gate.h"
+#include <workerd/io/io-gate.h>
 #include <workerd/api/util.h>
 #include <capnp/dynamic.h>
-#include "limit-enforcer.h"
-#include "io-channels.h"
+#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/io-channels.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
 
