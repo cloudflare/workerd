@@ -1,7 +1,7 @@
 /**
  * A email message that is sent to a consumer Worker.
  */
-interface EmailMessage<Body = unknown> {
+interface EmailMessage {
   /**
    * Envelope From attribute of the email message.
    */
