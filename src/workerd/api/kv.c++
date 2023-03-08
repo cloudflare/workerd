@@ -147,8 +147,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::GET, urlStr);
 
+  auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
   return context.awaitIo(js,
-      client->request(kj::HttpMethod::GET, urlStr, headers).response,
+      kj::mv(request.response),
       [type = kj::mv(type), &context, client = kj::mv(client)]
           (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
           -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
@@ -253,8 +254,9 @@ jsg::Promise<jsg::Value> KvNamespace::list(
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr);
 
+    auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js,
-        client->request(kj::HttpMethod::GET, urlStr, headers).response,
+        kj::mv(request.response),
         [&context, client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::Value> {

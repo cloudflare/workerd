@@ -1544,8 +1544,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       // subrequest.
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
+    auto webSocketResponse = client->openWebSocket(url, headers);
     return ioContext.awaitIo(js,
-        AbortSignal::maybeCancelWrap(signal, client->openWebSocket(url, headers)),
+        AbortSignal::maybeCancelWrap(signal, kj::mv(webSocketResponse)),
         [fetcher = kj::mv(fetcher), featureFlags, jsRequest = kj::mv(jsRequest),
          urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal)]
         (jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable

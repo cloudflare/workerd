@@ -285,6 +285,14 @@ private:
   // Create the value returned by `getName()`. Called once at construction time and cached in
   // `name`.
 
+  kj::Maybe<kj::Path> tryAppend(kj::PathPtr suffix) const;
+  // Tries to create a new path by appending the given path to this VFS's root directory path.
+  // This allows us to use the system's default VFS implementation, without wrapping, by passing
+  // the result of this function to sqlite3_open_v2().
+  //
+  // Unfortunately, this requires getting a file path from a kj::Directory. On Windows, we can use
+  // the GetFinalPathNameByHandleW() API. On Unix, there's no portable way to do this.
+
   friend class SqliteDatabase;
   class DefaultLockManager;
 };

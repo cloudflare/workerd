@@ -18,6 +18,10 @@ jsg::ByteString toLower(kj::StringPtr str);
 
 // =======================================================================================
 
+#if _MSC_VER
+#define strcasecmp _stricmp
+#endif
+
 struct CiLess {
   // Case-insensitive comparator for use with std::set/map.
 

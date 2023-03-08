@@ -17,9 +17,21 @@ wd_cc_library(
     ) + ["//src/workerd/api:srcs"],
     hdrs = glob(
         ["*.h"],
-        exclude = [
-            "trace.h",
-        ],
+        # `trace.h` should really be excluded here, but doing so causes the build to fail on
+        # Windows with errors like:
+        #
+        # ```
+        # ERROR: C:/.../src/workerd/io/BUILD.bazel: Compiling src/workerd/io/compatibility-date.c++ failed: undeclared inclusion(s) in rule '//src/workerd/io:io':
+        # this rule is missing dependency declarations for the following files included by 'src/workerd/io/compatibility-date.c++':
+        #   'bazel-out/x64_windows-opt/bin/src/workerd/io/_virtual_includes/io/workerd/io/trace.h'
+        # In file included from <built-in>:429:
+        # ```
+        #
+        # This feels like a weird interaction between symlinks on Windows and Bazel.
+        # `trace.h` is `#pragma once`d though, so including it in both `io` and `trace` targets
+        # should be ok.
+        #
+        # TODO(soon): Fix this
     ) + ["//src/workerd/api:hdrs"],
     visibility = ["//visibility:public"],
     deps = [

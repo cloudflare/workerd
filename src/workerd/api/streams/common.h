@@ -14,6 +14,10 @@
 #include <deque>
 #include <queue>
 
+#if _MSC_VER
+typedef long long ssize_t;
+#endif
+
 namespace workerd::api {
 
 class ReadableStream;

@@ -1,0 +1,237 @@
+From 7aac613785c353b7a5c79cb3dda6c131e0df369e Mon Sep 17 00:00:00 2001
+From: Brendan Coll <bcoll@cloudflare.com>
+Date: Thu, 16 Mar 2023 11:56:10 +0000
+Subject: [PATCH] Allow Windows builds under Bazel
+
+---
+ BUILD.bazel              | 26 ++++++++++++++++++++------
+ bazel/config/BUILD.bazel | 37 +++++++++++++++++++++++++++++++++++++
+ bazel/defs.bzl           | 25 +++++++++++++++++++++++++
+ 3 files changed, 82 insertions(+), 6 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 5639f547fa..52d0472ee8 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -655,6 +655,7 @@ filegroup(
+         "src/base/platform/mutex.cc",
+         "src/base/platform/mutex.h",
+         "src/base/platform/platform.h",
++        "src/base/platform/platform-posix.h",  # Always included by src/execution/isolate.h
+         "src/base/platform/semaphore.cc",
+         "src/base/platform/semaphore.h",
+         "src/base/platform/time.cc",
+@@ -690,7 +691,6 @@ filegroup(
+     ] + select({
+         "@v8//bazel/config:is_posix": [
+             "src/base/platform/platform-posix.cc",
+-            "src/base/platform/platform-posix.h",
+             "src/base/platform/platform-posix-time.cc",
+             "src/base/platform/platform-posix-time.h",
+         ],
+@@ -1079,6 +1079,7 @@ filegroup(
+         "include/v8-metrics.h",
+         "include/v8-unwinder-state.h",
+         "include/v8-wasm-trap-handler-posix.h",
++        "include/v8-wasm-trap-handler-win.h",
+         "src/api/api-arguments-inl.h",
+         "src/api/api-arguments.cc",
+         "src/api/api-arguments.h",
+@@ -2475,6 +2476,9 @@ filegroup(
+         ],
+         "//conditions:default": [],
+     }) + select({
++        "@v8//bazel/config:is_posix": [
++            "src/trap-handler/handler-inside-posix.h",
++        ],
+         "@v8//bazel/config:is_windows": [
+             "src/trap-handler/handler-inside-win.cc",
+             "src/trap-handler/handler-inside-win.h",
+@@ -2503,7 +2507,6 @@ filegroup(
+             "src/runtime/runtime-test-wasm.cc",
+             "src/runtime/runtime-wasm.cc",
+             "src/third_party/utf8-decoder/generalized-utf8-decoder.h",
+-            "src/trap-handler/handler-inside-posix.h",
+             "src/trap-handler/handler-inside.cc",
+             "src/trap-handler/handler-outside.cc",
+             "src/trap-handler/handler-shared.cc",
+@@ -3193,6 +3196,9 @@ filegroup(
+         "@v8//bazel/config:is_msvc_asm_ia32": ["src/heap/base/asm/ia32/push_registers_masm.asm"],
+         "@v8//bazel/config:is_msvc_asm_x64": ["src/heap/base/asm/x64/push_registers_masm.asm"],
+         "@v8//bazel/config:is_msvc_asm_arm64": ["src/heap/base/asm/arm64/push_registers_masm.S"],
++        "@v8//bazel/config:is_windows_clang_asm_ia32": ["src/heap/base/asm/ia32/push_registers_asm.cc"],
++        "@v8//bazel/config:is_windows_clang_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
++        "@v8//bazel/config:is_windows_clang_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
+     }),
+ )
+
+@@ -3528,9 +3534,11 @@ filegroup(
+         "src/d8/d8-js.cc",
+         "src/d8/d8-platforms.cc",
+         "src/d8/d8-platforms.h",
+-        "src/d8/d8-posix.cc",
+         "src/d8/d8-test.cc",
+-    ],
++    ] + select({
++        "@v8//bazel/config:is_posix": ["src/d8/d8-posix.cc"],
++        "@v8//bazel/config:is_windows": ["src/d8/d8-windows.cc"],
++    }),
+ )
+
+ genrule(
+@@ -3807,7 +3815,10 @@ py_test(
+         ":noicu/v8_build_config",
+         ":noicu/d8",
+         "test",
+-    ] + glob(["test/**"]) + glob(["tools/**/*.js"]) + glob(["tools/**/*.mjs"]),
++    ] + glob(
++        ["test/**"],
++        exclude = ["test/message/unicode-filename-*"],
++    ) + glob(["tools/**/*.js"]) + glob(["tools/**/*.mjs"]),
+     main = "tools/run-tests.py",
+     python_version = "PY3",
+     tags = [
+@@ -3837,7 +3848,10 @@ py_test(
+         ":icu/v8_build_config",
+         ":icu/d8",
+         "test",
+-    ] + glob(["test/**"]) + glob(["tools/**/*.js"]) + glob(["tools/**/*.mjs"]),
++    ] + glob(
++        ["test/**"],
++        exclude = ["test/message/unicode-filename-*"],
++    ) + glob(["tools/**/*.js"]) + glob(["tools/**/*.mjs"]),
+     main = "tools/run-tests.py",
+     python_version = "PY3",
+     tags = [
+diff --git a/bazel/config/BUILD.bazel b/bazel/config/BUILD.bazel
+index 7af7ccb606..01bb10db29 100644
+--- a/bazel/config/BUILD.bazel
++++ b/bazel/config/BUILD.bazel
+@@ -278,6 +278,7 @@ selects.config_setting_group(
+     match_all = [
+         ":is_windows",
+         ":is_x64",
++        ":is_compiler_default",
+     ],
+ )
+
+@@ -286,6 +287,7 @@ selects.config_setting_group(
+     match_all = [
+         ":is_windows",
+         ":is_ia32",
++        ":is_compiler_default",
+     ],
+ )
+
+@@ -294,6 +296,34 @@ selects.config_setting_group(
+     match_all = [
+         ":is_windows",
+         ":is_arm64",
++        ":is_compiler_default",
++    ],
++)
++
++selects.config_setting_group(
++    name = "is_windows_clang_asm_x64",
++    match_all = [
++        ":is_windows",
++        ":is_x64",
++        ":is_compiler_clang_cl",
++    ],
++)
++
++selects.config_setting_group(
++    name = "is_windows_clang_asm_ia32",
++    match_all = [
++        ":is_windows",
++        ":is_ia32",
++        ":is_compiler_clang_cl",
++    ],
++)
++
++selects.config_setting_group(
++    name = "is_windows_clang_asm_arm64",
++    match_all = [
++        ":is_windows",
++        ":is_arm64",
++        ":is_compiler_clang_cl",
+     ],
+ )
+
+@@ -335,6 +365,13 @@ config_setting(
+     },
+ )
+
++config_setting(
++    name = "is_compiler_clang_cl",
++    flag_values = {
++        "@bazel_tools//tools/cpp:compiler": "clang-cl",
++    },
++)
++
+ selects.config_setting_group(
+     name = "is_clang",
+     match_any = [
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 8053fa95df..0f6e19f853 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -112,6 +112,24 @@ def _default_args():
+                 "-Wno-non-virtual-dtor",
+                 "-isystem .",
+             ],
++            "@v8//bazel/config:is_windows": [
++                ## From BUILD.gn: `if (is_win)`
++                "/wd4245",
++                "/wd4267",
++                "/wd4324",
++                "/wd4701",
++                "/wd4702",
++                "/wd4703",
++                "/wd4709",
++                "/wd4714",
++                "/wd4715",
++                "/wd4718",
++                "/wd4723",
++                "/wd4724",
++                "/wd4800",
++                ## From BUILD.icu
++                "/wd4005",
++            ],
+             "//conditions:default": [],
+         }) + select({
+             "@v8//bazel/config:is_clang": [
+@@ -175,9 +193,14 @@ def _default_args():
+         includes = ["include"],
+         linkopts = select({
+             "@v8//bazel/config:is_windows": [
++                # Increase the initial stack size. The default is 1MB, this is 2MB. This
++                # applies only to executables and shared libraries produced by V8 since
++                # ldflags are not pushed to dependants.
++                "/STACK:2097152",
+                 "Winmm.lib",
+                 "DbgHelp.lib",
+                 "Advapi32.lib",
++                "Shell32.lib",
+             ],
+             "@v8//bazel/config:is_macos": ["-pthread"],
+             "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
+@@ -479,6 +502,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+         suffix = suffix,
+         target_os = select({
+             "@v8//bazel/config:is_macos": "mac",
++            "@v8//bazel/config:is_windows": "win",
+             "//conditions:default": "",
+         }),
+     )
+@@ -490,6 +514,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+         suffix = suffix,
+         target_os = select({
+             "@v8//bazel/config:is_macos": "mac",
++            "@v8//bazel/config:is_windows": "win",
+             "//conditions:default": "",
+         }),
+     )
+--
+2.39.1.windows.1
+

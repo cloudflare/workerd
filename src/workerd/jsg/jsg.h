@@ -134,7 +134,7 @@ public:
 
 private:
   void* trace[16];
-  size_t traceSize;
+  kj::ArrayPtr<void* const> tracePtr;
   mutable kj::String whatBuffer;
 };
 // When a C++ callback wishes to throw a JavaScript exception, it should first call

@@ -1334,7 +1334,7 @@ KJ_TEST("Server: Durable Objects (on disk)") {
       ),
       ( name = "my-disk",
         disk = (
-          path = "/var/do-storage",
+          path = "../../var/do-storage",
           writable = true,
         )
       ),
@@ -2011,7 +2011,7 @@ KJ_TEST("Server: external server cf blob header") {
 KJ_TEST("Server: disk service") {
   TestServer test(R"((
     services = [
-      (name = "hello", disk = "/frob/blah")
+      (name = "hello", disk = "../../frob/blah")
     ],
     sockets = [
       (name = "main", address = "test-addr", service = "hello")
@@ -2134,7 +2134,7 @@ KJ_TEST("Server: disk service") {
 KJ_TEST("Server: disk service writable") {
   TestServer test(R"((
     services = [
-      (name = "hello", disk = (path = "/frob/blah", writable = true))
+      (name = "hello", disk = (path = "../../frob/blah", writable = true))
     ],
     sockets = [
       (name = "main", address = "test-addr", service = "hello")
@@ -2243,7 +2243,7 @@ KJ_TEST("Server: disk service writable") {
 KJ_TEST("Server: disk service allow dotfiles") {
   TestServer test(R"((
     services = [
-      (name = "hello", disk = (path = "/frob", writable = true, allowDotfiles = true))
+      (name = "hello", disk = (path = "../../frob", writable = true, allowDotfiles = true))
     ],
     sockets = [
       (name = "main", address = "test-addr", service = "hello")

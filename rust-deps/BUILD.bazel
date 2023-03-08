@@ -31,11 +31,19 @@ selects.config_setting_group(
         "@platforms//cpu:aarch64",
     ],
 )
+selects.config_setting_group(
+    name = "win_x64",
+    match_all = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+)
 CARGO_BAZEL = select({
     ":linux_x64": "@cargo_bazel_linux_x64//file:downloaded",
     ":linux_arm64": "@cargo_bazel_linux_arm64//file:downloaded",
     ":macos_x64": "@cargo_bazel_macos_x64//file:downloaded",
     ":macos_arm64": "@cargo_bazel_macos_arm64//file:downloaded",
+    ":win_x64": "@cargo_bazel_win_x64//file:downloaded.exe",
 })
 
 # TODO (before prod):
@@ -128,6 +136,7 @@ crates_vendor(
         "x86_64-apple-darwin",
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
 
         # this is not used but its required to work around a bug in rules_rust where
         # invalid select statements can get generated in vendored BUILD files
@@ -187,16 +196,22 @@ rust_static_library(
         "WORKERD_VERSION": "{WORKERD_VERSION}"
     },
     visibility = ["//visibility:public"],
-    deps = [
-        ":addr2line",
-        ":util",
-        "@crates_vendor//:addr2line",
-        "@crates_vendor//:anyhow",
-        "@crates_vendor//:backtrace",
-        "@crates_vendor//:cxx",
-        "@crates_vendor//:libc",
-        "@crates_vendor//:lolhtml",
-        "@crates_vendor//:object",
-        "@crates_vendor//:typed-arena",
-    ],
+    deps = select({
+        # On Windows, CXX is broken under Bazel (https://github.com/dtolnay/cxx/pull/125).
+        # Luckily, util.rs and addr2line.rs are only used in the internal build which just targets
+        # Linux, so we can safely disable compilation of any CXX-using code.
+        "@platforms//os:windows": ["@crates_vendor//:lolhtml"],
+        "//conditions:default": [
+            ":addr2line",
+            ":util",
+            "@crates_vendor//:addr2line",
+            "@crates_vendor//:anyhow",
+            "@crates_vendor//:backtrace",
+            "@crates_vendor//:cxx",
+            "@crates_vendor//:libc",
+            "@crates_vendor//:lolhtml",
+            "@crates_vendor//:object",
+            "@crates_vendor//:typed-arena",
+        ]
+    }),
 )

@@ -9,9 +9,12 @@
 #include <algorithm>
 #include <functional>
 #include <regex>
-#include <strings.h>
 #include <kj/parse/char.h>
 #include <kj/compat/http.h>
+
+#if !_MSC_VER
+#include <strings.h>
+#endif
 
 namespace workerd::api {
 

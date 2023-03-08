@@ -35,10 +35,10 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "62e337ef35061c774678be5d0b0abc8b69f78a0481b253bffe4992e74f649757",
-    strip_prefix = "capnproto-capnproto-6a3dd15/c++",
+    sha256 = "9dd4850a9cd8d2ff9a3cff2aedd0b1af956c3645d11c443adcdd9c8d312bb623",
+    strip_prefix = "capnproto-capnproto-4544af1/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/6a3dd152d0d1245b1c44af8e76c78169cedadf03"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/4544af13a83d6ed4127e6f91d48f8a1b57b44c91"],
 )
 
 http_archive(
@@ -152,6 +152,16 @@ http_file(
     ],
 )
 
+http_file(
+    name = "cargo_bazel_win_x64",
+    executable = True,
+    sha256 = "a57c496e8ff9d1b2dcd4f6a3a43c41ed0c54e9f3d48183ed411097c3590176d3",
+    urls = [
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
+    ],
+    downloaded_file_path = "downloaded.exe" # .exe extension required for Windows to recognise as executable
+)
+
 http_archive(
     name = "rules_rust",
     sha256 = "0cc7e6b39e492710b819e00d48f2210ae626b717a3ab96e048c43ab57e61d204",
@@ -263,6 +273,7 @@ git_repository(
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
         "//:patches/v8/0005-Allow-compiling-on-macOS-catalina-and-ventura.patch",
         "//:patches/v8/0006-Fix-v8-code_generator-imports.patch",
+        "//:patches/v8/0007-Allow-Windows-builds-under-Bazel.patch",
     ],
 )
 
@@ -272,7 +283,8 @@ new_git_repository(
     commit = "c6b68522318204f795a8f04caebf6c0beb679cc4",
     shallow_since = "1676561136 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
-    patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ]
+    patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ],
+    patch_cmds_win = [ "Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item" ],
 )
 
 new_git_repository(
