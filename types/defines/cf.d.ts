@@ -79,7 +79,7 @@ interface BasicImageTransformationsGravityCoordinates {
  * Note: Currently, these properties cannot be tested in the
  * playground.
  */
-interface RequestInitCfProperties {
+interface RequestInitCfProperties extends Record<string, unknown> {
   cacheEverything?: boolean;
   /**
    * A request's cache key is what determines if two requests are
@@ -267,7 +267,7 @@ type IncomingRequestCfProperties<HostMetadata = unknown> =
     IncomingRequestCfPropertiesGeographicInformation &
     IncomingRequestCfPropertiesCloudflareAccessOrApiShield;
 
-interface IncomingRequestCfPropertiesBase {
+interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
   /**
    * [ASN](https://www.iana.org/assignments/as-numbers/as-numbers.xhtml) of the incoming request.
    *
@@ -465,88 +465,82 @@ interface IncomingRequestCfPropertiesExportedAuthenticatorMetadata {
 /**
  * Geographic data about the request's origin.
  */
-type IncomingRequestCfPropertiesGeographicInformation =
-  | {
-      /* No geographic data was found for the incoming request. */
-    }
-  | {
-      /** The country code `"T1"` is used for requests originating on TOR  */
-      country: "T1";
-    }
-  | {
-      /**
-       * The [ISO 3166-1 Alpha 2](https://www.iso.org/iso-3166-country-codes.html) country code the request originated from.
-       *
-       * If your worker is [configured to accept TOR connections](https://support.cloudflare.com/hc/en-us/articles/203306930-Understanding-Cloudflare-Tor-support-and-Onion-Routing), this may also be `"T1"`, indicating a request that originated over TOR.
-       *
-       * If Cloudflare is unable to determine where the request originated this property is omitted.
-       *
-       * @example "GB"
-       */
-      country: Iso3166Alpha2Code;
-      /**
-       * If present, this property indicates that the request originated in the EU
-       *
-       * @example "1"
-       */
-      isEUCountry?: "1";
-      /**
-       * A two-letter code indicating the continent the request originated from.
-       *
-       * @example "AN"
-       */
-      continent: ContinentCode;
-      /**
-       * The city the request originated from
-       *
-       * @example "Austin"
-       */
-      city?: string;
-      /**
-       * Postal code of the incoming request
-       *
-       * @example "78701"
-       */
-      postalCode?: string;
-      /**
-       * Latitude of the incoming request
-       *
-       * @example "30.27130"
-       */
-      latitude?: string;
-      /**
-       * Longitude of the incoming request
-       *
-       * @example "-97.74260"
-       */
-      longitude?: string;
-      /**
-       * Timezone of the incoming request
-       *
-       * @example "America/Chicago"
-       */
-      timezone?: string;
-      /**
-       * If known, the ISO 3166-2 name for the first level region associated with
-       * the IP address of the incoming request
-       *
-       * @example "Texas"
-       */
-      region?: string;
-      /**
-       * If known, the ISO 3166-2 code for the first-level region associated with
-       * the IP address of the incoming request
-       *
-       * @example "TX"
-       */
-      regionCode?: string;
-      /**
-       * Metro code (DMA) of the incoming request
-       *
-       * @example "635"
-       */
-      metroCode?: string;
-    };
+interface IncomingRequestCfPropertiesGeographicInformation {
+  /**
+   * The [ISO 3166-1 Alpha 2](https://www.iso.org/iso-3166-country-codes.html) country code the request originated from.
+   *
+   * If your worker is [configured to accept TOR connections](https://support.cloudflare.com/hc/en-us/articles/203306930-Understanding-Cloudflare-Tor-support-and-Onion-Routing), this may also be `"T1"`, indicating a request that originated over TOR.
+   *
+   * If Cloudflare is unable to determine where the request originated this property is omitted.
+   *
+   * The country code `"T1"` is used for requests originating on TOR.
+   *
+   * @example "GB"
+   */
+  country?: Iso3166Alpha2Code | "T1";
+  /**
+   * If present, this property indicates that the request originated in the EU
+   *
+   * @example "1"
+   */
+  isEUCountry?: "1";
+  /**
+   * A two-letter code indicating the continent the request originated from.
+   *
+   * @example "AN"
+   */
+  continent?: ContinentCode;
+  /**
+   * The city the request originated from
+   *
+   * @example "Austin"
+   */
+  city?: string;
+  /**
+   * Postal code of the incoming request
+   *
+   * @example "78701"
+   */
+  postalCode?: string;
+  /**
+   * Latitude of the incoming request
+   *
+   * @example "30.27130"
+   */
+  latitude?: string;
+  /**
+   * Longitude of the incoming request
+   *
+   * @example "-97.74260"
+   */
+  longitude?: string;
+  /**
+   * Timezone of the incoming request
+   *
+   * @example "America/Chicago"
+   */
+  timezone?: string;
+  /**
+   * If known, the ISO 3166-2 name for the first level region associated with
+   * the IP address of the incoming request
+   *
+   * @example "Texas"
+   */
+  region?: string;
+  /**
+   * If known, the ISO 3166-2 code for the first-level region associated with
+   * the IP address of the incoming request
+   *
+   * @example "TX"
+   */
+  regionCode?: string;
+  /**
+   * Metro code (DMA) of the incoming request
+   *
+   * @example "635"
+   */
+  metroCode?: string;
+}
 
 /** Data about the incoming request's TLS certificate */
 interface IncomingRequestCfPropertiesTLSClientAuth {
@@ -945,3 +939,7 @@ declare type Iso3166Alpha2Code =
 
 /** The 2-letter continent codes Cloudflare uses */
 declare type ContinentCode = "AF" | "AN" | "AS" | "EU" | "NA" | "OC" | "SA";
+
+type CfProperties<HostMetadata = unknown> =
+  | IncomingRequestCfProperties<HostMetadata>
+  | RequestInitCfProperties;

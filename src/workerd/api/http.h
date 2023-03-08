@@ -473,7 +473,7 @@ public:
     JSG_METHOD_NAMED(delete, delete_);
 
     JSG_TS_OVERRIDE({
-      fetch(input: RequestInfo, init?: RequestInit<RequestInitCfProperties>): Promise<Response>;
+      fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
       get: never;
       put: never;
       delete: never;
@@ -578,10 +578,10 @@ struct RequestInitializerDict {
 
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, mode, credentials, cache,
              referrer, referrerPolicy, integrity, signal);
-  JSG_STRUCT_TS_OVERRIDE(RequestInit<CfType = IncomingRequestCfProperties | RequestInitCfProperties> {
+  JSG_STRUCT_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
     headers?: HeadersInit;
     body?: BodyInit | null;
-    cf?: CfType;
+    cf?: Cf;
   });
 };
 
@@ -715,7 +715,7 @@ public:
 
     JSG_METHOD(clone);
 
-    JSG_TS_DEFINE(type RequestInfo = Request | string | URL);
+    JSG_TS_DEFINE(type RequestInfo<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> = Request<CfHostMetadata, Cf> | string | URL);
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
 
@@ -737,13 +737,14 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
 
-      JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
-        constructor(input: RequestInfo, init?: RequestInit);
-        clone(): Request<CfHostMetadata>;
-        get cf(): IncomingRequestCfProperties<CfHostMetadata> | undefined;
+      JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+        constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+        clone(): Request<CfHostMetadata, Cf>;
+        get cf(): Cf | undefined;
       });
       // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
-      // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.
+      // `CfProperties` is defined in `/types/defines/cf.d.ts`. We only really need a single `Cf`
+      // type parameter here, but it would be a breaking type change to remove `CfHostMetadata`.
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(method, getMethod);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
@@ -762,13 +763,11 @@ public:
       JSG_READONLY_INSTANCE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_INSTANCE_PROPERTY(keepalive, getKeepalive);
 
-      JSG_TS_OVERRIDE(<CfHostMetadata = unknown> {
-        constructor(input: RequestInfo, init?: RequestInit);
-        clone(): Request<CfHostMetadata>;
-        readonly cf?: IncomingRequestCfProperties<CfHostMetadata>;
+      JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+        constructor(input: RequestInfo<CfProperties>, init?: RequestInit<Cf>);
+        clone(): Request<CfHostMetadata, Cf>;
+        readonly cf?: Cf;
       });
-      // Use `RequestInfo` and `RequestInit` type aliases in constructor instead of inlining.
-      // `IncomingRequestCfProperties` is defined in `/types/defines/cf.d.ts`.
     }
   }
 
