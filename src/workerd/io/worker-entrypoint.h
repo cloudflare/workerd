@@ -5,7 +5,7 @@
 #pragma once
 
 #include "io-context.h"
-#include "trace.h"
+#include <workerd/io/trace.h>
 #include "worker-interface.h"
 #include <kj/compat/http.h>
 

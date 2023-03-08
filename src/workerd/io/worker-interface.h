@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "trace.h"
+#include <workerd/io/trace.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/http-over-capnp.h>
 

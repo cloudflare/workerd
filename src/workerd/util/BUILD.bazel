@@ -10,13 +10,17 @@ wd_cc_library(
             "capnp-mock.c++",
             "symbolizer.c++",
             "sqlite*.c++",
+            "thread-scopes.c++",
         ],
     ),
     hdrs = glob(
         ["*.h"],
         exclude = [
             "capnp-mock.h",
-            "sqlite*.h"
+            "sqlite*.h",
+            "own-util.h",
+            "thread-scopes.h",
+            "sentry.h",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -31,13 +35,19 @@ wd_cc_library(
 
 wd_cc_library(
     name = "sqlite",
-    srcs = [ "sqlite.c++", "sqlite-kv.c++" ],
-    hdrs = [ "sqlite.h", "sqlite-kv.h" ],
+    srcs = [
+        "sqlite.c++",
+        "sqlite-kv.c++",
+    ],
+    hdrs = [
+        "sqlite.h",
+        "sqlite-kv.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
-        "@sqlite3//:sqlite3",
         "@capnp-cpp//src/kj:kj-async",
-    ]
+        "@sqlite3",
+    ],
 )
 
 wd_cc_library(
@@ -61,12 +71,37 @@ wd_cc_library(
     alwayslink = 1,
 )
 
+wd_cc_library(
+    name = "own-util",
+    hdrs = ["own-util.h"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "sentry",
+    hdrs = ["sentry.h"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "thread-scopes",
+    srcs = ["thread-scopes.c++"],
+    hdrs = ["thread-scopes.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
 [kj_test(
     src = f,
     deps = [
         ":util",
     ],
-) for f in glob(["*-test.c++"], exclude = ["sqlite-*.c++"])]
+) for f in glob(
+    ["*-test.c++"],
+    exclude = ["sqlite-*.c++"],
+)]
 
 kj_test(
     src = "sqlite-test.c++",

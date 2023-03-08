@@ -17,6 +17,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":modules_capnp",
+        "//src/workerd/util:sentry",
+        "//src/workerd/util:thread-scopes",
         "//src/workerd/util",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",

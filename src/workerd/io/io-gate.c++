@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "io-gate.h"
+#include <workerd/io/io-gate.h>
 #include <kj/debug.h>
 
 namespace workerd {

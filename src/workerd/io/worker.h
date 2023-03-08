@@ -5,15 +5,15 @@
 #pragma once
 // Classes to manage lifetime of workers, scripts, and isolates.
 
-#include "worker-interface.h"
-#include "limit-enforcer.h"
+#include <workerd/io/worker-interface.h>
+#include <workerd/io/limit-enforcer.h>
 #include <kj/compat/http.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <kj/mutex.h>
-#include "io-channels.h"
+#include <workerd/io/io-channels.h>
 #include <workerd/io/actor-storage.capnp.h>
 
 namespace v8 { class Isolate; }

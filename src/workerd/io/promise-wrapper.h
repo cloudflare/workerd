@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "io-context.h"
-#include "worker.h"
+#include <workerd/io/io-context.h>
+#include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd {
