@@ -14,6 +14,7 @@
 #include "urlpattern.h"
 #include "form-data.h"
 #include "crypto.h"
+#include "crypto-streams.h"
 #include "cache.h"
 #include "html-rewriter.h"
 #include "trace.h"
