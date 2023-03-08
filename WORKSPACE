@@ -253,25 +253,26 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "18865d6af0404f2d2aeb1c99dd73503364ce0967",
-    shallow_since = "1662649276 +0000",
+    commit = "a51a1bb4c83ee9b63d7dceed0eb2643e23cbf06a",
+    shallow_since = "1677573722 +0000",
     patch_args = [ "-p1" ],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
-        "//:patches/v8/0005-Revert-bazel-Add-hide-symbols-from-release-fast-buil.patch",
-        "//:patches/v8/0006-bazel-Allow-compiling-on-macOS-catalina-and-ventura.patch",
-        "//:patches/v8/0007-bazel-Fix-code_generator-imports.patch",
+        "//:patches/v8/0005-Allow-compiling-on-macOS-catalina-and-ventura.patch",
+        "//:patches/v8/0006-include-fix-for-compiling-v8-from-workerd.patch",
+        "//:patches/v8/0007-Explicitly-include-ICUs-utf16.h.patch",
+        "//:patches/v8/0008-Fix-v8-code_generator-imports.patch",
     ],
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "20f8ac695af59b6c830def7d4e95bfeb13dd7be5",
-    shallow_since = "1660168635 +0000",
+    commit = "1b7d391f0528fb3a4976b7541b387ee04f915f83",
+    shallow_since = "1668814382 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
     patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ]
 )
@@ -280,7 +281,7 @@ new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
     commit = "521ac34ebd795939c7e16b37d9d3ddb40e8ed556",
-    shallow_since = "1659619139 -0700",
+    shallow_since = "1662669790 -0700",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
 )
 

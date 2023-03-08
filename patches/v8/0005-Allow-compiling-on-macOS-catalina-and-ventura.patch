@@ -1,15 +1,12 @@
-From 79e1d8e03c54f2b1fa1795ad5383fb0c7a94e742 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Dhi Aurrahman <dio@rockybars.com>
 Date: Thu, 27 Oct 2022 12:45:05 +0700
-Subject: [PATCH] [bazel] Allow compiling on macOS catalina and ventura
+Subject: Allow compiling on macOS catalina and ventura
 
 Signed-off-by: Dhi Aurrahman <dio@rockybars.com>
----
- bazel/defs.bzl | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index e957c0fad3..b557471eba 100644
+index 8c3e3b9d1d9a37679a36c61c1fc03342d7f25587..8053fa95df82eee6c3b2286e56e68129ec3c876f 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -151,6 +151,18 @@ def _default_args():
@@ -29,7 +26,5 @@ index e957c0fad3..b557471eba 100644
 +            ],
 +            "//conditions:default": [],
          }),
-         includes = ["include"],
-         linkopts = select({
---
-2.39.0
+         cxxopts = select({
+             "//third_party/v8/HEAD/google3/config:is_opt": [
