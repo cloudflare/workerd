@@ -2659,12 +2659,12 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
   return getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
 }
 
-Worker::Actor::Actor(const Worker& worker, Actor::Id actorId,
+Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Actor::Id actorId,
     bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
     kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics)
-    : worker(kj::atomicAddRef(worker)) {
+    : worker(kj::atomicAddRef(worker)), tracker(tracker) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(persistent),
                         kj::mv(makeStorage), timerChannel, kj::mv(metrics));
 

@@ -1288,7 +1288,7 @@ public:
 
           Worker::Lock lock(*service.worker, asyncLock);
           auto newActor = kj::refcounted<Worker::Actor>(
-              *service.worker, kj::mv(id), true, kj::mv(persistent),
+              *service.worker, nullptr, kj::mv(id), true, kj::mv(persistent),
               className, kj::mv(makeStorage), lock,
               timerChannel, kj::refcounted<ActorObserver>());
 
