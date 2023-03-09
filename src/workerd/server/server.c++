@@ -553,8 +553,8 @@ private:
 
     kj::Promise<void> connect(
         kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-        ConnectResponse& tunnel) override {
-      return parent.serviceAdapter->connect(host, headers, connection, tunnel);
+        ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+      return parent.serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
     }
 
     void prewarm(kj::StringPtr url) override {}
@@ -686,12 +686,12 @@ private:
 
   kj::Promise<void> connect(
       kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-      ConnectResponse& tunnel) override {
+      ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
     // This code is hit when the global `connect` function is called in a JS worker script.
     // It represents a proxy-less TCP connection, which means we can simply defer the handling of
     // the connection to the service adapter (likely NetworkHttpClient). Its behaviour will be to
     // connect directly to the host over TCP.
-    return serviceAdapter->connect(host, headers, connection, tunnel);
+    return serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
   }
 
   void prewarm(kj::StringPtr url) override {}
@@ -895,7 +895,8 @@ private:
   }
 
   kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
-      kj::AsyncIoStream& connection, kj::HttpService::ConnectResponse& response) override {
+      kj::AsyncIoStream& connection, kj::HttpService::ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
     throwUnsupported();
   }
   void prewarm(kj::StringPtr url) override {}

@@ -424,7 +424,8 @@ private:
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override;
     kj::Promise<void> connect(
         kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
-        kj::HttpService::ConnectResponse& tunnel) override;
+        kj::HttpService::ConnectResponse& tunnel,
+        kj::HttpConnectSettings settings) override;
     void prewarm(kj::StringPtr url) override;
     kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
     kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
