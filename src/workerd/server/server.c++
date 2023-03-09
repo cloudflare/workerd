@@ -656,11 +656,13 @@ public:
   NetworkService(kj::HttpHeaderTable& headerTable,
                  kj::Timer& timer, kj::EntropySource& entropySource,
                  kj::Own<kj::Network> networkParam,
-                 kj::Maybe<kj::Own<kj::Network>> tlsNetworkParam)
+                 kj::Maybe<kj::Own<kj::Network>> tlsNetworkParam,
+                 kj::Maybe<kj::SecureNetworkWrapper&> tlsContext)
       : network(kj::mv(networkParam)), tlsNetwork(kj::mv(tlsNetworkParam)),
         inner(kj::newHttpClient(timer, headerTable, *network, tlsNetwork, {
           .entropySource = entropySource,
-          .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION
+          .webSocketCompressionMode = kj::HttpClientSettings::MANUAL_COMPRESSION,
+          .tlsContext = tlsContext
         })),
         serviceAdapter(kj::newHttpService(*inner)) {}
 
@@ -716,13 +718,15 @@ kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf
       KJ_MAP(a, conf.getDeny() ) -> kj::StringPtr { return a; });
 
   kj::Maybe<kj::Own<kj::Network>> tlsNetwork;
+  kj::Maybe<kj::SecureNetworkWrapper&> tlsContext;
   if (conf.hasTlsOptions()) {
-    auto tlsContext = makeTlsContext(conf.getTlsOptions());
-    tlsNetwork = tlsContext->wrapNetwork(*restrictedNetwork).attach(kj::mv(tlsContext));
+    auto ownedTlsContext = makeTlsContext(conf.getTlsOptions());
+    tlsContext = ownedTlsContext;
+    tlsNetwork = ownedTlsContext->wrapNetwork(*restrictedNetwork).attach(kj::mv(ownedTlsContext));
   }
 
   return kj::heap<NetworkService>(globalContext->headerTable, timer, entropySource,
-                                  kj::mv(restrictedNetwork), kj::mv(tlsNetwork));
+                                  kj::mv(restrictedNetwork), kj::mv(tlsNetwork), tlsContext);
 }
 
 class Server::DiskDirectoryService final: public Service, private WorkerInterface {
@@ -2381,12 +2385,12 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
     kj::TlsContext::Options options;
     options.useSystemTrustStore = true;
 
-    auto tls = kj::heap<kj::TlsContext>(kj::mv(options));
-    auto tlsNetwork = tls->wrapNetwork(*publicNetwork).attach(kj::mv(tls));
+    kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+    auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
     auto service = kj::heap<NetworkService>(
         globalContext->headerTable, timer, entropySource,
-        kj::mv(publicNetwork), kj::mv(tlsNetwork));
+        kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls).attach(kj::mv(tls));
 
     return decltype(services)::Entry {
       kj::str("internet"_kj),

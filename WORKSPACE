@@ -35,10 +35,10 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "72dfd487fcdec4223bd6475a4f481b07f7a8884e09185e0c68b67730f1711f0b",
-    strip_prefix = "capnproto-capnproto-9b1acb2/c++",
+    sha256 = "8bb47cfa7d7c6349764d7c696c67e6f545d9c6d2987620441f72e6c91b03e60f",
+    strip_prefix = "capnproto-capnproto-d3702c0/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/9b1acb2f642fef318576c10a215bf6590c77538b"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/d3702c026f36e22d5475922e520669e79a0f89aa"],
 )
 
 http_archive(
