@@ -24,12 +24,23 @@ jobs:
           path: ~/bazel-disk-cache
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
       - run: mkdir -p ~/bazel-disk-cache
-      - name: install dependencies
+      - name: Install dependencies
         if: ${{ runner.os == 'Linux' }}
         run: |
             export DEBIAN_FRONTEND=noninteractive
             sudo apt-get install -y build-essential git clang libc++-dev
-      - name: bazel tests
+      - name: Bazel tests
         run: |
             bazel test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --show_timestamps --keep_going --test_output=errors //...
+      - name: Report disk usage
+        if: success() || failure()
+        run: |
+            BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
+            BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
+            echo "Bazel cache usage statistics"
+            du -hs -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+            echo "Bazel output usage statistics"
+            du -hs -t 1 $BAZEL_OUTPUT_BASE
+            echo "Workspace usage statistics"
+            du -hs -t 1 $GITHUB_WORKSPACE
 
