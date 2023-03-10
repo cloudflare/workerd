@@ -41,6 +41,9 @@ import {
   validateFunction,
 } from "node-internal:validators";
 
+
+import * as process from "node-internal:process";
+
 import { spliceOne } from "node-internal:internal_utils";
 
 import { default as async_hooks } from "node-internal:async_hooks";
@@ -234,9 +237,7 @@ function addCatch(that : any, promise : Promise<unknown>, type : string | symbol
       then.call(promise, undefined, function (err) {
         // The callback is called with nextTick to avoid a follow-up
         // rejection from this promise.
-        queueMicrotask(() => {
-          emitUnhandledRejectionOrErr(that, err, type, args);
-        });
+        process.nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
       });
     }
   } catch (err) {
