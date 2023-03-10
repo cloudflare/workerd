@@ -146,6 +146,8 @@ public:
     // This string remains valid at least until either the request has returned response headers
     // or has been canceled. (In practice, this string's lifetime is that of the Isolate making
     // the request.)
+
+    SubrequestMetadata clone();
   };
 
   virtual kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) = 0;
