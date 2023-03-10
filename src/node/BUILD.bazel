@@ -3,8 +3,10 @@ load("@workerd//:build/wd_api_bundle.bzl", "wd_api_bundle")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
 
 modules = glob(["*.ts"])
+js_modules = glob(["*.js"])
 
 internal_modules = glob(["internal/*.ts"])
+internal_js_modules = glob(["internal/*.js"])
 
 srcs = modules + internal_modules
 
@@ -20,6 +22,7 @@ ts_config(
 ts_project(
     name = "node",
     srcs = srcs,
+    allow_js = True,
     tsconfig = ":tsconfig",
 )
 
@@ -29,7 +32,10 @@ wd_api_bundle(
     builtin_modules = dict([(
         m.removesuffix(".ts") + ".js",
         "node:" + m.removesuffix(".ts"),
-    ) for m in modules]),
+    ) for m in modules] + [(
+        m,
+        "node:" + m.removesuffix(".js"),
+    ) for m in js_modules]),
     const_name = "nodeBundle",
     include_prefix = "node",
     # internal modules are accessible under "node-internal:<module_name>" name without "internal/"
@@ -37,7 +43,9 @@ wd_api_bundle(
     internal_modules = dict([(
         m.removesuffix(".ts") + ".js",
         "node-internal:" + m.removeprefix("internal/").removesuffix(".ts"),
-    ) for m in internal_modules if not m.endswith(".d.ts")]),
+    ) for m in internal_modules if not m.endswith(".d.ts")] + [(
+        m, "node-internal:" + m.removeprefix("internal/").removesuffix(".js"),
+    ) for m in internal_js_modules]),
     schema_id = "0xbcc8f57c63814005",
 )
 
