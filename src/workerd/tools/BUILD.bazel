@@ -89,7 +89,7 @@ filegroup(
 cc_ast_dump(
     name = "dump_api_ast",
     src = api_encoder_src,
-    out = "api.ast.json",
+    out = "api.ast.json.gz",
     deps = [":api_encoder_lib"],
 )
 
@@ -99,6 +99,7 @@ rust_binary(
     deps = [
         "@crates_vendor//:anyhow",
         "@crates_vendor//:clang-ast",
+        "@crates_vendor//:flate2",
         "@crates_vendor//:pico-args",
         "@crates_vendor//:serde",
         "@crates_vendor//:serde_json",

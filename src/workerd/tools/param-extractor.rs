@@ -1,9 +1,12 @@
 use std::{
+    ffi::OsStr,
     fs::File,
     io::{BufReader, BufWriter, Write},
+    path::Path,
 };
 
 use anyhow::Result;
+use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 
 /// Contains the declarations we care about
@@ -50,10 +53,14 @@ type ClangNode = clang_ast::Node<Clang>;
 fn main() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
 
-    let clang_ast = args.value_from_os_str("--input", |path| {
+    let clang_ast = args.value_from_os_str("--input", |path_str| {
+        let path = Path::new(path_str);
         let file = File::open(path)?;
-        let rdr = BufReader::new(file);
-        serde_json::from_reader(rdr).map_err(anyhow::Error::from)
+        let serde = match path.extension().and_then(OsStr::to_str) {
+            Some("gz") => serde_json::from_reader(BufReader::new(GzDecoder::new(file))),
+            _ => serde_json::from_reader(BufReader::new(file))
+        };
+        serde.map_err(anyhow::Error::from)
     })?;
 
     let value = get_parameter_names(clang_ast);

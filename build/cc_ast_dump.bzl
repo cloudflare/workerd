@@ -37,7 +37,7 @@ def _cc_ast_dump_impl(ctx):
     inputs = depset(direct = [ctx.file.src], transitive = [cc_toolchain.all_files] + [cc_info.compilation_context.headers])
     env = cc_common.get_environment_variables(feature_configuration = feature_configuration, action_name = CPP_COMPILE_ACTION_NAME, variables = variables)
 
-    command = " ".join([executable] + arguments + [">", ctx.outputs.out.path])
+    command = " ".join([executable] + arguments + ["|", "gzip", "-3", "-", ">", ctx.outputs.out.path])
 
     # run_shell until https://github.com/bazelbuild/bazel/issues/5511 is fixed
     ctx.actions.run_shell(
