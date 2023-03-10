@@ -58,6 +58,12 @@ alias(
 )
 
 alias(
+    name = "flate2",
+    actual = "@crates_vendor__flate2-1.0.24//:flate2",
+    tags = ["manual"],
+)
+
+alias(
     name = "libc",
     actual = "@crates_vendor__libc-0.2.137//:libc",
     tags = ["manual"],
