@@ -263,6 +263,7 @@ git_repository(
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
         "//:patches/v8/0005-Revert-bazel-Add-hide-symbols-from-release-fast-buil.patch",
         "//:patches/v8/0006-bazel-Allow-compiling-on-macOS-catalina-and-ventura.patch",
+        "//:patches/v8/0007-bazel-Fix-code_generator-imports.patch",
     ],
 )
 

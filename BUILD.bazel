@@ -7,7 +7,7 @@ load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
 cc_capnp_library(
     name = "icudata-embed",
     srcs = ["icudata-embed.capnp"],
-    strip_include_prefix = "",
+    include_prefix = ".",
     visibility = ["//visibility:public"],
     data = ["@com_googlesource_chromium_icu//:icudata"],
     defines = [ "WORKERD_ICU_DATA_EMBED" ],
