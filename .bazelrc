@@ -23,6 +23,10 @@ build --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 #   for workerd?
 build --cxxopt='-Wno-ambiguous-reversed-operator' --host_cxxopt='-Wno-ambiguous-reversed-operator'
 
+# Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
+# https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
+build --reuse_sandbox_directories
+
 
 # optimized LTO build. you'll need a fairly recent clang for this to work
 build:thin-lto -c opt
