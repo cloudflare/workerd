@@ -192,3 +192,20 @@ export function getOwnNonIndexProperties(
   }
   return result;
 }
+
+export function createDeferredPromise() {
+  let resolve;
+  let reject;
+
+  // eslint-disable-next-line promise/param-names
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  })
+  return {
+    promise,
+    resolve,
+    reject,
+  };
+}
+

@@ -333,6 +333,12 @@ export class ERR_UNKNOWN_ENCODING extends NodeTypeError {
   }
 }
 
+export class ERR_STREAM_PREMATURE_CLOSE extends NodeTypeError {
+  constructor() {
+    super("ERR_STREAM_PREMATURE_CLOSE", "Premature close");
+  }
+}
+
 export class AbortError extends Error {
   code: string;
 
@@ -388,6 +394,12 @@ export class ERR_INVALID_RETURN_VALUE extends NodeTypeError {
   }
 }
 
+export class ERR_MULTIPLE_CALLBACK extends NodeError {
+  constructor() {
+    super("ERR_MULTIPLE_CALLBACK", "Callback called multiple times");
+  }
+}
+
 export class ERR_MISSING_ARGS extends NodeTypeError {
   constructor(...args: (string | string[])[]) {
     let msg = "The ";
@@ -425,16 +437,70 @@ export class ERR_FALSY_VALUE_REJECTION extends NodeError {
   }
 }
 
-export default {
-  ERR_AMBIGUOUS_ARGUMENT,
-  ERR_BUFFER_OUT_OF_BOUNDS,
-  ERR_FALSY_VALUE_REJECTION,
-  ERR_INVALID_ARG_TYPE,
-  ERR_INVALID_ARG_VALUE,
-  ERR_INVALID_BUFFER_SIZE,
-  ERR_INVALID_THIS,
-  ERR_MISSING_ARGS,
-  ERR_OUT_OF_RANGE,
-  ERR_UNHANDLED_ERROR,
-  ERR_UNKNOWN_ENCODING,
-};
+export class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
+  constructor(name: string|symbol) {
+    if (typeof name === 'symbol') {
+      name = (name as symbol).description!;
+    }
+    super("ERR_METHOD_NOT_IMPLEMENTED", `The ${name} method is not implemented`);
+  }
+}
+
+export class ERR_STREAM_CANNOT_PIPE extends NodeError {
+  constructor() {
+    super("ERR_STREAM_CANNOT_PIPE", "Cannot pipe, not readable");
+  }
+}
+export class ERR_STREAM_DESTROYED extends NodeError {
+  constructor(name: string|symbol) {
+    if (typeof name === 'symbol') {
+      name = (name as symbol).description!;
+    }
+    super("ERR_STREAM_DESTROYED", `Cannot call ${name} after a stream was destroyed`);
+  }
+}
+export class ERR_STREAM_ALREADY_FINISHED extends NodeError {
+  constructor(name: string|symbol) {
+    if (typeof name === 'symbol') {
+      name = (name as symbol).description!;
+    }
+    super("ERR_STREAM_ALREADY_FINISHED", `Cannot call ${name} after a stream was finished`);
+  }
+}
+export class ERR_STREAM_NULL_VALUES extends NodeTypeError {
+  constructor() {
+    super("ERR_STREAM_NULL_VALUES", "May not write null values to stream");
+  }
+}
+export class ERR_STREAM_WRITE_AFTER_END extends NodeError {
+  constructor() {
+    super("ERR_STREAM_WRITE_AFTER_END", "write after end");
+  }
+}
+
+export class ERR_STREAM_PUSH_AFTER_EOF extends NodeError {
+  constructor() {
+    super("ERR_STREAM_PUSH_AFTER_EOF", "stream.push() after EOF");
+  }
+}
+
+export class ERR_STREAM_UNSHIFT_AFTER_END_EVENT extends NodeError {
+  constructor() {
+    super("ERR_STREAM_UNSHIFT_AFTER_END_EVENT", "stream.unshift() after end event");
+  }
+}
+
+export function aggregateTwoErrors(innerError: any, outerError: any) {
+  if (innerError && outerError && innerError !== outerError) {
+    if (Array.isArray(outerError.errors)) {
+      // If `outerError` is already an `AggregateError`.
+      outerError.errors.push(innerError);
+      return outerError;
+    }
+    const err = new AggregateError([outerError, innerError], outerError.message);
+    (err as any).code = outerError.code;
+    return err;
+  }
+  return innerError || outerError
+}
+

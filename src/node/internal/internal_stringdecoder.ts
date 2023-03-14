@@ -64,19 +64,20 @@ export interface StringDecoder {
   write(buf: ArrayBufferView|DataView|string): string;
   end(buf?: ArrayBufferView|DataView|string): string;
   text(buf: ArrayBufferView|DataView|string, offset?: number): string;
+  new (encoding?: string): StringDecoder;
 }
 
 interface InternalDecoder extends StringDecoder {
   [kNativeDecoder]: Buffer;
 }
 
-export function StringDecoder(this: any, encoding: string = 'utf8') {
+export function StringDecoder(this: StringDecoder, encoding: string = 'utf8') {
   const normalizedEncoding = normalizeEncoding(encoding);
   if (!isEncoding(normalizedEncoding)) {
     throw new ERR_UNKNOWN_ENCODING(encoding);
   }
-  this[kNativeDecoder] = Buffer.alloc(kSize);
-  this[kNativeDecoder][kEncoding] = encodings[normalizedEncoding!]!;
+  (this as InternalDecoder)[kNativeDecoder] = Buffer.alloc(kSize);
+  (this as InternalDecoder)[kNativeDecoder][kEncoding] = encodings[normalizedEncoding!]!;
   this.encoding = normalizedEncoding!;
 }
 
@@ -123,8 +124,6 @@ StringDecoder.prototype.write = write;
 StringDecoder.prototype.end = end;
 StringDecoder.prototype.text = text;
 
-interface Buffer extends Uint8Array {};
-
 Object.defineProperties(StringDecoder.prototype, {
   lastChar: {
     enumerable: true,
@@ -133,7 +132,7 @@ Object.defineProperties(StringDecoder.prototype, {
         throw new ERR_INVALID_THIS('StringDecoder');
       }
       return (this as InternalDecoder)[kNativeDecoder].subarray(
-        kIncompleteCharactersStart, kIncompleteCharactersEnd);
+        kIncompleteCharactersStart, kIncompleteCharactersEnd) as Buffer;
     },
   },
   lastNeed: {
