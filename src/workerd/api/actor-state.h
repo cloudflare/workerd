@@ -36,7 +36,7 @@ public:
     jsg::Optional<bool> allowConcurrency;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::ReadOptions() const {
+    inline operator ActorCacheOps::ReadOptions() const {
       return {
         .noCache = noCache.orDefault(false)
       };
@@ -70,7 +70,7 @@ public:
     jsg::Optional<bool> allowConcurrency;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::ReadOptions() const {
+    inline operator ActorCacheOps::ReadOptions() const {
       return {
         .noCache = noCache.orDefault(false)
       };
@@ -87,7 +87,7 @@ public:
     jsg::Optional<bool> allowUnconfirmed;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::WriteOptions() const {
+    inline operator ActorCacheOps::WriteOptions() const {
       return {
         .allowUnconfirmed = allowUnconfirmed.orDefault(false),
         .noCache = noCache.orDefault(false)
@@ -112,7 +112,7 @@ public:
     jsg::Optional<bool> allowUnconfirmed;
     // We don't allow noCache for alarm puts.
 
-    inline operator ActorCache::WriteOptions() const {
+    inline operator ActorCacheOps::WriteOptions() const {
       return {
         .allowUnconfirmed = allowUnconfirmed.orDefault(false),
       };
@@ -177,7 +177,7 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectStorage(IoPtr<ActorCache> cache)
+  DurableObjectStorage(IoPtr<ActorCacheInterface> cache)
     : cache(kj::mv(cache)) {}
   DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv)
     : cache(kj::mv(sqliteKv)) {}
@@ -235,12 +235,12 @@ protected:
   }
 
 private:
-  kj::OneOf<IoPtr<ActorCache>, IoPtr<ActorSqlite>> cache;
+  kj::OneOf<IoPtr<ActorCacheInterface>, IoPtr<ActorSqlite>> cache;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectTransaction(IoOwn<ActorCache::Transaction> cacheTxn)
+  DurableObjectTransaction(IoOwn<ActorCacheInterface::Transaction> cacheTxn)
     : cacheTxn(kj::mv(cacheTxn)) {}
 
   kj::Promise<void> maybeCommit();
@@ -288,7 +288,7 @@ protected:
   }
 
 private:
-  kj::Maybe<IoOwn<ActorCache::Transaction>> cacheTxn;
+  kj::Maybe<IoOwn<ActorCacheInterface::Transaction>> cacheTxn;
   // Becomes null when committed or rolled back.
 
   bool rolledBack = false;

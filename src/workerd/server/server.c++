@@ -1277,7 +1277,7 @@ public:
           });
 
           auto makeStorage = [actorSqlite](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
-                                           ActorCache& actorCache)
+                                           ActorCacheInterface& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
             KJ_IF_MAYBE(a, actorSqlite) {
               return jsg::alloc<api::DurableObjectStorage>(
