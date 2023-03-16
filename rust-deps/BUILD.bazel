@@ -186,9 +186,6 @@ rust_static_library(
     rustc_env = {
         "WORKERD_VERSION": "{WORKERD_VERSION}"
     },
-    rustc_flags = [
-        "-C", "panic=abort"
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":addr2line",
