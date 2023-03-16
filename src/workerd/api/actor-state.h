@@ -142,7 +142,7 @@ protected:
     return op == OP_GET || op == OP_LIST || op == OP_ROLLBACK;
   }
 
-  virtual ActorCacheInterface& getCache(OpName op) = 0;
+  virtual ActorCacheOps& getCache(OpName op) = 0;
 
   virtual bool useDirectIo() = 0;
   // Whether to skip caching and allow concurrency on all operations.
@@ -228,7 +228,7 @@ public:
   }
 
 protected:
-  ActorCacheInterface& getCache(kj::StringPtr op) override;
+  ActorCacheOps& getCache(kj::StringPtr op) override;
 
   bool useDirectIo() override {
     return false;
@@ -281,7 +281,7 @@ public:
   }
 
 protected:
-  ActorCacheInterface& getCache(kj::StringPtr op) override;
+  ActorCacheOps& getCache(kj::StringPtr op) override;
 
   bool useDirectIo() override {
     return false;

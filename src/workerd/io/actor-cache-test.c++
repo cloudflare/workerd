@@ -136,7 +136,7 @@ struct ActorCacheConvenienceWrappers {
   // This is formulated as a mixin inherited by ActorCacheTest, below, so that it can be reused
   // for transactions as well.
 
-  ActorCacheConvenienceWrappers(ActorCacheInterface& target): target(target) {}
+  ActorCacheConvenienceWrappers(ActorCacheOps& target): target(target) {}
 
   auto get(kj::StringPtr key, ActorCache::ReadOptions options = {}) {
     return stringifyValues(target.get(kj::str(key), options));
@@ -186,7 +186,7 @@ struct ActorCacheConvenienceWrappers {
   }
 
 private:
-  ActorCacheInterface& target;
+  ActorCacheOps& target;
 };
 
 struct ActorCacheTestOptions {
