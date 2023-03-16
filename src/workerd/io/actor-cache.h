@@ -43,7 +43,7 @@ struct ActorCacheWriteOptions {
   // key.  Hence, `noCache` does not affect consistency, only performance.
 };
 
-class ActorCacheInterface {
+class ActorCacheOps {
   // Common interface between ActorCache and ActorCache::Transaction.
 public:
   typedef kj::String Key;
@@ -157,7 +157,7 @@ public:
   // from underlying storage. The promise also applies backpressure if needed, as with put().
 };
 
-class ActorCache final: public ActorCacheInterface {
+class ActorCache final: public ActorCacheOps {
   // An in-memory caching layer on top of ActorStorage.Stage RPC interface.
   //
   // This cache assumes that it is the only client of the underlying storage -- which is, of
@@ -202,7 +202,7 @@ public:
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> onNoPendingFlush();
-  // See ActorCacheInterface.
+  // See ActorCacheOps.
 
   struct DeleteAllResults {
     // We split these up so client code that doesn't need the count doesn't have to
@@ -212,7 +212,7 @@ public:
   };
 
   DeleteAllResults deleteAll(WriteOptions options);
-  // Delete everything in the actor's storage. This is not part of ActorCacheInterface because it
+  // Delete everything in the actor's storage. This is not part of ActorCacheOps because it
   // is not supported as part of a transaction.
   //
   // The returned count only includes keys that were actually deleted from storage, not keys in
@@ -669,10 +669,10 @@ private:
   class GetMultiStreamImpl;
   class ForwardListStreamImpl;
   class ReverseListStreamImpl;
-  friend class ActorCacheInterface::GetResultList;
+  friend class ActorCacheOps::GetResultList;
 };
 
-class ActorCacheInterface::GetResultList {
+class ActorCacheOps::GetResultList {
   using Entry = ActorCache::Entry;
 public:
   class Iterator {
@@ -806,7 +806,7 @@ private:
   friend class ActorCache;
 };
 
-class ActorCache::Transaction final: public ActorCacheInterface {
+class ActorCache::Transaction final: public ActorCacheOps {
   // A transaction represents a set of writes that haven't been committed. The transaction can be
   // discarded without committing.
   //

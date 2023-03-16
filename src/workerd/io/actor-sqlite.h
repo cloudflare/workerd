@@ -9,8 +9,8 @@
 
 namespace workerd {
 
-class ActorSqlite final: public ActorCacheInterface {
-  // An implementation of ActorCacheInterface that is backed by SqliteKv.
+class ActorSqlite final: public ActorCacheOps {
+  // An implementation of ActorCacheOps that is backed by SqliteKv.
   //
   // TODO(perf): This interface is not designed ideally for wrapping SqliteKv. In particular, we
   //   end up allocating extra copies of all the results. It would be nicer if we could actually

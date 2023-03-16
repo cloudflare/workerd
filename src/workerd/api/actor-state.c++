@@ -141,7 +141,7 @@ jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCache::GetResultList valu
   size_t cachedReadBytes = 0;
   size_t uncachedReadBytes = 0;
   for (auto entry: value) {
-    auto& bytesRef = entry.status == ActorCacheInterface::CacheStatus::CACHED
+    auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                    ? cachedReadBytes : uncachedReadBytes;
     bytesRef += entry.key.size() + entry.value.size();
     jsg::check(map->Set(context, jsg::v8Str(isolate, entry.key),
@@ -179,7 +179,7 @@ kj::Function<jsg::Value(v8::Isolate*, ActorCache::GetResultList)> getMultipleRes
     uint32_t cachedUnits = 0;
     uint32_t uncachedUnits = 0;
     for (auto entry: value) {
-      auto& unitsRef = entry.status == ActorCacheInterface::CacheStatus::CACHED
+      auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                     ? cachedUnits : uncachedUnits;
       unitsRef += billingUnits(entry.key.size() + entry.value.size());
       jsg::check(map->Set(context, jsg::v8Str(isolate, entry.key),
@@ -581,7 +581,7 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
   });
 }
 
-ActorCacheInterface& DurableObjectStorage::getCache(OpName op) {
+ActorCacheOps& DurableObjectStorage::getCache(OpName op) {
   KJ_SWITCH_ONEOF(cache) {
     KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
       return *actorCache;
@@ -675,7 +675,7 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-ActorCacheInterface& DurableObjectTransaction::getCache(OpName op) {
+ActorCacheOps& DurableObjectTransaction::getCache(OpName op) {
   JSG_REQUIRE(!rolledBack, Error, kj::str("Cannot ", op, " on rolled back transaction"));
   auto& result = *JSG_REQUIRE_NONNULL(cacheTxn, Error,
       kj::str("Cannot call ", op,
