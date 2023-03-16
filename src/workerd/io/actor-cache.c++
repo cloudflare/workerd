@@ -129,7 +129,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
   return getBackpressure();
 }
 
-kj::Maybe<ActorCache::DeferredAlarmDeleter> ActorCache::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
   noCache = noCache || lru.options.noCache;
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
@@ -156,7 +156,18 @@ kj::Maybe<ActorCache::DeferredAlarmDeleter> ActorCache::armAlarmHandler(kj::Date
       .noCache = noCache,
       };
   }
-  return DeferredAlarmDeleter(*this);
+  static const DeferredAlarmDeleter disposer;
+  return kj::Own<void>(this, disposer);
+}
+
+void ActorCache::cancelDeferredAlarmDeletion() {
+  KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+    currentAlarmTime = KnownAlarmTime {
+      .status = KnownAlarmTime::Status::CLEAN,
+      .time = deferredDelete->timeToDelete,
+      .noCache = deferredDelete->noCache
+    };
+  }
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
@@ -1907,6 +1918,10 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
       return result;
     }
   }
+}
+
+kj::Own<ActorCacheInterface::Transaction> ActorCache::startTransaction() {
+  return kj::heap<Transaction>(*this);
 }
 
 ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
