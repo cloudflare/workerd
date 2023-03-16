@@ -2813,13 +2813,13 @@ kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
   return impl->transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
 }
 
-kj::Maybe<ActorCache&> Worker::Actor::getPersistent() {
+kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
   return impl->actorCache;
 }
 
 kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
     Worker::Actor::makeStorageForSwSyntax(Worker::Lock& lock) {
-  return impl->actorCache.map([&](ActorCache& cache) {
+  return impl->actorCache.map([&](ActorCacheInterface& cache) {
     return impl->makeStorage(lock, *worker->getIsolate().apiIsolate, cache);
   });
 }

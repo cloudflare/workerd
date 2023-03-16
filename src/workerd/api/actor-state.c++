@@ -133,7 +133,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
   KJ_UNREACHABLE
 }
 
-jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCache::GetResultList value, bool completelyCached) {
+jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCacheOps::GetResultList value, bool completelyCached) {
   v8::HandleScope scope(isolate);
   auto context = isolate->GetCurrentContext();
 
@@ -169,9 +169,9 @@ jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCache::GetResultList valu
   return jsg::Value(isolate, map);
 }
 
-kj::Function<jsg::Value(v8::Isolate*, ActorCache::GetResultList)> getMultipleResultsToMap(
+kj::Function<jsg::Value(v8::Isolate*, ActorCacheOps::GetResultList)> getMultipleResultsToMap(
     size_t numInputKeys) {
-  return [numInputKeys](v8::Isolate* isolate, ActorCache::GetResultList value) mutable {
+  return [numInputKeys](v8::Isolate* isolate, ActorCacheOps::GetResultList value) mutable {
     v8::HandleScope scope(isolate);
     auto context = isolate->GetCurrentContext();
 
@@ -214,7 +214,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
 
   auto result = getCache(OP_GET).get(kj::str(key), options);
   return transformCacheResultWithCacheStatus(isolate, kj::mv(result), options,
-      [key = kj::mv(key)](v8::Isolate* isolate, kj::Maybe<ActorCache::Value> value, bool cached) {
+      [key = kj::mv(key)](v8::Isolate* isolate, kj::Maybe<ActorCacheOps::Value> value, bool cached) {
     uint32_t units = 1;
     KJ_IF_MAYBE(v, value) {
       units = billingUnits(v->size());
@@ -350,7 +350,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
   }
 
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
-  ActorCache::ReadOptions readOptions = options;
+  ActorCacheOps::ReadOptions readOptions = options;
 
   auto result = reverse
       ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
@@ -489,7 +489,7 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
   KJ_SWITCH_ONEOF(cache) {
-    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCacheInterface>) {
       auto deleteAll = actorCache->deleteAll(options);
 
       auto& context = IoContext::current();
@@ -535,7 +535,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options, v8::Isolate* isolate) {
-  kj::Vector<ActorCache::KeyValuePair> kvs(entries.fields.size());
+  kj::Vector<ActorCacheOps::KeyValuePair> kvs(entries.fields.size());
 
   uint32_t units = 0;
   for (auto& field : entries.fields) {
@@ -551,7 +551,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
     units += billingUnits(field.name.size() + buffer.size());
 
-    kvs.add(ActorCache::KeyValuePair { kj::mv(field.name), kj::mv(buffer) });
+    kvs.add(ActorCacheOps::KeyValuePair { kj::mv(field.name), kj::mv(buffer) });
   }
 
   jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(isolate, options,
@@ -583,7 +583,7 @@ jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
 
 ActorCacheOps& DurableObjectStorage::getCache(OpName op) {
   KJ_SWITCH_ONEOF(cache) {
-    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCacheInterface>) {
       return *actorCache;
     }
     KJ_CASE_ONEOF(sqliteKv, IoPtr<ActorSqlite>) {
@@ -597,10 +597,10 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
     jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> callback,
     jsg::Optional<TransactionOptions> options) {
   KJ_SWITCH_ONEOF(cache) {
-    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCacheInterface>) {
       auto& context = IoContext::current();
       auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(
-            kj::heap<ActorCache::Transaction>(*actorCache)));
+            actorCache->startTransaction()));
 
       struct TxnResult {
         jsg::Value value;
@@ -648,7 +648,7 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(cache) {
-    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCache>) {
+    KJ_CASE_ONEOF(actorCache, IoPtr<ActorCacheInterface>) {
       KJ_IF_MAYBE(p, actorCache->onNoPendingFlush()) {
         // Note that we're not actually flushing since that will happen anyway once we go async. We're
         // merely checking if we have any pending or in-flight operations, and providing a promise that

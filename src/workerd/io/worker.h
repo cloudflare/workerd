@@ -36,7 +36,7 @@ namespace api {
 }
 
 class IoContext;
-class ActorCache;
+class ActorCacheInterface;
 class InputGate;
 class OutputGate;
 
@@ -634,7 +634,7 @@ class Worker::Actor final: public kj::Refcounted {
 
 public:
   using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
-      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCache& actorCache)>;
+      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)>;
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
@@ -679,7 +679,7 @@ public:
   const Id& getId();
   Id cloneId();
   kj::Maybe<jsg::Value> getTransient(Worker::Lock& lock);
-  kj::Maybe<ActorCache&> getPersistent();
+  kj::Maybe<ActorCacheInterface&> getPersistent();
 
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for
