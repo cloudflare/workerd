@@ -2334,7 +2334,6 @@ export const corkEnd = {
     });
 
     await closed.promise;
-
   }
 };
 
