@@ -157,7 +157,69 @@ public:
   // from underlying storage. The promise also applies backpressure if needed, as with put().
 };
 
-class ActorCache final: public ActorCacheOps {
+class ActorCacheInterface: public ActorCacheOps {
+  // Abstract interface that is implemneted by ActorCache as well as ActorSqlite.
+  //
+  // This extends ActorCacheOps and adds some methods that don't make sense as part of
+  // ActorCache::Transaction.
+
+public:
+  class Transaction: public ActorCacheOps {
+  public:
+    virtual kj::Maybe<kj::Promise<void>> commit() = 0;
+    // Write all changes to the underlying ActorCache.
+    //
+    // If commit() is not called before the Transaction is destroyed, nothing is written.
+    //
+    // Returns a promise if backpressure needs to be applied (like ActorCache::put()).
+    //
+    // This will NOT detect conflicts, it will always just write blindly, because conflicts
+    // inherently cannot happen.
+
+    virtual kj::Promise<void> rollback() = 0;
+  };
+
+  virtual kj::Own<Transaction> startTransaction() = 0;
+
+  struct DeleteAllResults {
+    // We split these up so client code that doesn't need the count doesn't have to
+    // wait for it just to account for backpressure
+    kj::Maybe<kj::Promise<void>> backpressure;
+    kj::Promise<uint> count;
+  };
+
+  virtual DeleteAllResults deleteAll(WriteOptions options) = 0;
+  // Delete everything in the actor's storage. This is not part of ActorCacheOps because it
+  // is not supported as part of a transaction.
+  //
+  // The returned count only includes keys that were actually deleted from storage, not keys in
+  // cache -- we only use the returned deleteAll count for billing, and not counting deletes of
+  // entries that are only in cache is no problem for billing, those deletes don't cost us anything.
+
+  virtual kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) = 0;
+  // Call each time the isolate lock is taken to evict stale entries. If this returns a promise,
+  // then the caller must hold off on JavaScript execution until the promise resolves -- this
+  // creates back pressure when the write queue is too deep.
+  //
+  // (This takes a Date rather than a TimePoint because it is based on Date.now(), to avoid
+  // bypassing Spectre mitigations.)
+
+  virtual void shutdown(kj::Maybe<const kj::Exception&> maybeException) = 0;
+
+  virtual kj::Maybe<kj::Own<void>> armAlarmHandler(
+      kj::Date scheduledTime, bool noCache = false) = 0;
+  // Call when entering the alarm handler and attach the returned object to the promise representing
+  // the alarm handler's execution.
+  //
+  // The returned object will schedule a write to clear the alarm time if no alarm writes have been
+  // made while it exists. If nullptr is returned, the alarm run should be canceled.
+
+  virtual void cancelDeferredAlarmDeletion() = 0;
+
+  virtual kj::Maybe<kj::Promise<void>> onNoPendingFlush() = 0;
+};
+
+class ActorCache final: public ActorCacheInterface {
   // An in-memory caching layer on top of ActorStorage.Stage RPC interface.
   //
   // This cache assumes that it is the only client of the underlying storage -- which is, of
@@ -201,78 +263,37 @@ public:
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
-  kj::Maybe<kj::Promise<void>> onNoPendingFlush();
   // See ActorCacheOps.
 
-  struct DeleteAllResults {
-    // We split these up so client code that doesn't need the count doesn't have to
-    // wait for it just to account for backpressure
-    kj::Maybe<kj::Promise<void>> backpressure;
-    kj::Promise<uint> count;
-  };
-
-  DeleteAllResults deleteAll(WriteOptions options);
-  // Delete everything in the actor's storage. This is not part of ActorCacheOps because it
-  // is not supported as part of a transaction.
-  //
-  // The returned count only includes keys that were actually deleted from storage, not keys in
-  // cache -- we only use the returned deleteAll count for billing, and not counting deletes of
-  // entries that are only in cache is no problem for billing, those deletes don't cost us anything.
+  kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  DeleteAllResults deleteAll(WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
+  void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
+  kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache = false) override;
+  void cancelDeferredAlarmDeletion() override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
+  // See ActorCacheInterface
 
   class Transaction;
   void verifyConsistencyForTest();
   // Check for inconsistencies in the cache, e.g. redundant entries.
 
-  kj::Maybe<kj::Promise<void>> evictStale(kj::Date now);
-  // Call each time the isolate lock is taken to evict stale entries. If this returns a promise,
-  // then the caller must hold off on JavaScript execution until the promise resolves -- this
-  // creates back pressure when the write queue is too deep.
-  //
-  // (This takes a Date rather than a TimePoint because it is based on Date.now(), to avoid
-  // bypassing Spectre mitigations.)
-
-  void shutdown(kj::Maybe<const kj::Exception&> maybeException);
-
 private:
-  class DeferredAlarmDeleter {
+  class DeferredAlarmDeleter: public kj::Disposer {
+    // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   public:
-    DeferredAlarmDeleter(ActorCache& parent): parent(parent) {}
-    DeferredAlarmDeleter(DeferredAlarmDeleter&& other)
-        : parent(other.parent) { other.parent = nullptr; }
-    KJ_DISALLOW_COPY(DeferredAlarmDeleter);
-
-    ~DeferredAlarmDeleter() noexcept(false) {
-      KJ_IF_MAYBE(p, parent) {
-        KJ_IF_MAYBE(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-          d->status = DeferredAlarmDelete::Status::READY;
-          p->ensureFlushScheduled(WriteOptions { .noCache = d->noCache });
-        }
+    void disposeImpl(void* pointer) const {
+      // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
+      // `ActorCache` itself, but with an alterante disposer that deletes the alarm rather than
+      // the whole object.
+      auto p = reinterpret_cast<ActorCache*>(pointer);
+      KJ_IF_MAYBE(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+        d->status = DeferredAlarmDelete::Status::READY;
+        p->ensureFlushScheduled(WriteOptions { .noCache = d->noCache });
       }
     }
-
-  private:
-    kj::Maybe<ActorCache&> parent;
   };
 
-public:
-  kj::Maybe<DeferredAlarmDeleter> armAlarmHandler(kj::Date scheduledTime, bool noCache = false);
-  // Call when entering the alarm handler and attach the returned object to the promise representing
-  // the alarm handler's execution.
-  //
-  // The returned object will schedule a write to clear the alarm time if no alarm writes have been
-  // made while it exists. If nullptr is returned, the alarm run should be canceled.
-
-  void cancelDeferredAlarmDeletion() {
-    KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-      currentAlarmTime = KnownAlarmTime {
-        .status = KnownAlarmTime::Status::CLEAN,
-        .time = deferredDelete->timeToDelete,
-        .noCache = deferredDelete->noCache
-      };
-    }
-  }
-
-private:
   enum EntryState {
     // States that a cache entry may be in.
 
@@ -806,7 +827,7 @@ private:
   friend class ActorCache;
 };
 
-class ActorCache::Transaction final: public ActorCacheOps {
+class ActorCache::Transaction final: public ActorCacheInterface::Transaction {
   // A transaction represents a set of writes that haven't been committed. The transaction can be
   // discarded without committing.
   //
@@ -838,17 +859,9 @@ public:
   // Read ops will reflect the previous writes made to the transaction even though they aren't
   // committed yet.
 
-  kj::Maybe<kj::Promise<void>> commit();
-  // Write all changes to the underlying ActorCache.
-  //
-  // If commit() is not called before the Transaction is destroyed, nothing is written.
-  //
-  // Returns a promise if backpressure needs to be applied (like ActorCache::put()).
-  //
-  // This will NOT detect conflicts, it will always just write blindly, because conflicts
-  // inherently cannot happen.
-
-  kj::Promise<void> rollback();
+  kj::Maybe<kj::Promise<void>> commit() override;
+  kj::Promise<void> rollback() override;
+  // Implements ActorCacheInterface::Transaction.
 
 private:
   ActorCache& cache;
