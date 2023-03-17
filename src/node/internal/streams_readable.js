@@ -296,6 +296,7 @@ function addChunk(stream, state, chunk, addToFront) {
       state.awaitDrainWriters.clear();
     } else {
       state.awaitDrainWriters = null;
+      state.multiAwaitDrain = false;
     }
     state.dataEmitted = true;
     stream.emit('data', chunk);
@@ -464,6 +465,7 @@ Readable.prototype.read = function (n) {
       state.awaitDrainWriters.clear();
     } else {
       state.awaitDrainWriters = null;
+      state.multiAwaitDrain = false;
     }
   }
   if (state.length === 0) {
@@ -600,7 +602,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   if (state.pipes.length === 1) {
     if (!state.multiAwaitDrain) {
       state.multiAwaitDrain = true;
-      state.awaitDrainWriters = new Set<Writable>(
+      state.awaitDrainWriters = new Set(
           state.awaitDrainWriters ? [state.awaitDrainWriters] : []);
     }
   }
@@ -1410,7 +1412,7 @@ function map(fn, options) {
             next = null;
           }
           if (!done && queue.length && queue.length >= concurrency) {
-            await new Promise<any>((resolve) => {
+            await new Promise((resolve) => {
               resume = resolve;
             });
           }

@@ -32,7 +32,10 @@ import {
   addAbortSignal,
   destroy,
   finished,
+  isDisturbed,
+  isErrored,
   pipeline,
+  promises,
 } from 'node:stream';
 
 import {
@@ -4568,3 +4571,6666 @@ export const stream2_compatibility = {
     strictEqual(writer.writable, false);
   }
 };
+
+export const stream2_basic = {
+  async test(ctrl, env, ctx) {
+
+    class TestReader extends Readable {
+      constructor(n) {
+        super()
+        this._buffer = Buffer.alloc(n || 100, 'x')
+        this._pos = 0
+        this._bufs = 10
+      }
+      _read(n) {
+        const max = this._buffer.length - this._pos
+        n = Math.max(n, 0)
+        const toRead = Math.min(n, max)
+        if (toRead === 0) {
+          // Simulate the read buffer filling up with some more bytes some time
+          // in the future.
+          setTimeout(() => {
+            this._pos = 0
+            this._bufs -= 1
+            if (this._bufs <= 0) {
+              // read them all!
+              if (!this.ended) this.push(null)
+            } else {
+              // now we have more.
+              // kinda cheating by calling _read, but whatever,
+              // it's just fake anyway.
+              this._read(n)
+            }
+          }, 10)
+          return
+        }
+        const ret = this._buffer.slice(this._pos, this._pos + toRead)
+        this._pos += toRead
+        this.push(ret)
+      }
+    }
+
+    class TestWriter extends EventEmitter {
+      constructor() {
+        super()
+        this.received = []
+        this.flush = false
+      }
+      write(c) {
+        this.received.push(c.toString())
+        this.emit('write', c)
+        return true
+      }
+      end(c) {
+        if (c) this.write(c)
+        this.emit('end', this.received)
+      }
+    }
+
+    {
+      // Test basic functionality
+      const r = new TestReader(20);
+      const reads = [];
+      const expect = [
+        'x',
+        'xx',
+        'xxx',
+        'xxxx',
+        'xxxxx',
+        'xxxxxxxxx',
+        'xxxxxxxxxx',
+        'xxxxxxxxxxxx',
+        'xxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxxxxxxxxxx',
+        'xxxxxxxxxxxxxxxxxxxxx'
+      ];
+      r.on(
+        'end',
+        function () {
+          deepStrictEqual(reads, expect);
+        }
+      );
+      let readSize = 1;
+      function flow() {
+        let res;
+        while (null !== (res = r.read(readSize++))) {
+          reads.push(res.toString());
+        }
+        r.once('readable', flow);
+      }
+      flow();
+
+      await promises.finished(r);
+    }
+    {
+      // Verify pipe
+      const r = new TestReader(5);
+      const expect = ['xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx'];
+      const w = new TestWriter();
+      w.on(
+        'end',
+        function (received) {
+          deepStrictEqual(received, expect);
+        }
+      );
+      r.pipe(w);
+      await promises.finished(r);
+    }
+    await Promise.all([1, 2, 3, 4, 5, 6, 7, 8, 9].map(async function (SPLIT) {
+      // Verify unpipe
+      const r = new TestReader(5);
+
+      // Unpipe after 3 writes, then write to another stream instead.
+      let expect = ['xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx'];
+      expect = [expect.slice(0, SPLIT), expect.slice(SPLIT)];
+      const w = [new TestWriter(), new TestWriter()];
+      let writes = SPLIT;
+      w[0].on('write', function () {
+        if (--writes === 0) {
+          r.unpipe();
+          deepStrictEqual(r._readableState.pipes, []);
+          w[0].end();
+          r.pipe(w[1]);
+          deepStrictEqual(r._readableState.pipes, [w[1]]);
+        }
+      });
+      let ended = 0;
+      w[0].on(
+        'end',
+        function (results) {
+          ended++;
+          strictEqual(ended, 1);
+          deepStrictEqual(results, expect[0]);
+        }
+      );
+      w[1].on(
+        'end',
+        function (results) {
+          ended++;
+          strictEqual(ended, 2);
+          deepStrictEqual(results, expect[1]);
+        }
+      );
+      r.pipe(w[0]);
+      await promises.finished(r);
+    }));
+    {
+      // Verify both writers get the same data when piping to destinations
+      const r = new TestReader(5);
+      const w = [new TestWriter(), new TestWriter()];
+      const expect = ['xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx'];
+      w[0].on(
+        'end',
+        function (received) {
+          deepStrictEqual(received, expect);
+        }
+      );
+      w[1].on(
+        'end',
+        function (received) {
+          deepStrictEqual(received, expect);
+        }
+      );
+      r.pipe(w[0]);
+      r.pipe(w[1]);
+      await promises.finished(r);
+    }
+    await Promise.all([1, 2, 3, 4, 5, 6, 7, 8, 9].map(async function (SPLIT) {
+      // Verify multi-unpipe
+      const r = new TestReader(5);
+
+      // Unpipe after 3 writes, then write to another stream instead.
+      let expect = ['xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx', 'xxxxx'];
+      expect = [expect.slice(0, SPLIT), expect.slice(SPLIT)];
+      const w = [new TestWriter(), new TestWriter(), new TestWriter()];
+      let writes = SPLIT;
+      w[0].on('write', function () {
+        if (--writes === 0) {
+          r.unpipe();
+          w[0].end();
+          r.pipe(w[1]);
+        }
+      });
+      let ended = 0;
+      w[0].on(
+        'end',
+        function (results) {
+          ended++
+          strictEqual(ended, 1);
+          deepStrictEqual(results, expect[0]);
+        }
+      );
+      w[1].on(
+        'end',
+        function (results) {
+          ended++;
+          strictEqual(ended, 2);
+          deepStrictEqual(results, expect[1]);
+        }
+      );
+      r.pipe(w[0]);
+      r.pipe(w[2]);
+      await promises.finished(r);
+    }));
+    {
+      // Verify that back pressure is respected
+      const r = new Readable({
+        objectMode: true
+      });
+      r._read = () => { throw new Error('should not have been called'); };
+      let counter = 0;
+      r.push(['one']);
+      r.push(['two']);
+      r.push(['three']);
+      r.push(['four']);
+      r.push(null);
+      const w1 = new Readable();
+      w1.write = function (chunk) {
+        strictEqual(chunk[0], 'one');
+        w1.emit('close');
+        queueMicrotask(function () {
+          r.pipe(w2);
+          r.pipe(w3);
+        });
+      };
+      w1.end = () => { throw new Error('should not have been called'); };
+      r.pipe(w1);
+      const expected = ['two', 'two', 'three', 'three', 'four', 'four'];
+      const w2 = new Readable();
+      w2.write = function (chunk) {
+        strictEqual(chunk[0], expected.shift());
+        strictEqual(counter, 0);
+        counter++;
+        if (chunk[0] === 'four') {
+          return true;
+        }
+        setTimeout(function () {
+          counter--;
+          w2.emit('drain');
+        }, 10);
+        return false;
+      }
+      const ended2 = deferredPromise();
+      w2.end = ended2.resolve;
+      const w3 = new Readable();
+      w3.write = function (chunk) {
+        strictEqual(chunk[0], expected.shift());
+        strictEqual(counter, 1);
+        counter++;
+        if (chunk[0] === 'four') {
+          return true;
+        }
+        setTimeout(function () {
+          counter--;
+          w3.emit('drain');
+        }, 50);
+        return false;
+      }
+      const ended3 = deferredPromise();
+      w3.end = function () {
+        strictEqual(counter, 2);
+        strictEqual(expected.length, 0);
+        ended3.resolve();
+      };
+      await Promise.all([
+        ended2.promise,
+        ended3.promise,
+      ]);
+    }
+    {
+      // Verify read(0) behavior for ended streams
+      const r = new Readable();
+      let written = false;
+      let ended = false;
+      r._read = () => { throw new Error('should not have been called'); };
+      r.push(Buffer.from('foo'));
+      r.push(null);
+      const v = r.read(0);
+      strictEqual(v, null);
+      const w = new Readable();
+      const writeCalled = deferredPromise();
+      w.write = function (buffer) {
+        written = true;
+        strictEqual(ended, false);
+        strictEqual(buffer.toString(), 'foo');
+        writeCalled.resolve();
+      }
+      const endCalled = deferredPromise();
+      w.end = function () {
+        ended = true;
+        strictEqual(written, true);
+        endCalled.resolve();
+      };
+      r.pipe(w);
+      await Promise.all([
+        endCalled.promise,
+        writeCalled.promise,
+      ]);
+    }
+    {
+      // Verify synchronous _read ending
+      const r = new Readable();
+      let called = false;
+      r._read = function (n) {
+        r.push(null);
+      }
+      r.once('end', function () {
+        // Verify that this is called before the next tick
+        called = true;
+      })
+      r.read();
+      queueMicrotask(function () {
+        strictEqual(called, true)
+      })
+    }
+    {
+      // Verify that adding readable listeners trigger data flow
+      const r = new Readable({
+        highWaterMark: 5
+      });
+      let onReadable = false;
+      let readCalled = 0;
+      r._read = function (n) {
+        if (readCalled++ === 2) r.push(null);
+        else r.push(Buffer.from('asdf'));
+      }
+      r.on('readable', function () {
+        onReadable = true;
+        r.read();
+      });
+      const endCalled = deferredPromise();
+      r.on(
+        'end',
+        function () {
+          strictEqual(readCalled, 3);
+          ok(onReadable);
+          endCalled.resolve();
+        }
+      );
+      await endCalled.promise;
+    }
+    {
+      // Verify that streams are chainable
+      const r = new Readable();
+      const readCalled = deferredPromise();
+      r._read = readCalled.resolve;
+      const r2 = r.setEncoding('utf8').pause().resume().pause();
+      strictEqual(r, r2);
+      await readCalled.promise;
+    }
+    {
+      // Verify readableEncoding property
+      ok(Reflect.has(Readable.prototype, 'readableEncoding'));
+      const r = new Readable({
+        encoding: 'utf8'
+      });
+      strictEqual(r.readableEncoding, 'utf8');
+    }
+    {
+      // Verify readableObjectMode property
+      ok(Reflect.has(Readable.prototype, 'readableObjectMode'));
+      const r = new Readable({
+        objectMode: true
+      });
+      strictEqual(r.readableObjectMode, true);
+    }
+    {
+      // Verify writableObjectMode property
+      ok(Reflect.has(Writable.prototype, 'writableObjectMode'));
+      const w = new Writable({
+        objectMode: true
+      });
+      strictEqual(w.writableObjectMode, true);
+    }
+  }
+};
+
+export const stream2_base64_single_char_read_end = {
+  async test(ctrl, env, ctx) {
+    const src = new Readable({
+      encoding: 'base64'
+    });
+    const dst = new Writable();
+    let hasRead = false;
+    const accum = [];
+    src._read = function (n) {
+      if (!hasRead) {
+        hasRead = true;
+        queueMicrotask(function () {
+          src.push(Buffer.from('1'));
+          src.push(null);
+        });
+      }
+    };
+    dst._write = function (chunk, enc, cb) {
+      accum.push(chunk);
+      cb();
+    };
+    src.on('end', function () {
+      strictEqual(String(Buffer.concat(accum)), 'MQ==');
+      clearTimeout(timeout);
+    })
+    src.pipe(dst);
+    const timeout = setTimeout(function () {
+      fail('timed out waiting for _write');
+    }, 100);
+  }
+};
+
+export const writev = {
+  async test(ctrl, env, ctx) {
+    const queue = [];
+    for (let decode = 0; decode < 2; decode++) {
+      for (let uncork = 0; uncork < 2; uncork++) {
+        for (let multi = 0; multi < 2; multi++) {
+          queue.push([!!decode, !!uncork, !!multi]);
+        }
+      }
+    }
+    run();
+    function run() {
+      const t = queue.pop();
+      if (t) test(t[0], t[1], t[2], run);
+    }
+    function test(decode, uncork, multi, next) {
+      let counter = 0;
+      let expectCount = 0;
+      function cnt(msg) {
+        expectCount++;
+        const expect = expectCount;
+        return function (er) {
+          ifError(er);
+          counter++;
+          strictEqual(counter, expect);
+        }
+      }
+      const w = new Writable({
+        decodeStrings: decode
+      });
+      w._write = () => { throw new Error('Should not call _write'); };
+      const expectChunks = decode
+        ? [
+            {
+              encoding: 'buffer',
+              chunk: [104, 101, 108, 108, 111, 44, 32]
+            },
+            {
+              encoding: 'buffer',
+              chunk: [119, 111, 114, 108, 100]
+            },
+            {
+              encoding: 'buffer',
+              chunk: [33]
+            },
+            {
+              encoding: 'buffer',
+              chunk: [10, 97, 110, 100, 32, 116, 104, 101, 110, 46, 46, 46]
+            },
+            {
+              encoding: 'buffer',
+              chunk: [250, 206, 190, 167, 222, 173, 190, 239, 222, 202, 251, 173]
+            }
+          ]
+        : [
+            {
+              encoding: 'ascii',
+              chunk: 'hello, '
+            },
+            {
+              encoding: 'utf8',
+              chunk: 'world'
+            },
+            {
+              encoding: 'buffer',
+              chunk: [33]
+            },
+            {
+              encoding: 'latin1',
+              chunk: '\nand then...'
+            },
+            {
+              encoding: 'hex',
+              chunk: 'facebea7deadbeefdecafbad'
+            }
+          ];
+      let actualChunks;
+      w._writev = function (chunks, cb) {
+        actualChunks = chunks.map(function (chunk) {
+          return {
+            encoding: chunk.encoding,
+            chunk: Buffer.isBuffer(chunk.chunk) ? Array.prototype.slice.call(chunk.chunk) : chunk.chunk
+          };
+        });
+        cb();
+      }
+      w.cork();
+      w.write('hello, ', 'ascii', cnt('hello'));
+      w.write('world', 'utf8', cnt('world'));
+      if (multi) w.cork();
+      w.write(Buffer.from('!'), 'buffer', cnt('!'));
+      w.write('\nand then...', 'latin1', cnt('and then'));
+      if (multi) w.uncork();
+      w.write('facebea7deadbeefdecafbad', 'hex', cnt('hex'));
+      if (uncork) w.uncork();
+      w.end(cnt('end'));
+      w.on('finish', function () {
+        // Make sure finish comes after all the write cb
+        cnt('finish')();
+        deepStrictEqual(actualChunks, expectChunks);
+        next();
+      });
+    }
+    {
+      const writeCalled = deferredPromise();
+      const writeFinished = deferredPromise();
+      const w = new Writable({
+        writev: function (chunks, cb) {
+          cb();
+          writeCalled.resolve();
+        }
+      })
+      w.write('asd', writeFinished.resolve);
+      await Promise.all([
+        writeCalled.promise,
+        writeFinished.promise,
+      ]);
+    }
+  }
+};
+
+export const writeFinal = {
+  async test(ctrl, env, ctx) {
+    const finalCalled = deferredPromise();
+    const finishCalled = deferredPromise();
+    let shutdown = false;
+    const w = new Writable({
+      final: function (cb) {
+        strictEqual(this, w);
+        setTimeout(function () {
+          shutdown = true;
+          cb();
+          finalCalled.resolve();
+        }, 100);
+      },
+      write: function (chunk, e, cb) {
+        queueMicrotask(cb);
+      }
+    })
+    w.on(
+      'finish',
+      function () {
+        ok(shutdown);
+        finishCalled.resolve();
+      }
+    )
+    w.write(Buffer.allocUnsafe(1));
+    w.end(Buffer.allocUnsafe(0));
+    await Promise.all([
+      finalCalled.promise,
+      finishCalled.promise,
+    ]);
+  }
+};
+
+export const writeDrain = {
+  async test(ctrl, env, ctx) {
+    const w = new Writable({
+      write(data, enc, cb) {
+        queueMicrotask(cb)
+      },
+      highWaterMark: 1
+    });
+    w.on('drain', () => { throw new Error('should not be called'); });
+    w.write('asd');
+    w.end();
+  }
+};
+
+export const writeDestroy = {
+  async test(ctrl, env, ctx) {
+    for (const withPendingData of [false, true]) {
+      for (const useEnd of [false, true]) {
+        const callbacks = [];
+        const w = new Writable({
+          write(data, enc, cb) {
+            callbacks.push(cb);
+          },
+          // Effectively disable the HWM to observe 'drain' events more easily.
+          highWaterMark: 1
+        });
+        let chunksWritten = 0;
+        let drains = 0;
+        w.on('drain', () => drains++);
+        function onWrite(err) {
+          if (err) {
+            strictEqual(w.destroyed, true);
+            strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+          } else {
+            chunksWritten++;
+          }
+        };
+        w.write('abc', onWrite);
+        strictEqual(chunksWritten, 0);
+        strictEqual(drains, 0);
+        callbacks.shift()();
+        strictEqual(chunksWritten, 1);
+        strictEqual(drains, 1);
+        if (withPendingData) {
+          // Test 2 cases: There either is or is not data still in the write queue.
+          // (The second write will never actually get executed either way.)
+          w.write('def', onWrite);
+        }
+        if (useEnd) {
+          // Again, test 2 cases: Either we indicate that we want to end the
+          // writable or not.
+          w.end('ghi', onWrite);
+        } else {
+          w.write('ghi', onWrite);
+        }
+        strictEqual(chunksWritten, 1);
+        w.destroy();
+        strictEqual(chunksWritten, 1);
+        callbacks.shift()()
+        strictEqual(chunksWritten, useEnd && !withPendingData ? 1 : 2);
+        strictEqual(callbacks.length, 0);
+        strictEqual(drains, 1);
+      }
+    }
+  }
+};
+
+export const writableState_uncorked_bufferedRequestCount = {
+  async test(ctrl, env, ctx) {
+    const writable = new Writable();
+    const writevCalled = deferredPromise();
+    const writeCalled = deferredPromise();
+    writable._writev = (chunks, cb) => {
+      strictEqual(chunks.length, 2);
+      cb();
+      writevCalled.resolve();
+    };
+    writable._write = (chunk, encoding, cb) => {
+      cb();
+      writeCalled.resolve();
+    };
+
+    // first cork
+    writable.cork();
+    strictEqual(writable._writableState.corked, 1);
+    strictEqual(writable._writableState.bufferedRequestCount, 0);
+
+    // cork again
+    writable.cork();
+    strictEqual(writable._writableState.corked, 2);
+
+    // The first chunk is buffered
+    writable.write('first chunk');
+    strictEqual(writable._writableState.bufferedRequestCount, 1);
+
+    // First uncork does nothing
+    writable.uncork();
+    strictEqual(writable._writableState.corked, 1);
+    strictEqual(writable._writableState.bufferedRequestCount, 1);
+    queueMicrotask(uncork);
+
+    // The second chunk is buffered, because we uncork at the end of tick
+    writable.write('second chunk');
+    strictEqual(writable._writableState.corked, 1);
+    strictEqual(writable._writableState.bufferedRequestCount, 2);
+    const uncorkCalled = deferredPromise();
+    function uncork() {
+      // Second uncork flushes the buffer
+      writable.uncork()
+      strictEqual(writable._writableState.corked, 0);
+      strictEqual(writable._writableState.bufferedRequestCount, 0);
+
+      // Verify that end() uncorks correctly
+      writable.cork();
+      writable.write('third chunk');
+      writable.end();
+
+      // End causes an uncork() as well
+      strictEqual(writable._writableState.corked, 0);
+      strictEqual(writable._writableState.bufferedRequestCount, 0);
+      uncorkCalled.resolve();
+    }
+
+    await Promise.all([
+      writevCalled.promise,
+      writeCalled.promise,
+      uncorkCalled.promise,
+    ]);
+  }
+};
+
+export const writeableState_ending = {
+  async test(ctrl, env, ctx) {
+    const writable = new Writable();
+    function testStates(ending, finished, ended) {
+      strictEqual(writable._writableState.ending, ending);
+      strictEqual(writable._writableState.finished, finished);
+      strictEqual(writable._writableState.ended, ended);
+    }
+    writable._write = (chunk, encoding, cb) => {
+      // Ending, finished, ended start in false.
+      testStates(false, false, false);
+      cb();
+    };
+    writable.on('finish', () => {
+      // Ending, finished, ended = true.
+      testStates(true, true, true);
+    });
+    const result = writable.end('testing function end()', () => {
+      // Ending, finished, ended = true.
+      testStates(true, true, true);
+    });
+
+    // End returns the writable instance
+    strictEqual(result, writable);
+
+    // Ending, ended = true.
+    // finished = false.
+    testStates(true, false, true);
+  }
+};
+
+export const writable_write_writev_finish = {
+  async test(ctrl, env, ctx) {
+    {
+      const writable = new Writable();
+      const errored = deferredPromise();
+      writable._write = (chunks, encoding, cb) => {
+        cb(new Error('write test error'));
+      }
+      writable.on('finish', errored.reject);
+      writable.on('prefinish', errored.reject);
+      writable.on(
+        'error',
+        (er) => {
+          strictEqual(er.message, 'write test error');
+          errored.resolve();
+        }
+      );
+      writable.end('test');
+      await errored.promise;
+    }
+    {
+      const writable = new Writable();
+      const errored = deferredPromise();
+      writable._write = (chunks, encoding, cb) => {
+        queueMicrotask(() => cb(new Error('write test error')));
+      }
+      writable.on('finish', errored.reject);
+      writable.on('prefinish', errored.reject)
+      writable.on(
+        'error',
+        (er) => {
+          strictEqual(er.message, 'write test error');
+          errored.resolve();
+        }
+      )
+      writable.end('test');
+      await errored.promise;
+    }
+    {
+      const writable = new Writable();
+      const errored = deferredPromise();
+      writable._write = (chunks, encoding, cb) => {
+        cb(new Error('write test error'));
+      };
+      writable._writev = (chunks, cb) => {
+        cb(new Error('writev test error'));
+      };
+      writable.on('finish', errored.reject);
+      writable.on('prefinish', errored.reject);
+      writable.on(
+        'error',
+        (er) => {
+          strictEqual(er.message, 'writev test error');
+          errored.resolve();
+        }
+      );
+      writable.cork();
+      writable.write('test');
+      queueMicrotask(function () {
+        writable.end('test');
+      });
+      await errored.promise;
+    }
+    {
+      const writable = new Writable();
+      const errored = deferredPromise();
+      writable._write = (chunks, encoding, cb) => {
+        queueMicrotask(() => cb(new Error('write test error')));
+      }
+      writable._writev = (chunks, cb) => {
+        queueMicrotask(() => cb(new Error('writev test error')));
+      }
+      writable.on('finish', errored.reject);
+      writable.on('prefinish', errored.reject);
+      writable.on(
+        'error',
+        (er) => {
+          strictEqual(er.message, 'writev test error');
+          errored.resolve();
+        }
+      )
+      writable.cork();
+      writable.write('test');
+      queueMicrotask(function () {
+        writable.end('test');
+      });
+      await errored.promise;
+    }
+
+    // Regression test for
+    // https://github.com/nodejs/node/issues/13812
+
+    {
+      const rs = new Readable();
+      rs.push('ok');
+      rs.push(null);
+      rs._read = () => {};
+      const ws = new Writable();
+      const errored = deferredPromise();
+      ws.on('finish', errored.reject);
+      ws.on('error', errored.resolve);
+      ws._write = (chunk, encoding, done) => {
+        queueMicrotask(() => done(new Error()));
+      }
+      rs.pipe(ws);
+      await errored.promise;
+    }
+    {
+      const rs = new Readable();
+      rs.push('ok');
+      rs.push(null);
+      rs._read = () => {};
+      const ws = new Writable();
+      const errored = deferredPromise();
+      ws.on('finish', errored.reject);
+      ws.on('error', errored.resolve);
+      ws._write = (chunk, encoding, done) => {
+        done(new Error());
+      }
+      rs.pipe(ws);
+      await errored.promise;
+    }
+    {
+      const w = new Writable();
+      w._write = (chunk, encoding, cb) => {
+        queueMicrotask(cb);
+      }
+      const errored = deferredPromise();
+      w.on('error', errored.resolve);
+      w.on('finish', errored.reject)
+      w.on('prefinish', () => {
+        w.write("shouldn't write in prefinish listener");
+      })
+      w.end();
+      await errored.promise;
+    }
+    {
+      const w = new Writable();
+      w._write = (chunk, encoding, cb) => {
+        queueMicrotask(cb);
+      };
+      const errored = deferredPromise();
+      w.on('error', errored.resolve);
+      w.on('finish', () => {
+        w.write("shouldn't write in finish listener");
+      })
+      w.end();
+      await errored.promise;
+    }
+  }
+};
+
+export const writable_write_error = {
+  async test(ctrl, env, ctx) {
+    async function expectError(w, args, code, sync) {
+      if (sync) {
+        if (code) {
+          throws(() => w.write(...args), {
+            code
+          });
+        } else {
+          w.write(...args);
+        }
+      } else {
+        let ticked = false;
+        const writeCalled = deferredPromise();
+        const errorCalled = deferredPromise();
+        w.write(
+          ...args,
+          (err) => {
+            strictEqual(ticked, true);
+            strictEqual(err.code, code);
+            writeCalled.resolve();
+          }
+        );
+        ticked = true;
+        w.on(
+          'error',
+          (err) => {
+            strictEqual(err.code, code);
+            errorCalled.resolve();
+          }
+        );
+        await Promise.all([
+          writeCalled.promise,
+          errorCalled.promise,
+        ]);
+      }
+    }
+    async function test(autoDestroy) {
+      {
+        const w = new Writable({
+          autoDestroy,
+          _write() {}
+        });
+        w.end();
+        await expectError(w, ['asd'], 'ERR_STREAM_WRITE_AFTER_END');
+      }
+      {
+        const w = new Writable({
+          autoDestroy,
+          _write() {}
+        });
+        w.destroy();
+      }
+      {
+        const w = new Writable({
+          autoDestroy,
+          _write() {}
+        });
+        await expectError(w, [null], 'ERR_STREAM_NULL_VALUES', true);
+      }
+      {
+        const w = new Writable({
+          autoDestroy,
+          _write() {}
+        });
+        await expectError(w, [{}], 'ERR_INVALID_ARG_TYPE', true);
+      }
+      {
+        const w = new Writable({
+          decodeStrings: false,
+          autoDestroy,
+          _write() {}
+        });
+        await expectError(w, ['asd', 'noencoding'], 'ERR_UNKNOWN_ENCODING', true);
+      }
+    }
+    await test(false)
+    await test(true)
+  }
+};
+
+export const writable_write_cb_twice = {
+  async test(ctrl, env, ctx) {
+    {
+      // Sync + Sync
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          cb();
+          cb();
+          writeCalled.resolve();
+        }
+      });
+      writable.write('hi');
+      writable.on(
+        'error',
+        function(err) {
+          strictEqual(err.code, 'ERR_MULTIPLE_CALLBACK');
+          errored.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      // Sync + Async
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          cb();
+          queueMicrotask(() => {
+            cb();
+            writeCalled.resolve();
+          });
+        }
+      })
+      writable.write('hi');
+      writable.on(
+        'error',
+        function (err) {
+          strictEqual(err.code, 'ERR_MULTIPLE_CALLBACK');
+          errored.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      // Async + Async
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          queueMicrotask(cb);
+          queueMicrotask(() => {
+            cb();
+            writeCalled.resolve();
+          });
+        }
+      });
+      writable.write('hi');
+      writable.on(
+        'error',
+        function (err) {
+          strictEqual(err.code, 'ERR_MULTIPLE_CALLBACK');
+          errored.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+  }
+};
+
+export const writable_write_cb_error = {
+  async test(ctrl, env, ctx) {
+    {
+      let callbackCalled = false;
+      // Sync Error
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const writeFinished = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          cb(new Error());
+          writeCalled.resolve();
+        }
+      });
+      writable.on(
+        'error',
+        () => {
+          strictEqual(callbackCalled, true);
+          errored.resolve();
+        }
+      );
+      writable.write(
+        'hi',
+        () => {
+          callbackCalled = true;
+          writeFinished.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+        writeFinished.promise,
+      ]);
+    }
+    {
+      let callbackCalled = false;
+      // Async Error
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const writeFinished = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          queueMicrotask(() => cb(new Error()));
+          writeCalled.resolve();
+        }
+      });
+      writable.on(
+        'error',
+        () => {
+          strictEqual(callbackCalled, true);
+          errored.resolve();
+        }
+      );
+      writable.write(
+        'hi',
+        () => {
+          callbackCalled = true;
+          writeFinished.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+        writeFinished.promise,
+      ]);
+    }
+    {
+      // Sync Error
+      const errored = deferredPromise();
+      const writeCalled = deferredPromise();
+      const writable = new Writable({
+        write: (buf, enc, cb) => {
+          cb(new Error());
+          writeCalled.resolve();
+        }
+      });
+      writable.on('error', errored.resolve);
+      let cnt = 0;
+      // Ensure we don't live lock on sync error
+      while (writable.write('a')) cnt++;
+      strictEqual(cnt, 0);
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+  }
+};
+
+export const writable_writable = {
+  async test(ctrl, env, ctx) {
+    {
+      const w = new Writable({
+        write() {}
+      });
+      strictEqual(w.writable, true);
+      w.destroy();
+      strictEqual(w.writable, false);
+    }
+    {
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const w = new Writable({
+        write: (chunk, encoding, callback) => {
+          callback(new Error());
+          writeCalled.resolve();
+        }
+      })
+      strictEqual(w.writable, true);
+      w.write('asd');
+      strictEqual(w.writable, false);
+      w.on('error', errored.resolve);
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const writeCalled = deferredPromise();
+      const errored = deferredPromise();
+      const w = new Writable({
+        write: (chunk, encoding, callback) => {
+          queueMicrotask(() => {
+            callback(new Error())
+            strictEqual(w.writable, false);
+            writeCalled.resolve();
+          })
+        }
+      });
+      w.write('asd');
+      w.on('error', errored.resolve);
+      await Promise.all([
+        writeCalled.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const closed = deferredPromise();
+      const w = new Writable({
+        write: closed.reject
+      })
+      w.on('close', closed.resolve);
+      strictEqual(w.writable, true);
+      w.end()
+      strictEqual(w.writable, false);
+      await closed.promise;
+    }
+  }
+};
+
+export const writable_properties = {
+  test(ctrl, env, ctx) {
+    {
+      const w = new Writable();
+      strictEqual(w.writableCorked, 0);
+      w.uncork();
+      strictEqual(w.writableCorked, 0);
+      w.cork();
+      strictEqual(w.writableCorked, 1);
+      w.cork();
+      strictEqual(w.writableCorked, 2);
+      w.uncork();
+      strictEqual(w.writableCorked, 1);
+      w.uncork();
+      strictEqual(w.writableCorked, 0);
+      w.uncork();
+      strictEqual(w.writableCorked, 0);
+    }
+
+  }
+};
+
+export const writable_null = {
+  async test(ctrl, env, ctx) {
+    class MyWritable extends Writable {
+      constructor(options) {
+        super({
+          autoDestroy: false,
+          ...options
+        });
+      }
+      _write(chunk, encoding, callback) {
+        notStrictEqual(chunk, null);
+        callback();
+      }
+    }
+    {
+      const m = new MyWritable({
+        objectMode: true
+      });
+      m.on('error', () => { throw new Error('should not be called') });
+      throws(
+        () => {
+          m.write(null);
+        },
+        {
+          code: 'ERR_STREAM_NULL_VALUES'
+        }
+      );
+    }
+    {
+      const m = new MyWritable();
+      m.on('error', () => { throw new Error('should not be called') });
+      throws(
+        () => {
+          m.write(false);
+        },
+        {
+          code: 'ERR_INVALID_ARG_TYPE'
+        }
+      );
+    }
+    {
+      // Should not throw.
+      const m = new MyWritable({
+        objectMode: true
+      });
+      m.write(false, ifError);
+    }
+    {
+      // Should not throw.
+      const m = new MyWritable({
+        objectMode: true
+      }).on('error', (e) => {
+        ifError(e || new Error('should not get here'));
+      })
+      m.write(false, ifError);
+    }
+  }
+};
+
+export const writable_needdrain_state = {
+  async test(ctrl, env, ctx) {
+    const transform = new Transform({
+      transform: _transform,
+      highWaterMark: 1
+    })
+    const transformCalled = deferredPromise();
+    const writeFinished = deferredPromise();
+    function _transform(chunk, encoding, cb) {
+      queueMicrotask(() => {
+        strictEqual(transform._writableState.needDrain, true);
+        cb();
+        transformCalled.resolve();
+      })
+    }
+    strictEqual(transform._writableState.needDrain, false);
+    transform.write(
+      'asdasd',
+      () => {
+        strictEqual(transform._writableState.needDrain, false);
+        writeFinished.resolve();
+      }
+    )
+    strictEqual(transform._writableState.needDrain, true);
+    await Promise.all([
+      transformCalled.promise,
+      writeFinished.promise,
+    ]);
+  }
+};
+
+export const writable_invalid_chunk = {
+  test(ctrl, env, ctx) {
+    function testWriteType(val, objectMode, code) {
+      const writable = new Writable({
+        objectMode,
+        write: () => {}
+      });
+      writable.on('error', () => { throw new Error('should not have been called'); });
+      if (code) {
+        throws(
+          () => {
+            writable.write(val);
+          },
+          {
+            code
+          }
+        );
+      } else {
+        writable.write(val);
+      }
+    }
+    testWriteType([], false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType({}, false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType(0, false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType(true, false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType(0.0, false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType(undefined, false, 'ERR_INVALID_ARG_TYPE');
+    testWriteType(null, false, 'ERR_STREAM_NULL_VALUES');
+    testWriteType([], true);
+    testWriteType({}, true);
+    testWriteType(0, true);
+    testWriteType(true, true);
+    testWriteType(0.0, true);
+    testWriteType(undefined, true);
+    testWriteType(null, true, 'ERR_STREAM_NULL_VALUES');
+  }
+};
+
+export const writable_finished = {
+  async test(ctrl, env, ctx) {
+    // basic
+    {
+      // Find it on Writable.prototype
+      ok(Reflect.has(Writable.prototype, 'writableFinished'));
+    }
+
+    // event
+    {
+      const writable = new Writable();
+      writable._write = (chunk, encoding, cb) => {
+        // The state finished should start in false.
+        strictEqual(writable.writableFinished, false);
+        cb();
+      };
+      const finishCalled = deferredPromise();
+      const endCalled = deferredPromise();
+      writable.on(
+        'finish',
+        () => {
+          strictEqual(writable.writableFinished, true);
+          finishCalled.resolve();
+        }
+      );
+      writable.end(
+        'testing finished state',
+        () => {
+          strictEqual(writable.writableFinished, true);
+          endCalled.resolve();
+        }
+      );
+      await Promise.all([
+        finishCalled.promise,
+        endCalled.promise,
+      ]);
+    }
+    {
+      // Emit finish asynchronously.
+
+      const w = new Writable({
+        write(chunk, encoding, cb) {
+          cb();
+        }
+      });
+      w.end();
+      const finishCalled = deferredPromise();
+      w.on('finish', finishCalled.resolve);
+      await finishCalled.promise;
+    }
+    {
+      // Emit prefinish synchronously.
+
+      const w = new Writable({
+        write(chunk, encoding, cb) {
+          cb();
+        }
+      })
+      let sync = true;
+      w.on(
+        'prefinish',
+        () => {
+          strictEqual(sync, true);
+        }
+      )
+      w.end();
+      sync = false;
+    }
+    {
+      // Emit prefinish synchronously w/ final.
+
+      const w = new Writable({
+        write(chunk, encoding, cb) {
+          cb();
+        },
+        final(cb) {
+          cb();
+        }
+      })
+      let sync = true;
+      w.on(
+        'prefinish',
+        () => {
+          strictEqual(sync, true);
+        }
+      )
+      w.end();
+      sync = false;
+    }
+    {
+      // Call _final synchronously.
+
+      let sync = true
+      const w = new Writable({
+        write(chunk, encoding, cb) {
+          cb();
+        },
+        final: (cb) => {
+          strictEqual(sync, true);
+          cb();
+        }
+      });
+      w.end();
+      sync = false;
+    }
+  }
+};
+
+export const writable_finished_state = {
+  async test(ctrl, env, ctx) {
+    const writable = new Writable()
+    writable._write = (chunk, encoding, cb) => {
+      // The state finished should start in false.
+      strictEqual(writable._writableState.finished, false);
+      cb();
+    };
+    const finishCalled = deferredPromise();
+    const endCalled = deferredPromise();
+    writable.on(
+      'finish',
+      () => {
+        strictEqual(writable._writableState.finished, true);
+        finishCalled.resolve();
+      }
+    );
+    writable.end(
+      'testing finished state',
+      () => {
+        strictEqual(writable._writableState.finished, true);
+        endCalled.resolve();
+      }
+    );
+    await Promise.all([
+      finishCalled.promise,
+      endCalled.promise,
+    ]);
+  }
+};
+
+export const writable_finish_destroyed = {
+  async test(ctrl, env, ctx) {
+    {
+      const writeCalled = deferredPromise();
+      const closed = deferredPromise();
+      const w = new Writable({
+        write: (chunk, encoding, cb) => {
+          w.on(
+            'close',
+            () => {
+              cb();
+              writeCalled.resolve();
+            }
+          );
+        }
+      });
+      w.on('close', closed.resolve);
+      w.on('finish', closed.reject);
+      w.end('asd');
+      w.destroy();
+      await Promise.all([
+        writeCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const writeCalled = deferredPromise();
+      const closed = deferredPromise();
+      const w = new Writable({
+        write: (chunk, encoding, cb) => {
+          w.on(
+            'close',
+            () => {
+              cb();
+              w.end();
+              writeCalled.resolve();
+            }
+          );
+        }
+      });
+      w.on('finish', closed.reject);
+      w.on('close', closed.resolve);
+      w.write('asd');
+      w.destroy();
+      await Promise.all([
+        writeCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const w = new Writable({
+        write() {}
+      })
+      const closed = deferredPromise();
+      w.on('finish', closed.reject);
+      w.on('close', closed.resolve);
+      w.end();
+      w.destroy();
+      await closed.promise;
+    }
+  }
+};
+
+export const writable_final_throw = {
+  async test(ctrl, env, ctx) {
+    class Foo extends Duplex {
+      _final(callback) {
+        throw new Error('fhqwhgads');
+      }
+      _read() {}
+    }
+    const writeCalled = deferredPromise();
+    const endFinished = deferredPromise();
+    const errored = deferredPromise();
+    const foo = new Foo();
+    foo._write = (chunk, encoding, cb) => {
+      cb()
+      writeCalled.resolve();
+    };
+    foo.end(
+      'test',
+      function(err) {
+        strictEqual(err.message, 'fhqwhgads');
+        endFinished.resolve();
+      }
+    );
+    foo.on('error', errored.resolve);
+    await Promise.all([
+      writeCalled.promise,
+      endFinished.promise,
+      errored.promise,
+    ]);
+  }
+};
+
+export const writable_final_destroy = {
+  async test(ctrl, env, ctx) {
+    const w = new Writable({
+      write(chunk, encoding, callback) {
+        callback(null)
+      },
+      final(callback) {
+        queueMicrotask(callback)
+      }
+    })
+    const closed = deferredPromise();
+    w.end()
+    w.destroy()
+    w.on('prefinish', closed.reject);
+    w.on('finish', closed.reject);
+    w.on('close', closed.resolve);
+    await closed.promise;
+  }
+};
+
+export const writable_final_async = {
+  async test(ctrl, env, ctx) {
+    {
+      class Foo extends Duplex {
+        async _final(callback) {
+          await scheduler.wait(10);
+          callback();
+        }
+        _read() {}
+      }
+      const foo = new Foo();
+      const writeCalled = deferredPromise();
+      const endCalled = deferredPromise();
+      foo._write = (chunk, encoding, cb) => {
+        cb();
+        writeCalled.resolve();
+      };
+      foo.end('test', endCalled.resolve);
+      foo.on('error', endCalled.reject);
+      await Promise.all([
+        endCalled.promise,
+        writeCalled.promise,
+      ]);
+    }
+  }
+};
+
+export const writable_ended_state = {
+  async test(ctrl, env, ctx) {
+    const writable = new Writable();
+    const writeCalled = deferredPromise();
+    const endCalled = deferredPromise();
+    writable._write = (chunk, encoding, cb) => {
+      strictEqual(writable._writableState.ended, false);
+      strictEqual(writable._writableState.writable, undefined);
+      strictEqual(writable.writableEnded, false);
+      cb();
+      writeCalled.resolve();
+    }
+    strictEqual(writable._writableState.ended, false);
+    strictEqual(writable._writableState.writable, undefined);
+    strictEqual(writable.writable, true);
+    strictEqual(writable.writableEnded, false);
+    writable.end(
+      'testing ended state',
+      () => {
+        strictEqual(writable._writableState.ended, true);
+        strictEqual(writable._writableState.writable, undefined);
+        strictEqual(writable.writable, false);
+        strictEqual(writable.writableEnded, true);
+        endCalled.resolve();
+      }
+    )
+    strictEqual(writable._writableState.ended, true);
+    strictEqual(writable._writableState.writable, undefined);
+    strictEqual(writable.writable, false);
+    strictEqual(writable.writableEnded, true);
+    await Promise.all([
+      writeCalled.promise,
+      endCalled.promise,
+    ]);
+  }
+};
+
+export const writable_end_multiple = {
+  async test(ctrl, env, ctx) {
+    const writable = new Writable();
+    writable._write = (chunk, encoding, cb) => {
+      setTimeout(() => cb(), 10);
+    }
+    const endCalled1 = deferredPromise();
+    const endCalled2 = deferredPromise();
+    const finishCalled = deferredPromise();
+    writable.end('testing ended state', endCalled1.resolve);
+    writable.end(endCalled2.resolve);
+    writable.on(
+      'finish',
+      () => {
+        let ticked = false;
+        writable.end(
+          (err) => {
+            strictEqual(ticked, true);
+            strictEqual(err.code, 'ERR_STREAM_ALREADY_FINISHED');
+            finishCalled.resolve();
+          }
+        );
+        ticked = true;
+      }
+    );
+    await Promise.all([
+      endCalled1.promise,
+      endCalled2.promise,
+      finishCalled.promise,
+    ]);
+  }
+};
+
+export const writable_end_cb_error = {
+  async test(ctrl, env, ctx) {
+    {
+      // Invoke end callback on failure.
+      const writable = new Writable();
+      const _err = new Error('kaboom');
+      writable._write = (chunk, encoding, cb) => {
+        queueMicrotask(() => cb(_err));
+      }
+      const errored = deferredPromise();
+      const endCalled1 = deferredPromise();
+      const endCalled2 = deferredPromise();
+      writable.on(
+        'error',
+        (err) => {
+          strictEqual(err, _err);
+          errored.resolve();
+        }
+      )
+      writable.write('asd');
+      writable.end(
+        (err) => {
+          strictEqual(err, _err);
+          endCalled1.resolve();
+        }
+      );
+      writable.end(
+        (err) => {
+          strictEqual(err, _err);
+          endCalled2.resolve();
+        }
+      );
+      await Promise.all([
+        errored.promise,
+        endCalled1.promise,
+        endCalled2.promise,
+      ]);
+    }
+    {
+      // Don't invoke end callback twice
+      const writable = new Writable();
+      writable._write = (chunk, encoding, cb) => {
+        queueMicrotask(cb);
+      };
+      let called = false;
+      const endCalled = deferredPromise();
+      const errored = deferredPromise();
+      const finishCalled = deferredPromise();
+      writable.end(
+        'asd',
+        (err) => {
+          called = true;
+          strictEqual(err, undefined);
+          endCalled.resolve();
+        }
+      );
+      writable.on(
+        'error',
+        (err) => {
+          strictEqual(err.message, 'kaboom');
+          errored.resolve();
+        }
+      );
+      writable.on(
+        'finish',
+        () => {
+          strictEqual(called, true);
+          writable.emit('error', new Error('kaboom'));
+          finishCalled.resolve();
+        }
+      );
+      await Promise.all([
+        endCalled.promise,
+        errored.promise,
+        finishCalled.promise,
+      ]);
+    }
+    {
+      const w = new Writable({
+        write(chunk, encoding, callback) {
+          queueMicrotask(callback);
+        },
+        finish(callback) {
+          queueMicrotask(callback);
+        }
+      });
+      const endCalled1 = deferredPromise();
+      const endCalled2 = deferredPromise();
+      const endCalled3 = deferredPromise();
+      const errored = deferredPromise();
+      w.end(
+        'testing ended state',
+        (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          endCalled1.resolve();
+        }
+      )
+      strictEqual(w.destroyed, false);
+      strictEqual(w.writableEnded, true);
+      w.end(
+        (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          endCalled2.resolve();
+        }
+      )
+      strictEqual(w.destroyed, false);
+      strictEqual(w.writableEnded, true);
+      w.end(
+        'end',
+        (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          endCalled3.resolve();
+        }
+      )
+      strictEqual(w.destroyed, true);
+      w.on(
+        'error',
+        (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          errored.resolve();
+        }
+      )
+      w.on('finish', errored.reject);
+      await Promise.all([
+        endCalled1.promise,
+        endCalled2.promise,
+        endCalled3.promise,
+        errored.promise,
+      ]);
+    }
+  }
+};
+
+export const writable_destroy = {
+  async test(ctrl, env, ctx) {
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const closed = deferredPromise();
+      write.on('finish', closed.reject);
+      write.on('close', closed.resolve);
+      write.destroy();
+      strictEqual(write.destroyed, true);
+      await closed.promise;
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          this.destroy(new Error('asd'));
+          cb();
+        }
+      })
+      const errored = deferredPromise();
+      write.on('error', errored.resolve);
+      write.on('finish', errored.reject);
+      write.end('asd');
+      strictEqual(write.destroyed, true);
+      await errored.promise;
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb()
+        }
+      });
+      const expected = new Error('kaboom');
+      const errored = deferredPromise();
+      const closed = deferredPromise();
+      write.on('finish', closed.reject);
+      write.on('close', closed.resolve);
+      write.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      write.destroy(expected);
+      strictEqual(write.destroyed, true);
+      await Promise.all([
+        errored.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      write._destroy = function (err, cb) {
+        strictEqual(err, expected);
+        cb(err);
+      }
+      const errored = deferredPromise();
+      const closed = deferredPromise();
+      const expected = new Error('kaboom');
+      write.on('finish', closed.reject);
+      write.on('close', closed.resolve);
+      write.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      write.destroy(expected);
+      strictEqual(write.destroyed, true);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const closed = deferredPromise();
+      const destroyCalled = deferredPromise();
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        },
+        destroy: function (err, cb) {
+          strictEqual(err, expected);
+          cb();
+          destroyCalled.resolve();
+        }
+      });
+      const expected = new Error('kaboom');
+      write.on('finish', closed.reject);
+      write.on('close', closed.resolve);
+
+      // Error is swallowed by the custom _destroy
+      write.on('error', closed.reject);
+      write.destroy(expected);
+      strictEqual(write.destroyed, true);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const destroyCalled = deferredPromise();
+      write._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb();
+        destroyCalled.resolve();
+      };
+      write.destroy();
+      strictEqual(write.destroyed, true);
+      await destroyCalled.promise;
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      })
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      write._destroy = function (err, cb) {
+        strictEqual(err, null);
+        queueMicrotask(() => {
+          this.end();
+          cb();
+          destroyCalled.resolve();
+        })
+      };
+      write.on('finish', closed.reject);
+      write.on('close', closed.resolve);
+      write.destroy();
+      strictEqual(write.destroyed, true);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const expected = new Error('kaboom');
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      write._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb(expected);
+        destroyCalled.resolve();
+      };
+      write.on('close', closed.resolve);
+      write.on('finish', closed.reject);
+      write.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      write.destroy();
+      strictEqual(write.destroyed, true);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      // double error case
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      let ticked = false;
+      const writeFinished = deferredPromise();
+      const errored = deferredPromise();
+      write.on(
+        'close',
+        () => {
+          strictEqual(ticked, true);
+          writeFinished.resolve();
+        }
+      );
+      write.on(
+        'error',
+        (err) => {
+          strictEqual(ticked, true);
+          strictEqual(err.message, 'kaboom 1');
+          strictEqual(write._writableState.errorEmitted, true);
+          errored.resolve();
+        }
+      );
+      const expected = new Error('kaboom 1');
+      write.destroy(expected);
+      write.destroy(new Error('kaboom 2'));
+      strictEqual(write._writableState.errored, expected);
+      strictEqual(write._writableState.errorEmitted, false);
+      strictEqual(write.destroyed, true);
+      ticked = true;
+      await Promise.all([
+        writeFinished.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const writable = new Writable({
+        destroy: function (err, cb) {
+          queueMicrotask(() => cb(new Error('kaboom 1')));
+        },
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      let ticked = false;
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      writable.on(
+        'close',
+        () => {
+          writable.on('error', () => { throw new Error('should not have been called') });
+          writable.destroy(new Error('hello'));
+          strictEqual(ticked, true);
+          strictEqual(writable._writableState.errorEmitted, true);
+          closed.resolve();
+        }
+      )
+      writable.on(
+        'error',
+        (err) => {
+          strictEqual(ticked, true);
+          strictEqual(err.message, 'kaboom 1');
+          strictEqual(writable._writableState.errorEmitted, true);
+          errored.resolve();
+        }
+      )
+      writable.destroy();
+      strictEqual(writable.destroyed, true);
+      strictEqual(writable._writableState.errored, null);
+      strictEqual(writable._writableState.errorEmitted, false);
+
+      // Test case where `writable.destroy()` is called again with an error before
+      // the `_destroy()` callback is called.
+      writable.destroy(new Error('kaboom 2'));
+      strictEqual(writable._writableState.errorEmitted, false);
+      strictEqual(writable._writableState.errored, null);
+      ticked = true;
+
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      write.destroyed = true;
+      strictEqual(write.destroyed, true);
+
+      // The internal destroy() mechanism should not be triggered
+      write.on('close', () => { throw new Error('should not have been called'); });
+      write.destroy();
+    }
+    {
+      function MyWritable() {
+        strictEqual(this.destroyed, false);
+        this.destroyed = false;
+        Writable.call(this);
+      }
+      Object.setPrototypeOf(MyWritable.prototype, Writable.prototype);
+      Object.setPrototypeOf(MyWritable, Writable);
+      new MyWritable();
+    }
+    {
+      // Destroy and destroy callback
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      write.destroy();
+      const expected = new Error('kaboom');
+      const destroyed = deferredPromise();
+      write.destroy(
+        expected,
+        (err) => {
+          strictEqual(err, undefined);
+          destroyed.resolve();
+        }
+      );
+      await destroyed.promise;
+    }
+    {
+      // Checks that `._undestroy()` restores the state so that `final` will be
+      // called again.
+      const writeCalled = deferredPromise();
+      const finalCalled = deferredPromise();
+      const closed = deferredPromise();
+      let finalCounter = 0;
+      const write = new Writable({
+        write: writeCalled.resolve(),
+        final: (cb) => {
+          cb();
+          if (++finalCounter === 2) finalCalled.resolve();
+        },
+        autoDestroy: true
+      })
+      write.end();
+      write.once(
+        'close',
+        () => {
+          write._undestroy();
+          write.end();
+          closed.resolve();
+        }
+      );
+      await Promise.all([
+        writeCalled.promise,
+        finalCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const write = new Writable();
+      write.destroy();
+      const writeFinished = deferredPromise();
+      write.on('error', writeFinished.reject);
+      write.write(
+        'asd',
+        function(err) {
+          strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+          writeFinished.resolve();
+        }
+      );
+      await writeFinished.promise;
+    }
+    {
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const writeFinished1 = deferredPromise();
+      const writeFinished2 = deferredPromise();
+      const writeFinished3 = deferredPromise();
+      write.on('error', writeFinished1.reject);
+      write.cork();
+      write.write('asd', writeFinished1.resolve);
+      write.uncork();
+      write.cork();
+      write.write(
+        'asd',
+        function(err) {
+          strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+          writeFinished2.resolve();
+        }
+      );
+      write.destroy();
+      write.write(
+        'asd',
+        function(err) {
+          strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+          writeFinished3.resolve();
+        }
+      );
+      write.uncork();
+      await Promise.all([
+        writeFinished1.promise,
+        writeFinished2.promise,
+        writeFinished3.promise,
+      ]);
+    }
+    {
+      // Call end(cb) after error & destroy
+
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb(new Error('asd'));
+        }
+      });
+      const errored = deferredPromise();
+      write.on(
+        'error',
+        () => {
+          write.destroy();
+          let ticked = false;
+          write.end(
+            (err) => {
+              strictEqual(ticked, true);
+              strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+              errored.resolve();
+            }
+          )
+          ticked = true;
+        }
+      )
+      write.write('asd');
+      await errored.promise;
+    }
+    {
+      // Call end(cb) after finish & destroy
+
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const finishCalled = deferredPromise();
+      write.on(
+        'finish',
+        () => {
+          write.destroy();
+          let ticked = false;
+          write.end(
+            (err) => {
+              strictEqual(ticked, true);
+              strictEqual(err.code, 'ERR_STREAM_ALREADY_FINISHED');
+              finishCalled.resolve();
+            }
+          )
+          ticked = true;
+        }
+      )
+      write.end();
+      await finishCalled.promise;
+    }
+    {
+      // Call end(cb) after error & destroy and don't trigger
+      // unhandled exception.
+
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          queueMicrotask(cb);
+        }
+      })
+      const _err = new Error('asd');
+      const errored = deferredPromise();
+      const ended = deferredPromise();
+      write.once(
+        'error',
+        (err) => {
+          strictEqual(err.message, 'asd');
+          errored.resolve();
+        }
+      )
+      write.end(
+        'asd',
+        (err) => {
+          strictEqual(err, _err);
+          ended.resolve();
+        }
+      )
+      write.destroy(_err);
+      await Promise.all([
+        errored.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      // Call buffered write callback with error
+
+      const _err = new Error('asd');
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          queueMicrotask(() => cb(_err));
+        },
+        autoDestroy: false
+      });
+      write.cork();
+      const writeFinished1 = deferredPromise();
+      const writeFinished2 = deferredPromise();
+      const errored = deferredPromise();
+      write.write(
+        'asd',
+        (err) => {
+          strictEqual(err, _err);
+          writeFinished1.resolve();
+        }
+      );
+      write.write(
+        'asd',
+        (err) => {
+          strictEqual(err, _err);
+          writeFinished2.resolve();
+        }
+      );
+      write.on(
+        'error',
+        (err) => {
+          strictEqual(err, _err);
+          errored.resolve();
+        }
+      );
+      write.uncork();
+      await Promise.all([
+        writeFinished1.promise,
+        writeFinished2.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      // Ensure callback order.
+
+      let state = 0;
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          // `queueMicrotask()` is used on purpose to ensure the callback is called
+          // after `queueMicrotask()` callbacks.
+          queueMicrotask(cb);
+        }
+      })
+      const writeFinished1 = deferredPromise();
+      const writeFinished2 = deferredPromise();
+      write.write(
+        'asd',
+        () => {
+          strictEqual(state++, 0);
+          writeFinished1.resolve();
+        }
+      );
+      write.write(
+        'asd',
+        (err) => {
+          strictEqual(err.code, 'ERR_STREAM_DESTROYED');
+          strictEqual(state++, 1);
+          writeFinished2.resolve();
+        }
+      );
+      write.destroy();
+      await Promise.all([
+        writeFinished1.promise,
+        writeFinished2.promise,
+      ]);
+    }
+    {
+      const write = new Writable({
+        autoDestroy: false,
+        write(chunk, enc, cb) {
+          cb();
+          cb();
+        }
+      })
+      const errored = deferredPromise();
+      write.on(
+        'error',
+        () => {
+          ok(write._writableState.errored);
+          errored.resolve();
+        }
+      );
+      write.write('asd');
+      await errored.promise;
+    }
+    {
+      const ac = new AbortController();
+      const write = addAbortSignal(
+        ac.signal,
+        new Writable({
+          write(chunk, enc, cb) {
+            cb();
+          }
+        })
+      );
+      const errored = deferredPromise();
+      write.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          strictEqual(write.destroyed, true);
+          errored.resolve();
+        }
+      )
+      write.write('asd');
+      ac.abort();
+      await errored.promise;
+    }
+    {
+      const ac = new AbortController();
+      const write = new Writable({
+        signal: ac.signal,
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const errored = deferredPromise();
+      write.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          strictEqual(write.destroyed, true);
+          errored.resolve();
+        }
+      )
+      write.write('asd');
+      ac.abort();
+      await errored.promise;
+    }
+    {
+      const signal = AbortSignal.abort();
+      const write = new Writable({
+        signal,
+        write(chunk, enc, cb) {
+          cb();
+        }
+      });
+      const errored = deferredPromise();
+      write.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          strictEqual(write.destroyed, true);
+          errored.resolve();
+        }
+      );
+      await errored.promise;
+    }
+    {
+      // Destroy twice
+      const write = new Writable({
+        write(chunk, enc, cb) {
+          cb();
+        }
+      })
+      const ended = deferredPromise()
+      write.end(ended.resolve);
+      write.destroy();
+      write.destroy();
+      await ended.promise;
+    }
+    {
+      // https://github.com/nodejs/node/issues/39356
+      const s = new Writable({
+        final() {}
+      })
+      const _err = new Error('oh no');
+      // Remove `callback` and it works
+      const ended = deferredPromise();
+      const errored = deferredPromise();
+      s.end(
+        (err) => {
+          strictEqual(err, _err);
+          ended.resolve();
+        }
+      )
+      s.on(
+        'error',
+        (err) => {
+          strictEqual(err, _err);
+          errored.resolve();
+        }
+      )
+      s.destroy(_err);
+      await Promise.all([
+        errored.promise,
+        ended.promise,
+      ]);
+    }
+  }
+};
+
+export const writable_decoded_encoding = {
+  async test(ctrl, env, ctx) {
+    class MyWritable extends Writable {
+      constructor(fn, options) {
+        super(options);
+        this.fn = fn;
+      }
+      _write(chunk, encoding, callback) {
+        this.fn(Buffer.isBuffer(chunk), typeof chunk, encoding);
+        callback();
+      }
+    }
+    {
+      const m = new MyWritable(
+        function (isBuffer, type, enc) {
+          ok(isBuffer);
+          strictEqual(type, 'object');
+          strictEqual(enc, 'buffer');
+        },
+        {
+          decodeStrings: true
+        }
+      )
+      m.write('some-text', 'utf8');
+      m.end();
+      await promises.finished(m);
+    }
+    {
+      const m = new MyWritable(
+        function (isBuffer, type, enc) {
+          ok(!isBuffer);
+          strictEqual(type, 'string');
+          strictEqual(enc, 'utf8');
+        },
+        {
+          decodeStrings: false
+        }
+      )
+      m.write('some-text', 'utf8');
+      m.end();
+      await promises.finished(m);
+    }
+  }
+};
+
+export const writable_constructor_set_methods = {
+  async test(ctrl, env, ctx) {
+    const bufferBlerg = Buffer.from('blerg');
+    const w = new Writable();
+    throws(
+      () => {
+        w.end(bufferBlerg);
+      },
+      {
+        name: 'Error',
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+        message: 'The _write() method is not implemented'
+      }
+    );
+    const writeCalled = deferredPromise();
+    const writevCalled = deferredPromise();
+    const _write = (chunk, _, next) => {
+      next();
+      writeCalled.resolve();
+    };
+    const _writev = (chunks, next) => {
+      strictEqual(chunks.length, 2);
+      next();
+      writevCalled.resolve();
+    }
+    const w2 = new Writable({
+      write: _write,
+      writev: _writev
+    });
+    strictEqual(w2._write, _write);
+    strictEqual(w2._writev, _writev);
+    w2.write(bufferBlerg);
+    w2.cork();
+    w2.write(bufferBlerg);
+    w2.write(bufferBlerg);
+    w2.end();
+    await Promise.all([
+      writeCalled.promise,
+      writevCalled.promise,
+    ]);
+  }
+};
+
+export const writable_clear_buffer = {
+  async test(ctrl, env, ctx) {
+    class StreamWritable extends Writable {
+      constructor() {
+        super({
+          objectMode: true
+        });
+      }
+
+      // Refs: https://github.com/nodejs/node/issues/6758
+      // We need a timer like on the original issue thread.
+      // Otherwise the code will never reach our test case.
+      _write(chunk, encoding, cb) {
+        queueMicrotask(cb);
+      }
+    }
+    const testStream = new StreamWritable();
+    testStream.cork();
+    const writePromises = [];
+    for (let i = 1; i <= 5; i++) {
+      const p = deferredPromise();
+      writePromises.push(p.promise);
+      testStream.write(
+        i,
+        () => {
+          strictEqual(testStream._writableState.bufferedRequestCount, testStream._writableState.getBuffer().length);
+          p.resolve();
+        }
+      );
+    }
+    testStream.end()
+    await Promise.all(writePromises);
+  }
+};
+
+export const writable_change_deafult_encoding = {
+  async test(ctrl, env, ctx) {
+    class MyWritable extends Writable {
+      constructor(fn, options) {
+        super(options);
+        this.fn = fn;
+      }
+      _write(chunk, encoding, callback) {
+        this.fn(Buffer.isBuffer(chunk), typeof chunk, encoding);
+        callback();
+      }
+    }
+
+    await (async function defaultCondingIsUtf8() {
+      const m = new MyWritable(
+        function (isBuffer, type, enc) {
+          strictEqual(enc, 'utf8');
+        },
+        {
+          decodeStrings: false
+        }
+      )
+      m.write('foo');
+      m.end();
+      await promises.finished(m);
+    })();
+
+    await (async function changeDefaultEncodingToAscii() {
+      const m = new MyWritable(
+        function (isBuffer, type, enc) {
+          strictEqual(enc, 'ascii');
+        },
+        {
+          decodeStrings: false
+        }
+      );
+      m.setDefaultEncoding('ascii');
+      m.write('bar');
+      m.end();
+      await promises.finished(m);
+    })()
+
+    // Change default encoding to invalid value.
+    throws(
+      () => {
+        const m = new MyWritable((isBuffer, type, enc) => {}, {
+          decodeStrings: false
+        })
+        m.setDefaultEncoding({});
+        m.write('bar');
+        m.end();
+      },
+      {
+        code: 'ERR_UNKNOWN_ENCODING',
+      }
+    );
+    await (async function checkVariableCaseEncoding() {
+      const m = new MyWritable(
+        function (isBuffer, type, enc) {
+          strictEqual(enc, 'ascii');
+        },
+        {
+          decodeStrings: false
+        }
+      )
+      m.setDefaultEncoding('AsCii');
+      m.write('bar');
+      m.end();
+      await promises.finished(m);
+    })()
+  }
+};
+
+export const writable_aborted = {
+  async test(ctrl, env, ctx) {
+    {
+      const writable = new Writable({
+        write() {}
+      });
+      strictEqual(writable.writableAborted, false);
+      writable.destroy();
+      strictEqual(writable.writableAborted, true);
+    }
+    {
+      const writable = new Writable({
+        write() {}
+      });
+      strictEqual(writable.writableAborted, false);
+      writable.end();
+      writable.destroy();
+      strictEqual(writable.writableAborted, true);
+    }
+  }
+};
+
+export const unshift_read_race = {
+  async test(ctrl, env, ctx) {
+    const hwm = 10;
+    const r = Readable({
+      highWaterMark: hwm,
+      autoDestroy: false
+    });
+    const chunks = 10;
+    const data = Buffer.allocUnsafe(chunks * hwm + Math.ceil(hwm / 2));
+    for (let i = 0; i < data.length; i++) {
+      const c = 'asdf'.charCodeAt(i % 4);
+      data[i] = c;
+    }
+    let pos = 0;
+    let pushedNull = false;
+    r._read = function (n) {
+      ok(!pushedNull, '_read after null push');
+
+      // Every third chunk is fast
+      push(!(chunks % 3));
+      function push(fast) {
+        ok(!pushedNull, 'push() after null push');
+        const c = pos >= data.length ? null : data.slice(pos, pos + n);
+        pushedNull = c === null;
+        if (fast) {
+          pos += n;
+          r.push(c);
+          if (c === null) pushError();
+        } else {
+          setTimeout(function () {
+            pos += n;
+            r.push(c);
+            if (c === null) pushError();
+          }, 1);
+        }
+      }
+    }
+    function pushError() {
+      r.unshift(Buffer.allocUnsafe(1));
+      w.end();
+      throws(
+        () => {
+          r.push(Buffer.allocUnsafe(1));
+        },
+        {
+          code: 'ERR_STREAM_PUSH_AFTER_EOF',
+          name: 'Error',
+          message: 'stream.push() after EOF'
+        }
+      );
+    }
+    const w = Writable();
+    const written = [];
+    const finishCalled = deferredPromise();
+    w._write = function (chunk, encoding, cb) {
+      written.push(chunk.toString());
+      cb();
+    }
+    r.on('end', finishCalled.reject);
+    r.on('readable', function () {
+      let chunk;
+      while (null !== (chunk = r.read(10))) {
+        w.write(chunk);
+        if (chunk.length > 4) r.unshift(Buffer.from('1234'));
+      }
+    });
+    w.on(
+      'finish',
+      function () {
+        // Each chunk should start with 1234, and then be asfdasdfasdf...
+        // The first got pulled out before the first unshift('1234'), so it's
+        // lacking that piece.
+        strictEqual(written[0], 'asdfasdfas');
+        let asdf = 'd';
+        for (let i = 1; i < written.length; i++) {
+          strictEqual(written[i].slice(0, 4), '1234');
+          for (let j = 4; j < written[i].length; j++) {
+            const c = written[i].charAt(j);
+            strictEqual(c, asdf);
+            switch (asdf) {
+              case 'a':
+                asdf = 's';
+                break;
+              case 's':
+                asdf = 'd';
+                break;
+              case 'd':
+                asdf = 'f';
+                break;
+              case 'f':
+                asdf = 'a';
+                break;
+            }
+          }
+        }
+        finishCalled.resolve();
+      }
+    );
+    await finishCalled.promise;
+    strictEqual(written.length, 18);
+  }
+};
+
+export const unshift_empty_chunk = {
+  async test(ctrl, env, ctx) {
+    const r = new Readable();
+    let nChunks = 10;
+    const chunk = Buffer.alloc(10, 'x');
+    r._read = function (n) {
+      queueMicrotask(() => {
+        r.push(--nChunks === 0 ? null : chunk)
+      });
+    }
+    let readAll = false;
+    const seen = [];
+    r.on('readable', () => {
+      let chunk;
+      while ((chunk = r.read()) !== null) {
+        seen.push(chunk.toString());
+        // Simulate only reading a certain amount of the data,
+        // and then putting the rest of the chunk back into the
+        // stream, like a parser might do.  We just fill it with
+        // 'y' so that it's easy to see which bits were touched,
+        // and which were not.
+        const putBack = Buffer.alloc(readAll ? 0 : 5, 'y');
+        readAll = !readAll;
+        r.unshift(putBack);
+      }
+    })
+    const expect = [
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy',
+      'xxxxxxxxxx',
+      'yyyyy'
+    ];
+    r.on('end', () => {
+      deepStrictEqual(seen, expect);
+    });
+    await promises.finished(r);
+  }
+};
+
+export const unpipe_event = {
+  async test(ctrl, env, ctx) {
+    class NullWriteable extends Writable {
+      _write(chunk, encoding, callback) {
+        return callback();
+      }
+    }
+    class QuickEndReadable extends Readable {
+      _read() {
+        this.push(null);
+      }
+    }
+    class NeverEndReadable extends Readable {
+      _read() {}
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const unpipeCalled = deferredPromise();
+      const dest = new NullWriteable();
+      const src = new QuickEndReadable();
+      dest.on('pipe', pipeCalled.resolve);
+      dest.on('unpipe', unpipeCalled.resolve);
+      src.pipe(dest);
+      await Promise.all([
+        pipeCalled.promise,
+        unpipeCalled.promise,
+      ]);
+      strictEqual(src._readableState.pipes.length, 0);
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const dest = new NullWriteable();
+      const src = new NeverEndReadable();
+      dest.on('pipe', pipeCalled.resolve);
+      dest.on('unpipe', pipeCalled.reject);
+      src.pipe(dest);
+      await pipeCalled.promise;
+      strictEqual(src._readableState.pipes.length, 1);
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const unpipeCalled = deferredPromise();
+      const dest = new NullWriteable();
+      const src = new NeverEndReadable();
+      dest.on('pipe', pipeCalled.resolve);
+      dest.on('unpipe', unpipeCalled.resolve);
+      src.pipe(dest);
+      src.unpipe(dest);
+      await Promise.all([
+        pipeCalled.promise,
+        unpipeCalled.promise,
+      ]);
+      strictEqual(src._readableState.pipes.length, 0);
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const unpipeCalled = deferredPromise();
+      const dest = new NullWriteable();
+      const src = new QuickEndReadable();
+      dest.on('pipe', pipeCalled.resolve);
+      dest.on('unpipe', unpipeCalled.resolve);
+      src.pipe(dest, {
+        end: false
+      })
+      await Promise.all([
+        pipeCalled.promise,
+        unpipeCalled.promise,
+      ]);
+      strictEqual(src._readableState.pipes.length, 0);
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const dest = new NullWriteable()
+      const src = new NeverEndReadable()
+      dest.on('pipe', pipeCalled.resolve)
+      dest.on('unpipe', pipeCalled.reject)
+      src.pipe(dest, {
+        end: false
+      })
+      await pipeCalled.promise;
+      strictEqual(src._readableState.pipes.length, 1);
+    }
+    {
+      const pipeCalled = deferredPromise();
+      const unpipeCalled = deferredPromise();
+      const dest = new NullWriteable();
+      const src = new NeverEndReadable();
+      dest.on('pipe', pipeCalled.resolve);
+      dest.on('unpipe', unpipeCalled.resolve);
+      src.pipe(dest, {
+        end: false
+      });
+      src.unpipe(dest);
+      await Promise.all([
+        pipeCalled.promise,
+        unpipeCalled.promise,
+      ]);
+      strictEqual(src._readableState.pipes.length, 0);
+    }
+  }
+};
+
+export const uint8array = {
+  async test(ctrl, env, ctx) {
+    const ABC = new Uint8Array([0x41, 0x42, 0x43]);
+    const DEF = new Uint8Array([0x44, 0x45, 0x46]);
+    const GHI = new Uint8Array([0x47, 0x48, 0x49]);
+    {
+      // Simple Writable test.
+
+      let n = 0;
+      const writeCalled = deferredPromise();
+      let writeCount = 0;
+      const writable = new Writable({
+        write: (chunk, encoding, cb) => {
+          ok(chunk instanceof Buffer);
+          if (n++ === 0) {
+            strictEqual(String(chunk), 'ABC');
+          } else {
+            strictEqual(String(chunk), 'DEF');
+          }
+          cb();
+          if (++writeCount === 2) writeCalled.resolve();
+        }
+      });
+      writable.write(ABC);
+      writable.end(DEF);
+      await writeCalled.promise;
+    }
+    {
+      // Writable test, pass in Uint8Array in object mode.
+      const writeCalled = deferredPromise();
+      const writable = new Writable({
+        objectMode: true,
+        write: (chunk, encoding, cb) => {
+          ok(!(chunk instanceof Buffer));
+          ok(chunk instanceof Uint8Array);
+          strictEqual(chunk, ABC);
+          strictEqual(encoding, 'utf8');
+          cb();
+          writeCalled.resolve();
+        }
+      });
+      writable.end(ABC);
+      await writeCalled.promise;
+    }
+    {
+      // Writable test, multiple writes carried out via writev.
+      let callback;
+      const writeCalled = deferredPromise();
+      const writevCalled = deferredPromise();
+      const writable = new Writable({
+        write: (chunk, encoding, cb) => {
+          ok(chunk instanceof Buffer);
+          strictEqual(encoding, 'buffer');
+          strictEqual(String(chunk), 'ABC');
+          callback = cb;
+          writeCalled.resolve();
+        },
+        writev: (chunks, cb) => {
+          strictEqual(chunks.length, 2);
+          strictEqual(chunks[0].encoding, 'buffer');
+          strictEqual(chunks[1].encoding, 'buffer');
+          strictEqual(chunks[0].chunk + chunks[1].chunk, 'DEFGHI');
+          writevCalled.resolve();
+        }
+      });
+      writable.write(ABC);
+      writable.write(DEF);
+      writable.end(GHI);
+      callback();
+      await Promise.all([
+        writeCalled.promise,
+        writevCalled.promise,
+      ]);
+    }
+    {
+      // Simple Readable test.
+      const readable = new Readable({
+        read() {}
+      });
+      readable.push(DEF);
+      readable.unshift(ABC);
+      const buf = readable.read();
+      ok(buf instanceof Buffer);
+      deepStrictEqual([...buf], [...ABC, ...DEF]);
+    }
+    {
+      // Readable test, setEncoding.
+      const readable = new Readable({
+        read() {}
+      });
+      readable.setEncoding('utf8');
+      readable.push(DEF);
+      readable.unshift(ABC);
+      const out = readable.read();
+      strictEqual(out, 'ABCDEF');
+    }
+  }
+};
+
+export const transform_split_objectmode = {
+  async test(ctrl, env, ctx) {
+    const parser = new Transform({
+      readableObjectMode: true
+    });
+    ok(parser._readableState.objectMode);
+    ok(!parser._writableState.objectMode);
+    strictEqual(parser.readableHighWaterMark, 16);
+    strictEqual(parser.writableHighWaterMark, 16 * 1024);
+    strictEqual(parser.readableHighWaterMark, parser._readableState.highWaterMark);
+    strictEqual(parser.writableHighWaterMark, parser._writableState.highWaterMark);
+    parser._transform = function (chunk, enc, callback) {
+      callback(null, {
+        val: chunk[0]
+      });
+    };
+    let parsed;
+    parser.on('data', function (obj) {
+      parsed = obj;
+    });
+    parser.end(Buffer.from([42]));
+
+    const serializer = new Transform({
+      writableObjectMode: true
+    });
+    ok(!serializer._readableState.objectMode);
+    ok(serializer._writableState.objectMode);
+    strictEqual(serializer.readableHighWaterMark, 16 * 1024);
+    strictEqual(serializer.writableHighWaterMark, 16);
+    strictEqual(parser.readableHighWaterMark, parser._readableState.highWaterMark);
+    strictEqual(parser.writableHighWaterMark, parser._writableState.highWaterMark);
+    serializer._transform = function (obj, _, callback) {
+      callback(null, Buffer.from([obj.val]));
+    };
+    let serialized;
+    serializer.on('data', function (chunk) {
+      serialized = chunk;
+    });
+    serializer.write({
+      val: 42
+    });
+
+    strictEqual(parsed.val, 42);
+    strictEqual(serialized[0], 42);
+  }
+};
+
+export const transform_split_highwatermark = {
+  async test(ctrl, env, ctx) {
+    const DEFAULT = 16 * 1024;
+    function testTransform(expectedReadableHwm, expectedWritableHwm, options) {
+      const t = new Transform(options);
+      strictEqual(t._readableState.highWaterMark, expectedReadableHwm);
+      strictEqual(t._writableState.highWaterMark, expectedWritableHwm);
+    }
+
+    // Test overriding defaultHwm
+    testTransform(666, DEFAULT, {
+      readableHighWaterMark: 666
+    });
+    testTransform(DEFAULT, 777, {
+      writableHighWaterMark: 777
+    });
+    testTransform(666, 777, {
+      readableHighWaterMark: 666,
+      writableHighWaterMark: 777
+    });
+
+    // Test highWaterMark overriding
+    testTransform(555, 555, {
+      highWaterMark: 555,
+      readableHighWaterMark: 666
+    });
+    testTransform(555, 555, {
+      highWaterMark: 555,
+      writableHighWaterMark: 777
+    });
+    testTransform(555, 555, {
+      highWaterMark: 555,
+      readableHighWaterMark: 666,
+      writableHighWaterMark: 777
+    });
+
+    // Test undefined, null
+    ;[undefined, null].forEach((v) => {
+      testTransform(DEFAULT, DEFAULT, {
+        readableHighWaterMark: v
+      });
+      testTransform(DEFAULT, DEFAULT, {
+        writableHighWaterMark: v
+      });
+      testTransform(666, DEFAULT, {
+        highWaterMark: v,
+        readableHighWaterMark: 666
+      });
+      testTransform(DEFAULT, 777, {
+        highWaterMark: v,
+        writableHighWaterMark: 777
+      });
+    });
+
+    // test NaN
+    {
+      throws(
+        () => {
+          new Transform({
+            readableHighWaterMark: NaN
+          });
+        },
+        {
+          name: 'TypeError',
+          code: 'ERR_INVALID_ARG_VALUE',
+        }
+      );
+      throws(
+        () => {
+          new Transform({
+            writableHighWaterMark: NaN
+          });
+        },
+        {
+          name: 'TypeError',
+          code: 'ERR_INVALID_ARG_VALUE',
+        }
+      );
+    }
+
+    // Test non Duplex streams ignore the options
+    {
+      const r = new Readable({
+        readableHighWaterMark: 666
+      });
+      strictEqual(r._readableState.highWaterMark, DEFAULT);
+      const w = new Writable({
+        writableHighWaterMark: 777
+      });
+      strictEqual(w._writableState.highWaterMark, DEFAULT);
+    }
+  }
+};
+
+export const transform_objectmode_falsey_value = {
+  async test(ctrl, env, ctx) {
+    const src = new PassThrough({
+      objectMode: true
+    });
+    const tx = new PassThrough({
+      objectMode: true
+    });
+    const dest = new PassThrough({
+      objectMode: true
+    });
+    const expect = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const results = [];
+    const dataCalled = deferredPromise();
+    const intervalFinished = deferredPromise();
+    let dataCount = 0;
+    let intCount = 0;
+    dest.on(
+      'data',
+      function (x) {
+        results.push(x);
+        if (++dataCount === expect.length) dataCalled.resolve();
+      }
+    )
+    src.pipe(tx).pipe(dest);
+    let i = -1;
+    const int = setInterval(
+      function () {
+        if (results.length === expect.length) {
+          src.end();
+          clearInterval(int);
+          deepStrictEqual(results, expect);
+        } else {
+          src.write(i++);
+        }
+        if (++intCount === expect.length + 1) intervalFinished.resolve();
+      }, 1);
+    await Promise.all([
+      dataCalled.promise,
+      intervalFinished.promise,
+    ]);
+  }
+};
+
+export const transform_hwm0 = {
+  async test(ctrl, env, ctx) {
+    const t = new Transform({
+      objectMode: true,
+      highWaterMark: 0,
+      transform(chunk, enc, callback) {
+        queueMicrotask(() => callback(null, chunk, enc));
+      }
+    });
+    strictEqual(t.write(1), false);
+    const drainCalled = deferredPromise();
+    const readableCalled = deferredPromise();
+    t.on(
+      'drain',
+      () => {
+        strictEqual(t.write(2), false);
+        t.end();
+        drainCalled.resolve();
+      }
+    )
+    t.once(
+      'readable',
+      () => {
+        strictEqual(t.read(), 1);
+        queueMicrotask(
+          () => {
+            strictEqual(t.read(), null);
+            t.once(
+              'readable',
+              () => {
+                strictEqual(t.read(), 2);
+                readableCalled.resolve();
+              }
+            );
+          }
+        );
+      }
+    );
+    await Promise.all([
+      drainCalled.promise,
+      readableCalled.promise,
+    ]);
+  }
+};
+
+export const transform_flush_data = {
+  async test(ctrl, env, ctx) {
+    const expected = 'asdf';
+    function _transform(d, e, n) {
+      n();
+    }
+    function _flush(n) {
+      n(null, expected);
+    }
+    const t = new Transform({
+      transform: _transform,
+      flush: _flush
+    });
+    t.end(Buffer.from('blerg'));
+    t.on('data', (data) => {
+      strictEqual(data.toString(), expected);
+    });
+    await promises.finished(t);
+  }
+};
+
+export const transform_final = {
+  async test(ctrl, env, ctx) {
+    let state = 0;
+    const transformCalled = deferredPromise();
+    const finalCalled = deferredPromise();
+    const flushCalled = deferredPromise();
+    const finishCalled = deferredPromise();
+    const endCalled = deferredPromise();
+    const dataCalled =deferredPromise();
+    const endFinished = deferredPromise();
+    let dataCount = 0;
+    let transformCount = 0;
+    const t = new Transform({
+      objectMode: true,
+      transform: function (chunk, _, next) {
+        // transformCallback part 1
+        strictEqual(++state, chunk);
+        this.push(state);
+        // transformCallback part 2
+        strictEqual(++state, chunk + 2);
+        queueMicrotask(next);
+        if (++transformCount === 3) transformCalled.resolve();
+      },
+      final: function (done) {
+        state++;
+        // finalCallback part 1
+        strictEqual(state, 10);
+        setTimeout(function () {
+          state++;
+          // finalCallback part 2
+          strictEqual(state, 11);
+          done();
+          finalCalled.resolve();
+        }, 100);
+      },
+      flush: function (done) {
+        state++;
+        // flushCallback part 1
+        strictEqual(state, 12);
+        queueMicrotask(function () {
+          state++;
+          // flushCallback part 2
+          strictEqual(state, 13);
+          done();
+          flushCalled.resolve();
+        })
+      }
+    });
+    t.on(
+      'finish',
+      function () {
+        state++;
+        // finishListener
+        strictEqual(state, 15);
+        finishCalled.resolve();
+      }
+    );
+    t.on(
+      'end',
+      function () {
+        state++;
+        // end event
+        strictEqual(state, 16);
+        endCalled.resolve();
+      }
+    );
+    t.on(
+      'data',
+      function (d) {
+        // dataListener
+        strictEqual(++state, d + 1);
+        if (++dataCount) dataCalled.resolve();
+      }
+    );
+    t.write(1);
+    t.write(4);
+    t.end(
+      7,
+      function () {
+        state++;
+        // endMethodCallback
+        strictEqual(state, 14);
+        endFinished.resolve();
+      }
+    );
+    await Promise.all([
+      transformCalled.promise,
+      finalCalled.promise,
+      flushCalled.promise,
+      finishCalled.promise,
+      endCalled.promise,
+      dataCalled.promise,
+      endFinished.promise,
+    ]);
+  }
+};
+
+export const transform_final_sync = {
+  async test(ctrl, env, ctx) {
+    let state = 0;
+    const transformCalled = deferredPromise();
+    const finalCalled = deferredPromise();
+    const flushCalled = deferredPromise();
+    const finishCalled = deferredPromise();
+    const endCalled = deferredPromise();
+    const dataCalled = deferredPromise();
+    const endFinished = deferredPromise();
+    let transformCount = 0;
+    let dataCount = 0;
+    const t = new Transform({
+      objectMode: true,
+      transform: function (chunk, _, next) {
+        // transformCallback part 1
+        strictEqual(++state, chunk);
+        this.push(state);
+        // transformCallback part 2
+        strictEqual(++state, chunk + 2);
+        queueMicrotask(next);
+        if (++transformCount === 3) transformCalled.resolve();
+      },
+      final: function (done) {
+        state++;
+        // finalCallback part 1
+        strictEqual(state, 10);
+        state++;
+        // finalCallback part 2
+        strictEqual(state, 11);
+        done();
+        finalCalled.resolve();
+      },
+      flush: function (done) {
+        state++;
+        // fluchCallback part 1
+        strictEqual(state, 12);
+        queueMicrotask(function () {
+          state++;
+          // fluchCallback part 2
+          strictEqual(state, 13);
+          done();
+          flushCalled.resolve();
+        });
+      }
+    });
+    t.on(
+      'finish',
+      function () {
+        state++;
+        // finishListener
+        strictEqual(state, 15);
+        finishCalled.resolve();
+      }
+    );
+    t.on(
+      'end',
+      function () {
+        state++;
+        // endEvent
+        strictEqual(state, 16);
+        endCalled.resolve();
+      }
+    );
+    t.on(
+      'data',
+      function (d) {
+        // dataListener
+        strictEqual(++state, d + 1);
+        if (++dataCount === 3) dataCalled.resolve();
+      }
+    );
+    t.write(1);
+    t.write(4);
+    t.end(
+      7,
+      function () {
+        state++;
+        // endMethodCallback
+        strictEqual(state, 14);
+        endFinished.resolve();
+      }
+    );
+    await Promise.all([
+      transformCalled.promise,
+      finalCalled.promise,
+      flushCalled.promise,
+      finishCalled.promise,
+      endCalled.promise,
+      dataCalled.promise,
+      endFinished.promise,
+    ]);
+  }
+};
+
+export const transform_destroy = {
+  async test(ctrl, env, ctx) {
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      transform.resume();
+      const closed = deferredPromise();
+      transform.on('end', closed.reject);
+      transform.on('close', closed.resolve);
+      transform.on('finish', closed.reject);
+      transform.destroy();
+      await closed.promise;
+    }
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      transform.resume();
+      const expected = new Error('kaboom');
+      const errored = deferredPromise();
+      const closed = deferredPromise();
+      transform.on('end', closed.reject);
+      transform.on('finish', closed.reject);
+      transform.on('close', closed.resolve);
+      transform.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      );
+      transform.destroy(expected);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      transform._destroy = function (err, cb) {
+        strictEqual(err, expected);
+        cb(err);
+      };
+      const expected = new Error('kaboom');
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      transform.on('finish', closed.reject);
+      transform.on('close', closed.resolve);
+      transform.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      transform.destroy(expected);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const expected = new Error('kaboom');
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const transform = new Transform({
+        transform(chunk, enc, cb) {},
+        destroy: function (err, cb) {
+          strictEqual(err, expected);
+          cb();
+          destroyCalled.resolve();
+        }
+      });
+      transform.resume();
+      transform.on('end', closed.reject);
+      transform.on('close', closed.resolve);
+      transform.on('finish', closed.reject);
+
+      // Error is swallowed by the custom _destroy
+      transform.on('error', closed.reject);
+      transform.destroy(expected);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      const destroyCalled = deferredPromise();
+      transform._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb();
+        destroyCalled.resolve();
+      };
+      transform.destroy();
+      await destroyCalled.promise;
+    }
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      transform.resume();
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const endCalled = deferredPromise();
+      transform._destroy = function (err, cb) {
+        strictEqual(err, null);
+        queueMicrotask(() => {
+          this.push(null);
+          this.end();
+          cb();
+          destroyCalled.resolve();
+        })
+      };
+      transform.on('finish', closed.reject);
+      transform.on('end', closed.reject);
+      transform.on('close', closed.resolve);
+      transform.destroy();
+      transform.removeListener('end', closed.reject);
+      transform.removeListener('finish', closed.reject);
+      transform.on('end', endCalled.resolve);
+      transform.on('finish', closed.reject);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        endCalled.promise,
+      ]);
+    }
+    {
+      const transform = new Transform({
+        transform(chunk, enc, cb) {}
+      });
+      const expected = new Error('kaboom');
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      transform._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb(expected);
+        destroyCalled.resolve();
+      };
+      transform.on('close', closed.resolve);
+      transform.on('finish', closed.reject);
+      transform.on('end', closed.reject);
+      transform.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      );
+      transform.destroy();
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+  }
+};
+
+export const transform_constructor_set_methods = {
+  async test(ctrl, env, ctx) {
+    const t = new Transform();
+    throws(
+      () => {
+        t.end(Buffer.from('blerg'));
+      },
+      {
+        name: 'Error',
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+        message: 'The _transform() method is not implemented'
+      }
+    );
+    const transformCalled = deferredPromise();
+    const finalCalled = deferredPromise();
+    const flushCalled = deferredPromise();
+    const _transform = (chunk, _, next) => {
+      next();
+      transformCalled.resolve();
+    };
+    const _final = (next) => {
+      next();
+      finalCalled.resolve();
+    };
+    const _flush = (next) => {
+      next();
+      flushCalled.resolve();
+    };
+    const t2 = new Transform({
+      transform: _transform,
+      flush: _flush,
+      final: _final
+    });
+    strictEqual(t2._transform, _transform);
+    strictEqual(t2._flush, _flush);
+    strictEqual(t2._final, _final);
+    t2.end(Buffer.from('blerg'));
+    t2.resume();
+    await Promise.all([
+      transformCalled.promise,
+      finalCalled.promise,
+      flushCalled.promise,
+    ]);
+  }
+};
+
+export const transform_callback_twice = {
+  async test(ctrl, env, ctx) {
+    const stream = new Transform({
+      transform(chunk, enc, cb) {
+        cb();
+        cb();
+      }
+    });
+    const errored = deferredPromise();
+    stream.on(
+      'error',
+      function (err) {
+        strictEqual(err.code, 'ERR_MULTIPLE_CALLBACK');
+        errored.resolve();
+      }
+    )
+    stream.write('foo');
+    await errored.promise;
+  }
+};
+
+export const toarray = {
+  async test(ctrl, env, ctx) {
+    {
+      // Works on a synchronous stream
+      await (async () => {
+        const tests = [
+          [],
+          [1],
+          [1, 2, 3],
+          Array(100)
+            .fill()
+            .map((_, i) => i)
+        ];
+        for (const test of tests) {
+          const stream = Readable.from(test);
+          const result = await stream.toArray();
+          deepStrictEqual(result, test);
+        }
+      })();
+    }
+    {
+      // Works on a non-object-mode stream
+      await (async () => {
+        const firstBuffer = Buffer.from([1, 2, 3]);
+        const secondBuffer = Buffer.from([4, 5, 6]);
+        const stream = Readable.from([firstBuffer, secondBuffer], {
+          objectMode: false
+        });
+        const result = await stream.toArray();
+        strictEqual(Array.isArray(result), true);
+        deepStrictEqual(result, [firstBuffer, secondBuffer]);
+      })();
+    }
+    {
+      // Works on an asynchronous stream
+      await (async () => {
+        const tests = [
+          [],
+          [1],
+          [1, 2, 3],
+          Array(100)
+            .fill()
+            .map((_, i) => i)
+        ];
+        for (const test of tests) {
+          const stream = Readable.from(test).map((x) => Promise.resolve(x));
+          const result = await stream.toArray();
+          deepStrictEqual(result, test);
+        }
+      })();
+    }
+    {
+      // Support for AbortSignal
+      const ac = new AbortController();
+      let stream;
+      queueMicrotask(() => ac.abort());
+      await rejects(
+          async () => {
+            stream = Readable.from([1, 2, 3]).map(async (x) => {
+              if (x === 3) {
+                await new Promise(() => {}); // Explicitly do not pass signal here
+              }
+
+              return Promise.resolve(x);
+            })
+            await stream.toArray({
+              signal: ac.signal
+            });
+          },
+          {
+            name: 'AbortError'
+          }
+        );
+
+      // Only stops toArray, does not destroy the stream
+      ok(stream.destroyed, false);
+    }
+    {
+      // Test result is a Promise
+      const result = Readable.from([1, 2, 3, 4, 5]).toArray();
+      strictEqual(result instanceof Promise, true);
+    }
+    {
+      // Error cases
+      await rejects(async () => {
+          await Readable.from([1]).toArray(1)
+        }, /ERR_INVALID_ARG_TYPE/);
+      await rejects(async () => {
+          await Readable.from([1]).toArray({
+            signal: true
+          })
+        }, /ERR_INVALID_ARG_TYPE/);
+    }
+  }
+};
+
+export const some_find_every = {
+  async test(ctrl, env, ctx) {
+    function oneTo5() {
+      return Readable.from([1, 2, 3, 4, 5]);
+    }
+
+    function oneTo5Async() {
+      return oneTo5().map(async (x) => {
+        await Promise.resolve();
+        return x;
+      });
+    }
+    {
+      // Some, find, and every work with a synchronous stream and predicate
+      strictEqual(await oneTo5().some((x) => x > 3), true);
+      strictEqual(await oneTo5().every((x) => x > 3), false);
+      strictEqual(await oneTo5().find((x) => x > 3), 4);
+      strictEqual(await oneTo5().some((x) => x > 6), false);
+      strictEqual(await oneTo5().every((x) => x < 6), true);
+      strictEqual(await oneTo5().find((x) => x > 6), undefined);
+      strictEqual(await Readable.from([]).some(() => true), false);
+      strictEqual(await Readable.from([]).every(() => true), true);
+      strictEqual(await Readable.from([]).find(() => true), undefined);
+    }
+
+    {
+      // Some, find, and every work with an asynchronous stream and synchronous predicate
+      strictEqual(await oneTo5Async().some((x) => x > 3), true);
+      strictEqual(await oneTo5Async().every((x) => x > 3), false);
+      strictEqual(await oneTo5Async().find((x) => x > 3), 4);
+      strictEqual(await oneTo5Async().some((x) => x > 6), false);
+      strictEqual(await oneTo5Async().every((x) => x < 6), true);
+      strictEqual(await oneTo5Async().find((x) => x > 6), undefined);
+    }
+
+    {
+      // Some, find, and every work on synchronous streams with an asynchronous predicate
+      strictEqual(await oneTo5().some(async (x) => x > 3), true);
+      strictEqual(await oneTo5().every(async (x) => x > 3), false);
+      strictEqual(await oneTo5().find(async (x) => x > 3), 4);
+      strictEqual(await oneTo5().some(async (x) => x > 6), false);
+      strictEqual(await oneTo5().every(async (x) => x < 6), true);
+      strictEqual(await oneTo5().find(async (x) => x > 6), undefined);
+    }
+
+    {
+      // Some, find, and every work on asynchronous streams with an asynchronous predicate
+      strictEqual(await oneTo5Async().some(async (x) => x > 3), true);
+      strictEqual(await oneTo5Async().every(async (x) => x > 3), false);
+      strictEqual(await oneTo5Async().find(async (x) => x > 3), 4);
+      strictEqual(await oneTo5Async().some(async (x) => x > 6), false);
+      strictEqual(await oneTo5Async().every(async (x) => x < 6), true);
+      strictEqual(await oneTo5Async().find(async (x) => x > 6), undefined);
+    }
+
+    {
+      async function checkDestroyed(stream) {
+        await scheduler.wait(1);
+        strictEqual(stream.destroyed, true);
+      }
+
+      {
+        // Some, find, and every short circuit
+        const someStream = oneTo5();
+        await someStream.some((x) => x > 2);
+        await checkDestroyed(someStream);
+
+        const everyStream = oneTo5();
+        await everyStream.every((x) => x < 3);
+        await checkDestroyed(everyStream);
+
+        const findStream = oneTo5();
+        await findStream.find((x) => x > 1);
+        await checkDestroyed(findStream);
+
+        // When short circuit isn't possible the whole stream is iterated
+        await oneTo5().some(() => false);
+        await oneTo5().every(() => true);
+        await oneTo5().find(() => false);
+      }
+
+      {
+        // Some, find, and every short circuit async stream/predicate
+        const someStream = oneTo5Async();
+        await someStream.some(async (x) => x > 2);
+        await checkDestroyed(someStream);
+
+        const everyStream = oneTo5Async();
+        await everyStream.every(async (x) => x < 3);
+        await checkDestroyed(everyStream);
+
+        const findStream = oneTo5Async();
+        await findStream.find(async (x) => x > 1);
+        await checkDestroyed(findStream);
+
+        // When short circuit isn't possible the whole stream is iterated
+        await oneTo5Async().some(async () => false);
+        await oneTo5Async().every(async () => true);
+        await oneTo5Async().find(async () => false);
+      }
+    }
+
+    {
+      // Concurrency doesn't affect which value is found.
+      const found = await Readable.from([1, 2]).find(
+        async (val) => {
+          if (val === 1) {
+            await scheduler.wait(100);
+          }
+          return true;
+        },
+        { concurrency: 2 }
+      )
+      strictEqual(found, 1);
+    }
+
+    {
+      // Support for AbortSignal
+      for (const op of ['some', 'every', 'find']) {
+        {
+          const ac = new AbortController();
+          queueMicrotask(() => ac.abort());
+          await rejects(
+              Readable.from([1, 2, 3])[op](() => new Promise(() => {}), { signal: ac.signal }),
+              {
+                name: 'AbortError'
+              },
+              `${op} should abort correctly with sync abort`
+            );
+        }
+        {
+          // Support for pre-aborted AbortSignal
+          await rejects(
+              Readable.from([1, 2, 3])[op](() => new Promise(() => {}), { signal: AbortSignal.abort() }),
+              {
+                name: 'AbortError'
+              },
+              `${op} should abort with pre-aborted abort controller`
+            );
+        }
+      }
+    }
+    {
+      // Error cases
+      for (const op of ['some', 'every', 'find']) {
+        await rejects(
+            async () => {
+              await Readable.from([1])[op](1);
+            },
+            /ERR_INVALID_ARG_TYPE/,
+            `${op} should throw for invalid function`
+          );
+        await rejects(
+            async () => {
+              await Readable.from([1])[op]((x) => x, {
+                concurrency: 'Foo'
+              });
+            },
+            /RangeError/,
+            `${op} should throw for invalid concurrency`
+          );
+        await rejects(
+            async () => {
+              await Readable.from([1])[op]((x) => x, 1);
+            },
+            /ERR_INVALID_ARG_TYPE/,
+            `${op} should throw for invalid concurrency`
+          );
+        await rejects(
+            async () => {
+              await Readable.from([1])[op]((x) => x, {
+                signal: true
+              });
+            },
+            /ERR_INVALID_ARG_TYPE/,
+            `${op} should throw for invalid signal`
+          );
+      }
+    }
+    {
+      for (const op of ['some', 'every', 'find']) {
+        const stream = oneTo5();
+        Object.defineProperty(stream, 'map', {
+          value: () => {
+            throw new Error('should not be called');
+          }
+        });
+        // Check that map isn't getting called.
+        stream[op](() => {});
+      }
+    }
+  }
+};
+
+export const reduce = {
+  async test(ctrl, env, ctx) {
+    function sum(p, c) {
+      return p + c;
+    }
+    {
+      // Does the same thing as `(await stream.toArray()).reduce(...)`
+      await (async () => {
+        const tests = [
+          [[], sum, 0],
+          [[1], sum, 0],
+          [[1, 2, 3, 4, 5], sum, 0],
+          [[...Array(100).keys()], sum, 0],
+          [['a', 'b', 'c'], sum, ''],
+          [[1, 2], sum],
+          [[1, 2, 3], (x, y) => y]
+        ];
+        for (const [values, fn, initial] of tests) {
+          const streamReduce = await Readable.from(values).reduce(fn, initial);
+          const arrayReduce = values.reduce(fn, initial);
+          deepStrictEqual(streamReduce, arrayReduce);
+        }
+        // Does the same thing as `(await stream.toArray()).reduce(...)` with an
+        // asynchronous reducer
+        for (const [values, fn, initial] of tests) {
+          const streamReduce = await Readable.from(values)
+            .map(async (x) => x)
+            .reduce(fn, initial);
+          const arrayReduce = values.reduce(fn, initial);
+          deepStrictEqual(streamReduce, arrayReduce);
+        }
+      })();
+    }
+    {
+      // Works with an async reducer, with or without initial value
+      await (async () => {
+        const six = await Readable.from([1, 2, 3]).reduce(async (p, c) => p + c, 0);
+        strictEqual(six, 6);
+      })();
+      await (async () => {
+        const six = await Readable.from([1, 2, 3]).reduce(async (p, c) => p + c);
+        strictEqual(six, 6);
+      })();
+    }
+    {
+      // Works lazily
+      await rejects(
+          Readable.from([1, 2, 3, 4, 5, 6])
+            .map(
+              (x) => {
+                return x
+              }
+            ) // Two consumed and one buffered by `map` due to default concurrency
+            .reduce(async (p, c) => {
+              if (p === 1) {
+                throw new Error('boom');
+              }
+              return c;
+            }, 0),
+          /boom/
+        );
+    }
+    {
+      // Support for AbortSignal
+      const ac = new AbortController();
+      queueMicrotask(() => ac.abort());
+      await rejects(
+          async () => {
+            await Readable.from([1, 2, 3]).reduce(
+              async (p, c) => {
+                if (c === 3) {
+                  await new Promise(() => {}); // Explicitly do not pass signal here
+                }
+
+                return Promise.resolve();
+              },
+              0,
+              {
+                signal: ac.signal
+              }
+            );
+          },
+          {
+            name: 'AbortError'
+          }
+        );
+    }
+    {
+      // Support for AbortSignal - pre aborted
+      const stream = Readable.from([1, 2, 3]);
+      await rejects(
+          async () => {
+            await stream.reduce(
+              async (p, c) => {
+                if (c === 3) {
+                  await new Promise(() => {}) // Explicitly do not pass signal here
+                }
+
+                return Promise.resolve()
+              },
+              0,
+              {
+                signal: AbortSignal.abort()
+              }
+            )
+          },
+          {
+            name: 'AbortError'
+          }
+        );
+
+      strictEqual(stream.destroyed, true);
+    }
+    {
+      // Support for AbortSignal - deep
+      const stream = Readable.from([1, 2, 3])
+      await rejects(
+          async () => {
+            await stream.reduce(
+              async (p, c, { signal }) => {
+                signal.addEventListener('abort', () => {}, {
+                  once: true
+                })
+                if (c === 3) {
+                  await new Promise(() => {}) // Explicitly do not pass signal here
+                }
+
+                return Promise.resolve()
+              },
+              0,
+              {
+                signal: AbortSignal.abort()
+              }
+            )
+          },
+          {
+            name: 'AbortError'
+          }
+        );
+      strictEqual(stream.destroyed, true);
+    }
+    {
+      // Error cases
+      await rejects(() => Readable.from([]).reduce(1), /TypeError/);
+      await rejects(() => Readable.from([]).reduce('5'), /TypeError/);
+      await rejects(() => Readable.from([]).reduce((x, y) => x + y, 0, 1), /ERR_INVALID_ARG_TYPE/);
+      await rejects(
+        () =>
+          Readable.from([]).reduce((x, y) => x + y, 0, {
+            signal: true
+          }),
+        /ERR_INVALID_ARG_TYPE/
+      );
+    }
+    {
+      // Test result is a Promise
+      const result = Readable.from([1, 2, 3, 4, 5]).reduce(sum, 0);
+      ok(result instanceof Promise);
+    }
+  }
+};
+
+export const readablelistening_state = {
+  async test(ctrl, env, ctx) {
+    const r = new Readable({
+      read: () => {}
+    });
+
+    // readableListening state should start in `false`.
+    strictEqual(r._readableState.readableListening, false);
+    const readableCalled = deferredPromise();
+    const dataCalled = deferredPromise();
+    r.on(
+      'readable',
+      () => {
+        // Inside the readable event this state should be true.
+        strictEqual(r._readableState.readableListening, true);
+        readableCalled.resolve();
+      }
+    )
+    r.push(Buffer.from('Testing readableListening state'))
+    const r2 = new Readable({
+      read: () => {}
+    });
+
+    // readableListening state should start in `false`.
+    strictEqual(r2._readableState.readableListening, false);
+    r2.on(
+      'data',
+      (chunk) => {
+        // readableListening should be false because we don't have
+        // a `readable` listener
+        strictEqual(r2._readableState.readableListening, false);
+        dataCalled.resolve();
+      }
+    )
+    r2.push(Buffer.from('Testing readableListening state'))
+    await Promise.all([
+      readableCalled.promise,
+      dataCalled.promise,
+    ]);
+  }
+};
+
+export const readable_with_unimplemented_read = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable();
+    readable.read();
+    const errored = deferredPromise();
+    const closed = deferredPromise();
+    readable.on(
+      'error',
+      function(err) {
+        strictEqual(err.code, 'ERR_METHOD_NOT_IMPLEMENTED');
+        errored.resolve();
+      }
+    );
+    readable.on('close', closed.resolve);
+    await Promise.all([
+      errored.promise,
+      closed.promise,
+    ]);
+  }
+};
+
+export const readable_unshift = {
+  async test(ctrl, env, ctx) {
+    {
+      // Check that strings are saved as Buffer
+      const readable = new Readable({
+        read() {}
+      });
+      const string = 'abc';
+      const dataCalled = deferredPromise();
+      readable.on(
+        'data',
+        (chunk) => {
+          ok(Buffer.isBuffer(chunk));
+          strictEqual(chunk.toString('utf8'), string);
+          dataCalled.resolve();
+        }
+      );
+      readable.unshift(string);
+      await dataCalled.promise;
+    }
+    {
+      // Check that data goes at the beginning
+      const readable = new Readable({
+        read() {}
+      });
+      const unshift = 'front';
+      const push = 'back';
+      const expected = [unshift, push];
+      const dataCalled = deferredPromise();
+      let dataCount = 0;
+      readable.on(
+        'data',
+        (chunk) => {
+          strictEqual(chunk.toString('utf8'), expected.shift());
+          if (++dataCount === 2) dataCalled.resolve();
+        }
+      );
+      readable.push(push);
+      readable.unshift(unshift);
+      await dataCalled.promise;
+    }
+    {
+      // Check that buffer is saved with correct encoding
+      const readable = new Readable({
+        read() {}
+      });
+      const encoding = 'base64';
+      const string = Buffer.from('abc').toString(encoding);
+      const dataCalled = deferredPromise();
+      readable.on(
+        'data',
+        (chunk) => {
+          strictEqual(chunk.toString(encoding), string);
+          dataCalled.resolve();
+        }
+      );
+      readable.unshift(string, encoding);
+      await dataCalled.promise;
+    }
+    {
+      const streamEncoding = 'base64';
+      const dataCalled = deferredPromise();
+      function checkEncoding(readable) {
+        // chunk encodings
+        const encodings = ['utf8', 'binary', 'hex', 'base64'];
+        const expected = [];
+        let dataCount = 0;
+        readable.on(
+          'data',
+          (chunk) => {
+            const { encoding, string } = expected.pop();
+            strictEqual(chunk.toString(encoding), string);
+            if (++dataCount === encodings.length) dataCalled.resolve();
+          }
+        );
+        for (const encoding of encodings) {
+          const string = 'abc';
+
+          // If encoding is the same as the state.encoding the string is
+          // saved as is
+          const expect = encoding !== streamEncoding ? Buffer.from(string, encoding).toString(streamEncoding) : string;
+          expected.push({
+            encoding,
+            string: expect
+          });
+          readable.unshift(string, encoding);
+        }
+      }
+      const r1 = new Readable({
+        read() {}
+      });
+      r1.setEncoding(streamEncoding);
+      checkEncoding(r1);
+      const r2 = new Readable({
+        read() {},
+        encoding: streamEncoding
+      });
+      checkEncoding(r2);
+      await dataCalled.promise;
+    }
+    {
+      // Both .push & .unshift should have the same behaviour
+      // When setting an encoding, each chunk should be emitted with that encoding
+      const encoding = 'base64';
+      const dataCalled = deferredPromise();
+      function checkEncoding(readable) {
+        const string = 'abc';
+        let dataCount = 0;
+        readable.on(
+          'data',
+          (chunk) => {
+            strictEqual(chunk, Buffer.from(string).toString(encoding));
+            if (++dataCount === 2) dataCalled.resolve();
+          }
+        );
+        readable.push(string);
+        readable.unshift(string);
+      }
+      const r1 = new Readable({
+        read() {}
+      });
+      r1.setEncoding(encoding);
+      checkEncoding(r1);
+      const r2 = new Readable({
+        read() {},
+        encoding
+      });
+      checkEncoding(r2);
+      await dataCalled.promise;
+    }
+    {
+      // Check that ObjectMode works
+      const readable = new Readable({
+        objectMode: true,
+        read() {}
+      });
+      const chunks = ['a', 1, {}, []];
+      const dataCalled = deferredPromise();
+      let dataCount = 0;
+      readable.on(
+        'data',
+        (chunk) => {
+          strictEqual(chunk, chunks.pop());
+          if (++dataCount === chunks.length) dataCalled.resolve();
+        }
+      );
+      for (const chunk of chunks) {
+        readable.unshift(chunk);
+      }
+      await dataCalled.promise;
+    }
+    {
+      // Should not throw: https://github.com/nodejs/node/issues/27192
+      const highWaterMark = 50;
+      class ArrayReader extends Readable {
+        constructor(opt) {
+          super({
+            highWaterMark
+          });
+          // The error happened only when pushing above hwm
+          this.buffer = new Array(highWaterMark * 2).fill(0).map(String);
+        }
+        _read(size) {
+          while (this.buffer.length) {
+            const chunk = this.buffer.shift();
+            if (!this.buffer.length) {
+              this.push(chunk);
+              this.push(null);
+              return true;
+            }
+            if (!this.push(chunk)) return;
+          }
+        }
+      }
+      const readCalled = deferredPromise();
+      function onRead() {
+        while (null !== stream.read()) {
+          // Remove the 'readable' listener before unshifting
+          stream.removeListener('readable', onRead);
+          stream.unshift('a');
+          break;
+        }
+        readCalled.resolve();
+      }
+      const stream = new ArrayReader();
+      stream.once('readable', onRead);
+      await readCalled.promise;
+    }
+  }
+};
+
+export const readable_setencoding_null = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable({
+      encoding: 'hex'
+    });
+    strictEqual(readable._readableState.encoding, 'hex');
+    readable.setEncoding(null);
+    strictEqual(readable._readableState.encoding, 'utf8');
+  }
+};
+
+export const readable_setencoding_existing_buffers = {
+  async test(ctrl, env, ctx) {
+    {
+      // Call .setEncoding() while there are bytes already in the buffer.
+      const r = new Readable({
+        read() {}
+      });
+      r.push(Buffer.from('a'));
+      r.push(Buffer.from('b'));
+      r.setEncoding('utf8');
+      const chunks = [];
+      r.on('data', (chunk) => chunks.push(chunk));
+      queueMicrotask(() => {
+        deepStrictEqual(chunks, ['ab']);
+      });
+    }
+    {
+      // Call .setEncoding() while the buffer contains a complete,
+      // but chunked character.
+      const r = new Readable({
+        read() {}
+      });
+      r.push(Buffer.from([0xf0]));
+      r.push(Buffer.from([0x9f]));
+      r.push(Buffer.from([0x8e]));
+      r.push(Buffer.from([0x89]));
+      r.setEncoding('utf8');
+      const chunks = [];
+      r.on('data', (chunk) => chunks.push(chunk));
+      queueMicrotask(() => {
+        deepStrictEqual(chunks, ['🎉']);
+      });
+    }
+    {
+      // Call .setEncoding() while the buffer contains an incomplete character,
+      // and finish the character later.
+      const r = new Readable({
+        read() {}
+      });
+      r.push(Buffer.from([0xf0]));
+      r.push(Buffer.from([0x9f]));
+      r.setEncoding('utf8');
+      r.push(Buffer.from([0x8e]));
+      r.push(Buffer.from([0x89]));
+      const chunks = [];
+      r.on('data', (chunk) => chunks.push(chunk));
+      queueMicrotask(() => {
+        deepStrictEqual(chunks, ['🎉']);
+      });
+    }
+  }
+};
+
+export const readable_resumescheduled = {
+  async test(ctrl, env, ctx) {
+    {
+      // pipe() test case
+      const r = new Readable({
+        read() {}
+      });
+      const w = new Writable();
+
+      // resumeScheduled should start = `false`.
+      strictEqual(r._readableState.resumeScheduled, false);
+
+      // Calling pipe() should change the state value = true.
+      r.pipe(w);
+      strictEqual(r._readableState.resumeScheduled, true);
+      queueMicrotask(
+        () => {
+          strictEqual(r._readableState.resumeScheduled, false);
+        }
+      );
+    }
+    {
+      // 'data' listener test case
+      const r = new Readable({
+        read() {}
+      });
+
+      // resumeScheduled should start = `false`.
+      strictEqual(r._readableState.resumeScheduled, false);
+      r.push(Buffer.from([1, 2, 3]));
+
+      // Adding 'data' listener should change the state value
+      r.on(
+        'data',
+        () => {
+          strictEqual(r._readableState.resumeScheduled, false);
+        }
+      );
+      strictEqual(r._readableState.resumeScheduled, true);
+      queueMicrotask(
+        () => {
+          strictEqual(r._readableState.resumeScheduled, false);
+        }
+      );
+    }
+    {
+      // resume() test case
+      const r = new Readable({
+        read() {}
+      });
+
+      // resumeScheduled should start = `false`.
+      strictEqual(r._readableState.resumeScheduled, false);
+
+      // Calling resume() should change the state value.
+      r.resume();
+      strictEqual(r._readableState.resumeScheduled, true);
+      r.on(
+        'resume',
+        () => {
+          // The state value should be `false` again
+          strictEqual(r._readableState.resumeScheduled, false);
+        }
+      );
+      queueMicrotask(
+        () => {
+          strictEqual(r._readableState.resumeScheduled, false);
+        }
+      );
+    }
+  }
+};
+
+export const readable_resume_hwm = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable({
+      read: () => { throw new Error('should not be called'); },
+      highWaterMark: 100
+    });
+
+    // Fill up the internal buffer so that we definitely exceed the HWM:
+    for (let i = 0; i < 10; i++) readable.push('a'.repeat(200));
+
+    // Call resume, and pause after one chunk.
+    // The .pause() is just so that we don’t empty the buffer fully, which would
+    // be a valid reason to call ._read().
+    readable.resume();
+    const dataCalled = deferredPromise();
+    readable.once(
+      'data',
+      () => {
+        readable.pause();
+        dataCalled.resolve();
+      }
+    );
+    await dataCalled.promise;
+  }
+};
+
+export const readable_reading_readingmore = {
+  async test(ctrl, env, ctx) {
+    {
+      const readable = new Readable({
+        read(size) {}
+      });
+      const state = readable._readableState;
+
+      // Starting off with false initially.
+      strictEqual(state.reading, false);
+      strictEqual(state.readingMore, false);
+      let dataCount = 0;
+      let readableCount = 0;
+      const dataCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      const ended = deferredPromise();
+      readable.on(
+        'data',
+        (data) => {
+          // While in a flowing state with a 'readable' listener
+          // we should not be reading more
+          if (readable.readableFlowing) strictEqual(state.readingMore, true);
+
+          // Reading as long as we've not ended
+          strictEqual(state.reading, !state.ended);
+          if (++dataCount === 2) dataCalled.resolve();
+        }
+      );
+      function onStreamEnd() {
+        // End of stream; state.reading is false
+        // And so should be readingMore.
+        strictEqual(state.readingMore, false);
+        strictEqual(state.reading, false);
+        ended.resolve();
+      }
+      const expectedReadingMore = [true, true, false];
+      readable.on(
+        'readable',
+        () => {
+          // There is only one readingMore scheduled from on('data'),
+          // after which everything is governed by the .read() call
+          strictEqual(state.readingMore, expectedReadingMore.shift());
+
+          // If the stream has ended, we shouldn't be reading
+          strictEqual(state.ended, !state.reading);
+
+          // Consume all the data
+          while (readable.read() !== null);
+          if (expectedReadingMore.length === 0)
+            // Reached end of stream
+            queueMicrotask(onStreamEnd);
+          if (++readableCount === 3) readableCalled.resolve();
+        }
+      );
+      readable.on('end', onStreamEnd);
+      readable.push('pushed');
+      readable.read(6);
+
+      // reading
+      strictEqual(state.reading, true);
+      strictEqual(state.readingMore, true);
+
+      // add chunk to front
+      readable.unshift('unshifted');
+
+      // end
+      readable.push(null);
+      await Promise.all([
+        dataCalled.promise,
+        readableCalled.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      const readable = new Readable({
+        read(size) {}
+      });
+      const state = readable._readableState;
+
+      // Starting off with false initially.
+      strictEqual(state.reading, false);
+      strictEqual(state.readingMore, false);
+      let dataCount = 0;
+      const dataCalled = deferredPromise();
+      const ended = deferredPromise();
+      readable.on(
+        'data',
+        (data) => {
+          // While in a flowing state without a 'readable' listener
+          // we should be reading more
+          if (readable.readableFlowing) strictEqual(state.readingMore, true);
+
+          // Reading as long as we've not ended
+          strictEqual(state.reading, !state.ended);
+          if (++dataCount === 2) dataCalled.resolve();
+        }
+      )
+      function onStreamEnd() {
+        // End of stream; state.reading is false
+        // And so should be readingMore.
+        strictEqual(state.readingMore, false);
+        strictEqual(state.reading, false);
+        ended.resolve();
+      }
+      readable.on('end', onStreamEnd);
+      readable.push('pushed');
+
+      // Stop emitting 'data' events
+      strictEqual(state.flowing, true);
+      readable.pause();
+
+      // paused
+      strictEqual(state.reading, false);
+      strictEqual(state.flowing, false);
+      readable.resume();
+      strictEqual(state.reading, false);
+      strictEqual(state.flowing, true);
+
+      // add chunk to front
+      readable.unshift('unshifted');
+
+      // end
+      readable.push(null);
+      await Promise.all([
+        dataCalled.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      const readable = new Readable({
+        read(size) {}
+      });
+      const state = readable._readableState;
+
+      let dataCount = 0;
+      const dataCalled = deferredPromise();
+      const ended = deferredPromise();
+
+      // Starting off with false initially.
+      strictEqual(state.reading, false);
+      strictEqual(state.readingMore, false);
+      readable.on('readable', fail);
+      readable.on(
+        'data',
+        (data) => {
+          // Reading as long as we've not ended
+          strictEqual(state.reading, !state.ended);
+          if (++dataCount === 2) dataCalled.resolve();
+        }
+      );
+      readable.removeListener('readable', fail);
+      function onStreamEnd() {
+        // End of stream; state.reading is false
+        // And so should be readingMore.
+        strictEqual(state.readingMore, false);
+        strictEqual(state.reading, false);
+        ended.resolve();
+      };
+      readable.on('end', onStreamEnd);
+      readable.push('pushed');
+
+      // We are still not flowing, we will be resuming in the next tick
+      strictEqual(state.flowing, false);
+
+      // Wait for nextTick, so the readableListener flag resets
+      queueMicrotask(function () {
+        readable.resume();
+
+        // Stop emitting 'data' events
+        strictEqual(state.flowing, true);
+        readable.pause();
+
+        // paused
+        strictEqual(state.flowing, false);
+        readable.resume();
+        strictEqual(state.flowing, true);
+
+        // add chunk to front
+        readable.unshift('unshifted');
+
+        // end
+        readable.push(null);
+      });
+
+      await Promise.all([
+        dataCalled.promise,
+        ended.promise,
+      ]);
+    }
+  }
+};
+
+export const readable_readable = {
+  async test(ctrl, env, ctx) {
+    {
+      const r = new Readable({
+        read() {}
+      });
+      strictEqual(r.readable, true);
+      r.destroy();
+      strictEqual(r.readable, false);
+    }
+    {
+      const r = new Readable({
+        read() {}
+      });
+      strictEqual(r.readable, true);
+      r.on('end', fail);
+      r.resume();
+      r.push(null);
+      strictEqual(r.readable, true);
+      r.off('end', fail);
+      const ended = deferredPromise();
+      r.on(
+        'end',
+        () => {
+          strictEqual(r.readable, false);
+          ended.resolve();
+        }
+      );
+    }
+    {
+      const readCalled = deferredPromise();
+      const errored = deferredPromise();
+      const r = new Readable({
+        read: () => {
+          queueMicrotask(() => {
+            r.destroy(new Error());
+            strictEqual(r.readable, false);
+            readCalled.resolve();
+          })
+        }
+      })
+      r.resume();
+      r.on(
+        'error',
+        () => {
+          strictEqual(r.readable, false);
+          errored.resolve();
+        }
+      );
+      await Promise.all([
+        readCalled.promise,
+        errored.promise,
+      ]);
+    }
+  }
+};
+
+export const readable_readable_then_resume = {
+  async test(ctrl, env, ctx) {
+    await check(
+      new Readable({
+        objectMode: true,
+        highWaterMark: 1,
+        read() {
+          if (!this.first) {
+            this.push('hello');
+            this.first = true;
+            return;
+          }
+          this.push(null);
+        }
+      })
+    );
+    async function check(s) {
+      const ended = deferredPromise();
+      s.on('readable', ended.reject);
+      s.on('end', ended.resolve);
+      strictEqual(s.removeListener, s.off);
+      s.removeListener('readable', ended.reject);
+      s.resume();
+      await ended.promise;
+    }
+  }
+};
+
+export const readable_pause_and_resume = {
+  async test(ctrl, env, ctx) {
+    let ticks = 18;
+    let expectedData = 19;
+    const rs = new Readable({
+      objectMode: true,
+      read: () => {
+        if (ticks-- > 0) return queueMicrotask(() => rs.push({}));
+        rs.push({});
+        rs.push(null);
+      }
+    })
+    const ended = deferredPromise();
+    const ondataCalled = deferredPromise();
+    rs.on('end', ended.resolve);
+    await readAndPause();
+    async function readAndPause() {
+      // Does a on(data) -> pause -> wait -> resume -> on(data) ... loop.
+      // Expects on(data) to never fire if the stream is paused.
+      const ondata = (data) => {
+        rs.pause();
+        expectedData--;
+        if (expectedData <= 0) return;
+        queueMicrotask(function () {
+          rs.removeListener('data', ondata);
+          readAndPause();
+          rs.resume();
+          ondataCalled.resolve();
+        })
+      }; // Only call ondata once
+
+      rs.on('data', ondata);
+      await Promise.all([
+        ended.promise,
+        ondataCalled.promise,
+      ]);
+    }
+    {
+      const readable = new Readable({
+        read() {}
+      });
+      function read() {};
+      readable.setEncoding('utf8');
+      readable.on('readable', read);
+      readable.removeListener('readable', read);
+      readable.pause();
+      queueMicrotask(function () {
+        ok(readable.isPaused());
+      });
+    }
+    {
+      const source3 = new PassThrough();
+      const target3 = new PassThrough();
+      const chunk = Buffer.allocUnsafe(1000);
+      while (target3.write(chunk));
+      source3.pipe(target3);
+      const drainCalled = deferredPromise();
+      target3.on(
+        'drain',
+        () => {
+          ok(!source3.isPaused());
+          drainCalled.resolve();
+        }
+      );
+      target3.on('data', () => {});
+      await drainCalled.promise;
+    }
+  }
+};
+
+export const readable_object_multi_push_async = {
+  async test(ctrl, env, ctx) {
+    const MAX = 42
+    const BATCH = 10
+    {
+      const readCalled = deferredPromise();
+      const ended = deferredPromise();
+      let readCount = 0;
+      const readable = new Readable({
+        objectMode: true,
+        read: function () {
+          fetchData((err, data) => {
+            if (err) {
+              this.destroy(err);
+              return;
+            }
+            if (data.length === 0) {
+              this.push(null);
+              return;
+            }
+            data.forEach((d) => this.push(d));
+          });
+          if (++readCount === Math.floor(MAX / BATCH) + 2)
+            readCalled.resolve();
+        }
+      })
+      let i = 0;
+      function fetchData(cb) {
+        if (i > MAX) {
+          setTimeout(cb, 10, null, []);
+        } else {
+          const array = [];
+          const max = i + BATCH;
+          for (; i < max; i++) {
+            array.push(i);
+          }
+          setTimeout(cb, 10, null, array);
+        }
+      }
+      readable.on('readable', () => {
+        let data;
+        while ((data = readable.read()) !== null) {}
+      });
+      readable.on(
+        'end',
+        () => {
+          strictEqual(i, (Math.floor(MAX / BATCH) + 1) * BATCH);
+          ended.resolve();
+        }
+      );
+      await Promise.all([
+        readCalled.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      const readCalled = deferredPromise();
+      const ended = deferredPromise();
+      let readCount = 0;
+      const readable = new Readable({
+        objectMode: true,
+        read: function () {
+          fetchData((err, data) => {
+            if (err) {
+              this.destroy(err);
+              return;
+            }
+            if (data.length === 0) {
+              this.push(null);
+              return;
+            }
+            data.forEach((d) => this.push(d));
+          });
+          if (++readCount === Math.floor(MAX / BATCH) + 2)
+            readCalled.resolve();
+        }
+      });
+      let i = 0;
+      function fetchData(cb) {
+        if (i > MAX) {
+          setTimeout(cb, 10, null, []);
+        } else {
+          const array = [];
+          const max = i + BATCH;
+          for (; i < max; i++) {
+            array.push(i);
+          }
+          setTimeout(cb, 10, null, array);
+        }
+      }
+      readable.on('data', (data) => {});
+      readable.on(
+        'end',
+        () => {
+          strictEqual(i, (Math.floor(MAX / BATCH) + 1) * BATCH);
+          ended.resolve();
+        }
+      );
+      await Promise.all([
+        readCalled.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      const readCalled = deferredPromise();
+      const ended = deferredPromise();
+      let readCount = 0;
+      const readable = new Readable({
+        objectMode: true,
+        read: function () {
+          fetchData((err, data) => {
+            if (err) {
+              this.destroy(err);
+              return;
+            }
+            data.forEach((d) => this.push(d));
+            if (data[BATCH - 1] >= MAX) {
+              this.push(null);
+            }
+          });
+          if (++readCount === Math.floor(MAX / BATCH) + 1)
+            readCalled.resolve();
+        }
+      });
+      let i = 0;
+      function fetchData(cb) {
+        const array = [];
+        const max = i + BATCH;
+        for (; i < max; i++) {
+          array.push(i);
+        }
+        setTimeout(cb, 10, null, array);
+      }
+      readable.on('data', (data) => {});
+      readable.on(
+        'end',
+        () => {
+          strictEqual(i, (Math.floor(MAX / BATCH) + 1) * BATCH);
+          ended.resolve();
+        }
+      );
+      await Promise.all([
+        readCalled.promise,
+        ended.promise,
+      ]);
+    }
+    {
+      const ended = deferredPromise();
+      const readable = new Readable({
+        objectMode: true,
+        read() {},
+      });
+      readable.on('data', ended.reject);
+      readable.push(null);
+      let nextTickPassed = false;
+      queueMicrotask(() => {
+        nextTickPassed = true;
+      });
+      readable.on(
+        'end',
+        () => {
+          strictEqual(nextTickPassed, true);
+          ended.resolve();
+        }
+      );
+      await ended.promise;
+    }
+    {
+      const ended = deferredPromise();
+      const readCalled = deferredPromise();
+      const readable = new Readable({
+        objectMode: true,
+        read: readCalled.resolve,
+      });
+      readable.on('data', (data) => {});
+      readable.on('end', ended.resolve);
+      queueMicrotask(() => {
+        readable.push('aaa');
+        readable.push(null);
+      })
+      await Promise.all([
+        readCalled.promise,
+        ended.promise,
+      ]);
+    }
+  }
+};
+
+export const readable_no_unneeded_readable = {
+  async test(ctrl, env, ctx) {
+    async function test(r) {
+      const wrapper = new Readable({
+        read: () => {
+          let data = r.read();
+          if (data) {
+            wrapper.push(data);
+            return;
+          }
+          r.once('readable', function () {
+            data = r.read();
+            if (data) {
+              wrapper.push(data);
+            }
+            // else: the end event should fire
+          })
+        }
+      })
+
+      r.once('end', function () {
+        wrapper.push(null);
+      });
+      const ended = deferredPromise();
+      wrapper.resume();
+      wrapper.once('end', ended.resolve);
+      await ended.promise;
+    }
+    {
+      const source = new Readable({
+        read: () => {}
+      });
+      source.push('foo');
+      source.push('bar');
+      source.push(null);
+      const pt = source.pipe(new PassThrough());
+      await test(pt);
+    }
+    {
+      // This is the underlying cause of the above test case.
+      const pushChunks = ['foo', 'bar'];
+      const r = new Readable({
+        read: () => {
+          const chunk = pushChunks.shift();
+          if (chunk) {
+            // synchronous call
+            r.push(chunk);
+          } else {
+            // asynchronous call
+            queueMicrotask(() => r.push(null));
+          }
+        }
+      })
+      await test(r);
+    }
+  }
+};
+
+export const readable_next_no_null = {
+  async test(ctrl, env, ctx) {
+    async function* generate() {
+      yield null;
+    }
+    const stream = Readable.from(generate());
+    const errored = deferredPromise();
+    stream.on(
+      'error',
+      function(err) {
+        strictEqual(err.code, 'ERR_STREAM_NULL_VALUES');
+        errored.resolve();
+      }
+    )
+    stream.on('data', errored.reject);
+    stream.on('end', errored.reject);
+    await errored.promise;
+  }
+};
+
+export const readable_needreadable = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable({
+      read: () => {}
+    });
+
+    // Initialized to false.
+    strictEqual(readable._readableState.needReadable, false);
+    const readableCalled1 = deferredPromise();
+    const ended = deferredPromise();
+    readable.on(
+      'readable',
+      () => {
+        // When the readable event fires, needReadable is reset.
+        strictEqual(readable._readableState.needReadable, false, '1');
+        readable.read();
+        readableCalled1.resolve();
+      }
+    );
+
+    // If a readable listener is attached, then a readable event is needed.
+    strictEqual(readable._readableState.needReadable, true);
+    readable.push('foo');
+    readable.push(null);
+    readable.on(
+      'end',
+      () => {
+        // No need to emit readable anymore when the stream ends.
+        strictEqual(readable._readableState.needReadable, false, '2');
+        ended.resolve();
+      }
+    )
+    await Promise.all([
+      readableCalled1.promise,
+      ended.promise,
+    ]);
+
+    const readableCalled2 = deferredPromise();
+    const ended2 = deferredPromise();
+    const dataCalled = deferredPromise();
+    let readableCount = 0;
+    let dataCount = 0;
+    const asyncReadable = new Readable({
+      read: () => {}
+    });
+
+    asyncReadable.on(
+      'readable',
+      () => {
+        if (asyncReadable.read() !== null) {
+          // After each read(), the buffer is empty.
+          // If the stream doesn't end now,
+          // then we need to notify the reader on future changes.
+          readableCalled2.resolve();
+        }
+      }
+    )
+    queueMicrotask(
+      () => {
+        asyncReadable.push('foooo');
+      }
+    );
+    queueMicrotask(
+      () => {
+        asyncReadable.push('bar');
+      }
+    );
+    queueMicrotask(
+      () => {
+        asyncReadable.push(null);
+        strictEqual(asyncReadable._readableState.needReadable, false);
+      }
+    )
+    const flowing = new Readable({
+      read: () => {}
+    });
+
+    // Notice this must be above the on('data') call.
+    flowing.push('foooo');
+    flowing.push('bar');
+    flowing.push('quo');
+    queueMicrotask(
+      () => {
+        flowing.push(null);
+      }
+    );
+
+    // When the buffer already has enough data, and the stream is
+    // in flowing mode, there is no need for the readable event.
+    flowing.on(
+      'data',
+      function (data) {
+        strictEqual(flowing._readableState.needReadable, false);
+        if (++dataCount === 3) dataCalled.resolve();
+      }
+    );
+    await Promise.all([
+      readableCalled2.promise,
+      dataCalled.promise,
+      ended.promise,
+    ]);
+
+    // const slowProducer = new Readable({
+    //   read: () => {}
+    // });
+    // const readableCalled3 = deferredPromise();
+    // readableCount = 0;
+    // slowProducer.on(
+    //   'readable',
+    //   () => {
+    //     const chunk = slowProducer.read(8);
+    //     const state = slowProducer._readableState;
+    //     if (chunk === null) {
+    //       // The buffer doesn't have enough data, and the stream is not need,
+    //       // we need to notify the reader when data arrives.
+    //       strictEqual(state.needReadable, true);
+    //     } else {
+    //       strictEqual(state.needReadable, false);
+    //     }
+    //     if (++readableCount === 4) readableCalled3.resolve();
+    //   }
+    // );
+    // queueMicrotask(
+    //   () => {
+    //     slowProducer.push('foo')
+    //     queueMicrotask(
+    //       () => {
+    //         slowProducer.push('foo')
+    //         queueMicrotask(
+    //           () => {
+    //             slowProducer.push('foo')
+    //             queueMicrotask(
+    //               () => {
+    //                 slowProducer.push(null)
+    //               }
+    //             );
+    //           }
+    //         );
+    //       }
+    //     );
+    //   }
+    // );
+  }
+};
+
+export const readable_invalid_chunk = {
+  async test(ctrl, env, ctx) {
+    async function testPushArg(val) {
+      const readable = new Readable({
+        read: () => {}
+      });
+      const errored = deferredPromise();
+      readable.on(
+        'error',
+        function(err) {
+          strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
+          errored.resolve();
+        }
+      );
+      readable.push(val);
+      await errored.promise;
+    }
+    await Promise.all([
+      testPushArg([]),
+      testPushArg({}),
+      testPushArg(0)
+    ]);
+    async function testUnshiftArg(val) {
+      const readable = new Readable({
+        read: () => {}
+      });
+      const errored = deferredPromise();
+      readable.on(
+        'error',
+        function(err) {
+          strictEqual(err.code, 'ERR_INVALID_ARG_TYPE');
+          errored.resolve();
+        }
+      );
+      readable.unshift(val);
+      await errored.promise;
+    }
+    await Promise.all([
+      testUnshiftArg([]),
+      testUnshiftArg({}),
+      testUnshiftArg(0)
+    ]);
+  }
+};
+
+export const readable_hwm_0 = {
+  async test(ctrl, env, ctx) {
+    const readableCalled = deferredPromise();
+    const readCalled = deferredPromise();
+    const ended = deferredPromise();
+    const r = new Readable({
+      // Must be called only once upon setting 'readable' listener
+      read: readCalled.resolve,
+      highWaterMark: 0
+    });
+    let pushedNull = false;
+    // This will trigger read(0) but must only be called after push(null)
+    // because the we haven't pushed any data
+    r.on(
+      'readable',
+      () => {
+        strictEqual(r.read(), null);
+        strictEqual(pushedNull, true);
+        readableCalled.resolve();
+      }
+    )
+    r.on('end', ended.resolve);
+    queueMicrotask(() => {
+      strictEqual(r.read(), null);
+      pushedNull = true;
+      r.push(null);
+    });
+    await Promise.all([
+      readableCalled.promise,
+      readCalled.promise,
+      ended.promise,
+    ]);
+  }
+};
+
+export const readable_hwm_0_async = {
+  async test(ctrl, env, ctx) {
+    let count = 5;
+    const readCalled = deferredPromise();
+    const ended = deferredPromise();
+    const dataCalled = deferredPromise();
+    let readCount = 0;
+    let dataCount = 0;
+    const r = new Readable({
+      // Called 6 times: First 5 return data, last one signals end of stream.
+      read: () => {
+        queueMicrotask(
+          () => {
+            if (count--) r.push('a');
+            else r.push(null);
+          }
+        );
+        if (++readCount === 6) readCalled.resolve();
+      },
+      highWaterMark: 0
+    })
+    r.on('end', ended.resolve);
+    r.on('data', () => {
+      if (++dataCount === 5) dataCalled.resolve();
+    });
+    await Promise.all([
+      readCalled.promise,
+      ended.promise,
+      dataCalled.promise,
+    ]);
+  }
+};
+
+export const readable_event = {
+  async test(ctrl, env, ctx) {
+    {
+      // First test, not reading when the readable is added.
+      // make sure that on('readable', ...) triggers a readable event.
+      const r = new Readable({
+        highWaterMark: 3
+      });
+      const readableCalled = deferredPromise();
+      r._read = readableCalled.reject;
+
+      // This triggers a 'readable' event, which is lost.
+      r.push(Buffer.from('blerg'));
+      setTimeout(function () {
+        // We're testing what we think we are
+        ok(!r._readableState.reading);
+        r.on('readable', readableCalled.resolve);
+      }, 1);
+      await readableCalled.promise;
+    }
+    {
+      // Second test, make sure that readable is re-emitted if there's
+      // already a length, while it IS reading.
+
+      const r = new Readable({
+        highWaterMark: 3
+      });
+      const readCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      r._read = readCalled.resolve;
+
+      // This triggers a 'readable' event, which is lost.
+      r.push(Buffer.from('bl'));
+      setTimeout(function () {
+        // Assert we're testing what we think we are
+        ok(r._readableState.reading);
+        r.on('readable', readableCalled.resolve);
+      }, 1);
+      await Promise.all([
+        readCalled.promise,
+        readableCalled.promise,
+      ]);
+    }
+    {
+      // Third test, not reading when the stream has not passed
+      // the highWaterMark but *has* reached EOF.
+      const r = new Readable({
+        highWaterMark: 30
+      });
+
+      // This triggers a 'readable' event, which is lost.
+      r.push(Buffer.from('blerg'));
+      r.push(null);
+      const readableCalled = deferredPromise();
+      r._read = readableCalled.reject;
+      setTimeout(function () {
+        // Assert we're testing what we think we are
+        ok(!r._readableState.reading);
+        r.on('readable', readableCalled.resolve);
+      }, 1);
+      await readableCalled.promise;
+    }
+    {
+      // Pushing an empty string in non-objectMode should
+      // trigger next `read()`.
+      const underlyingData = ['', 'x', 'y', '', 'z'];
+      const expected = underlyingData.filter((data) => data);
+      const result = [];
+      const r = new Readable({
+        encoding: 'utf8'
+      });
+      r._read = function () {
+        queueMicrotask(() => {
+          if (!underlyingData.length) {
+            this.push(null);
+          } else {
+            this.push(underlyingData.shift());
+          }
+        });
+      }
+      r.on('readable', () => {
+        const data = r.read();
+        if (data !== null) result.push(data);
+      });
+      const ended = deferredPromise();
+      r.on(
+        'end',
+        () => {
+          deepStrictEqual(result, expected);
+          ended.resolve();
+        }
+      );
+      await ended.promise;
+    }
+    {
+      // #20923
+      const r = new Readable();
+      r._read = function () {
+        // Actually doing thing here
+      }
+      r.on('data', function () {});
+      r.removeAllListeners();
+      strictEqual(r.eventNames().length, 0);
+    }
+  }
+};
+
+export const readable_error_end = {
+  async test(ctrl, env, ctx) {
+    const r = new Readable({
+      read() {}
+    });
+    const data = deferredPromise();
+    const errored = deferredPromise();
+    r.on('end', errored.reject);
+    r.on('data', data.resolve);
+    r.on('error', errored.resolve);
+    r.push('asd');
+    r.push(null);
+    r.destroy(new Error('kaboom'));
+    await Promise.all([
+      data.promise,
+      errored.promise,
+    ]);
+  }
+};
+
+export const readable_ended = {
+  async test(ctrl, env, ctx) {
+    {
+      // Find it on Readable.prototype
+      ok(Reflect.has(Readable.prototype, 'readableEnded'));
+    }
+
+    // event
+    {
+      const readable = new Readable();
+      readable._read = () => {
+        // The state ended should start in false.
+        strictEqual(readable.readableEnded, false);
+        readable.push('asd');
+        strictEqual(readable.readableEnded, false);
+        readable.push(null);
+        strictEqual(readable.readableEnded, false);
+      }
+      const ended = deferredPromise();
+      const dataCalled = deferredPromise();
+      readable.on(
+        'end',
+        () => {
+          strictEqual(readable.readableEnded, true);
+          ended.resolve();
+        }
+      );
+      readable.on(
+        'data',
+        () => {
+          strictEqual(readable.readableEnded, false);
+          dataCalled.resolve();
+        }
+      );
+      await Promise.all([
+        ended.promise,
+        dataCalled.promise,
+      ]);
+    }
+
+    // Verifies no `error` triggered on multiple .push(null) invocations
+    {
+      const readable = new Readable();
+      readable.on('readable', () => {
+        readable.read()
+      });
+      const ended = deferredPromise();
+      readable.on('error', ended.reject);
+      readable.on('end', ended.resolve);
+      readable.push('a');
+      readable.push(null);
+      readable.push(null);
+      await ended.promise;
+    }
+  }
+};
+
+export const readable_end_destroyed = {
+  async test(ctrl, env, ctx) {
+    const r = new Readable()
+    const closed = deferredPromise();
+    r.on('end', fail);
+    r.resume();
+    r.destroy();
+    r.on(
+      'close',
+      () => {
+        r.push(null);
+        closed.resolve();
+      }
+    );
+    await closed.promise;
+  }
+};
+
+export const readable_short_stream = {
+  async test(ctrl, env, ctx) {
+    {
+      const readCalled = deferredPromise();
+      const transformCalled = deferredPromise();
+      const flushCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      let readableCount = 0;
+      const r = new Readable({
+        read: function () {
+          this.push('content');
+          this.push(null);
+          readCalled.resolve();
+        }
+      })
+      const t = new Transform({
+        transform: function (chunk, encoding, callback) {
+          transformCalled.resolve();
+          this.push(chunk);
+          return callback();
+        },
+        flush: function (callback) {
+          flushCalled.resolve();
+          return callback();
+        }
+      })
+      r.pipe(t);
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read();
+            if (!chunk) break;
+            strictEqual(chunk.toString(), 'content');
+          }
+          if (++readableCount === 2) readableCalled.resolve();
+        }
+      );
+      await Promise.all([
+        readCalled.promise,
+        transformCalled.promise,
+        flushCalled.promise,
+        readableCalled.promise,
+      ]);
+    }
+    {
+      const transformCalled = deferredPromise();
+      const flushCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      const t = new Transform({
+        transform: function (chunk, encoding, callback) {
+          transformCalled.resolve();
+          this.push(chunk);
+          return callback();
+        },
+        flush: function (callback) {
+          flushCalled.resolve();
+          return callback();
+        }
+      });
+      t.end('content');
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read();
+            if (!chunk) break;
+            strictEqual(chunk.toString(), 'content');
+          }
+          readableCalled.resolve();
+        }
+      );
+      await Promise.all([
+        transformCalled.promise,
+        flushCalled.promise,
+        readableCalled.promise,
+      ]);
+    }
+    {
+      const transformCalled = deferredPromise();
+      const flushCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      const t = new Transform({
+        transform: function (chunk, encoding, callback) {
+          transformCalled.resolve();
+          this.push(chunk);
+          return callback();
+        },
+        flush: function (callback) {
+          flushCalled.resolve();
+          return callback();
+        }
+      })
+      t.write('content');
+      t.end();
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read();
+            if (!chunk) break;
+            strictEqual(chunk.toString(), 'content');
+            readableCalled.resolve();
+          }
+        }
+      );
+      await Promise.all([
+        transformCalled.promise,
+        flushCalled.promise,
+        readableCalled.promise,
+      ]);
+    }
+    {
+      const t = new Readable({
+        read() {}
+      });
+      const readableCalled = deferredPromise();
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read();
+            if (!chunk) break;
+            strictEqual(chunk.toString(), 'content');
+          }
+          readableCalled.resolve();
+        }
+      )
+      t.push('content');
+      t.push(null);
+      await readableCalled.promise;
+    }
+    {
+      const t = new Readable({
+        read() {}
+      });
+      const readableCalled = deferredPromise();
+      let readableCount = 0;
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read()
+            if (!chunk) break
+            strictEqual(chunk.toString(), 'content')
+          }
+          if (++readableCount === 2) readableCalled.resolve();
+        }
+      )
+      queueMicrotask(() => {
+        t.push('content');
+        t.push(null);
+      });
+      await readableCalled.promise;
+    }
+    {
+      const transformCalled = deferredPromise();
+      const flushCalled = deferredPromise();
+      const readableCalled = deferredPromise();
+      let readableCount = 0;
+      const t = new Transform({
+        transform: function (chunk, encoding, callback) {
+          transformCalled.resolve();
+          this.push(chunk);
+          return callback();
+        },
+        flush: function (callback) {
+          flushCalled.resolve();
+          return callback();
+        }
+      })
+      t.on(
+        'readable',
+        function () {
+          while (true) {
+            const chunk = t.read();
+            if (!chunk) break;
+            strictEqual(chunk.toString(), 'content');
+          }
+          if (++readableCount === 2) readableCalled.resolve();
+        }
+      );
+      t.write('content');
+      t.end();
+      await Promise.all([
+        transformCalled.promise,
+        flushCalled.promise,
+        readableCalled.promise,
+      ]);
+    }
+  }
+};
+
+export const readable_didread = {
+  async test(ctrl, env, ctx) {
+    function noop() {}
+    async function check(readable, data, fn) {
+      const closed = deferredPromise();
+      strictEqual(readable.readableDidRead, false);
+      strictEqual(isDisturbed(readable), false);
+      strictEqual(isErrored(readable), false);
+      if (data === -1) {
+        readable.on(
+          'error',
+          () => {
+            strictEqual(isErrored(readable), true);
+          }
+        )
+        readable.on('data', fail);
+        readable.on('end', fail);
+      } else {
+        readable.on('error', fail)
+        if (data === -2) {
+          readable.on('end', fail)
+        } else {
+          readable.on('end', () => {});
+        }
+        if (data > 0) {
+          readable.on('data', () => {});
+        } else {
+          readable.on('data', fail);
+        }
+      }
+      readable.on('close', closed.resolve);
+      fn();
+      queueMicrotask(() => {
+        strictEqual(readable.readableDidRead, data > 0);
+        if (data > 0) {
+          strictEqual(isDisturbed(readable), true);
+        }
+      });
+      await closed.promise;
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push(null);
+        }
+      })
+      await check(readable, 0, () => {
+        readable.read();
+      });
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push(null);
+        }
+      });
+      await check(readable, 0, () => {
+        readable.resume();
+      });
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push(null);
+        }
+      })
+      await check(readable, -2, () => {
+        readable.destroy();
+      });
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push(null);
+        }
+      });
+      await check(readable, -1, () => {
+        readable.destroy(new Error());
+      });
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push('data');
+          this.push(null);
+        }
+      });
+      await check(readable, 1, () => {
+        readable.on('data', noop);
+      });
+    }
+    {
+      const readable = new Readable({
+        read() {
+          this.push('data');
+          this.push(null);
+        }
+      })
+      await check(readable, 1, () => {
+        readable.on('data', noop);
+        readable.off('data', noop);
+      });
+    }
+  }
+};
+
+export const readable_destroy = {
+  async test(ctrl, env, ctx) {
+    {
+      const closed = deferredPromise();
+      const read = new Readable({
+        read() {}
+      });
+      read.resume();
+      read.on('close', closed.resolve);
+      read.destroy();
+      strictEqual(read.errored, null);
+      strictEqual(read.destroyed, true);
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      })
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      read.resume();
+      const expected = new Error('kaboom');
+      read.on('end', closed.reject);
+      read.on('close', closed.resolve);
+      read.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      read.destroy(expected);
+      strictEqual(read.errored, expected);
+      strictEqual(read.destroyed, true);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      const read = new Readable({
+        read() {}
+      });
+      read._destroy = function (err, cb) {
+        strictEqual(err, expected);
+        cb(err);
+        destroyCalled.resolve();
+      };
+      const expected = new Error('kaboom');
+      read.on('end', closed.reject);
+      read.on('close', closed.resolve);
+      read.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      read.destroy(expected);
+      strictEqual(read.destroyed, true);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const read = new Readable({
+        read() {},
+        destroy: function (err, cb) {
+          strictEqual(err, expected);
+          cb();
+          destroyCalled.resolve();
+        }
+      });
+      const expected = new Error('kaboom');
+      read.on('end', closed.reject);
+
+      // Error is swallowed by the custom _destroy
+      read.on('error', fail);
+      read.on('close', closed.resolve);
+      read.destroy(expected);
+      strictEqual(read.destroyed, true);
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+      ]);
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const destroyCalled = deferredPromise();
+      read._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb();
+        destroyCalled.resolve();
+      };
+      read.destroy();
+      strictEqual(read.destroyed, true);
+      await destroyCalled.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      read.resume();
+      const closed = deferredPromise();
+      const destroyCalled = deferredPromise();
+      read._destroy = function (err, cb) {
+        strictEqual(err, null);
+        queueMicrotask(() => {
+          this.push(null);
+          cb();
+          destroyCalled.resolve();
+        });
+      };
+      read.on('end', fail);
+      read.on('close', closed.resolve);
+      read.destroy();
+      read.removeListener('end', fail);
+      read.on('end', closed.reject);
+      strictEqual(read.destroyed, true);
+      await Promise.all([
+        closed.promise,
+        destroyCalled.promise,
+      ]);
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const expected = new Error('kaboom');
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      read._destroy = function (err, cb) {
+        strictEqual(err, null);
+        cb(expected);
+        destroyCalled.resolve();
+      };
+      let ticked = false;
+      read.on('end', closed.reject);
+      read.on('close', closed.resolve);
+      read.on(
+        'error',
+        (err) => {
+          strictEqual(ticked, true);
+          strictEqual(read._readableState.errorEmitted, true);
+          strictEqual(read._readableState.errored, expected);
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      read.destroy();
+      strictEqual(read._readableState.errorEmitted, false);
+      strictEqual(read._readableState.errored, expected);
+      strictEqual(read.destroyed, true);
+      ticked = true;
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      function MyReadable() {
+        strictEqual(this.destroyed, false);
+        this.destroyed = false;
+        Readable.call(this);
+      }
+      Object.setPrototypeOf(MyReadable.prototype, Readable.prototype);
+      Object.setPrototypeOf(MyReadable, Readable);
+      new MyReadable();
+    }
+    {
+      // Destroy and destroy callback
+      const read = new Readable({
+        read() {}
+      });
+      read.resume();
+      const expected = new Error('kaboom');
+      let ticked = false;
+      const closed = deferredPromise();
+      const destroyCalled = deferredPromise();
+      const errored = deferredPromise();
+      read.on(
+        'close',
+        () => {
+          strictEqual(read._readableState.errorEmitted, true);
+          strictEqual(ticked, true);
+          closed.resolve();
+        }
+      )
+      read.on(
+        'error',
+        (err) => {
+          strictEqual(err, expected);
+          errored.resolve();
+        }
+      )
+      strictEqual(read._readableState.errored, null);
+      strictEqual(read._readableState.errorEmitted, false);
+      read.destroy(
+        expected,
+        function (err) {
+          strictEqual(read._readableState.errored, expected);
+          strictEqual(err, expected);
+          destroyCalled.resolve();
+        }
+      )
+      strictEqual(read._readableState.errorEmitted, false);
+      strictEqual(read._readableState.errored, expected);
+      ticked = true;
+      await Promise.all([
+        closed.promise,
+        destroyCalled.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const destroyCalled = deferredPromise();
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      const readable = new Readable({
+        destroy: function (err, cb) {
+          queueMicrotask(() => cb(new Error('kaboom 1')));
+          destroyCalled.resolve();
+        },
+        read() {}
+      });
+      let ticked = false;
+      readable.on(
+        'close',
+        () => {
+          strictEqual(ticked, true);
+          strictEqual(readable._readableState.errorEmitted, true);
+          closed.resolve();
+        }
+      );
+      readable.on(
+        'error',
+        (err) => {
+          strictEqual(ticked, true);
+          strictEqual(err.message, 'kaboom 1');
+          strictEqual(readable._readableState.errorEmitted, true);
+          errored.resolve();
+        }
+      )
+      readable.destroy();
+      strictEqual(readable.destroyed, true);
+      strictEqual(readable._readableState.errored, null);
+      strictEqual(readable._readableState.errorEmitted, false);
+
+      // Test case where `readable.destroy()` is called again with an error before
+      // the `_destroy()` callback is called.
+      readable.destroy(new Error('kaboom 2'));
+      strictEqual(readable._readableState.errorEmitted, false);
+      strictEqual(readable._readableState.errored, null);
+      ticked = true;
+
+      await Promise.all([
+        destroyCalled.promise,
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const closed = deferredPromise();
+      read.destroy();
+      read.push('hi');
+      read.on('data', fail);
+      read.on('close', closed.resolve);
+      await closed.promise;
+    }
+    {
+      const closed = deferredPromise();
+      const read = new Readable({
+        read: closed.reject
+      })
+      read.on('close', closed.resolve);
+      read.destroy();
+      strictEqual(read.destroyed, true);
+      read.read();
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        autoDestroy: false,
+        read() {
+          this.push(null);
+          this.push('asd');
+        }
+      });
+      const errored = deferredPromise();
+      read.on(
+        'error',
+        () => {
+          ok(read._readableState.errored);
+          errored.resolve();
+        }
+      )
+      read.resume();
+      await errored.promise;
+    }
+    {
+      const controller = new AbortController();
+      const read = addAbortSignal(
+        controller.signal,
+        new Readable({
+          read() {
+            this.push('asd');
+          }
+        })
+      );
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      read.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          errored.resolve();
+        }
+      )
+      controller.abort();
+      read.on('data', closed.reject);
+      read.on('close', closed.resolve);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const controller = new AbortController()
+      const read = new Readable({
+        signal: controller.signal,
+        read() {
+          this.push('asd')
+        }
+      })
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      read.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          errored.resolve();
+        }
+      )
+      controller.abort();
+      read.on('data', closed.reject);
+      read.on('close', closed.resolve);
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const controller = new AbortController()
+      const read = addAbortSignal(
+        controller.signal,
+        new Readable({
+          objectMode: true,
+          read() {
+            return false
+          }
+        })
+      )
+      read.push('asd')
+      const errored = deferredPromise();
+      read.on(
+        'error',
+        (e) => {
+          strictEqual(e.name, 'AbortError');
+          errored.resolve();
+        }
+      )
+      const rejected = rejects(
+        (async () => {
+          // eslint-disable-next-line no-unused-vars, no-empty
+          for await (const chunk of read) {
+          }
+        })(),
+        /AbortError/
+      );
+      setTimeout(() => controller.abort(), 0);
+      await Promise.all([
+        errored.promise,
+        rejected,
+      ]);
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const closed = deferredPromise();
+      const errored = deferredPromise();
+      read.on('data', closed.reject);
+      read.on(
+        'error',
+        (e) => {
+          read.push('asd');
+          read.read();
+          errored.resolve();
+        }
+      )
+      read.on(
+        'close',
+        (e) => {
+          read.push('asd');
+          read.read();
+          closed.resolve();
+        }
+      )
+      read.destroy(new Error('asd'));
+      await Promise.all([
+        closed.promise,
+        errored.promise,
+      ]);
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const closed = deferredPromise();
+      read.on('data', closed.reject);
+      read.on(
+        'close',
+        (e) => {
+          read.push('asd');
+          read.read();
+          closed.resolve();
+        }
+      )
+      read.destroy();
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const closed = deferredPromise();
+      read.on('data', closed.reject);
+      read.on(
+        'close',
+        (e) => {
+          read.push('asd');
+          read.unshift('asd');
+          closed.resolve();
+        }
+      )
+      read.destroy();
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      })
+      const closed = deferredPromise();
+      read.on('data', closed.reject);
+      read.on('close', closed.resolve);
+      read.destroy();
+      read.unshift('asd');
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      read.resume();
+      const closed = deferredPromise();
+      read.on('data', closed.reject);
+      read.on(
+        'close',
+        (e) => {
+          read.push('asd');
+          closed.resolve();
+        }
+      )
+      read.destroy();
+      await closed.promise;
+    }
+    {
+      const read = new Readable({
+        read() {}
+      });
+      const closed = deferredPromise();
+      read.on('data', closed.reject);
+      read.on('close', closed.resolve);
+      read.destroy();
+      read.push('asd');
+      await closed.promise;
+    }
+  }
+};
+
+export const readable_data = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable({
+      read() {}
+    });
+    function read() {}
+    readable.setEncoding('utf8');
+    readable.on('readable', read);
+    readable.removeListener('readable', read);
+    const dataCalled = deferredPromise();
+    queueMicrotask(function () {
+      readable.on('data', dataCalled.resolve);
+      readable.push('hello');
+    });
+    await dataCalled.promise;
+  }
+};
+
+export const readable_constructor_set_methods = {
+  async test(ctrl, env, ctx) {
+    const readCalled = deferredPromise();
+    const _read = function _read(n) {
+      this.push(null);
+      readCalled.resolve();
+    }
+    const r = new Readable({
+      read: _read
+    });
+    r.resume();
+    await readCalled.promise;
+  }
+};
+
+export const readable_add_chunk_during_data = {
+  async test(ctrl, env, ctx) {
+    const dataCalled = deferredPromise();
+    let dataCount = 0;
+    for (const method of ['push', 'unshift']) {
+      const r = new Readable({
+        read() {}
+      });
+      r.once(
+        'data',
+        (chunk) => {
+          strictEqual(r.readableLength, 0);
+          r[method](chunk);
+          strictEqual(r.readableLength, chunk.length);
+          r.on(
+            'data',
+            (chunk) => {
+              strictEqual(chunk.toString(), 'Hello, world');
+              if (++dataCount === 2) dataCalled.resolve();
+            }
+          )
+        }
+      );
+      r.push('Hello, world');
+    }
+  }
+};
+
+export const readable_aborted = {
+  async test(ctrl, env, ctx) {
+    {
+      const readable = new Readable({
+        read() {}
+      });
+      strictEqual(readable.readableAborted, false);
+      readable.destroy();
+      strictEqual(readable.readableAborted, true);
+    }
+    {
+      const readable = new Readable({
+        read() {}
+      });
+      strictEqual(readable.readableAborted, false);
+      readable.push(null);
+      readable.destroy();
+      strictEqual(readable.readableAborted, true);
+    }
+    {
+      const readable = new Readable({
+        read() {}
+      });
+      strictEqual(readable.readableAborted, false);
+      readable.push('asd');
+      readable.destroy();
+      strictEqual(readable.readableAborted, true);
+    }
+    {
+      const readable = new Readable({
+        read() {}
+      });
+      strictEqual(readable.readableAborted, false);
+      readable.push('asd');
+      readable.push(null);
+      strictEqual(readable.readableAborted, false);
+      const ended = deferredPromise();
+      readable.on(
+        'end',
+        () => {
+          strictEqual(readable.readableAborted, false);
+          readable.destroy();
+          strictEqual(readable.readableAborted, false);
+          queueMicrotask(() => {
+            strictEqual(readable.readableAborted, false);
+            ended.resolve();
+          });
+        }
+      )
+      readable.resume();
+      await ended.promise;
+    }
+    {
+      const duplex = new Duplex({
+        readable: false,
+        write() {}
+      });
+      duplex.destroy();
+      strictEqual(duplex.readableAborted, false);
+    }
+  }
+};
+
+export const push_strings = {
+  async test(ctrl, env, ctx) {
+    class MyStream extends Readable {
+      constructor(options) {
+        super(options);
+        this._chunks = 3;
+      }
+      _read(n) {
+        switch (this._chunks--) {
+          case 0:
+            return this.push(null);
+          case 1:
+            return setTimeout(() => {
+              this.push('last chunk');
+            }, 100);
+          case 2:
+            return this.push('second to last chunk');
+          case 3:
+            return queueMicrotask(() => {
+              this.push('first chunk');
+            })
+          default:
+            throw new Error('?')
+        }
+      }
+    }
+    const ms = new MyStream();
+    const results = [];
+    ms.on('readable', function () {
+      let chunk;
+      while (null !== (chunk = ms.read())) results.push(String(chunk));
+    })
+    const expect = ['first chunksecond to last chunk', 'last chunk'];
+    await promises.finished(ms);
+    strictEqual(ms._chunks, -1);
+    deepStrictEqual(results, expect);
+  }
+};
+
