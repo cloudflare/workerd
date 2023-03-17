@@ -92,7 +92,7 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
         // deserialize the value so it can be accessed and modified in JS code.
         hibWS.activeWebSocket.emplace(
             api::WebSocket::unhibernate(js, *hibWS.ws, hibWS.attachment, hibWS.url,
-                                        hibWS.protocol, hibWS.extensions));
+                                        hibWS.protocol, hibWS.extensions, hibWS.autoResponseTimestamp));
       }
       // Now that we know the websocket is "awake", we simply add it to the vector.
       KJ_IF_MAYBE(awake, hibWS.activeWebSocket) {
@@ -101,6 +101,17 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
     }
   };
   return kj::mv(matches);
+}
+
+void HibernationManagerImpl::setWebSocketAutoResponse(kj::String request,
+                                                      kj::String response) {
+  autoResponseRequest = kj::mv(request);
+  autoResponseResponse = kj::mv(response);
+}
+
+void HibernationManagerImpl::unsetWebSocketAutoResponse() {
+  autoResponseRequest = nullptr;
+  autoResponseResponse = nullptr;
 }
 
 kj::Array<kj::byte> HibernationManagerImpl::serializeV8Value(
@@ -144,12 +155,32 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
   auto& ws = *hib.ws;
   return ws.receive()
-      .then([this, &hib] (kj::WebSocket::Message&& message) mutable -> kj::Promise<void> {
+      .then([this, &hib, &ws] (kj::WebSocket::Message&& message) mutable -> kj::Promise<void> {
     // TODO(now): Within CustomEvent impl run, when we pass a reference to this hibernation manager,
-    // we'll want to assign the hib manager ref to the Worker::Actorso that JS can access it elsewhere.
-    if (hib.activeWebSocket == nullptr) {
+    // we'll want to assign the hib manager ref to the Worker::Actor so that JS can access it elsewhere.
+
+    auto unhibernate = true;
+    KJ_IF_MAYBE (req, autoResponseRequest) {
+      // If we have an autoResponseRequest set, we must have
+      // autoResponseResponse also.
+      KJ_ASSERT_NONNULL(autoResponseResponse);
+      KJ_SWITCH_ONEOF(message) {
+        KJ_CASE_ONEOF(text, kj::String) {
+          if (text == *req) {
+            unhibernate = false;
+            kj::Duration time =
+                static_cast<int64_t>(api::dateNow()) * kj::SECONDS;
+            hib.autoResponseTimestamp = kj::UNIX_EPOCH + time;
+            KJ_IF_MAYBE (response, autoResponseResponse) {
+              ws.send(kj::str(response));
+            }
+          }
+        }
+        KJ_CASE_ONEOF_DEFAULT {}
+      }
+    }
+    if (hib.activeWebSocket == nullptr && unhibernate) {
       // If we are currently hibernating, we need to wake up.
-      // TODO(soon): Ping/Pongs that don't wake us from hibernation.
       // TODO(now): We need to get access to an Isolate so we can deserialize `attachment` and
       //            pass a jsg::Lock& to unhibernate.
       // TODO(now): We can't create the api::WebSocket at this point since we aren't guaranteed to

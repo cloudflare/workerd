@@ -31,11 +31,13 @@ jsg::Ref<WebSocket> WebSocket::unhibernate(
     kj::ArrayPtr<kj::byte> attachment,
     kj::Maybe<kj::StringPtr> url,
     kj::Maybe<kj::StringPtr> protocol,
-    kj::Maybe<kj::StringPtr> extensions) {
+    kj::Maybe<kj::StringPtr> extensions,
+    kj::Maybe<kj::Date> autoResponseTimestamp) {
   auto websocket = jsg::alloc<WebSocket>(ws, attachment);
   websocket->url = url.map([](kj::StringPtr s) { return kj::str(s); });
   websocket->protocol = protocol.map([](kj::StringPtr s) { return kj::str(s); });
   websocket->extensions = extensions.map([](kj::StringPtr s) { return kj::str(s); });
+  websocket->autoResponseTimestamp = kj::mv(autoResponseTimestamp);
   return kj::mv(websocket);
 }
 
@@ -617,6 +619,10 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
 
 kj::Maybe<v8::Local<v8::Value>> WebSocket::getAttachment() {
   return attachment.map([](v8::Local<v8::Value>& value){ return value; });
+}
+
+kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
+  return autoResponseTimestamp;
 }
 
 void WebSocket::dispatchOpen(jsg::Lock& js) {

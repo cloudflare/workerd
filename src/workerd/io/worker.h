@@ -647,6 +647,8 @@ public:
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(jsg::Lock& js, kj::StringPtr tag) = 0;
     virtual void hibernateWebSockets(jsg::Lock& js, v8::Isolate* isolate, IoContext& context) = 0;
+    virtual void setWebSocketAutoResponse(kj::String request, kj::String response) = 0;
+    virtual void unsetWebSocketAutoResponse() = 0;
   };
 
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,

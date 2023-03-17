@@ -170,7 +170,8 @@ public:
       kj::ArrayPtr<kj::byte> attachment,
       kj::Maybe<kj::StringPtr> url,
       kj::Maybe<kj::StringPtr> protocol,
-      kj::Maybe<kj::StringPtr> extensions);
+      kj::Maybe<kj::StringPtr> extensions,
+      kj::Maybe<kj::Date> autoResponseTimestamp);
   // Similar to how the JS `constructor()` creates a WebSocket, when waking from hibernation
   // we want to be able to recreate WebSockets from C++ that will be delivered to JS code.
 
@@ -252,6 +253,7 @@ public:
   kj::Maybe<kj::StringPtr> getProtocol();
   kj::Maybe<kj::StringPtr> getExtensions();
   kj::Maybe<v8::Local<v8::Value>> getAttachment();
+  kj::Maybe<kj::Date> getAutoResponseTimestamp();
 
   JSG_RESOURCE_TYPE(WebSocket, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
@@ -274,12 +276,14 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_PROTOTYPE_PROPERTY(extensions, getExtensions);
       JSG_READONLY_PROTOTYPE_PROPERTY(attachment, getAttachment);
+      JSG_READONLY_PROTOTYPE_PROPERTY(autoResponseTimestamp, getAutoResponseTimestamp);
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(readyState, getReadyState);
       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
       JSG_READONLY_INSTANCE_PROPERTY(protocol, getProtocol);
       JSG_READONLY_INSTANCE_PROPERTY(extensions, getExtensions);
       JSG_READONLY_INSTANCE_PROPERTY(attachment, getAttachment);
+      JSG_READONLY_INSTANCE_PROPERTY(autoResponseTimestamp, getAutoResponseTimestamp);
     }
 
     JSG_TS_DEFINE(type WebSocketEventMap = {
@@ -295,6 +299,7 @@ private:
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
+  kj::Maybe<kj::Date> autoResponseTimestamp;
 
   struct Native;
 

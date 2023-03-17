@@ -40,6 +40,9 @@ public:
   //    - Seriailizing the `attachment`
   //    - Dropping the api::WebSocket reference (`activeWebSocket`)
 
+  void setWebSocketAutoResponse(kj::String request, kj::String response) override;
+  void unsetWebSocketAutoResponse() override;
+
 private:
   class HibernatableWebSocket;
   struct TagListItem {
@@ -77,7 +80,9 @@ private:
           protocol(KJ_REQUIRE_NONNULL(activeWebSocket)->getProtocol()
               .map([](kj::StringPtr s) { return kj::str(s);})),
           extensions(KJ_REQUIRE_NONNULL(activeWebSocket)->getExtensions()
-              .map([](kj::StringPtr s) { return kj::str(s);})) {}
+              .map([](kj::StringPtr s) { return kj::str(s);})),
+          autoResponseTimestamp(KJ_REQUIRE_NONNULL(activeWebSocket)->getAutoResponseTimestamp()
+              .map([](kj::Date d) { return d;})) {}
 
     ~HibernatableWebSocket() {
       // We expect this dtor to be called when we're removing a HibernatableWebSocket
@@ -129,6 +134,7 @@ private:
     const kj::Maybe<kj::String> url;
     const kj::Maybe<kj::String> protocol;
     const kj::Maybe<kj::String> extensions;
+    kj::Maybe<kj::Date> autoResponseTimestamp;
     friend HibernationManagerImpl;
 
     bool operator==(HibernatableWebSocket& other) {
@@ -179,5 +185,7 @@ private:
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;
+  kj::Maybe<kj::String> autoResponseRequest;
+  kj::Maybe<kj::String> autoResponseResponse;
 };
 }; // namespace workerd
