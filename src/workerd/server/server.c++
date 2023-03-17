@@ -1259,40 +1259,35 @@ public:
 
         auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() {
           auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
-          kj::Maybe<ActorSqlite&> actorSqlite;
 
-          auto persistent = config.tryGet<Durable>().map([&](const Durable& d) {
-            kj::Own<ActorSqlite> ownSqlite;
-            KJ_IF_MAYBE(as, channels.actorStorage) {
-              ownSqlite = kj::heap<ActorSqlite>(**as,
-                  kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}));
-              actorSqlite = *ownSqlite;
-            }
+          auto makeActorCache =
+              [&](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate) {
+            return config.tryGet<Durable>()
+                .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
+              KJ_IF_MAYBE(as, channels.actorStorage) {
+                return kj::heap<ActorSqlite>(**as,
+                    kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}));
+              } else {
+                // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
+                // ActorCache never to flush, so this effectively creates in-memory storage.
+                return kj::heap<ActorCache>(
+                    kj::heap<EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate);
+              }
+            });
+          };
 
-            // TODO(sqlite)(cleanup): This isn't actually used when using local disk storage. Can
-            //   we make it go away? For now we use it as a convenient place to attach the
-            //   ActorSqlite object so that it sticks around for the appropriate lifetime.
-            return rpc::ActorStorage::Stage::Client(
-                kj::heap<EmptyReadOnlyActorStorageImpl>().attach(kj::mv(ownSqlite)));
-          });
-
-          auto makeStorage = [actorSqlite](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
-                                           ActorCacheInterface& actorCache)
+          auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
+                                ActorCacheInterface& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
-            KJ_IF_MAYBE(a, actorSqlite) {
-              return jsg::alloc<api::DurableObjectStorage>(
-                  IoContext::current().addObject(kj::implicitCast<ActorCacheInterface&>(*a)));
-            } else {
-              return jsg::alloc<api::DurableObjectStorage>(
-                  IoContext::current().addObject(actorCache));
-            }
+            return jsg::alloc<api::DurableObjectStorage>(
+                IoContext::current().addObject(actorCache));
           };
 
           TimerChannel& timerChannel = service;
 
           Worker::Lock lock(*service.worker, asyncLock);
           auto newActor = kj::refcounted<Worker::Actor>(
-              *service.worker, nullptr, kj::mv(id), true, kj::mv(persistent),
+              *service.worker, nullptr, kj::mv(id), true, kj::mv(makeActorCache),
               className, kj::mv(makeStorage), lock,
               timerChannel, kj::refcounted<ActorObserver>());
 
