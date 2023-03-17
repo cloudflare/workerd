@@ -91,4 +91,42 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
   JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
 }
 
+kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
+  // TODO(sqlite): Implement transactions.
+  JSG_FAIL_REQUIRE(Error, "transaction() not yet implemented for SQLite-backed storage");
+}
+
+ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
+  uint count = kv.deleteAll();
+  return {
+    .backpressure = nullptr,
+    .count = count,
+  };
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::evictStale(kj::Date now) {
+  // TODO(sqlite): This is called every time the isolate lock is taken. We can temporarily delay
+  //   the lock by returning a promise. This could be a good time to apply backpressure on the
+  //   application e.g. while waiting for an asynchronous checkpoint to complete or for replication
+  //   buffers to go down.
+  return nullptr;
+}
+
+void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
+  // Nothing here (yet).
+}
+
+kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+void ActorSqlite::cancelDeferredAlarmDeletion() {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
+  // TODO(sqlite): onNoPendingFlush() should wait for replication if applicable.
+  return nullptr;
+}
+
 }  // namespace workerd

@@ -31,8 +31,9 @@ bool SqliteKv::delete_(KeyPtr key) {
   return query.changeCount() > 0;
 }
 
-void SqliteKv::deleteAll() {
-  stmtDeleteAll.run();
+uint SqliteKv::deleteAll() {
+  auto query = stmtDeleteAll.run();
+  return query.changeCount();
 }
 
 }  // namespace workerd
