@@ -664,6 +664,15 @@ void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachme
   serializedAttachment = kj::mv(released.data);
 }
 
+void WebSocket::setAutoResponseTimestamp(kj::Maybe<kj::Date> time) {
+  autoResponseTimestamp = time;
+}
+
+
+kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
+  return autoResponseTimestamp;
+}
+
 void WebSocket::dispatchOpen(jsg::Lock& js) {
   dispatchEventImpl(js, jsg::alloc<Event>("open"));
 }

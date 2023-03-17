@@ -7,6 +7,7 @@
 #include <kj/debug.h>
 #include <workerd/api/web-socket.h>
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/actor-state.h>
 #include "v8-isolate.h"
 #include <workerd/jsg/ser.h>
 
@@ -38,6 +39,11 @@ public:
   void hibernateWebSockets(Worker::Lock& lock) override;
   // Hibernates all the websockets held by the HibernationManager.
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
+
+  void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) override;
+  void unsetWebSocketAutoResponse() override;
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
+  void setTimerChannel(TimerChannel& timerChannel) override;
 
   friend class api::HibernatableWebSocketEvent;
 
@@ -100,7 +106,10 @@ private:
       // to the api::WebSocket.
       KJ_IF_MAYBE(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
-            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(*package)));
+            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(*package))
+        )->setAutoResponseTimestamp(autoResponseTimestamp);
+        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
+        // that was stored in the corresponding HibernatableWebSocket.
       }
       return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
     }
@@ -132,6 +141,10 @@ private:
     bool hasDispatchedClose = false;
     // True once we have dispatched the close event.
     // This prevents us from dispatching it if we have already done so.
+
+    kj::Maybe<kj::Date> autoResponseTimestamp;
+    // Stores the last received autoResponseRequest timestamp.
+
     friend HibernationManagerImpl;
   };
 
@@ -196,5 +209,7 @@ private:
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> autoResponsePair;
+  kj::Maybe<TimerChannel&> timer;
 };
 }; // namespace workerd

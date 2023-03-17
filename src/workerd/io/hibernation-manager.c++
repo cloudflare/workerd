@@ -96,6 +96,27 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
   return kj::mv(matches);
 }
 
+void HibernationManagerImpl::setWebSocketAutoResponse(
+    jsg::Ref<api::WebSocketRequestResponsePair> reqResp) {
+  autoResponsePair = kj::mv(reqResp);
+}
+
+void HibernationManagerImpl::unsetWebSocketAutoResponse() {
+  autoResponsePair = nullptr;
+}
+
+kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::getWebSocketAutoResponse() {
+  KJ_IF_MAYBE(ar, autoResponsePair) {
+    return ar->addRef();
+  } else {
+    return nullptr;
+  }
+}
+
+void HibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
+  timer = timerChannel;
+}
+
 void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   jsg::Lock& js(lock);
   v8::HandleScope handleScope(js.v8Isolate);
@@ -164,6 +185,42 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   while (true) {
     kj::WebSocket::Message message = co_await ws.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
+
+    auto skip = false;
+
+    KJ_IF_MAYBE (reqResp, autoResponsePair) {
+      KJ_SWITCH_ONEOF(message) {
+        KJ_CASE_ONEOF(text, kj::String) {
+          if (text == (*reqResp)->getRequest()) {
+            // If the received message matches the one set for auto-response, we must
+            // short-circuit readLoop, store the current timestamp and and automatically respond
+            // with the expected response.
+            TimerChannel& timerChannel = KJ_REQUIRE_NONNULL(timer);
+            // We should have set the timerChannel previously in the hibernation manager.
+            // If we haven't, we aren't able to get the current time.
+            hib.autoResponseTimestamp = timerChannel.now();
+            // We'll store the current timestamp in the HibernatableWebSocket to assure it gets
+            // stored even if the WebSocket is currently hibernating. In that scenario, the timestamp
+            // value will be loaded into the WebSocket during unhibernation.
+            KJ_IF_MAYBE(active, hib.activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
+              // If the actor is not hibernated/If the WebSocket is active, we need to update
+              // autoResponseTimestamp on the active websocket.
+              (*active)->setAutoResponseTimestamp(hib.autoResponseTimestamp);
+            }
+            ws.send((*reqResp)->getResponse().asArray());
+            skip = true;
+            // If we've sent an auto response message, we should not unhibernate or deliver the
+            // received message to the actor
+          }
+        }
+        KJ_CASE_ONEOF_DEFAULT {}
+      }
+    }
+
+    if (skip) {
+      continue;
+    }
+
     auto websocketId = randomUUID(nullptr);
     webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
 

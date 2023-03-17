@@ -385,6 +385,11 @@ public:
   // Used to get/set the attachment for hibernation.
   // If the object isn't serialized, it will not survive hibernation.
 
+  void setAutoResponseTimestamp(kj::Maybe<kj::Date> time);
+  kj::Maybe<kj::Date> getAutoResponseTimestamp();
+  // Used to get/store the last auto request/response timestamp for this WebSocket.
+  // These methods are c++ only and are not exposed to our js interface.
+
   int getReadyState();
 
   bool isAccepted();
@@ -441,6 +446,7 @@ private:
   kj::Maybe<kj::String> url;
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
+  kj::Maybe<kj::Date> autoResponseTimestamp;
   kj::Maybe<kj::Array<byte>> serializedAttachment;
   // All WebSockets have this property. It starts out null but can
   // be assigned to any serializable value. The property will survive hibernation.

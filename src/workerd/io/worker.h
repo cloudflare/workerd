@@ -38,6 +38,7 @@ namespace api {
   struct CryptoAlgorithm;
   struct QueueExportedHandler;
   class WebSocket;
+  class WebSocketRequestResponsePair;
 }
 
 class IoContext;
@@ -684,6 +685,10 @@ public:
         jsg::Lock& js,
         kj::Maybe<kj::StringPtr> tag) = 0;
     virtual void hibernateWebSockets(Worker::Lock& lock) = 0;
+    virtual void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) = 0;
+    virtual void unsetWebSocketAutoResponse() = 0;
+    virtual kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() = 0;
+    virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
   };
 
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,

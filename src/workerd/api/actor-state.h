@@ -364,6 +364,28 @@ private:
   kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent;
 };
 
+class WebSocketRequestResponsePair: public jsg::Object {
+public:
+  WebSocketRequestResponsePair(kj::String request, kj::String response)
+      : request(kj::mv(request)), response(kj::mv(response)) {};
+
+  static jsg::Ref<WebSocketRequestResponsePair> constructor(kj::String request, kj::String response) {
+    return jsg::alloc<WebSocketRequestResponsePair>(kj::mv(request),kj::mv(response));
+  };
+
+  kj::StringPtr getRequest() { return request.asPtr(); }
+  kj::StringPtr getResponse() { return response.asPtr(); }
+
+  JSG_RESOURCE_TYPE(WebSocketRequestResponsePair) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(request, getRequest);
+    JSG_READONLY_PROTOTYPE_PROPERTY(response, getResponse);
+  }
+
+private:
+  kj::String request;
+  kj::String response;
+};
+
 class DurableObjectState: public jsg::Object {
   // The type passed as the first parameter to durable object class's constructor.
 
@@ -410,6 +432,19 @@ public:
   // If no tag is provided, an array of all accepted WebSockets is returned.
   // Disconnected WebSockets are automatically removed from the list.
 
+  void setWebSocketAutoResponse(jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
+  // Sets an object-wide websocket auto response message for a specific
+  // request string. All websockets belonging to the same object must
+  // reply to the request with the matching response, then store the timestamp at which
+  // the request was received.
+  // If maybeReqResp is not set, we consider it as unset and remove any set request response pair.
+
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
+  // Gets the currently set object-wide websocket auto response.
+
+  kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);
+  // Get the last auto response timestamp or null
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
@@ -417,6 +452,9 @@ public:
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
+    JSG_METHOD(setWebSocketAutoResponse);
+    JSG_METHOD(getWebSocketAutoResponse);
+    JSG_METHOD(getWebSocketAutoResponseTimestamp);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(someday): This currently exists for testing purposes only but maybe it could be
@@ -452,6 +490,7 @@ private:
   api::DurableObjectStorageOperations::GetOptions,       \
   api::DurableObjectStorageOperations::GetAlarmOptions,  \
   api::DurableObjectStorageOperations::PutOptions,       \
-  api::DurableObjectStorageOperations::SetAlarmOptions
+  api::DurableObjectStorageOperations::SetAlarmOptions,  \
+  api::WebSocketRequestResponsePair
 
 }  // namespace workerd::api
