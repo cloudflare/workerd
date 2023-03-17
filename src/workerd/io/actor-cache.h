@@ -6,7 +6,6 @@
 
 #include <kj/async.h>
 #include <workerd/io/actor-storage.h>
-#include <workerd/io/io-context.h>
 #include <kj/one-of.h>
 #include <kj/map.h>
 #include <kj/list.h>
