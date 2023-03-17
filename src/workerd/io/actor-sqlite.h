@@ -9,7 +9,7 @@
 
 namespace workerd {
 
-class ActorSqlite final: public ActorCacheOps {
+class ActorSqlite final: public ActorCacheInterface {
   // An implementation of ActorCacheOps that is backed by SqliteKv.
   //
   // TODO(perf): This interface is not designed ideally for wrapping SqliteKv. In particular, we
@@ -38,13 +38,16 @@ public:
   kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
   kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+  // See ActorCacheOps.
 
-  void deleteAll() { kv.deleteAll(); }
-  // TODO(sqlite): deleteAll() should delete the database from disk if there are no other tables.
-  //   For that matter, the database should not be created on disk until it is first written.
-
-  kj::Maybe<kj::Promise<void>> sync() { return nullptr; }
-  // TODO(sqlite): synk() should wait for replication if applicable.
+  kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  DeleteAllResults deleteAll(WriteOptions options) override;
+  kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
+  void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
+  kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache = false) override;
+  void cancelDeferredAlarmDeletion() override;
+  kj::Maybe<kj::Promise<void>> onNoPendingFlush() override;
+  // See ActorCacheInterface
 
 private:
   SqliteDatabase db;
