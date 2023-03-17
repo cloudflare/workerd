@@ -4,6 +4,7 @@
 
 #include "actor-sqlite.h"
 #include <algorithm>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd {
 
