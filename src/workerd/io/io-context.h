@@ -1615,13 +1615,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   }, [cs = kj::mv(cs2)]
      (kj::Exception&& e) mutable {
     // Annotate as broken for periodic metrics.
-    auto msg = e.getDescription();
-    if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
-      // If we already set up a brokeness reason, we shouldn't override it.
-
-      auto description = jsg::annotateBroken(msg, "broken.inputGateBroken");
-      e.setDescription(kj::mv(description));
-    }
+    jsg::annotateBroken(e, "broken.inputGateBroken");
 
     // Note that on failure, no further InputLocks will be obtainable and the actor will
     // shut down, so don't worry about holding a lock until we get back to application code --

@@ -2701,14 +2701,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 
       impl->classInstance = kj::mv(handler);
     }).catch_([this](kj::Exception&& e) {
-      auto msg = e.getDescription();
-
-      if (!msg.startsWith("broken."_kj) && !msg.startsWith("remote.broken."_kj)) {
-        // If we already set up a brokeness reason, we shouldn't override it.
-
-        auto description = jsg::annotateBroken(msg, "broken.constructorFailed");
-        e.setDescription(kj::mv(description));
-      }
+      jsg::annotateBroken(e, "broken.constructorFailed");
 
       impl->constructorFailedPaf.fulfiller->reject(kj::cp(e));
       impl->classInstance = kj::mv(e);

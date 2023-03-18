@@ -26,8 +26,8 @@ bool getCommonJsExportDefault(v8::Isolate* isolate);
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
-// Annotate an internal message with the corresponding brokeness reason.
+void annotateBroken(kj::Exception& exception, kj::StringPtr brokenessReason);
+// Annotate an exception with the corresponding brokeness reason. Modifies the exception in-place.
 
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);

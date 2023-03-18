@@ -366,10 +366,27 @@ kj::String extractTunneledExceptionDescription(kj::StringPtr message) {
   return kj::str(tunneledErrorType(message).type);
 }
 
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason) {
+void annotateBroken(kj::Exception& exception, kj::StringPtr brokenessReason) {
   // TODO(soon) Once we support multiple brokenness reasons, we can make this much simpler.
 
+  kj::StringPtr internalMessage = exception.getDescription();
+  if (internalMessage.startsWith("broken."_kj) || internalMessage.startsWith("remote.broken."_kj)) {
+    // If we already set up a brokeness reason, we shouldn't override it.
+    return;
+  }
+
   auto tunneledInfo = tunneledErrorType(internalMessage);
+
+  if (tunneledInfo.isInternal) {
+    // Broken because of an internal error; log it.
+    // TODO(cleanup): LOG_EXCEPTION requries a literal first parameter but we want to compute from
+    //   brokennessReason so we expand the macro... can we do better?
+    kj::StringPtr sentryErrorContext = brokenessReason;
+    if (sentryErrorContext.startsWith("broken.")) {
+      sentryErrorContext = sentryErrorContext.slice("broken."_kj.size());
+    }
+    KJ_LOG(ERROR, exception, sentryErrorContext);
+  }
 
   kj::StringPtr remotePrefix;
   if (tunneledInfo.isFromRemote) {
@@ -381,8 +398,8 @@ kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokeness
     prefixType = ERROR_INTERNAL_SOURCE_PREFIX_JSG;
   }
 
-  return kj::str(
-      remotePrefix, brokenessReason, ERROR_PREFIX_DELIM, prefixType, tunneledInfo.type);
+  exception.setDescription(kj::str(
+      remotePrefix, brokenessReason, ERROR_PREFIX_DELIM, prefixType, tunneledInfo.type));
 }
 
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
