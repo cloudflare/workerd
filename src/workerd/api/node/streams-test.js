@@ -11234,3 +11234,799 @@ export const push_strings = {
   }
 };
 
+export const filter = {
+  async test(ctrl, env, ctx) {
+    {
+      // Filter works on synchronous streams with a synchronous predicate
+      const stream = Readable.from([1, 2, 3, 4, 5]).filter((x) => x < 3);
+      const result = [1, 2];
+
+      for await (const item of stream) {
+        strictEqual(item, result.shift());
+      }
+    }
+    {
+      // Filter works on synchronous streams with an asynchronous predicate
+      const stream = Readable.from([1, 2, 3, 4, 5]).filter(async (x) => {
+        await Promise.resolve();
+        return x > 3;
+      })
+      const result = [4, 5];
+      for await (const item of stream) {
+        strictEqual(item, result.shift());
+      }
+    }
+    {
+      // Map works on asynchronous streams with a asynchronous mapper
+      const stream = Readable.from([1, 2, 3, 4, 5])
+        .map(async (x) => {
+          await Promise.resolve();
+          return x + x;
+        })
+        .filter((x) => x > 5);
+      const result = [6, 8, 10];
+      for await (const item of stream) {
+        strictEqual(item, result.shift());
+      }
+    }
+    {
+      // Filter works on an infinite stream
+      const stream = Readable.from(
+        (async function* () {
+          while (true) yield 1;
+        })()
+      ).filter(async (x) => x < 3);
+      let i = 1;
+      for await (const item of stream) {
+        strictEqual(item, 1);
+        if (++i === 5) break;
+      }
+    }
+    {
+      // Filter works on constructor created streams
+      let i = 0;
+      const stream = new Readable({
+        read() {
+          if (i === 10) {
+            this.push(null);
+            return;
+          }
+          this.push(Uint8Array.from([i]));
+          i++;
+        },
+        highWaterMark: 0
+      }).filter(async ([x]) => x !== 5)
+      const result = (await stream.toArray()).map((x) => x[0]);
+      const expected = [...Array(10).keys()].filter((x) => x !== 5);
+      deepStrictEqual(result, expected);
+    }
+    {
+      // Throwing an error during `filter` (sync)
+      const stream = Readable.from([1, 2, 3, 4, 5]).filter((x) => {
+        if (x === 3) {
+          throw new Error('boom');
+        }
+        return true;
+      })
+      await rejects(stream.map((x) => x + x).toArray(), /boom/);
+    }
+    {
+      // Throwing an error during `filter` (async)
+      const stream = Readable.from([1, 2, 3, 4, 5]).filter(async (x) => {
+        if (x === 3) {
+          throw new Error('boom');
+        }
+        return true;
+      })
+      await rejects(stream.filter(() => true).toArray(), /boom/);
+    }
+    {
+      function once(ee, event) {
+        const deferred = deferredPromise();
+        ee.once(event, deferred.resolve);
+        return deferred.promise;
+      }
+      // Concurrency + AbortSignal
+      const ac = new AbortController();
+      let calls = 0;
+      const stream = Readable.from([1, 2, 3, 4]).filter(
+        async (_, { signal }) => {
+          calls++;
+          await once(signal, 'abort');
+        },
+        {
+          signal: ac.signal,
+          concurrency: 2
+        }
+      );
+      queueMicrotask(() => ac.abort());
+      // pump
+      await rejects(
+          async () => {
+            for await (const item of stream) {
+              // nope
+            }
+          },
+          {
+            name: 'AbortError'
+          }
+        );
+    }
+    {
+      // Concurrency result order
+      const stream = Readable.from([1, 2]).filter(
+        async (item, { signal }) => {
+          await scheduler.wait(10 - item);
+          return true
+        },
+        {
+          concurrency: 2
+        }
+      );
+      const expected = [1, 2];
+      for await (const item of stream) {
+        strictEqual(item, expected.shift());
+      }
+    }
+    {
+      // Error cases
+      throws(() => Readable.from([1]).filter(1), /ERR_INVALID_ARG_TYPE/);
+      throws(
+        () =>
+          Readable.from([1]).filter((x) => x, {
+            concurrency: 'Foo'
+          }), { code: 'ERR_OUT_OF_RANGE' }
+      );
+      throws(() => Readable.from([1]).filter((x) => x, 1), {
+        code: 'ERR_INVALID_ARG_TYPE'
+      });
+    }
+    {
+      // Test result is a Readable
+      const stream = Readable.from([1, 2, 3, 4, 5]).filter((x) => true);
+      strictEqual(stream.readable, true);
+    }
+  }
+};
+
+export const pipeWithoutListenerCount = {
+  async test(ctrl, env, ctx) {
+    const r = new Stream();
+    r.listenerCount = undefined;
+    const w = new Stream();
+    w.listenerCount = undefined;
+    w.on('pipe', function () {
+      r.emit('error', new Error('Readable Error'));
+      w.emit('error', new Error('Writable Error'));
+    });
+    const rErrored = deferredPromise();
+    const wErrored = deferredPromise();
+    r.on('error', rErrored.resolve);
+    w.on('error', wErrored.resolve);
+    r.pipe(w);
+    await Promise.all([
+      rErrored.promise,
+      wErrored.promise,
+    ]);
+  }
+};
+
+export const pipeUnpipeStreams = {
+  async test(ctrl, env, ctx) {
+    const source = Readable({
+      read: () => {}
+    });
+    const dest1 = Writable({
+      write: () => {}
+    });
+    const dest2 = Writable({
+      write: () => {}
+    });
+    source.pipe(dest1);
+    source.pipe(dest2);
+
+    const unpipe1 = deferredPromise();
+    const unpipe2 = deferredPromise();
+
+    dest1.on('unpipe', unpipe1.resolve);
+    dest2.on('unpipe', unpipe2.resolve);
+    strictEqual(source._readableState.pipes[0], dest1);
+    strictEqual(source._readableState.pipes[1], dest2);
+    strictEqual(source._readableState.pipes.length, 2);
+
+    // Should be able to unpipe them in the reverse order that they were piped.
+
+    source.unpipe(dest2);
+    deepStrictEqual(source._readableState.pipes, [dest1]);
+    notStrictEqual(source._readableState.pipes, dest2);
+    dest2.on('unpipe', fail);
+    source.unpipe(dest2);
+    source.unpipe(dest1);
+    strictEqual(source._readableState.pipes.length, 0);
+    {
+      // Test `cleanup()` if we unpipe all streams.
+      const source = Readable({
+        read: () => {}
+      });
+      const dest1 = Writable({
+        write: () => {}
+      });
+      const dest2 = Writable({
+        write: () => {}
+      });
+      let destCount = 0;
+      const srcCheckEventNames = ['end', 'data'];
+      const destCheckEventNames = ['close', 'finish', 'drain', 'error', 'unpipe'];
+      const checkSrcCleanup = () => {
+        strictEqual(source._readableState.pipes.length, 0);
+        strictEqual(source._readableState.flowing, false);
+        srcCheckEventNames.forEach((eventName) => {
+          strictEqual(source.listenerCount(eventName), 0, `source's '${eventName}' event listeners not removed`);
+        })
+      }
+      async function checkDestCleanup(dest) {
+        const done = deferredPromise();
+        const currentDestId = ++destCount;
+        source.pipe(dest);
+        const unpipeChecker = () => {
+          destCheckEventNames.forEach((eventName) => {
+            strictEqual(
+              dest.listenerCount(eventName),
+              0,
+              `destination{${currentDestId}}'s '${eventName}' event ` + 'listeners not removed'
+            );
+          });
+          if (--destCount === 0) checkSrcCleanup();
+          done.resolve();
+        };
+        dest.once('unpipe', unpipeChecker);
+        await done.promise;
+      }
+      const p1 = checkDestCleanup(dest1);
+      const p2 = checkDestCleanup(dest2);
+      source.unpipe();
+      await Promise.all([
+        p1, p2, unpipe1.promise, unpipe2.promise
+      ]);
+    }
+    {
+      const src = Readable({
+        read: () => {}
+      });
+      const dst = Writable({
+        write: () => {}
+      });
+      src.pipe(dst);
+      const resumeCalled = deferredPromise();
+      src.on(
+        'resume',
+        () => {
+          src.on('pause', resumeCalled.resolve);
+          src.unpipe(dst);
+        }
+      );
+      await resumeCalled.promise;
+    }
+  }
+}
+
+export const pipeSameDestinationTwice = {
+  async test(ctrl, env, ctx) {
+    // Regression test for https://github.com/nodejs/node/issues/12718.
+    // Tests that piping a source stream twice to the same destination stream
+    // works, and that a subsequent unpipe() call only removes the pipe *once*.
+    {
+      const passThrough = new PassThrough();
+      const writeCalled = deferredPromise();
+      const dest = new Writable({
+        write: (chunk, encoding, cb) => {
+          strictEqual(`${chunk}`, 'foobar');
+          cb();
+          writeCalled.resolve();
+        }
+      });
+      passThrough.pipe(dest);
+      passThrough.pipe(dest);
+      strictEqual(passThrough._events.data.length, 2);
+      strictEqual(passThrough._readableState.pipes.length, 2);
+      strictEqual(passThrough._readableState.pipes[0], dest);
+      strictEqual(passThrough._readableState.pipes[1], dest);
+      passThrough.unpipe(dest);
+      strictEqual(passThrough._events.data.length, 1);
+      strictEqual(passThrough._readableState.pipes.length, 1);
+      deepStrictEqual(passThrough._readableState.pipes, [dest]);
+      passThrough.write('foobar');
+      passThrough.pipe(dest);
+      await writeCalled.promise;
+    }
+    {
+      const passThrough = new PassThrough();
+      const writeCalled = deferredPromise();
+      let writeCount = 0;
+      const dest = new Writable({
+        write: (chunk, encoding, cb) => {
+          strictEqual(`${chunk}`, 'foobar');
+          cb();
+          if (++writeCount == 2) writeCalled.resolve();
+        }
+      });
+      passThrough.pipe(dest);
+      passThrough.pipe(dest);
+      strictEqual(passThrough._events.data.length, 2);
+      strictEqual(passThrough._readableState.pipes.length, 2);
+      strictEqual(passThrough._readableState.pipes[0], dest);
+      strictEqual(passThrough._readableState.pipes[1], dest);
+      passThrough.write('foobar');
+      await writeCalled.promise;
+    }
+    {
+      const passThrough = new PassThrough();
+      const dest = new Writable({
+        write: fail
+      });
+      passThrough.pipe(dest);
+      passThrough.pipe(dest);
+      strictEqual(passThrough._events.data.length, 2);
+      strictEqual(passThrough._readableState.pipes.length, 2);
+      strictEqual(passThrough._readableState.pipes[0], dest);
+      strictEqual(passThrough._readableState.pipes[1], dest);
+      passThrough.unpipe(dest);
+      passThrough.unpipe(dest);
+      strictEqual(passThrough._events.data, undefined);
+      strictEqual(passThrough._readableState.pipes.length, 0);
+      passThrough.write('foobar');
+    }
+  }
+};
+
+export const pipeNeedDrain = {
+  async test(ctrl, env, ctx) {
+    // Pipe should pause temporarily if writable needs drain.
+    const w = new Writable({
+      write(buf, encoding, callback) {
+        queueMicrotask(callback);
+      },
+      highWaterMark: 1
+    });
+    while (w.write('asd'));
+    strictEqual(w.writableNeedDrain, true);
+    const r = new Readable({
+      read() {
+        this.push('asd');
+        this.push(null);
+      }
+    });
+    const pauseCalled = deferredPromise();
+    const endCalled = deferredPromise();
+    let pauseCount = 0;
+    r.on('pause', () => {
+      if (++pauseCount === 2) pauseCalled.resolve();
+    });
+    r.on('end', endCalled.resolve);
+    r.pipe(w);
+    await Promise.all([
+      pauseCalled.promise,
+      endCalled.promise,
+    ]);
+  }
+};
+
+export const pipeMultiplePipes = {
+  async test(ctrl, env, ctx) {
+    const readable = new Readable({
+      read: () => {}
+    });
+    const writables = [];
+    const promises = [];
+    for (let i = 0; i < 5; i++) {
+      const writeCalled = deferredPromise();
+      promises.push(writeCalled.promise);
+      const target = new Writable({
+        write: (chunk, encoding, callback) => {
+          target.output.push(chunk);
+          callback();
+          writeCalled.resolve();
+        }
+      });
+      const pipeCalled = deferredPromise();
+      promises.push(pipeCalled.promise);
+      target.output = [];
+      target.on('pipe', pipeCalled.resolve);
+      readable.pipe(target);
+      writables.push(target);
+    }
+    const input = Buffer.from([1, 2, 3, 4, 5]);
+    readable.push(input);
+
+    await Promise.all(promises);
+
+    // The pipe() calls will postpone emission of the 'resume' event using nextTick,
+    // so no data will be available to the writable streams until then.
+
+    for (const target of writables) {
+      deepStrictEqual(target.output, [input]);
+      readable.unpipe(target);
+    }
+    readable.push('something else') // This does not get through.
+    readable.push(null)
+    readable.resume() // Make sure the 'end' event gets emitted.
+
+    const ended = deferredPromise();
+    readable.on(
+      'end',
+      () => {
+        for (const target of writables) {
+          deepStrictEqual(target.output, [input])
+        }
+        ended.resolve();
+      }
+    );
+    await ended.promise;
+  }
+};
+
+export const pipeManualResume = {
+  async test(ctrl, env, ctx) {
+    async function test(throwCodeInbetween) {
+      // Check that a pipe does not stall if .read() is called unexpectedly
+      // (i.e. the stream is not resumed by the pipe).
+
+      const n = 1000;
+      let counter = n;
+      const rClosed = deferredPromise();
+      const wClosed = deferredPromise();
+      const rs = Readable({
+        objectMode: true,
+        read: () => {
+          if (--counter >= 0)
+            rs.push({ counter });
+          else rs.push(null);
+        }
+      });
+      const ws = Writable({
+        objectMode: true,
+        write: (data, enc, cb) => {
+          queueMicrotask(cb);
+        }
+      });
+      rs.on('close', rClosed.resolve);
+      ws.on('close', wClosed.resolve);
+      queueMicrotask(() => throwCodeInbetween(rs, ws));
+      rs.pipe(ws);
+      await Promise.all([
+        rClosed.promise,
+        wClosed.promise,
+      ]);
+    }
+
+    await Promise.all([
+      test((rs) => rs.read()),
+      test((rs) => rs.resume()),
+      test(() => 0),
+    ]);
+  }
+};
+
+export const pipeFlow = {
+  async test(ctrl, env, ctx) {
+    {
+      let ticks = 17;
+      const rs = new Readable({
+        objectMode: true,
+        read: () => {
+          if (ticks-- > 0) return queueMicrotask(() => rs.push({}));
+          rs.push({});
+          rs.push(null);
+        }
+      });
+      const ws = new Writable({
+        highWaterMark: 0,
+        objectMode: true,
+        write: (data, end, cb) => queueMicrotask(cb)
+      })
+      const ended = deferredPromise();
+      const finished = deferredPromise();
+      rs.on('end', ended.resolve);
+      ws.on('finish', finished.resolve);
+      rs.pipe(ws);
+      await Promise.all([
+        ended.promise,
+        finished.promise,
+      ]);
+    }
+    {
+      let missing = 8;
+      const rs = new Readable({
+        objectMode: true,
+        read: () => {
+          if (missing--) rs.push({});
+          else rs.push(null);
+        }
+      })
+      const pt = rs
+        .pipe(
+          new PassThrough({
+            objectMode: true,
+            highWaterMark: 2
+          })
+        )
+        .pipe(
+          new PassThrough({
+            objectMode: true,
+            highWaterMark: 2
+          })
+        );
+      pt.on('end', () => {
+        wrapper.push(null);
+      });
+      const wrapper = new Readable({
+        objectMode: true,
+        read: () => {
+          queueMicrotask(() => {
+            let data = pt.read();
+            if (data === null) {
+              pt.once('readable', () => {
+                data = pt.read();
+                if (data !== null) wrapper.push(data);
+              });
+            } else {
+              wrapper.push(data);
+            }
+          });
+        }
+      });
+      wrapper.resume();
+      const ended = deferredPromise();
+      wrapper.on('end', ended.resolve);
+      await ended.promise;
+    }
+    {
+      // Only register drain if there is backpressure.
+      const rs = new Readable({
+        read() {}
+      });
+      const pt = rs.pipe(
+        new PassThrough({
+          objectMode: true,
+          highWaterMark: 2
+        })
+      );
+      strictEqual(pt.listenerCount('drain'), 0);
+      pt.on('finish', () => {
+        strictEqual(pt.listenerCount('drain'), 0);
+      });
+      rs.push('asd');
+      strictEqual(pt.listenerCount('drain'), 0);
+      const done = deferredPromise();
+      queueMicrotask(() => {
+        rs.push('asd');
+        strictEqual(pt.listenerCount('drain'), 0);
+        rs.push(null);
+        strictEqual(pt.listenerCount('drain'), 0);
+        done.resolve();
+      });
+      await done.promise;
+    }
+  }
+};
+
+export const pipeErrorHandling = {
+  async test(ctrl, env, ctx) {
+    {
+      const source = new Stream();
+      const dest = new Stream();
+      source.pipe(dest);
+      let gotErr = null;
+      source.on('error', function (err) {
+        gotErr = err;
+      });
+      const err = new Error('This stream turned into bacon.');
+      source.emit('error', err);
+      strictEqual(gotErr, err);
+    }
+    {
+      const source = new Stream();
+      const dest = new Stream();
+      source.pipe(dest);
+      const err = new Error('This stream turned into bacon.');
+      let gotErr = null;
+      try {
+        source.emit('error', err);
+      } catch (e) {
+        gotErr = e;
+      }
+      strictEqual(gotErr, err);
+    }
+    {
+      const r = new Readable({
+        autoDestroy: false
+      });
+      const w = new Writable({
+        autoDestroy: false
+      });
+      let removed = false;
+      r._read = function () {
+        setTimeout(
+          function () {
+            ok(removed);
+            throws(function () {
+              w.emit('error', new Error('fail'));
+            }, /^Error: fail$/)
+          },
+          1
+        )
+      };
+      w.on('error', myOnError);
+      r.pipe(w);
+      w.removeListener('error', myOnError);
+      removed = true;
+      function myOnError() {
+        throw new Error('this should not happen');
+      }
+    }
+    {
+      const r = new Readable();
+      const w = new Writable();
+      let removed = false;
+      r._read = function () {
+        setTimeout(
+          function () {
+            ok(removed);
+            w.emit('error', new Error('fail'));
+          },
+          1
+        );
+      };
+      const errored = deferredPromise();
+      w.on('error', errored.resolve);
+      w._write = () => {};
+      r.pipe(w);
+      // Removing some OTHER random listener should not do anything
+      w.removeListener('error', () => {});
+      removed = true;
+      await errored.promise;
+    }
+    {
+      const _err = new Error('this should be handled');
+      const destination = new PassThrough();
+      const errored = deferredPromise();
+      destination.once(
+        'error',
+        (err) => {
+          strictEqual(err, _err);
+          errored.resolve();
+        }
+      );
+      const stream = new Stream();
+      stream.pipe(destination);
+      destination.destroy(_err);
+      await errored.promise;
+    }
+  }
+};
+
+export const pipeCleanup = {
+  async test(ctrl, env, ctx) {
+    function Writable() {
+      this.writable = true;
+      this.endCalls = 0;
+      Stream.call(this);
+    }
+    Object.setPrototypeOf(Writable.prototype, Stream.prototype);
+    Object.setPrototypeOf(Writable, Stream);
+    Writable.prototype.end = function () {
+      this.endCalls++;
+    };
+    Writable.prototype.destroy = function () {
+      this.endCalls++;
+    };
+    function Readable() {
+      this.readable = true;
+      Stream.call(this);
+    }
+    Object.setPrototypeOf(Readable.prototype, Stream.prototype);
+    Object.setPrototypeOf(Readable, Stream);
+    function Duplex() {
+      this.readable = true;
+      Writable.call(this);
+    }
+    Object.setPrototypeOf(Duplex.prototype, Writable.prototype);
+    Object.setPrototypeOf(Duplex, Writable);
+    let i = 0;
+    const limit = 100;
+    let w = new Writable();
+    let r;
+    for (i = 0; i < limit; i++) {
+      r = new Readable();
+      r.pipe(w);
+      r.emit('end');
+    }
+    strictEqual(r.listeners('end').length, 0);
+    strictEqual(w.endCalls, limit);
+    w.endCalls = 0;
+    for (i = 0; i < limit; i++) {
+      r = new Readable();
+      r.pipe(w);
+      r.emit('close');
+    }
+    strictEqual(r.listeners('close').length, 0);
+    strictEqual(w.endCalls, limit);
+    w.endCalls = 0;
+    r = new Readable();
+    for (i = 0; i < limit; i++) {
+      w = new Writable();
+      r.pipe(w);
+      w.emit('close');
+    }
+    strictEqual(w.listeners('close').length, 0);
+    r = new Readable();
+    w = new Writable();
+    const d = new Duplex();
+    r.pipe(d); // pipeline A
+    d.pipe(w); // pipeline B
+    strictEqual(r.listeners('end').length, 2); // A.onend, A.cleanup
+    strictEqual(r.listeners('close').length, 2); // A.onclose, A.cleanup
+    strictEqual(d.listeners('end').length, 2); // B.onend, B.cleanup
+    // A.cleanup, B.onclose, B.cleanup
+    strictEqual(d.listeners('close').length, 3);
+    strictEqual(w.listeners('end').length, 0);
+    strictEqual(w.listeners('close').length, 1); // B.cleanup
+
+    r.emit('end');
+    strictEqual(d.endCalls, 1);
+    strictEqual(w.endCalls, 0);
+    strictEqual(r.listeners('end').length, 0);
+    strictEqual(r.listeners('close').length, 0);
+    strictEqual(d.listeners('end').length, 2); // B.onend, B.cleanup
+    strictEqual(d.listeners('close').length, 2); // B.onclose, B.cleanup
+    strictEqual(w.listeners('end').length, 0);
+    strictEqual(w.listeners('close').length, 1); // B.cleanup
+
+    d.emit('end');
+    strictEqual(d.endCalls, 1);
+    strictEqual(w.endCalls, 1);
+    strictEqual(r.listeners('end').length, 0);
+    strictEqual(r.listeners('close').length, 0);
+    strictEqual(d.listeners('end').length, 0);
+    strictEqual(d.listeners('close').length, 0);
+    strictEqual(w.listeners('end').length, 0);
+    strictEqual(w.listeners('close').length, 0);
+  }
+};
+
+export const pipeCleanupPause = {
+  async test(ctrl, env, ctx) {
+    const done = deferredPromise();
+    const reader = new Readable();
+    const writer1 = new Writable();
+    const writer2 = new Writable();
+
+    // 560000 is chosen here because it is larger than the (default) highWaterMark
+    // and will cause `.write()` to return false
+    // See: https://github.com/nodejs/node/issues/2323
+    const buffer = Buffer.allocUnsafe(560000);
+    reader._read = () => {};
+    writer1._write = function (chunk, encoding, cb) {
+      this.emit('chunk-received');
+      cb();
+    }
+    writer1.once('chunk-received', function () {
+      reader.unpipe(writer1);
+      reader.pipe(writer2);
+      reader.push(buffer);
+      queueMicrotask(function () {
+        reader.push(buffer);
+        queueMicrotask(function () {
+          reader.push(buffer);
+          done.resolve();
+        });
+      });
+    });
+    writer2._write = function (chunk, encoding, cb) {
+      cb();
+    };
+    reader.pipe(writer1);
+    reader.push(buffer);
+    await done.promise;
+  }
+};
