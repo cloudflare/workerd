@@ -112,7 +112,7 @@ BackingStore BufferSource::detach(Lock& js) {
   auto buffer = theHandle->IsArrayBuffer() ?
       theHandle.As<v8::ArrayBuffer>() :
       theHandle.As<v8::ArrayBufferView>()->Buffer();
-  buffer->Detach();
+  jsg::check(buffer->Detach(v8::Local<v8::Value>()));
 
   return kj::mv(backingStore);
 }

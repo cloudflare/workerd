@@ -396,7 +396,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         return js.rejectedPromise<ReadResult>(
             js.v8TypeError("Unable to use non-detachable ArrayBuffer"_kj));
       }
-      buffer->Detach();
+      jsg::check(buffer->Detach(v8::Local<v8::Value>()));
     }
   } else {
     byteLength = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;

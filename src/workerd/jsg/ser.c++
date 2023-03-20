@@ -64,7 +64,7 @@ void Serializer::transfer(v8::Local<v8::ArrayBuffer> arrayBuffer) {
 
   arrayBuffers.add(jsg::V8Ref(isolate, arrayBuffer));
   backingStores.add(arrayBuffer->GetBackingStore());
-  arrayBuffer->Detach();
+  check(arrayBuffer->Detach(v8::Local<v8::Value>()));
   ser.TransferArrayBuffer(n, arrayBuffer);
 }
 
