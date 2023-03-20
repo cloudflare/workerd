@@ -72,6 +72,13 @@ struct Config {
   # WARNING: Use at your own risk. V8 flags can have all sorts of wild effects including completely
   #   breaking everything. V8 flags also generally do not come with any guarantee of stability
   #   between V8 versions. Most users should not set any V8 flags.
+
+  builtins @3 :List(BuiltinsBundle);
+  # These builtin bundles will be available as imports to the application and can also be used
+  # for specifying wrapped bindings.
+  # A major difference between worker modules and builtins is that latter represents system
+  # capabilities provided by a particular workerd deployment. These bundles are usually
+  # prepared separately and late-linked to the app through this config field.
 }
 
 # ========================================================================================
@@ -775,4 +782,28 @@ struct TlsOptions {
   # - You have extreme backwards-compatibility needs and wish to enable obsolete and/or broken
   #   algorithms.
   # - You need quickly to disable an algorithm recently discovered to be broken.
+}
+
+# ========================================================================================
+# Builtins
+
+struct BuiltinsBundle {
+  # A bundle of builtin modules. Builtin modules are used to provide
+  # lower level functionality across all workers.
+
+  modules @0 :List(Module);
+  # List of modules in the bundle.
+
+  struct Module {
+    # A builtin module extending workerd functionality.
+
+    name @0 :Text;
+    # Builtin module name
+
+    internal @1 :Bool = false;
+    # Internal modules can be imported by other builins only and not the user code.
+
+    esModule @2 :Text;
+    # Raw source code of ES module.
+  }
 }

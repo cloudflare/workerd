@@ -1788,7 +1788,8 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
 }
 
 
-kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf) {
+kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
+    config::Config::Reader serverConfig) {
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
   struct ErrorReporter: public Worker::ValidationErrorReporter {
@@ -1891,7 +1892,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   }
 
   auto script = isolate->newScript(name,
-                                   WorkerdApiIsolate::extractSource(name, conf, errorReporter),
+                                   WorkerdApiIsolate::extractSource(name, conf, errorReporter, serverConfig),
                                    IsolateObserver::StartType::COLD, false, errorReporter);
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
@@ -2003,7 +2004,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
 kj::Own<Server::Service> Server::makeService(
     config::Service::Reader conf,
-    kj::HttpHeaderTable::Builder& headerTableBuilder) {
+    kj::HttpHeaderTable::Builder& headerTableBuilder,
+    config::Config::Reader serverConfig) {
   kj::StringPtr name = conf.getName();
 
   switch (conf.which()) {
@@ -2019,7 +2021,7 @@ kj::Own<Server::Service> Server::makeService(
       return makeNetworkService(conf.getNetwork());
 
     case config::Service::WORKER:
-      return makeWorker(name, conf.getWorker());
+      return makeWorker(name, conf.getWorker(), serverConfig);
 
     case config::Service::DISK:
       return makeDiskDirectoryService(name, conf.getDisk(), headerTableBuilder);
@@ -2363,7 +2365,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
   // Second pass: Build services.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
-    auto service = makeService(serviceConf, headerTableBuilder);
+    auto service = makeService(serviceConf, headerTableBuilder, config);
 
     services.upsert(kj::str(name), kj::mv(service), [&](auto&&...) {
       reportConfigError(kj::str("Config defines multiple services named \"", name, "\"."));

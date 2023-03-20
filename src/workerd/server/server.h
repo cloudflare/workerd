@@ -147,10 +147,12 @@ private:
   kj::Own<Service> makeDiskDirectoryService(
       kj::StringPtr name, config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf);
+  kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf,
+      config::Config::Reader serverConfig);
   kj::Own<Service> makeService(
       config::Service::Reader conf,
-      kj::HttpHeaderTable::Builder& headerTableBuilder);
+      kj::HttpHeaderTable::Builder& headerTableBuilder,
+      config::Config::Reader serverConfig);
 
   Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
   // Can only be called in the link stage.
