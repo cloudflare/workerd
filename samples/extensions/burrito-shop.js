@@ -1,17 +1,4 @@
-// kitchen is hidden from the user
-import { makeBurritoImpl } from "burrito-shop-internal:kitchen";
+// implementation details are not directly accessible to the user
+import { BurritoShop } from "burrito-shop-internal:burrito-shop-impl";
 
-export class BurritoShop {
-  #recipes;
-
-  constructor(recipes) {
-    this.#recipes = recipes;
-  }
-
-  makeBurrito(type) {
-    if (!type in this.#recipes) {
-      throw new Error(`recipe not found: ${type}`);
-    }
-    return makeBurritoImpl(this.#recipes[type]);
-  }
-}
+export { BurritoShop };

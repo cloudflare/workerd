@@ -331,6 +331,9 @@ struct Worker {
       # R2 bucket and admin API bindings. Similar to KV namespaces, these turn operations into
       # HTTP requests aimed at the named service.
 
+      wrapped @14 :WrappedBinding;
+      # Wraps a collection of inner bindings in a common api functionality.
+
       # TODO(someday): dispatch, analyticsEngine, other new features
     }
 
@@ -423,6 +426,26 @@ struct Worker {
         wrapKey @6;
         unwrapKey @7;
       }
+    }
+
+    struct WrappedBinding {
+      # A binding that wraps a group of (lower-level) bindings in a common API.
+
+      moduleName @0 :Text;
+      # Wrapper module nume.
+      # Can be both a module from current worker or a built-in module.
+      # The module will be instantitated during binding initialization phase.
+      # Module needs to exports "wrapBindings(env)" function.
+      # Env argument is a dictionary with all the inner bindings.
+      # Function will be invoked during initialization phase and its return value will be used as
+      # resulting binding value.
+
+      wrapWithFn @1 :Text = "wrapBindings";
+
+      innerBindings @2 :List(Binding);
+      # Inner bindings that will be created and passed in the env dictionary.
+      # These bindings shall be used to implement then end-user api, and are not available to the
+      # binding consumers unless "re-exported" in wrapBindings function.
     }
   }
 
