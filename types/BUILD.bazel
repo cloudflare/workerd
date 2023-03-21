@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary", "js_test")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wd_ts_test.bzl", "wd_ts_test")
+load("//:build/wd_ts_type_test.bzl", "wd_ts_type_test")
 
 wd_ts_project(
     name = "types_lib",
@@ -50,4 +51,9 @@ js_run_binary(
         deps = [":types_lib"],
     )
     for src in glob(["test/**/*.spec.ts"])
+]
+
+[
+    wd_ts_type_test(src = src)
+    for src in glob(["test/types/**/*.ts"])
 ]

@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "lib": ["esnext"],
+    "strict": true,
+    "types": ["../../../bazel-bin/types/definitions/experimental"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}

@@ -161,14 +161,14 @@ struct ExportedHandler {
   // include it in type definitions.
 
   JSG_STRUCT_TS_DEFINE(
-    type ExportedHandlerFetchHandler<Env = unknown> = (request: Request, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+    type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown> {
-    fetch?: ExportedHandlerFetchHandler<Env>;
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown, CfHostMetadata = unknown> {
+    fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
     trace?: ExportedHandlerTraceHandler<Env>;
     scheduled?: ExportedHandlerScheduledHandler<Env>;
     alarm: never;
