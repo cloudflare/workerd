@@ -5,6 +5,7 @@
 #include "util.h"
 #include <kj/encoding.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/thread-scopes.h>
 
 namespace workerd::api {
 
@@ -282,6 +283,72 @@ double dateNow() {
   }
 
   return 0.0;
+}
+
+kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
+    jsg::Lock& js,
+    kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf) {
+  KJ_IF_MAYBE(cf, maybeCf) {
+    // In case the cf object has a logging proxy, we want to make sure
+    // the logging is not triggered here when the object is cloned.
+    NoRequestCfProxyLoggingScope noLoggingScope;
+    auto cloned = cf->deepClone(js);
+    maybeWrapBotManagement(js.v8Isolate, cloned.getHandle(js));
+    return kj::mv(cloned);
+  }
+  return nullptr;
+}
+
+void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle) {
+  auto context = isolate->GetCurrentContext();
+  auto botManagement = jsg::v8StrIntern(isolate, "botManagement");
+  v8::Local<v8::Value> maybeBotManagement = jsg::check(handle->Get(context, botManagement));
+  // If the botManagement field exists, we replace its value here with a Proxy object that
+  // will log the first time any of its properties are accessed. Logging will occur only
+  // once per worker instance.
+  //
+  // Replacing the value with a proxy rather than setting an accessor for botManagement on
+  // the request.cf object itself avoids false positives when someone is simply iterating
+  // over the fields of request.cf without actually using them. It also allows us to avoid
+  // having to create accessors or a class to intercept every individual property on the
+  // botManagement object.
+  if (maybeBotManagement->IsObject() && !maybeBotManagement->IsProxy()) {
+    v8::Local<v8::Object> bmObj = maybeBotManagement.As<v8::Object>();
+    auto& js = jsg::Lock::from(isolate);
+
+    // Create the Proxy handler exactly once per global context and cache it using a private
+    // property on the global itself. The handler itself maintains no state so it is safe to
+    // use it over and over for all requests.
+    auto sym = v8::Private::ForApi(isolate, jsg::v8StrIntern(isolate, "loggingProxyHandler"));
+    auto handler = jsg::check(context->Global()->GetPrivate(context, sym));
+    if (handler->IsUndefined()) {
+      handler = v8::Object::New(isolate);
+      jsg::check(handler.As<v8::Object>()->Set(context, jsg::v8StrIntern(isolate, "get"),
+          js.wrapReturningFunction(context,
+              [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (IoContext::hasCurrent()) {
+          if (!NoRequestCfProxyLoggingScope::isActive()) {
+            IoContext::current().getMetrics().logBotManagementUse();
+          }
+        } else {
+          // TODO(later): There is an edge case where the request.cf could be set to a global
+          // scope variable and read outside of an IoContext. In such cases we would not get the
+          // logging. Is that ok? It should be rare but in theory it means the logging won't be
+          // 100% effective at identifying all uses.
+        }
+        if (args[0]->IsObject()) {
+          return jsg::check(args[0].As<v8::Object>()->Get(
+              js.v8Isolate->GetCurrentContext(), args[1]));
+        } else {
+          return js.v8Undefined();
+        }
+      })));
+      context->Global()->SetPrivate(context, sym, handler);
+    }
+
+    jsg::check(handle->Set(context, botManagement,
+        jsg::check(v8::Proxy::New(context, bmObj, handler.As<v8::Object>()))));
+  }
 }
 
 }  // namespace workerd::api

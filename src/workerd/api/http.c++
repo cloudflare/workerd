@@ -10,6 +10,7 @@
 #include <kj/memory.h>
 #include <kj/parse/char.h>
 #include <workerd/util/http-util.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/io/io-context.h>
 #include <set>
@@ -799,7 +800,7 @@ jsg::Ref<Request> Request::constructor(
       method = oldRequest->method;
       headers = jsg::alloc<Headers>(*oldRequest->headers);
       KJ_IF_MAYBE(oldCf, oldRequest->getCf(js)) {
-        cf = js.v8Ref(*oldCf).deepClone(js);
+        cf = cloneRequestCf(js, js.v8Ref(*oldCf));
       }
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(),
@@ -870,8 +871,8 @@ jsg::Ref<Request> Request::constructor(
           signal = kj::mv(*s);
         }
 
-        KJ_IF_MAYBE(c, initDict.cf) {
-          cf = c->deepClone(js);
+        KJ_IF_MAYBE(newCf, initDict.cf) {
+          cf = cloneRequestCf(js, kj::mv(initDict.cf));
         }
 
         KJ_IF_MAYBE(b, kj::mv(initDict.body).orDefault(nullptr)) {
@@ -904,9 +905,8 @@ jsg::Ref<Request> Request::constructor(
         fetcher = otherRequest->getFetcher();
         signal = otherRequest->getSignal();
         headers = jsg::alloc<Headers>(*otherRequest->headers);
-        KJ_IF_MAYBE(otherCf, otherRequest->cf) {
-          cf = otherCf->deepClone(js);
-        }
+        cf = cloneRequestCf(js, otherRequest->cf.map([&](jsg::V8Ref<v8::Object>& ref)
+            -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
         KJ_IF_MAYBE(b, otherRequest->getBody()) {
           // Note that unlike when `input` (Request ctor's 1st parameter) is a Request object, here
           // we're NOT stealing the other request's body, because we're supposed to pretend that the
@@ -1010,6 +1010,7 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.map([&](jsg::V8Ref<v8::Object>& obj) {
+    NoRequestCfProxyLoggingScope noLoggingScope;
     return js.serializeJson(obj);
   });
 }
@@ -1057,9 +1058,7 @@ jsg::Ref<Response> Response::constructor(
         headers = jsg::alloc<Headers>(jsg::Dict<jsg::ByteString, jsg::ByteString>());
       }
 
-      KJ_IF_MAYBE(c, initDict.cf) {
-        cf = c->deepClone(js);
-      }
+      cf = cloneRequestCf(js, kj::mv(initDict.cf));
 
       KJ_IF_MAYBE(ws, initDict.webSocket) {
         KJ_IF_MAYBE(ws2, *ws) {
@@ -1076,9 +1075,8 @@ jsg::Ref<Response> Response::constructor(
       bodyEncoding = otherResponse->bodyEncoding;
       statusText = kj::str(otherResponse->statusText);
       headers = jsg::alloc<Headers>(*otherResponse->headers);
-      KJ_IF_MAYBE(otherCf, otherResponse->cf) {
-        cf = otherCf->deepClone(js);
-      }
+      cf = cloneRequestCf(js, otherResponse->cf.map([&](jsg::V8Ref<v8::Object>& ref)
+          -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
       KJ_IF_MAYBE(otherWs, otherResponse->webSocket) {
         webSocket = otherWs->addRef();
       }
@@ -1245,9 +1243,8 @@ jsg::Ref<Response> Response::json_(
               ? "manual" : "automatic"),
         };
 
-        KJ_IF_MAYBE(otherCf, res->cf) {
-          newInit.cf = otherCf->deepClone(js);
-        }
+        newInit.cf = cloneRequestCf(js, res->cf.map([&](jsg::V8Ref<v8::Object>& ref)
+            -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
 
         KJ_IF_MAYBE(otherWs, res->webSocket) {
           newInit.webSocket = otherWs->addRef();
