@@ -778,6 +778,15 @@ KJ_TEST("Parse protocol with state override") {
   }
 }
 
+
+KJ_TEST("Can parse") {
+  {
+    KJ_ASSERT(URL::canParse(jsg::usv("http://example.org")));
+    KJ_ASSERT(URL::canParse(jsg::usv("foo"), jsg::usv("http://example.org")));
+    KJ_ASSERT(!URL::canParse(jsg::usv("this is not a parseable URL")));
+    KJ_ASSERT(!URL::canParse(jsg::usv("foo"), jsg::usv("base is not a URL")));
+  }
+}
 }  // namespace
 }  // namespace workerd::api::url
 

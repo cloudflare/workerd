@@ -298,6 +298,19 @@ public:
 
   UrlRecord& getRecord() KJ_LIFETIMEBOUND { return inner; }
 
+  static bool canParse(jsg::UsvString url,
+                       jsg::Optional<jsg::UsvString> base = nullptr);
+  // Standard utility that returns true if the given input can be
+  // successfully parsed as a URL. This is useful for validating
+  // URL inputs without incurring the additional cost of constructing
+  // and throwing an error. For example:
+  //
+  // const urls = [
+  //   'https://example.org/good',
+  //   'not a url'
+  // ].filter((test) => URL.canParse(test));
+  //
+
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);
     JSG_PROTOTYPE_PROPERTY(href, getHref, setHref);
@@ -313,6 +326,7 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(searchParams, getSearchParams);
     JSG_METHOD_NAMED(toJSON, getHref);
     JSG_METHOD_NAMED(toString, getHref);
+    JSG_STATIC_METHOD(canParse);
 
     JSG_TS_OVERRIDE(URL {
       constructor(url: string | URL, base?: string | URL);

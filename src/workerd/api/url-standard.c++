@@ -1639,6 +1639,21 @@ URL::~URL() noexcept(false) {
   }
 }
 
+bool URL::canParse(jsg::UsvString url, jsg::Optional<jsg::UsvString> maybeBase) {
+  KJ_IF_MAYBE(base, maybeBase) {
+    KJ_IF_MAYBE(parsedBase, URL::parse(*base)) {
+      KJ_IF_MAYBE(parsed, URL::parse(url, *parsedBase)) {
+        return true;
+      }
+    }
+  } else {
+    KJ_IF_MAYBE(parsed, URL::parse(url)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 jsg::UsvString URL::getOrigin() {
   KJ_SWITCH_ONEOF(inner.getOrigin()) {
     KJ_CASE_ONEOF(opaque, OpaqueOrigin) {
