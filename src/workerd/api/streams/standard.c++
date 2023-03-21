@@ -1518,7 +1518,7 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 // ======================================================================================
 
 void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
-  view.getHandle(js)->Buffer()->Detach();
+  jsg::check(view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
   view = js.v8Ref(readRequest->getView(js));
 }
 
@@ -1554,7 +1554,7 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
     // If the user code happened to have retained a reference to the view or
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
-    impl->view.getHandle(js)->Buffer()->Detach();
+    jsg::check(impl->view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
     impl->controller->maybeByobRequest = nullptr;
   }
   maybeImpl = nullptr;
