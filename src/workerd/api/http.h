@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/async-context.h>
 #include <workerd/util/abortable.h>
 #include <kj/compat/http.h>
 #include <map>
@@ -797,7 +798,7 @@ public:
     MANUAL
   };
 
-  Response(int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
+  Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
            CompatibilityFlags::Reader reader,
            kj::Array<kj::String> urlList = {},
@@ -811,7 +812,8 @@ public:
         urlList(kj::mv(urlList)),
         webSocket(kj::mv(webSocket)),
         bodyEncoding(bodyEncoding),
-        hasEnabledWebSocketCompression(reader.getWebSocketCompression()) {}
+        hasEnabledWebSocketCompression(reader.getWebSocketCompression()),
+        asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -985,8 +987,14 @@ private:
 
   bool hasEnabledWebSocketCompression = false;
 
+  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext;
+  // Capturing the AsyncContextFrame when the Response is created is necessary because there's
+  // a natural separation that occurs between the moment the Response is created and when we
+  // actually start consuming it. If a JS-backed ReadableStream is used, we end up losing the
+  // appropriate async context in the promise read loop since that is kicked off later.
+
   void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(headers, webSocket, cf);
+    visitor.visit(headers, webSocket, cf, asyncContext);
   }
 };
 
