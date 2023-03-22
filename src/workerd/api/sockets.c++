@@ -4,6 +4,7 @@
 
 #include "sockets.h"
 #include "system-streams.h"
+#include <workerd/io/worker-interface.h>
 
 
 namespace workerd::api {
@@ -64,12 +65,13 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
-  auto httpClient = kj::newHttpClient(*client);
+  auto httpClient = asHttpClient(kj::mv(client));
   kj::HttpConnectSettings httpConnectSettings = { .useTls = false };
   KJ_IF_MAYBE(opts, options) {
     httpConnectSettings.useTls = opts->useSecureTransport;
   }
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
+  request.connection = request.connection.attach(kj::mv(httpClient));
   auto connDisconnPromise = request.connection->whenWriteDisconnected();
 
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
