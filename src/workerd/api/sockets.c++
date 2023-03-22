@@ -194,6 +194,8 @@ void Socket::handleProxyStatus(
       auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
         kj::str(JSG_EXCEPTION(Error) ": proxy request failed"));
       resolveFulfiller(js, exc);
+      readable->getController().cancel(js, nullptr).markAsHandled();
+      writable->getController().abort(js, nullptr).markAsHandled();
     }
   });
   result.markAsHandled();
