@@ -41,3 +41,16 @@ build:fastdbg -c fastbuild
 build:fastdbg --cxxopt='-gline-tables-only' --host_cxxopt='-gline-tables-only'
 build:fastdbg --linkopt='-gline-tables-only' --host_linkopt='-gline-tables-only'
 build:fastdbg --strip=never
+
+# Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
+# Need to disable debug-assertions for fastdbg, should be off automatically for opt
+build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n
+
+build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1
+
+# TODO(later): -C codegen-units=1 improves code size and quality, should be enabled in a future
+# release configuration even if lto is off. Similarly, adding -C lto=thin would improve binary size
+# a lot (~2.2MB on Linux) – disable it for now due to compile errors and wrong code generation when
+# bazel and Rust use different LLVM versions. -C opt-level=s provides a comparatively small size
+# improvement, ~35k or ~75k with LTO.
+build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1
