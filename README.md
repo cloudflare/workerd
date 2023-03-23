@@ -132,7 +132,9 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   serviceWorkerScript = embed "hello.js",
-  compatibilityDate = "2022-09-16",
+  compatibilityDate = "2023-02-28",
+  # Learn more about compatibility dates at:
+  # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );
 ```
 

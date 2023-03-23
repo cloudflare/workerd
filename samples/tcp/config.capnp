@@ -26,7 +26,7 @@ const gopherWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "gopher.js")
   ],
-  compatibilityDate = "2022-09-26",
+  compatibilityDate = "2023-02-28",
   compatibilityFlags = ["tcp_sockets_support"],
   # In order to access our configured proxy we need to specify it as a binding. This will allow
   # it to be accessible via `env.proxy` in the JS script.

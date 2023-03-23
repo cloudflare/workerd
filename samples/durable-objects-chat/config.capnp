@@ -18,7 +18,7 @@ const chatWorker :Workerd.Worker = (
   # All Workers must declare a compatibility date, which ensures that if `workerd` is updated to
   # a newer version with breaking changes, it will emulate the API as it existed on this date, so
   # the Worker won't break.
-  compatibilityDate = "2022-09-16",
+  compatibilityDate = "2023-02-28",
 
   # This worker is modules-based.
   modules = [
