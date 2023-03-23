@@ -661,10 +661,18 @@ public:
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
+  class Loopback {
+    // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
+    // onto this for longer than a Worker::Actor is alive.
+  public:
+    virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
+    virtual kj::Own<Loopback> addRef() = 0;
+  };
+
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
         bool hasTransient, MakeActorCacheFunc makeActorCache,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-        TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
+        kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
 
@@ -701,8 +709,10 @@ public:
 
   const Id& getId();
   Id cloneId();
+  static Id cloneId(Id& id);
   kj::Maybe<jsg::Value> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
+  kj::Own<Loopback> getLoopback();
 
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for

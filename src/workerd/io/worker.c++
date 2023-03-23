@@ -2622,6 +2622,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   kj::Maybe<kj::Promise<void>> metricsFlushLoopTask;
   // Task which periodically flushes metrics. Initialized after `ioContext` is initialized.
 
+  kj::Own<Loopback> loopback;
+  // Allows sending requests back into this actor, recreating it as necessary. Safe to hold longer
+  // than the Worker::Actor is alive.
+
   TimerChannel& timerChannel;
 
   kj::ForkedPromise<void> shutdownPromise;
@@ -2646,13 +2650,14 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, MakeActorCacheFunc makeActorCache,
-       MakeStorageFunc makeStorage, TimerChannel& timerChannel,
-       kj::Own<ActorObserver> metricsParam,
+       MakeStorageFunc makeStorage, kj::Own<Loopback> loopback,
+       TimerChannel& timerChannel, kj::Own<ActorObserver> metricsParam,
        kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
         hooks(timerChannel, *metrics),
         inputGate(hooks), outputGate(hooks),
+        loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
         shutdownPromise(paf.promise.fork()), shutdownFulfiller(kj::mv(paf.fulfiller)),
         deletedAlarmTasks(*this) {
@@ -2692,13 +2697,12 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
 Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Actor::Id actorId,
     bool hasTransient, MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-    TimerChannel& timerChannel,
-    kj::Own<ActorObserver> metrics)
+    kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics)
     : worker(kj::atomicAddRef(worker)), tracker(tracker.map([](RequestTracker& tracker){
       return tracker.addRef();
     })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
-                        kj::mv(makeStorage), timerChannel, kj::mv(metrics));
+                        kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics));
 
   KJ_IF_MAYBE(c, className) {
     KJ_IF_MAYBE(cls, lock.getWorker().impl->actorClasses.find(*c)) {
@@ -2825,8 +2829,8 @@ const Worker::Actor::Id& Worker::Actor::getId() {
   return impl->actorId;
 }
 
-Worker::Actor::Id Worker::Actor::cloneId() {
-  KJ_SWITCH_ONEOF(impl->actorId) {
+Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {
+  KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return kj::str(coloLocalId);
     }
@@ -2837,6 +2841,10 @@ Worker::Actor::Id Worker::Actor::cloneId() {
   KJ_UNREACHABLE;
 }
 
+Worker::Actor::Id Worker::Actor::cloneId() {
+  return cloneId(impl->actorId);
+}
+
 kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
   return impl->transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
@@ -2844,6 +2852,10 @@ kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
   return impl->actorCache;
+}
+
+kj::Own<Worker::Actor::Loopback> Worker::Actor::getLoopback() {
+  return impl->loopback->addRef();
 }
 
 kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
