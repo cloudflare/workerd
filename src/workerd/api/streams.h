@@ -37,6 +37,7 @@ namespace workerd::api {
   api::TransformStream,                                     \
   api::FixedLengthStream,                                   \
   api::IdentityTransformStream,                             \
+  api::IdentityTransformStream::QueuingStrategy,            \
   api::ReadableStream::ValuesOptions,                       \
   api::ReadableStream::ReadableStreamAsyncIterator,         \
   api::ReadableStream::ReadableStreamAsyncIterator::Next,   \

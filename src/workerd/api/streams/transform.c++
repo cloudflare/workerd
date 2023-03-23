@@ -122,20 +122,28 @@ jsg::Ref<TransformStream> TransformStream::constructor(
   return IdentityTransformStream::constructor(js);
 }
 
-jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(jsg::Lock& js) {
+jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
+    jsg::Lock& js,
+    jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
   auto readableSide = kj::refcounted<IdentityTransformStreamImpl>();
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
 
+  kj::Maybe<uint64_t> maybeHighWaterMark = nullptr;
+  KJ_IF_MAYBE(queuingStrategy, maybeQueuingStrategy) {
+    maybeHighWaterMark = queuingStrategy->highWaterMark;
+  }
+
   return jsg::alloc<IdentityTransformStream>(
       jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
 }
 
 jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
     jsg::Lock& js,
-    uint64_t expectedLength) {
+    uint64_t expectedLength,
+    jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
   constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
 
   JSG_REQUIRE(expectedLength <= MAX_SAFE_INTEGER, TypeError,
@@ -146,9 +154,17 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
 
   auto& ioContext = IoContext::current();
 
+  kj::Maybe<uint64_t> maybeHighWaterMark = nullptr;
+  // For a FixedLengthStream we do not want a highWaterMark higher than the expectedLength.
+  KJ_IF_MAYBE(queuingStrategy, maybeQueuingStrategy) {
+    maybeHighWaterMark = queuingStrategy->highWaterMark.map([&](uint64_t highWaterMark) {
+      return kj::min(expectedLength, highWaterMark);
+    });
+  }
+
   return jsg::alloc<FixedLengthStream>(
       jsg::alloc<ReadableStream>(ioContext, kj::mv(readableSide)),
-      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
+      jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide), maybeHighWaterMark));
 }
 
 }  // namespace workerd::api
