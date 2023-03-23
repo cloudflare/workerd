@@ -22,20 +22,29 @@ struct SocketOptions {
   JSG_STRUCT(useSecureTransport, allowHalfOpen);
 };
 
+struct TlsOptions {
+  jsg::Optional<kj::String> expectedServerHostname;
+  JSG_STRUCT(expectedServerHostname);
+};
+
 class Socket: public jsg::Object {
 public:
   Socket(jsg::Lock& js, jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
-      kj::Own<jsg::PromiseResolverPair<void>> close, kj::Promise<void> connDisconnPromise,
-      jsg::Optional<SocketOptions> options)
+      jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
+      jsg::Optional<SocketOptions> options, kj::TlsStarterCallback tlsStarter, bool isSecureSocket,
+      kj::String domain)
       : readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
-        closedPromise(kj::mv(closeFulfiller->promise)),
+        closedPromise(kj::mv(closeFulfiller.promise)),
         // Listen for abrupt disconnects and resolve the `closed` promise when they occur.
         writeDisconnectedPromise(IoContext::current().awaitIo(kj::mv(connDisconnPromise))
             .then(js, [this](jsg::Lock& js) {
-              closeFulfiller->resolver.resolve();
+              closeFulfiller.resolver.resolve();
             })),
-        options(kj::mv(options)) { };
+        options(kj::mv(options)),
+        tlsStarter(kj::mv(tlsStarter)),
+        isSecureSocket(isSecureSocket),
+        domain(kj::mv(domain)) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -45,6 +54,11 @@ public:
 
   jsg::Promise<void> close(jsg::Lock& js);
   // Closes the socket connection.
+
+  jsg::Ref<Socket> startTls(jsg::Lock& js, jsg::Optional<TlsOptions> options);
+  // Flushes write buffers then performs a TLS handshake on the current Socket connection.
+  // The current `Socket` instance is closed and its readable/writable instances are also closed.
+  // All new operations should be performed on the new `Socket` instance.
 
   void handleProxyStatus(
       jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
@@ -58,25 +72,33 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
     JSG_METHOD(close);
+    JSG_METHOD(startTls);
   }
 
 private:
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
-  kj::Own<jsg::PromiseResolverPair<void>> closeFulfiller;
+  jsg::PromiseResolverPair<void> closeFulfiller;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Promise<void> writeDisconnectedPromise;
   jsg::Optional<SocketOptions> options;
+  kj::TlsStarterCallback tlsStarter;
+  // Callback used to upgrade the existing connection to a secure one.
+  bool isSecureSocket;
+  // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
+  // `startTls`.
+  kj::String domain;
+  // The domain/ip this socket is connected to. Used for startTls.
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_MAYBE(err, maybeErr) {
-      closeFulfiller->resolver.reject(js, kj::cp(*err));
+      closeFulfiller.resolver.reject(js, kj::cp(*err));
     } else {
-      closeFulfiller->resolver.resolve();
+      closeFulfiller.resolver.resolve();
     }
   };
 
@@ -103,7 +125,8 @@ jsg::Ref<Socket> connectImpl(
 #define EW_SOCKETS_ISOLATE_TYPES     \
   api::Socket,                       \
   api::SocketOptions,                \
-  api::SocketAddress
+  api::SocketAddress,                \
+  api::TlsOptions
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
