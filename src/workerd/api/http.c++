@@ -1154,9 +1154,9 @@ jsg::Ref<Response> Response::constructor(
     }
   }
 
-  return jsg::alloc<Response>(statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)), kj::mv(headers),
-                              kj::mv(cf), kj::mv(body), flags, nullptr, kj::mv(webSocket),
-                              bodyEncoding);
+  return jsg::alloc<Response>(js, statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)),
+                              kj::mv(headers), kj::mv(cf), kj::mv(body), flags, nullptr,
+                              kj::mv(webSocket), bodyEncoding);
 }
 
 jsg::Ref<Response> Response::redirect(
@@ -1198,7 +1198,8 @@ jsg::Ref<Response> Response::redirect(
 
   auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
 
-  return jsg::alloc<Response>(statusCode, kj::str(statusText), kj::mv(headers), nullptr, nullptr, flags);
+  return jsg::alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(headers), nullptr,
+                              nullptr, flags);
 }
 
 jsg::Ref<Response> Response::json_(
@@ -1277,7 +1278,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader fla
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
   return jsg::alloc<Response>(
-      statusCode, kj::str(statusText), kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone),
+      js, statusCode, kj::str(statusText), kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone),
       flags, kj::mv(urlListClone));
 }
 
@@ -1345,6 +1346,9 @@ kj::Promise<DeferredProxy<void>> Response::send(
     auto stream = newSystemStream(
         outer.send(statusCode, statusText, outHeaders, maybeLength),
         encoding);
+    // We need to enter the AsyncContextFrame that was captured when the
+    // Response was created before starting the loop.
+    jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return (*jsBody)->pumpTo(js, kj::mv(stream), true);
   } else {
     outer.send(statusCode, statusText, outHeaders, uint64_t(0));
@@ -1804,7 +1808,7 @@ jsg::Ref<Response> makeHttpResponse(
 
   // TODO(someday): Fill response CF blob from somewhere?
   return jsg::alloc<Response>(
-        statusCode, kj::str(statusText), kj::mv(responseHeaders),
+        js, statusCode, kj::str(statusText), kj::mv(responseHeaders),
         nullptr, kj::mv(responseBody), flags, kj::mv(urlList), kj::mv(webSocket));
 }
 
