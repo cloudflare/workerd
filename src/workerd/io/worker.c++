@@ -2572,10 +2572,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   // If the actor is backed by a class, this field tracks the instance through its stages. The
   // instance is constructed as part of the first request to be delivered.
 
-  class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks {
+  class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
   public:
-    HooksImpl(TimerChannel& timerChannel, ActorObserver& metrics)
-        : timerChannel(timerChannel), metrics(metrics) {}
+    HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
+        : loopback(kj::mv(loopback)), timerChannel(timerChannel), metrics(metrics) {}
 
     void inputGateLocked() override { metrics.inputGateLocked(); }
     void inputGateReleased() override { metrics.inputGateReleased(); }
@@ -2598,9 +2598,15 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
     void outputGateWaiterRemoved() override { metrics.outputGateWaiterRemoved(); }
     // Implements OutputGate::Hooks.
 
+    void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) override;
+    // Implements ActorCache::Hooks
+
   private:
-    TimerChannel& timerChannel;    // only for afterLimitTimeout()
+    kj::Own<Loopback> loopback;    // only for updateAlarmInMemory()
+    TimerChannel& timerChannel;    // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+
+    kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
   };
 
   HooksImpl hooks;
@@ -2655,7 +2661,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
        kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
-        hooks(timerChannel, *metrics),
+        hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks), outputGate(hooks),
         loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
@@ -2668,7 +2674,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
       transient.emplace(isolate, v8::Object::New(isolate));
     }
 
-    actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate);
+    actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
   }
 
   void taskFailed(kj::Exception&& e) override {
@@ -2894,31 +2900,34 @@ void Worker::Actor::assertCanSetAlarm() {
   KJ_UNREACHABLE;
 }
 
-kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime) {
+void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
+  if (newTime == nullptr) {
+    maybeAlarmPreviewTask = nullptr;
+    return;
+  }
+
+  auto scheduledTime = KJ_ASSERT_NONNULL(newTime);
+
   auto retry = kj::coCapture([this, originalTime = scheduledTime]()
       -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
     for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
-      auto result = co_await impl->timerChannel.atTime(scheduledTime)
+      auto result = co_await timerChannel.atTime(scheduledTime)
           .then([this, originalTime]() {
-        return impl->loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
+        return loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
       });
 
       if (result.outcome != EventOutcome::OK && result.retry) {
         auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-        auto& timeContext = this->impl->timerChannel;
-        scheduledTime = timeContext.now() + delay;
+        scheduledTime = timerChannel.now() + delay;
       } else {
         break;
       }
     }
   });
 
-  auto task = retry().fork();
-
-  IoContext::current().addWaitUntil(task.addBranch());
-  return task.addBranch();
+  maybeAlarmPreviewTask = retry();
 }
 
 kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(

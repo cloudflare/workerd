@@ -244,11 +244,21 @@ public:
   class SharedLru;
   // Shared LRU for a whole isolate.
 
+  class Hooks {
+    // Hooks that can be used to customize ActorCache behavior
+  public:
+    virtual void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) {};
+    // Called when the alarm time is dirty when neverFlush is set and ensureFlushScheduled is called.
+
+    static Hooks DEFAULT;
+  };
+
   static constexpr auto SHUTDOWN_ERROR_MESSAGE =
       "broken.ignored; jsg.Error: "
       "Durable Object storage is no longer accessible."_kj;
 
-  ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate);
+  ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate,
+      Hooks& hooks = Hooks::DEFAULT);
   ~ActorCache() noexcept(false);
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return nullptr; }
@@ -475,6 +485,7 @@ private:
   rpc::ActorStorage::Stage::Client storage;
   const SharedLru& lru;
   OutputGate& gate;
+  Hooks& hooks;
 
   class DirtyList {
     // Wrapper around kj::List that keeps track of the total size of all elements.
@@ -532,7 +543,6 @@ private:
   };
 
   kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime = UnknownAlarmTime{};
-  kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
 
   struct ReadCompletionChain: public kj::Refcounted {
     kj::Maybe<kj::Own<ReadCompletionChain>> next;

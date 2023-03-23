@@ -646,7 +646,7 @@ class Worker::Actor final: public kj::Refcounted {
 
 public:
   using MakeActorCacheFunc = kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(
-      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate)>;
+      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks)>;
   // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
   // can be used to customize the storage implementation. This will be called synchronously in
   // the constructor.
