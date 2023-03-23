@@ -104,6 +104,22 @@ T unwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
 }
 
 template <typename T>
+T& unwrapOpaqueRef(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
+  // Unwraps a handle created using `wrapOpaque()`, without consuming the value.  Throws if the
+  // handle is the wrong type or has already been consumed previously.
+
+  static_assert(!kj::isReference<T>());
+  static_assert(!isV8Ref<T>(), "no need to opaque-wrap regular JavaScript values");
+  static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
+
+  Wrappable& wrappable = KJ_ASSERT_NONNULL(Wrappable::tryUnwrapOpaque(isolate, handle));
+  OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
+  KJ_ASSERT(holder != nullptr);
+  KJ_ASSERT(!holder->movedAway);
+  return holder->value;
+}
+
+template <typename T>
 void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   // Destroys the value contained by an opaque handle, without returning it. This is equivalent
   // to calling unwrapOpaque<T>() and dropping the result, except that if the handle is the wrong

@@ -161,6 +161,8 @@ kj::Promise<void> WorkerEntrypoint::request(
        &metrics = incomingRequest->getMetrics(),
        &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
       (Worker::Lock& lock) mutable {
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
     return lock.getGlobalScope().request(
         method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
@@ -354,6 +356,8 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       [scheduledTime, cron, entrypointName=entrypointName, &context,
        &metrics = incomingRequest->getMetrics()]
       (Worker::Lock& lock) mutable {
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(entrypointName, context.getActor()));
   }));
@@ -400,6 +404,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
           [scheduledTime, entrypointName=entrypointName, &context,
            &metrics = incomingRequest->getMetrics()]
           (Worker::Lock& lock){
+        jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
         return lock.getGlobalScope().runAlarm(scheduledTime, lock,
             lock.getExportedHandler(entrypointName, context.getActor()));
       }).attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
@@ -425,6 +431,8 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   context.addWaitUntil(context.run(
       [entrypointName=entrypointName, &context, &metrics = incomingRequest->getMetrics()]
       (Worker::Lock& lock) mutable -> kj::Promise<void> {
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
     return context.awaitJs(lock.getGlobalScope()
         .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
   }));

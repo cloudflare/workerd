@@ -810,8 +810,14 @@ public:
   kj::Own<CacheClient> getCacheClient();
   // Get an HttpClient to use for Cache API subrequests.
 
+  jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  // Returns an object that ensures an async JS operation started in the current scope captures the
+  // current request's trace span.
+
   SpanBuilder makeTraceSpan(kj::StringPtr operationName);
-  // Make a new trace span, if tracing is active. Returns null if tracing is not active.
+  // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
+  // If called while the JS lock is held, uses the trace information from the current async
+  // context, if available.
 
   jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> makeCachePutStream(
       jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream);
@@ -961,6 +967,8 @@ private:
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
 
+  kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+
   void setTimeoutImpl(TimeoutId timeoutId, bool repeat, jsg::V8Ref<v8::Function> function,
     double msDelay, kj::Array<jsg::Value> args);
 
@@ -971,7 +979,7 @@ private:
   // The timeout manager needs to live below `deleteQueue` because the promises may refer to
   // objects in the queue.
 
-  // ATTENTION: `tasks` and `timeoutManagerOrCanceler` MUST be destructed before any other member.
+  // ATTENTION: `tasks` and `timeoutManager` MUST be destructed before any other member.
   // If any other member is destructed after (is declared later in the class than) these two
   // members, then there is a possibility that callbacks will attempt to use a partially or fully
   // destructed IoContext object. For the same reason, any promises stored outside of the
