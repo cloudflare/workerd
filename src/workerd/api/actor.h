@@ -115,6 +115,11 @@ public:
     // Restricts the new unique ID to a set of colos within a jurisdiction.
 
     JSG_STRUCT(jurisdiction);
+
+    JSG_STRUCT_TS_DEFINE(type DurableObjectJurisdiction = "eu" | "fedramp");
+    JSG_STRUCT_TS_OVERRIDE({
+      jurisdiction?: DurableObjectJurisdiction;
+    });
   };
 
   jsg::Ref<DurableObjectId> newUniqueId(jsg::Optional<NewUniqueIdOptions> options);
@@ -135,6 +140,11 @@ public:
     jsg::Optional<kj::String> locationHint;
 
     JSG_STRUCT(locationHint);
+
+    JSG_STRUCT_TS_DEFINE(type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me");
+    JSG_STRUCT_TS_OVERRIDE({
+      locationHint?: DurableObjectLocationHint;
+    });
   };
 
   jsg::Ref<DurableObject> get(
@@ -162,7 +172,11 @@ public:
       JSG_METHOD(getExisting);
     }
     JSG_METHOD(jurisdiction);
+
     JSG_TS_ROOT();
+    JSG_TS_OVERRIDE({
+      jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace;
+    });
   }
 
 private:
