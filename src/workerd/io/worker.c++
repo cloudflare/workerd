@@ -2895,16 +2895,14 @@ void Worker::Actor::assertCanSetAlarm() {
 }
 
 kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime) {
-  auto& context = IoContext::current();
-
-  auto retry = kj::coCapture([this, originalTime = scheduledTime](auto runAlarmFunc)
+  auto retry = kj::coCapture([this, originalTime = scheduledTime]()
       -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
     for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
       auto result = co_await impl->timerChannel.atTime(scheduledTime)
-          .then([originalTime, &runAlarmFunc]() {
-        return runAlarmFunc(originalTime);
+          .then([this, originalTime]() {
+        return impl->loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
       });
 
       if (result.outcome != EventOutcome::OK && result.retry) {
@@ -2917,57 +2915,7 @@ kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime)
     }
   });
 
-  auto runAlarm = [this, &context](kj::Date scheduledTime)
-      -> kj::Promise<WorkerInterface::AlarmResult> {
-    auto& persistent = *KJ_ASSERT_NONNULL(impl->actorCache);
-
-    auto maybeDeferredDelete = persistent.armAlarmHandler(scheduledTime);
-
-    KJ_IF_MAYBE(deferredDelete, maybeDeferredDelete) {
-      // The alarm may expect to be treated as a new request as far as receiving a higher cpu limit
-      // so we should top it up.
-      context.getLimitEnforcer().topUpActor();
-
-      return dedupAlarm(scheduledTime, [this, &context]() {
-        return context.run([this](Worker::Lock& lock) {
-          auto& handler = KJ_ASSERT_NONNULL(getHandler());
-
-          // We skip logging a nice warning for the null case here
-          // since the time is kept in memory, so we know that setAlarm()
-          // verified the existence of the alarm handler and would have thrown
-          // if it was not present.
-          auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
-
-          return alarm(lock)
-              .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
-            return WorkerInterface::AlarmResult {
-              .retry = false,
-              .outcome = EventOutcome::OK,
-            };
-          }, [this](kj::Exception&& e) {
-            auto& persistent = *KJ_ASSERT_NONNULL(impl->actorCache);
-            persistent.cancelDeferredAlarmDeletion();
-
-            LOG_EXCEPTION_IF_INTERNAL("alarmRetry", e);
-
-            return WorkerInterface::AlarmResult {
-              .retry = true,
-              // TODO(soon): We should use the correct outcome here once we start reporting
-              // alarm runs in preview to wrangler tail.
-              .outcome = EventOutcome::EXCEPTION,
-            };
-          });
-        });
-      }).attach(kj::mv(*deferredDelete));
-    } else {
-      return WorkerInterface::AlarmResult {
-        .retry = false,
-        .outcome = EventOutcome::CANCELED,
-      };
-    }
-  };
-
-  auto task = retry(kj::mv(runAlarm)).fork();
+  auto task = retry().fork();
 
   IoContext::current().addWaitUntil(task.addBranch());
   return task.addBranch();

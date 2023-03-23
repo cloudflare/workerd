@@ -666,6 +666,10 @@ public:
     // onto this for longer than a Worker::Actor is alive.
   public:
     virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
+    // Send a request to this actor, potentially re-creating it if it is not currently active.
+    // The returned kj::Own<WorkerInterface> may be held longer than Loopback, and is assumed
+    // to keep the Worker::Actor alive as well.
+
     virtual kj::Own<Loopback> addRef() = 0;
   };
 
