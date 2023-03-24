@@ -18,303 +18,149 @@ struct ByteReadable;
 KJ_DECLARE_NON_POLYMORPHIC(ValueReadable);
 KJ_DECLARE_NON_POLYMORPHIC(ByteReadable);
 
-class ReadableStreamJsController: public ReadableStreamController {
-  // The ReadableStreamJsController provides the implementation of custom
-  // ReadableStreams backed by a user-code provided Underlying Source. The implementation
-  // is fairly complicated and defined entirely by the streams specification.
-  //
-  // Another important thing to understand is that there are two types of JavaScript
-  // backed ReadableStreams: value-oriented, and byte-oriented.
-  //
-  // When user code uses the `new ReadableStream(underlyingSource)` constructor, the
-  // underlyingSource argument may have a `type` property, the value of which is either
-  // `undefined`, the empty string, or the string value `'bytes'`. If the underlyingSource
-  // argument is not given, the default value of `type` is `undefined`. If `type` is
-  // `undefined` or the empty string, the ReadableStream is value-oriented. If `type` is
-  // exactly equal to `'bytes'`, the ReadableStream is byte-oriented.
-  //
-  // For value-oriented streams, any JavaScript value can be pushed through the stream,
-  // and the stream will only support use of the ReadableStreamDefaultReader to consume
-  // the stream data.
-  //
-  // For byte-oriented streams, only byte data (as provided by `ArrayBufferView`s) can
-  // be pushed through the stream. All byte-oriented streams support using both
-  // ReadableStreamDefaultReader and ReadableStreamBYOBReader to consume the stream
-  // data.
-  //
-  // When the ReadableStreamJsController::setup() method is called the type
-  // of stream is determined, and the controller will create an instance of either
-  // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
-  // These are the objects that are actually passed on to the user-code's Underlying Source
-  // implementation.
-public:
-  using ReadableLockImpl = jscontroller::ReadableLockImpl<ReadableStreamJsController>;
-
-  KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
-
-  explicit ReadableStreamJsController();
-  explicit ReadableStreamJsController(StreamStates::Closed closed);
-  explicit ReadableStreamJsController(StreamStates::Errored errored);
-  explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
-  explicit ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer);
-  explicit ReadableStreamJsController(kj::Own<ValueReadable> consumer);
-  explicit ReadableStreamJsController(kj::Own<ByteReadable> consumer);
-
-  jsg::Ref<ReadableStream> addRef() override;
-
-  void setup(
-      jsg::Lock& js,
-      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
-
-  jsg::Promise<void> cancel(
-      jsg::Lock& js,
-      jsg::Optional<v8::Local<v8::Value>> reason) override;
-  // Signals that this ReadableStream is no longer interested in the underlying
-  // data source. Whether this cancels the underlying data source also depends
-  // on whether or not there are other ReadableStreams still attached to it.
-  // This operation is terminal. Once called, even while the returned Promise
-  // is still pending, the ReadableStream will be no longer usable and any
-  // data still in the queue will be dropped. Pending read requests will be
-  // rejected if a reason is given, or resolved with no data otherwise.
-
-  void doClose();
-
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
-
-  bool canCloseOrEnqueue();
-  bool hasBackpressure();
-
-  bool isByteOriented() const override;
-
-  bool isDisturbed() override;
-
-  bool isClosedOrErrored() const override;
-
-  bool isLockedToReader() const override;
-
-  bool lockReader(jsg::Lock& js, Reader& reader) override;
-
-  kj::Maybe<v8::Local<v8::Value>> isErrored(jsg::Lock& js);
-
-  kj::Maybe<int> getDesiredSize();
-
-  jsg::Promise<void> pipeTo(
-      jsg::Lock& js,
-      WritableStreamController& destination,
-      PipeToOptions options) override;
-
-  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js, kj::Own<WritableStreamSink>, bool end)
-     override;
-
-  kj::Maybe<jsg::Promise<ReadResult>> read(
-      jsg::Lock& js,
-      kj::Maybe<ByobOptions> byobOptions) override;
-
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
-  // See the comment for releaseReader in common.h for details on the use of maybeJs
-
-  void setOwnerRef(ReadableStream& stream) override;
-
-  Tee tee(jsg::Lock& js) override;
-
-  kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
-
-  void visitForGc(jsg::GcVisitor& visitor) override;
-
-  kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
-
-  jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
-  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
-
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
-
-  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
-
-private:
-  bool hasPendingReadRequests();
-
-  kj::Maybe<IoContext&> ioContext;
-  // If the stream was created within the scope of a request, we want to treat it as I/O
-  // and make sure it is not advanced from the scope of a different request.
-  kj::Maybe<ReadableStream&> owner;
-
-  kj::OneOf<StreamStates::Closed,
-            StreamStates::Errored,
-            kj::Own<ValueReadable>,
-            kj::Own<ByteReadable>> state = StreamStates::Closed();
-
-  ReadableLockImpl lock;
-  // The lock state is separate because a closed or errored stream can still be locked.
-
-  bool disturbed = false;
-
-  friend ReadableLockImpl;
-  friend ReadableLockImpl::PipeLocked;
-};
-
-class WritableStreamJsController: public WritableStreamController,
-                                  public jscontroller::WriterOwner {
-  // The WritableStreamJsController provides the implementation of custom
-  // WritableStream's backed by a user-code provided Underlying Sink. The implementation
-  // is fairly complicated and defined entirely by the streams specification.
-  //
-  // Importantly, the controller is designed to operate entirely within the JavaScript
-  // isolate lock. It is possible to call removeSink() to acquire a WritableStreamSink
-  // implementation that delegates to the WritableStreamDefaultController.
-public:
-  using WritableLockImpl = jscontroller::WritableLockImpl<WritableStreamJsController>;
-
-  using Controller = jsg::Ref<WritableStreamDefaultController>;
-
-  explicit WritableStreamJsController();
-
-  explicit WritableStreamJsController(StreamStates::Closed closed);
-
-  explicit WritableStreamJsController(StreamStates::Errored errored);
-
-  KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
-
-  ~WritableStreamJsController() noexcept(false) override {
-    weakRef->reset();
-    KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
-      (*controller)->setOwner(nullptr);
-    }
-  }
-
-  jsg::Promise<void> abort(jsg::Lock& js,
-                            jsg::Optional<v8::Local<v8::Value>> reason) override;
-
-  jsg::Ref<WritableStream> addRef() override;
-
-  jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
-
-  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override {
-    KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
-  }
-
-  void doClose() override;
-
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override;
-
-  kj::Maybe<int> getDesiredSize() override;
-
-  kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
-  kj::Maybe<v8::Local<v8::Value>> isErroredOrErroring(jsg::Lock& js);
-
-  bool isLocked() const override;
-
-  bool isLockedToWriter() const override;
-
-  bool isStarted();
-
-  inline bool isWritable() const { return state.is<Controller>(); }
-
-  bool lockWriter(jsg::Lock& js, Writer& writer) override;
-
-  void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason) override;
-
-  void maybeResolveReadyPromise() override;
-
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
-  // See the comment for releaseWriter in common.h for details on the use of maybeJs
-
-  kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
-
-  void setOwnerRef(WritableStream& stream) override;
-
-  void setup(
-      jsg::Lock& js,
-      jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
-
-  kj::Maybe<jsg::Promise<void>> tryPipeFrom(
-      jsg::Lock& js,
-      jsg::Ref<ReadableStream> source,
-      PipeToOptions options) override;
-
-  void updateBackpressure(jsg::Lock& js, bool backpressure) override;
-
-  jsg::Promise<void> write(jsg::Lock& js,
-                            jsg::Optional<v8::Local<v8::Value>> value) override;
-
-  void visitForGc(jsg::GcVisitor& visitor) override;
-
-  kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
-    return kj::addRef(*weakRef);
-  }
-
-private:
-  jsg::Promise<void> pipeLoop(jsg::Lock& js);
-
-  kj::Maybe<IoContext&> ioContext;
-  kj::Maybe<WritableStream&> owner;
-  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
-  WritableLockImpl lock;
-  kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
-  kj::Own<WeakRef<WritableStreamJsController>> weakRef;
-
-  friend WritableLockImpl;
-};
-
-kj::Own<ReadableStreamController> newReadableStreamJsController() {
-  return kj::heap<ReadableStreamJsController>();
-}
-
-kj::Own<WritableStreamController> newWritableStreamJsController() {
-  return kj::heap<WritableStreamJsController>();
-}
+// =======================================================================================
+// The Unlocked, Locked, ReaderLocked, and WriterLocked structs
+// are used to track the current lock status of JavaScript-backed streams.
+// All readable and writable streams begin in the Unlocked state. When a
+// reader or writer are attached, the streams will transition into the
+// ReaderLocked or WriterLocked state. When the reader is released, those
+// will transition back to Unlocked.
+//
+// When a readable is piped to a writable, both will enter the PipeLocked state.
+// (PipeLocked is defined within the ReadableLockImpl and WritableLockImpl classes
+// below) When the pipe completes, both will transition back to Unlocked.
+//
+// When a ReadableStreamJsController is tee()'d, it will enter the locked state.
 
 namespace {
-auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
-    return promise.then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                            ioContext.addFunctor(kj::mv(onFailure)));
-  } else {
-    return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
-  }
-}
-}  // namespace
 
-namespace jscontroller {
-jsg::Promise<void> maybeRunAlgorithm(
-    jsg::Lock& js,
-    auto& maybeAlgorithm,
-    auto&& onSuccess,
-    auto&& onFailure,
-    auto&&...args) {
-  // The algorithm is a JavaScript function mapped through jsg::Function.
-  // It is expected to return a Promise mapped via jsg::Promise. If the
-  // function returns synchronously, the jsg::Promise wrapper ensures
-  // that it is properly mapped to a jsg::Promise, but if the Promise
-  // throws synchronously, we have to convert that synchronous throw
-  // into a proper rejected jsg::Promise.
+template <typename Controller>
+class ReadableLockImpl {
+  // A utility class used by ReadableStreamJsController
+  // for implementing the reader lock in a consistent way (without duplicating any code).
+public:
+  using PipeController = ReadableStreamController::PipeController;
+  using Reader = ReadableStreamController::Reader;
 
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
-    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
-      return js.tryCatch([&] {
-        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
-      }, [&](jsg::Value&& exception) {
-        return js.rejectedPromise<void>(kj::mv(exception));
-      }).then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                  ioContext.addFunctor(kj::mv(onFailure)));
+  bool isLockedToReader() const { return !state.template is<Unlocked>(); }
+
+  bool lockReader(jsg::Lock& js, Controller& self, Reader& reader);
+
+  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
+  // See the comment for releaseReader in common.h for details on the use of maybeJs
+
+  bool lock();
+
+  void onClose();
+  void onError(jsg::Lock& js, v8::Local<v8::Value> reason);
+
+  kj::Maybe<PipeController&> tryPipeLock(
+        Controller& self,
+        jsg::Ref<WritableStream> destination);
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+private:
+  class PipeLocked: public PipeController {
+  public:
+    explicit PipeLocked(Controller& inner, jsg::Ref<WritableStream> ref)
+        : inner(inner), writableStreamRef(kj::mv(ref)) {}
+
+    bool isClosed() override { return inner.state.template is<StreamStates::Closed>(); }
+
+    kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) override {
+      KJ_IF_MAYBE(errored, inner.state.template tryGet<StreamStates::Errored>()) {
+        return errored->getHandle(js);
+      }
+      return nullptr;
     }
-  } else {
-    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
-      return js.tryCatch([&] {
-        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
-      }, [&](jsg::Value&& exception) {
-        return js.rejectedPromise<void>(kj::mv(exception));
-      }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+
+    void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) override {
+      // Cancel here returns a Promise but we do not need to propagate it.
+      // We can safely drop it on the floor here.
+      auto promise KJ_UNUSED = inner.cancel(js, reason);
     }
+
+    void close() override {
+      inner.doClose();
+    }
+
+    void error(jsg::Lock& js, v8::Local<v8::Value> reason) override {
+      inner.doError(js, reason);
+    }
+
+    void release(jsg::Lock& js,
+                 kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) override {
+      KJ_IF_MAYBE(error, maybeError) {
+        cancel(js, *error);
+      }
+      inner.lock.state.template init<Unlocked>();
+    }
+
+    kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
+
+    jsg::Promise<ReadResult> read(jsg::Lock& js) override;
+
+    void visitForGc(jsg::GcVisitor& visitor) ;
+
+  private:
+    Controller& inner;
+    jsg::Ref<WritableStream> writableStreamRef;
+
+    friend Controller;
+  };
+
+  kj::OneOf<Locked, PipeLocked, ReaderLocked, Unlocked> state = Unlocked();
+  friend Controller;
+};
+
+template <typename Controller>
+class WritableLockImpl {
+  // A utility class used by WritableStreamJsController to implement the writer lock
+  // mechanism. Extracted for consistency with ReadableStreamJsController and to
+  // eventually allow it to be shared also with WritableStreamInternalController.
+public:
+  using Writer = WritableStreamController::Writer;
+
+  bool isLockedToWriter() const;
+
+  bool lockWriter(jsg::Lock& js, Controller& self, Writer& writer);
+
+  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
+  // See the comment for releaseWriter in common.h for details on the use of maybeJs
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+  bool pipeLock(WritableStream& owner,
+                jsg::Ref<ReadableStream> source,
+                PipeToOptions& options);
+  void releasePipeLock();
+
+private:
+  struct PipeLocked {
+    ReadableStreamController::PipeController& source;
+    jsg::Ref<ReadableStream> readableStreamRef;
+    bool preventAbort;
+    bool preventCancel;
+    bool preventClose;
+    bool pipeThrough;
+    kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
+
+    kj::Maybe<jsg::Promise<void>> checkSignal(
+        jsg::Lock& js,
+        Controller& self);
+  };
+  kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
+
+  inline kj::Maybe<PipeLocked&> tryGetPipe() {
+    KJ_IF_MAYBE(locked, state.template tryGet<PipeLocked>()) {
+      return *locked;
+    }
+    return nullptr;
   }
 
-  // If the algorithm does not exist, we just handle it as a success and move on.
-  onSuccess(js);
-  return js.resolvedPromise();
-}
+  friend Controller;
+};
 
 // ======================================================================================
 
@@ -591,6 +437,306 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
     }
   }
   return nullptr;
+}
+
+}  // namespace
+
+class ReadableStreamJsController: public ReadableStreamController {
+  // The ReadableStreamJsController provides the implementation of custom
+  // ReadableStreams backed by a user-code provided Underlying Source. The implementation
+  // is fairly complicated and defined entirely by the streams specification.
+  //
+  // Another important thing to understand is that there are two types of JavaScript
+  // backed ReadableStreams: value-oriented, and byte-oriented.
+  //
+  // When user code uses the `new ReadableStream(underlyingSource)` constructor, the
+  // underlyingSource argument may have a `type` property, the value of which is either
+  // `undefined`, the empty string, or the string value `'bytes'`. If the underlyingSource
+  // argument is not given, the default value of `type` is `undefined`. If `type` is
+  // `undefined` or the empty string, the ReadableStream is value-oriented. If `type` is
+  // exactly equal to `'bytes'`, the ReadableStream is byte-oriented.
+  //
+  // For value-oriented streams, any JavaScript value can be pushed through the stream,
+  // and the stream will only support use of the ReadableStreamDefaultReader to consume
+  // the stream data.
+  //
+  // For byte-oriented streams, only byte data (as provided by `ArrayBufferView`s) can
+  // be pushed through the stream. All byte-oriented streams support using both
+  // ReadableStreamDefaultReader and ReadableStreamBYOBReader to consume the stream
+  // data.
+  //
+  // When the ReadableStreamJsController::setup() method is called the type
+  // of stream is determined, and the controller will create an instance of either
+  // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
+  // These are the objects that are actually passed on to the user-code's Underlying Source
+  // implementation.
+public:
+  using ReadableLockImpl = ReadableLockImpl<ReadableStreamJsController>;
+
+  KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamJsController);
+
+  explicit ReadableStreamJsController();
+  explicit ReadableStreamJsController(StreamStates::Closed closed);
+  explicit ReadableStreamJsController(StreamStates::Errored errored);
+  explicit ReadableStreamJsController(jsg::Lock& js, ValueReadable& consumer);
+  explicit ReadableStreamJsController(jsg::Lock& js, ByteReadable& consumer);
+  explicit ReadableStreamJsController(kj::Own<ValueReadable> consumer);
+  explicit ReadableStreamJsController(kj::Own<ByteReadable> consumer);
+
+  jsg::Ref<ReadableStream> addRef() override;
+
+  void setup(
+      jsg::Lock& js,
+      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
+
+  jsg::Promise<void> cancel(
+      jsg::Lock& js,
+      jsg::Optional<v8::Local<v8::Value>> reason) override;
+  // Signals that this ReadableStream is no longer interested in the underlying
+  // data source. Whether this cancels the underlying data source also depends
+  // on whether or not there are other ReadableStreams still attached to it.
+  // This operation is terminal. Once called, even while the returned Promise
+  // is still pending, the ReadableStream will be no longer usable and any
+  // data still in the queue will be dropped. Pending read requests will be
+  // rejected if a reason is given, or resolved with no data otherwise.
+
+  void doClose();
+
+  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
+
+  bool canCloseOrEnqueue();
+  bool hasBackpressure();
+
+  bool isByteOriented() const override;
+
+  bool isDisturbed() override;
+
+  bool isClosedOrErrored() const override;
+
+  bool isLockedToReader() const override;
+
+  bool lockReader(jsg::Lock& js, Reader& reader) override;
+
+  kj::Maybe<v8::Local<v8::Value>> isErrored(jsg::Lock& js);
+
+  kj::Maybe<int> getDesiredSize();
+
+  jsg::Promise<void> pipeTo(
+      jsg::Lock& js,
+      WritableStreamController& destination,
+      PipeToOptions options) override;
+
+  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js, kj::Own<WritableStreamSink>, bool end)
+     override;
+
+  kj::Maybe<jsg::Promise<ReadResult>> read(
+      jsg::Lock& js,
+      kj::Maybe<ByobOptions> byobOptions) override;
+
+  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
+  // See the comment for releaseReader in common.h for details on the use of maybeJs
+
+  void setOwnerRef(ReadableStream& stream) override;
+
+  Tee tee(jsg::Lock& js) override;
+
+  kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
+
+  void visitForGc(jsg::GcVisitor& visitor) override;
+
+  kj::Maybe<kj::OneOf<DefaultController, ByobController>> getController();
+
+  jsg::Promise<kj::Array<byte>> readAllBytes(jsg::Lock& js, uint64_t limit) override;
+  jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+
+  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
+
+private:
+  bool hasPendingReadRequests();
+
+  kj::Maybe<IoContext&> ioContext;
+  // If the stream was created within the scope of a request, we want to treat it as I/O
+  // and make sure it is not advanced from the scope of a different request.
+  kj::Maybe<ReadableStream&> owner;
+
+  kj::OneOf<StreamStates::Closed,
+            StreamStates::Errored,
+            kj::Own<ValueReadable>,
+            kj::Own<ByteReadable>> state = StreamStates::Closed();
+
+  ReadableLockImpl lock;
+  // The lock state is separate because a closed or errored stream can still be locked.
+
+  bool disturbed = false;
+
+  friend ReadableLockImpl;
+  friend ReadableLockImpl::PipeLocked;
+};
+
+class WritableStreamJsController: public WritableStreamController,
+                                  public jscontroller::WriterOwner {
+  // The WritableStreamJsController provides the implementation of custom
+  // WritableStream's backed by a user-code provided Underlying Sink. The implementation
+  // is fairly complicated and defined entirely by the streams specification.
+  //
+  // Importantly, the controller is designed to operate entirely within the JavaScript
+  // isolate lock. It is possible to call removeSink() to acquire a WritableStreamSink
+  // implementation that delegates to the WritableStreamDefaultController.
+public:
+  using WritableLockImpl = WritableLockImpl<WritableStreamJsController>;
+
+  using Controller = jsg::Ref<WritableStreamDefaultController>;
+
+  explicit WritableStreamJsController();
+
+  explicit WritableStreamJsController(StreamStates::Closed closed);
+
+  explicit WritableStreamJsController(StreamStates::Errored errored);
+
+  KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
+
+  ~WritableStreamJsController() noexcept(false) override {
+    weakRef->reset();
+    KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
+      (*controller)->setOwner(nullptr);
+    }
+  }
+
+  jsg::Promise<void> abort(jsg::Lock& js,
+                            jsg::Optional<v8::Local<v8::Value>> reason) override;
+
+  jsg::Ref<WritableStream> addRef() override;
+
+  jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
+
+  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override {
+    KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
+  }
+
+  void doClose() override;
+
+  void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+
+  kj::Maybe<int> getDesiredSize() override;
+
+  kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
+  kj::Maybe<v8::Local<v8::Value>> isErroredOrErroring(jsg::Lock& js);
+
+  bool isLocked() const override;
+
+  bool isLockedToWriter() const override;
+
+  bool isStarted();
+
+  inline bool isWritable() const { return state.is<Controller>(); }
+
+  bool lockWriter(jsg::Lock& js, Writer& writer) override;
+
+  void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+
+  void maybeResolveReadyPromise() override;
+
+  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
+  // See the comment for releaseWriter in common.h for details on the use of maybeJs
+
+  kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
+
+  void setOwnerRef(WritableStream& stream) override;
+
+  void setup(
+      jsg::Lock& js,
+      jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
+
+  kj::Maybe<jsg::Promise<void>> tryPipeFrom(
+      jsg::Lock& js,
+      jsg::Ref<ReadableStream> source,
+      PipeToOptions options) override;
+
+  void updateBackpressure(jsg::Lock& js, bool backpressure) override;
+
+  jsg::Promise<void> write(jsg::Lock& js,
+                            jsg::Optional<v8::Local<v8::Value>> value) override;
+
+  void visitForGc(jsg::GcVisitor& visitor) override;
+
+  kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
+    return kj::addRef(*weakRef);
+  }
+
+private:
+  jsg::Promise<void> pipeLoop(jsg::Lock& js);
+
+  kj::Maybe<IoContext&> ioContext;
+  kj::Maybe<WritableStream&> owner;
+  kj::OneOf<StreamStates::Closed, StreamStates::Errored, Controller> state = StreamStates::Closed();
+  WritableLockImpl lock;
+  kj::Maybe<jsg::Promise<void>> maybeAbortPromise;
+  kj::Own<WeakRef<WritableStreamJsController>> weakRef;
+
+  friend WritableLockImpl;
+};
+
+kj::Own<ReadableStreamController> newReadableStreamJsController() {
+  return kj::heap<ReadableStreamJsController>();
+}
+
+kj::Own<WritableStreamController> newWritableStreamJsController() {
+  return kj::heap<WritableStreamJsController>();
+}
+
+namespace {
+auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    return promise.then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                            ioContext.addFunctor(kj::mv(onFailure)));
+  } else {
+    return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  }
+}
+}  // namespace
+
+namespace jscontroller {
+jsg::Promise<void> maybeRunAlgorithm(
+    jsg::Lock& js,
+    auto& maybeAlgorithm,
+    auto&& onSuccess,
+    auto&& onFailure,
+    auto&&...args) {
+  // The algorithm is a JavaScript function mapped through jsg::Function.
+  // It is expected to return a Promise mapped via jsg::Promise. If the
+  // function returns synchronously, the jsg::Promise wrapper ensures
+  // that it is properly mapped to a jsg::Promise, but if the Promise
+  // throws synchronously, we have to convert that synchronous throw
+  // into a proper rejected jsg::Promise.
+
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
+      return js.tryCatch([&] {
+        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
+      }, [&](jsg::Value&& exception) {
+        return js.rejectedPromise<void>(kj::mv(exception));
+      }).then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                  ioContext.addFunctor(kj::mv(onFailure)));
+    }
+  } else {
+    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
+      return js.tryCatch([&] {
+        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
+      }, [&](jsg::Value&& exception) {
+        return js.rejectedPromise<void>(kj::mv(exception));
+      }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+    }
+  }
+
+  // If the algorithm does not exist, we just handle it as a success and move on.
+  onSuccess(js);
+  return js.resolvedPromise();
 }
 
 // ======================================================================================
