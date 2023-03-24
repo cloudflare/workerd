@@ -198,6 +198,14 @@ WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
   getController().setOwnerRef(*this);
 }
 
+jsg::Ref<WritableStream> WritableStream::addRef() { return JSG_THIS; }
+
+void WritableStream::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(getController());
+}
+
+bool WritableStream::isLocked() { return getController().isLockedToWriter(); }
+
 WritableStreamController& WritableStream::getController() { return *controller; }
 
 kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
