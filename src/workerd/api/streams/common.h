@@ -586,6 +586,10 @@ public:
   virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
+
+  virtual void setup(jsg::Lock& js,
+                     jsg::Optional<UnderlyingSink> underlyingSink,
+                     jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
 };
 
 struct Unlocked {};

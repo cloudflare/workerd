@@ -1003,7 +1003,7 @@ public:
   void setup(
       jsg::Lock& js,
       jsg::Optional<UnderlyingSink> maybeUnderlyingSink,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy);
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
       jsg::Lock& js,

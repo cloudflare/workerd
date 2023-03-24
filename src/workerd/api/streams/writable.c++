@@ -263,8 +263,7 @@ jsg::Ref<WritableStream> WritableStream::constructor(
                "streams_enable_constructors feature flag.");
 
   auto stream = jsg::alloc<WritableStream>(kj::heap<WritableStreamJsController>());
-  static_cast<WritableStreamJsController&>(
-      stream->getController()).setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
+  stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
 
