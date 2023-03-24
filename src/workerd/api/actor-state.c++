@@ -917,10 +917,10 @@ void DurableObjectState::setWebSocketAutoResponse(
       "A response of size ", reqResp->getResponse().size(), " was provided."));
 
   if (a.getHibernationManager() == kj::none) {
-    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
-            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
     // If there's no hibernation manager created yet, we should create one and
     // set its auto response.
+    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
   }
   KJ_REQUIRE_NONNULL(a.getHibernationManager()).setWebSocketAutoResponse(
       reqResp->getRequest(), reqResp->getResponse());
@@ -937,6 +937,40 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWe
 
 kj::Maybe<kj::Date> DurableObjectState::getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws) {
   return ws->getAutoResponseTimestamp();
+}
+
+void DurableObjectState::setHibernatableWebSocketEventTimeout(jsg::Optional<uint32_t> timeoutMs) {
+  auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+
+  // Setting a timeout = 0ms or an empty value will unset any currently set event timeout.
+  // If there's no hibernation manager instantiated, we can skip the event timeout unsetting.
+  if (timeoutMs == kj::none || KJ_REQUIRE_NONNULL(timeoutMs) == 0) {
+    KJ_IF_SOME(hibernationManager, a.getHibernationManager()) {
+      hibernationManager.setEventTimeout(kj::none);
+    }
+    return;
+  }
+
+  auto t = timeoutMs.orDefault((uint32_t)0);
+
+  // We want to limit the duration of an event to a maximum of 7 days (604800 * 1000 millis).
+  JSG_REQUIRE(t <= 604800 * 1000, Error, "Event timeout should not exceed 604800000 ms.");
+
+  if (a.getHibernationManager() == kj::none) {
+    // If there's no hibernation manager created yet, we should create one.
+    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+        a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
+  }
+  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setEventTimeout(t);
+}
+
+kj::Maybe<uint32_t> DurableObjectState::getHibernatableWebSocketEventTimeout() {
+  KJ_IF_SOME(a, IoContext::current().getActor()) {
+    KJ_IF_SOME(manager, a.getHibernationManager()) {
+      return manager.getEventTimeout();
+    }
+  }
+  return kj::none;
 }
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
