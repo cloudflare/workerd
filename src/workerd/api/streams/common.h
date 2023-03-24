@@ -416,6 +416,11 @@ public:
   // The promise will reject if the read will produce more bytes than the limit.
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
+
+  virtual void setup(
+      jsg::Lock& js,
+      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {}
 };
 
 class WritableStreamController {

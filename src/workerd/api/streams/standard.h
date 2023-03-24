@@ -792,7 +792,7 @@ public:
   void setup(
       jsg::Lock& js,
       jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
-      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy);
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
 
   jsg::Promise<void> cancel(
       jsg::Lock& js,

@@ -533,8 +533,7 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
   auto stream = jsg::alloc<ReadableStream>(newReadableStreamJsController());
-  static_cast<ReadableStreamJsController&>(
-      stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
+  stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
 
