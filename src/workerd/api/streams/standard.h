@@ -371,7 +371,7 @@ public:
 
   ReadableStreamDefaultController(UnderlyingSource underlyingSource,
                                   StreamQueuingStrategy queuingStrategy);
-  ~ReadableStreamDefaultController() noexcept(false) { weakRef->reset(); }
+  ~ReadableStreamDefaultController() noexcept(false);
 
   void start(jsg::Lock& js);
 
@@ -405,9 +405,7 @@ public:
     });
   }
 
-  kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef() {
-    return kj::addRef(*weakRef);
-  }
+  kj::Own<WeakRef<ReadableStreamDefaultController>> getWeakRef();
 
 private:
   kj::Maybe<IoContext&> ioContext;
@@ -472,10 +470,7 @@ private:
 
     Impl(jsg::Lock& js,
          kj::Own<ByteQueue::ByobRequest> readRequest,
-         jsg::Ref<ReadableByteStreamController> controller)
-         : readRequest(kj::mv(readRequest)),
-           controller(kj::mv(controller)),
-           view(js.v8Ref(this->readRequest->getView(js))) {}
+         jsg::Ref<ReadableByteStreamController> controller);
 
     void updateView(jsg::Lock& js);
   };

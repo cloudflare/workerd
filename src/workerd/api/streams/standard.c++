@@ -1837,6 +1837,15 @@ ReadableStreamDefaultController::ReadableStreamDefaultController(
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)),
       weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(*this)) {}
 
+ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(false) {
+  weakRef->reset();
+}
+
+kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
+  return kj::addRef(*weakRef);
+}
+
+
 void ReadableStreamDefaultController::start(jsg::Lock& js) {
   impl.start(js, JSG_THIS);
 }
@@ -1911,6 +1920,14 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 }
 
 // ======================================================================================
+
+ReadableStreamBYOBRequest::Impl::Impl(
+    jsg::Lock& js,
+    kj::Own<ByteQueue::ByobRequest> readRequest,
+    jsg::Ref<ReadableByteStreamController> controller)
+    : readRequest(kj::mv(readRequest)),
+      controller(kj::mv(controller)),
+      view(js.v8Ref(this->readRequest->getView(js))) {}
 
 void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
   jsg::check(view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
