@@ -297,9 +297,24 @@ ReadableStream::ReadableStream(
 }
 
 ReadableStream::ReadableStream(Controller controller)
-    : ioContext(tryGetIoContext()), controller(kj::mv(controller)) {
+    : ioContext(tryGetIoContext()),
+      controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
 }
+
+void ReadableStream::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(getController(), maybePipeThrough);
+  KJ_IF_MAYBE(pair, eofResolverPair) {
+    visitor.visit(pair->resolver);
+    visitor.visit(pair->promise);
+  }
+}
+
+jsg::Ref<ReadableStream> ReadableStream::addRef() { return JSG_THIS; }
+
+bool ReadableStream::isDisturbed() { return getController().isDisturbed(); }
+
+bool ReadableStream::isLocked() { return getController().isLockedToReader(); }
 
 void ReadableStream::initEofResolverPair(jsg::Lock& js) {
   eofResolverPair = js.newPromiseAndResolver<void>();
