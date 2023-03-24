@@ -856,7 +856,7 @@ public:
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
-  kj::Own<ReadableStreamJsController> detach(jsg::Lock& js);
+  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
 
 private:
   bool hasPendingReadRequests();
@@ -880,7 +880,7 @@ private:
   friend ReadableLockImpl::PipeLocked;
 };
 
-kj::Own<ReadableStreamJsController> newReadableStreamJsController();
+kj::Own<ReadableStreamController> newReadableStreamJsController();
 
 // =======================================================================================
 

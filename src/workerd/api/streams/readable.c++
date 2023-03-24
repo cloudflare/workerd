@@ -293,7 +293,7 @@ ReadableStream::ReadableStream(
     kj::Own<ReadableStreamSource> source)
     : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
 
-ReadableStream::ReadableStream(Controller controller)
+ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
     : ioContext(tryGetIoContext()),
       controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
@@ -318,15 +318,7 @@ void ReadableStream::initEofResolverPair(jsg::Lock& js) {
 }
 
 ReadableStreamController& ReadableStream::getController() {
-  KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-      return *c;
-    }
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-      return *c;
-    }
-  }
-  KJ_UNREACHABLE;
+  return *controller;
 }
 
 jsg::Promise<void> ReadableStream::cancel(
@@ -462,17 +454,7 @@ jsg::Promise<void> ReadableStream::returnFunction(
 jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDisturbed) {
   JSG_REQUIRE(!isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-  KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-      return jsg::alloc<ReadableStream>(IoContext::current(),
-          KJ_REQUIRE_NONNULL(c->removeSource(js, ignoreDisturbed)));
-    }
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-      auto stream = jsg::alloc<ReadableStream>(c->detach(js));
-      return kj::mv(stream);
-    }
-  }
-  KJ_UNREACHABLE;
+  return jsg::alloc<ReadableStream>(getController().detach(js, ignoreDisturbed));
 }
 
 kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {

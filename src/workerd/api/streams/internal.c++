@@ -1815,6 +1815,12 @@ kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncodin
   KJ_UNREACHABLE;
 }
 
+kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
+    jsg::Lock& js, bool ignoreDetached) {
+  return newReadableStreamInternalController(IoContext::current(),
+      KJ_ASSERT_NONNULL(removeSource(js, ignoreDetached)));
+}
+
 kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
   auto source = KJ_ASSERT_NONNULL(removeSource(js));
@@ -2092,7 +2098,7 @@ kj::Promise<void> IdentityTransformStreamImpl::writeHelper(kj::ArrayPtr<const kj
   KJ_UNREACHABLE;
 }
 
-kj::Own<ReadableStreamInternalController> newReadableStreamInternalController(
+kj::Own<ReadableStreamController> newReadableStreamInternalController(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source) {
   return kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)));

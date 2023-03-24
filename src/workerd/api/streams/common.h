@@ -424,6 +424,8 @@ public:
 
   virtual kj::Promise<DeferredProxy<void>> pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+
+  virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
 };
 
 class WritableStreamController {

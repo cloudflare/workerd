@@ -191,13 +191,10 @@ private:
       jsg::Optional<jsg::Value> value);
 
 public:
-  using Controller = kj::OneOf<kj::Own<ReadableStreamInternalController>,
-                               kj::Own<ReadableStreamJsController>>;
-
   explicit ReadableStream(IoContext& ioContext,
                           kj::Own<ReadableStreamSource> source);
 
-  explicit ReadableStream(Controller controller);
+  explicit ReadableStream(kj::Own<ReadableStreamController> controller);
 
   ReadableStreamController& getController();
 
@@ -367,7 +364,7 @@ public:
   // that the signalling is active.
 private:
   kj::Maybe<IoContext&> ioContext;
-  Controller controller;
+  kj::Own<ReadableStreamController> controller;
   kj::Maybe<jsg::Promise<void>> maybePipeThrough;
 
   void visitForGc(jsg::GcVisitor& visitor);

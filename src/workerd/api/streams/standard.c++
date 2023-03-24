@@ -10,7 +10,7 @@
 
 namespace workerd::api {
 
-kj::Own<ReadableStreamJsController> newReadableStreamJsController() {
+kj::Own<ReadableStreamController> newReadableStreamJsController() {
   return kj::heap<ReadableStreamJsController>();
 }
 
@@ -2633,7 +2633,7 @@ jsg::Promise<kj::String> ReadableStreamJsController::readAllText(
   KJ_UNREACHABLE;
 }
 
-kj::Own<ReadableStreamJsController> ReadableStreamJsController::detach(jsg::Lock& js) {
+kj::Own<ReadableStreamController> ReadableStreamJsController::detach(jsg::Lock& js, bool ignored) {
   KJ_ASSERT(!isLockedToReader());
   KJ_ASSERT(!isDisturbed());
   auto controller = kj::heap<ReadableStreamJsController>();

@@ -175,6 +175,8 @@ public:
                                           kj::Own<WritableStreamSink> sink,
                                           bool end) override;
 
+  kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) override;
+
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   void doClose();
@@ -222,7 +224,7 @@ private:
   friend class PipeLocked;
 };
 
-kj::Own<ReadableStreamInternalController> newReadableStreamInternalController(
+kj::Own<ReadableStreamController> newReadableStreamInternalController(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source);
 
