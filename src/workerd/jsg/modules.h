@@ -79,6 +79,27 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js, auto&& reader) 
 
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
 
+enum class ModuleInfoCompileOption {
+  BUNDLE,
+  // The BUNDLE options tells the compile operation to treat the content as coming
+  // from a worker bundle.
+  BUILTIN,
+  // The BUILTIN option tells the compile operation to treat the content as a builtin
+  // module. This implies certain changes in behavior, such as treating the content
+  // as an immutable, process-lifetime buffer that will never be destroyed, and caching
+  // the compilation data.
+};
+
+struct ModuleRegistryObserver: public kj::Refcounted {
+  // Monitors behavior of ModuleRegistry
+
+  virtual kj::Own<void> onEsmCompilationStart(
+      v8::Isolate* isolate, kj::StringPtr name, ModuleInfoCompileOption option) const = 0;
+  // Called at the start of module compilation.
+  // Returned value will be destroyed when module compilation finishes.
+  // It is guaranteed that isolate lock is held during both invocations.
+};
+
 class ModuleRegistry {
   // The ModuleRegistry maintains the collection of modules known to a script that can be
   // required or imported.
@@ -176,21 +197,11 @@ public:
                v8::Local<v8::Module> module,
                kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
 
-    enum class CompileOption {
-      BUNDLE,
-      // The BUNDLE options tells the compile operation to threat the content as coming
-      // from a worker bundle.
-      BUILTIN,
-      // The BUILTIN option tells the compile operation to treat the content as a builtin
-      // module. This implies certain changes in behavior, such as treating the content
-      // as an immutable, process-lifetime buffer that will never be destroyed, and caching
-      // the compilation data.
-    };
-
     ModuleInfo(jsg::Lock& js,
                kj::StringPtr name,
                kj::ArrayPtr<const char> content,
-               CompileOption flags = CompileOption::BUNDLE);
+               ModuleInfoCompileOption flags,
+               const ModuleRegistryObserver& observer);
 
     ModuleInfo(jsg::Lock& js, kj::StringPtr name,
                kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
@@ -226,11 +237,11 @@ public:
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
 };
 
-using ModuleInfoCompileOption = ModuleRegistry::ModuleInfo::CompileOption;
-
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
 public:
+  ModuleRegistryImpl(kj::Own<ModuleRegistryObserver> observer) : observer(kj::mv(observer)) {}
+
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
   }
@@ -301,16 +312,16 @@ public:
     using Key = typename Entry::Key;
     if (internalOnly) {
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
-        return entry->module(js);
+        return entry->module(js, *observer);
       }
     } else {
       // First, we try to resolve a worker bundle version of the module.
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
-        return entry->module(js);
+        return entry->module(js, *observer);
       }
       // Then we look for a built-in version of the module.
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUILTIN))) {
-        return entry->module(js);
+        return entry->module(js, *observer);
       }
     }
     return nullptr;
@@ -371,6 +382,7 @@ public:
   }
 
 private:
+  kj::Own<ModuleRegistryObserver> observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
 
   // When we build a bundle containing modules, we must build a table of modules to resolve imports.
@@ -419,7 +431,7 @@ private:
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
 
-    ModuleInfo& module(jsg::Lock& js) {
+    ModuleInfo& module(jsg::Lock& js, ModuleRegistryObserver& observer) {
       // Lazily instantiate module from source code if needed
 
       KJ_SWITCH_ONEOF(info) {
@@ -427,7 +439,7 @@ private:
           return moduleInfo;
         }
         KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN);
+          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
         KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {

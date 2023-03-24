@@ -232,13 +232,22 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   return compiledGlobals.finish();
 }
 
+struct NoopModuleRegistryObserver final : public jsg::ModuleRegistryObserver {
+  kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
+      kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {
+    return kj::Own<void>();
+  }
+};
+
 kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
 
-  auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>();
+  auto observer = kj::refcounted<NoopModuleRegistryObserver>();
+  auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>(
+      kj::addRef(*observer));
 
   for (auto module: conf.getModules()) {
     auto path = kj::Path::parse(module.getName());
@@ -295,7 +304,9 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
             jsg::ModuleRegistry::ModuleInfo(
                 lock,
                 module.getName(),
-                module.getEsModule()));
+                module.getEsModule(),
+                jsg::ModuleInfoCompileOption::BUNDLE,
+                *observer));
         break;
       }
       case config::Worker::Module::COMMON_JS_MODULE: {
