@@ -364,7 +364,6 @@ public:
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<ReadableStreamController> controller;
-  kj::Maybe<jsg::Promise<void>> maybePipeThrough;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

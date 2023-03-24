@@ -301,7 +301,7 @@ ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
 }
 
 void ReadableStream::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(getController(), maybePipeThrough);
+  visitor.visit(getController());
   KJ_IF_MAYBE(pair, eofResolverPair) {
     visitor.visit(pair->resolver);
     visitor.visit(pair->promise);
@@ -380,15 +380,12 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
 
   auto options = kj::mv(maybeOptions).orDefault({});
   options.pipeThrough = true;
-  maybePipeThrough = controller.pipeTo(js, destination, kj::mv(options)).then(js,
-      JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self), (jsg::Lock& js) {
-    maybePipeThrough = nullptr;
+  controller.pipeTo(js, destination, kj::mv(options)).then(js,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js) {
     return js.resolvedPromise();
-  }), JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
-    maybePipeThrough = nullptr;
+  }), JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
     return js.rejectedPromise<void>(kj::mv(exception));
-  }));
-  KJ_ASSERT_NONNULL(maybePipeThrough).markAsHandled();
+  })).markAsHandled();
   return kj::mv(transform.readable);
 }
 
