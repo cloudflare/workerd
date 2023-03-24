@@ -576,8 +576,7 @@ private:
   friend ReadableLockImpl::PipeLocked;
 };
 
-class WritableStreamJsController: public WritableStreamController,
-                                  public jscontroller::WriterOwner {
+class WritableStreamJsController: public WritableStreamController {
   // The WritableStreamJsController provides the implementation of custom
   // WritableStream's backed by a user-code provided Underlying Sink. The implementation
   // is fairly complicated and defined entirely by the streams specification.
@@ -600,9 +599,6 @@ public:
 
   ~WritableStreamJsController() noexcept(false) override {
     weakRef->reset();
-    KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
-      (*controller)->setOwner(nullptr);
-    }
   }
 
   jsg::Promise<void> abort(jsg::Lock& js,
@@ -616,16 +612,16 @@ public:
     KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
   }
 
-  void doClose() override;
+  void doClose();
 
-  void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+  void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   kj::Maybe<int> getDesiredSize() override;
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override;
   kj::Maybe<v8::Local<v8::Value>> isErroredOrErroring(jsg::Lock& js);
 
-  bool isLocked() const override;
+  bool isLocked() const;
 
   bool isLockedToWriter() const override;
 
@@ -635,9 +631,9 @@ public:
 
   bool lockWriter(jsg::Lock& js, Writer& writer) override;
 
-  void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason) override;
+  void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  void maybeResolveReadyPromise() override;
+  void maybeResolveReadyPromise();
 
   void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
@@ -656,7 +652,7 @@ public:
       jsg::Ref<ReadableStream> source,
       PipeToOptions options) override;
 
-  void updateBackpressure(jsg::Lock& js, bool backpressure) override;
+  void updateBackpressure(jsg::Lock& js, bool backpressure);
 
   jsg::Promise<void> write(jsg::Lock& js,
                             jsg::Optional<v8::Local<v8::Value>> value) override;
@@ -1037,8 +1033,8 @@ bool ReadableImpl<Self>::hasPendingReadRequests() {
 // ======================================================================================
 
 template <typename Self>
-WritableImpl<Self>::WritableImpl(WriterOwner& owner)
-    : owner(owner),
+WritableImpl<Self>::WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner)
+    : owner(kj::mv(owner)),
       signal(jsg::alloc<AbortSignal>()) {}
 
 template <typename Self>
@@ -1073,6 +1069,11 @@ jsg::Promise<void> WritableImpl<Self>::abort(
 
   maybePendingAbort = PendingAbort(js, reason, wasAlreadyErroring);
   return KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
+}
+
+template <typename Self>
+kj::Maybe<WritableStreamJsController&> WritableImpl<Self>::tryGetOwner() {
+  return owner->tryGet();
 }
 
 template <typename Self>
@@ -1157,8 +1158,10 @@ jsg::Promise<void> WritableImpl<Self>::close(jsg::Lock& js, jsg::Ref<Self> self)
   auto prp = js.newPromiseAndResolver<void>();
   closeRequest = kj::mv(prp.resolver);
 
-  if (backpressure && isWritable() && owner != nullptr) {
-    getOwner().maybeResolveReadyPromise();
+  if (backpressure && isWritable()) {
+    KJ_IF_MAYBE(owner, tryGetOwner()) {
+      owner->maybeResolveReadyPromise();
+    }
   }
 
   advanceQueueIfNeeded(js, kj::mv(self));
@@ -1195,11 +1198,8 @@ void WritableImpl<Self>::doClose() {
   state.template init<StreamStates::Closed>();
   algorithms.clear();
 
-  KJ_IF_MAYBE(theOwner, owner) {
-    theOwner->doClose();
-    owner = nullptr;
-    // Calling doClose here most likely caused the WritableImpl<Self> to be destroyed,
-    // so it is important not to do anything else after calling doClose here.
+  KJ_IF_MAYBE(owner, tryGetOwner()) {
+    owner->doClose();
   }
 }
 
@@ -1213,11 +1213,8 @@ void WritableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   state = js.v8Ref(reason);
   algorithms.clear();
 
-  KJ_IF_MAYBE(theOwner, owner) {
-    theOwner->doError(js, reason);
-    owner = nullptr;
-    // Calling doError here most likely caused the WritableImpl<Self> to be destroyed,
-    // so it is important not to do anything else after calling doError here.
+  KJ_IF_MAYBE(owner, tryGetOwner()) {
+    owner->doError(js, reason);
   }
 }
 
@@ -1361,10 +1358,12 @@ void WritableImpl<Self>::setup(
     algorithms.starting = nullptr;
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
 
-    if (isWritable() && owner != nullptr) {
+    if (isWritable()) {
       // Only resolve the ready promise if an abort is not pending.
       // It will have been rejected already.
-      getOwner().maybeResolveReadyPromise();
+      KJ_IF_MAYBE(owner, tryGetOwner()) {
+        owner->maybeResolveReadyPromise();
+      }
     }
 
     started = true;
@@ -1376,8 +1375,8 @@ void WritableImpl<Self>::setup(
     algorithms.starting = nullptr;
     auto handle = reason.getHandle(js);
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
-    KJ_IF_MAYBE(theOwner, owner) {
-      theOwner->maybeRejectReadyPromise(js, handle);
+    KJ_IF_MAYBE(owner, tryGetOwner()) {
+      owner->maybeRejectReadyPromise(js, handle);
     }
     started = true;
     dealWithRejection(js, kj::mv(self), handle);
@@ -1398,8 +1397,8 @@ void WritableImpl<Self>::startErroring(
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
   KJ_ASSERT(isWritable());
-  KJ_IF_MAYBE(theOwner, owner) {
-    theOwner->maybeRejectReadyPromise(js, reason);
+  KJ_IF_MAYBE(owner, tryGetOwner()) {
+    owner->maybeRejectReadyPromise(js, reason);
   }
   state.template init<StreamStates::Erroring>(js.v8Ref(reason));
   if (inFlightWrite == nullptr && inFlightClose == nullptr && started) {
@@ -1414,8 +1413,8 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   bool bp = getDesiredSize() < 0;
   if (bp != backpressure) {
     backpressure = bp;
-    KJ_IF_MAYBE(theOwner, owner) {
-      theOwner->updateBackpressure(js, backpressure);
+    KJ_IF_MAYBE(owner, tryGetOwner()) {
+      owner->updateBackpressure(js, backpressure);
     }
   }
 }
@@ -3103,8 +3102,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
 
 // ======================================================================================
 
-WritableStreamDefaultController::WritableStreamDefaultController(WriterOwner& owner)
-    : ioContext(tryGetIoContext()), impl(owner) {}
+WritableStreamDefaultController::WritableStreamDefaultController(
+    kj::Own<WeakRef<WritableStreamJsController>> owner)
+    : ioContext(tryGetIoContext()), impl(kj::mv(owner)) {}
 
 jsg::Promise<void> WritableStreamDefaultController::abort(
     jsg::Lock& js,
@@ -3135,10 +3135,6 @@ kj::Maybe<v8::Local<v8::Value>> WritableStreamDefaultController::isErroring(jsg:
     return erroring->reason.getHandle(js);
   }
   return nullptr;
-}
-
-void WritableStreamDefaultController::setOwner(kj::Maybe<WriterOwner&> owner) {
-  impl.setOwner(owner);
 }
 
 void WritableStreamDefaultController::setup(
@@ -3217,9 +3213,6 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
 }
 
 void WritableStreamJsController::doClose() {
-  KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
-    (*controller)->setOwner(nullptr);
-  }
   state.init<StreamStates::Closed>();
   KJ_IF_MAYBE(locked, lock.state.tryGet<WriterLocked>()) {
     maybeResolvePromise(locked->getClosedFulfiller());
@@ -3230,9 +3223,6 @@ void WritableStreamJsController::doClose() {
 }
 
 void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
-    (*controller)->setOwner(nullptr);
-  }
   state.init<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_MAYBE(locked, lock.state.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(locked->getClosedFulfiller(), reason);
@@ -3338,7 +3328,7 @@ void WritableStreamJsController::setup(
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = jsg::alloc<WritableStreamDefaultController>(*this);
+  state = jsg::alloc<WritableStreamDefaultController>(kj::addRef(*weakRef));
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

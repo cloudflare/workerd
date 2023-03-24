@@ -119,44 +119,30 @@ namespace workerd::api {
 //
 //  WritableStream -> WritableStreamJsController -> jsg::Ref<WritableStreamDefaultController>
 //
-// The WritableStreamJsController implements both the WritableStreamController interface
-// (same API that is implemented by WritableStreamInternalController) and the
-// jscontroller::WriterOwner API.
-//
 // All write operations on a JavaScript-backed WritableStream are processed within the
 // isolate lock using JavaScript promises instead of kj::Promises.
 
 class ReadableStreamJsController;
 class WritableStreamJsController;
 
+template <typename T>
+class WeakRef: public kj::Refcounted {
+  // Used to allow the TransformStreamDefaultController to hold safe
+  // weak refs to the ReadableStreamDefaultController and WritableStreamJsController.
+public:
+  WeakRef(T& ref) : ref(ref) {}
+  KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
+  kj::Maybe<T&> tryGet() { return ref; }
+  kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
+private:
+  void reset() { ref = nullptr; }
+  kj::Maybe<T&> ref;
+  friend T;
+};
+
 namespace jscontroller {
 // The jscontroller namespace defines declarations that are common to all of the the
 // JavaScript-backed ReadableStream and WritableStream variants.
-
-// =======================================================================================
-class WriterOwner {
-  // The WriterOwner is the current owner of a WritableStreamDefaultController.
-  // Currently, this can only be a WritableStreamJsController.
-  // The WriterOwner interface allows the underlying controller to communicate
-  // status updates up to the current owner without caring about what kind of thing
-  // the owner currently is.
-public:
-  virtual void doClose() = 0;
-  // Communicate to the owner that the stream has been closed. The owner should release
-  // ownership of the underlying controller and allow it to be garbage collected as soon
-  // as possible.
-
-  virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
-  // Communicate to the owner that the stream has been errored. The owner should remember
-  // the error reason, and release ownership of the underlying controller and allow it to
-  // be garbage collected as soon as possible.
-
-  virtual bool isLocked() const = 0;
-
-  virtual void updateBackpressure(jsg::Lock& js, bool backpressure) = 0;
-  virtual void maybeResolveReadyPromise() = 0;
-  virtual void maybeRejectReadyPromise(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
-};
 
 // =======================================================================================
 template <class Self>
@@ -278,7 +264,7 @@ public:
     }
   };
 
-  WritableImpl(WriterOwner& owner);
+  WritableImpl(kj::Own<WeakRef<WritableStreamJsController>> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js,
                             jsg::Ref<Self> self,
@@ -316,13 +302,7 @@ public:
 
   void rejectCloseAndClosedPromiseIfNeeded(jsg::Lock& js);
 
-  void setOwner(kj::Maybe<WriterOwner&> owner) {
-    this->owner = owner;
-  }
-
-  WriterOwner& getOwner() {
-    return JSG_REQUIRE_NONNULL(owner, TypeError, "This stream has been closed.");
-  }
+  kj::Maybe<WritableStreamJsController&> tryGetOwner();
 
   void setup(
       jsg::Lock& js,
@@ -375,7 +355,7 @@ private:
 
   struct Writable {};
 
-  kj::Maybe<WriterOwner&> owner;
+  kj::Own<WeakRef<WritableStreamJsController>> owner;
   jsg::Ref<AbortSignal> signal;
   kj::OneOf<StreamStates::Closed,
             StreamStates::Errored,
@@ -398,21 +378,6 @@ private:
 };
 
 }  // namespace jscontroller
-
-template <typename T>
-class WeakRef: public kj::Refcounted {
-  // Used to allow the TransformStreamDefaultController to hold safe
-  // weak refs to the ReadableStreamDefaultController and WritableStreamJsController.
-public:
-  WeakRef(T& ref) : ref(ref) {}
-  KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
-  kj::Maybe<T&> tryGet() { return ref; }
-  kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
-private:
-  void reset() { ref = nullptr; }
-  kj::Maybe<T&> ref;
-  friend T;
-};
 
 // =======================================================================================
 
@@ -603,9 +568,8 @@ class WritableStreamDefaultController: public jsg::Object {
   // is given.
 public:
   using WritableImpl = jscontroller::WritableImpl<WritableStreamDefaultController>;
-  using WriterOwner = jscontroller::WriterOwner;
 
-  explicit WritableStreamDefaultController(WriterOwner& owner);
+  explicit WritableStreamDefaultController(kj::Own<WeakRef<WritableStreamJsController>> owner);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
@@ -620,8 +584,6 @@ public:
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
   bool isStarted() { return impl.started; }
-
-  void setOwner(kj::Maybe<WriterOwner&> owner);
 
   void setup(
       jsg::Lock& js,
