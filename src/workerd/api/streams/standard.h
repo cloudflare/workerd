@@ -153,36 +153,57 @@ public:
                StreamQueuingStrategy queuingStrategy);
 
   void start(jsg::Lock& js, jsg::Ref<Self> self);
+  // Invokes the start algorithm to initialize the underlying source.
 
   jsg::Promise<void> cancel(jsg::Lock& js,
                              jsg::Ref<Self> self,
                              v8::Local<v8::Value> maybeReason);
+  // If the readable is not already closed or errored, initiates a cancelation.
 
   bool canCloseOrEnqueue();
+  // True if the readable is not closed, not errored, and close has not already been requested.
 
   void doCancel(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  // Invokes the cancel algorithm to let the underlying source know that the
+  // readable has been canceled.
 
   void close(jsg::Lock& js);
+  // Close the queue if we are in a state where we can be closed.
 
   void enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self);
+  // Push a chunk of data into the queue.
 
   void doClose(jsg::Lock& js);
 
   void doError(jsg::Lock& js, jsg::Value reason);
+  // If it isn't already errored or closed, errors the queue, causing all consumers to be errored
+  // and detached.
 
   kj::Maybe<int> getDesiredSize();
+  // When a negative number is returned, indicates that we are above the highwatermark
+  // and backpressure should be signaled.
 
   void pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self);
+  // Invokes the pull algorithm only if we're in a state where the queue the
+  // queue is below the watermark and we actually need data right now.
 
   bool hasPendingReadRequests();
+  // True if any of the known consumers have pending reads waiting to be
+  // fulfilled. This is the case if a read is received that cannot be
+  // completely fulfilled by the current contents of the queue.
 
   bool shouldCallPull();
+  // True if the queue is current below the highwatermark.
 
   kj::Own<Consumer> getConsumer(kj::Maybe<StateListener&> listener);
-
-  void visitForGc(jsg::GcVisitor& visitor);
+  // The consumer can be used to read from this readables queue so long as the queue
+  // is open. The consumer instance may outlive the readable but will be put into
+  // a closed state or errored state when the readable is destroyed.
 
   size_t consumerCount();
+  // The number of consumers that exist for this readable.
+
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
   struct Algorithms {
