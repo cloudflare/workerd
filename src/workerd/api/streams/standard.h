@@ -880,8 +880,6 @@ private:
   friend ReadableLockImpl::PipeLocked;
 };
 
-kj::Own<ReadableStreamController> newReadableStreamJsController();
-
 // =======================================================================================
 
 class WritableStreamDefaultController: public jsg::Object {

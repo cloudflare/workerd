@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "internal.h"
-#include "standard.h"
+#include "common.h"
 #include <kj/function.h>
 
 namespace workerd::api {

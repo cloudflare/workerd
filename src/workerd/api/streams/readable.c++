@@ -324,7 +324,7 @@ ReadableStreamController& ReadableStream::getController() {
 jsg::Promise<void> ReadableStream::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  if (getController().isLockedToReader()) {
+  if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
   }
@@ -372,7 +372,7 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
   auto& controller = getController();
 
   auto& destination = transform.writable->getController();
-  JSG_REQUIRE(!controller.isLockedToReader(), TypeError,
+  JSG_REQUIRE(!isLocked(), TypeError,
                "This ReadableStream is currently locked to a reader.");
   JSG_REQUIRE(!destination.isLockedToWriter(), TypeError,
                "This WritableStream is currently locked to a writer.");
@@ -395,7 +395,7 @@ jsg::Promise<void> ReadableStream::pipeTo(
     jsg::Lock& js,
     jsg::Ref<WritableStream> destination,
     jsg::Optional<PipeToOptions> maybeOptions) {
-  if (getController().isLockedToReader()) {
+  if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
   }
