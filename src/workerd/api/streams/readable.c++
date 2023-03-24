@@ -291,10 +291,7 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStream::ReadableStream(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source)
-    : ioContext(ioContext),
-      controller(kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)))) {
-  getController().setOwnerRef(*this);
-}
+    : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
 
 ReadableStream::ReadableStream(Controller controller)
     : ioContext(tryGetIoContext()),
@@ -535,7 +532,7 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                Error,
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
-  auto stream = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>());
+  auto stream = jsg::alloc<ReadableStream>(newReadableStreamJsController());
   static_cast<ReadableStreamJsController&>(
       stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);

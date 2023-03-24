@@ -10,6 +10,10 @@
 
 namespace workerd::api {
 
+kj::Own<ReadableStreamJsController> newReadableStreamJsController() {
+  return kj::heap<ReadableStreamJsController>();
+}
+
 namespace {
 auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
   if (IoContext::hasCurrent()) {

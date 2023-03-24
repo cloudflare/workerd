@@ -218,6 +218,10 @@ private:
   friend class PipeLocked;
 };
 
+kj::Own<ReadableStreamInternalController> newReadableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<ReadableStreamSource> source);
+
 class WritableStreamInternalController: public WritableStreamController {
 public:
   using Writable = IoOwn<WritableStreamSink>;
