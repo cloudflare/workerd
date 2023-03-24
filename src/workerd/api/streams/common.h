@@ -421,6 +421,9 @@ public:
       jsg::Lock& js,
       jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
       jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {}
+
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
 };
 
 class WritableStreamController {

@@ -488,37 +488,7 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
   return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
     JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
     JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-
-    KJ_SWITCH_ONEOF(controller) {
-      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-        auto source = KJ_ASSERT_NONNULL(c->removeSource(js));
-
-        struct Holder: public kj::Refcounted {
-          kj::Own<WritableStreamSink> sink;
-          kj::Own<ReadableStreamSource> source;
-          Holder(kj::Own<WritableStreamSink> sink,
-                 kj::Own<ReadableStreamSource> source)
-              : sink(kj::mv(sink)), source(kj::mv(source)) {}
-        };
-
-        auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
-        return holder->source->pumpTo(*holder->sink, end).then(
-            [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-          proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
-          return kj::mv(proxy);
-        }, [&holder=*holder](kj::Exception&& ex) mutable {
-          holder.sink->abort(kj::cp(ex));
-          holder.source->cancel(kj::cp(ex));
-          return kj::mv(ex);
-        }).attach(kj::mv(holder));
-      }
-      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-        // It is important to note that the JavaScript-backed streams do not support
-        // the deferred proxy optimization.
-        return c->pumpTo(js, kj::mv(sink), end);
-      }
-    }
-    KJ_UNREACHABLE;
+    return getController().pumpTo(js, kj::mv(sink), end);
   });
 }
 

@@ -171,6 +171,10 @@ public:
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
+  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js,
+                                          kj::Own<WritableStreamSink> sink,
+                                          bool end) override;
+
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   void doClose();

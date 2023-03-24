@@ -831,7 +831,8 @@ public:
       WritableStreamController& destination,
       PipeToOptions options) override;
 
-  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js, kj::Own<WritableStreamSink>, bool end);
+  kj::Promise<DeferredProxy<void>> pumpTo(jsg::Lock& js, kj::Own<WritableStreamSink>, bool end)
+     override;
 
   kj::Maybe<jsg::Promise<ReadResult>> read(
       jsg::Lock& js,
