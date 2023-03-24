@@ -696,7 +696,7 @@ auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure
 }
 }  // namespace
 
-namespace jscontroller {
+namespace {
 jsg::Promise<void> maybeRunAlgorithm(
     jsg::Lock& js,
     auto& maybeAlgorithm,
@@ -737,7 +737,6 @@ jsg::Promise<void> maybeRunAlgorithm(
 
 // ======================================================================================
 
-namespace {
 int getHighWaterMark(const UnderlyingSource& underlyingSource,
                      const StreamQueuingStrategy& queuingStrategy) {
   bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
@@ -754,26 +753,21 @@ ReadableImpl<Self>::ReadableImpl(
 
 template <typename Self>
 void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
-  KJ_ASSERT(!started && algorithms.starting == nullptr);
+  KJ_ASSERT(!started && !starting);
+  starting = true;
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    algorithms.starting = nullptr;
     started = true;
     pullIfNeeded(js, kj::mv(self));
   });
 
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                                         (jsg::Lock& js, jsg::Value reason) {
-    algorithms.starting = nullptr;
     started = true;
     doError(js, kj::mv(reason));
   });
 
-  algorithms.starting = maybeRunAlgorithm(js,
-                                          algorithms.start,
-                                          kj::mv(onSuccess),
-                                          kj::mv(onFailure),
-                                          kj::mv(self));
+  maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
   algorithms.start = nullptr;
 }
 
@@ -857,7 +851,6 @@ void ReadableImpl<Self>::doCancel(
   state.template init<StreamStates::Closed>();
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    algorithms.canceling = nullptr;
     doClose(js);
     KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
       maybeResolvePromise(pendingCancel->fulfiller);
@@ -865,7 +858,6 @@ void ReadableImpl<Self>::doCancel(
   });
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                                         (jsg::Lock& js, jsg::Value reason) {
-    algorithms.canceling = nullptr;
     // We do not call doError() here because there's really no point. Everything
     // that cares about the state of this controller impl has signaled that it
     // no longer cares and has gone away.
@@ -875,11 +867,7 @@ void ReadableImpl<Self>::doCancel(
     }
   });
 
-  algorithms.canceling = maybeRunAlgorithm(js,
-                                           algorithms.cancel,
-                                           kj::mv(onSuccess),
-                                           kj::mv(onFailure),
-                                           reason);
+  maybeRunAlgorithm(js, algorithms.cancel, kj::mv(onSuccess), kj::mv(onFailure), reason);
 }
 
 template <typename Self>
@@ -977,7 +965,6 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
   pulling = true;
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    algorithms.pulling = nullptr;
     pulling = false;
     if (pullAgain) {
       pullAgain = false;
@@ -987,15 +974,11 @@ void ReadableImpl<Self>::pullIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
 
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                            (jsg::Lock& js, jsg::Value reason) {
-    algorithms.pulling = nullptr;
+    pulling = false;
     doError(js, kj::mv(reason));
   });
 
-  algorithms.pulling = maybeRunAlgorithm(js,
-                                         algorithms.pull,
-                                         kj::mv(onSuccess),
-                                         kj::mv(onFailure),
-                                         self.addRef());
+  maybeRunAlgorithm(js, algorithms.pull, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
 template <typename Self>
@@ -1099,20 +1082,15 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
       inFlightClose = kj::mv(closeRequest);
 
       auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-        algorithms.closing = nullptr;
         finishInFlightClose(js, kj::mv(self));
       });
 
       auto onFailure = JSG_VISITABLE_LAMBDA(
           (this, self = self.addRef()), (self), (jsg::Lock& js, jsg::Value reason) {
-        algorithms.closing = nullptr;
         finishInFlightClose(js, kj::mv(self), reason.getHandle(js));
       });
 
-      algorithms.closing = maybeRunAlgorithm(js,
-                                            algorithms.close,
-                                            kj::mv(onSuccess),
-                                            kj::mv(onFailure));
+      maybeRunAlgorithm(js, algorithms.close, kj::mv(onSuccess), kj::mv(onFailure));
     }
     return;
   }
@@ -1126,7 +1104,6 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   auto onSuccess = JSG_VISITABLE_LAMBDA(
       (this, self = self.addRef(), size), (self), (jsg::Lock& js) {
     amountBuffered -= size;
-    algorithms.writing = nullptr;
     finishInFlightWrite(js, self.addRef());
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
     if (!isCloseQueuedOrInFlight() && isWritable()) {
@@ -1138,16 +1115,15 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef(), size), (self),
                                         (jsg::Lock& js, jsg::Value reason) {
     amountBuffered -= size;
-    algorithms.writing = nullptr;
     finishInFlightWrite(js, kj::mv(self), reason.getHandle(js));
   });
 
-  algorithms.writing = maybeRunAlgorithm(js,
-                                         algorithms.write,
-                                         kj::mv(onSuccess),
-                                         kj::mv(onFailure),
-                                         value.getHandle(js),
-                                         self.addRef());
+  maybeRunAlgorithm(js,
+                    algorithms.write,
+                    kj::mv(onSuccess),
+                    kj::mv(onFailure),
+                    value.getHandle(js),
+                    self.addRef());
 }
 
 template <typename Self>
@@ -1249,7 +1225,6 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
     }
 
     auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-      algorithms.aborting = nullptr;
       auto& pendingAbort = KJ_ASSERT_NONNULL(maybePendingAbort);
       pendingAbort.reject = false;
       pendingAbort.complete(js);
@@ -1258,17 +1233,12 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
 
     auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                                           (jsg::Lock& js, jsg::Value reason) {
-      algorithms.aborting = nullptr;
       auto& pendingAbort = KJ_ASSERT_NONNULL(maybePendingAbort);
       pendingAbort.fail(reason.getHandle(js));
       rejectCloseAndClosedPromiseIfNeeded(js);
     });
 
-    algorithms.aborting = maybeRunAlgorithm(js,
-                                            algorithms.abort,
-                                            kj::mv(onSuccess),
-                                            kj::mv(onFailure),
-                                            reason);
+    maybeRunAlgorithm(js, algorithms.abort, kj::mv(onSuccess), kj::mv(onFailure), reason);
     return;
   }
   rejectCloseAndClosedPromiseIfNeeded(js);
@@ -1346,6 +1316,8 @@ void WritableImpl<Self>::setup(
     jsg::Ref<Self> self,
     UnderlyingSink underlyingSink,
     StreamQueuingStrategy queuingStrategy) {
+  KJ_ASSERT(!started && !starting);
+  starting = true;
 
   highWaterMark = queuingStrategy.highWaterMark.orDefault(1);
   auto startAlgorithm = kj::mv(underlyingSink.start);
@@ -1355,7 +1327,6 @@ void WritableImpl<Self>::setup(
   algorithms.size = kj::mv(queuingStrategy.size);
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
-    algorithms.starting = nullptr;
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
 
     if (isWritable()) {
@@ -1372,7 +1343,6 @@ void WritableImpl<Self>::setup(
 
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                                         (jsg::Lock& js, jsg::Value reason) {
-    algorithms.starting = nullptr;
     auto handle = reason.getHandle(js);
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
     KJ_IF_MAYBE(owner, tryGetOwner()) {
@@ -1384,11 +1354,7 @@ void WritableImpl<Self>::setup(
 
   backpressure = getDesiredSize() < 0;
 
-  algorithms.starting = maybeRunAlgorithm(js,
-                                          startAlgorithm,
-                                          kj::mv(onSuccess),
-                                          kj::mv(onFailure),
-                                          self.addRef());
+  maybeRunAlgorithm(js, startAlgorithm, kj::mv(onSuccess), kj::mv(onFailure), self.addRef());
 }
 
 template <typename Self>
@@ -1491,8 +1457,6 @@ template <typename Self>
 bool WritableImpl<Self>::isWritable() const {
   return state.template is<Writable>();
 }
-
-}  // namespace jscontroller
 
 // ======================================================================================
 
@@ -3644,7 +3608,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
     return js.rejectedPromise<void>(kj::mv(reason));
   });
 
-  return jscontroller::maybeRunAlgorithm(
+  return maybeRunAlgorithm(
       js, algorithms.flush, kj::mv(onSuccess), kj::mv(onFailure), JSG_THIS);
 }
 
@@ -3666,7 +3630,7 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js,
     v8::Local<v8::Value> chunk) {
   KJ_IF_MAYBE(transform, algorithms.transform) {
-    return jscontroller::maybeRunAlgorithm(
+    return maybeRunAlgorithm(
         js,
         transform,
         [](jsg::Lock& js) -> jsg::Promise<void> {
@@ -3761,15 +3725,13 @@ void TransformStreamDefaultController::init(
 
   setBackpressure(js, true);
 
-  algorithms.starting = jscontroller::maybeRunAlgorithm(
+  maybeRunAlgorithm(
       js,
       transformer.start,
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
-        ref->algorithms.starting = nullptr;
         ref->startPromise.resolver.resolve();
       }),
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value reason) {
-        ref->algorithms.starting = nullptr;
         ref->startPromise.resolver.reject(reason.getHandle(js));
       }),
       JSG_THIS);

@@ -13,7 +13,7 @@
 namespace workerd::api {
 
 // =======================================================================================
-// jscontroller, ReadableStreamJsController, WritableStreamJsController, and the rest in
+// ReadableStreamJsController, WritableStreamJsController, and the rest in
 // this section define the implementation of JavaScript-backed ReadableStream and WritableStreams.
 //
 // A JavaScript-backed ReadableStream is backed by a ReadableStreamJsController that is either
@@ -140,10 +140,6 @@ private:
   friend T;
 };
 
-namespace jscontroller {
-// The jscontroller namespace defines declarations that are common to all of the the
-// JavaScript-backed ReadableStream and WritableStream variants.
-
 // =======================================================================================
 template <class Self>
 class ReadableImpl {
@@ -191,10 +187,6 @@ public:
 
 private:
   struct Algorithms {
-    kj::Maybe<jsg::Promise<void>> starting;
-    kj::Maybe<jsg::Promise<void>> pulling;
-    kj::Maybe<jsg::Promise<void>> canceling;
-
     kj::Maybe<jsg::Function<UnderlyingSource::StartAlgorithm>> start;
     kj::Maybe<jsg::Function<UnderlyingSource::PullAlgorithm>> pull;
     kj::Maybe<jsg::Function<UnderlyingSource::CancelAlgorithm>> cancel;
@@ -210,9 +202,6 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      starting = nullptr;
-      pulling = nullptr;
-      canceling = nullptr;
       start = nullptr;
       pull = nullptr;
       cancel = nullptr;
@@ -220,7 +209,7 @@ private:
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, pulling, canceling, start, pull, cancel, size);
+      visitor.visit(start, pull, cancel, size);
     }
   };
 
@@ -234,6 +223,7 @@ private:
   bool pullAgain = false;
   bool pulling = false;
   bool started = false;
+  bool starting = false;
   size_t highWaterMark = 1;
 
   struct PendingCancel {
@@ -323,11 +313,6 @@ public:
 private:
 
   struct Algorithms {
-    kj::Maybe<jsg::Promise<void>> aborting;
-    kj::Maybe<jsg::Promise<void>> closing;
-    kj::Maybe<jsg::Promise<void>> starting;
-    kj::Maybe<jsg::Promise<void>> writing;
-
     kj::Maybe<jsg::Function<UnderlyingSink::AbortAlgorithm>> abort;
     kj::Maybe<jsg::Function<UnderlyingSink::CloseAlgorithm>> close;
     kj::Maybe<jsg::Function<UnderlyingSink::WriteAlgorithm>> write;
@@ -338,10 +323,6 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      aborting = nullptr;
-      closing = nullptr;
-      starting = nullptr;
-      writing = nullptr;
       abort = nullptr;
       close = nullptr;
       size = nullptr;
@@ -349,7 +330,7 @@ private:
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, aborting, closing, writing, write, close, abort, size);
+      visitor.visit(write, close, abort, size);
     }
   };
 
@@ -363,6 +344,7 @@ private:
             Writable> state = Writable();
   Algorithms algorithms;
   bool started = false;
+  bool starting = false;
   bool backpressure = false;
   size_t highWaterMark = 1;
 
@@ -377,8 +359,6 @@ private:
   friend Self;
 };
 
-}  // namespace jscontroller
-
 // =======================================================================================
 
 class ReadableStreamDefaultController: public jsg::Object {
@@ -387,7 +367,7 @@ class ReadableStreamDefaultController: public jsg::Object {
   // array buffers, but treats all values as opaque. BYOB reads are not supported.
 public:
   using QueueType = ValueQueue;
-  using ReadableImpl = jscontroller::ReadableImpl<ReadableStreamDefaultController>;
+  using ReadableImpl = ReadableImpl<ReadableStreamDefaultController>;
 
   ReadableStreamDefaultController(UnderlyingSource underlyingSource,
                                   StreamQueuingStrategy queuingStrategy);
@@ -512,7 +492,7 @@ class ReadableByteStreamController: public jsg::Object {
   // BYOB reads are supported.
 public:
   using QueueType = ByteQueue;
-  using ReadableImpl = jscontroller::ReadableImpl<ReadableByteStreamController>;
+  using ReadableImpl = ReadableImpl<ReadableByteStreamController>;
 
   ReadableByteStreamController(UnderlyingSource underlyingSource,
                                StreamQueuingStrategy queuingStrategy);
@@ -567,7 +547,7 @@ class WritableStreamDefaultController: public jsg::Object {
   // to determine whether it is capable of handling whatever type of JavaScript object it
   // is given.
 public:
-  using WritableImpl = jscontroller::WritableImpl<WritableStreamDefaultController>;
+  using WritableImpl = WritableImpl<WritableStreamDefaultController>;
 
   explicit WritableStreamDefaultController(kj::Own<WeakRef<WritableStreamJsController>> owner);
 
@@ -667,8 +647,6 @@ public:
 
 private:
   struct Algorithms {
-    kj::Maybe<jsg::Promise<void>> starting;
-
     kj::Maybe<jsg::Function<Transformer::TransformAlgorithm>> transform;
     kj::Maybe<jsg::Function<Transformer::FlushAlgorithm>> flush;
 
@@ -677,13 +655,12 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     inline void clear() {
-      starting = nullptr;
       transform = nullptr;
       flush = nullptr;
     }
 
     inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(starting, transform, flush);
+      visitor.visit(transform, flush);
     }
   };
 
