@@ -439,6 +439,60 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
   return nullptr;
 }
 
+auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    return promise.then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                            ioContext.addFunctor(kj::mv(onFailure)));
+  } else {
+    return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  }
+}
+
+jsg::Promise<void> maybeRunAlgorithm(
+    jsg::Lock& js,
+    auto& maybeAlgorithm,
+    auto&& onSuccess,
+    auto&& onFailure,
+    auto&&...args) {
+  // The algorithm is a JavaScript function mapped through jsg::Function.
+  // It is expected to return a Promise mapped via jsg::Promise. If the
+  // function returns synchronously, the jsg::Promise wrapper ensures
+  // that it is properly mapped to a jsg::Promise, but if the Promise
+  // throws synchronously, we have to convert that synchronous throw
+  // into a proper rejected jsg::Promise.
+
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
+      return js.tryCatch([&] {
+        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
+      }, [&](jsg::Value&& exception) {
+        return js.rejectedPromise<void>(kj::mv(exception));
+      }).then(js, ioContext.addFunctor(kj::mv(onSuccess)),
+                  ioContext.addFunctor(kj::mv(onFailure)));
+    }
+  } else {
+    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
+      return js.tryCatch([&] {
+        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
+      }, [&](jsg::Value&& exception) {
+        return js.rejectedPromise<void>(kj::mv(exception));
+      }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+    }
+  }
+
+  // If the algorithm does not exist, we just handle it as a success and move on.
+  onSuccess(js);
+  return js.resolvedPromise();
+}
+
+int getHighWaterMark(const UnderlyingSource& underlyingSource,
+                     const StreamQueuingStrategy& queuingStrategy) {
+  bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
+  return queuingStrategy.highWaterMark.orDefault(isBytes ? 0 : 1);
+}
+
 }  // namespace
 
 class ReadableStreamJsController: public ReadableStreamController {
@@ -684,66 +738,6 @@ kj::Own<WritableStreamController> newWritableStreamJsController() {
   return kj::heap<WritableStreamJsController>();
 }
 
-namespace {
-auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
-    return promise.then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                            ioContext.addFunctor(kj::mv(onFailure)));
-  } else {
-    return promise.then(js, kj::mv(onSuccess), kj::mv(onFailure));
-  }
-}
-}  // namespace
-
-namespace {
-jsg::Promise<void> maybeRunAlgorithm(
-    jsg::Lock& js,
-    auto& maybeAlgorithm,
-    auto&& onSuccess,
-    auto&& onFailure,
-    auto&&...args) {
-  // The algorithm is a JavaScript function mapped through jsg::Function.
-  // It is expected to return a Promise mapped via jsg::Promise. If the
-  // function returns synchronously, the jsg::Promise wrapper ensures
-  // that it is properly mapped to a jsg::Promise, but if the Promise
-  // throws synchronously, we have to convert that synchronous throw
-  // into a proper rejected jsg::Promise.
-
-  if (IoContext::hasCurrent()) {
-    auto& ioContext = IoContext::current();
-    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
-      return js.tryCatch([&] {
-        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
-      }, [&](jsg::Value&& exception) {
-        return js.rejectedPromise<void>(kj::mv(exception));
-      }).then(js, ioContext.addFunctor(kj::mv(onSuccess)),
-                  ioContext.addFunctor(kj::mv(onFailure)));
-    }
-  } else {
-    KJ_IF_MAYBE(algorithm, maybeAlgorithm) {
-      return js.tryCatch([&] {
-        return (*algorithm)(js, kj::fwd<decltype(args)>(args)...);
-      }, [&](jsg::Value&& exception) {
-        return js.rejectedPromise<void>(kj::mv(exception));
-      }).then(js, kj::mv(onSuccess), kj::mv(onFailure));
-    }
-  }
-
-  // If the algorithm does not exist, we just handle it as a success and move on.
-  onSuccess(js);
-  return js.resolvedPromise();
-}
-
-// ======================================================================================
-
-int getHighWaterMark(const UnderlyingSource& underlyingSource,
-                     const StreamQueuingStrategy& queuingStrategy) {
-  bool isBytes = underlyingSource.type.map([](auto& s) { return s == "bytes"; }).orDefault(false);
-  return queuingStrategy.highWaterMark.orDefault(isBytes ? 0 : 1);
-}
-}  // namespace
-
 template <typename Self>
 ReadableImpl<Self>::ReadableImpl(
     UnderlyingSource underlyingSource,
@@ -758,12 +752,14 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     started = true;
+    starting = false;
     pullIfNeeded(js, kj::mv(self));
   });
 
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
                                         (jsg::Lock& js, jsg::Value reason) {
     started = true;
+    starting = false;
     doError(js, kj::mv(reason));
   });
 
@@ -1338,6 +1334,7 @@ void WritableImpl<Self>::setup(
     }
 
     started = true;
+    starting = false;
     advanceQueueIfNeeded(js, kj::mv(self));
   });
 
@@ -1349,6 +1346,7 @@ void WritableImpl<Self>::setup(
       owner->maybeRejectReadyPromise(js, handle);
     }
     started = true;
+    starting = false;
     dealWithRejection(js, kj::mv(self), handle);
   });
 
@@ -3092,6 +3090,10 @@ jsg::Promise<void> WritableStreamDefaultController::abort(
     v8::Local<v8::Value> reason) {
   return impl.abort(js, JSG_THIS, reason);
 }
+
+void WritableStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(impl);
+  }
 
 jsg::Promise<void> WritableStreamDefaultController::close(jsg::Lock& js) {
   return impl.close(js, JSG_THIS);

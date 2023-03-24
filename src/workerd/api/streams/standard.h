@@ -13,8 +13,8 @@
 namespace workerd::api {
 
 // =======================================================================================
-// ReadableStreamJsController, WritableStreamJsController, and the rest in
-// this section define the implementation of JavaScript-backed ReadableStream and WritableStreams.
+// ReadableStreamJsController, WritableStreamJsController, and the rest here define the
+// implementation of JavaScript-backed ReadableStream and WritableStreams.
 //
 // A JavaScript-backed ReadableStream is backed by a ReadableStreamJsController that is either
 // Closed, Errored, or in a Readable state. When readable, the controller owns either a
@@ -127,8 +127,7 @@ class WritableStreamJsController;
 
 template <typename T>
 class WeakRef: public kj::Refcounted {
-  // Used to allow the TransformStreamDefaultController to hold safe
-  // weak refs to the ReadableStreamDefaultController and WritableStreamJsController.
+  // Used to allow holding safe weak pointers to type T
 public:
   WeakRef(T& ref) : ref(ref) {}
   KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
@@ -576,9 +575,7 @@ private:
   kj::Maybe<IoContext&> ioContext;
   WritableImpl impl;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(impl);
-   }
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 // =======================================================================================
