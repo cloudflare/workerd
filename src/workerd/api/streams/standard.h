@@ -321,14 +321,21 @@ public:
       StreamQueuingStrategy queuingStrategy);
 
   void startErroring(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> reason);
+  // Puts the writable into an erroring state. This allows any in flight write or
+  // close to complete before actually transitioning the writable.
 
   void updateBackpressure(jsg::Lock& js);
+  // Notifies the Writer of the current backpressure state. If the amount of data queued
+  // is equal to or above the highwatermark, then backpressure is applied.
 
   jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value);
-
-  void visitForGc(jsg::GcVisitor& visitor);
+  // Writes a chunk to the Writable, possibly queing the chunk in the internal buffer
+  // if there are already other writes pending.
 
   bool isWritable() const;
+  // True if the writable is in a state where new chunks can be written
+
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
 
