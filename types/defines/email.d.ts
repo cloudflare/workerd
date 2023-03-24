@@ -1,5 +1,5 @@
 /**
- * A email message that is sent to a consumer Worker.
+ * An email message that can be sent from a Worker.
  */
 interface EmailMessage {
   /**
@@ -10,14 +10,20 @@ interface EmailMessage {
    * Envelope To attribute of the email message.
    */
   readonly to: string;
-  /**
-   * A [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
-   */
-  readonly headers: Headers;
+}
+
+/**
+ * An email message that is sent to a consumer Worker and can be rejected/forwarded.
+ */
+interface ForwardableEmailMessage extends EmailMessage {
   /**
    * Stream of the email message content.
    */
   readonly raw: ReadableStream;
+  /**
+   * An [Headers object](https://developer.mozilla.org/en-US/docs/Web/API/Headers).
+   */
+  readonly headers: Headers;
   /**
    * Size of the email message content.
    */
@@ -37,12 +43,27 @@ interface EmailMessage {
   forward(rcptTo: string, headers?: Headers): Promise<void>;
 }
 
+/**
+ * A binding that allows a Worker to send email messages.
+ */
+interface SendEmail {
+  send(message: EmailMessage): Promise<void>;
+}
+
 declare abstract class EmailEvent extends ExtendableEvent {
-  readonly message: EmailMessage;
+  readonly message: ForwardableEmailMessage;
 }
 
 declare type EmailExportedHandler<Env = unknown> = (
-  message: EmailMessage,
+  message: ForwardableEmailMessage,
   env: Env,
   ctx: ExecutionContext
 ) => void | Promise<void>;
+
+declare module "cloudflare:email" {
+  let _EmailMessage: {
+    prototype: EmailMessage;
+    new (from: string, to: string, raw: ReadableStream | string): EmailMessage;
+  };
+  export { _EmailMessage as EmailMessage };
+}
