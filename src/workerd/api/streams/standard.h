@@ -669,6 +669,7 @@ public:
   WeakRef(T& ref) : ref(ref) {}
   KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
   kj::Maybe<T&> tryGet() { return ref; }
+  kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
 private:
   void reset() { ref = nullptr; }
   kj::Maybe<T&> ref;

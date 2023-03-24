@@ -1091,23 +1091,42 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor &visitor) {
 // ======================================================================================
 
 namespace {
+template <typename T>
+kj::Maybe<T&> tryGetAs(auto& ref) {
+  KJ_IF_MAYBE(ptr, ref->tryGet()) {
+    return kj::dynamicDowncastIfAvailable<T>(*ptr);
+  }
+  return nullptr;
+}
 
 class AllReaderBase {
 public:
+  AllReaderBase() : ref(kj::refcounted<WeakRef<AllReaderBase>>(*this)) {}
+  virtual ~AllReaderBase() noexcept(false) {
+    ref->reset();
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(AllReaderBase);
+
   virtual void doClose() = 0;
   virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
+
+  kj::Own<WeakRef<AllReaderBase>> addWeakRef() { return ref->addRef(); }
+
+private:
+  kj::Own<WeakRef<AllReaderBase>> ref;
 };
 
 template <typename Controller, typename Consumer>
 struct ReadableState {
+  using AllReaderWeakRef = kj::Own<WeakRef<AllReaderBase>>;
   jsg::Ref<Controller> controller;
-  kj::Maybe<kj::OneOf<ReadableStreamJsController*, AllReaderBase*>> owner;
+  kj::Maybe<kj::OneOf<ReadableStreamJsController*, AllReaderWeakRef>> owner;
   kj::Own<Consumer> consumer;
 
   ReadableState(
       jsg::Ref<Controller> controller, auto owner, auto stateListener)
       : controller(kj::mv(controller)),
-        owner(owner),
+        owner(kj::mv(owner)),
         consumer(this->controller->getConsumer(stateListener)) {}
 
   ReadableState(jsg::Ref<Controller> controller, auto owner, kj::Own<Consumer> consumer)
@@ -1116,7 +1135,7 @@ struct ReadableState {
         consumer(kj::mv(consumer)) {}
 
   void setOwner(auto newOwner) {
-    owner = newOwner;
+    owner = kj::mv(newOwner);
   }
 
   bool hasPendingReadRequests() {
@@ -1134,8 +1153,11 @@ struct ReadableState {
         KJ_CASE_ONEOF(controller, ReadableStreamJsController*) {
           return controller->doClose();
         }
-        KJ_CASE_ONEOF(reader, AllReaderBase*) {
-          return reader->doClose();
+        KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
+          KJ_IF_MAYBE(base, reader->tryGet()) {
+            base->doClose();
+          }
+          return;
         }
       }
       KJ_UNREACHABLE;
@@ -1148,8 +1170,11 @@ struct ReadableState {
         KJ_CASE_ONEOF(controller, ReadableStreamJsController*) {
           return controller->doError(js, reason.getHandle(js));
         }
-        KJ_CASE_ONEOF(reader, AllReaderBase*) {
-          return reader->doError(js, reason.getHandle(js));
+        KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
+          KJ_IF_MAYBE(base, reader->tryGet()) {
+            base->doError(js, reason.getHandle(js));
+          }
+          return;
         }
       }
       KJ_UNREACHABLE;
@@ -1204,7 +1229,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
   }
 
   void setOwner(auto newOwner) {
-    KJ_IF_MAYBE(s, state) { s->setOwner(newOwner); }
+    KJ_IF_MAYBE(s, state) { s->setOwner(kj::mv(newOwner)); }
   }
 
   kj::Own<ValueReadable> clone(jsg::Lock& js, ReadableStreamJsController* owner) {
@@ -1314,7 +1339,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
   }
 
   void setOwner(auto newOwner) {
-    KJ_IF_MAYBE(s, state) { s->setOwner(newOwner); }
+    KJ_IF_MAYBE(s, state) { s->setOwner(kj::mv(newOwner)); }
   }
 
   kj::Own<ByteReadable> clone(jsg::Lock& js, ReadableStreamJsController* owner) {
@@ -2109,9 +2134,10 @@ public:
   using PartList = kj::Array<kj::ArrayPtr<byte>>;
 
   AllReader(Readable readable, uint64_t limit)
-      : ioContext(tryGetIoContext()), state(kj::mv(readable)), limit(limit) {
-    AllReaderBase* base = this;
-    state.template get<Readable>()->setOwner(base);
+      : ioContext(tryGetIoContext()),
+        state(kj::mv(readable)),
+        limit(limit) {
+    state.template get<Readable>()->setOwner(addWeakRef());
   }
 
   void doClose() override {
@@ -2245,14 +2271,8 @@ public:
     : ioContext(IoContext::current()),
       state(kj::mv(readable)),
       sink(kj::mv(sink)),
-      ref(kj::refcounted<WeakRef>(this)),
       end(end) {
-    AllReaderBase* base = this;
-    state.template get<Readable>()->setOwner(base);
-  }
-
-  ~PumpToReader() noexcept(false) {
-    ref->reset();
+    state.template get<Readable>()->setOwner(addWeakRef());
   }
 
   void doClose() override {
@@ -2285,7 +2305,7 @@ public:
         // IoContext. Thw WeakRef ensures that if the PumpToReader is freed while
         // the JS continuation is pending, there won't be a dangling reference.
         return ioContext.awaitJs(
-            pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(kj::addRef(*ref))));
+            pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(addWeakRef())));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
         return KJ_EXCEPTION(FAILED, "pumping is already in progress");
@@ -2301,28 +2321,10 @@ public:
   }
 
 private:
-
-  class WeakRef : public kj::Refcounted {
-  public:
-    WeakRef(PumpToReader* ptr) : maybePtr(ptr) {}
-
-    kj::Maybe<PumpToReader&> tryGet() {
-      return maybePtr.map([](auto& ptr) -> PumpToReader& { return *ptr; });
-    }
-
-  private:
-    kj::Maybe<PumpToReader*> maybePtr;
-    void reset() {
-      maybePtr = nullptr;
-    }
-    friend class PumpToReader;
-  };
-
   struct Pumping {};
   IoContext& ioContext;
   kj::OneOf<Readable, Pumping, StreamStates::Closed, kj::Exception> state;
   kj::Own<WritableStreamSink> sink;
-  kj::Own<WeakRef> ref;
   bool end;
 
   bool isErroredOrClosed() {
@@ -2334,7 +2336,7 @@ private:
       jsg::Lock& js,
       IoContext& ioContext,
       Readable readable,
-      IoOwn<WeakRef> pumpToReader) {
+      IoOwn<WeakRef<AllReaderBase>> pumpToReader) {
     ioContext.requireCurrentOrThrowJs();
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ready, Readable) {
@@ -2441,7 +2443,7 @@ private:
         }).then(js, ioContext.addFunctor(
             [readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)]
             (jsg::Lock& js, Result result) mutable {
-          KJ_IF_MAYBE(reader, pumpToReader->tryGet()) {
+          KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
             // Oh good, if we got here it means we're in the right IoContext and
             // the PumpToReader is still alive. Let's process the result.
             reader->ioContext.requireCurrentOrThrowJs();
@@ -2464,7 +2466,7 @@ private:
                 }).then(js, ioContext.addFunctor(
                     [readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)]
                     (jsg::Lock& js, kj::Maybe<jsg::Value> maybeException) mutable {
-                  KJ_IF_MAYBE(reader, pumpToReader->tryGet()) {
+                  KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
                     auto& ioContext = reader->ioContext;
                     ioContext.requireCurrentOrThrowJs();
                     // Oh good, if we got here it means we're in the right IoContext and
