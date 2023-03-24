@@ -135,7 +135,7 @@ namespace jscontroller {
 
 // =======================================================================================
 class WriterOwner {
-  // The WriterOwner is the current owner of a WritableStreamDefaultcontroller.
+  // The WriterOwner is the current owner of a WritableStreamDefaultController.
   // Currently, this can only be a WritableStreamJsController.
   // The WriterOwner interface allows the underlying controller to communicate
   // status updates up to the current owner without caring about what kind of thing
