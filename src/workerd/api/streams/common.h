@@ -31,6 +31,8 @@ class WritableStreamController;
 class WritableStreamSink;
 class WritableStreamDefaultController;
 
+class TransformStreamDefaultController;
+
 enum class StreamEncoding {
   IDENTITY,
   GZIP
@@ -49,6 +51,114 @@ struct ReadResult {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(value);
   }
+};
+
+struct StreamQueuingStrategy {
+  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
+
+  jsg::Optional<uint64_t> highWaterMark;
+  jsg::Optional<jsg::Function<SizeAlgorithm>> size;
+
+  JSG_STRUCT(highWaterMark, size);
+  JSG_STRUCT_TS_OVERRIDE(QueuingStrategy<T = any> {
+    size?: (chunk: T) => number | bigint;
+  });
+};
+
+struct UnderlyingSource {
+  using Controller = kj::OneOf<jsg::Ref<ReadableStreamDefaultController>,
+                               jsg::Ref<ReadableByteStreamController>>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using PullAlgorithm = jsg::Promise<void>(Controller);
+  using CancelAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
+  // The autoAllocateChunkSize mechanism allows byte streams to operate as if a BYOB
+  // reader is being used even if it is just a default reader. Support is optional
+  // per the streams spec but our implementation will always enable it. Specifically,
+  // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
+  // this default.
+
+  jsg::Optional<kj::String> type;
+  // Per the spec, the type property for the UnderlyingSource should be either
+  // undefined, the empty string, or "bytes". When undefined, the empty string is
+  // used as the default. When type is the empty string, the stream is considered
+  // to be value-oriented rather than byte-oriented.
+
+  jsg::Optional<int> autoAllocateChunkSize;
+  // Used only when type is equal to "bytes", the autoAllocateChunkSize defines
+  // the size of automatically allocated buffer that is created when a default
+  // mode read is performed on a byte-oriented ReadableStream that supports
+  // BYOB reads. The stream standard makes this optional to support and defines
+  // no default value. We've chosen to use a default value of 4096. If given,
+  // the value must be greater than zero.
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<PullAlgorithm>> pull;
+  jsg::Optional<jsg::Function<CancelAlgorithm>> cancel;
+
+  JSG_STRUCT(type, autoAllocateChunkSize, start, pull, cancel);
+  JSG_STRUCT_TS_DEFINE(interface UnderlyingByteSource {
+    type: "bytes";
+    autoAllocateChunkSize?: number;
+    start?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    pull?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+  });
+  JSG_STRUCT_TS_OVERRIDE(<R = any> {
+    type?: "" | undefined;
+    autoAllocateChunkSize: never;
+    start?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    pull?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+  });
+};
+
+struct UnderlyingSink {
+  using Controller = jsg::Ref<WritableStreamDefaultController>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using WriteAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using AbortAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+  using CloseAlgorithm = jsg::Promise<void>();
+
+  jsg::Optional<kj::String> type;
+  // Per the spec, the type property for the UnderlyingSink should always be either
+  // undefined or the empty string. Any other value will trigger a TypeError.
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<WriteAlgorithm>> write;
+  jsg::Optional<jsg::Function<AbortAlgorithm>> abort;
+  jsg::Optional<jsg::Function<CloseAlgorithm>> close;
+
+  JSG_STRUCT(type, start, write, abort, close);
+  // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
+  JSG_STRUCT_TS_OVERRIDE(<W = any> {
+    write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
+    start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
+    abort?: (reason: any) => void | Promise<void>;
+    close?: () => void | Promise<void>;
+  });
+};
+
+struct Transformer {
+  using Controller = jsg::Ref<TransformStreamDefaultController>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using FlushAlgorithm = jsg::Promise<void>(Controller);
+
+  jsg::Optional<kj::String> readableType;
+  jsg::Optional<kj::String> writableType;
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<TransformAlgorithm>> transform;
+  jsg::Optional<jsg::Function<FlushAlgorithm>> flush;
+
+  JSG_STRUCT(readableType, writableType, start, transform, flush);
+  JSG_STRUCT_TS_OVERRIDE(<I = any, O = any> {
+    start?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    transform?: (chunk: I, controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    flush?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+  });
 };
 
 struct PipeToOptions {
