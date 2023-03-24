@@ -515,7 +515,7 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
       KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
         // It is important to note that the JavaScript-backed streams do not support
         // the deferred proxy optimization.
-        return addNoopDeferredProxy(c->pumpTo(js, kj::mv(sink), end));
+        return c->pumpTo(js, kj::mv(sink), end);
       }
     }
     KJ_UNREACHABLE;

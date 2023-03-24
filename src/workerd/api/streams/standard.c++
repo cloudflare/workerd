@@ -2666,38 +2666,36 @@ kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding enco
   return nullptr;
 }
 
-kj::Promise<void> ReadableStreamJsController::pumpTo(
+kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
     jsg::Lock& js,
     kj::Own<WritableStreamSink> sink,
     bool end) {
   KJ_ASSERT(IoContext::hasCurrent(), "Unable to consume this ReadableStream outside of a request");
-  return kj::evalNow([&]() -> kj::Promise<void> {
-    KJ_REQUIRE(!isLockedToReader(), "This ReadableStream is currently locked to a reader.");
-    disturbed = true;
+  KJ_REQUIRE(!isLockedToReader(), "This ReadableStream is currently locked to a reader.");
+  disturbed = true;
 
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return sink->end().attach(kj::mv(sink));
-      }
-      KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.exceptionToKj(errored.addRef(js));
-      }
-      KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
-        KJ_ASSERT(lock.lock());
-        auto reader = kj::heap<PumpToReader<ValueReadable>>(kj::mv(readable), kj::mv(sink), end);
-        doClose();
-        return reader->pumpTo(js).attach(kj::mv(reader));
-      }
-      KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
-        KJ_ASSERT(lock.lock());
-        auto reader = kj::heap<PumpToReader<ByteReadable>>(kj::mv(readable), kj::mv(sink), end);
-        doClose();
-        return reader->pumpTo(js).attach(kj::mv(reader));
-      }
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      return addNoopDeferredProxy(sink->end().attach(kj::mv(sink)));
     }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      return js.exceptionToKj(errored.addRef(js));
+    }
+    KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
+      KJ_ASSERT(lock.lock());
+      auto reader = kj::heap<PumpToReader<ValueReadable>>(kj::mv(readable), kj::mv(sink), end);
+      doClose();
+      return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
+    }
+    KJ_CASE_ONEOF(readable, kj::Own<ByteReadable>) {
+      KJ_ASSERT(lock.lock());
+      auto reader = kj::heap<PumpToReader<ByteReadable>>(kj::mv(readable), kj::mv(sink), end);
+      doClose();
+      return addNoopDeferredProxy(reader->pumpTo(js).attach(kj::mv(reader)));
+    }
+  }
 
-    KJ_UNREACHABLE;
-  });
+  KJ_UNREACHABLE;
 }
 
 // ======================================================================================
