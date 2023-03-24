@@ -4,6 +4,7 @@
 
 #include "readable.h"
 #include "writable.h"
+#include <workerd/jsg/buffersource.h>
 
 namespace workerd::api {
 

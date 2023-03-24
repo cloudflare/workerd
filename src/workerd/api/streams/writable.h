@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "internal.h"
-#include "standard.h"
+#include "common.h"
 
 namespace workerd::api {
 
@@ -98,14 +97,11 @@ private:
 
 class WritableStream: public jsg::Object {
 public:
-  using Controller = kj::OneOf<kj::Own<WritableStreamInternalController>,
-                               kj::Own<WritableStreamJsController>>;
-
   explicit WritableStream(IoContext& ioContext,
                           kj::Own<WritableStreamSink> sink,
                           kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
 
-  explicit WritableStream(Controller controller);
+  explicit WritableStream(kj::Own<WritableStreamController> controller);
 
   WritableStreamController& getController();
 
@@ -155,7 +151,7 @@ public:
 
 private:
   kj::Maybe<IoContext&> ioContext;
-  Controller controller;
+  kj::Own<WritableStreamController> controller;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(getController());

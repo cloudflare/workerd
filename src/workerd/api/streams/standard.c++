@@ -14,6 +14,10 @@ kj::Own<ReadableStreamController> newReadableStreamJsController() {
   return kj::heap<ReadableStreamJsController>();
 }
 
+kj::Own<WritableStreamController> newWritableStreamJsController() {
+  return kj::heap<WritableStreamJsController>();
+}
+
 namespace {
 auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
   if (IoContext::hasCurrent()) {

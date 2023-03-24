@@ -2104,4 +2104,13 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
   return kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)));
 }
 
+kj::Own<WritableStreamController> newWritableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<WritableStreamSink> sink,
+    kj::Maybe<uint64_t> maybeHighWaterMark) {
+  return kj::heap<WritableStreamInternalController>(
+      ioContext.addObject(kj::mv(sink)),
+      maybeHighWaterMark);
+}
+
 }  // namespace workerd::api

@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "writable.h"
-#include "readable.h"
 
 namespace workerd::api {
 
@@ -190,29 +189,16 @@ WritableStream::WritableStream(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
     kj::Maybe<uint64_t> maybeHighWaterMark)
-    : ioContext(ioContext),
-      controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)),
-                                                            maybeHighWaterMark)) {
-  getController().setOwnerRef(*this);
-}
+    : WritableStream(newWritableStreamInternalController(ioContext, kj::mv(sink),
+                                                         maybeHighWaterMark)) {}
 
-WritableStream::WritableStream(Controller controller)
+WritableStream::WritableStream(kj::Own<WritableStreamController> controller)
     : ioContext(tryGetIoContext()),
       controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
 }
 
-WritableStreamController& WritableStream::getController() {
-  KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, kj::Own<WritableStreamInternalController>) {
-      return *c;
-    }
-    KJ_CASE_ONEOF(c, kj::Own<WritableStreamJsController>) {
-      return *c;
-    }
-  }
-  KJ_UNREACHABLE;
-}
+WritableStreamController& WritableStream::getController() { return *controller; }
 
 kj::Own<WritableStreamSink> WritableStream::removeSink(jsg::Lock& js) {
   return JSG_REQUIRE_NONNULL(
@@ -256,13 +242,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(
     jsg::Optional<UnderlyingSink> underlyingSink,
     jsg::Optional<StreamQueuingStrategy> queuingStrategy,
     CompatibilityFlags::Reader flags) {
-
   JSG_REQUIRE(flags.getStreamsJavaScriptControllers(),
                Error,
                "To use the new WritableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
-
-  auto stream = jsg::alloc<WritableStream>(kj::heap<WritableStreamJsController>());
+  auto stream = jsg::alloc<WritableStream>(newWritableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }

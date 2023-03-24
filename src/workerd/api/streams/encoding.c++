@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
+#include "standard.h"
 #include "../encoding.h"
 #include <workerd/jsg/buffersource.h>
 

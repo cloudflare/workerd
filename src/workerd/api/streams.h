@@ -12,6 +12,7 @@
 #include "streams/transform.h"
 #include "streams/compression.h"
 #include "streams/encoding.h"
+#include "streams/standard.h"
 
 namespace workerd::api {
 
