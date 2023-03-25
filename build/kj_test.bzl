@@ -11,4 +11,7 @@ def kj_test(
             "@capnp-cpp//src/kj:kj-test",
             "@workerd//src/workerd/util:symbolizer",
         ] + deps,
+        env = {
+            "LLVM_SYMBOLIZER": "llvm-symbolizer",
+        },
     )
