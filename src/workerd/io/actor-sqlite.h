@@ -20,7 +20,9 @@ class ActorSqlite final: public ActorCacheInterface {
 
 public:
   ActorSqlite(SqliteDatabase::Vfs& vfs, kj::PathPtr path)
-      : db(vfs, path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
+      : db(vfs, path, ErrorCallback([](const char* errStr) {
+          JSG_ASSERT(false, Error, errStr);
+        }), kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
         kv(db) {}
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
@@ -46,8 +48,8 @@ public:
   kj::Maybe<kj::Promise<void>> sync() { return nullptr; }
   // TODO(sqlite): synk() should wait for replication if applicable.
 
-private:
   SqliteDatabase db;
+private:
   SqliteKv kv;
 };
 

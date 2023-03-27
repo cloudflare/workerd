@@ -15,6 +15,7 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/sql.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/urlpattern.h>
@@ -64,6 +65,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_URL_STANDARD_ISOLATE_TYPES,
   EW_URLPATTERN_ISOLATE_TYPES,
   EW_WEBSOCKET_ISOLATE_TYPES,
+  EW_SQL_ISOLATE_TYPES,
   EW_NODE_ISOLATE_TYPES,
 
   jsg::TypeWrapperExtension<PromiseWrapper>,

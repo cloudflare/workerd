@@ -21,6 +21,7 @@ namespace workerd::api {
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObjectId;
+class SqlDatabase;
 
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate);
 
@@ -177,10 +178,8 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectStorage(IoPtr<ActorCache> cache)
-    : cache(kj::mv(cache)) {}
-  DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv)
-    : cache(kj::mv(sqliteKv)) {}
+  DurableObjectStorage(IoPtr<ActorCache> cache);
+  DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv);
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -199,6 +198,8 @@ public:
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
+  jsg::Ref<SqlDatabase> getSql(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -210,6 +211,7 @@ public:
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
+    JSG_READONLY_PROTOTYPE_PROPERTY(sql, getSql);
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
@@ -235,6 +237,7 @@ protected:
   }
 
 private:
+  jsg::Ref<SqlDatabase> sql;
   kj::OneOf<IoPtr<ActorCache>, IoPtr<ActorSqlite>> cache;
 };
 

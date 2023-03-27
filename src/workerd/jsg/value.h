@@ -33,6 +33,20 @@ class PrimitiveWrapper {
   // because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
 
 public:
+  static constexpr const char* getName(nullptr_t*) { return "null"; }
+
+  v8::Local<v8::Primitive> wrap(
+      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
+      nullptr_t value) {
+    return wrap(context->GetIsolate(), creator, value);
+  }
+
+  v8::Local<v8::Primitive> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator,
+      nullptr_t value) {
+    return v8::Null(isolate);
+  }
+
   static constexpr const char* getName(double*) { return "number"; }
 
   v8::Local<v8::Number> wrap(

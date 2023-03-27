@@ -13,6 +13,7 @@
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-storage.h>
+#include "sql.h"
 
 namespace workerd::api {
 
@@ -484,6 +485,11 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
       getCache(OP_DELETE_ALARM).setAlarm(nullptr, options));
 }
 
+DurableObjectStorage::DurableObjectStorage(IoPtr<ActorCache> cache)
+  : sql(nullptr), cache(kj::mv(cache)) {}
+DurableObjectStorage::DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv)
+  : sql(jsg::alloc<SqlDatabase>(sqliteKv->db)), cache(kj::mv(sqliteKv)) {}
+
 jsg::Promise<void> DurableObjectStorage::deleteAll(
     jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
@@ -673,6 +679,11 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
     }
   }
   KJ_UNREACHABLE;
+}
+
+jsg::Ref<SqlDatabase> DurableObjectStorage::getSql(jsg::Lock& js) {
+  sql->storage = JSG_THIS;
+  return sql.addRef();
 }
 
 ActorCacheInterface& DurableObjectTransaction::getCache(OpName op) {
