@@ -188,9 +188,11 @@ void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
 
 WritableStream::WritableStream(
     IoContext& ioContext,
-    kj::Own<WritableStreamSink> sink)
+    kj::Own<WritableStreamSink> sink,
+    kj::Maybe<uint64_t> maybeHighWaterMark)
     : ioContext(ioContext),
-      controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)))) {
+      controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)),
+                                                            maybeHighWaterMark)) {
   getController().setOwnerRef(*this);
 }
 

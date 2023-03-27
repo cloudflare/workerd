@@ -81,7 +81,15 @@ class IdentityTransformStream: public TransformStream {
 public:
   using TransformStream::TransformStream;
 
-  static jsg::Ref<IdentityTransformStream> constructor(jsg::Lock& js);
+  struct QueuingStrategy {
+    jsg::Optional<uint64_t> highWaterMark;
+
+    JSG_STRUCT(highWaterMark);
+  };
+
+  static jsg::Ref<IdentityTransformStream> constructor(
+      jsg::Lock& js,
+      jsg::Optional<QueuingStrategy> queuingStrategy = nullptr);
 
   JSG_RESOURCE_TYPE(IdentityTransformStream) {
     JSG_INHERIT(TransformStream);
@@ -98,7 +106,10 @@ class FixedLengthStream: public IdentityTransformStream {
 public:
   using IdentityTransformStream::IdentityTransformStream;
 
-  static jsg::Ref<FixedLengthStream> constructor(jsg::Lock& js, uint64_t expectedLength);
+  static jsg::Ref<FixedLengthStream> constructor(
+      jsg::Lock& js,
+      uint64_t expectedLength,
+      jsg::Optional<QueuingStrategy> queuingStrategy = nullptr);
 
   JSG_RESOURCE_TYPE(FixedLengthStream) {
     JSG_INHERIT(IdentityTransformStream);

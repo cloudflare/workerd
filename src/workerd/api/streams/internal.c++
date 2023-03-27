@@ -763,6 +763,7 @@ jsg::Promise<void> WritableStreamInternalController::write(
       }
 
       auto prp = js.newPromiseAndResolver<void>();
+      increaseCurrentWriteBufferSize(js, byteLength);
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
         .event = Write {
@@ -778,6 +779,45 @@ jsg::Promise<void> WritableStreamInternalController::write(
   }
 
   KJ_UNREACHABLE;
+}
+
+void WritableStreamInternalController::increaseCurrentWriteBufferSize(
+    jsg::Lock& js,
+    uint64_t amount) {
+  currentWriteBufferSize += amount;
+  KJ_IF_MAYBE(highWaterMark, maybeHighWaterMark) {
+    updateBackpressure(js, (*highWaterMark) - currentWriteBufferSize <= 0);
+  }
+}
+
+void WritableStreamInternalController::decreaseCurrentWriteBufferSize(
+    jsg::Lock& js,
+    uint64_t amount) {
+  currentWriteBufferSize -= amount;
+  KJ_IF_MAYBE(highWaterMark, maybeHighWaterMark) {
+    updateBackpressure(js, (*highWaterMark) - currentWriteBufferSize <= 0);
+  }
+}
+
+void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool backpressure) {
+  KJ_IF_MAYBE(writerLock, writeState.tryGet<WriterLocked>()) {
+    if (backpressure) {
+      // Per the spec, when backpressure is updated and is true, we replace the existing
+      // ready promise on the writer with a new pending promise, regardless of whether
+      // the existing one is resolved or not.
+      auto prp = js.newPromiseAndResolver<void>();
+      prp.promise.markAsHandled();
+      writerLock->setReadyFulfiller(prp);
+      return;
+    }
+
+    // When backpressure is updated and is false, we resolve the ready promise on the writer
+    maybeResolvePromise(writerLock->getReadyFulfiller());
+  }
+}
+
+void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) {
+  maybeHighWaterMark = highWaterMark;
 }
 
 jsg::Promise<void> WritableStreamInternalController::close(
@@ -1010,7 +1050,12 @@ kj::Maybe<int> WritableStreamInternalController::getDesiredSize() {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) { return uint(0); }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
-    KJ_CASE_ONEOF(writable, Writable) { return 1; }
+    KJ_CASE_ONEOF(writable, Writable) {
+      KJ_IF_MAYBE(highWaterMark, maybeHighWaterMark) {
+        return (*highWaterMark) - currentWriteBufferSize;
+      }
+      return 1;
+    }
   }
 
   KJ_UNREACHABLE;
@@ -1024,24 +1069,27 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   auto closedPrp = js.newPromiseAndResolver<void>();
   closedPrp.promise.markAsHandled();
 
-  auto readyPromise = js.resolvedPromise();
+  auto readyPrp = js.newPromiseAndResolver<void>();
+  readyPrp.promise.markAsHandled();
 
-  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver));
+  auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       maybeResolvePromise(lock.getClosedFulfiller());
+      maybeResolvePromise(lock.getReadyFulfiller());
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       maybeRejectPromise<void>(lock.getClosedFulfiller(), errored.getHandle(js));
+      maybeRejectPromise<void>(lock.getReadyFulfiller(), errored.getHandle(js));
     }
     KJ_CASE_ONEOF(writable, Writable) {
-      // Nothing to do.
+      maybeResolvePromise(lock.getReadyFulfiller());
     }
   }
 
   writeState = kj::mv(lock);
-  writer.attach(*this, kj::mv(closedPrp.promise), kj::mv(readyPromise));
+  writer.attach(*this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
@@ -1076,6 +1124,7 @@ void WritableStreamInternalController::doClose() {
   state.init<StreamStates::Closed>();
   KJ_IF_MAYBE(locked, writeState.tryGet<WriterLocked>()) {
     maybeResolvePromise(locked->getClosedFulfiller());
+    maybeResolvePromise(locked->getReadyFulfiller());
     writeState.init<Locked>();
   } else KJ_IF_MAYBE(locked, writeState.tryGet<PipeLocked>()) {
     writeState.init<Unlocked>();
@@ -1087,6 +1136,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
   state.init<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_MAYBE(locked, writeState.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(locked->getClosedFulfiller(), reason);
+    maybeResolvePromise(locked->getReadyFulfiller());
     writeState.init<Locked>();
   } else KJ_IF_MAYBE(locked, writeState.tryGet<PipeLocked>()) {
     writeState.init<Unlocked>();
@@ -1197,6 +1247,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       auto& writable = state.get<Writable>();
       auto check = makeChecker(request);
 
+      auto amountToWrite = request.bytes.size();
+
       auto promise = writable->write(request.bytes.begin(), request.bytes.size())
           .attach(kj::mv(request.ownBytes));
 
@@ -1210,18 +1262,20 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // That's a larger refactor, though.
       return ioContext.awaitIoLegacy(kj::mv(promise)).then(js,
           ioContext.addFunctor(
-            [this, check, maybeAbort](jsg::Lock& js) -> jsg::Promise<void> {
+            [this, check, maybeAbort, amountToWrite](jsg::Lock& js) -> jsg::Promise<void> {
         auto& request = check();
         maybeResolvePromise(request.promise);
+        decreaseCurrentWriteBufferSize(js, amountToWrite);
         queue.pop_front();
         maybeAbort(js, request);
         return writeLoop(js, IoContext::current());
       }), ioContext.addFunctor(
-            [this, check, maybeAbort](jsg::Lock& js, jsg::Value reason)
+            [this, check, maybeAbort, amountToWrite](jsg::Lock& js, jsg::Value reason)
                 -> jsg::Promise<void> {
           auto handle = reason.getHandle(js);
           auto& request = check();
           auto& writable = state.get<Writable>();
+          decreaseCurrentWriteBufferSize(js, amountToWrite);
           maybeRejectPromise<void>(request.promise, handle);
           queue.pop_front();
           if (!maybeAbort(js, request)) {

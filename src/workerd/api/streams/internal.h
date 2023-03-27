@@ -226,8 +226,11 @@ public:
       : state(closed) {}
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
-  explicit WritableStreamInternalController(Writable writable)
-      : state(kj::mv(writable)) {}
+  explicit WritableStreamInternalController(Writable writable,
+                                            kj::Maybe<uint64_t> maybeHighWaterMark = nullptr)
+      : state(kj::mv(writable)),
+        maybeHighWaterMark(maybeHighWaterMark) {
+}
 
   WritableStreamInternalController(WritableStreamInternalController&& other) = default;
   WritableStreamInternalController& operator=(WritableStreamInternalController&& other) = default;
@@ -270,6 +273,8 @@ public:
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
+  void setHighWaterMark(uint64_t highWaterMark);
+
 private:
   bool isClosedOrClosing();
 
@@ -303,6 +308,17 @@ private:
   kj::OneOf<Unlocked, Locked, PipeLocked, WriterLocked> writeState = Unlocked();
 
   kj::Maybe<PendingAbort> maybePendingAbort;
+
+  uint64_t currentWriteBufferSize = 0;
+  kj::Maybe<uint64_t> maybeHighWaterMark;
+  // The highWaterMark is the total amount of data currently buffered in
+  // the controller waiting to be flushed out to the underlying WritableStreamSink.
+  // It is used to implement backpressure signaling using desiredSize and the ready
+  // promise on the writer.
+
+  void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
+  void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
+  void updateBackpressure(jsg::Lock& js, bool backpressure);
 
   struct Write {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
