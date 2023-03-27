@@ -81,7 +81,7 @@ To use one of these entrypoints, you need to specify them in your `tsconfig.json
 
 ### Importable Types
 
-It's not always possible (or desirable) to modify the `tsconfig.json` settings for a project to include all the Cloudflare Workers types. For use cases like that, this package provides importable versions of it's types, which are usable with no additional `tsconfig.json` setup. For example:
+It's not always possible (or desirable) to modify the `tsconfig.json` settings for a project to include all the Cloudflare Workers types. For use cases like that, this package provides importable versions of its types, which are usable with no additional `tsconfig.json` setup. For example:
 
 ```ts
 import type { Request as WorkerRequest, ExecutionContext } from "@cloudflare/workers-types/experimental"
