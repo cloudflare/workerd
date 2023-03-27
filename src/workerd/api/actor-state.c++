@@ -13,6 +13,8 @@
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-storage.h>
+#include <workerd/io/actor-sqlite.h>
+#include "sql.h"
 
 namespace workerd::api {
 
@@ -633,6 +635,14 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
     return context.awaitIo(kj::mv(*p));
   } else {
     return js.resolvedPromise();
+  }
+}
+
+jsg::Ref<SqlDatabase> DurableObjectStorage::getSql(jsg::Lock& js) {
+  if (ActorSqlite* actorSql = dynamic_cast<ActorSqlite*>(&*cache)) {
+    return jsg::alloc<SqlDatabase>(actorSql->db, JSG_THIS);
+  } else {
+    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
   }
 }
 
