@@ -579,7 +579,10 @@ public:
                    "Useful for development, but not recommended in production.")
         .addOption({"experimental"}, [this]() { server.allowExperimental(); return true; },
                    "Permit the use of experimental features which may break backwards "
-                   "compatibility in a future release.");
+                   "compatibility in a future release.")
+        .addOption({"log-response"}, [this]() { server.allowLogResponse(); return true; },
+                   "Print response information for each request to workerd. "
+                   "This includes method, url, and status");
   }
 
   kj::MainFunc addServeOptions(kj::MainBuilder& builder) {

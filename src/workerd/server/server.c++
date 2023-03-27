@@ -23,6 +23,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/api/actor-state.h>
 #include "workerd-api.h"
+#include <iostream>
 
 namespace workerd::server {
 
@@ -2155,6 +2156,20 @@ private:
   kj::StringPtr physicalProtocol;
   kj::Own<HttpRewriter> rewriter;
 
+  struct RequestInfo {
+      RequestInfo(bool logResponse, kj::HttpMethod method, kj::StringPtr url, kj::Date requestTime) : requestTime(requestTime) {
+        this->logResponse = logResponse;
+        this->method = method;
+        this->url = url;
+        this->requestTime = requestTime;
+      }
+
+      bool logResponse;
+      kj::HttpMethod method;
+      kj::StringPtr url;
+      kj::Date requestTime;
+  };
+
   struct Connection final: public kj::HttpService, public kj::HttpServerErrorHandler {
     Connection(HttpListener& parent, kj::Maybe<kj::String> cfBlobJson)
         : parent(parent), cfBlobJson(kj::mv(cfBlobJson)),
@@ -2169,14 +2184,20 @@ private:
 
     class ResponseWrapper final: public kj::HttpService::Response {
     public:
-      ResponseWrapper(kj::HttpService::Response& inner, HttpRewriter& rewriter)
-          : inner(inner), rewriter(rewriter) {}
+      ResponseWrapper(kj::HttpService::Response& inner, HttpRewriter& rewriter, RequestInfo reqInfo)
+          : inner(inner), rewriter(rewriter), reqInfo(reqInfo) {}
 
       kj::Own<kj::AsyncOutputStream> send(
           uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
           kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
         auto rewrite = headers.cloneShallow();
-        rewriter.rewriteResponse(rewrite);
+        if (rewriter.needsRewriteResponse()) {
+          rewriter.rewriteResponse(rewrite);
+        }
+
+        if (reqInfo.logResponse) {
+          logResponse(reqInfo, statusCode, statusText);
+        }
         return inner.send(statusCode, statusText, rewrite, expectedBodySize);
       }
 
@@ -2186,9 +2207,26 @@ private:
         return inner.acceptWebSocket(rewrite);
       }
 
+    void logResponse(RequestInfo reqInfo, uint statusCode, kj::StringPtr statusText) {
+        auto time = (kj::systemPreciseCalendarClock().now() - reqInfo.requestTime);
+        kj::StringPtr codeColor;
+        kj::StringPtr textColor;
+
+        if (statusCode >= 400) {
+            codeColor = kj::StringPtr(" \x1b[91;1m");
+            textColor = kj::StringPtr(" \x1b[0;31m");
+        } else {
+            codeColor = kj::StringPtr(" \x1b[92;1m");
+            textColor = kj::StringPtr(" \x1b[0;32m");
+        }
+
+        std::cout << kj::str("\x1b[0;1m", reqInfo.method, "\x1b[0m ", reqInfo.url, codeColor, statusCode, textColor, statusText, " \x1b[90m", time, "\x1b[0m\n").cStr();
+    }
+
     private:
       kj::HttpService::Response& inner;
       HttpRewriter& rewriter;
+      RequestInfo reqInfo;
     };
 
     // ---------------------------------------------------------------------------
@@ -2202,8 +2240,10 @@ private:
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
-      if (parent.rewriter->needsRewriteResponse()) {
-        wrappedResponse = ownResponse = kj::heap<ResponseWrapper>(response, *parent.rewriter);
+      if (parent.owner.responseLog || parent.rewriter->needsRewriteRequest()) {
+        RequestInfo reqInfo(parent.owner.responseLog, method, url, kj::systemPreciseCalendarClock().now());
+
+        wrappedResponse = ownResponse = kj::heap<ResponseWrapper>(response, *parent.rewriter, reqInfo);
       }
 
       if (parent.rewriter->needsRewriteRequest() || cfBlobJson != nullptr) {
