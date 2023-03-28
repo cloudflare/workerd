@@ -117,6 +117,7 @@ public:
     JSG_STRUCT(jurisdiction);
 
     JSG_STRUCT_TS_DEFINE(type DurableObjectJurisdiction = "eu" | "fedramp");
+    // Possible values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#restricting-objects-to-a-jurisdiction
     JSG_STRUCT_TS_OVERRIDE({
       jurisdiction?: DurableObjectJurisdiction;
     });
@@ -142,6 +143,7 @@ public:
     JSG_STRUCT(locationHint);
 
     JSG_STRUCT_TS_DEFINE(type DurableObjectLocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | "oc" | "afr" | "me");
+    // Possible values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#providing-a-location-hint
     JSG_STRUCT_TS_OVERRIDE({
       locationHint?: DurableObjectLocationHint;
     });
