@@ -275,7 +275,13 @@ public:
     kj::Array<kj::String> delimitedPrefixes;
 
     JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
-    JSG_STRUCT_TS_OVERRIDE(R2Objects);
+    JSG_STRUCT_TS_OVERRIDE(type R2Objects = {
+      objects: R2Object[];
+      delimitedPrefixes: string[];
+    } & (
+      | { truncated: true; cursor: string }
+      | { truncated: false }
+    ));
   };
 
   struct ListOptions {
