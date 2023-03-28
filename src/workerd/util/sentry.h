@@ -9,6 +9,7 @@
 #include <kj/common.h>
 #include <kj/string.h>
 #include <kj/exception.h>
+#include <kj/time.h>
 #include <stdint.h>
 
 namespace workerd {
@@ -47,4 +48,42 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     KJ_LOG(severity,  __VA_ARGS__); \
   }
 
-}  // namespace workerd
+// Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY.
+#define LOG_ERROR_ONCE(msg, ...)                                               \
+  do {                                                                         \
+    static bool logOnce KJ_UNUSED = [&]() {                                    \
+      KJ_LOG(ERROR, msg, ##__VA_ARGS__);                                       \
+      return true;                                                             \
+    }();                                                                       \
+  } while (0)
+
+#define LOG_ERROR_ONCE_IF(cond, msg, ...)                                      \
+  do {                                                                         \
+    if (cond) {                                                                \
+      LOG_ERROR_ONCE(msg, ##__VA_ARGS__);                                      \
+    }                                                                          \
+  } while (0)
+
+// Slightly more expensive than LOG_ERROR_ONCE. Avoid putting into a hot path (e.g. within a loop)
+// where an overhead of ~hundreds of nanoseconds per evaluation to retrieve the current time would
+// be prohibitive.
+#define LOG_ERROR_PERIODICALLY(msg, ...)                                       \
+  do {                                                                         \
+    static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) =                          \
+        kj::origin<kj::TimePoint>();                                           \
+    const auto now = kj::systemCoarseMonotonicClock().now();                   \
+    const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                     \
+    if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                               \
+      KJ_UNIQUE_NAME(lastLogged) = now;                                        \
+      KJ_LOG(ERROR, msg, ##__VA_ARGS__);                                       \
+    }                                                                          \
+  } while (0)
+
+#define LOG_ERROR_PERIODICALLY_IF(cond, msg, ...)                              \
+  do {                                                                         \
+    if (cond) {                                                                \
+      LOG_ERROR_PERIODICALLY(msg, ##__VA_ARGS__);                              \
+    }                                                                          \
+  } while (0)
+
+} // namespace workerd
