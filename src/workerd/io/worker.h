@@ -16,6 +16,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/actor-storage.capnp.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 
 namespace v8 { class Isolate; }
 
@@ -36,7 +37,6 @@ namespace api {
 }
 
 class IoContext;
-class ActorCache;
 class InputGate;
 class OutputGate;
 
@@ -633,13 +633,24 @@ class Worker::Actor final: public kj::Refcounted {
   // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
 
 public:
+  using MakeActorCacheFunc = kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(
+      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate)>;
+  // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
+  // can be used to customize the storage implementation. This will be called synchronously in
+  // the constructor.
+
   using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
-      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCache& actorCache)>;
+      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)>;
+  // Callback which constructs the `DurableObjectStorage` instance for an actor. This can be used
+  // to customize the JavaScript API.
+  //
+  // TODO(cleanup): Can we refactor the (internal-codebase) user of this so that it doesn't need
+  //   to customize the JS API but only the underlying ActorCacheInterface?
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
-        bool hasTransient, kj::Maybe<rpc::ActorStorage::Stage::Client> persistent,
+        bool hasTransient, MakeActorCacheFunc makeActorCache,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
         TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
@@ -679,7 +690,7 @@ public:
   const Id& getId();
   Id cloneId();
   kj::Maybe<jsg::Value> getTransient(Worker::Lock& lock);
-  kj::Maybe<ActorCache&> getPersistent();
+  kj::Maybe<ActorCacheInterface&> getPersistent();
 
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for

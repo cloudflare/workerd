@@ -15,7 +15,6 @@
 #include <workerd/io/promise-wrapper.h>
 #include "util.h"
 #include <workerd/io/actor-cache.h>
-#include <workerd/io/actor-sqlite.h>
 
 namespace workerd::api {
 
@@ -36,7 +35,7 @@ public:
     jsg::Optional<bool> allowConcurrency;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::ReadOptions() const {
+    inline operator ActorCacheOps::ReadOptions() const {
       return {
         .noCache = noCache.orDefault(false)
       };
@@ -70,7 +69,7 @@ public:
     jsg::Optional<bool> allowConcurrency;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::ReadOptions() const {
+    inline operator ActorCacheOps::ReadOptions() const {
       return {
         .noCache = noCache.orDefault(false)
       };
@@ -87,7 +86,7 @@ public:
     jsg::Optional<bool> allowUnconfirmed;
     jsg::Optional<bool> noCache;
 
-    inline operator ActorCache::WriteOptions() const {
+    inline operator ActorCacheOps::WriteOptions() const {
       return {
         .allowUnconfirmed = allowUnconfirmed.orDefault(false),
         .noCache = noCache.orDefault(false)
@@ -112,7 +111,7 @@ public:
     jsg::Optional<bool> allowUnconfirmed;
     // We don't allow noCache for alarm puts.
 
-    inline operator ActorCache::WriteOptions() const {
+    inline operator ActorCacheOps::WriteOptions() const {
       return {
         .allowUnconfirmed = allowUnconfirmed.orDefault(false),
       };
@@ -142,7 +141,7 @@ protected:
     return op == OP_GET || op == OP_LIST || op == OP_ROLLBACK;
   }
 
-  virtual ActorCacheInterface& getCache(OpName op) = 0;
+  virtual ActorCacheOps& getCache(OpName op) = 0;
 
   virtual bool useDirectIo() = 0;
   // Whether to skip caching and allow concurrency on all operations.
@@ -177,10 +176,8 @@ class DurableObjectTransaction;
 
 class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectStorage(IoPtr<ActorCache> cache)
+  DurableObjectStorage(IoPtr<ActorCacheInterface> cache)
     : cache(kj::mv(cache)) {}
-  DurableObjectStorage(IoPtr<ActorSqlite> sqliteKv)
-    : cache(kj::mv(sqliteKv)) {}
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -228,19 +225,19 @@ public:
   }
 
 protected:
-  ActorCacheInterface& getCache(kj::StringPtr op) override;
+  ActorCacheOps& getCache(kj::StringPtr op) override;
 
   bool useDirectIo() override {
     return false;
   }
 
 private:
-  kj::OneOf<IoPtr<ActorCache>, IoPtr<ActorSqlite>> cache;
+  IoPtr<ActorCacheInterface> cache;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {
 public:
-  DurableObjectTransaction(IoOwn<ActorCache::Transaction> cacheTxn)
+  DurableObjectTransaction(IoOwn<ActorCacheInterface::Transaction> cacheTxn)
     : cacheTxn(kj::mv(cacheTxn)) {}
 
   kj::Promise<void> maybeCommit();
@@ -281,14 +278,14 @@ public:
   }
 
 protected:
-  ActorCacheInterface& getCache(kj::StringPtr op) override;
+  ActorCacheOps& getCache(kj::StringPtr op) override;
 
   bool useDirectIo() override {
     return false;
   }
 
 private:
-  kj::Maybe<IoOwn<ActorCache::Transaction>> cacheTxn;
+  kj::Maybe<IoOwn<ActorCacheInterface::Transaction>> cacheTxn;
   // Becomes null when committed or rolled back.
 
   bool rolledBack = false;

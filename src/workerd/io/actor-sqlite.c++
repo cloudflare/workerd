@@ -4,20 +4,21 @@
 
 #include "actor-sqlite.h"
 #include <algorithm>
+#include <workerd/jsg/jsg.h>
 
 namespace workerd {
 
-kj::OneOf<kj::Maybe<ActorCacheInterface::Value>,
-          kj::Promise<kj::Maybe<ActorCacheInterface::Value>>>
+kj::OneOf<kj::Maybe<ActorCacheOps::Value>,
+          kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
     ActorSqlite::get(Key key, ReadOptions options) {
-  kj::Maybe<ActorCacheInterface::Value> result;
+  kj::Maybe<ActorCacheOps::Value> result;
   kv.get(key, [&](ValuePtr value) {
     result = kj::heapArray(value);
   });
   return result;
 }
 
-kj::OneOf<ActorCacheInterface::GetResultList, kj::Promise<ActorCacheInterface::GetResultList>>
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
     ActorSqlite::get(kj::Array<Key> keys, ReadOptions options) {
   kj::Vector<KeyValuePair> results;
   for (auto& key: keys) {
@@ -36,7 +37,7 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
   JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
 }
 
-kj::OneOf<ActorCacheInterface::GetResultList, kj::Promise<ActorCacheInterface::GetResultList>>
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
     ActorSqlite::list(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
   kj::Vector<KeyValuePair> results;
   kv.list(begin, end, limit, SqliteKv::FORWARD, [&](KeyPtr key, ValuePtr value) {
@@ -47,7 +48,7 @@ kj::OneOf<ActorCacheInterface::GetResultList, kj::Promise<ActorCacheInterface::G
   return GetResultList(kj::mv(results));
 }
 
-kj::OneOf<ActorCacheInterface::GetResultList, kj::Promise<ActorCacheInterface::GetResultList>>
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
     ActorSqlite::listReverse(Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit,
                                ReadOptions options) {
   kj::Vector<KeyValuePair> results;
@@ -89,6 +90,44 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   // TODO(sqlite): Implement alarms for sqlite storage.
   JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
+  // TODO(sqlite): Implement transactions.
+  JSG_FAIL_REQUIRE(Error, "transaction() not yet implemented for SQLite-backed storage");
+}
+
+ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
+  uint count = kv.deleteAll();
+  return {
+    .backpressure = nullptr,
+    .count = count,
+  };
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::evictStale(kj::Date now) {
+  // TODO(sqlite): This is called every time the isolate lock is taken. We can temporarily delay
+  //   the lock by returning a promise. This could be a good time to apply backpressure on the
+  //   application e.g. while waiting for an asynchronous checkpoint to complete or for replication
+  //   buffers to go down.
+  return nullptr;
+}
+
+void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
+  // Nothing here (yet).
+}
+
+kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+void ActorSqlite::cancelDeferredAlarmDeletion() {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
+  // TODO(sqlite): onNoPendingFlush() should wait for replication if applicable.
+  return nullptr;
 }
 
 }  // namespace workerd
