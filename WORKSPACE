@@ -253,8 +253,8 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "a51a1bb4c83ee9b63d7dceed0eb2643e23cbf06a",
-    shallow_since = "1677573722 +0000",
+    commit = "96fed67922e5f54a027aed80259e5083769e33e2",
+    shallow_since = "1679318470 +0000",
     patch_args = [ "-p1" ],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -262,17 +262,15 @@ git_repository(
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
         "//:patches/v8/0005-Allow-compiling-on-macOS-catalina-and-ventura.patch",
-        "//:patches/v8/0006-include-fix-for-compiling-v8-from-workerd.patch",
-        "//:patches/v8/0007-Explicitly-include-ICUs-utf16.h.patch",
-        "//:patches/v8/0008-Fix-v8-code_generator-imports.patch",
+        "//:patches/v8/0006-Fix-v8-code_generator-imports.patch",
     ],
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "1b7d391f0528fb3a4976b7541b387ee04f915f83",
-    shallow_since = "1668814382 +0000",
+    commit = "c6b68522318204f795a8f04caebf6c0beb679cc4",
+    shallow_since = "1676561136 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
     patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ]
 )
@@ -280,8 +278,8 @@ new_git_repository(
 new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    commit = "521ac34ebd795939c7e16b37d9d3ddb40e8ed556",
-    shallow_since = "1662669790 -0700",
+    commit = "147f65333c38ddd1ebf554e89965c243c8ce50b3",
+    shallow_since = "1676317690 -0800",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
 )
 
