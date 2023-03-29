@@ -169,27 +169,27 @@ public:
   inline explicit operator bool() const { return pos < ptr.size(); }
 
   inline bool operator<(UsvStringIterator& other) const {
-    return pos < other.pos && ptr == other.ptr;
+    return pos < other.pos;
   }
 
   inline bool operator<=(UsvStringIterator& other) const {
-    return pos <= other.pos && ptr == other.ptr;
+    return pos <= other.pos;
   }
 
   inline bool operator>(UsvStringIterator& other) const {
-    return pos > other.pos && ptr == other.ptr;
+    return pos > other.pos;
   }
 
   inline bool operator>=(UsvStringIterator& other) const {
-    return pos >= other.pos && ptr == other.ptr;
+    return pos >= other.pos;
   }
 
   inline bool operator==(const UsvStringIterator& other) const {
-    return pos == other.pos && ptr == other.ptr;
+    return pos == other.pos;
   }
 
   inline bool operator!=(const UsvStringIterator& other) const {
-    return pos != other.pos || ptr != other.ptr;
+    return pos != other.pos;
   }
 
   inline size_t position() const { return pos; }
