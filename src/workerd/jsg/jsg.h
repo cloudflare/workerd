@@ -38,14 +38,17 @@
   KJ_FAIL_REQUIRE(kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // JSG_REQUIRE + KJ_FAIL_REQUIRE
 
+#define JSG_WARN_ONCE(msg, ...) \
+    static bool logOnce KJ_UNUSED = ([&] { \
+      KJ_LOG(WARNING, msg, ##__VA_ARGS__); \
+      return true; \
+    })() \
+
 // Conditionally log a warning, at most once. Useful for determining if code changes would break
 // any existing scripts.
-#define JSG_WARN_ONCE_IF(cond, msg) \
+#define JSG_WARN_ONCE_IF(cond, msg, ...) \
   if (cond) { \
-    static bool logOnce KJ_UNUSED = ([] { \
-      KJ_LOG(WARNING, msg); \
-      return true; \
-    })(); \
+    JSG_WARN_ONCE(msg, ##__VA_ARGS__); \
   }
 
 // These are passthrough functions to KJ. We expect the error string to be
