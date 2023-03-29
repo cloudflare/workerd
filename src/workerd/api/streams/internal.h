@@ -147,7 +147,7 @@ public:
 
   Tee tee(jsg::Lock& js) override;
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js);
+  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(jsg::Lock& js, bool ignoreDisturbed=false);
 
   bool isClosedOrErrored() const override {
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();

@@ -169,7 +169,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   //
   // Detach the AsyncIoStream from the Writable/Readable streams and make them unusable.
   writable->removeSink(js);
-  readable->detach(js);
+  readable = readable->detach(js, true);
   closeFulfiller.resolver.resolve();
 
   auto acceptedHostname = domain.asPtr();
