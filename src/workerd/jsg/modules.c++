@@ -5,6 +5,7 @@
 #include "modules.h"
 #include "promise.h"
 #include <kj/mutex.h>
+#include <openssl/sha.h>
 
 namespace workerd::jsg {
 namespace {
@@ -269,9 +270,54 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
   // Create a dummy script origin for it to appear in Sources panel.
   auto isolate = js.v8Isolate;
   v8::ScriptOrigin origin(isolate, v8StrIntern(isolate, name));
-  v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
-  return NonModuleScript(js,
-      check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
+
+  // Compute code sha256
+  char shaHex[SHA256_DIGEST_LENGTH * 2];
+  {
+    SHA256_CTX ctx;
+    byte sha[SHA256_DIGEST_LENGTH];
+    KJ_ASSERT(SHA256_Init(&ctx));
+    KJ_ASSERT(SHA256_Update(&ctx, code.begin(), code.size()));
+    KJ_ASSERT(SHA256_Final(sha, &ctx));
+    for (size_t i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+      sprintf(shaHex+i*2, "%02x", sha[i]);
+    }
+  }
+
+  // Check the file cache
+  auto path = kj::Path::parse(kj::str("tmp/v8cache/", shaHex));
+  auto fs = kj::newDiskFilesystem();
+  auto maybeCacheFile = fs->getRoot().tryOpenFile(path);
+
+  KJ_IF_MAYBE(cacheFile, maybeCacheFile) {
+    // read and prepare cache data
+    auto cachedBytes = cacheFile->get()->readAllBytes();
+    auto data = new uint8_t[cachedBytes.size()];
+    memcpy(data, cachedBytes.begin(), cachedBytes.size());
+    auto cachedData = new v8::ScriptCompiler::CachedData(
+        data, cachedBytes.size(), v8::ScriptCompiler::CachedData::BufferPolicy::BufferOwned);
+
+    // compile and verify that cached data was used
+    v8::ScriptCompiler::Source source(v8Str(isolate, code), origin, cachedData);
+    auto script = check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source, v8::ScriptCompiler::kConsumeCodeCache));
+    KJ_ASSERT(!cachedData->rejected);
+
+    return NonModuleScript(js, script);
+  } else {
+    v8::ScriptCompiler::Source source(v8Str(isolate, code), origin);
+    auto script = check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source));
+
+    // save cached data to file cache
+    {
+      auto cachedData = std::unique_ptr<v8::ScriptCompiler::CachedData>(
+          v8::ScriptCompiler::CreateCodeCache(script));
+      KJ_ASSERT(!cachedData->rejected);
+      auto file = fs->getRoot().openFile(path, kj::WriteMode::CREATE);
+      file->writeAll(kj::ArrayPtr<const uint8_t>(cachedData->data, cachedData->length));
+    }
+
+    return NonModuleScript(js, script);
+  }
 }
 
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
@@ -345,7 +391,6 @@ v8::Local<v8::Module> compileEsmModule(
     //   });
     //   return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options));
     // }
-
     v8::ScriptCompiler::Source source(contentStr, origin);
     auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
 
