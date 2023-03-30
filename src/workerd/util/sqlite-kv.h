@@ -47,7 +47,7 @@ public:
   bool delete_(KeyPtr key);
   // Delete the key and return whether it was matched.
 
-  void deleteAll();
+  uint deleteAll();
 
   // TODO(perf): Should we provide multi-get, multi-put, and multi-delete? It's a bit tricky to
   //   implement them as single SQL queries, while still using prepared statements. The c-array
