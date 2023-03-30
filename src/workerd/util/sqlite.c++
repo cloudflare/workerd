@@ -1159,7 +1159,6 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
     : directory(directory),
       ownLockManager(kj::heap<DefaultLockManager>()),
       lockManager(*ownLockManager),
-      name(kj::str("kj-", &directory)),
       native(*sqlite3_vfs_find(nullptr)) {
   KJ_IF_MAYBE(fd, directory.getFd()) {
     rootFd = *fd;
@@ -1173,7 +1172,6 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
 SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, const LockManager& lockManager)
     : directory(directory),
       lockManager(lockManager),
-      name(kj::str("kj-", &directory)),
       native(*sqlite3_vfs_find(nullptr)),
       // Always use KJ VFS when using a custom LockManager.
       vfs(kj::heap(makeKjVfs())) {
@@ -1182,6 +1180,11 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, const LockManager& lock
 
 SqliteDatabase::Vfs::~Vfs() noexcept(false) {
   sqlite3_vfs_unregister(vfs);
+}
+
+kj::String SqliteDatabase::Vfs::makeName() {
+  // A pointer to this object should be suitably unique. (Ugghhhh.)
+  return kj::str("kj-", this);
 }
 
 // =======================================================================================

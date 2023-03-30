@@ -258,10 +258,12 @@ private:
   const kj::Directory& directory;
   kj::Own<LockManager> ownLockManager;
   const LockManager& lockManager;
-  kj::String name;
 
   sqlite3_vfs& native;  // the system's default VFS implementation
   kj::Own<sqlite3_vfs> vfs;  // our VFS
+
+  kj::String name = makeName();
+  // Value returned by getName();
 
   int rootFd = -1;
   // Result of `directory.getFd()`, if it returns non-null. Cached here for convenience.
@@ -278,6 +280,10 @@ private:
   struct FileImpl;
   sqlite3_vfs makeKjVfs();
   // Create a VFS definition that actually delegates to the KJ filesystem.
+
+  kj::String makeName();
+  // Create the value returned by `getName()`. Called once at construction time and cached in
+  // `name`.
 
   friend class SqliteDatabase;
   class DefaultLockManager;
