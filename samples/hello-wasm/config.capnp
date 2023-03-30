@@ -31,5 +31,5 @@ const helloWasm :Workerd.Worker = (
     ( name = "entrypoint", esModule = embed "./build/worker/shim.mjs" ),
     ( name = "./index.wasm", wasm = embed "./build/worker/index.wasm" )
   ],
-  compatibilityDate = "2022-09-16",
+  compatibilityDate = "2023-03-14",
 );

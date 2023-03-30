@@ -18,7 +18,7 @@ $ ./workerd serve config.capnp
 To run using bazel
 
 ```sh
-$ bazel run //src/workerd/server:workerd -- serve ~/cloudflare/workerd/samples/hellowasm/config.capnp
+$ bazel run //src/workerd/server:workerd -- serve $(pwd)/samples/hello-wasm/config.capnp
 ```
 
 To create a standalone binary that can be run:
