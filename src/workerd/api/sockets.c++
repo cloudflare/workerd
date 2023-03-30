@@ -43,8 +43,8 @@ bool isValidHost(kj::StringPtr host) {
 
 jsg::Ref<Socket> setupSocket(
     jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
-    jsg::Optional<SocketOptions> options, kj::TlsStarterCallback tlsStarter, bool isSecureSocket,
-    kj::String domain) {
+    jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
+    bool isSecureSocket, kj::String domain) {
   auto& ioContext = IoContext::current();
   auto connDisconnPromise = connection->whenWriteDisconnected();
 
@@ -112,8 +112,8 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   KJ_IF_MAYBE(opts, options) {
     httpConnectSettings.useTls = opts->useSecureTransport;
   }
-  kj::TlsStarterCallback tlsStarter;
-  httpConnectSettings.tlsStarter = &tlsStarter;
+  kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
+  httpConnectSettings.tlsStarter = tlsStarter;
   auto request = httpClient->connect(addressStr, *headers, httpConnectSettings);
   request.connection = request.connection.attach(kj::mv(httpClient));
 
@@ -179,8 +179,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
     }
   }
   // All non-secure sockets should have a tlsStarter.
-  kj::Own<kj::AsyncIoStream> secure = KJ_ASSERT_NONNULL(tlsStarter)(acceptedHostname);
-  return setupSocket(js, kj::mv(secure), kj::mv(options), nullptr, true, kj::mv(domain));
+  kj::Own<kj::AsyncIoStream> secure = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname);
+  return setupSocket(js, kj::mv(secure), kj::mv(options), kj::mv(tlsStarter), true, kj::mv(domain));
 }
 
 void Socket::handleProxyStatus(
