@@ -169,10 +169,10 @@ class StringSearch : private StringSearchBase {
   static inline int CharOccurrence(int* bad_char_occurrence,
                                    Char char_code) {
     if (sizeof(Char) == 1) {
-      return bad_char_occurrence[static_cast<int>(char_code)];
+      return bad_char_occurrence[static_cast<uint>(char_code)];
     }
     // Both pattern and subject are UC16. Reduce character to equivalence class.
-    int equiv_class = char_code % kUC16AlphabetSize;
+    uint equiv_class = char_code % kUC16AlphabetSize;
     return bad_char_occurrence[equiv_class];
   }
 
@@ -532,7 +532,7 @@ void StringSearch<Char>::PopulateBoyerMooreHorspoolTable() {
   }
   for (size_t i = start; i < pattern_length - 1; i++) {
     Char c = pattern_[i];
-    int bucket = (sizeof(Char) == 1) ? c : c % AlphabetSize();
+    uint bucket = (sizeof(Char) == 1) ? c : c % AlphabetSize();
     bad_char_occurrence[bucket] = i;
   }
 }

@@ -1153,7 +1153,12 @@ jsg::UsvString generatePatternString(kj::ArrayPtr<Part> partList, const CompileO
     return false;
   };
 
-  for (auto n = 0; n < partList.size(); n++) {
+  // On each iteration of the for loop, a JavaScript callback is invokved. If a new
+  // item is appended to the partList within that function, the loop must pick
+  // it up. Using the classic for (;;) syntax here allows for that. However, this does
+  // mean that it's possible for a user to trigger an infinite loop here if new items
+  // are added to the search params unconditionally on each iteration.
+  for (size_t n = 0; n < partList.size(); n++) {
     auto& part = partList[n];
     Part* previousPart = nullptr;
     Part* nextPart = nullptr;
@@ -1481,7 +1486,7 @@ URLPattern::URLPatternInit parseConstructorString(
     }
   };
 
-  const auto getSafeToken = [&tokenList](auto index) -> Token& {
+  const auto getSafeToken = [&tokenList](size_t index) -> Token& {
     if (index < tokenList.size()) {
       return tokenList[index];
     }
