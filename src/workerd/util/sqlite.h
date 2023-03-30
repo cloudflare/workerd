@@ -327,11 +327,11 @@ private:
   kj::Own<LockManager> ownLockManager;
   const LockManager& lockManager;
 
-  sqlite3_vfs& native;  // the system's default VFS implementation
-  kj::Own<sqlite3_vfs> vfs;  // our VFS
-
   kj::String name = makeName();
   // Value returned by getName();
+
+  sqlite3_vfs& native;  // the system's default VFS implementation
+  kj::Own<sqlite3_vfs> vfs;  // our VFS
 
   int rootFd = -1;
   // Result of `directory.getFd()`, if it returns non-null. Cached here for convenience.
