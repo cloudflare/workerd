@@ -85,36 +85,6 @@ void SwapBytes(kj::ArrayPtr<kj::byte> bytes) {
   }
 }
 
-enum class Encoding {
-  ASCII,
-  LATIN1,
-  UTF8,
-  UTF16LE,
-  BASE64,
-  BASE64URL,
-  HEX,
-};
-
-Encoding getEncoding(kj::StringPtr encoding) {
-  if (encoding == "utf8"_kj) {
-    return Encoding::UTF8;
-  } else if (encoding == "ascii") {
-    return Encoding::ASCII;
-  } else if (encoding == "latin1") {
-    return Encoding::LATIN1;
-  } else if (encoding == "utf16le") {
-    return Encoding::UTF16LE;
-  } else if (encoding == "base64") {
-    return Encoding::BASE64;
-  } else if (encoding == "base64url") {
-    return Encoding::BASE64URL;
-  } else if (encoding == "hex") {
-    return Encoding::HEX;
-  }
-
-  KJ_UNREACHABLE;
-}
-
 kj::Maybe<uint> tryFromHexDigit(char c) {
   if ('0' <= c && c <= '9') {
     return c - '0';
@@ -214,12 +184,33 @@ uint32_t writeInto(
   }
   KJ_UNREACHABLE;
 }
+}  // namespace
+
+Encoding getEncoding(kj::StringPtr encoding) {
+  if (encoding == "utf8"_kj) {
+    return Encoding::UTF8;
+  } else if (encoding == "ascii") {
+    return Encoding::ASCII;
+  } else if (encoding == "latin1") {
+    return Encoding::LATIN1;
+  } else if (encoding == "utf16le") {
+    return Encoding::UTF16LE;
+  } else if (encoding == "base64") {
+    return Encoding::BASE64;
+  } else if (encoding == "base64url") {
+    return Encoding::BASE64URL;
+  } else if (encoding == "hex") {
+    return Encoding::HEX;
+  }
+
+  KJ_UNREACHABLE;
+}
 
 kj::Array<kj::byte> decodeStringImpl(
     jsg::Lock& js,
     v8::Local<v8::String> string,
     Encoding encoding,
-    bool strict = false) {
+    bool strict) {
   if (string->Length() == 0) return kj::Array<kj::byte>();
 
   switch (encoding) {
@@ -267,7 +258,6 @@ kj::Array<kj::byte> decodeStringImpl(
   }
   KJ_UNREACHABLE;
 }
-}  // namespace
 
 uint32_t BufferUtil::byteLength(jsg::Lock& js, v8::Local<v8::String> str) {
   // Gets the UTF8 byte length for the given input. We use v8::String

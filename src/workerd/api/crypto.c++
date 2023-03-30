@@ -282,6 +282,10 @@ kj::Array<kj::StringPtr> CryptoKey::getUsages() const {
 }
 CryptoKeyUsageSet CryptoKey::getUsageSet() const { return impl->getUsages(); }
 
+bool CryptoKey::operator==(const CryptoKey& other) const {
+  return *impl == *other.impl;
+}
+
 jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(
     jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,

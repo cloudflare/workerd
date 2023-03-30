@@ -27,12 +27,37 @@ import {
   randomUUID,
 } from 'node-internal:crypto_random';
 
+import {
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
+} from 'node-internal:crypto_keys';
+
 export {
   randomBytes,
   randomFillSync,
   randomFill,
   randomInt,
   randomUUID,
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
 }
 
 // We do not implement the openssl secure heap.
@@ -60,6 +85,18 @@ export const fips = true;
 export function getFips() { return fips; }
 
 export default {
+  // Keys,
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
   // Random
   getRandomValues,
   randomBytes,

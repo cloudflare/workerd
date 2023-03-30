@@ -9,6 +9,7 @@
 
 #include "crypto.h"
 #include <openssl/evp.h>
+#include <openssl/bio.h>
 
 #define OSSLCALL(...) if ((__VA_ARGS__) != 1) \
     ::workerd::api::throwOpensslError(__FILE__, __LINE__, #__VA_ARGS__)
@@ -184,6 +185,8 @@ public:
 
   virtual kj::StringPtr getAlgorithmName() const = 0;
 
+  virtual bool operator==(const Impl& other) const { return false; }
+
   // JS API implementation
 
   virtual AlgorithmVariant getAlgorithm() const = 0;
@@ -253,9 +256,18 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 #define OSSL_NEW(T, ...) \
   OSSLCALL_OWN(T, T##_new(__VA_ARGS__), InternalDOMOperationError, "Error allocating crypto")
 
+#define OSSL_WRAP(T, ptr) \
+  kj::Own<T>(ptr, workerd::api::SslDisposer<T, &T##_free>::INSTANCE);
+
 #define BIGNUM_new BN_new
 #define BIGNUM_free BN_free
 // BIGNUM obnoxiously doesn't follow the naming convention...
+#define BIO_new BIO_new_mem_buf
+#define BIO_free BIO_free_all
+// Neither does BIO...
+
+#define OSSL_BIO(buf, ...) OSSL_NEW(BIO, buf.begin(), buf.size())
+// Wrap a kj::Array<kj::byte> (or kj::ArrayPtr) with an openssl BIO
 
 template <typename T>
 static inline T integerCeilDivision(T a, T b) {
@@ -263,6 +275,25 @@ static inline T integerCeilDivision(T a, T b) {
   static_assert(std::is_unsigned<T>::value);
   return a == 0 ? 0 : 1 + (a - 1) / b;
 }
+
+// Adopted from Node.js' crypto implementation. the MarkPopErrorOnReturn
+// and ClearErrorOnReturn mechanisms make working with the openssl error
+// stack a bit easier...
+struct MarkPopErrorOnReturn {
+  MarkPopErrorOnReturn() { ERR_set_mark(); }
+  ~MarkPopErrorOnReturn() { ERR_pop_to_mark(); }
+  KJ_DISALLOW_COPY_AND_MOVE(MarkPopErrorOnReturn);
+};
+
+struct ClearErrorOnReturn {
+  ClearErrorOnReturn() = default;
+  ~ClearErrorOnReturn() { ERR_clear_error(); }
+  KJ_DISALLOW_COPY_AND_MOVE(ClearErrorOnReturn);
+};
+
+// TODO(cleanup): Make these names more consistent since they are doing the same thing.
+kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk);
+kj::Own<EVP_PKEY> importRsaFromJwk(SubtleCrypto::JsonWebKey&& keyDataJwk);
 
 }  // namespace workerd::api
 

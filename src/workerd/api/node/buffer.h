@@ -98,6 +98,24 @@ public:
   }
 };
 
+enum class Encoding {
+  ASCII,
+  LATIN1,
+  UTF8,
+  UTF16LE,
+  BASE64,
+  BASE64URL,
+  HEX,
+};
+
+kj::Array<kj::byte> decodeStringImpl(
+    jsg::Lock& js,
+    v8::Local<v8::String> string,
+    Encoding encoding,
+    bool strict = false);
+
+Encoding getEncoding(kj::StringPtr encoding);
+
 #define EW_NODE_BUFFER_ISOLATE_TYPES       \
     api::node::BufferUtil,                 \
     api::node::BufferUtil::CompareOptions

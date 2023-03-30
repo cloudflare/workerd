@@ -170,6 +170,16 @@ public:
     JSG_STRUCT(name, modulusLength, publicExponent, hash);
   };
 
+  struct DsaKeyAlgorithm {
+    kj::StringPtr name;
+
+    DsaKeyAlgorithm clone() const {
+      return { name };
+    }
+
+    JSG_STRUCT(name);
+  };
+
   struct EllipticKeyAlgorithm {
     kj::StringPtr name;
     // "ECDSA" or "ECDH"
@@ -204,7 +214,7 @@ public:
 
   using AlgorithmVariant = kj::OneOf<
       KeyAlgorithm, AesKeyAlgorithm, HmacKeyAlgorithm, RsaKeyAlgorithm,
-      EllipticKeyAlgorithm, ArbitraryKeyAlgorithm>;
+      EllipticKeyAlgorithm, ArbitraryKeyAlgorithm, DsaKeyAlgorithm>;
 
   AlgorithmVariant getAlgorithm() const;
   kj::StringPtr getType() const;
@@ -218,6 +228,8 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(algorithm, getAlgorithm);
     JSG_READONLY_INSTANCE_PROPERTY(usages, getUsages);
   }
+
+  bool operator==(const CryptoKey& other) const;
 
   class Impl;
   // HACK: Needs to be public so derived classes can inherit from it.
@@ -674,6 +686,7 @@ private:
   api::CryptoKey::AesKeyAlgorithm,                    \
   api::CryptoKey::HmacKeyAlgorithm,                   \
   api::CryptoKey::RsaKeyAlgorithm,                    \
+  api::CryptoKey::DsaKeyAlgorithm,                    \
   api::CryptoKey::EllipticKeyAlgorithm,               \
   api::CryptoKey::ArbitraryKeyAlgorithm,              \
   api::DigestStream
