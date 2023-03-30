@@ -374,11 +374,8 @@ void reportStartupError(
           // TODO(soon): We add logging here to see if this hack is still necessary or if it can be
           // removed. Adding this additional logging should be temporary! If we hit this log in
           // sentry even once, then we'll keep the hack, otherwise we can likely safely remove it.
-          static bool logOnce KJ_UNUSED = ([] {
-            KJ_LOG(WARNING, "reportStartupError() customer-specific SyntaxError hack "
-                            "is still relevant.");
-            return true;
-          })();
+          JSG_WARN_ONCE("reportStartupError() customer-specific SyntaxError hack "
+                        "is still relevant.");
         } else {
           KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
           KJ_FAIL_REQUIRE("script startup threw exception");

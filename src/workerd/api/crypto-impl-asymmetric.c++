@@ -133,12 +133,8 @@ public:
 
       JSG_REQUIRE(EVP_MD_size(type) + paddingOverhead <= RSA_size(&rsa), DOMOperationError,
           "key too small for signing with given digest");
-      if (RSA_size(&rsa) < EVP_MD_size(type) + 32) {
-        static bool logOnce KJ_UNUSED = ([rsa] {
-          KJ_LOG(WARNING, "Signing with peculiar key size of ", RSA_size(&rsa), " bytes");
-          return true;
-        })();
-      }
+      JSG_WARN_ONCE_IF(RSA_size(&rsa) < EVP_MD_size(type) + 32,
+          "Signing with peculiar key size of ", RSA_size(&rsa), " bytes");
 
       // JSG_REQUIRE(EVP_MD_size(type) + 32 <= RSA_size(&rsa), DOMOperationError,
       //     "key too small for signing with given digest");
@@ -733,19 +729,11 @@ void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
   // TODO(soon): We should also enforce these limitations on imported keys. To see if this breaks
   // existing scripts only provide a warning in sentry for now.
   if (warnImport) {
-    if (modulusLength % 8 || modulusLength < 256 || modulusLength > 16384) {
-      static bool logOnce KJ_UNUSED = ([modulusLength] {
-        KJ_LOG(WARNING, "Imported RSA key has invalid modulus length ", modulusLength, ".");
-        return true;
-      })();
-    }
+    JSG_WARN_ONCE_IF(modulusLength % 8 || modulusLength < 256 || modulusLength > 16384,
+        "Imported RSA key has invalid modulus length ", modulusLength, ".");
     KJ_IF_MAYBE(v, fromBignum<unsigned>(publicExponent)) {
-      if (*v != 3 && *v != 65537) {
-        static bool logOnce KJ_UNUSED = ([v] {
-          KJ_LOG(WARNING, "Imported RSA key has invalid publicExponent ", *v,".");
-          return true;
-        })();
-      }
+      JSG_WARN_ONCE_IF(*v != 3 && *v != 65537,
+          "Imported RSA key has invalid publicExponent ", *v, ".");
     } else {
       JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
           "got a number larger than 2^32.");
