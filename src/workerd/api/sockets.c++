@@ -22,7 +22,7 @@ bool isValidHost(kj::StringPtr host) {
     return false;
   }
 
-  for (int i = 0; i < host.size(); i++) {
+  for (auto i : kj::indices(host)) {
     switch (host[i]) {
       case '-':
       case '.':

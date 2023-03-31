@@ -768,7 +768,7 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
   profile.setEndTime(cpuProfile->GetEndTime());
 
   auto nodes = profile.initNodes(allNodes.size());
-  for (int i=0; i < allNodes.size(); i++) {
+  for (auto i : kj::indices(allNodes)) {
     auto nodeBuilder = nodes[i];
     nodeBuilder.setId(allNodes[i]->GetNodeId());
 
@@ -795,7 +795,7 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
     allNodes[i]->GetLineTicks(lineBuffer, hitLineCount);
 
     auto positionTicks = nodeBuilder.initPositionTicks(hitLineCount);
-    for (int j=0; j < hitLineCount; j++) {
+    for (uint j=0; j < hitLineCount; j++) {
       auto positionTick = positionTicks[j];
       positionTick.setLine(lineBuffer[j].line);
       positionTick.setTicks(lineBuffer[j].hit_count);

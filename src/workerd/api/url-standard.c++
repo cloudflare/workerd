@@ -366,7 +366,7 @@ void percentEncodeCodepoint(
       return;
     }
     auto len = codepointToUtf8(buf, codepoint);
-    for (auto n = 0; n < len; n++) {
+    for (size_t n = 0; n < len; n++) {
       builder.add('%');
       hexEncode(builder, buf[n]);
     }
@@ -401,7 +401,7 @@ jsg::UsvString percentDecode(jsg::UsvStringPtr input) {
   const auto appendAsUtf8 = [&result](auto codepoint) {
     kj::byte buf[4];
     auto len = codepointToUtf8(buf, codepoint);
-    for (auto n = 0; n < len; n++) {
+    for (size_t n = 0; n < len; n++) {
       result.add(buf[n]);
     }
   };
@@ -2052,7 +2052,7 @@ void URLSearchParams::forEach(
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
-  for (int i = 0; i < list.size(); i++) {
+  for (size_t i = 0; i < list.size(); i++) {
     auto& entry = list[i];
     v8::Local<v8::Value> args[3] = {
       jsg::v8Str(isolate, entry.value),

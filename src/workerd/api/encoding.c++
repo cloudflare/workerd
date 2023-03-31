@@ -265,7 +265,7 @@ Encoding getEncodingForLabel(kj::StringPtr label) {
             c == 0x0d /* cr  */ ||
             c == 0x20 /* sp  */;
     };
-    auto start = 0;
+    size_t start = 0;
     auto end = label.size();
     while (start < end && isAsciiWhitespace(label[start])) { start++; }
     while (end > start && isAsciiWhitespace(label[end - 1])) { end--; }

@@ -85,7 +85,7 @@ void Deserializer::init(
     deser.SetWireFormatVersion(*version);
   }
   KJ_IF_MAYBE(arrayBuffers, transferedArrayBuffers) {
-    for (auto n = 0; n < arrayBuffers->size(); n++) {
+    for (auto n : kj::indices(*arrayBuffers)) {
       deser.TransferArrayBuffer(n,
           v8::ArrayBuffer::New(isolate, kj::mv((*arrayBuffers)[n])));
     }
