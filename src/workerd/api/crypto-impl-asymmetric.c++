@@ -254,9 +254,9 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       // Public key.
       // TODO(soon): The usage set is required to be empty for public ECDH keys, which is not being
       // checked for currently. See if any code relies on the current behavior and require an empty
-      // an empty set otherwise (i.e. change to allowedUsages = CryptoKeyUsageSet()). Same applies
+      // an empty set otherwise (i.e. change to allowedUsages = {}. Same applies
       // for spki-based and raw ECDH key imports.
-      JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+      JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
             "importing jwk-based public ECDH key with non-empty usages");
       keyType = "public";
       usages =
@@ -266,9 +266,15 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
                                       CryptoKeyUsageSet::publicKeyMask()));
     }
 
+    auto [expectedUse, op0, op1] = [&, normalizedName] {
+      if (normalizedName == "RSA-OAEP") {return std::make_tuple("enc", "encrypt", "wrapKey");}
+      if (normalizedName == "ECDH") {return std::make_tuple("enc", "unused", "unused");}
+      return std::make_tuple("sig", "sign", "verify");
+    }();
+
     if (keyUsages.size() > 0) {
       KJ_IF_MAYBE(use, keyDataJwk.use) {
-        JSG_REQUIRE(*use == "sig", DOMDataError,
+        JSG_REQUIRE(*use == expectedUse, DOMDataError,
             "Asymmetric \"jwk\" key import with usages requires a JSON Web Key with "
             "Public Key Use parameter \"use\" (\"", *use, "\") equal to \"sig\".");
       }
@@ -289,30 +295,43 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
         // "The "use" and "key_ops" JWK members SHOULD NOT be used together; however, if both are
         // used, the information they convey MUST be consistent." -- RFC 7517, section 4.3.
 
-        // TODO(conform):When we factor this out into a JWK validation function, we should switch
-        //   based on `use`'s value and check for consistency whether it's "sig", "enc",
-        //   what-have-you. But, asymmetric keys are sign/verify only.
-        JSG_REQUIRE(*use == "sig", DOMDataError, "Asymmetric \"jwk\" import "
-            "requires a JSON Web Key with Public Key Use \"use\" (\"", *use, "\") equal to \"sig\".");
+        JSG_REQUIRE(*use == expectedUse, DOMDataError, "Asymmetric \"jwk\" import requires a JSON "
+            "Web Key with Public Key Use \"use\" (\"", *use, "\") equal to \"sig\".");
 
         for (const auto& op: *ops) {
-          // TODO(conform): Can a JWK private key actually be used to verify? Not
-          //   using the Web Crypto API...
-          JSG_REQUIRE(op == "sign" || op == "verify", DOMDataError,
+          JSG_REQUIRE(normalizedName != "ECDH", DOMDataError,
               "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
               "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
-              "with each other. A \"sig\" Public Key Use would allow a Key Operations array with "
-              "only \"sign\" and/or \"verify\" values (not \"", op, "\").");
+              "with each other. For public ", normalizedName, " keys, there are no valid usages,"
+              "so keys with a non-empty \"key_ops\" parameter are not allowed.");
+
+          // TODO(conform): Can a JWK private key actually be used to verify? Not
+          //   using the Web Crypto API...
+          JSG_REQUIRE(op == op0 || op == op1, DOMDataError,
+              "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
+              "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
+              "with each other. A Public Key Use for ", normalizedName, " would allow a Key "
+              "Operations array with only \"", op0, "\" and/or \"", op1, "\" values (not \"", op,
+              "\").");
         }
       }
 
-      // Okay, here's the deal. We're supposed to verify that `ops` contains all the values listed
-      // in `keyUsages`. But we've verified above that `keyUsages` either contains all "sign" or all
-      // "verify" values, if anything. So we're just going to test the first value, if present.
+      // We're supposed to verify that `ops` contains all the values listed in `keyUsages`. For any
+      // of the supported algorithms, a key may have at most two distinct usages ('sig' type keys
+      // have at most one valid usage, but there may be two for e.g. ECDH). Test the first usage
+      // and the next usages. Test the first usage and the first usage distinct from the first, if
+      // present (i.e. the second allowed usage, even if there are duplicates).
       if (keyUsages.size() > 0) {
         JSG_REQUIRE(std::find(ops->begin(), ops->end(), keyUsages.front()) != ops->end(),
             DOMDataError, "All specified key usages must be present in the JSON "
             "Web Key's Key Operations parameter (\"key_ops\").");
+        auto secondUsage = std::find_end(keyUsages.begin(), keyUsages.end(), keyUsages.begin(),
+            keyUsages.begin() + 1) + 1;
+        if (secondUsage != keyUsages.end()) {
+          JSG_REQUIRE(std::find(ops->begin(), ops->end(), *secondUsage) != ops->end(),
+              DOMDataError, "All specified key usages must be present in the JSON "
+              "Web Key's Key Operations parameter (\"key_ops\").");
+        }
       }
     }
 
@@ -334,7 +353,7 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
           " trailing bytes after SPKI input.");
     }
-    JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+    JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
         "importing spki-based public ECDH key with non-empty usages");
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
@@ -603,7 +622,6 @@ public:
   kj::Array<kj::byte> sign(
       SubtleCrypto::SignAlgorithm&& algorithm,
       kj::ArrayPtr<const kj::byte> data) const override {
-    auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
     RSA* rsa = EVP_PKEY_get0_RSA(getEvpPkey());
     if (rsa == nullptr) {
@@ -1481,7 +1499,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
 
     return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr,
         d.begin(), d.size()), InternalDOMOperationError,
-        "Failed to construct ", crv, " public key", internalDescribeOpensslErrors());
+        "Failed to construct ", crv, " private key", internalDescribeOpensslErrors());
   }
 
   JSG_REQUIRE(keyDataJwk.kty == "EC", DOMDataError,
@@ -1549,7 +1567,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
   const auto& raw = keyData.get<kj::Array<kj::byte>>();
 
-  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && allowedUsages.size() != 0,
+  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
       "importing raw ECDH key with non-empty usages");
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
@@ -1650,7 +1668,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(
     kj::StringPtr normalizedName,
-    SubtleCrypto::GenerateKeyAlgorithm &&algorithm, bool extractable,
+    SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages,
@@ -1814,8 +1832,12 @@ private:
     jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
 
     if (getType() == "private"_kj) {
-      uint8_t rawPrivateKey[ED25519_PRIVATE_KEY_LEN];
-      size_t privateKeyLen = sizeof(rawPrivateKey);
+      // Deliberately use ED25519_PUBLIC_KEY_LEN here.
+      // boringssl defines ED25519_PRIVATE_KEY_LEN as 64B since it stores the private key together
+      // with public key data in some functions, but in the EVP interface only the 32B private key
+      // itself is returned.
+      uint8_t rawPrivateKey[ED25519_PUBLIC_KEY_LEN];
+      size_t privateKeyLen = ED25519_PUBLIC_KEY_LEN;
       JSG_REQUIRE(1 == EVP_PKEY_get_raw_private_key(getEvpPkey(), rawPrivateKey, &privateKeyLen),
           InternalDOMOperationError, "Failed to retrieve private key",
           internalDescribeOpensslErrors());
@@ -1877,7 +1899,6 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
   // The private key technically also contains the public key. Why does the keypair function bother
   // writing out the public key to a separate buffer?
 
-  auto evpPkey = OSSL_NEW(EVP_PKEY);
   auto privateEvpPKey = OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(nid, nullptr,
       rawPrivateKey, keylen), InternalDOMOperationError, "Error constructing ", curveName,
       " private key", internalDescribeOpensslErrors());
