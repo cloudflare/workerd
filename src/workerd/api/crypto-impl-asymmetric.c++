@@ -1547,16 +1547,9 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
       "importing raw ECDH key with non-empty usages");
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
-  // TODO(revisit once this is standardized): NodeJS appears to support importing raw for private
-  //   keys but that doesn't seem aligned with how ECDSA works & in contrast from the proposal
-  //   from many years ago: http://htmlpreview.github.io/?https://github.com/trevp/curve25519_webcrypto/blob/master/Curve25519_WebCrypto.html.
-  // We differ from NodeJS in this notable way.
-  // Filed upstream with the standardization effort: https://github.com/tQsW/webcrypto-curve25519/issues/8
 
   if (curveId == NID_ED25519) {
-    auto evpPkey = OSSL_NEW(EVP_PKEY);
-
-    JSG_REQUIRE(raw.size() == 32, DOMDataError, "NODE-ED25519 raw keys must be exactly 32-bytes "
+    JSG_REQUIRE(raw.size() == 32, DOMDataError, "Ed25519 raw keys must be exactly 32-bytes "
         "(provided ", raw.size(), ").");
 
     return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
@@ -1706,20 +1699,15 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
 
 namespace {
 
-class EdDsaKey final: public AsymmetricKey {
+// Abstract base class for EDDSA and EDDH. Unfortunately, the legacy NODE-ED25519 identifier has a
+// namedCurve field whereas the algorithms in the Secure Curves spec do not, which requires having
+// a base class implementing most functionality and having classes inherit from it to define the
+// key algorithm struct with or without namedCurve.
+class EdDsaKeyBase : public virtual AsymmetricKey {
 public:
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(
       kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
       CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey);
-
-  explicit EdDsaKey(kj::Own<EVP_PKEY> keyData,
-                    CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
-                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
-        keyAlgorithm(kj::mv(keyAlgorithm)) {}
-
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
 
   kj::StringPtr chooseHash(
       const kj::Maybe<kj::OneOf<kj::String,
@@ -1733,8 +1721,8 @@ public:
     JSG_REQUIRE(getType() == "private", DOMInvalidAccessError,
         "Asymmetric signing requires a private key.");
 
-    JSG_REQUIRE(keyAlgorithm.name == "NODE-ED25519", DOMOperationError,
-       "Not implemented for algorithm \"", keyAlgorithm.name, "\".");
+    JSG_REQUIRE(getAlgorithmName() == "Ed25519" || getAlgorithmName() == "NODE-ED25519",
+        DOMOperationError, "Not implemented for algorithm \"", getAlgorithmName(), "\".");
     // Why NODE-ED25519? NodeJS uses NODE-ED25519/NODE-448 as algorithm names but that feels
     // inconsistent with the broader WebCrypto standard. Filed an issue with the standard for
     // clarification: https://github.com/tQsW/webcrypto-curve25519/issues/7
@@ -1748,14 +1736,14 @@ public:
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize ED25519 signing digest",
+        InternalDOMOperationError, "Failed to initialize Ed25519 signing digest",
         internalDescribeOpensslErrors());
     JSG_REQUIRE(1 == EVP_DigestSign(digestCtx.get(), signature.begin(), &signatureLength,
-        data.begin(), data.size()), InternalDOMOperationError, "Failed to sign with ED25119 key",
+        data.begin(), data.size()), InternalDOMOperationError, "Failed to sign with Ed25119 key",
         internalDescribeOpensslErrors());
 
     JSG_REQUIRE(signatureLength == signature.size(), InternalDOMOperationError,
-        "Unexpected change in size signing ED25519", signatureLength);
+        "Unexpected change in size signing Ed25519", signatureLength);
 
     return signature;
   }
@@ -1766,15 +1754,15 @@ public:
     JSG_REQUIRE(getType() == "public", DOMInvalidAccessError,
         "Asymmetric verification requires a public key.");
 
-    JSG_REQUIRE(keyAlgorithm.name == "NODE-ED25519", DOMOperationError,
-       "Not implemented for this algorithm", keyAlgorithm.name);
+    JSG_REQUIRE(getAlgorithmName() == "Ed25519" || getAlgorithmName() == "NODE-ED25519",
+        DOMOperationError, "Not implemented for this algorithm", getAlgorithmName());
 
     JSG_REQUIRE(signature.size() == ED25519_SIGNATURE_LEN, DOMOperationError,
-        "Invalid ", keyAlgorithm.namedCurve, "signature length ", signature.size());
+        "Invalid ", getAlgorithmName(), " signature length ", signature.size());
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize ED25519 verification digest",
+        InternalDOMOperationError, "Failed to initialize Ed25519 verification digest",
         internalDescribeOpensslErrors());
 
     auto result = EVP_DigestVerify(digestCtx.get(), signature.begin(), signature.size(),
@@ -1792,7 +1780,7 @@ public:
 
 private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
-    KJ_ASSERT(keyAlgorithm.namedCurve == "NODE-ED25519"_kj);
+    KJ_ASSERT(getAlgorithmName() == "Ed25519"_kj || getAlgorithmName() == "NODE-ED25519"_kj);
 
     uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN];
     size_t publicKeyLen = sizeof(rawPublicKey);
@@ -1827,19 +1815,15 @@ private:
   }
 
   kj::Array<kj::byte> exportRaw() const override final {
-    // In contrast to Node's implementation, import of raw private keys is disallowed. Why?
-    // The proposal from many years ago disallowed it similarly: http://htmlpreview.github.io/?https://github.com/trevp/curve25519_webcrypto/blob/master/Curve25519_WebCrypto.html
-    // It's not allowed for ECDSA/ECDH & one would think that EDDSA would follow suit.
-    // https://github.com/tQsW/webcrypto-curve25519/issues/8
     JSG_REQUIRE(getType() == "public"_kj, DOMInvalidAccessError,
-        "Raw export of ", keyAlgorithm.namedCurve, " keys is only allowed for public keys.");
+        "Raw export of ", getAlgorithmName(), " keys is only allowed for public keys.");
 
     kj::Vector<kj::byte> raw(ED25519_PUBLIC_KEY_LEN);
     raw.resize(ED25519_PUBLIC_KEY_LEN);
     size_t exportedLength = raw.size();
 
     JSG_REQUIRE(1 == EVP_PKEY_get_raw_public_key(getEvpPkey(), raw.begin(), &exportedLength),
-        InternalDOMOperationError, "Failed to export ", keyAlgorithm.namedCurve, " key", getType(),
+        InternalDOMOperationError, "Failed to retrieve public key",
         internalDescribeOpensslErrors());
 
     JSG_REQUIRE(exportedLength == raw.size(), InternalDOMOperationError,
@@ -1848,26 +1832,49 @@ private:
     return raw.releaseAsArray();
   }
 
+};
+
+class EdDsaKey final : public EdDsaKeyBase {
+public:
+  explicit EdDsaKey(kj::Own<EVP_PKEY> keyData,
+                    CryptoKey::KeyAlgorithm keyAlgorithm,
+                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
+  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
+
+private:
+  CryptoKey::KeyAlgorithm keyAlgorithm;
+};
+
+// Class for legacy algorithm NODE-ED25519, which includes a namedCurve field in its algorithm unlike Ed25519.
+class EdDsaCurveKey final : public EdDsaKeyBase {
+public:
+  explicit EdDsaCurveKey(kj::Own<EVP_PKEY> keyData,
+                    CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
+                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
+  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
+
+private:
   CryptoKey::EllipticKeyAlgorithm keyAlgorithm;
 };
 
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
     kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
     CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
   auto [curveName, keypair, keylen] = [nid, normalizedName] {
     switch (nid) {
-      // BoringSSL doesn't support ED448/X448.
+      // BoringSSL doesn't support ED448.
       case NID_ED25519:
-        return std::make_tuple("NODE-ED25519"_kj, ED25519_keypair, ED25519_PUBLIC_KEY_LEN);
+        return std::make_tuple("Ed25519"_kj, ED25519_keypair, ED25519_PUBLIC_KEY_LEN);
     }
 
     KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
   }();
-
-  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
-    normalizedName,
-    curveName,
-  };
 
   uint8_t rawPublicKey[keylen];
   uint8_t rawPrivateKey[keylen * 2];
@@ -1883,6 +1890,21 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
       rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
       "public key", internalDescribeOpensslErrors());
 
+  if (normalizedName == "NODE-ED25519") {
+    auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
+      normalizedName,
+      normalizedName,
+    };
+    auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaCurveKey>(kj::mv(privateEvpPKey),
+        keyAlgorithm, "private"_kj, extractablePrivateKey, privateKeyUsages));
+    auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaCurveKey>(kj::mv(publicEvpPKey),
+        keyAlgorithm, "public"_kj, true, publicKeyUsages));
+
+    return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
+  }
+  auto keyAlgorithm = CryptoKey::KeyAlgorithm {
+    normalizedName
+  };
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateEvpPKey),
       keyAlgorithm, "private"_kj, extractablePrivateKey, privateKeyUsages));
   auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicEvpPKey),
@@ -1903,10 +1925,12 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
   auto privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
   auto publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
 
-  kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve,TypeError,
-      "Missing field \"namedCurve\" in \"algorithm\".");
-  JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError, "EDDSA curve \"", namedCurve,
-      "\" isn't supported.");
+  if (normalizedName == "NODE-ED25519") {
+    kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve, TypeError,
+        "Missing field \"namedCurve\" in \"algorithm\".");
+    JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError,
+        "EDDSA curve \"", namedCurve, "\" isn't supported.");
+  }
 
   return EdDsaKey::generateKey(normalizedName, NID_ED25519, privateKeyUsages, publicKeyUsages,
                                extractable);
@@ -1917,16 +1941,15 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
-  kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve, TypeError,
-      "Missing field \"namedCurve\" in \"algorithm\".");
+  kj::StringPtr namedCurve;
 
   // BoringSSL doesn't support ED448.
-  JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError, "EDDSA curve \"", namedCurve,
-      "\" isn't supported.");
-  auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
-    normalizedName,
-    "NODE-ED25519",
-  };
+  if (normalizedName == "NODE-ED25519") {
+    namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve, TypeError,
+        "Missing field \"namedCurve\" in \"algorithm\".");
+    JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError,
+        "EDDSA curve \"", namedCurve, "\" isn't supported.");
+  }
 
   auto [evpPkey, keyType, usages] = [&] {
     if (format != "raw") {
@@ -1940,6 +1963,17 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
                                CryptoKeyUsageSet::verify());
     }
   }();
+
+  if (normalizedName == "NODE-ED25519") {
+    auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
+      normalizedName,
+      normalizedName,
+    };
+    return kj::heap<EdDsaCurveKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable, usages);
+  }
+  auto keyAlgorithm = CryptoKey::KeyAlgorithm {
+    normalizedName
+  };
 
   return kj::heap<EdDsaKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable, usages);
 }
