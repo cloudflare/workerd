@@ -126,6 +126,30 @@ struct QueueResponse @0x90e98932c0bfc0de {
   # List of Message IDs that were explicitly marked as acknowledged
 }
 
+struct HibernatableWebSocketEventMessage {
+  payload :union {
+    text @0 :Text;
+    data @1 :Data;
+    close :group {
+      code @2 :UInt16;
+      reason @3 :Text;
+      wasClean @4 :Bool;
+    }
+    error @5 :Text;
+    # TODO(someday): This could be an Exception instead of Text.
+  }
+}
+
+struct HibernatableWebSocketResponse {
+  outcome @0 :EventOutcome;
+}
+
+interface HibernatableWebSocketEventDispatcher {
+  hibernatableWebSocketEvent @0 (message: HibernatableWebSocketEventMessage )
+      -> (result :HibernatableWebSocketResponse);
+  # Run a hibernatable websocket event
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 

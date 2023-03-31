@@ -10,9 +10,12 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/api/basics.h>
 #include <workerd/api/web-socket.h>
+#include <workerd/api/hibernation-event-params.h>
 
 namespace workerd::api {
 
+using HibernationReader =
+    rpc::HibernatableWebSocketEventDispatcher::HibernatableWebSocketEventParams::Reader;
 class HibernatableWebSocketEvent final: public ExtendableEvent {
 public:
   explicit HibernatableWebSocketEvent();
@@ -21,26 +24,10 @@ public:
 
   // TODO(soon): return correct ws instead of the current stub implementation
   jsg::Ref<WebSocket> getWebSocket(jsg::Lock& lock);
-  jsg::Value getError(jsg::Lock& lock);
 
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {
     JSG_INHERIT(ExtendableEvent);
   }
-};
-
-struct HibernatableSocketParams {
-  enum Type {
-    TEXT,
-    DATA,
-    CLOSE,
-    ERROR
-  };
-
-  Type type;
-  kj::Array<byte> data;
-  kj::String message;
-  kj::String closeReason;
-  int closeCode;
 };
 
 class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
@@ -49,8 +36,15 @@ public:
   HibernatableWebSocketCustomEventImpl(
       uint16_t typeId,
       kj::TaskSet& waitUntilTasks,
-      HibernatableSocketParams params)
+      kj::Own<HibernationReader> params,
+      kj::Maybe<Worker::Actor::HibernationManager&> manager=nullptr)
     : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)) {}
+  HibernatableWebSocketCustomEventImpl(
+      uint16_t typeId,
+      kj::TaskSet& waitUntilTasks,
+      HibernatableSocketParams params,
+      Worker::Actor::HibernationManager& manager)
+    : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)), manager(manager) {}
 
   kj::Promise<Result> run(
       kj::Own<IoContext_IncomingRequest> incomingRequest,
@@ -67,9 +61,42 @@ public:
   }
 
 private:
+  HibernatableSocketParams consumeParams() {
+    // Returns `params`, but if we have a HibernationReader we convert it to a
+    // HibernatableSocketParams first.
+    KJ_IF_MAYBE(p, params.tryGet<kj::Own<HibernationReader>>()) {
+      kj::Maybe<HibernatableSocketParams> eventParameters;
+      auto payload = (*p)->getMessage().getPayload();
+      switch(payload.which()) {
+        case rpc::HibernatableWebSocketEventMessage::Payload::TEXT: {
+          eventParameters.emplace(kj::str(payload.getText()));
+          break;
+        }
+        case rpc::HibernatableWebSocketEventMessage::Payload::DATA: {
+          kj::Array<byte> b = kj::heapArray(payload.getData().asBytes());
+          eventParameters.emplace(kj::mv(b));
+          break;
+        }
+        case rpc::HibernatableWebSocketEventMessage::Payload::CLOSE: {
+          auto close = payload.getClose();
+          eventParameters.emplace(
+              close.getCode(), kj::str(close.getReason()), close.getWasClean());
+          break;
+        }
+        case rpc::HibernatableWebSocketEventMessage::Payload::ERROR: {
+          eventParameters.emplace(KJ_EXCEPTION(FAILED, kj::str(payload.getError())));
+          break;
+        }
+      }
+      return kj::mv(KJ_REQUIRE_NONNULL(eventParameters));
+    }
+    return kj::mv(KJ_REQUIRE_NONNULL(params.tryGet<HibernatableSocketParams>()));
+  }
+
   uint16_t typeId;
   kj::TaskSet& waitUntilTasks;
-  HibernatableSocketParams params;
+  kj::OneOf<HibernatableSocketParams, kj::Own<HibernationReader>> params;
+  kj::Maybe<Worker::Actor::HibernationManager&> manager;
 };
 
 #define EW_WEB_SOCKET_MESSAGE_ISOLATE_TYPES      \

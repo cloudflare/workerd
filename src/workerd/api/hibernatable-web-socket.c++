@@ -17,12 +17,6 @@ jsg::Ref<WebSocket> HibernatableWebSocketEvent::getWebSocket(jsg::Lock& lock) {
   return jsg::alloc<WebSocket>(kj::str(""), WebSocket::Locality::LOCAL);
 }
 
-jsg::Value HibernatableWebSocketEvent::getError(jsg::Lock& lock) {
-  // This is just a stub implementation and is to be replaced once the new websocket manager
-  // needs it
-  return lock.exceptionToJs(KJ_EXCEPTION(FAILED, "whatever"));
-}
-
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName) {
@@ -31,31 +25,42 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   incomingRequest->delivered();
   EventOutcome outcome = EventOutcome::OK;
 
+  // We definitely have an actor by this point. Let's set the hibernation manager on the actor
+  // before we start running any events that might need to access it.
+  auto& a = KJ_REQUIRE_NONNULL(context.getActor());
+  if (a.getHibernationManager() == nullptr) {
+    a.setHibernationManager(kj::addRef(KJ_REQUIRE_NONNULL(manager)));
+  }
+
   try {
     co_await context.run(
-        [entrypointName=entrypointName, &context, params=kj::mv(params)]
+        [entrypointName=entrypointName, &context, eventParameters=consumeParams()]
         (Worker::Lock& lock) mutable {
-      switch (params.type) {
-        case HibernatableSocketParams::Type::TEXT:
+      KJ_SWITCH_ONEOF(eventParameters.eventType) {
+        KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
-              kj::mv(params.message),
+              kj::mv(text.message),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
-        case HibernatableSocketParams::Type::DATA:
+        }
+        KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
-              kj::mv(params.data),
+              kj::mv(data.message),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
-        case HibernatableSocketParams::Type::CLOSE:
+        }
+        KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
           return lock.getGlobalScope().sendHibernatableWebSocketClose(
-              kj::mv(params.closeReason),
-              params.closeCode,
+              kj::mv(close),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
-        case HibernatableSocketParams::Type::ERROR:
+        }
+        KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
           return lock.getGlobalScope().sendHibernatableWebSocketError(
+              kj::mv(e.error),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
+        }
         KJ_UNREACHABLE;
       }
     });
@@ -80,7 +85,41 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     capnp::ByteStreamFactory& byteStreamFactory,
     kj::TaskSet& waitUntilTasks,
     rpc::EventDispatcher::Client dispatcher) {
-  KJ_UNIMPLEMENTED("HibernatableWebSocket event is never called via rpc.");
+  auto req = dispatcher.castAs<
+      rpc::HibernatableWebSocketEventDispatcher>().hibernatableWebSocketEventRequest();
+
+  KJ_IF_MAYBE(rpcParameters, params.tryGet<kj::Own<HibernationReader>>()) {
+    req.setMessage((*rpcParameters)->getMessage());
+  } else {
+    auto message = req.initMessage();
+    auto payload = message.initPayload();
+    auto& eventParameters = KJ_REQUIRE_NONNULL(params.tryGet<HibernatableSocketParams>());
+    KJ_SWITCH_ONEOF(eventParameters.eventType) {
+      KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
+        payload.setText(kj::mv(text.message));
+      }
+      KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
+        payload.setData(kj::mv(data.message));
+      }
+      KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
+        auto closeBuilder = payload.initClose();
+        closeBuilder.setCode(close.code);
+        closeBuilder.setReason(kj::mv(close.reason));
+        closeBuilder.setWasClean(close.wasClean);
+      }
+      KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
+        payload.setError(e.error.getDescription());
+      }
+      KJ_UNREACHABLE;
+    }
+  }
+
+  return req.send().then([](auto resp) {
+    auto respResult = resp.getResult();
+    return WorkerInterface::CustomEvent::Result {
+      .outcome = respResult.getOutcome(),
+    };
+  });
 }
 
 }  // namespace workerd::api

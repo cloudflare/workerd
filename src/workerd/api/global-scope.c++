@@ -13,6 +13,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/api/hibernatable-web-socket.h>
 
 namespace workerd::api {
 
@@ -521,14 +522,16 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
 }
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
-    kj::String reason,
-    int code,
+    HibernatableSocketParams::Close close,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
   auto event = jsg::alloc<HibernatableWebSocketEvent>();
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(handler, h->webSocketClose) {
-      auto promise = (*handler)(lock, event->getWebSocket(lock), kj::mv(reason), code);
+      auto websocket = event->getWebSocket(lock);
+      websocket->initiateHibernatableRelease(lock, api::WebSocket::HibernatableReleaseState::CLOSE);
+      auto promise = (*handler)(lock, kj::mv(websocket), close.code, kj::mv(close.reason),
+                                close.wasClean);
       event->waitUntil(kj::mv(promise));
     }
     // We want to deliver close, but if no webSocketClose handler is exported, we shouldn't fail
@@ -536,13 +539,17 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
 }
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
+    kj::Exception e,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   auto event = jsg::alloc<HibernatableWebSocketEvent>();
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(handler, h->webSocketError) {
-      auto promise = (*handler)(lock, event->getWebSocket(lock), event->getError(lock));
+      auto websocket = event->getWebSocket(lock);
+      websocket->initiateHibernatableRelease(lock, WebSocket::HibernatableReleaseState::ERROR);
+      jsg::Lock& js(lock);
+      auto promise = (*handler)(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e)));
       event->waitUntil(kj::mv(promise));
     }
     // We want to deliver an error, but if no webSocketError handler is exported, we shouldn't fail
