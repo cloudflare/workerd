@@ -67,6 +67,10 @@ public:
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
 
+  struct Durable { kj::String uniqueKey; };
+  struct Ephemeral {};
+  using ActorConfig = kj::OneOf<Durable, Ephemeral>;
+
 private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -92,10 +96,6 @@ private:
 
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
-
-  struct Durable { kj::String uniqueKey; };
-  struct Ephemeral {};
-  using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
   kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
