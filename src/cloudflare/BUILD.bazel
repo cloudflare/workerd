@@ -1,0 +1,65 @@
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
+load("@workerd//:build/wd_api_bundle.bzl", "wd_api_bundle")
+load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
+
+modules = glob(["*.ts"])
+js_modules = glob(["*.js"])
+
+internal_modules = glob(["internal/*.ts"])
+internal_js_modules = glob(["internal/*.js"])
+
+srcs = modules + internal_modules
+
+eslintrc_json = ":.eslintrc.json"
+
+tsconfig_json = ":tsconfig.json"
+
+ts_config(
+    name = "tsconfig",
+    src = tsconfig_json,
+)
+
+ts_project(
+    name = "cloudflare",
+    srcs = srcs,
+    allow_js = True,
+    tsconfig = ":tsconfig",
+)
+
+wd_api_bundle(
+    name = "cfbundle",
+    # builtin modules are accessible under "cloudflare:<module_name>" name
+    builtin_modules = dict([(
+        m.removesuffix(".ts") + ".js",
+        "cloudflare:" + m.removesuffix(".ts"),
+    ) for m in modules] + [(
+        m,
+        "cloudflare:" + m.removesuffix(".js"),
+    ) for m in js_modules]),
+    const_name = "cloudflareBundle",
+    include_prefix = "cloudflare",
+    # internal modules are accessible under "cloudflare-internal:<module_name>" name without "internal/"
+    # folder prefix.
+    internal_modules = dict([(
+        m.removesuffix(".ts") + ".js",
+        "cloudflare-internal:" + m.removeprefix("internal/").removesuffix(".ts"),
+    ) for m in internal_modules if not m.endswith(".d.ts")] + [(
+        m, "cloudflare-internal:" + m.removeprefix("internal/").removesuffix(".js"),
+    ) for m in internal_js_modules]),
+    schema_id = "0xbcc8f57c63814006",
+)
+
+eslint_bin.eslint_test(
+    name = "eslint",
+    args = [
+        "--config $(location {})".format(eslintrc_json),
+        "-f stylish",
+        "--report-unused-disable-directives"
+    ] + ["$(location " + src + ")" for src in srcs],
+    data = srcs + [
+        eslintrc_json,
+        tsconfig_json,
+        "//:node_modules/@typescript-eslint/eslint-plugin",
+    ],
+    tags = ["lint"],
+)
