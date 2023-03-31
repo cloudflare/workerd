@@ -1546,6 +1546,248 @@ private:
   void reportMetrics(RequestObserver& requestMetrics) override {}
 };
 
+struct FutureSubrequestChannel {
+  config::ServiceDesignator::Reader designator;
+  kj::String errorContext;
+};
+
+struct FutureActorChannel {
+  config::Worker::Binding::DurableObjectNamespaceDesignator::Reader designator;
+  kj::String errorContext;
+};
+
+static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
+    kj::StringPtr workerName,
+    config::Worker::Reader conf,
+    config::Worker::Binding::Reader binding,
+    Worker::ValidationErrorReporter& errorReporter,
+    kj::Vector<FutureSubrequestChannel>& subrequestChannels,
+    kj::Vector<FutureActorChannel>& actorChannels,
+    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs) {
+  // creates binding object or returns null and reports an error
+  using Global = WorkerdApiIsolate::Global;
+  kj::StringPtr bindingName = binding.getName();
+  auto makeGlobal = [&](auto&& value) {
+    return Global{.name = kj::str(bindingName), .value = kj::mv(value)};
+  };
+
+  auto errorContext = kj::str("Worker \"", workerName , "\"'s binding \"", bindingName, "\"");
+
+  switch (binding.which()) {
+    case config::Worker::Binding::UNSPECIFIED:
+      errorReporter.addError(kj::str(errorContext, " does not specify any binding value."));
+      return nullptr;
+
+    case config::Worker::Binding::PARAMETER:
+      KJ_UNIMPLEMENTED("TODO(beta): parameters");
+
+    case config::Worker::Binding::TEXT:
+      return makeGlobal(kj::str(binding.getText()));
+    case config::Worker::Binding::DATA:
+      return makeGlobal(kj::heapArray<byte>(binding.getData()));
+    case config::Worker::Binding::JSON:
+      return makeGlobal(Global::Json { kj::str(binding.getJson()) });
+
+    case config::Worker::Binding::WASM_MODULE:
+      if (conf.isServiceWorkerScript()) {
+        // Already handled earlier.
+      } else {
+        errorReporter.addError(kj::str(
+            errorContext, " is a Wasm binding, but Wasm bindings are not allowed in "
+            "modules-based scripts. Use Wasm modules instead."));
+      }
+      return nullptr;
+
+    case config::Worker::Binding::CRYPTO_KEY: {
+      auto keyConf = binding.getCryptoKey();
+      Global::CryptoKey keyGlobal;
+
+      switch (keyConf.which()) {
+        case config::Worker::Binding::CryptoKey::RAW:
+          keyGlobal.format = kj::str("raw");
+          keyGlobal.keyData = kj::heapArray<kj::byte>(keyConf.getRaw());
+          goto validFormat;
+        case config::Worker::Binding::CryptoKey::HEX: {
+          keyGlobal.format = kj::str("raw");
+          auto decoded = kj::decodeHex(keyConf.getHex());
+          if (decoded.hadErrors) {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained invalid hex."));
+          }
+          keyGlobal.keyData = kj::Array<byte>(kj::mv(decoded));
+          goto validFormat;
+        }
+        case config::Worker::Binding::CryptoKey::BASE64: {
+          keyGlobal.format = kj::str("raw");
+          auto decoded = kj::decodeBase64(keyConf.getBase64());
+          if (decoded.hadErrors) {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained invalid base64."));
+          }
+          keyGlobal.keyData = kj::Array<byte>(kj::mv(decoded));
+          goto validFormat;
+        }
+        case config::Worker::Binding::CryptoKey::PKCS8: {
+          keyGlobal.format = kj::str("pkcs8");
+          auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getPkcs8()), {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
+            return nullptr;
+          });
+          if (pem.type != "PRIVATE KEY") {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
+                "expected \"PRIVATE KEY\" but got \"", pem.type, "\"."));
+            return nullptr;
+          }
+          keyGlobal.keyData = kj::mv(pem.data);
+          goto validFormat;
+        }
+        case config::Worker::Binding::CryptoKey::SPKI: {
+          keyGlobal.format = kj::str("spki");
+          auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getSpki()), {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
+            return nullptr;
+          });
+          if (pem.type != "PUBLIC KEY") {
+            errorReporter.addError(kj::str(
+                "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
+                "expected \"PUBLIC KEY\" but got \"", pem.type, "\"."));
+            return nullptr;
+          }
+          keyGlobal.keyData = kj::mv(pem.data);
+          goto validFormat;
+        }
+        case config::Worker::Binding::CryptoKey::JWK:
+          keyGlobal.format = kj::str("jwk");
+          keyGlobal.keyData = Global::Json { kj::str(keyConf.getJwk()) };
+          goto validFormat;
+      }
+      errorReporter.addError(kj::str(
+          "Encountered unknown CryptoKey type for binding \"", binding.getName(),
+          "\". Was the config compiled with a newer version of the schema?"));
+      return nullptr;
+    validFormat:
+
+      auto algorithmConf = keyConf.getAlgorithm();
+      switch (algorithmConf.which()) {
+        case config::Worker::Binding::CryptoKey::Algorithm::NAME:
+          keyGlobal.algorithm = Global::Json {
+            kj::str('"', escapeJsonString(algorithmConf.getName()), '"')
+          };
+          goto validAlgorithm;
+        case config::Worker::Binding::CryptoKey::Algorithm::JSON:
+          keyGlobal.algorithm = Global::Json { kj::str(algorithmConf.getJson()) };
+          goto validAlgorithm;
+      }
+      errorReporter.addError(kj::str(
+          "Encountered unknown CryptoKey algorithm type for binding \"", binding.getName(),
+          "\". Was the config compiled with a newer version of the schema?"));
+      return nullptr;
+    validAlgorithm:
+
+      keyGlobal.extractable = keyConf.getExtractable();
+      keyGlobal.usages = KJ_MAP(usage, keyConf.getUsages()) { return kj::str(usage); };
+
+      return makeGlobal(kj::mv(keyGlobal));
+      return nullptr;
+    }
+
+    case config::Worker::Binding::SERVICE: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getService(),
+        kj::mv(errorContext)
+      });
+      return makeGlobal(Global::Fetcher {
+        .channel = channel,
+        .requiresHost = true,
+        .isInHouse = false
+      });
+    }
+
+    case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
+      auto actorBinding = binding.getDurableObjectNamespace();
+      const Server::ActorConfig* actorConfig;
+      if (actorBinding.hasServiceName()) {
+        auto& svcMap = KJ_UNWRAP_OR(actorConfigs.find(actorBinding.getServiceName()), {
+          errorReporter.addError(kj::str(
+              errorContext, " refers to a service \"", actorBinding.getServiceName(),
+              "\", but no such service is defined."));
+          return nullptr;
+        });
+
+        actorConfig = &KJ_UNWRAP_OR(svcMap.find(actorBinding.getClassName()), {
+          errorReporter.addError(kj::str(
+              errorContext, " refers to a Durable Object namespace named \"",
+              actorBinding.getClassName(), "\" in service \"", actorBinding.getServiceName(),
+              "\", but no such Durable Object namespace is defined by that service."));
+          return nullptr;
+        });
+      } else {
+          auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(workerName));
+          actorConfig = &KJ_UNWRAP_OR(localActorConfigs.find(actorBinding.getClassName()), {
+          errorReporter.addError(kj::str(
+              errorContext, " refers to a Durable Object namespace named \"",
+              actorBinding.getClassName(), "\", but no such Durable Object namespace is defined "
+              "by this Worker."));
+          return nullptr;
+        });
+      }
+
+      uint channel = (uint)actorChannels.size();
+      actorChannels.add(FutureActorChannel{actorBinding, kj::mv(errorContext)});
+
+      KJ_SWITCH_ONEOF(*actorConfig) {
+        KJ_CASE_ONEOF(durable, Server::Durable) {
+          return makeGlobal(Global::DurableActorNamespace {
+            .actorChannel = channel,
+            .uniqueKey = durable.uniqueKey
+          });
+        }
+        KJ_CASE_ONEOF(_, Server::Ephemeral) {
+          return makeGlobal(Global::EphemeralActorNamespace{.actorChannel = channel});
+        }
+      }
+
+      return nullptr;
+    }
+
+    case config::Worker::Binding::KV_NAMESPACE: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getKvNamespace(),
+        kj::mv(errorContext)
+      });
+
+      return makeGlobal(Global::KvNamespace{.subrequestChannel = channel});
+    }
+
+    case config::Worker::Binding::R2_BUCKET: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getR2Bucket(),
+        kj::mv(errorContext)
+      });
+      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel});
+    }
+
+    case config::Worker::Binding::R2_ADMIN: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getR2Admin(),
+        kj::mv(errorContext)
+      });
+      return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
+    }
+  }
+  errorReporter.addError(kj::str(
+      errorContext, "has unrecognized type. Was the config compiled with a newer version of "
+      "the schema?"));
+}
+
+
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf) {
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
@@ -1652,262 +1894,17 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                                    WorkerdApiIsolate::extractSource(name, conf, errorReporter),
                                    IsolateObserver::StartType::COLD, false, errorReporter);
 
-  struct FutureSubrequestChannel {
-    config::ServiceDesignator::Reader designator;
-    kj::String errorContext;
-  };
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
-
-  struct FutureActorChannel {
-    config::Worker::Binding::DurableObjectNamespaceDesignator::Reader designator;
-    kj::String errorContext;
-  };
   kj::Vector<FutureActorChannel> actorChannels;
 
   auto confBindings = conf.getBindings();
   using Global = WorkerdApiIsolate::Global;
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
-    kj::StringPtr bindingName = binding.getName();
-    auto addGlobal = [&](auto&& value) {
-      globals.add(Global {
-        .name = kj::str(bindingName),
-        .value = kj::mv(value)
-      });
-    };
-
-    auto errorContext = kj::str("Worker \"", name , "\"'s binding \"", bindingName, "\"");
-
-    switch (binding.which()) {
-      case config::Worker::Binding::UNSPECIFIED:
-        errorReporter.addError(kj::str(errorContext, " does not specify any binding value."));
-        continue;
-
-      case config::Worker::Binding::PARAMETER:
-        KJ_UNIMPLEMENTED("TODO(beta): parameters");
-
-      case config::Worker::Binding::TEXT:
-        addGlobal(kj::str(binding.getText()));
-        continue;
-      case config::Worker::Binding::DATA:
-        addGlobal(kj::heapArray<byte>(binding.getData()));
-        continue;
-      case config::Worker::Binding::JSON:
-        addGlobal(Global::Json { kj::str(binding.getJson()) });
-        continue;
-
-      case config::Worker::Binding::WASM_MODULE:
-        if (conf.isServiceWorkerScript()) {
-          // Already handled earlier.
-        } else {
-          errorReporter.addError(kj::str(
-              errorContext, " is a Wasm binding, but Wasm bindings are not allowed in "
-              "modules-based scripts. Use Wasm modules instead."));
-        }
-        continue;
-
-      case config::Worker::Binding::CRYPTO_KEY: {
-        auto keyConf = binding.getCryptoKey();
-        Global::CryptoKey keyGlobal;
-
-        switch (keyConf.which()) {
-          case config::Worker::Binding::CryptoKey::RAW:
-            keyGlobal.format = kj::str("raw");
-            keyGlobal.keyData = kj::heapArray<kj::byte>(keyConf.getRaw());
-            goto validFormat;
-          case config::Worker::Binding::CryptoKey::HEX: {
-            keyGlobal.format = kj::str("raw");
-            auto decoded = kj::decodeHex(keyConf.getHex());
-            if (decoded.hadErrors) {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained invalid hex."));
-            }
-            keyGlobal.keyData = kj::Array<byte>(kj::mv(decoded));
-            goto validFormat;
-          }
-          case config::Worker::Binding::CryptoKey::BASE64: {
-            keyGlobal.format = kj::str("raw");
-            auto decoded = kj::decodeBase64(keyConf.getBase64());
-            if (decoded.hadErrors) {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained invalid base64."));
-            }
-            keyGlobal.keyData = kj::Array<byte>(kj::mv(decoded));
-            goto validFormat;
-          }
-          case config::Worker::Binding::CryptoKey::PKCS8: {
-            keyGlobal.format = kj::str("pkcs8");
-            auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getPkcs8()), {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
-              continue;
-            });
-            if (pem.type != "PRIVATE KEY") {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
-                  "expected \"PRIVATE KEY\" but got \"", pem.type, "\"."));
-              continue;
-            }
-            keyGlobal.keyData = kj::mv(pem.data);
-            goto validFormat;
-          }
-          case config::Worker::Binding::CryptoKey::SPKI: {
-            keyGlobal.format = kj::str("spki");
-            auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getSpki()), {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
-              continue;
-            });
-            if (pem.type != "PUBLIC KEY") {
-              errorReporter.addError(kj::str(
-                  "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
-                  "expected \"PUBLIC KEY\" but got \"", pem.type, "\"."));
-              continue;
-            }
-            keyGlobal.keyData = kj::mv(pem.data);
-            goto validFormat;
-          }
-          case config::Worker::Binding::CryptoKey::JWK:
-            keyGlobal.format = kj::str("jwk");
-            keyGlobal.keyData = Global::Json { kj::str(keyConf.getJwk()) };
-            goto validFormat;
-        }
-        errorReporter.addError(kj::str(
-            "Encountered unknown CryptoKey type for binding \"", binding.getName(),
-            "\". Was the config compiled with a newer version of the schema?"));
-        continue;
-      validFormat:
-
-        auto algorithmConf = keyConf.getAlgorithm();
-        switch (algorithmConf.which()) {
-          case config::Worker::Binding::CryptoKey::Algorithm::NAME:
-            keyGlobal.algorithm = Global::Json {
-              kj::str('"', escapeJsonString(algorithmConf.getName()), '"')
-            };
-            goto validAlgorithm;
-          case config::Worker::Binding::CryptoKey::Algorithm::JSON:
-            keyGlobal.algorithm = Global::Json { kj::str(algorithmConf.getJson()) };
-            goto validAlgorithm;
-        }
-        errorReporter.addError(kj::str(
-            "Encountered unknown CryptoKey algorithm type for binding \"", binding.getName(),
-            "\". Was the config compiled with a newer version of the schema?"));
-        continue;
-      validAlgorithm:
-
-        keyGlobal.extractable = keyConf.getExtractable();
-        keyGlobal.usages = KJ_MAP(usage, keyConf.getUsages()) { return kj::str(usage); };
-
-        addGlobal(kj::mv(keyGlobal));
-        continue;
-      }
-
-      case config::Worker::Binding::SERVICE: {
-        addGlobal(Global::Fetcher {
-          .channel = (uint)subrequestChannels.size() +
-              IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT,
-          .requiresHost = true,
-          .isInHouse = false
-        });
-
-        subrequestChannels.add(FutureSubrequestChannel {
-          binding.getService(),
-          kj::mv(errorContext)
-        });
-        continue;
-      }
-
-      case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
-        auto actorBinding = binding.getDurableObjectNamespace();
-        const ActorConfig* actorConfig;
-        if (actorBinding.hasServiceName()) {
-          auto& svcMap = KJ_UNWRAP_OR(actorConfigs.find(actorBinding.getServiceName()), {
-            errorReporter.addError(kj::str(
-                errorContext, " refers to a service \"", actorBinding.getServiceName(),
-                "\", but no such service is defined."));
-            continue;
-          });
-
-          actorConfig = &KJ_UNWRAP_OR(svcMap.find(actorBinding.getClassName()), {
-            errorReporter.addError(kj::str(
-                errorContext, " refers to a Durable Object namespace named \"",
-                actorBinding.getClassName(), "\" in service \"", actorBinding.getServiceName(),
-                "\", but no such Durable Object namespace is defined by that service."));
-            continue;
-          });
-        } else {
-          actorConfig = &KJ_UNWRAP_OR(localActorConfigs.find(actorBinding.getClassName()), {
-            errorReporter.addError(kj::str(
-                errorContext, " refers to a Durable Object namespace named \"",
-                actorBinding.getClassName(), "\", but no such Durable Object namespace is defined "
-                "by this Worker."));
-            continue;
-          });
-        }
-
-        KJ_SWITCH_ONEOF(*actorConfig) {
-          KJ_CASE_ONEOF(durable, Durable) {
-            addGlobal(Global::DurableActorNamespace {
-              .actorChannel = (uint)actorChannels.size(),
-              .uniqueKey = durable.uniqueKey
-            });
-          }
-          KJ_CASE_ONEOF(_, Ephemeral) {
-            addGlobal(Global::EphemeralActorNamespace {
-              .actorChannel = (uint)actorChannels.size(),
-            });
-          }
-        }
-
-        actorChannels.add(FutureActorChannel {
-          actorBinding,
-          kj::mv(errorContext)
-        });
-        continue;
-      }
-
-      case config::Worker::Binding::KV_NAMESPACE: {
-        addGlobal(Global::KvNamespace {
-          .subrequestChannel = (uint)subrequestChannels.size() +
-              IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
-        });
-
-        subrequestChannels.add(FutureSubrequestChannel {
-          binding.getKvNamespace(),
-          kj::mv(errorContext)
-        });
-        continue;
-      }
-
-      case config::Worker::Binding::R2_BUCKET: {
-        addGlobal(Global::R2Bucket {
-          .subrequestChannel = (uint)subrequestChannels.size() +
-              IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
-        });
-
-        subrequestChannels.add(FutureSubrequestChannel {
-          binding.getR2Bucket(),
-          kj::mv(errorContext)
-        });
-        continue;
-      }
-
-      case config::Worker::Binding::R2_ADMIN: {
-        addGlobal(Global::R2Admin {
-          .subrequestChannel = (uint)subrequestChannels.size() +
-              IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT
-        });
-
-        subrequestChannels.add(FutureSubrequestChannel {
-          binding.getR2Admin(),
-          kj::mv(errorContext)
-        });
-        continue;
-      }
+    KJ_IF_MAYBE(global, createBinding(name, conf, binding, errorReporter,
+                                     subrequestChannels, actorChannels, actorConfigs)) {
+      globals.add(kj::mv(*global));
     }
-    errorReporter.addError(kj::str(
-        errorContext, "has unrecognized type. Was the config compiled with a newer version of "
-        "the schema?"));
   }
 
   auto worker = kj::atomicRefcounted<Worker>(
