@@ -338,7 +338,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
 
   // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
   // cloning for faster worker creation.
-  for (auto bundle: serverConfig.getBuiltins()) {
+  for (auto bundle: serverConfig.getExtensions()) {
     for (auto module: bundle.getModules()) {
       modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
           module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL : jsg::ModuleRegistry::Type::BUILTIN);

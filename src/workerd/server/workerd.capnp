@@ -73,10 +73,10 @@ struct Config {
   #   breaking everything. V8 flags also generally do not come with any guarantee of stability
   #   between V8 versions. Most users should not set any V8 flags.
 
-  builtins @3 :List(BuiltinsBundle);
-  # These builtin bundles will be available as imports to the application and can also be used
+  extensions @3 :List(ExtensionBundle);
+  # Modules from theses bundles will be available as imports to the application and can also be used
   # for specifying wrapped bindings.
-  # A major difference between worker modules and builtins is that latter represents system
+  # A major difference between worker modules and extensions is that latter represents system
   # capabilities provided by a particular workerd deployment. These bundles are usually
   # prepared separately and late-linked to the app through this config field.
 }
@@ -785,10 +785,10 @@ struct TlsOptions {
 }
 
 # ========================================================================================
-# Builtins
+# Extensions
 
-struct BuiltinsBundle {
-  # A bundle of builtin modules. Builtin modules are used to provide
+struct ExtensionBundle {
+  # A bundle of modules. Extension modules are used to provide
   # lower level functionality across all workers.
 
   modules @0 :List(Module);
