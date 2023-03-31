@@ -6,7 +6,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
-#include <node/bundle.capnp.h>
+#include <node/node.capnp.h>
 
 namespace workerd::api::node {
 
