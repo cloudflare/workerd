@@ -50,7 +50,6 @@ public:
   // Add salt to digest context in order to generate or verify salted signature.
   // Currently only used for RSA-PSS sign and verify operations.
 
-
   // ---------------------------------------------------------------------------
   // Implementation of CryptoKey
 
@@ -246,7 +245,9 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
 
     auto [expectedUse, op0, op1] = [&, normalizedName] {
       if (normalizedName == "RSA-OAEP") {return std::make_tuple("enc", "encrypt", "wrapKey");}
-      if (normalizedName == "ECDH") {return std::make_tuple("enc", "unused", "unused");}
+      if (normalizedName == "ECDH" || normalizedName == "X25519") {
+        return std::make_tuple("enc", "unused", "unused");
+      }
       return std::make_tuple("sig", "sign", "verify");
     }();
 
@@ -274,10 +275,10 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
         // used, the information they convey MUST be consistent." -- RFC 7517, section 4.3.
 
         JSG_REQUIRE(*use == expectedUse, DOMDataError, "Asymmetric \"jwk\" import requires a JSON "
-            "Web Key with Public Key Use \"use\" (\"", *use, "\") equal to \"sig\".");
+            "Web Key with Public Key Use \"use\" (\"", *use, "\") equal to \"", expectedUse, "\".");
 
         for (const auto& op: *ops) {
-          JSG_REQUIRE(normalizedName != "ECDH", DOMDataError,
+          JSG_REQUIRE(normalizedName != "ECDH" && normalizedName != "X25519", DOMDataError,
               "A JSON Web Key should have either a Public Key Use parameter (\"use\") or a Key "
               "Operations parameter (\"key_ops\"); otherwise, the parameters must be consistent "
               "with each other. For public ", normalizedName, " keys, there are no valid usages,"
@@ -1101,7 +1102,7 @@ public:
         "Missing field \"public\" in \"derivedKeyParams\".");
 
     JSG_REQUIRE(publicKey->getType() == "public"_kj, DOMInvalidAccessError, ""
-        "The public key provided has type \"", publicKey->getType(), "\", not \"public\"");
+        "The provided key has type \"", publicKey->getType(), "\", not \"public\"");
 
     JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
         "Base ", getAlgorithmName(), " private key cannot be used to derive a "
@@ -1149,7 +1150,7 @@ public:
 
     auto outputBitLength = resultBitLength.orDefault(sharedSecret.size() * 8);
     JSG_REQUIRE(outputBitLength <= sharedSecret.size() * 8, DOMOperationError,
-        "Derived key length (", outputBitLength, " bits) is too long (should be less than ",
+        "Derived key length (", outputBitLength, " bits) is too long (should be at most ",
         sharedSecret.size() * 8, " bits).");
 
     // Round up since outputBitLength may not be a perfect multiple of 8.
@@ -1442,14 +1443,26 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
 }
 
 kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk) {
-  if (curveId == NID_ED25519) {
+  if (curveId == NID_ED25519 || curveId == NID_X25519) {
+    auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
+    auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
+
     JSG_REQUIRE(keyDataJwk.kty == "OKP", DOMDataError,
-        "Ed25519 \"jwk\" key import requires a JSON Web Key with Key Type parameter "
+        curveName, " \"jwk\" key imports requires a JSON Web Key with Key Type parameter "
         "\"kty\" (\"", keyDataJwk.kty, "\") equal to \"OKP\".");
     auto& crv = JSG_REQUIRE_NONNULL(keyDataJwk.crv, DOMDataError,
-        "Missing field \"crv\" for Ed25519 key.");
-    JSG_REQUIRE(crv == "Ed25519", DOMNotSupportedError,
-        "Only Ed25519 is supported but \"", crv, "\" was requested.");
+        "Missing field \"crv\" for ", curveName, " key.");
+    JSG_REQUIRE(crv == curveName, DOMNotSupportedError,
+        "Only ", curveName, " is supported but \"", crv, "\" was requested.");
+    KJ_IF_MAYBE(alg, keyDataJwk.alg) {
+      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
+      // importKey().
+      if (curveId == NID_ED25519) {
+        JSG_REQUIRE(*alg == "EdDSA", DOMDataError,
+            "JSON Web Key Algorithm parameter \"alg\" (\"", *alg, "\") does not match requested "
+            "Ed25519 curve.");
+      }
+    }
 
     auto x = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.x), DOMDataError,
         "Invalid ", crv, " key in JSON WebKey; missing or invalid public key component (\"x\").");
@@ -1457,7 +1470,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
 
     if (keyDataJwk.d == nullptr) {
       // This is a public key.
-      return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
+      return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
           x.begin(), x.size()), InternalDOMOperationError,
           "Failed to construct ", crv, " public key", internalDescribeOpensslErrors());
     }
@@ -1470,10 +1483,10 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
     // seems to throw it away when a private key is provided.
 
     auto d = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.d), DOMDataError,
-        "Invalid Ed25519 key in JSON Web Key; missing or invalid private key component (\"d\").");
+        "Invalid ", curveName, " key in JSON Web Key; missing or invalid private key component (\"d\").");
     JSG_REQUIRE(d.size() == 32, DOMDataError, "Invalid length ", d.size(), " for private key");
 
-    return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr,
+    return OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_private_key(evpId, nullptr,
         d.begin(), d.size()), InternalDOMOperationError,
         "Failed to construct ", crv, " private key", internalDescribeOpensslErrors());
   }
@@ -1497,7 +1510,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
         "\" listed in JSON Web Key Algorithm parameter.");
 
     JSG_REQUIRE(iter->second == curveId, DOMDataError,
-        "JSON Web Key Algorithm parameter \"alg\" \"", *alg, "\" does not match requested EC curve.");
+        "JSON Web Key Algorithm parameter \"alg\" (\"", *alg, "\") does not match requested curve.");
   }
 
   auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
@@ -1548,11 +1561,14 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
 
-  if (curveId == NID_ED25519) {
-    JSG_REQUIRE(raw.size() == 32, DOMDataError, "Ed25519 raw keys must be exactly 32-bytes "
+  if (curveId == NID_ED25519 || curveId == NID_X25519) {
+    auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
+    auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
+
+    JSG_REQUIRE(raw.size() == 32, DOMDataError, curveName, " raw keys must be exactly 32-bytes "
         "(provided ", raw.size(), ").");
 
-    return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
+    return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
         raw.begin(), raw.size()), InternalDOMOperationError, "Failed to import raw public EDDSA",
         raw.size(), internalDescribeOpensslErrors()), "public"_kj, usages };
   }
@@ -1696,15 +1712,18 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
 // =====================================================================================
 // EDDSA & EDDH
 
-
 namespace {
 
 // Abstract base class for EDDSA and EDDH. Unfortunately, the legacy NODE-ED25519 identifier has a
 // namedCurve field whereas the algorithms in the Secure Curves spec do not, which requires having
 // a base class implementing most functionality and having classes inherit from it to define the
 // key algorithm struct with or without namedCurve.
-class EdDsaKeyBase : public virtual AsymmetricKey {
+class EdDsaKeyBase : public AsymmetricKey {
 public:
+  explicit EdDsaKeyBase(kj::Own<EVP_PKEY> keyData,
+                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
+      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages) {}
+
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(
       kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
       CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey);
@@ -1778,9 +1797,75 @@ public:
     return !!result;
   }
 
+  kj::Array<kj::byte> deriveBits(
+      SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+      kj::Maybe<uint32_t> resultBitLength) const override final {
+    JSG_REQUIRE(getAlgorithmName() == "X25519", DOMNotSupportedError, ""
+        "The deriveBits operation is not implemented for \"", getAlgorithmName(), "\".");
+
+    JSG_REQUIRE(getType() == "private"_kj, DOMInvalidAccessError, ""
+        "The deriveBits operation is only valid for a private key, not \"", getType(), "\".");
+
+    auto& publicKey = JSG_REQUIRE_NONNULL(algorithm.$public, TypeError,
+        "Missing field \"public\" in \"derivedKeyParams\".");
+
+    JSG_REQUIRE(publicKey->getType() == "public"_kj, DOMInvalidAccessError, ""
+        "The provided key has type \"", publicKey->getType(), "\", not \"public\"");
+
+    JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
+        "Base ", getAlgorithmName(), " private key cannot be used to derive a "
+        "key from a peer ", getAlgorithmName(), " public key");
+
+    JSG_REQUIRE(getAlgorithmName() == publicKey->getAlgorithmName(), DOMInvalidAccessError,
+        "Private key for derivation is using \"", getAlgorithmName(),
+        "\" while public key is using \"", publicKey->getAlgorithmName(), "\".");
+
+    auto outputBitLength = resultBitLength.orDefault(X25519_SHARED_KEY_LEN * 8);
+    JSG_REQUIRE(outputBitLength <= X25519_SHARED_KEY_LEN * 8, DOMOperationError,
+        "Derived key length (", outputBitLength, " bits) is too long (should be at most ",
+        X25519_SHARED_KEY_LEN * 8, " bits).");
+
+    // The check above for the algorithm `which` equality ensures that the impl can be downcast to
+    // EdDsaKey (assuming we don't accidentally create a class that doesn't inherit this one that
+    // for some reason returns an EdDsaKey).
+    auto& publicKeyImpl = kj::downcast<EdDsaKeyBase>(*publicKey->impl);
+
+    // EDDH code derived from https://www.openssl.org/docs/manmaster/man3/EVP_PKEY_derive.html
+    auto ctx = OSSL_NEW(EVP_PKEY_CTX, getEvpPkey(), nullptr);
+    JSG_REQUIRE(1 == EVP_PKEY_derive_init(ctx), InternalDOMOperationError,
+        "Failed to init EDDH key derivation", internalDescribeOpensslErrors());
+    JSG_REQUIRE(1 == EVP_PKEY_derive_set_peer(ctx, publicKeyImpl.getEvpPkey()),
+        InternalDOMOperationError, "Failed to set EDDH peer", internalDescribeOpensslErrors());
+
+    kj::Vector<kj::byte> sharedSecret;
+    sharedSecret.resize(X25519_SHARED_KEY_LEN);
+    size_t skeylen = X25519_SHARED_KEY_LEN;
+    JSG_REQUIRE(1 == EVP_PKEY_derive(ctx, sharedSecret.begin(), &skeylen), DOMOperationError,
+        "Failed to derive EDDH key", internalDescribeOpensslErrors());
+    KJ_ASSERT(skeylen == X25519_SHARED_KEY_LEN);
+
+    // Check for all-zero value as mandated by spec
+    kj::byte isNonZeroSecret = 0;
+    for (kj::byte b : sharedSecret) {
+      isNonZeroSecret |= b;
+    }
+    JSG_REQUIRE(isNonZeroSecret, DOMOperationError,
+        "Detected small order secure curve points, aborting EDDH derivation");
+
+    // mask off bits like in ECDH's deriveBits()
+    auto resultByteLength = integerCeilDivision(outputBitLength, 8u);
+    sharedSecret.truncate(resultByteLength);
+    auto numBitsToMaskOff = resultByteLength * 8 - outputBitLength;
+    KJ_DASSERT(numBitsToMaskOff < 8, numBitsToMaskOff);
+    uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
+    sharedSecret.back() &= mask;
+    return sharedSecret.releaseAsArray();
+  }
+
 private:
   SubtleCrypto::JsonWebKey exportJwk() const override final {
-    KJ_ASSERT(getAlgorithmName() == "Ed25519"_kj || getAlgorithmName() == "NODE-ED25519"_kj);
+    KJ_ASSERT(getAlgorithmName() == "X25519"_kj || getAlgorithmName() == "Ed25519"_kj ||
+        getAlgorithmName() == "NODE-ED25519"_kj);
 
     uint8_t rawPublicKey[ED25519_PUBLIC_KEY_LEN];
     size_t publicKeyLen = sizeof(rawPublicKey);
@@ -1792,8 +1877,11 @@ private:
 
     SubtleCrypto::JsonWebKey jwk;
     jwk.kty = kj::str("OKP");
-    jwk.crv = kj::str("Ed25519");
+    jwk.crv = kj::str(getAlgorithmName() == "X25519"_kj ? "X25519"_kj : "Ed25519"_kj);
     jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
+    if (getAlgorithmName() == "Ed25519"_kj) {
+      jwk.alg = kj::str("EdDSA");
+    }
 
     if (getType() == "private"_kj) {
       // Deliberately use ED25519_PUBLIC_KEY_LEN here.
@@ -1839,7 +1927,7 @@ public:
   explicit EdDsaKey(kj::Own<EVP_PKEY> keyData,
                     CryptoKey::KeyAlgorithm keyAlgorithm,
                     kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+      : EdDsaKeyBase(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
   CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
@@ -1848,13 +1936,14 @@ private:
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
 
-// Class for legacy algorithm NODE-ED25519, which includes a namedCurve field in its algorithm unlike Ed25519.
+// Class for legacy algorithm NODE-ED25519, which includes a namedCurve field in its algorithm
+// unlike Ed25519.
 class EdDsaCurveKey final : public EdDsaKeyBase {
 public:
   explicit EdDsaCurveKey(kj::Own<EVP_PKEY> keyData,
                     CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
                     kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+      : EdDsaKeyBase(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)) {}
   CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
@@ -1868,9 +1957,11 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
     CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
   auto [curveName, keypair, keylen] = [nid, normalizedName] {
     switch (nid) {
-      // BoringSSL doesn't support ED448.
+      // BoringSSL doesn't support ED448/X448.
       case NID_ED25519:
         return std::make_tuple("Ed25519"_kj, ED25519_keypair, ED25519_PUBLIC_KEY_LEN);
+      case NID_X25519:
+        return std::make_tuple("X25519"_kj, X25519_keypair, X25519_PUBLIC_VALUE_LEN);
     }
 
     KJ_FAIL_REQUIRE("ED ", normalizedName, " unimplemented", nid);
@@ -1879,6 +1970,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
   uint8_t rawPublicKey[keylen];
   uint8_t rawPrivateKey[keylen * 2];
   keypair(rawPublicKey, rawPrivateKey);
+
   // The private key technically also contains the public key. Why does the keypair function bother
   // writing out the public key to a separate buffer?
 
@@ -1921,6 +2013,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
       CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate, keyUsages,
+                                  normalizedName == "X25519" ?
+                                  CryptoKeyUsageSet::derivationKeyMask() :
                                   CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
   auto privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
   auto publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
@@ -1932,8 +2026,8 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
         "EDDSA curve \"", namedCurve, "\" isn't supported.");
   }
 
-  return EdDsaKey::generateKey(normalizedName, NID_ED25519, privateKeyUsages, publicKeyUsages,
-                               extractable);
+  return EdDsaKey::generateKey(normalizedName, normalizedName == "X25519" ? NID_X25519 :
+                               NID_ED25519, privateKeyUsages, publicKeyUsages, extractable);
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
@@ -1952,15 +2046,17 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
   }
 
   auto [evpPkey, keyType, usages] = [&] {
+    auto nid = normalizedName == "X25519" ? NID_X25519 : NID_ED25519;
     if (format != "raw") {
       return importAsymmetric(
           format, kj::mv(keyData), normalizedName, extractable, keyUsages,
-          [](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-        return ellipticJwkReader(NID_ED25519, kj::mv(keyDataJwk));
-      }, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
+          [nid](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
+        return ellipticJwkReader(nid, kj::mv(keyDataJwk));
+      }, normalizedName == "X25519" ? CryptoKeyUsageSet::derivationKeyMask() :
+         CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
-      return importEllipticRaw(kj::mv(keyData), NID_ED25519, normalizedName, keyUsages,
-                               CryptoKeyUsageSet::verify());
+      return importEllipticRaw(kj::mv(keyData), nid, normalizedName, keyUsages,
+                               normalizedName == "X25519" ? CryptoKeyUsageSet() : CryptoKeyUsageSet::verify());
     }
   }();
 
@@ -1969,12 +2065,14 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
       normalizedName,
       normalizedName,
     };
-    return kj::heap<EdDsaCurveKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable, usages);
+    return kj::heap<EdDsaCurveKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable,
+                                   usages);
   }
   auto keyAlgorithm = CryptoKey::KeyAlgorithm {
     normalizedName
   };
 
+  // In X25519 we ignore the id-X25519 identifier, as with id-ecDH above.
   return kj::heap<EdDsaKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable, usages);
 }
 }  // namespace workerd::api
