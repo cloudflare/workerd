@@ -19,7 +19,6 @@ namespace workerd {
 
 using kj::byte;
 using kj::uint;
-using ErrorCallback = kj::Maybe<kj::Function<void(const char*)>>;
 
 class SqliteDatabase {
   // C++/KJ API for SQLite.
@@ -36,9 +35,10 @@ public:
   class Statement;
   class Lock;
   class LockManager;
+  class Regulator;
 
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, ErrorCallback onError);
-  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, ErrorCallback onError, kj::WriteMode mode);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path);
+  SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
@@ -46,12 +46,16 @@ public:
   // Allows a SqliteDatabase to be passed directly into SQLite API functions where `sqlite*` is
   // expected.
 
-  Statement prepare(kj::StringPtr sqlCode, ErrorCallback onError = nullptr);
+  static Regulator TRUSTED;
+  // Use as the `Regulator&` for queries that are fully trusted. As a general rule, this should
+  // be used if and only if the SQL query is a string literal.
+
+  Statement prepare(Regulator& regulator, kj::StringPtr sqlCode);
   // Prepares the given SQL code as a persistent statement that can be used across several queries.
   // Don't use this for one-off queries; pass the code to the Query constructor.
 
   template <typename... Params>
-  Query run(kj::StringPtr sqlCode, Params&&... bindings);
+  Query run(Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
   // except:
   // - It may be more efficient for one-off use caes.
@@ -59,23 +63,49 @@ public:
   //   `Query` object are both associated with the last statement. This is particulary convenient
   //   for doing database initialization such as creating several tables at once.
 
+  template <size_t size>
+  Statement prepare(const char (&sqlCode)[size]);
+  template <size_t size, typename... Params>
+  Query run(const char (&sqlCode)[size], Params&&... bindings);
+  // When the input is a string literal, we automatically use the TRUSTED regulator.
+
 private:
   sqlite3* db;
-
-  ErrorCallback onError;
 
   void close();
 
   enum Multi { SINGLE, MULTI };
 
   static kj::Own<sqlite3_stmt> prepareSql(
-      sqlite3* db, ErrorCallback& onError, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
+      sqlite3* db, Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
   // Helper to call sqlite3_prepare_v3().
   //
   // In SINGLE mode, an exception is thrown if `sqlCode` contains multiple statements.
   //
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
+};
+
+class SqliteDatabase::Regulator {
+  // Class which regulates a SQL query, especially to control how queries created in JavaScript
+  // application code are handled.
+
+public:
+  // TODO(now): Add hooks for authorizer callback. SQLite only allows a single callback per
+  //   database connection but we need to apply different rules to system queries vs. application
+  //   queries.
+
+  virtual void onError(kj::StringPtr message) {}
+  // Report that an error occurred. `message` is the detail message constructed by SQLite. This
+  // function should typically throw an exception. If no exception is thrown, a simple KJ exception
+  // will be thrown after `onError()` returns.
+  //
+  // The purpose of this callback is to allow the JavaScript API bindings to throw a JSG exception.
+  //
+  // Note that SQLITE_MISUSE errors are NOT reported using `onError()` -- they will throw regular
+  // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
+  // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
+  // prohibited from causing such errors in the first place.
 };
 
 class SqliteDatabase::Statement {
@@ -92,9 +122,11 @@ public:
 
 private:
   SqliteDatabase& db;
+  Regulator& regulator;
   kj::Own<sqlite3_stmt> stmt;
 
-  Statement(SqliteDatabase& db, kj::Own<sqlite3_stmt> stmt): db(db), stmt(kj::mv(stmt)) {}
+  Statement(SqliteDatabase& db, Regulator& regulator, kj::Own<sqlite3_stmt> stmt)
+      : db(db), regulator(regulator), stmt(kj::mv(stmt)) {}
 
   friend class SqliteDatabase;
 };
@@ -112,24 +144,28 @@ public:
                              decltype(nullptr)>;
   Query(Query&& query);
 
-  Query(SqliteDatabase& db, Statement& statement, kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
+        kj::ArrayPtr<const ValuePtr> bindings);
   // Begin a query executing a prepared statement.
   //
   // `bindings` are the value to fill into `?`s in the statement. The `bindings` array itself
   // need only live until the constructor returns, but any strings or blobs it points to must
   // remain valid until the Query is destroyed.
 
-  Query(SqliteDatabase& db, kj::StringPtr sqlCode, kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
+        kj::ArrayPtr<const ValuePtr> bindings);
   // Begin a one-off query executing some code directly.
 
   template <typename... Params>
-  Query(SqliteDatabase& db, Statement& statement, Params&&... bindings)
-      : db(db), onError(db.onError), statement(statement) {
+  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement, Params&&... bindings)
+      : db(db), regulator(regulator), statement(statement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
-  Query(SqliteDatabase& db, kj::StringPtr sqlCode, Params&&... bindings)
-      : db(db), onError(db.onError), ownStatement(prepareSql(db, db.onError, sqlCode, 0, MULTI)), statement(ownStatement) {
+  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
+      : db(db), regulator(regulator),
+        ownStatement(prepareSql(db, regulator, sqlCode, 0, MULTI)),
+        statement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   // These versions of the constructor accept the binding values as positional parameters. This
@@ -189,7 +225,7 @@ public:
 
 private:
   sqlite3* db;
-  ErrorCallback& onError;
+  Regulator& regulator;
   kj::Own<sqlite3_stmt> ownStatement;   // for one-off queries
   sqlite3_stmt* statement;
   bool done = false;
@@ -419,13 +455,24 @@ public:
 };
 
 template <typename... Params>
-SqliteDatabase::Query SqliteDatabase::run(kj::StringPtr sqlCode, Params&&... params) {
-  return Query(*this, sqlCode, kj::fwd<Params>(params)...);
+SqliteDatabase::Query SqliteDatabase::run(
+    Regulator& regulator, kj::StringPtr sqlCode, Params&&... params) {
+  return Query(*this, regulator, sqlCode, kj::fwd<Params>(params)...);
 }
 
 template <typename... Params>
 SqliteDatabase::Query SqliteDatabase::Statement::run(Params&&... params) {
-  return Query(db, *this, kj::fwd<Params>(params)...);
+  return Query(db, regulator, *this, kj::fwd<Params>(params)...);
+}
+
+template <size_t size>
+SqliteDatabase::Statement SqliteDatabase::prepare(const char (&sqlCode)[size]) {
+  return prepare(TRUSTED, kj::StringPtr(sqlCode, size - 1));
+}
+template <size_t size, typename... Params>
+SqliteDatabase::Query SqliteDatabase::run(
+    const char (&sqlCode)[size], Params&&... params) {
+  return Query(*this, TRUSTED, sqlCode, kj::fwd<Params>(params)...);
 }
 
 }  // namespace workerd

@@ -47,7 +47,7 @@ function test(sql) {
 
   // Incorrect number of binding values
   requireException(() => sql.exec("SELECT ?"),
-    "wrong number of bindings for SQLite query");
+    "Error: Wrong number of parameter bindings for SQL query.");
 
   // Prepared statement
   const prepared = sql.prepare("SELECT 789");
@@ -63,7 +63,7 @@ function test(sql) {
 
   // Prepared statement (incorrect number of binding values)
   requireException(() => preparedWithBinding({bindValues: []}),
-    "wrong number of bindings for SQLite query");
+    "Error: Wrong number of parameter bindings for SQL query.");
 
   // Create and access hidden _cf_ table as admin
   sql.exec("CREATE TABLE _cf_test (name TEXT)", {admin: true});

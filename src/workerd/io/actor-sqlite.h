@@ -6,7 +6,6 @@
 
 #include "actor-cache.h"
 #include <workerd/util/sqlite-kv.h>
-#include <workerd/jsg/jsg.h>
 
 namespace workerd {
 
@@ -21,9 +20,7 @@ class ActorSqlite final: public ActorCacheInterface {
 
 public:
   ActorSqlite(SqliteDatabase::Vfs& vfs, kj::PathPtr path)
-      : db(vfs, path, ErrorCallback([](const char* errStr) {
-          JSG_ASSERT(false, Error, errStr);
-        }), kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
+      : db(vfs, path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
         kv(db) {}
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(

@@ -65,7 +65,7 @@ jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Optional<SqlRunOptions> optio
   }
 
   kj::ArrayPtr<const SqliteDatabase::Query::ValuePtr> boundValues = bindValues.asPtr();
-  SqliteDatabase::Query query(sqlDatabase->sqlite, statement, boundValues);
+  SqliteDatabase::Query query(sqlDatabase->sqlite, *sqlDatabase, statement, boundValues);
   return jsg::alloc<SqlResult>(kj::mv(query));
 }
 
@@ -145,10 +145,7 @@ jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql, jsg::O
   kj::String error;
   kj::ArrayPtr<const SqliteDatabase::Query::ValuePtr> boundValues = bindValues.asPtr();
 
-  ErrorCallback errorCb = ErrorCallback([](const char* errStr) {
-    JSG_ASSERT(false, Error, errStr);
-  });
-  SqliteDatabase::Query query = sqlite.run(querySql, boundValues);
+  SqliteDatabase::Query query = sqlite.run(*this, querySql, boundValues);
   isAdmin = false;
   return jsg::alloc<SqlResult>(kj::mv(query));
 }
@@ -158,9 +155,13 @@ jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String qu
     isAdmin = o->admin;
   }
 
-  SqliteDatabase::Statement statement = sqlite.prepare(query);
+  SqliteDatabase::Statement statement = sqlite.prepare(*this, query);
   isAdmin = false;
   return jsg::alloc<SqlPreparedStatement>(JSG_THIS, kj::mv(statement));
+}
+
+void SqlDatabase::onError(kj::StringPtr message) {
+  JSG_ASSERT(false, Error, message);
 }
 
 }  // namespace workerd::api

@@ -57,7 +57,7 @@ private:
   SqliteDatabase::Statement statement;
 };
 
-class SqlDatabase final: public jsg::Object {
+class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
 public:
   friend class SqlPreparedStatement;
   SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
@@ -96,7 +96,7 @@ private:
     const char* dbName,
     const char* triggerName);
 
-  void onError(const char* errStr);
+  void onError(kj::StringPtr message) override;
 
   SqliteDatabase& sqlite;
   jsg::Ref<DurableObjectStorage> storage;
