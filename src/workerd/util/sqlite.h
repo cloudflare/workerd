@@ -140,8 +140,6 @@ class SqliteDatabase::Query {
 public:
   using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
                              decltype(nullptr)>;
-  using ValueOwned = kj::OneOf<kj::Array<const byte>, kj::String, int64_t, double,
-                             decltype(nullptr)>;
   Query(Query&& query);
 
   Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
@@ -192,9 +190,6 @@ public:
   //
   // Returned pointers (strings and blobs) remain valid only until either (a) nextRow() is called,
   // or (b) a different get method is called on the same column but with a different type.
-
-  ValueOwned getValueOwned(uint column);
-  // Get the value at the given column, as whatever type was actually returned.
 
   kj::StringPtr getColumnName(uint column);
   // Get the name of a specific column.

@@ -23,14 +23,17 @@ public:
     JSG_ITERABLE(rows);
   }
 
-  JSG_ITERATOR(RowIterator, rows,
-                jsg::Dict<SqliteDatabase::Query::ValueOwned>,
-                jsg::Ref<SqlResult>,
-                rowIteratorNext);
+  using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
+  // One value returned from SQL. Note that we intentionally return StringPtr instead of String
+  // because we know that the underlying buffer returned by SQLite will be valid long enough to be
+  // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
+  // JSG, which does not need to make a copy.
 
-  static kj::Maybe<jsg::Dict<SqliteDatabase::Query::ValueOwned>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& state);
+  JSG_ITERATOR(RowIterator, rows, jsg::Dict<Value>, jsg::Ref<SqlResult>, rowIteratorNext);
+  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& state);
 private:
   SqliteDatabase::Query query;
+  bool isFirst = true;
 };
 
 class SqlPreparedStatement final: public jsg::Object {

@@ -27,7 +27,7 @@ function test(sql) {
   // Test blob results
   const resultBlob = [...sql.exec("SELECT x'ff'")];
   assert.equal(resultBlob.length, 1);
-  const blob = resultBlob[0]["x'ff'"];
+  const blob = new Uint8Array(resultBlob[0]["x'ff'"]);
   assert.equal(blob.length, 1);
   assert.equal(blob[0], 255);
   // Test binding values

@@ -15,22 +15,50 @@ jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
-kj::Maybe<jsg::Dict<SqliteDatabase::Query::ValueOwned>> SqlResult::rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& state) {
+kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
+    jsg::Lock& js, jsg::Ref<SqlResult>& state) {
+  if (state->isFirst) {
+    // Little hack: We don't want to call query.nextRow() at the end of this method because it
+    // may invalidate the backing buffers of StringPtrs that we haven't returned to JS yet.
+    state->isFirst = false;
+  } else {
+    state->query.nextRow();
+  }
+
   auto& query = state->query;
   if (query.isDone()) {
     return nullptr;
   }
 
-  kj::Vector<jsg::Dict<SqliteDatabase::Query::ValueOwned>::Field> fields;
-  for (uint i = 0; i < query.columnCount(); ++i) {
-    fields.add(jsg::Dict<SqliteDatabase::Query::ValueOwned>::Field{
+  kj::Vector<jsg::Dict<Value>::Field> fields;
+  for (auto i: kj::zeroTo(query.columnCount())) {
+    Value value;
+    KJ_SWITCH_ONEOF(query.getValue(i)) {
+      KJ_CASE_ONEOF(data, kj::ArrayPtr<const byte>) {
+        value.emplace(kj::heapArray(data));
+      }
+      KJ_CASE_ONEOF(text, kj::StringPtr) {
+        value.emplace(text);
+      }
+      KJ_CASE_ONEOF(i, int64_t) {
+        // int64 will become BigInt, but most applications won't want all their integers to be
+        // BigInt. We will coerce to a double here.
+        // TODO(someday): Allow applications to request that certain columns use BigInt.
+        value.emplace(static_cast<double>(i));
+      }
+      KJ_CASE_ONEOF(d, double) {
+        value.emplace(d);
+      }
+      KJ_CASE_ONEOF(_, decltype(nullptr)) {
+        // leave value null
+      }
+    }
+    fields.add(jsg::Dict<Value>::Field{
       .name = kj::heapString(query.getColumnName(i)),
-      .value = query.getValueOwned(i)
+      .value = kj::mv(value)
     });
   }
-  auto dict = jsg::Dict<SqliteDatabase::Query::ValueOwned>{.fields = fields.releaseAsArray()};
-  query.nextRow();
-  return dict;
+  return jsg::Dict<Value>{.fields = fields.releaseAsArray()};
 }
 
 SqlPreparedStatement::SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, SqliteDatabase::Statement&& statement):

@@ -325,20 +325,6 @@ SqliteDatabase::Query::ValuePtr SqliteDatabase::Query::getValue(uint column) {
   KJ_UNREACHABLE;
 }
 
-SqliteDatabase::Query::ValueOwned SqliteDatabase::Query::getValueOwned(uint column) {
-  switch (sqlite3_column_type(statement, column)) {
-    case SQLITE_INTEGER: {
-      int64_t value = getInt64(column);
-      return static_cast<double>(value);
-    }
-    case SQLITE_FLOAT:   return getDouble(column);
-    case SQLITE_TEXT:    return kj::heapString(getText(column));
-    case SQLITE_BLOB:    return kj::heapArray<const byte>(getBlob(column));
-    case SQLITE_NULL:    return nullptr;
-  }
-  KJ_UNREACHABLE;
-}
-
 kj::StringPtr SqliteDatabase::Query::getColumnName(uint column) {
   return sqlite3_column_name(statement, column);
 }
