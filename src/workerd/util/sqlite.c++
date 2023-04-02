@@ -98,6 +98,14 @@ static kj::Path getPathFromWin32Handle(HANDLE handle) {
 }
 #endif
 
+kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
+  if (cstr == nullptr) {
+    return nullptr;
+  } else {
+    return kj::StringPtr(cstr);
+  }
+}
+
 }  // namespace
 
 // =======================================================================================
@@ -113,6 +121,10 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
     SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
                                     SQLITE_OPEN_READONLY, vfs.getName().cStr()));
   }
+
+  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
+  //   from this throwing.
+  setupAuthorizer();
 }
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
@@ -136,6 +148,10 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
     SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
                                     flags, vfs.getName().cStr()));
   }
+
+  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
+  //   from this throwing.
+  setupAuthorizer();
 }
 
 SqliteDatabase::~SqliteDatabase() noexcept(false) {
@@ -151,7 +167,13 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
 }
 
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
-    sqlite3* db, Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
+    Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
+  // Set up the regulator that will be used for authorizer callbacks while preparing this
+  // statement.
+  KJ_ASSERT(currentRegulator == nullptr, "recursive prepareSql()?");
+  KJ_DEFER(currentRegulator = nullptr);
+  currentRegulator = regulator;
+
   for (;;) {
     sqlite3_stmt* result;
     const char* tail;
@@ -195,9 +217,169 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
   }
 }
 
+bool SqliteDatabase::isAuthorized(int actionCode,
+    kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
+    kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName) {
+  Regulator& regulator = KJ_UNWRAP_OR(currentRegulator, {
+    // We're not currently preparing a statement, so we didn't expect the authorizer callback to
+    // run. We blanket-deny in this case as a precaution.
+    KJ_LOG(ERROR, "SQLite authorizer callback invoked at unexpected time", kj::getStackTrace());
+    return false;
+  });
+
+  KJ_IF_MAYBE(t, triggerName) {
+    if (!regulator.isAllowedTrigger(*t)) {
+      // Log an error because it seems really suspicious if a trigger runs when it's not allowed.
+      // I want to understand if this can even happen.
+      KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", *t, kj::getStackTrace());
+
+      // TODO(security): Is it better to return SQLITE_IGNORE to ignore the trigger? I don't fully
+      //   understand the implications of SQLITE_IGNORE. The documentation mentions that in the
+      //   case of SQLITE_DELETE, it doesn't actually ignore the delete, which is weird. Hopefully
+      //   it's impossible for people to register a trigger on protected tables in the first place,
+      //   so triggers will never run.
+      return false;
+    }
+  }
+
+  KJ_IF_MAYBE(d, dbName) {
+    if (*d != "main"_kj) {
+      // We don't allow opening multiple databases (including temporary databases), as our storage
+      // engine is not designed for this at present.
+      return false;
+    }
+  }
+
+  if (&regulator == &TRUSTED) {
+    // Everything is allowed for trusted queries.
+    return true;
+  }
+
+  switch (actionCode) {
+    // ---------------------------------------------------------------
+    // Stuff that is (sometimes) allowed
+
+    case SQLITE_SELECT             :   /* NULL            NULL            */
+      // Yes, SELECT statements are allowed. (Note that if the SELECT names any tables, a separate
+      // SQLITE_READ will be authorized for each one.)
+      KJ_ASSERT(param1 == nullptr);
+      KJ_ASSERT(param2 == nullptr);
+      return true;
+
+    case SQLITE_CREATE_TABLE       :   /* Table Name      NULL            */
+    case SQLITE_DELETE             :   /* Table Name      NULL            */
+    case SQLITE_DROP_TABLE         :   /* Table Name      NULL            */
+    case SQLITE_INSERT             :   /* Table Name      NULL            */
+    case SQLITE_ANALYZE            :   /* Table Name      NULL            */
+    case SQLITE_CREATE_VIEW        :   /* View Name       NULL            */
+    case SQLITE_DROP_VIEW          :   /* View Name       NULL            */
+    case SQLITE_REINDEX            :   /* Index Name      NULL            */
+      KJ_ASSERT(param2 == nullptr);
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+
+    case SQLITE_ALTER_TABLE        :   /* Database Name   Table Name      */
+      // Why is the database name passed redundantly here? Weird.
+      KJ_ASSERT(KJ_ASSERT_NONNULL(param1) == "main"_kj);
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+
+    case SQLITE_READ               :   /* Table Name      Column Name     */
+    case SQLITE_UPDATE             :   /* Table Name      Column Name     */
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+
+    case SQLITE_CREATE_INDEX       :   /* Index Name      Table Name      */
+    case SQLITE_DROP_INDEX         :   /* Index Name      Table Name      */
+    case SQLITE_CREATE_TRIGGER     :   /* Trigger Name    Table Name      */
+    case SQLITE_DROP_TRIGGER       :   /* Trigger Name    Table Name      */
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1)) &&
+             regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+
+    case SQLITE_TRANSACTION        :   /* Operation       NULL            */
+      {
+        // Verify param1 is one of the values we expect.
+        kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
+        KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "COMMIT", op);
+      }
+      KJ_ASSERT(param2 == nullptr);
+      return true;
+
+    case SQLITE_SAVEPOINT          :   /* Operation       Savepoint Name  */
+      {
+        // Verify param1 is one of the values we expect.
+        kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
+        KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "COMMIT", op);
+      }
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+
+    case SQLITE_PRAGMA             :   /* Pragma Name     1st arg or NULL */
+      // TODO(sqlite): Decide which pragmas are OK.
+      return false;
+
+    case SQLITE_FUNCTION           :   /* NULL            Function Name   */
+      // TODO(sqlite): Decide which function are OK.
+      return false;
+
+    // ---------------------------------------------------------------
+    // Stuff that is never allowed
+
+    case SQLITE_CREATE_VTABLE      :   /* Table Name      Module Name     */
+    case SQLITE_DROP_VTABLE        :   /* Table Name      Module Name     */
+      // Virtual tables are tables backed by some native-code callbacks. We don't support these.
+      return false;
+
+    case SQLITE_ATTACH             :   /* Filename        NULL            */
+    case SQLITE_DETACH             :   /* Database Name   NULL            */
+      // We do not support attached databases. It seems unlikely that we ever will.
+      return false;
+
+    case SQLITE_CREATE_TEMP_TABLE  :   /* Table Name      NULL            */
+    case SQLITE_DROP_TEMP_TABLE    :   /* Table Name      NULL            */
+    case SQLITE_CREATE_TEMP_INDEX  :   /* Index Name      Table Name      */
+    case SQLITE_DROP_TEMP_INDEX    :   /* Index Name      Table Name      */
+    case SQLITE_CREATE_TEMP_TRIGGER:   /* Trigger Name    Table Name      */
+    case SQLITE_DROP_TEMP_TRIGGER  :   /* Trigger Name    Table Name      */
+    case SQLITE_CREATE_TEMP_VIEW   :   /* View Name       NULL            */
+    case SQLITE_DROP_TEMP_VIEW     :   /* View Name       NULL            */
+      // TODO(someday): Allow temporary tables. Creating a temporary table actually causes
+      //   SQLite to open a separate temporary file to place the data in. Currently, our storage
+      //   engine has no support for this.
+      return false;
+
+    case SQLITE_RECURSIVE          :   /* NULL            NULL            */
+      // Recursive select. Disallow because AFAICT there's no way to prevent infinite loops.
+      // TODO(someday): Find a way to apply CPU time limits to SQLite.
+      return false;
+
+    case SQLITE_COPY               :   /* No longer used */
+      // These are operations we simply don't support today.
+      return false;
+
+    default:
+      KJ_LOG(WARNING, "unknown SQLite action", actionCode);
+      return false;
+  }
+}
+
+void SqliteDatabase::setupAuthorizer() {
+  SQLITE_CALL_NODB(sqlite3_set_authorizer(db,
+      [](void* userdata, int actionCode,
+         const char* param1, const char* param2,
+         const char* dbName, const char* triggerName) {
+    try {
+      return reinterpret_cast<SqliteDatabase*>(userdata)
+          ->isAuthorized(actionCode, toMaybeString(param1), toMaybeString(param2),
+                        toMaybeString(dbName), toMaybeString(triggerName))
+          ? SQLITE_OK : SQLITE_DENY;
+    } catch (kj::Exception& e) {
+      // We'll crash if we throw to SQLite. Instead, log the error and deny.
+      KJ_LOG(ERROR, e);
+      return SQLITE_DENY;
+    }
+  }, this));
+}
+
 SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::StringPtr sqlCode) {
   return Statement(*this, regulator,
-      prepareSql(db, regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
+      prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
 SqliteDatabase::Query::Query(Query&& query):
@@ -218,7 +400,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, Statement
 SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
                              kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), regulator(regulator),
-      ownStatement(prepareSql(db, regulator, sqlCode, 0, MULTI)),
+      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       statement(ownStatement) {
   init(bindings);
 }

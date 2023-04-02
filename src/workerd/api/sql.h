@@ -67,19 +67,13 @@ public:
   ~SqlDatabase();
 
   struct SqlExecOptions {
-    bool admin = false;
     kj::Maybe<kj::Array<ValueBind>> bindValues;
-    JSG_STRUCT(admin, bindValues);
+    JSG_STRUCT(bindValues);
   };
 
   jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Optional<SqlExecOptions> options);
 
-  struct SqlPrepareOptions {
-    bool admin = false;
-    JSG_STRUCT(admin);
-  };
-
-  jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query, jsg::Optional<SqlPrepareOptions> options);
+  jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query);
 
   JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
@@ -91,20 +85,12 @@ private:
     visitor.visit(storage);
   }
 
-  static int authorize(
-    void* userdata,
-    int actionCode,
-    const char* param1,
-    const char* param2,
-    const char* dbName,
-    const char* triggerName);
-
+  bool isAllowedName(kj::StringPtr name) override;
+  bool isAllowedTrigger(kj::StringPtr name) override;
   void onError(kj::StringPtr message) override;
 
   SqliteDatabase& sqlite;
   jsg::Ref<DurableObjectStorage> storage;
-
-  bool isAdmin = false;
 };
 
 #define EW_SQL_ISOLATE_TYPES                \
@@ -114,8 +100,7 @@ private:
   api::SqlResult::RowIterator,              \
   api::SqlResult::RowIterator::Next,        \
   api::SqlPreparedStatement::SqlRunOptions, \
-  api::SqlDatabase::SqlExecOptions,         \
-  api::SqlDatabase::SqlPrepareOptions
+  api::SqlDatabase::SqlExecOptions
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

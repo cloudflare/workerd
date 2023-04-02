@@ -65,25 +65,15 @@ function test(sql) {
   requireException(() => preparedWithBinding({bindValues: []}),
     "Error: Wrong number of parameter bindings for SQL query.");
 
-  // Create and access hidden _cf_ table as admin
-  sql.exec("CREATE TABLE _cf_test (name TEXT)", {admin: true});
-  sql.exec("SELECT * FROM _cf_test", {admin: true});
-
   // Accessing a hidden _cf_ table
   requireException(() => sql.exec("CREATE TABLE _cf_invalid (name TEXT)"),
     "not authorized");
-  requireException(() => sql.exec("SELECT * FROM _cf_test"),
-    "access to _cf_test.name is prohibited");
+  requireException(() => sql.exec("SELECT * FROM _cf_KV"),
+    "access to _cf_KV.key is prohibited");
 
-  // Accessing pragmas without and withn admin
+  // Accessing pragmas is not allowed
   requireException(() => sql.exec("PRAGMA hard_heap_limit = 1024"),
     "not authorized");
-  sql.exec("PRAGMA hard_heap_limit = 1024", {admin: true});
-
-  // Transactions without and withn admin
-  requireException(() => sql.exec("BEGIN TRANSACTION; END TRANSACTION"),
-    "not authorized");
-  sql.exec("BEGIN TRANSACTION; END TRANSACTION", {admin: true});
 }
 
 export class DurableObjectExample {

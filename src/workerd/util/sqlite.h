@@ -72,18 +72,28 @@ public:
 private:
   sqlite3* db;
 
+  kj::Maybe<Regulator&> currentRegulator;
+  // Set while a query is compiling.
+
   void close();
 
   enum Multi { SINGLE, MULTI };
 
-  static kj::Own<sqlite3_stmt> prepareSql(
-      sqlite3* db, Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
+  kj::Own<sqlite3_stmt> prepareSql(
+      Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
   // Helper to call sqlite3_prepare_v3().
   //
   // In SINGLE mode, an exception is thrown if `sqlCode` contains multiple statements.
   //
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
+
+  bool isAuthorized(int actionCode,
+      kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
+      kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName);
+  // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
+
+  void setupAuthorizer();
 };
 
 class SqliteDatabase::Regulator {
@@ -91,9 +101,22 @@ class SqliteDatabase::Regulator {
   // application code are handled.
 
 public:
-  // TODO(now): Add hooks for authorizer callback. SQLite only allows a single callback per
-  //   database connection but we need to apply different rules to system queries vs. application
-  //   queries.
+  virtual bool isAllowedName(kj::StringPtr name) { return true; }
+  // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
+  // accessed. Typically, this is used to deny access to names containing special prefixes
+  // indicating that they are privileged, like `_cf_`.
+  //
+  // This only applies to global names. Scoped names, such as column names, are not subject to
+  // authorization.
+
+  virtual bool isAllowedTrigger(kj::StringPtr name) { return false; }
+  // Returns whether a given trigger or view name should be permitted to run as a side effect of a
+  // query running under this Regulator. This is a precaution to prevent application-defined
+  // triggers from executing under a privileged regulator.
+  //
+  // TODO(someday): In theory a trigger should run with the authority level under which it was
+  //   created, but how do we track that? In practice we probably never expect triggers to run on
+  //   trusted queries.
 
   virtual void onError(kj::StringPtr message) {}
   // Report that an error occurred. `message` is the detail message constructed by SQLite. This
@@ -162,7 +185,7 @@ public:
   template <typename... Params>
   Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
       : db(db), regulator(regulator),
-        ownStatement(prepareSql(db, regulator, sqlCode, 0, MULTI)),
+        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
         statement(ownStatement) {
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
