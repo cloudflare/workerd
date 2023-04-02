@@ -3,21 +3,7 @@ using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "main", worker = .mainWorker),
-    ( name = "my-disk",
-      disk = (
-        path = "/tmp/do-storage",
-        writable = true,
-      )
-    ),
-  ],
-
-  sockets = [
-    # Serve HTTP on port 8080.
-    ( name = "http",
-      address = "*:8080",
-      http = (),
-      service = "main"
-    ),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
   ]
 );
 
@@ -33,11 +19,9 @@ const mainWorker :Workerd.Worker = (
     (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
   ],
 
-  durableObjectStorage = (localDisk = "my-disk"),
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
 
-  # We must declare bindings to allow us to call back to our own Durable Object namespaces. These
-  # show up as properties on the `env` object passed to `fetch()`.
   bindings = [
-    (name = "DurableObjectExample", durableObjectNamespace = "DurableObjectExample"),
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
   ],
 );

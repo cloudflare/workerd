@@ -98,14 +98,9 @@ export class DurableObjectExample {
 }
 
 export default {
-  async fetch(request, env) {
-    return await handleRequest(request, env);
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName("A");
+    let obj = env.ns.get(id);
+    await obj.fetch("http://foo");
   }
-}
-
-async function handleRequest(request, env) {
-  let id = env.DurableObjectExample.idFromName("A");
-  let obj = env.DurableObjectExample.get(id);
-  await obj.fetch(request.url);
-  return new Response();
 }
