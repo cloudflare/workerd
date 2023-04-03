@@ -916,8 +916,13 @@ struct ArrayContext: public Object {
     KJ_ASSERT(array[64] == 1);
     return kj::mv(array);
   }
+  kj::Array<int> takeArguments(int i, Arguments<int> array) {
+    KJ_ASSERT(i == 123);
+    return kj::mv(array);
+  }
   JSG_RESOURCE_TYPE(ArrayContext) {
     JSG_METHOD(takeArray);
+    JSG_METHOD(takeArguments);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(ArrayIsolate, ArrayContext);
@@ -925,6 +930,8 @@ JSG_DECLARE_ISOLATE_TYPE(ArrayIsolate, ArrayContext);
 KJ_TEST("Array Values") {
   Evaluator<ArrayContext, ArrayIsolate> e(v8System);
   e.expectEval("m = Array(65); m[64] = 1; takeArray(m)[64]", "number", "1");
+
+  e.expectEval("takeArguments(123, 456, 789, 321).join(', ')", "string", "456, 789, 321");
 }
 
 // ========================================================================================

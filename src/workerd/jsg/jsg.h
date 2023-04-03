@@ -969,8 +969,26 @@ struct Dict {
 
 template <typename T> class TypeHandler;
 
+template <typename T>
+class Arguments: public kj::Array<T> {
+  // When used as a function argument type, captures all remaining arguments passed to the method,
+  // unwrapping them all as type T.
+public:
+  Arguments(kj::Array<T>&& value): kj::Array<T>(kj::mv(value)) {}
+
+  using ElementType = T;
+};
+
+template <typename T> struct IsArguments_ { static constexpr bool value = false; };
+template <typename T> struct IsArguments_<Arguments<T>> { static constexpr bool value = true; };
+template <typename T>
+constexpr bool isArguments() { return IsArguments_<T>::value; }
+// Is `T` some specialization of `Arguments<U>`?
+
 class Varargs {
   // An array of local values placed on the end of a parameter list to capture all trailing values
+  //
+  // TODO(cleanup): Can all use cases of this be replaced with Arguments<Value>?
 public:
   Varargs(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args): startIndex(index), args(args) {
     if (index > args.Length()) {

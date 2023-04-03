@@ -412,6 +412,14 @@ FOR_EACH_JSG_IMPL_TYPE(DECLARE_JSG_IMPL_TYPE)
 #undef FOR_EACH_JSG_IMPL_TYPE
 #undef DECLARE_JSG_IMPL_TYPE
 
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, Arguments<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    // TODO(someday): Create a representation of Arguments<T> that actually encodes the type T.
+    builder.initJsgImpl().setType(JsgImplType::Type::JSG_VARARGS);
+  }
+};
+
 template<typename Configuration>
 struct BuildRtti<Configuration, Configuration> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
