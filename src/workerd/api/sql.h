@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 
@@ -14,12 +15,13 @@ class DurableObjectStorage;
 
 typedef kj::OneOf<kj::Array<const byte>, kj::String, double> SqlBindingValue;
 class SqlDatabase;
+class SqlPreparedStatement;
 
 class SqlResult final: public jsg::Object {
 public:
-  SqlResult(SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings);
-  SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-            kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
+  template <typename... Params>
+  SqlResult(Params&&... params)
+      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))) {}
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
@@ -32,15 +34,27 @@ public:
   // JSG, which does not need to make a copy.
 
   JSG_ITERATOR(RowIterator, rows, jsg::Dict<Value>, jsg::Ref<SqlResult>, rowIteratorNext);
-  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& state);
+  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
 private:
-  SqliteDatabase::Query query;
+  struct State {
+    kj::Own<void> dependency;
+    // Refcount on the SqliteDatabase::Statement underlying the query, if any.
 
-  kj::Array<SqlBindingValue> bindings;
-  // The bindings that were used to construct `query`. We have to keep these alive until the query
-  // is done since it might contain pointers into strings and blobs.
+    kj::Array<SqlBindingValue> bindings;
+    // The bindings that were used to construct `query`. We have to keep these alive until the query
+    // is done since it might contain pointers into strings and blobs.
 
-  bool isFirst = true;
+    SqliteDatabase::Query query;
+
+    bool isFirst = true;
+
+    State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
+          kj::Array<SqlBindingValue> bindings);
+    State(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+          kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
+  };
+
+  IoOwn<State> state;
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<SqlBindingValue> values);
@@ -48,7 +62,7 @@ private:
 
 class SqlPreparedStatement final: public jsg::Object {
 public:
-  SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, SqliteDatabase::Statement&& statement);
+  SqlPreparedStatement(SqliteDatabase::Statement&& statement);
 
   jsg::Ref<SqlResult> run(jsg::Arguments<SqlBindingValue> bindings);
 
@@ -57,12 +71,9 @@ public:
   }
 
 private:
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(sqlDatabase);
-  }
+  IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>> statement;
 
-  jsg::Ref<SqlDatabase> sqlDatabase;
-  SqliteDatabase::Statement statement;
+  friend class SqlResult;
 };
 
 class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
@@ -88,10 +99,11 @@ private:
   bool isAllowedTrigger(kj::StringPtr name) override;
   void onError(kj::StringPtr message) override;
 
-  SqliteDatabase& sqlite;
+  IoPtr<SqliteDatabase> sqlite;
   jsg::Ref<DurableObjectStorage> storage;
 
   friend class SqlPreparedStatement;
+  friend SqlResult;
 };
 
 #define EW_SQL_ISOLATE_TYPES                \

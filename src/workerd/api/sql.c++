@@ -7,14 +7,17 @@
 
 namespace workerd::api {
 
-SqlResult::SqlResult(SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings)
-    : query(statement.run(mapBindings(bindings).asPtr())),
-      bindings(kj::mv(bindings)) {}
+SqlResult::SqlResult::State::State(
+    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<SqlBindingValue> bindingsParam)
+    : dependency(statement.addWrappedRef()),
+      bindings(kj::mv(bindingsParam)),
+      query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
 
-SqlResult::SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-                     kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings)
-    : query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())),
-      bindings(kj::mv(bindings)) {}
+SqlResult::SqlResult::State::State(
+    SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+    kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindingsParam)
+    : bindings(kj::mv(bindingsParam)),
+      query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
 
 jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
     jsg::Lock&,
@@ -23,16 +26,18 @@ jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
 }
 
 kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
-    jsg::Lock& js, jsg::Ref<SqlResult>& state) {
-  if (state->isFirst) {
+    jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+  auto& state = *obj->state;
+
+  if (state.isFirst) {
     // Little hack: We don't want to call query.nextRow() at the end of this method because it
     // may invalidate the backing buffers of StringPtrs that we haven't returned to JS yet.
-    state->isFirst = false;
+    state.isFirst = false;
   } else {
-    state->query.nextRow();
+    state.query.nextRow();
   }
 
-  auto& query = state->query;
+  auto& query = state.query;
   if (query.isDone()) {
     return nullptr;
   }
@@ -68,10 +73,9 @@ kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
   return jsg::Dict<Value>{.fields = fields.releaseAsArray()};
 }
 
-SqlPreparedStatement::SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, SqliteDatabase::Statement&& statement):
-  sqlDatabase(kj::mv(sqlDb)),
-  statement(kj::mv(statement)) {
-}
+SqlPreparedStatement::SqlPreparedStatement(SqliteDatabase::Statement&& statement)
+    : statement(IoContext::current().addObject(
+        kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
 
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
     kj::ArrayPtr<SqlBindingValue> values) {
@@ -92,22 +96,22 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
 }
 
 jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bindings) {
-  return jsg::alloc<SqlResult>(statement, kj::mv(bindings));
+  return jsg::alloc<SqlResult>(*statement, kj::mv(bindings));
 }
 
 SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
-    : sqlite(sqlite), storage(kj::mv(storage)) {}
+    : sqlite(IoContext::current().addObject(sqlite)), storage(kj::mv(storage)) {}
 
 SqlDatabase::~SqlDatabase() {}
 
 jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
                                       jsg::Arguments<SqlBindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<SqlResult>(sqlite, regulator, querySql, kj::mv(bindings));
+  return jsg::alloc<SqlResult>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
 
 jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
-  return jsg::alloc<SqlPreparedStatement>(JSG_THIS, sqlite.prepare(*this, query));
+  return jsg::alloc<SqlPreparedStatement>(sqlite->prepare(*this, query));
 }
 
 bool SqlDatabase::isAllowedName(kj::StringPtr name) {
