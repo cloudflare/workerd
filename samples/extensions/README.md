@@ -2,7 +2,7 @@
 
 This directory contains comprehensive samples of using workerd extensions.
 
-This examples defines a fictional burrito shop extension in
+This example defines a fictional burrito shop extension in
 [burrito-shop.capnp](burrito-shop.capnp)
 and demonstrates following features:
 

@@ -2,7 +2,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 
 config_setting(
@@ -16,34 +16,29 @@ bool_flag(
     name = "use_tcmalloc",
     build_setting_default = True,
 )
-
 config_setting(
     name = "set_use_tcmalloc",
     flag_values = {"use_tcmalloc": "True"},
 )
-
 selects.config_setting_group(
     name = "really_use_tcmalloc",
-    match_all = [
-        ":set_use_tcmalloc",
-        ":is_linux",
-    ],
+    match_all = [":set_use_tcmalloc", ":is_linux"],
 )
 
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
-    malloc = select({
-        ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
-        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
-    }),
     tags = ["no-arm64"],
     visibility = ["//visibility:public"],
     deps = [
         ":server",
-        ":workerd-meta_capnp",
         ":workerd_capnp",
+        ":workerd-meta_capnp",
     ],
+    malloc = select({
+        ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
+        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
+    }),
 )
 
 wd_cc_library(
@@ -61,9 +56,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
+        "@capnp-cpp//src/capnp:capnpc",
         "//src/workerd/io",
         "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 

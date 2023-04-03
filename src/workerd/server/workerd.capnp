@@ -788,9 +788,9 @@ struct Extension {
   # Additional capabilities for workers.
 
   modules @0 :List(Module);
-  # List of javascript modules provided by tne extension.
+  # List of javascript modules provided by the extension.
   # These modules can either be imported directly as user-level api (if not marked internal)
-  # or used to implement more complicated workerd constructs such as wrapped bindings and events.
+  # or used to define more complicated workerd constructs such as wrapped bindings and events.
 
   struct Module {
     # A module extending workerd functionality.
