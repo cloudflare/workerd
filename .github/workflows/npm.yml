@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [darwin-64, linux-64, linux-arm64, darwin-arm64]
+        arch: [darwin-64, darwin-arm64, linux-64, linux-arm64, windows-64]
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
