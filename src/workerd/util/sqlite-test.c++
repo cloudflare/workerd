@@ -6,9 +6,14 @@
 #include <kj/test.h>
 #include <kj/thread.h>
 #include <errno.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <atomic>
+
+#if _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace workerd {
 namespace {
@@ -143,10 +148,20 @@ private:
     const char* tmpDir = getenv("TEST_TMPDIR");
     kj::String pathStr = kj::str(
         tmpDir != nullptr ? tmpDir : "/var/tmp", "/workerd-sqlite-test.XXXXXX");
+#if _WIN32
+    if (_mktemp(pathStr.begin()) == nullptr) {
+      KJ_FAIL_SYSCALL("_mktemp", errno, pathStr);
+    }
+    auto path = disk->getCurrentPath().evalNative(pathStr);
+    disk->getRoot().openSubdir(path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY |
+                                     kj::WriteMode::CREATE_PARENT);
+    return path;
+#else
     if (mkdtemp(pathStr.begin()) == nullptr) {
       KJ_FAIL_SYSCALL("mkdtemp", errno, pathStr);
     }
     return disk->getCurrentPath().evalNative(pathStr);
+#endif
   }
 };
 

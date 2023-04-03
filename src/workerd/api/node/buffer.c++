@@ -140,7 +140,7 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
   }
   kj::Vector vec = kj::Vector<kj::byte>(text.size() / 2);
 
-  for (auto i = 0; i < text.size(); i += 2) {
+  for (size_t i = 0; i < text.size(); i += 2) {
     byte b = 0;
     KJ_IF_MAYBE(d1, tryFromHexDigit(text[i])) {
       b = *d1 << 4;

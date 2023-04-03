@@ -12,31 +12,34 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest]
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
-      - uses: bazelbuild/setup-bazelisk@v2
       - name: Cache
         id: cache
         uses: actions/cache@v2
         with:
           path: ~/bazel-disk-cache
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
-      - run: mkdir -p ~/bazel-disk-cache
-      - name: Install dependencies
+      - name: Setup Linux
         if: ${{ runner.os == 'Linux' }}
         run: |
             export DEBIAN_FRONTEND=noninteractive
             sudo apt-get install -y build-essential git clang libc++-dev
+      - name: Setup Windows
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+            [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
       - name: Bazel build
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
+            bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
       - name: Bazel tests
         run: |
-            bazel test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --show_timestamps --keep_going --test_output=errors //...
+            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --show_timestamps --keep_going --test_output=errors //...
       - name: Report disk usage
         if: success() || failure()
+        shell: bash
         run: |
             BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
             BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)

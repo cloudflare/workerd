@@ -69,6 +69,10 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
     ],
     alwayslink = 1,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(

@@ -6,7 +6,7 @@ on:
     - main
 
 jobs:
-  version: 
+  version:
     outputs:
       version: ${{ steps.echo.outputs.version }}
     runs-on: ubuntu-22.04
@@ -28,27 +28,30 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest]
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
-      - uses: bazelbuild/setup-bazelisk@v2
       - name: Cache
         id: cache
         uses: actions/cache@v2
         with:
           path: ~/bazel-disk-cache
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
-          
-      - name: install dependencies
+
+      - name: Setup Linux
         if: ${{ runner.os == 'Linux' }}
         run: |
-            export DEBIAN_FRONTEND=noninteractive
-            sudo apt-get install -y build-essential git clang libc++-dev
-
-      - name: build
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get install -y build-essential git clang libc++-dev
+      - name: Setup Windows
+        if: ${{ runner.os == 'Windows' }}
         run: |
-            bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //src/workerd/server:workerd
+          [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+
+      - name: Bazel build
+        run: |
+          bazelisk build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //src/workerd/server:workerd
       - name: Upload binary
         uses: actions/upload-artifact@v3.1.0
         with:
@@ -67,11 +70,11 @@ jobs:
           fetch-depth: 0
       - uses: mukunku/tag-exists-action@v1.1.0
         id: check_tag
-        with: 
+        with:
           tag: v${{ needs.version.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
+
   tag-and-release:
     name: Tag & Release
     outputs:
@@ -92,19 +95,21 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: v${{ needs.version.outputs.version }}
-          
+
   upload-artifacts:
     name: Upload Artifacts
     needs: [tag-and-release]
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [linux-64, darwin-64]
+        arch: [linux-64, darwin-64, windows-64]
         include:
           - arch: linux-64
             name: Linux-X64
           - arch: darwin-64
             name: macOS-X64
+          - arch: windows-64
+            name: Windows-X64
     steps:
       - name: Download ${{ matrix.name }}
         uses: actions/download-artifact@v3.0.0
@@ -114,19 +119,12 @@ jobs:
       - run: mv /tmp/workerd /tmp/workerd-${{ matrix.arch }}
       - run: chmod +x /tmp/workerd-${{ matrix.arch }}
       - name: Upload Release Asset
-        id: upload-release-asset 
+        id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.tag-and-release.outputs.upload_url }} 
+          upload_url: ${{ needs.tag-and-release.outputs.upload_url }}
           asset_path: /tmp/workerd-${{ matrix.arch }}
           asset_name: workerd-${{ matrix.arch }}
           asset_content_type: application/octet-stream
-  
-          
-          
-      
-          
-          
-          

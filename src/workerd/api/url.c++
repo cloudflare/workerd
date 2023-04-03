@@ -596,8 +596,13 @@ void URLSearchParams::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
+  // On each iteration of the for loop, a JavaScript callback is invokved. If a new
+  // item is appended to the this->url->query within that function, the loop must pick
+  // it up. Using the classic for (;;) syntax here allows for that. However, this does
+  // mean that it's possible for a user to trigger an infinite loop here if new items
+  // are added to the search params unconditionally on each iteration.
   auto context = isolate->GetCurrentContext();  // Needed later for Call().
-  for (int i = 0; i < this->url->query.size(); i++) {
+  for (size_t i = 0; i < this->url->query.size(); i++) {
     auto& [key, value] = this->url->query[i];
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {

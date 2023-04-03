@@ -20,6 +20,8 @@ struct lol_html_AttributesIterator;
 struct lol_html_Attribute;
 // Defined in lol_html.h, forward declarations mirrored here so we don't need the header.
 
+KJ_DECLARE_NON_POLYMORPHIC(lol_html_AttributesIterator);
+
 namespace workerd::api {
 
 class Element;

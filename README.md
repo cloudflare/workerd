@@ -59,12 +59,14 @@ With that said, if you discover a bug that allows malicious code to break out of
 
 ### Supported Platforms
 
-In theory, `workerd` should work on any POSIX system that is supported by V8.
+In theory, `workerd` should work on any POSIX system that is supported by V8 and Windows.
 
-In practice, `workerd` is tested on Linux and macOS under x86-64 and arm64 architectures.
+In practice, `workerd` is tested on:
+
+- Linux and macOS (x86-64 and arm64 architectures)
+- Windows (x86-64 architecture)
+
 On other platforms, you may have to do tinkering to make things work.
-
-Windows users should run `workerd` under WSL (1 or 2).
 
 ### Building `workerd`
 
@@ -76,6 +78,15 @@ To build `workerd`, you need:
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
 * On macOS:
   * full XCode 13+ installation
+* On Windows:
+  * Visual Studio Community 2022, including "Desktop development with C++" features
+  * [LLVM 15](https://github.com/llvm/llvm-project/releases/)
+  * [MSYS2](https://www.msys2.org/) installed to `C:\tools\msys64` with the `BAZEL_SH` environment variable set to `C:\tools\msys64\usr\bin\bash.exe`
+  * [Python 3](https://www.python.org/downloads/) with a `python3` executable on the `PATH`
+  * GNU `patch` executable on the `PATH` (e.g. `pacman -S patch` in MSYS2 terminal, then copy `patch.exe` and `msys-2.0.dll` from `C:\tools\msys64\usr\bin` to a directory on the `PATH`)
+  * Add `startup --output_user_root=C:/tmp` to the `.bazelrc` file in your user directory
+  * Enable 8.3 filename support with `fsutil 8dot3name set 0` in an administrator command prompt
+  * Enable [developer mode](https://docs.microsoft.com/en-us/windows/uwp/get-started/enable-your-device-for-development) for symlink support
 
 You may then build using:
 

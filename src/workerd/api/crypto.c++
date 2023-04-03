@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <limits>
 #include <typeinfo>
-#include <strings.h>
 
 namespace workerd::api {
 
@@ -40,10 +39,10 @@ CryptoKeyUsageSet CryptoKeyUsageSet::byName(kj::StringPtr name) {
 }
 
 kj::ArrayPtr<const CryptoKeyUsageSet> CryptoKeyUsageSet::singletons() {
-  static const std::array<const CryptoKeyUsageSet, 8> singletons = {
+  static const workerd::api::CryptoKeyUsageSet singletons[] = {
     encrypt(), decrypt(), sign(), verify(), deriveKey(), deriveBits(), wrapKey(), unwrapKey()
   };
-  return kj::ArrayPtr<const CryptoKeyUsageSet>(singletons.begin(), 8);
+  return singletons;
 }
 
 CryptoKeyUsageSet CryptoKeyUsageSet::validate(kj::StringPtr normalizedName, Context ctx,

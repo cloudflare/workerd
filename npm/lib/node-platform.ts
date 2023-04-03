@@ -17,7 +17,7 @@ export const knownPackages: Record<string, string> = {
   "darwin x64 LE": "@cloudflare/workerd-darwin-64",
   "linux arm64 LE": "@cloudflare/workerd-linux-arm64",
   "linux x64 LE": "@cloudflare/workerd-linux-64",
-  "win32 x64 LE": "@cloudflare/workerd-linux-64",
+  "win32 x64 LE": "@cloudflare/workerd-windows-64",
 };
 
 export function pkgAndSubpathForCurrentPlatform(): {

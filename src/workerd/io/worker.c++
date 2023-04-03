@@ -25,8 +25,15 @@
 #include <v8-profiler.h>
 #include <map>
 #include <time.h>
-#include <sys/syscall.h>
 #include <numeric>
+
+#if _WIN32
+#include <kj/win32-api-version.h>
+#include <windows.h>
+#include <kj/windows-sanity.h>
+#else
+#include <sys/syscall.h>
+#endif
 
 namespace v8_inspector {
   kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
@@ -415,6 +422,8 @@ void reportStartupError(
 uint64_t getCurrentThreadId() {
 #if __linux__
   return syscall(SYS_gettid);
+#elif _WIN32
+  return GetCurrentThreadId();
 #else
   // Assume MacOS or BSD
   uint64_t tid;
@@ -768,7 +777,7 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
   profile.setEndTime(cpuProfile->GetEndTime());
 
   auto nodes = profile.initNodes(allNodes.size());
-  for (int i=0; i < allNodes.size(); i++) {
+  for (auto i : kj::indices(allNodes)) {
     auto nodeBuilder = nodes[i];
     nodeBuilder.setId(allNodes[i]->GetNodeId());
 
@@ -795,7 +804,7 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
     allNodes[i]->GetLineTicks(lineBuffer, hitLineCount);
 
     auto positionTicks = nodeBuilder.initPositionTicks(hitLineCount);
-    for (int j=0; j < hitLineCount; j++) {
+    for (uint j=0; j < hitLineCount; j++) {
       auto positionTick = positionTicks[j];
       positionTick.setLine(lineBuffer[j].line);
       positionTick.setTicks(lineBuffer[j].hit_count);

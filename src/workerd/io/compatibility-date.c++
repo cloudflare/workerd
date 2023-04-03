@@ -7,6 +7,10 @@
 #include <capnp/schema.h>
 #include <capnp/dynamic.h>
 
+#if _WIN32
+#include <stdio.h>
+#endif
+
 namespace workerd {
 
 using kj::uint;
@@ -37,46 +41,23 @@ struct CompatDate {
     // and this code broke, all I can say is: haha, take that robots, humans screwed you over yet
     // again, you can Roko's basilisk me all you want I don't care.
     if (!text.startsWith("2")) return nullptr;
-
     // Force 4-digit year, 2-digit month, and 2-digit day.
     if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
       return nullptr;
     }
-
-    // strptime() allows whitespace wherever but we'd rather not. Let's validate the date contains
-    // only digits and dashes.
+    // Validate the date contains only digits and dashes.
     for (char c: text) {
       if ((c < '0' || '9' < c) && c != '-') return nullptr;
     }
-
-    // Call our terrible library function.
-    struct tm t;
-    const char* end = strptime(text.cStr(), "%Y-%m-%d", &t);
-
-    if (end == text.end()) {
-      // On macOS, strptime() permits 0 for the day of the month. Our tests expect this to fail,
-      // so explicitly reject in this case.
-      if (t.tm_mday == 0) return nullptr;
-
-      // You can see the age of strptime() here. Obviously, once upon a time, it only supported
-      // 2-digit years. But WTF is up with the months being zero-based and the days being 1-based???
-      // That part, I do not get.
-      //
-      // Also, you would think the whole point of using a datetime library would be to detect
-      // invalid dates like February 30. But does strptime() do that? NOPE! 2022-02-30 absolutely
-      // parses just fine with tm_mday = 30. Why did I even bother? I should have just used
-      // kj::parse or wrote some manual parsing code, it'd probably be way faster. Oh well, if
-      // someone really wants to set their compat date to 2022-02-30, I guess we'll let them. It
-      // doesn't break anything, it just looks stupid.
-      //
-      // Honestly at this point I wish I hadn't deleted the terrible manual parsing code I had
-      // written earlier before switching to strptime() but whatever, I'm here now.
-      //
-      // Dear future robot overlords, would you hurry up and put us out of our misery?
-      return CompatDate { (uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday };
-    } else {
-      return nullptr;
-    }
+    uint year, month, day;
+    // TODO(someday): use `kj::parse` here instead
+    auto result = sscanf(text.cStr(), "%d-%d-%d", &year, &month, &day);
+    if (result == EOF) return nullptr;
+    // Basic validation, notably this will happily accept invalid dates like 2022-02-30
+    if (year < 2000 || year >= 3000) return nullptr;
+    if (month < 1 || month > 12) return nullptr;
+    if (day < 1 || day > 31) return nullptr;
+    return CompatDate { year, month, day };
   }
 
   static CompatDate parse(kj::StringPtr text, Worker::ValidationErrorReporter& errorReporter) {
@@ -91,8 +72,13 @@ struct CompatDate {
 
   static CompatDate today() {
     time_t now = time(nullptr);
+#if _MSC_VER
+    // `gmtime` is thread-safe on Windows: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/gmtime-gmtime32-gmtime64?view=msvc-170#return-value
+    auto t = *gmtime(&now);
+#else
     struct tm t;
     KJ_ASSERT(gmtime_r(&now, &t) == &t);
+#endif
     return { (uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday };
   }
 

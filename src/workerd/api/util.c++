@@ -91,7 +91,7 @@ kj::Maybe<kj::ArrayPtr<const char>> readContentTypeParameter(kj::StringPtr conte
 
         if (leftover[valueStart] == '"') {
           // parameter value surrounded by quotes
-          auto pos = 0;
+          size_t pos = 0;
           auto valueStr = leftover.slice(valueStart + 1);
 
           while(pos < valueStr.size()) {

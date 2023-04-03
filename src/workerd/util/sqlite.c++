@@ -4,7 +4,15 @@
 
 #include "sqlite.h"
 #include <kj/debug.h>
+
+#if _WIN32
+#include <kj/win32-api-version.h>
+#include <windows.h>
+#include <kj/windows-sanity.h>
+#else
 #include <unistd.h>
+#endif
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sqlite3.h>
@@ -62,13 +70,38 @@ kj::Own<T> ownSqlite(T* obj) {
   return kj::Own<T>(obj, disposer);
 }
 
+#if _WIN32
+// https://github.com/capnproto/capnproto/blob/master/c%2B%2B/src/kj/filesystem-disk-win32.c%2B%2B#L255-L269
+static kj::Path getPathFromWin32Handle(HANDLE handle) {
+  DWORD tryLen = MAX_PATH;
+  for (;;) {
+    auto temp = kj::heapArray<wchar_t>(tryLen + 1);
+    DWORD len = GetFinalPathNameByHandleW(handle, temp.begin(), tryLen, 0);
+    if (len == 0) {
+      KJ_FAIL_WIN32("GetFinalPathNameByHandleW", GetLastError());
+    }
+    if (len < temp.size()) {
+      return kj::Path::parseWin32Api(temp.slice(0, len));
+    }
+    // Try again with new length.
+    tryLen = len;
+  }
+}
+#endif
+
 }  // namespace
 
 // =======================================================================================
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
-  SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
-                                   SQLITE_OPEN_READONLY, vfs.getName().cStr()));
+  KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
+    // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
+                                    SQLITE_OPEN_READONLY, nullptr));
+  } else {
+    SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
+                                    SQLITE_OPEN_READONLY, vfs.getName().cStr()));
+  }
 }
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
@@ -84,8 +117,14 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
   }
   KJ_REQUIRE(kj::has(mode, kj::WriteMode::MODIFY), "SQLite doesn't support create-exclusive mode");
 
-  SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
-                                   flags, vfs.getName().cStr()));
+  KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
+    // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
+                                    flags, nullptr));
+  } else {
+    SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
+                                    flags, vfs.getName().cStr()));
+  }
 }
 
 SqliteDatabase::~SqliteDatabase() noexcept(false) {
@@ -313,6 +352,7 @@ bool SqliteDatabase::Query::isNull(uint column) {
 // we want to leverage all that code. If we can just make it interpret paths differently, then we
 // can reuse the rest of the implementation.
 
+#if !_WIN32
 namespace {
 
 static thread_local int currentVfsRoot = AT_FDCWD;
@@ -535,6 +575,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
 #undef WRAP
   };
 }
+#endif // #if !_WIN32
 
 // -----------------------------------------------------------------------------
 // Code to implement a true SQLite VFS based on `kj::Directory`.
@@ -1160,12 +1201,16 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
       ownLockManager(kj::heap<DefaultLockManager>()),
       lockManager(*ownLockManager),
       native(*sqlite3_vfs_find(nullptr)) {
+#if _WIN32
+  vfs = kj::heap(makeKjVfs());
+#else
   KJ_IF_MAYBE(fd, directory.getFd()) {
     rootFd = *fd;
     vfs = kj::heap(makeWrappedNativeVfs());
   } else {
     vfs = kj::heap(makeKjVfs());
   }
+#endif
   sqlite3_vfs_register(vfs, false);
 }
 
@@ -1186,6 +1231,19 @@ kj::String SqliteDatabase::Vfs::makeName() {
   // A pointer to this object should be suitably unique. (Ugghhhh.)
   return kj::str("kj-", this);
 }
+
+#if _WIN32
+kj::Maybe<kj::Path> SqliteDatabase::Vfs::tryAppend(kj::PathPtr suffix) const {
+  auto handle = KJ_UNWRAP_OR_RETURN(directory.getWin32Handle(), nullptr);
+  auto root = getPathFromWin32Handle(handle);
+  return root.append(suffix);
+}
+#else
+kj::Maybe<kj::Path> SqliteDatabase::Vfs::tryAppend(kj::PathPtr suffix) const {
+  // TODO(someday): consider implementing this on other platforms
+  return nullptr;
+}
+#endif
 
 // =======================================================================================
 

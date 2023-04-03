@@ -9,6 +9,8 @@ def kj_test(
         srcs = [src],
         deps = [
             "@capnp-cpp//src/kj:kj-test",
-            "@workerd//src/workerd/util:symbolizer",
-        ] + deps,
+        ] + select({
+            "@platforms//os:windows": [],
+            "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
+        }) + deps,
     )

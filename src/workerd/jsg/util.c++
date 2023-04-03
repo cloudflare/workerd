@@ -4,9 +4,12 @@
 
 #include "jsg.h"  // can't include util.h directly due to weird cyclic dependency...
 #include "setup.h"
-#include <cxxabi.h>
 #include <kj/debug.h>
 #include <stdlib.h>
+
+#if !_WIN32
+#include <cxxabi.h>
+#endif
 
 #include <workerd/util/sentry.h>
 
@@ -22,6 +25,32 @@ bool getCommonJsExportDefault(v8::Isolate* isolate) {
   return jsgIsolate.getCommonJsExportDefault();
 }
 
+#if _WIN32
+kj::String fullyQualifiedTypeName(const std::type_info& type) {
+  // type.name() returns a human-readable name on Windows:
+  // https://learn.microsoft.com/en-us/cpp/cpp/type-info-class?view=msvc-170
+  kj::StringPtr name = type.name();
+
+  // Remove struct prefix
+  if (name.startsWith("struct ")) {
+    name = name.slice(7);
+  }
+  // Remove class prefix
+  if (name.startsWith("class ")) {
+    name = name.slice(6);
+  }
+
+  kj::String result = kj::str(name);
+
+  // Replace instances of `anonymous namespace' with (anonymous namespace)
+  for (auto& c: result.asArray()) {
+    if (c == '`') c = '(';
+    else if (c == '\'') c = ')';
+  }
+
+  return kj::mv(result);
+}
+#else
 kj::String fullyQualifiedTypeName(const std::type_info& type) {
   int status;
   char* buf = abi::__cxa_demangle(type.name(), nullptr, nullptr, &status);
@@ -30,6 +59,7 @@ kj::String fullyQualifiedTypeName(const std::type_info& type) {
 
   return kj::mv(result);
 }
+#endif
 
 kj::String typeName(const std::type_info& type) {
   auto result = fullyQualifiedTypeName(type);

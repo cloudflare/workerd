@@ -536,7 +536,7 @@ struct MembersBuilder {
   Structure::Builder structure;
   capnp::List<Member>::Builder members;
   Builder<Configuration>& rtti;
-  int index = 0;
+  uint index = 0;
 
   MembersBuilder(Structure::Builder structure,
                  capnp::List<Member>::Builder members,
