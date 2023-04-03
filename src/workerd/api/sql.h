@@ -6,7 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sqlite.h>
-#include "basics.h"
+#include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
 

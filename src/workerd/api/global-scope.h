@@ -21,7 +21,6 @@
 #include "hibernatable-web-socket.h"
 #include "blob.h"
 #include "sockets.h"
-#include "sql.h"
 
 namespace workerd::api {
 
@@ -423,12 +422,6 @@ public:
     JSG_NESTED_TYPE(Response);
     JSG_NESTED_TYPE(WebSocket);
     JSG_NESTED_TYPE(WebSocketPair);
-
-    if (flags.getWorkerdExperimental() || true) {
-      JSG_NESTED_TYPE(SqlDatabase);
-      JSG_NESTED_TYPE(SqlPreparedStatement);
-      JSG_NESTED_TYPE(SqlResult);
-    }
 
     JSG_NESTED_TYPE(AbortController);
     JSG_NESTED_TYPE(AbortSignal);

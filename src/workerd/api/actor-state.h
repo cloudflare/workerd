@@ -15,12 +15,12 @@
 #include <workerd/io/promise-wrapper.h>
 #include "util.h"
 #include <workerd/io/actor-cache.h>
+#include "sql.h"
 
 namespace workerd::api {
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObjectId;
-class SqlDatabase;
 
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate);
 
