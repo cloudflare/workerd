@@ -75,14 +75,14 @@ def _copy_modules(modules):
         )
     return dict([(modules[m].replace(":", "_"), modules[m]) for m in modules])
 
-def wd_api_bundle(
+def wd_js_bundle(
         name,
         schema_id,
         const_name,
         builtin_modules = {},
         internal_modules = {},
         **kwargs):
-    """Generate cc capnp library with api bundle.
+    """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
           actual rule usage.
