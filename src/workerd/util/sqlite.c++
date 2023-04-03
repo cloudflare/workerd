@@ -382,15 +382,6 @@ SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::Stri
       prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-SqliteDatabase::Query::Query(Query&& query):
-  db(query.db),
-  regulator(query.regulator),
-  ownStatement(kj::mv(query.ownStatement)),
-  statement(query.statement),
-  done(query.done) {
-  query.statement = nullptr;
-}
-
 SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
                              kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), regulator(regulator), statement(statement) {
@@ -408,7 +399,7 @@ SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, kj::Strin
 SqliteDatabase::Query::~Query() noexcept(false) {
   // We only need to reset the statement if we don't own it. If we own it, it's about to be
   // destroyed anyway.
-  if (ownStatement.get() == nullptr && statement) {
+  if (ownStatement.get() == nullptr) {
     // The error code returned by sqlite3_reset() actually represents the last error encountered
     // when stepping the statement. This doesn't mean that the reset failed.
     sqlite3_reset(statement);

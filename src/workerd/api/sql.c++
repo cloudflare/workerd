@@ -6,9 +6,15 @@
 
 namespace workerd::api {
 
-SqlResult::SqlResult(SqliteDatabase::Query&& queryMoved,
-                     kj::Array<SqlBindingValue> bindings)
-    : query(kj::mv(queryMoved)), bindings(kj::mv(bindings)) {}
+SqlResult::SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+                     SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings)
+    : query(db, regulator, statement, mapBindings(bindings).asPtr()),
+      bindings(kj::mv(bindings)) {}
+
+SqlResult::SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+                     kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings)
+    : query(db, regulator, sqlCode, mapBindings(bindings).asPtr()),
+      bindings(kj::mv(bindings)) {}
 
 jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
     jsg::Lock&,
@@ -67,7 +73,7 @@ SqlPreparedStatement::SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, Sqlite
   statement(kj::mv(statement)) {
 }
 
-static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
+kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
     kj::ArrayPtr<SqlBindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
     KJ_SWITCH_ONEOF(value) {
@@ -86,9 +92,8 @@ static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
 }
 
 jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bindings) {
-  SqliteDatabase::Query query(sqlDatabase->sqlite, *sqlDatabase, statement,
-                              mapBindings(bindings).asPtr());
-  return jsg::alloc<SqlResult>(kj::mv(query), kj::mv(bindings));
+  SqliteDatabase::Regulator& regulator = *sqlDatabase;
+  return jsg::alloc<SqlResult>(sqlDatabase->sqlite, regulator, statement, kj::mv(bindings));
 }
 
 SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
@@ -98,8 +103,8 @@ SqlDatabase::~SqlDatabase() {}
 
 jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
                                       jsg::Arguments<SqlBindingValue> bindings) {
-  SqliteDatabase::Query query(sqlite, *this, querySql, mapBindings(bindings).asPtr());
-  return jsg::alloc<SqlResult>(kj::mv(query), kj::mv(bindings));
+  SqliteDatabase::Regulator& regulator = *this;
+  return jsg::alloc<SqlResult>(sqlite, regulator, querySql, kj::mv(bindings));
 }
 
 jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {

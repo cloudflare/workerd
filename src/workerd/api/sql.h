@@ -17,7 +17,10 @@ class SqlDatabase;
 
 class SqlResult final: public jsg::Object {
 public:
-  SqlResult(SqliteDatabase::Query&& query, kj::Array<SqlBindingValue> bindings);
+  SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+            SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings);
+  SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
+            kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
@@ -39,6 +42,9 @@ private:
   // is done since it might contain pointers into strings and blobs.
 
   bool isFirst = true;
+
+  static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
+      kj::ArrayPtr<SqlBindingValue> values);
 };
 
 class SqlPreparedStatement final: public jsg::Object {
@@ -62,7 +68,6 @@ private:
 
 class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
 public:
-  friend class SqlPreparedStatement;
   SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
   ~SqlDatabase();
 
@@ -86,6 +91,8 @@ private:
 
   SqliteDatabase& sqlite;
   jsg::Ref<DurableObjectStorage> storage;
+
+  friend class SqlPreparedStatement;
 };
 
 #define EW_SQL_ISOLATE_TYPES                \

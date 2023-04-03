@@ -163,7 +163,6 @@ class SqliteDatabase::Query {
 public:
   using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
                              decltype(nullptr)>;
-  Query(Query&& query);
 
   Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
         kj::ArrayPtr<const ValuePtr> bindings);
@@ -193,7 +192,7 @@ public:
   // may be convenient when the number of bindings is statically known.
 
   ~Query() noexcept(false);
-  KJ_DISALLOW_COPY(Query);
+  KJ_DISALLOW_COPY_AND_MOVE(Query);
 
   bool isDone() { return done; }
   // If true, there are no more rows. (When true, the methods below must not be called.)
