@@ -277,19 +277,10 @@ private:
 
 #define JSG_CALLABLE(name) \
   do { \
-    static const char NAME[] = #name; \
-    registry.template registerCallable<NAME, decltype(&Self::name), &Self::name>(); \
+    registry.template registerCallable<decltype(&Self::name), &Self::name>(); \
   } while (false)
 // Use inside a JSG_RESOURCE_TYPE to declare that the resource type itself can be invoked as
 // a function.
-
-#define JSG_CALLABLE_NAMED(name, method) \
-  do { \
-    static const char NAME[] = #name; \
-    registry.template registerCallable<NAME, decltype(&Self::method), &Self::method>(); \
-  } while (false)
-// Use inside a JSG_RESOURCE_TYPE to declare that the instance of the resource type itself can
-// be invoked as a function.
 
 #define JSG_METHOD(name) \
   do { \

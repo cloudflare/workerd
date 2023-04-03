@@ -478,6 +478,9 @@ struct MemberCounter {
   template<const char* name, typename Method, Method method>
   inline void registerMethod() { ++count; }
 
+  template<typename Method, Method method>
+  inline void registerCallable() { /* not a member */ }
+
   template<typename Type>
   inline void registerInherit() { /* inherit is not a member */ }
 
@@ -638,6 +641,16 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  template<typename Method, Method method>
+  inline void registerCallable() {
+    auto func = structure.initCallable();
+
+    using Traits = FunctionTraits<Method>;
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(func.initReturnType(), rtti);
+    using Args = typename Traits::ArgsTuple;
+    TupleRttiBuilder<Configuration, Args>::build(func.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
   template<const char* name, typename Method, Method>
