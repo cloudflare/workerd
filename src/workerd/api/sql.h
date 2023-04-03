@@ -17,8 +17,7 @@ class SqlDatabase;
 
 class SqlResult final: public jsg::Object {
 public:
-  SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-            SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings);
+  SqlResult(SqliteDatabase::Statement& statement, kj::Array<SqlBindingValue> bindings);
   SqlResult(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
             kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
 

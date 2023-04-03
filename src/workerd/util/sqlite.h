@@ -140,6 +140,14 @@ public:
   // Convenience method to start a query. This is equivalent to:
   //
   //     SqliteDatabase::Query(db, statement, bindings...);
+  //
+  // `bindings` are the values to fill into `?`s in the statement. Each value in `bindings` must
+  // be one of the types of Query::ValuePtr. Alternatively, `bindings` can be a single parameter
+  // of type `ArrayPtr<const Query::ValuePtr>` to initialize bindings from an array.
+  //
+  // Any strings or byte blobs in the bindings must remain valid until the `Query` is destroyed.
+  // However, when passing `bindings` as an array, the outer array need only remain valid until
+  // this method returns.
 
   operator sqlite3_stmt*() { return stmt; }
 
@@ -164,32 +172,7 @@ public:
   using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
                              decltype(nullptr)>;
 
-  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
-        kj::ArrayPtr<const ValuePtr> bindings);
-  // Begin a query executing a prepared statement.
-  //
-  // `bindings` are the value to fill into `?`s in the statement. The `bindings` array itself
-  // need only live until the constructor returns, but any strings or blobs it points to must
-  // remain valid until the Query is destroyed.
-
-  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
-        kj::ArrayPtr<const ValuePtr> bindings);
-  // Begin a one-off query executing some code directly.
-
-  template <typename... Params>
-  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement, Params&&... bindings)
-      : db(db), regulator(regulator), statement(statement) {
-    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
-  }
-  template <typename... Params>
-  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
-      : db(db), regulator(regulator),
-        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
-        statement(ownStatement) {
-    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
-  }
-  // These versions of the constructor accept the binding values as positional parameters. This
-  // may be convenient when the number of bindings is statically known.
+  // Construct using Statement::run() or SqliteDatabase::run().
 
   ~Query() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Query);
@@ -246,6 +229,25 @@ private:
   kj::Own<sqlite3_stmt> ownStatement;   // for one-off queries
   sqlite3_stmt* statement;
   bool done = false;
+
+  friend class SqliteDatabase;
+
+  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
+        kj::ArrayPtr<const ValuePtr> bindings);
+  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode,
+        kj::ArrayPtr<const ValuePtr> bindings);
+  template <typename... Params>
+  Query(SqliteDatabase& db, Regulator& regulator, Statement& statement, Params&&... bindings)
+      : db(db), regulator(regulator), statement(statement) {
+    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
+  }
+  template <typename... Params>
+  Query(SqliteDatabase& db, Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings)
+      : db(db), regulator(regulator),
+        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
+        statement(ownStatement) {
+    bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
+  }
 
   void checkRequirements(size_t size);
 
