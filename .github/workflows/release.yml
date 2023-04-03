@@ -51,7 +51,7 @@ jobs:
 
       - name: Bazel build
         run: |
-          bazelisk build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //src/workerd/server:workerd
+          bazelisk build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --remote_download_minimal -c opt //src/workerd/server:workerd
       - name: Upload binary
         uses: actions/upload-artifact@v3.1.0
         with:
