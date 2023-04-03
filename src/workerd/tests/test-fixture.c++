@@ -269,7 +269,7 @@ TestFixture::TestFixture(SetupParams params)
       kj::atomicAddRef(*workerIsolate),
       scriptId,
       server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter,
-          server::config::Config::Reader{}),
+          capnp::List<server::config::Extension>::Reader{}),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
       kj::atomicAddRef(*workerScript),

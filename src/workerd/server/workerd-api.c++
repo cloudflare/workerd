@@ -160,7 +160,7 @@ const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
 Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
-    config::Config::Reader serverConfig) {
+    capnp::List<config::Extension>::Reader extensions) {
   switch (conf.which()) {
     case config::Worker::MODULES: {
       auto modules = conf.getModules();
@@ -171,9 +171,9 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
 
       return Worker::Script::ModulesSource {
         modules[0].getName(),
-        [conf,&errorReporter, serverConfig](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
+        [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
-              .compileModules(lock, conf, errorReporter, serverConfig);
+              .compileModules(lock, conf, errorReporter, extensions);
         }
       };
     }
@@ -243,7 +243,7 @@ struct NoopModuleRegistryObserver final : public jsg::ModuleRegistryObserver {
 kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
-    config::Config::Reader serverConfig) const {
+    capnp::List<config::Extension>::Reader extensions) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
 
@@ -338,8 +338,8 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
 
   // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
   // cloning for faster worker creation.
-  for (auto bundle: serverConfig.getExtensions()) {
-    for (auto module: bundle.getModules()) {
+  for (auto extension: extensions) {
+    for (auto module: extension.getModules()) {
       modules->addBuiltinModule(module.getName(), module.getEsModule().asArray(),
           module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL : jsg::ModuleRegistry::Type::BUILTIN);
     }

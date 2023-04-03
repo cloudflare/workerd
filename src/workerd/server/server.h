@@ -148,11 +148,11 @@ private:
       kj::StringPtr name, config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf,
-      config::Config::Reader serverConfig);
+      capnp::List<config::Extension>::Reader extensions);
   kj::Own<Service> makeService(
       config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
-      config::Config::Reader serverConfig);
+      capnp::List<config::Extension>::Reader extensions);
 
   Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
   // Can only be called in the link stage.

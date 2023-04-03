@@ -73,12 +73,9 @@ struct Config {
   #   breaking everything. V8 flags also generally do not come with any guarantee of stability
   #   between V8 versions. Most users should not set any V8 flags.
 
-  extensions @3 :List(ExtensionBundle);
-  # Modules from theses bundles will be available as imports to the application and can also be used
-  # for specifying wrapped bindings.
-  # A major difference between worker modules and extensions is that latter represents system
-  # capabilities provided by a particular workerd deployment. These bundles are usually
-  # prepared separately and late-linked to the app through this config field.
+  extensions @3 :List(Extension);
+  # Extensions provide capabilities to all workers. Extensions are usually prepared separately
+  # and are late-linked with the app using this config field.
 }
 
 # ========================================================================================
@@ -787,21 +784,22 @@ struct TlsOptions {
 # ========================================================================================
 # Extensions
 
-struct ExtensionBundle {
-  # A bundle of modules. Extension modules are used to provide
-  # lower level functionality across all workers.
+struct Extension {
+  # Additional capabilities for workers.
 
   modules @0 :List(Module);
-  # List of modules in the bundle.
+  # List of javascript modules provided by tne extension.
+  # These modules can either be imported directly as user-level api (if not marked internal)
+  # or used to implement more complicated workerd constructs such as wrapped bindings and events.
 
   struct Module {
-    # A builtin module extending workerd functionality.
+    # A module extending workerd functionality.
 
     name @0 :Text;
-    # Builtin module name
+    # Full js module name.
 
     internal @1 :Bool = false;
-    # Internal modules can be imported by other builins only and not the user code.
+    # Internal modules can be imported by other extension modules only and not the user code.
 
     esModule @2 :Text;
     # Raw source code of ES module.
