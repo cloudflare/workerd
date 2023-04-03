@@ -110,7 +110,8 @@ struct WorkerdApiIsolate::Impl {
   };
 
   static v8::Local<v8::WasmModuleObject> compileWasmGlobal(
-      JsgWorkerdIsolate::Lock& lock, capnp::Data::Reader reader) {
+      JsgWorkerdIsolate::Lock& lock, capnp::Data::Reader reader,
+      const jsg::CompilationObserver& observer) {
     lock.setAllowEval(true);
     KJ_DEFER(lock.setAllowEval(false));
 
@@ -120,7 +121,7 @@ struct WorkerdApiIsolate::Impl {
     // compiles fast but runs slower.
     AllowV8BackgroundThreadsScope scope;
 
-    return jsg::compileWasmModule(lock, reader);
+    return jsg::compileWasmModule(lock, reader, observer);
   };
 
   static v8::Local<v8::Value> compileJsonGlobal(JsgWorkerdIsolate::Lock& lock,
@@ -158,6 +159,17 @@ const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
     WorkerdApiIsolate::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
+
+struct NoopCompilationObserver final : public jsg::CompilationObserver {
+  kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
+      kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {
+    return kj::Own<void>();
+  }
+
+  kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const override {
+    return kj::Own<void>();
+  }
+};
 
 Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
@@ -219,11 +231,12 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
     if (binding.isWasmModule()) ++wasmCount;
   }
 
+  auto observer = kj::refcounted<NoopCompilationObserver>();
   auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(wasmCount);
   for (auto binding: conf.getBindings()) {
     if (binding.isWasmModule()) {
       auto name = jsg::v8StrIntern(lock.v8Isolate, binding.getName());
-      auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule());
+      auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), *observer);
 
       compiledGlobals.add(Worker::Script::CompiledGlobal {
         { lock.v8Isolate, name },
@@ -235,13 +248,6 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   return compiledGlobals.finish();
 }
 
-struct NoopModuleRegistryObserver final : public jsg::ModuleRegistryObserver {
-  kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
-      kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {
-    return kj::Own<void>();
-  }
-};
-
 kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -249,7 +255,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
 
-  auto observer = kj::refcounted<NoopModuleRegistryObserver>();
+  auto observer = kj::refcounted<NoopCompilationObserver>();
   auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>(
       kj::addRef(*observer));
 
@@ -288,7 +294,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
                 module.getName(),
                 nullptr,
                 jsg::ModuleRegistry::WasmModuleInfo(lock,
-                    Impl::compileWasmGlobal(lock, module.getWasm()))));
+                    Impl::compileWasmGlobal(lock, module.getWasm(), *observer))));
         break;
       }
       case config::Worker::Module::JSON: {

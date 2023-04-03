@@ -71,12 +71,6 @@ private:
   v8::Global<v8::UnboundScript> unboundScript;
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js, auto&& reader) {
-  return jsg::check(v8::WasmModuleObject::Compile(
-      js.v8Isolate,
-      v8::MemorySpan<const uint8_t>(reader.begin(), reader.size())));
-}
-
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
 
 enum class ModuleInfoCompileOption {
@@ -90,15 +84,24 @@ enum class ModuleInfoCompileOption {
   // the compilation data.
 };
 
-struct ModuleRegistryObserver: public kj::Refcounted {
-  // Monitors behavior of ModuleRegistry
+struct CompilationObserver: public kj::Refcounted {
+  // Monitors behavior of compilation processes.
 
   virtual kj::Own<void> onEsmCompilationStart(
       v8::Isolate* isolate, kj::StringPtr name, ModuleInfoCompileOption option) const = 0;
   // Called at the start of module compilation.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during both invocations.
+
+  virtual kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const = 0;
+  // Called at the start of wasm compilation.
+  // Returned value will be destroyed when module compilation finishes.
+  // It is guaranteed that isolate lock is held during both invocations.
 };
+
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer);
 
 class ModuleRegistry {
   // The ModuleRegistry maintains the collection of modules known to a script that can be
@@ -201,7 +204,7 @@ public:
                kj::StringPtr name,
                kj::ArrayPtr<const char> content,
                ModuleInfoCompileOption flags,
-               const ModuleRegistryObserver& observer);
+               const CompilationObserver& observer);
 
     ModuleInfo(jsg::Lock& js, kj::StringPtr name,
                kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
@@ -240,7 +243,7 @@ public:
 template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
 public:
-  ModuleRegistryImpl(kj::Own<ModuleRegistryObserver> observer) : observer(kj::mv(observer)) {}
+  ModuleRegistryImpl(kj::Own<CompilationObserver> observer) : observer(kj::mv(observer)) {}
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
@@ -382,7 +385,7 @@ public:
   }
 
 private:
-  kj::Own<ModuleRegistryObserver> observer;
+  kj::Own<CompilationObserver> observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
 
   // When we build a bundle containing modules, we must build a table of modules to resolve imports.
@@ -431,7 +434,7 @@ private:
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
 
-    ModuleInfo& module(jsg::Lock& js, ModuleRegistryObserver& observer) {
+    ModuleInfo& module(jsg::Lock& js, CompilationObserver& observer) {
       // Lazily instantiate module from source code if needed
 
       KJ_SWITCH_ONEOF(info) {

@@ -307,7 +307,7 @@ v8::Local<v8::Module> compileEsmModule(
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     ModuleInfoCompileOption option,
-    const ModuleRegistryObserver& observer) {
+    const CompilationObserver& observer) {
   // destroy the observer after compilation finished to indicate the end of the process.
   auto compilationObserver = observer.onEsmCompilationStart(js.v8Isolate, name, option);
 
@@ -394,7 +394,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     ModuleInfoCompileOption flags,
-    const ModuleRegistryObserver& observer)
+    const CompilationObserver& observer)
     : ModuleInfo(js, compileEsmModule(js, name, content, flags, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(
@@ -416,5 +416,17 @@ ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
     kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls)
     : fileScope(kj::mv(fileScope)),
       topLevelDecls(kj::mv(topLevelDecls)) {}
+
+
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer) {
+  // destroy the observer after compilation finishes to indicate the end of the process.
+  auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
+
+  return jsg::check(v8::WasmModuleObject::Compile(
+      js.v8Isolate,
+      v8::MemorySpan<const uint8_t>(code.begin(), code.size())));
+}
 
 }  // namespace workerd::jsg
