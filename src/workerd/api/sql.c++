@@ -6,7 +6,9 @@
 
 namespace workerd::api {
 
-SqlResult::SqlResult(SqliteDatabase::Query&& queryMoved): query(kj::mv(queryMoved)) {}
+SqlResult::SqlResult(SqliteDatabase::Query&& queryMoved,
+                     kj::Array<SqlBindingValue> bindings)
+    : query(kj::mv(queryMoved)), bindings(kj::mv(bindings)) {}
 
 jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
     jsg::Lock&,
@@ -65,35 +67,28 @@ SqlPreparedStatement::SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, Sqlite
   statement(kj::mv(statement)) {
 }
 
-void fillBindValues(
-  kj::Vector<SqliteDatabase::Query::ValuePtr>& bindValues, kj::Maybe<kj::Array<ValueBind>>& bindValuesOptional) {
-  KJ_IF_MAYBE(values, bindValuesOptional) {
-    for (auto& value : *values) {
-      KJ_SWITCH_ONEOF(value) {
-        KJ_CASE_ONEOF(val, kj::Array<const byte>) {
-          bindValues.add(val.asPtr());
-        }
-        KJ_CASE_ONEOF(val, kj::String) {
-          bindValues.add(val.asPtr());
-        }
-        KJ_CASE_ONEOF(val, double) {
-          bindValues.add(val);
-        }
+static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
+    kj::ArrayPtr<SqlBindingValue> values) {
+  return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(data, kj::Array<const byte>) {
+        return data.asPtr();
+      }
+      KJ_CASE_ONEOF(text, kj::String) {
+        return text.asPtr();
+      }
+      KJ_CASE_ONEOF(d, double) {
+        return d;
       }
     }
-  }
+    KJ_UNREACHABLE;
+  };
 }
 
-jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Optional<SqlRunOptions> options) {
-  kj::Vector<SqliteDatabase::Query::ValuePtr> bindValues;
-
-  KJ_IF_MAYBE(o, options) {
-    fillBindValues(bindValues, o->bindValues);
-  }
-
-  kj::ArrayPtr<const SqliteDatabase::Query::ValuePtr> boundValues = bindValues.asPtr();
-  SqliteDatabase::Query query(sqlDatabase->sqlite, *sqlDatabase, statement, boundValues);
-  return jsg::alloc<SqlResult>(kj::mv(query));
+jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bindings) {
+  SqliteDatabase::Query query(sqlDatabase->sqlite, *sqlDatabase, statement,
+                              mapBindings(bindings).asPtr());
+  return jsg::alloc<SqlResult>(kj::mv(query), kj::mv(bindings));
 }
 
 SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
@@ -101,18 +96,10 @@ SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> 
 
 SqlDatabase::~SqlDatabase() {}
 
-jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql, jsg::Optional<SqlExecOptions> options) {
-  kj::Vector<SqliteDatabase::Query::ValuePtr> bindValues;
-
-  KJ_IF_MAYBE(o, options) {
-    fillBindValues(bindValues, o->bindValues);
-  }
-
-  kj::String error;
-  kj::ArrayPtr<const SqliteDatabase::Query::ValuePtr> boundValues = bindValues.asPtr();
-
-  SqliteDatabase::Query query = sqlite.run(*this, querySql, boundValues);
-  return jsg::alloc<SqlResult>(kj::mv(query));
+jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
+                                      jsg::Arguments<SqlBindingValue> bindings) {
+  SqliteDatabase::Query query(sqlite, *this, querySql, mapBindings(bindings).asPtr());
+  return jsg::alloc<SqlResult>(kj::mv(query), kj::mv(bindings));
 }
 
 jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {

@@ -31,7 +31,7 @@ function test(sql) {
   assert.equal(blob.length, 1);
   assert.equal(blob[0], 255);
   // Test binding values
-  const resultBinding = [...sql.exec("SELECT ?", {bindValues: [456]})];
+  const resultBinding = [...sql.exec("SELECT ?", 456)];
   assert.equal(resultBinding.length, 1);
   assert.equal(resultBinding[0]["?"], 456);
 
@@ -57,12 +57,12 @@ function test(sql) {
 
   // Prepared statement with binding values
   const preparedWithBinding = sql.prepare("SELECT ?");
-  const resultPreparedWithBinding = [...preparedWithBinding({bindValues: [789]})];
+  const resultPreparedWithBinding = [...preparedWithBinding(789)];
   assert.equal(resultPreparedWithBinding.length, 1);
   assert.equal(resultPreparedWithBinding[0]["?"], 789);
 
   // Prepared statement (incorrect number of binding values)
-  requireException(() => preparedWithBinding({bindValues: []}),
+  requireException(() => preparedWithBinding(),
     "Error: Wrong number of parameter bindings for SQL query.");
 
   // Accessing a hidden _cf_ table

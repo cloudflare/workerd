@@ -12,12 +12,12 @@ namespace workerd::api {
 
 class DurableObjectStorage;
 
-typedef kj::OneOf<kj::Array<const byte>, kj::String, double> ValueBind;
+typedef kj::OneOf<kj::Array<const byte>, kj::String, double> SqlBindingValue;
 class SqlDatabase;
 
 class SqlResult final: public jsg::Object {
 public:
-  SqlResult(SqliteDatabase::Query&& query);
+  SqlResult(SqliteDatabase::Query&& query, kj::Array<SqlBindingValue> bindings);
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
@@ -33,6 +33,11 @@ public:
   static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& state);
 private:
   SqliteDatabase::Query query;
+
+  kj::Array<SqlBindingValue> bindings;
+  // The bindings that were used to construct `query`. We have to keep these alive until the query
+  // is done since it might contain pointers into strings and blobs.
+
   bool isFirst = true;
 };
 
@@ -40,12 +45,7 @@ class SqlPreparedStatement final: public jsg::Object {
 public:
   SqlPreparedStatement(jsg::Ref<SqlDatabase>&& sqlDb, SqliteDatabase::Statement&& statement);
 
-  struct SqlRunOptions {
-    kj::Maybe<kj::Array<ValueBind>> bindValues;
-    JSG_STRUCT(bindValues);
-  };
-
-  jsg::Ref<SqlResult> run(jsg::Optional<SqlRunOptions> options);
+  jsg::Ref<SqlResult> run(jsg::Arguments<SqlBindingValue> bindings);
 
   JSG_RESOURCE_TYPE(SqlPreparedStatement, CompatibilityFlags::Reader flags) {
     JSG_CALLABLE(run);
@@ -66,12 +66,7 @@ public:
   SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
   ~SqlDatabase();
 
-  struct SqlExecOptions {
-    kj::Maybe<kj::Array<ValueBind>> bindValues;
-    JSG_STRUCT(bindValues);
-  };
-
-  jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Optional<SqlExecOptions> options);
+  jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Arguments<SqlBindingValue> bindings);
 
   jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query);
 
@@ -98,9 +93,7 @@ private:
   api::SqlPreparedStatement,                \
   api::SqlResult,                           \
   api::SqlResult::RowIterator,              \
-  api::SqlResult::RowIterator::Next,        \
-  api::SqlPreparedStatement::SqlRunOptions, \
-  api::SqlDatabase::SqlExecOptions
+  api::SqlResult::RowIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
