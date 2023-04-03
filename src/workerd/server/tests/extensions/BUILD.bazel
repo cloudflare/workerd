@@ -1,0 +1,9 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "extensions-test.wd-test",
+    data = glob([
+        "*.js",
+        "*.capnp",
+    ]),
+)

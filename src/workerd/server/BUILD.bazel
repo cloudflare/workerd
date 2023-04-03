@@ -2,7 +2,6 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
-load("//:build/wd_test.bzl", "wd_test")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 
@@ -92,13 +91,3 @@ wd_cc_capnp_library(
         "//src/workerd/util:test-util",
     ],
 ) for f in glob(["*-test.c++"])]
-
-wd_test(
-    src = "builtins-test.wd-test",
-    data = [
-        "builtins-test.js",
-        "builtins-test-bundle.capnp",
-        "builtin-internal-module.js",
-        "builtin-module.js",
-    ],
-)

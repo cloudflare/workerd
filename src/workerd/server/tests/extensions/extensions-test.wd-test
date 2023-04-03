@@ -1,17 +1,17 @@
 using Workerd = import "/workerd/workerd.capnp";
-using TestBundle = import "builtins-test-bundle.capnp";
+using TestExtension = import "extension.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
-    ( name = "builtins-test",
+    ( name = "extensions-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "builtins-test.js")
+          (name = "worker", esModule = embed "extensions-test.js")
         ],
         compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
       )
     ),
   ],
-  extensions = [ TestBundle.bundle ],
+  extensions = [ TestExtension.extension ],
 );
