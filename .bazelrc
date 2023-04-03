@@ -1,22 +1,4 @@
-build --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic --verbose_failures
-build --cxxopt='-fcoroutines-ts' --host_cxxopt='-fcoroutines-ts'
-build --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
-build --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
-
-build --action_env=BAZEL_COMPILER=clang
-build --action_env=CC=clang
-build --action_env=CXX=clang++
-
-build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:libdl=True
-
-# Warning options.
-build --cxxopt='-Wall' --host_cxxopt='-Wall'
-build --cxxopt='-Wextra' --host_cxxopt='-Wextra'
-build --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
-build --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
-build --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
-build --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
-build --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
+common --enable_platform_specific_config
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 # TODO(cleanup): Can we disable warnings altogether from our dependencies, without disabling them
@@ -26,7 +8,6 @@ build --cxxopt='-Wno-ambiguous-reversed-operator' --host_cxxopt='-Wno-ambiguous-
 # Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
 # https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
 build --reuse_sandbox_directories
-
 
 # optimized LTO build. you'll need a fairly recent clang for this to work
 build:thin-lto -c opt
@@ -54,3 +35,55 @@ build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-asserti
 # bazel and Rust use different LLVM versions. -C opt-level=s provides a comparatively small size
 # improvement, ~35k or ~75k with LTO.
 build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1
+
+#
+# Linux and macOS
+#
+build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic --verbose_failures
+build:unix --cxxopt='-fcoroutines-ts' --host_cxxopt='-fcoroutines-ts'
+build:unix --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
+build:unix --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
+
+build:unix --action_env=BAZEL_COMPILER=clang
+build:unix --action_env=CC=clang
+build:unix --action_env=CXX=clang++
+
+# Warning options.
+build:unix --cxxopt='-Wall' --host_cxxopt='-Wall'
+build:unix --cxxopt='-Wextra' --host_cxxopt='-Wextra'
+build:unix --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
+build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
+build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
+build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
+build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
+
+build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:libdl=True
+
+build:linux --config=unix
+build:macos --config=unix
+
+#
+# Windows
+#
+
+# See https://bazel.build/configure/windows#symlink
+startup --windows_enable_symlinks
+build:windows --enable_runfiles
+# We use LLVM's MSVC-compatible compiler driver to compile our code on Windows,
+# as opposed to using MSVC directly. This enables us to use the "same" compiler
+# frontend on Linux, macOS, and Windows, massively reducing the effort required
+# to compile workerd on Windows. Notably, this provides proper support for
+# `#pragma once` when using symlinked virtual includes, `__atomic_*` functions,
+# a standards-compliant preprocessor, support for GNU statement expressions
+# used by some KJ macros, and understands the `.c++` extension by default.
+build:windows --compiler=clang-cl
+
+build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20' --verbose_failures
+build:windows --cxxopt='/await' --host_cxxopt='/await'
+build:windows --cxxopt='/wo4503' --host_cxxopt='/wo4503'
+build:windows --cxxopt='/DWINDOWS_LEAN_AND_MEAN' --host_cxxopt='/DWINDOWS_LEAN_AND_MEAN'
+# The `/std:c++14` argument is unused during boringssl compilation and we don't
+# want a warning when compiling each file.
+build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-unused-command-line-argument'
+
+build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True

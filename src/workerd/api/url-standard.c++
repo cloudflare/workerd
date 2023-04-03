@@ -13,9 +13,15 @@
 #include <unicode/uchar.h>
 #include <unicode/uidna.h>
 #include <unicode/utf8.h>
-#include <arpa/inet.h>
 #include <algorithm>
 #include <numeric>
+
+#if _WIN32
+#include <ws2tcpip.h>
+#undef RELATIVE
+#else
+#include <arpa/inet.h>
+#endif
 
 namespace workerd::api::url {
 

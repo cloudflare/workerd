@@ -62,6 +62,10 @@ filegroup(
         for (date, label) in compat_dates
     ],
     visibility = ["//visibility:public"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 [
@@ -76,6 +80,10 @@ filegroup(
         ],
         tool = "api_encoder_bin",
         visibility = ["//visibility:public"],
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
     for (date, label) in compat_dates
 ]
@@ -91,6 +99,10 @@ cc_ast_dump(
     src = api_encoder_src,
     out = "api.ast.json.gz",
     deps = [":api_encoder_lib"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 rust_binary(
@@ -104,6 +116,10 @@ rust_binary(
         "@crates_vendor//:serde",
         "@crates_vendor//:serde_json",
     ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 run_binary(
@@ -120,4 +136,8 @@ run_binary(
     ],
     tool = "param_extractor_bin",
     visibility = ["//visibility:public"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

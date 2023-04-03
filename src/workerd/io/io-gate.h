@@ -310,10 +310,10 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise) {
       fulfiller->fulfill();
       co_return v;
     }
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     setBroken(e);
     fulfiller->reject(kj::cp(e));
-    kj::throwFatalException(kj::mv(e));
+    kj::throwFatalException(kj::cp(e));
   }
 }
 

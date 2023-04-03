@@ -3,26 +3,37 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <kj/main.h>
+#include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <capnp/schema-parser.h>
 #include <capnp/dynamic.h>
+#include <workerd/server/v8-platform-impl.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/server/workerd-meta.capnp.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
 #include "server.h"
-#include <unistd.h>
-#include <sys/syscall.h>
 #include <workerd/jsg/setup.h>
-#include <kj/async-unix.h>
-#include <sys/ioctl.h>
 #include <openssl/rand.h>
 #include <workerd/io/compatibility-date.h>
+
+#if _WIN32
+#include <iostream>
+#include <kj/async-win32.h>
+#include <kj/win32-api-version.h>
+#include <windows.h>
+#include <kj/windows-sanity.h>
+#include <winsock2.h>
+#else
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/ioctl.h>
+#include <kj/async-unix.h>
+#endif
 
 #if __linux__
 #include <sys/inotify.h>
@@ -270,6 +281,20 @@ private:
   }
 };
 
+#elif _WIN32
+
+class FileWatcher {
+public:
+  FileWatcher(kj::Win32EventPort& port) {}
+
+  bool isSupported() { return false; }
+
+  void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
+
+  kj::Promise<void> onChange() { return kj::NEVER_DONE; }
+private:
+};
+
 #else
 
 class FileWatcher {
@@ -281,8 +306,6 @@ public:
   bool isSupported() { return false; }
 
   void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {}
-
-  void watch(const kj::ReadableFile& file) {}
 
   kj::Promise<void> onChange() { return kj::NEVER_DONE; }
 private:
@@ -679,6 +702,28 @@ public:
     server.overrideSocket(kj::mv(name), kj::str(value));
   }
 
+#if _WIN32
+  void validateSocketFd(uint fd, kj::StringPtr label) {
+    int acceptcon = 0;
+    int optlen = sizeof(acceptcon);
+    int result = getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, (char*)&acceptcon, &optlen);
+    if (result == SOCKET_ERROR) {
+      // https://learn.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-getsockopt#return-value
+      switch (int error = WSAGetLastError()) {
+        case WSAENOTSOCK:
+          CLI_ERROR("File descriptor is not a socket.");
+        case WSAENOPROTOOPT:
+          // Some operating systems don't support SO_ACCEPTCONN; in that case just move on and
+          // assume it is listening.
+          break;
+        default:
+          KJ_FAIL_SYSCALL("getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN)", error);
+      }
+    } else if (!acceptcon) {
+      CLI_ERROR("Socket for ", label ," is not listening.");
+    }
+  }
+#else
   void validateSocketFd(uint fd, kj::StringPtr label) {
     int acceptcon = 0;
     socklen_t optlen = sizeof(acceptcon);
@@ -699,6 +744,7 @@ public:
       }
     }
   }
+#endif
 
   void overrideSocketFd(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
@@ -728,7 +774,11 @@ public:
   }
 
   void watch() {
+#if _WIN32
+    auto& w = watcher.emplace(io.win32EventPort);
+#else
     auto& w = watcher.emplace(io.unixEventPort);
+#endif
     if (!w.isSupported()) {
       CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
     }
@@ -749,7 +799,13 @@ public:
       }
 
       // Can't use mmap() because it's probably not a file.
+#if _WIN32
+      auto handle = GetStdHandle(STD_INPUT_HANDLE);
+      auto stream = kj::HandleInputStream(handle);
+      auto reader = kj::heap<capnp::InputStreamMessageReader>(stream, CONFIG_READER_OPTIONS);
+#else
       auto reader = kj::heap<capnp::StreamFdMessageReader>(STDIN_FILENO, CONFIG_READER_OPTIONS);
+#endif
       config = reader->getRoot<config::Config>();
       configOwner = kj::mv(reader);
     } else {
@@ -861,16 +917,26 @@ public:
 
     config::Config::Reader config = getConfig();
 
+#if _WIN32
+    if (_isatty(_fileno(stdout))) {
+#else
     if (isatty(STDOUT_FILENO)) {
+#endif
       context.exitError(
           "Refusing to write binary to the terminal. Please use `>` to send the output to a file.");
     }
 
+#if !_WIN32
     // Grab the inode info before we write anything.
     struct stat stats;
     KJ_SYSCALL(fstat(STDOUT_FILENO, &stats));
+#endif
 
+#if _WIN32
+    kj::FdOutputStream out(_fileno(stdout));
+#else
     kj::FdOutputStream out(STDOUT_FILENO);
+#endif
 
     if (configOnly) {
       // Write just the config -- in normal message format -- to stdout.
@@ -882,7 +948,7 @@ public:
     } else {
       // Write an executable file to stdout by concatenating this executable, the config, and the
       // magic suffix. This takes advantage of the fact that you can append arbitrary stuff to an
-      // ELF binary without affecting the ability to execute the program.
+      // ELF binary or Windows executable without affecting the ability to execute the program.
 
       // Copy the executable to the output.
       {
@@ -916,6 +982,7 @@ public:
         out.write(words.asBytes().begin(), words.asBytes().size());
       }
 
+#if !_WIN32
       // If we wrote a regular file, and it was empty before we started writing, then let's go ahead
       // and set the executable bit on the file.
       if (S_ISREG(stats.st_mode) && stats.st_size == 0) {
@@ -932,6 +999,7 @@ public:
         }
         KJ_SYSCALL(fchmod(STDOUT_FILENO, mode));
       }
+#endif
     }
   }
 
@@ -952,7 +1020,9 @@ public:
       }
     } else {
       auto config = getConfig();
-      jsg::V8System v8System(
+      auto platform = jsg::defaultPlatform(0);
+      WorkerdPlatform v8Platform(*platform);
+      jsg::V8System v8System(v8Platform,
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
       auto promise = func(v8System, config);
       KJ_IF_MAYBE(w, watcher) {
@@ -968,9 +1038,13 @@ public:
 
   [[noreturn]] void serve() noexcept {
     serveImpl([&](jsg::V8System& v8System, config::Config::Reader config) {
+#if _WIN32
+      return server.run(v8System, config);
+#else
       return server.run(v8System, config,
           // Gracefully drain when SIGTERM is received.
           io.unixEventPort.onSignal(SIGTERM).ignoreResult());
+#endif
     });
   }
 
@@ -998,6 +1072,11 @@ public:
     });
   }
 
+#if _WIN32
+  void reloadFromConfigChange() {
+    KJ_UNREACHABLE("Watching is not yet implemented on Windows");
+  }
+#else
   [[noreturn]] void reloadFromConfigChange() {
     // Write extra spaces to fully overwrite the line that we wrote earlier with a CR but no LF:
     //     "Noticed configuration change, reloading shortly...\r"
@@ -1025,6 +1104,7 @@ public:
       }
     }
   }
+#endif
 
 private:
   kj::ProcessContext& context;
@@ -1072,7 +1152,18 @@ private:
     kj::Own<const kj::ReadableFile> file;
   };
 
-  static kj::Maybe<ExeInfo> tryOpenExe(kj::StringPtr path) {
+#if _WIN32
+  static kj::Maybe<ExeInfo> tryOpenExe(kj::Filesystem& fs, kj::StringPtr path) {
+    // TODO(bug): Like with Unix below, we should probably use native CreateFile() here, but it has
+    // sooooo many arguments, I don't want to deal with it.
+    auto parsedPath = fs.getCurrentPath().evalNative(path);
+    KJ_IF_MAYBE(file, fs.getRoot().tryOpenFile(parsedPath)) {
+      return ExeInfo { kj::str(path), kj::mv(*file) };
+    }
+    return nullptr;
+  }
+#else
+  static kj::Maybe<ExeInfo> tryOpenExe(kj::Filesystem& fs, kj::StringPtr path) {
     // Use open() and not fs.getRoot().tryOpenFile() because we probably want to use true kernel
     // path resolution here, not KJ's logical path resolution.
     int fd = open(path.cStr(), O_RDONLY);
@@ -1081,19 +1172,20 @@ private:
     }
     return ExeInfo { kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd)) };
   }
+#endif
 
   static kj::Maybe<ExeInfo> getExecFile(
       kj::ProcessContext& context, kj::Filesystem& fs) {
   #ifdef __GLIBC__
     auto execfn = getauxval(AT_EXECFN);
     if (execfn != 0) {
-      return tryOpenExe(reinterpret_cast<const char*>(execfn));
+      return tryOpenExe(fs, reinterpret_cast<const char*>(execfn));
     }
   #endif
 
   #if __linux__
     KJ_IF_MAYBE(link, fs.getRoot().tryReadlink(kj::Path({"proc", "self", "exe"}))) {
-      return tryOpenExe(*link);
+      return tryOpenExe(fs, *link);
     }
   #endif
 
@@ -1102,7 +1194,17 @@ private:
     pid_t pid = getpid();
   	char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
     if (proc_pidpath(pid, pathbuf, sizeof(pathbuf)) > 0) {
-      return tryOpenExe(pathbuf);
+      return tryOpenExe(fs, pathbuf);
+    }
+  #endif
+
+  #if _WIN32
+    wchar_t pathbuf[MAX_PATH];
+    int result = GetModuleFileNameW(NULL, pathbuf, MAX_PATH);
+    if (result > 0) {
+      auto decoded = kj::decodeWideString(kj::arrayPtr(pathbuf, result));
+      KJ_ASSERT(!decoded.hadErrors);
+      return tryOpenExe(fs, decoded);
     }
   #endif
 
@@ -1150,6 +1252,11 @@ private:
     hadErrors = true;
   }
 
+#if _WIN32
+  kj::Promise<void> waitForChanges(FileWatcher& watcher) {
+    KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
+  }
+#else
   kj::Promise<void> waitForChanges(FileWatcher& watcher) {
     // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
     // down, in case there's a bunch of changes all at once.
@@ -1178,13 +1285,16 @@ private:
 
     co_return;
   }
+#endif
 };
 
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {
   ::kj::TopLevelProcessContext context(argv[0]);
+#if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
+#endif
   workerd::server::CliMain mainObject(context, argv);
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

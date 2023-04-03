@@ -62,4 +62,8 @@ eslint_bin.eslint_test(
         "//:node_modules/@typescript-eslint/eslint-plugin",
     ],
     tags = ["lint"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
