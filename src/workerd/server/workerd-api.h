@@ -28,7 +28,8 @@ public:
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter);
+      Worker::ValidationErrorReporter& errorReporter,
+      capnp::List<config::Extension>::Reader extensions);
 
   struct Global {
     // A pipeline-level binding.
@@ -137,7 +138,8 @@ private:
       Worker::ValidationErrorReporter& errorReporter) const;
   kj::Own<jsg::ModuleRegistry> compileModules(
       jsg::Lock& lock, config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter) const;
+      Worker::ValidationErrorReporter& errorReporter,
+      capnp::List<config::Extension>::Reader extensions) const;
 };
 
 }  // namespace workerd::server

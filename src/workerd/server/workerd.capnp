@@ -72,6 +72,10 @@ struct Config {
   # WARNING: Use at your own risk. V8 flags can have all sorts of wild effects including completely
   #   breaking everything. V8 flags also generally do not come with any guarantee of stability
   #   between V8 versions. Most users should not set any V8 flags.
+
+  extensions @3 :List(Extension);
+  # Extensions provide capabilities to all workers. Extensions are usually prepared separately
+  # and are late-linked with the app using this config field.
 }
 
 # ========================================================================================
@@ -775,4 +779,29 @@ struct TlsOptions {
   # - You have extreme backwards-compatibility needs and wish to enable obsolete and/or broken
   #   algorithms.
   # - You need quickly to disable an algorithm recently discovered to be broken.
+}
+
+# ========================================================================================
+# Extensions
+
+struct Extension {
+  # Additional capabilities for workers.
+
+  modules @0 :List(Module);
+  # List of javascript modules provided by the extension.
+  # These modules can either be imported directly as user-level api (if not marked internal)
+  # or used to define more complicated workerd constructs such as wrapped bindings and events.
+
+  struct Module {
+    # A module extending workerd functionality.
+
+    name @0 :Text;
+    # Full js module name.
+
+    internal @1 :Bool = false;
+    # Internal modules can be imported by other extension modules only and not the user code.
+
+    esModule @2 :Text;
+    # Raw source code of ES module.
+  }
 }
