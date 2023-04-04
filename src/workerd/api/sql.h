@@ -26,6 +26,7 @@ public:
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
+    JSG_METHOD(raw);
   }
 
   using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
@@ -35,7 +36,8 @@ public:
   // JSG, which does not need to make a copy.
 
   JSG_ITERATOR(RowIterator, rows, jsg::Dict<Value>, jsg::Ref<SqlResult>, rowIteratorNext);
-  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
+  JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<SqlResult>, rawIteratorNext);
+
 private:
   struct State {
     kj::Own<void> dependency;
@@ -69,6 +71,13 @@ private:
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<SqlBindingValue> values);
+
+  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
+  static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
+  template <typename Func>
+  static auto iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& func)
+      -> kj::Maybe<kj::Array<
+          decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
 
   friend class SqlPreparedStatement;
 };
@@ -127,7 +136,9 @@ private:
   api::SqlPreparedStatement,                \
   api::SqlResult,                           \
   api::SqlResult::RowIterator,              \
-  api::SqlResult::RowIterator::Next
+  api::SqlResult::RowIterator::Next,        \
+  api::SqlResult::RawIterator,              \
+  api::SqlResult::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

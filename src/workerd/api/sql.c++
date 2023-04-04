@@ -38,6 +38,37 @@ jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
 
 kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+  return iteratorImpl(js, obj,
+      [&](State& state, uint i, Value&& value) {
+    return jsg::Dict<Value>::Field{
+      .name = kj::heapString(state.query.getColumnName(i)),
+      .value = kj::mv(value)
+    };
+  }).map([&](kj::Array<jsg::Dict<Value>::Field>&& fields) {
+    return jsg::Dict<Value> { .fields = kj::mv(fields) };
+  });
+}
+
+jsg::Ref<SqlResult::RawIterator> SqlResult::raw(
+    jsg::Lock&,
+    CompatibilityFlags::Reader featureFlags) {
+  return jsg::alloc<RawIterator>(JSG_THIS);
+}
+
+kj::Maybe<kj::Array<SqlResult::Value>> SqlResult::rawIteratorNext(
+    jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+  return iteratorImpl(js, obj,
+      [&](State& state, uint i, Value&& value) {
+    return kj::mv(value);
+  });
+}
+
+template <typename Func>
+auto SqlResult::iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& func)
+    -> kj::Maybe<kj::Array<
+        decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
+  using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()));
+
   auto& state = *KJ_UNWRAP_OR(obj->state, {
     if (obj->canceled) {
       JSG_FAIL_REQUIRE(Error,
@@ -65,7 +96,7 @@ kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
     return nullptr;
   }
 
-  kj::Vector<jsg::Dict<Value>::Field> fields;
+  kj::Vector<Element> results;
   for (auto i: kj::zeroTo(query.columnCount())) {
     Value value;
     KJ_SWITCH_ONEOF(query.getValue(i)) {
@@ -88,12 +119,9 @@ kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
         // leave value null
       }
     }
-    fields.add(jsg::Dict<Value>::Field{
-      .name = kj::heapString(query.getColumnName(i)),
-      .value = kj::mv(value)
-    });
+    results.add(func(state, i, kj::mv(value)));
   }
-  return jsg::Dict<Value>{.fields = fields.releaseAsArray()};
+  return results.releaseAsArray();
 }
 
 SqlPreparedStatement::SqlPreparedStatement(SqliteDatabase::Statement&& statement)

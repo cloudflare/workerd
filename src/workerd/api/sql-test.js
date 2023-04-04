@@ -19,6 +19,12 @@ function test(sql) {
   assert.equal(resultNumber.length, 1);
   assert.equal(resultNumber[0]["123"], 123);
 
+  // Test raw results
+  const resultNumberRaw = [...sql.exec("SELECT 123").raw()];
+  assert.equal(resultNumberRaw.length, 1);
+  assert.equal(resultNumberRaw[0].length, 1);
+  assert.equal(resultNumberRaw[0][0], 123);
+
   // Test string results
   const resultStr = [...sql.exec("SELECT 'hello'")];
   assert.equal(resultStr.length, 1);
