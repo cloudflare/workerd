@@ -96,8 +96,8 @@ auto SqlResult::iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& fun
     return nullptr;
   }
 
-  kj::Vector<Element> results;
-  for (auto i: kj::zeroTo(query.columnCount())) {
+  auto results = kj::heapArrayBuilder<Element>(query.columnCount());
+  for (auto i: kj::zeroTo(results.capacity())) {
     Value value;
     KJ_SWITCH_ONEOF(query.getValue(i)) {
       KJ_CASE_ONEOF(data, kj::ArrayPtr<const byte>) {
@@ -121,7 +121,7 @@ auto SqlResult::iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& fun
     }
     results.add(func(state, i, kj::mv(value)));
   }
-  return results.releaseAsArray();
+  return results.finish();
 }
 
 SqlPreparedStatement::SqlPreparedStatement(SqliteDatabase::Statement&& statement)
