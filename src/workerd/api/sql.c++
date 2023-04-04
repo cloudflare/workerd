@@ -30,22 +30,40 @@ SqlResult::~SqlResult() noexcept(false) {
   }
 }
 
+void SqlResult::CachedColumnNames::ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source) {
+  if (names == nullptr) {
+    v8::HandleScope scope(js.v8Isolate);
+    auto builder = kj::heapArrayBuilder<jsg::V8Ref<v8::String>>(source.columnCount());
+    for (auto i: kj::zeroTo(builder.capacity())) {
+      builder.add(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, source.getColumnName(i)));
+    }
+    names = builder.finish();
+  }
+}
+
 jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
-    jsg::Lock&,
+    jsg::Lock& js,
     CompatibilityFlags::Reader featureFlags) {
+  KJ_IF_MAYBE(s, state) {
+    cachedColumnNames.ensureInitialized(js, (*s)->query);
+  }
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
-kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
+kj::Maybe<SqlResult::RowDict> SqlResult::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+  auto names = obj->cachedColumnNames.get();
   return iteratorImpl(js, obj,
       [&](State& state, uint i, Value&& value) {
-    return jsg::Dict<Value>::Field{
-      .name = kj::heapString(state.query.getColumnName(i)),
+    return RowDict::Field{
+      // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
+      // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
+      // which would be relatively slower.
+      .name = names[i].getHandle(js),
       .value = kj::mv(value)
     };
-  }).map([&](kj::Array<jsg::Dict<Value>::Field>&& fields) {
-    return jsg::Dict<Value> { .fields = kj::mv(fields) };
+  }).map([&](kj::Array<RowDict::Field>&& fields) {
+    return RowDict { .fields = kj::mv(fields) };
   });
 }
 
@@ -164,7 +182,7 @@ jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bi
     currentCursor = nullptr;
   }
 
-  auto result = jsg::alloc<SqlResult>(statementRef, kj::mv(bindings));
+  auto result = jsg::alloc<SqlResult>(cachedColumnNames, statementRef, kj::mv(bindings));
 
   result->selfRef = currentCursor;
   currentCursor = *result;

@@ -119,6 +119,8 @@ constexpr bool isStringType = kj::isSameType<T, kj::String>() ||
                               kj::isSameType<T, ByteString>() ||
                               kj::isSameType<T, jsg::UsvString>() ||
                               kj::isSameType<T, jsg::UsvStringPtr>() ||
+                              kj::isSameType<T, v8::Local<v8::String>>() ||
+                              kj::isSameType<T, jsg::V8Ref<v8::String>>() ||
                               kj::isSameType<T, NonCoercible<kj::String>>();
 
 template <typename T>

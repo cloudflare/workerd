@@ -18,10 +18,18 @@ class SqlDatabase;
 class SqlPreparedStatement;
 
 class SqlResult final: public jsg::Object {
+  class CachedColumnNames;
 public:
   template <typename... Params>
   SqlResult(Params&&... params)
-      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))) {}
+      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
+        ownCachedColumnNames(nullptr),  // silence bogus Clang warning on next line
+        cachedColumnNames(ownCachedColumnNames.emplace()) {}
+
+  template <typename... Params>
+  SqlResult(CachedColumnNames& cachedColumnNames, Params&&... params)
+      : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
+        cachedColumnNames(cachedColumnNames) {}
   ~SqlResult() noexcept(false);
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
@@ -35,10 +43,26 @@ public:
   // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
   // JSG, which does not need to make a copy.
 
-  JSG_ITERATOR(RowIterator, rows, jsg::Dict<Value>, jsg::Ref<SqlResult>, rowIteratorNext);
+  using RowDict = jsg::Dict<Value, v8::Local<v8::String>>;
+  JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<SqlResult>, rowIteratorNext);
   JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<SqlResult>, rawIteratorNext);
 
 private:
+  class CachedColumnNames {
+    // Helper class to cache column names for a query so that we don't have to recreate the V8
+    // strings for every row.
+    //
+    // TODO(perf): Can we further cache the V8 object layout information for a row?
+  public:
+    kj::ArrayPtr<jsg::V8Ref<v8::String>> get() { return KJ_REQUIRE_NONNULL(names); }
+    // Get the cached names. ensureInitialized() must have been called previously.
+
+    void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
+
+  private:
+    kj::Maybe<kj::Array<jsg::V8Ref<v8::String>>> names;
+  };
+
   struct State {
     kj::Own<void> dependency;
     // Refcount on the SqliteDatabase::Statement underlying the query, if any.
@@ -69,10 +93,13 @@ private:
   // destruction. Used by SqlPreparedStatement to invalidate past cursors when the statement is
   // executed again.
 
+  kj::Maybe<CachedColumnNames> ownCachedColumnNames;
+  CachedColumnNames& cachedColumnNames;
+
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<SqlBindingValue> values);
 
-  static kj::Maybe<jsg::Dict<Value>> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
+  static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
   static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
   template <typename Func>
   static auto iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& func)
@@ -97,6 +124,10 @@ private:
 
   kj::Maybe<SqlResult&> currentCursor;
   // Weak reference to the SqlResult that is currently using this statement.
+
+  SqlResult::CachedColumnNames cachedColumnNames;
+  // All queries from the same prepared statement have the same column names, so we can cache them
+  // on the statement.
 
   friend class SqlResult;
 };
