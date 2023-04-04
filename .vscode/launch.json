@@ -6,27 +6,44 @@
   "configurations": [
     {
       "name": "workerd debug",
-      "preLaunchTask": "Bazel Build",
+      "preLaunchTask": "Bazel Build (dbg)",
       "type": "cppdbg",
       "request": "launch",
       "MIMode": "gdb",
-      "program": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd",
+      "miDebuggerArgs": "-d ${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd",
       "args": [
-        // A prompt will be displayed asking for the configuration
-        // arguments for the workerd process
-        "${input:debugargs}"
+        "serve",
+        "${input:workerdConfig}"
       ],
-      "cwd": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd.runfiles/workerd",
-
+      "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd",
+      "stopAtEntry": false,
+      "externalConsole": false
+    },
+    {
+      "name": "workerd debug with inspector enabled",
+      "preLaunchTask": "Bazel Build (dbg)",
+      "type": "cppdbg",
+      "request": "launch",
+      "MIMode": "gdb",
+      "miDebuggerArgs": "-d ${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd",
+      "args": [
+        "serve",
+        "-i0.0.0.0",
+        "--verbose",
+        "${input:workerdConfig}"
+      ],
+      "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd",
       "stopAtEntry": false,
       "externalConsole": false
     }
   ],
   "inputs": [
     {
-      "id": "debugargs",
-      "description": "workerd arguments",
-      "default": "--help",
+      "id": "workerdConfig",
+      "description": "Workerd configuration to serve",
+      "default": "${workspaceFolder}/samples/helloworld/config.capnp",
       "type": "promptString"
     }
   ]

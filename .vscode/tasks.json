@@ -2,10 +2,29 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Bazel Build",
+      "label": "Bazel Build (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "//src/workerd/server"],
+      "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel Build (fastbuild)",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["build", "--config", "fastbuild", "//src/workerd/server:workerd"],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -24,7 +43,7 @@
       "label": "Bazel Build (opt)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "opt", "//src/workerd/server"],
+      "args": ["build", "-c", "opt", "//src/workerd/server:workerd"],
       "group": {
         "kind": "build",
         "isDefault": false

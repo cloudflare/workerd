@@ -1,6 +1,8 @@
 .idea
 .DS_Store
 
+/*.code-workspace
+
 /rust-deps/target
 /rust-deps/Cargo.toml
 
