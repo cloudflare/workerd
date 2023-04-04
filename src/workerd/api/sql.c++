@@ -35,7 +35,8 @@ void SqlStorage::onError(kj::StringPtr message) {
 }
 
 SqlStorage::Cursor::State::State(
-    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<BindingValue> bindingsParam)
+    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
+    kj::Array<BindingValue> bindingsParam)
     : dependency(statement.addWrappedRef()),
       bindings(kj::mv(bindingsParam)),
       query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
