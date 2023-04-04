@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v3.1.0
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
-          path: bazel-bin/src/workerd/server/workerd
+          path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
   check-tag:
     name: Check tag is new
     outputs:
@@ -116,8 +116,9 @@ jobs:
         with:
           name: ${{ matrix.name }}-binary
           path: /tmp
-      - run: mv /tmp/workerd /tmp/workerd-${{ matrix.arch }}
+      - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} /tmp/workerd-${{ matrix.arch }}
       - run: chmod +x /tmp/workerd-${{ matrix.arch }}
+        if: ${{ matrix.arch != 'windows-64' }}
       - name: Upload Release Asset
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
@@ -126,5 +127,5 @@ jobs:
         with:
           upload_url: ${{ needs.tag-and-release.outputs.upload_url }}
           asset_path: /tmp/workerd-${{ matrix.arch }}
-          asset_name: workerd-${{ matrix.arch }}
+          asset_name: workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }}
           asset_content_type: application/octet-stream

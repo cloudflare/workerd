@@ -20,6 +20,8 @@ export const knownPackages: Record<string, string> = {
   "win32 x64 LE": "@cloudflare/workerd-windows-64",
 };
 
+const maybeExeExtension = process.platform === "win32" ? ".exe" : "";
+
 export function pkgAndSubpathForCurrentPlatform(): {
   pkg: string;
   subpath: string;
@@ -30,7 +32,7 @@ export function pkgAndSubpathForCurrentPlatform(): {
 
   if (platformKey in knownPackages) {
     pkg = knownPackages[platformKey];
-    subpath = "bin/workerd";
+    subpath = `bin/workerd${maybeExeExtension}`;
   } else {
     throw new Error(`Unsupported platform: ${platformKey}`);
   }
@@ -58,7 +60,7 @@ function pkgForSomeOtherPlatform(): string | null {
 
 export function downloadedBinPath(pkg: string, subpath: string): string {
   const libDir = path.dirname(require.resolve("workerd"));
-  return path.join(libDir, `downloaded-${pkg.replace("/", "-")}-${path.basename(subpath)}`);
+  return path.join(libDir, `downloaded-${pkg.replace("/", "-")}-${path.basename(subpath)}${maybeExeExtension}`);
 }
 
 export function generateBinPath(): { binPath: string } {
