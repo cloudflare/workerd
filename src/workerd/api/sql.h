@@ -22,6 +22,7 @@ public:
   template <typename... Params>
   SqlResult(Params&&... params)
       : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))) {}
+  ~SqlResult() noexcept(false);
 
   JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
@@ -54,10 +55,22 @@ private:
           kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
   };
 
-  IoOwn<State> state;
+  kj::Maybe<IoOwn<State>> state;
+  // Nulled out when query is done or canceled.
+
+  bool canceled = false;
+  // True if the cursor was canceled by a new call to the same statement. This is used only to
+  // flag an error if the application tries to reuse the cursor.
+
+  kj::Maybe<kj::Maybe<SqlResult&>&> selfRef;
+  // Reference to a weak reference that might point back to this object. If so, null it out at
+  // destruction. Used by SqlPreparedStatement to invalidate past cursors when the statement is
+  // executed again.
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<SqlBindingValue> values);
+
+  friend class SqlPreparedStatement;
 };
 
 class SqlPreparedStatement final: public jsg::Object {
@@ -72,6 +85,9 @@ public:
 
 private:
   IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>> statement;
+
+  kj::Maybe<SqlResult&> currentCursor;
+  // Weak reference to the SqlResult that is currently using this statement.
 
   friend class SqlResult;
 };

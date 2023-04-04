@@ -55,6 +55,18 @@ function test(sql) {
   assert.equal(resultPrepared.length, 1);
   assert.equal(resultPrepared[0]["789"], 789);
 
+  // Running the same query twice invalidates the previous cursor.
+  let result1 = prepared();
+  let result2 = prepared();
+  assert.equal([...result2][0]["789"], 789);
+  requireException(() => [...result1],
+      "SQL cursor was closed because the same statement was executed again.");
+
+  // That said if a cursor was already done before the statement was re-run, it's not considered
+  // canceled.
+  prepared();
+  assert.equal([...result2].length, 0);
+
   // Prepared statement with binding values
   const preparedWithBinding = sql.prepare("SELECT ?");
   const resultPreparedWithBinding = [...preparedWithBinding(789)];

@@ -19,6 +19,17 @@ SqlResult::SqlResult::State::State(
     : bindings(kj::mv(bindingsParam)),
       query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
 
+SqlResult::~SqlResult() noexcept(false) {
+  // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
+  KJ_IF_MAYBE(s, selfRef) {
+    KJ_IF_MAYBE(p, *s) {
+      if (p == this) {
+        *s = nullptr;
+      }
+    }
+  }
+}
+
 jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
     jsg::Lock&,
     CompatibilityFlags::Reader featureFlags) {
@@ -27,7 +38,17 @@ jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
 
 kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
-  auto& state = *obj->state;
+  auto& state = *KJ_UNWRAP_OR(obj->state, {
+    if (obj->canceled) {
+      JSG_FAIL_REQUIRE(Error,
+          "SQL cursor was closed because the same statement was executed again. If you need to "
+          "run multiple copies of the same statement concurrently, you must create multiple "
+          "prepared statement objects.");
+    } else {
+      // Query already done.
+      return nullptr;
+    }
+  });
 
   if (state.isFirst) {
     // Little hack: We don't want to call query.nextRow() at the end of this method because it
@@ -39,6 +60,8 @@ kj::Maybe<jsg::Dict<SqlResult::Value>> SqlResult::rowIteratorNext(
 
   auto& query = state.query;
   if (query.isDone()) {
+    // Clean up the query proactively.
+    obj->state = nullptr;
     return nullptr;
   }
 
@@ -96,7 +119,29 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
 }
 
 jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bindings) {
-  return jsg::alloc<SqlResult>(*statement, kj::mv(bindings));
+  auto& statementRef = *statement;  // validate we're in the right IoContext
+
+  KJ_IF_MAYBE(c, currentCursor) {
+    // Invalidate previous cursor if it's still running. We have to do this because SQLite only
+    // allows one execution of a statement at a time.
+    //
+    // If this is a problem, we could consider a scheme where we dynamically instantiate copies of
+    // the statement as needed. However, that risks wasting memory if the app commonly leaves
+    // cursors open and the GC doesn't run proactively enough.
+    KJ_IF_MAYBE(s, c->state) {
+      c->canceled = !(*s)->query.isDone();
+      c->state = nullptr;
+    }
+    c->selfRef = nullptr;
+    currentCursor = nullptr;
+  }
+
+  auto result = jsg::alloc<SqlResult>(statementRef, kj::mv(bindings));
+
+  result->selfRef = currentCursor;
+  currentCursor = *result;
+
+  return result;
 }
 
 SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
