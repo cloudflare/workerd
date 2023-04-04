@@ -526,6 +526,9 @@ struct Worker::Isolate::Impl {
   kj::HashSet<kj::String> errorOnceDescriptions;
   // Set of error log lines that should not be logged again.
 
+  mutable uint actorCount = 0;
+  // Instantaneous count of how many Worker::Actor objects share this isolate.
+
   mutable uint lockAttemptGauge = 0;
   // Instantaneous count of how many threads are trying to or have successfully obtained an
   // AsyncLock on this isolate, used to implement getCurrentLoad().
@@ -2674,6 +2677,8 @@ Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, A
   } else {
     impl->classInstance = Impl::NoClass();
   }
+
+  __atomic_add_fetch(&worker.getIsolate().impl->actorCount, 1, __ATOMIC_RELAXED);
 }
 
 void Worker::Actor::ensureConstructed(IoContext& context) {
@@ -2723,6 +2728,8 @@ Worker::Actor::~Actor() noexcept(false) {
   // IoContext and the Actor will not destruct as we'd expect. Ideally, we'd want an object
   // that represents Actor liveness that does what shutdown() does now. It should be reasonable to
   // implement that once we have tests that invoke the Actor dtor.
+
+  __atomic_sub_fetch(&worker->getIsolate().impl->actorCount, 1, __ATOMIC_RELAXED);
 
   // Destroy under lock.
   //
@@ -3069,6 +3076,10 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
 }
 
 // =======================================================================================
+
+uint Worker::Isolate::getActorCount() const {
+  return __atomic_load_n(&impl->actorCount, __ATOMIC_RELAXED);
+}
 
 uint Worker::Isolate::getCurrentLoad() const {
   return __atomic_load_n(&impl->lockAttemptGauge, __ATOMIC_RELAXED);

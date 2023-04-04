@@ -270,6 +270,10 @@ public:
   const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
   const ApiIsolate& getApiIsolate() const { return *apiIsolate; }
 
+  uint getActorCount() const;
+  // Returns how many Worker::Actor objects currently share this isolate. This may be useful as
+  // an estimate of memory load, as opposed to getCurrentLoad() which estimates CPU load.
+
   uint getCurrentLoad() const;
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
