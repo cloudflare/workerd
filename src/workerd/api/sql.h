@@ -16,6 +16,37 @@ class DurableObjectStorage;
 typedef kj::OneOf<kj::Array<const byte>, kj::String, double> SqlBindingValue;
 class SqlDatabase;
 class SqlPreparedStatement;
+class SqlResult;
+
+class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
+public:
+  SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
+  ~SqlDatabase();
+
+  jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Arguments<SqlBindingValue> bindings);
+
+  jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query);
+
+  JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
+    JSG_METHOD(exec);
+    JSG_METHOD(prepare);
+  }
+
+private:
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(storage);
+  }
+
+  bool isAllowedName(kj::StringPtr name) override;
+  bool isAllowedTrigger(kj::StringPtr name) override;
+  void onError(kj::StringPtr message) override;
+
+  IoPtr<SqliteDatabase> sqlite;
+  jsg::Ref<DurableObjectStorage> storage;
+
+  friend class SqlPreparedStatement;
+  friend SqlResult;
+};
 
 class SqlResult final: public jsg::Object {
   class CachedColumnNames;
@@ -130,36 +161,6 @@ private:
   // on the statement.
 
   friend class SqlResult;
-};
-
-class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
-public:
-  SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
-  ~SqlDatabase();
-
-  jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Arguments<SqlBindingValue> bindings);
-
-  jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query);
-
-  JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(exec);
-    JSG_METHOD(prepare);
-  }
-
-private:
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(storage);
-  }
-
-  bool isAllowedName(kj::StringPtr name) override;
-  bool isAllowedTrigger(kj::StringPtr name) override;
-  void onError(kj::StringPtr message) override;
-
-  IoPtr<SqliteDatabase> sqlite;
-  jsg::Ref<DurableObjectStorage> storage;
-
-  friend class SqlPreparedStatement;
-  friend SqlResult;
 };
 
 #define EW_SQL_ISOLATE_TYPES                \

@@ -7,6 +7,33 @@
 
 namespace workerd::api {
 
+SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
+    : sqlite(IoContext::current().addObject(sqlite)), storage(kj::mv(storage)) {}
+
+SqlDatabase::~SqlDatabase() {}
+
+jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
+                                      jsg::Arguments<SqlBindingValue> bindings) {
+  SqliteDatabase::Regulator& regulator = *this;
+  return jsg::alloc<SqlResult>(*sqlite, regulator, querySql, kj::mv(bindings));
+}
+
+jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
+  return jsg::alloc<SqlPreparedStatement>(sqlite->prepare(*this, query));
+}
+
+bool SqlDatabase::isAllowedName(kj::StringPtr name) {
+  return !name.startsWith("_cf_");
+}
+
+bool SqlDatabase::isAllowedTrigger(kj::StringPtr name) {
+  return true;
+}
+
+void SqlDatabase::onError(kj::StringPtr message) {
+  JSG_ASSERT(false, Error, message);
+}
+
 SqlResult::SqlResult::State::State(
     kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<SqlBindingValue> bindingsParam)
     : dependency(statement.addWrappedRef()),
@@ -188,33 +215,6 @@ jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bi
   currentCursor = *result;
 
   return result;
-}
-
-SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
-    : sqlite(IoContext::current().addObject(sqlite)), storage(kj::mv(storage)) {}
-
-SqlDatabase::~SqlDatabase() {}
-
-jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
-                                      jsg::Arguments<SqlBindingValue> bindings) {
-  SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<SqlResult>(*sqlite, regulator, querySql, kj::mv(bindings));
-}
-
-jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
-  return jsg::alloc<SqlPreparedStatement>(sqlite->prepare(*this, query));
-}
-
-bool SqlDatabase::isAllowedName(kj::StringPtr name) {
-  return !name.startsWith("_cf_");
-}
-
-bool SqlDatabase::isAllowedTrigger(kj::StringPtr name) {
-  return true;
-}
-
-void SqlDatabase::onError(kj::StringPtr message) {
-  JSG_ASSERT(false, Error, message);
 }
 
 }  // namespace workerd::api
