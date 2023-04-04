@@ -13,7 +13,7 @@ default = ["console_error_panic_hook"]
 
 [dependencies]
 cfg-if = "0.1.2"
-worker = "0.0.11"
+worker = "0.0.15"
 serde_json = "1.0.67"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
