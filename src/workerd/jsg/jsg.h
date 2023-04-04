@@ -514,8 +514,7 @@ using HasGetTemplateOverload = decltype(
 
 #define JSG_NESTED_TYPE(Type) \
   do { \
-    static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE, \
-        #Type " is not a resource type, and therefore cannot not be declared nested"); \
+    /* Note that `Type` may be incomplete here, we should be OK with that. */ \
     static const char NAME[] = #Type; \
     registry.template registerNestedType<Type, NAME>(); \
   } while (false)
@@ -526,8 +525,7 @@ using HasGetTemplateOverload = decltype(
 
 #define JSG_NESTED_TYPE_NAMED(Type, Name) \
   do { \
-    static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE, \
-        #Type " is not a resource type, and therefore cannot not be declared nested"); \
+    /* Note that `Type` may be incomplete here, we should be OK with that. */ \
     static const char NAME[] = #Name; \
     registry.template registerNestedType<Type, NAME>(); \
   } while (false)

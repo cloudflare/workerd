@@ -30,6 +30,9 @@ public:
   JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
+
+    JSG_NESTED_TYPE(Cursor);
+    JSG_NESTED_TYPE(Statement);
   }
 
 private:
