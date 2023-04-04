@@ -64,14 +64,15 @@ jobs:
       - uses: robinraju/release-downloader@v1.5
         with:
           tag: v${{ needs.version.outputs.release_version }}
-          fileName: workerd-${{ matrix.arch }}
+          fileName: workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }}
           tarBall: false
           zipBall: false
           out-file-path: "release-downloads"
           token: ${{ secrets.GITHUB_TOKEN }}
       - run: chmod +x $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}
+        if: ${{ matrix.arch != 'windows-64' }}
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
-      - run: cp $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }} npm/workerd-${{ matrix.arch }}/bin/workerd
+      - run: cp $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
       - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag ${{ inputs.prerelease == true && 'beta' || 'latest'}}
         env:
