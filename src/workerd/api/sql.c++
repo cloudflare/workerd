@@ -12,14 +12,14 @@ SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> 
 
 SqlDatabase::~SqlDatabase() {}
 
-jsg::Ref<SqlResult> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
-                                      jsg::Arguments<SqlBindingValue> bindings) {
+jsg::Ref<SqlDatabase::Cursor> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
+                                                jsg::Arguments<BindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
-  return jsg::alloc<SqlResult>(*sqlite, regulator, querySql, kj::mv(bindings));
+  return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
 
-jsg::Ref<SqlPreparedStatement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
-  return jsg::alloc<SqlPreparedStatement>(sqlite->prepare(*this, query));
+jsg::Ref<SqlDatabase::Statement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
+  return jsg::alloc<Statement>(sqlite->prepare(*this, query));
 }
 
 bool SqlDatabase::isAllowedName(kj::StringPtr name) {
@@ -34,19 +34,19 @@ void SqlDatabase::onError(kj::StringPtr message) {
   JSG_ASSERT(false, Error, message);
 }
 
-SqlResult::SqlResult::State::State(
-    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<SqlBindingValue> bindingsParam)
+SqlDatabase::Cursor::State::State(
+    kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<BindingValue> bindingsParam)
     : dependency(statement.addWrappedRef()),
       bindings(kj::mv(bindingsParam)),
       query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
 
-SqlResult::SqlResult::State::State(
+SqlDatabase::Cursor::State::State(
     SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-    kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindingsParam)
+    kj::StringPtr sqlCode, kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
       query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
 
-SqlResult::~SqlResult() noexcept(false) {
+SqlDatabase::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
   KJ_IF_MAYBE(s, selfRef) {
     KJ_IF_MAYBE(p, *s) {
@@ -57,7 +57,8 @@ SqlResult::~SqlResult() noexcept(false) {
   }
 }
 
-void SqlResult::CachedColumnNames::ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source) {
+void SqlDatabase::Cursor::CachedColumnNames::ensureInitialized(
+    jsg::Lock& js, SqliteDatabase::Query& source) {
   if (names == nullptr) {
     v8::HandleScope scope(js.v8Isolate);
     auto builder = kj::heapArrayBuilder<jsg::V8Ref<v8::String>>(source.columnCount());
@@ -68,7 +69,7 @@ void SqlResult::CachedColumnNames::ensureInitialized(jsg::Lock& js, SqliteDataba
   }
 }
 
-jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
+jsg::Ref<SqlDatabase::Cursor::RowIterator> SqlDatabase::Cursor::rows(
     jsg::Lock& js,
     CompatibilityFlags::Reader featureFlags) {
   KJ_IF_MAYBE(s, state) {
@@ -77,8 +78,8 @@ jsg::Ref<SqlResult::RowIterator> SqlResult::rows(
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
-kj::Maybe<SqlResult::RowDict> SqlResult::rowIteratorNext(
-    jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+kj::Maybe<SqlDatabase::Cursor::RowDict> SqlDatabase::Cursor::rowIteratorNext(
+    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
   return iteratorImpl(js, obj,
       [&](State& state, uint i, Value&& value) {
@@ -94,14 +95,14 @@ kj::Maybe<SqlResult::RowDict> SqlResult::rowIteratorNext(
   });
 }
 
-jsg::Ref<SqlResult::RawIterator> SqlResult::raw(
+jsg::Ref<SqlDatabase::Cursor::RawIterator> SqlDatabase::Cursor::raw(
     jsg::Lock&,
     CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<RawIterator>(JSG_THIS);
 }
 
-kj::Maybe<kj::Array<SqlResult::Value>> SqlResult::rawIteratorNext(
-    jsg::Lock& js, jsg::Ref<SqlResult>& obj) {
+kj::Maybe<kj::Array<SqlDatabase::Cursor::Value>> SqlDatabase::Cursor::rawIteratorNext(
+    jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   return iteratorImpl(js, obj,
       [&](State& state, uint i, Value&& value) {
     return kj::mv(value);
@@ -109,7 +110,7 @@ kj::Maybe<kj::Array<SqlResult::Value>> SqlResult::rawIteratorNext(
 }
 
 template <typename Func>
-auto SqlResult::iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& func)
+auto SqlDatabase::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
     -> kj::Maybe<kj::Array<
         decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
   using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()));
@@ -169,12 +170,12 @@ auto SqlResult::iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& fun
   return results.finish();
 }
 
-SqlPreparedStatement::SqlPreparedStatement(SqliteDatabase::Statement&& statement)
+SqlDatabase::Statement::Statement(SqliteDatabase::Statement&& statement)
     : statement(IoContext::current().addObject(
         kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
 
-kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
-    kj::ArrayPtr<SqlBindingValue> values) {
+kj::Array<const SqliteDatabase::Query::ValuePtr> SqlDatabase::Cursor::mapBindings(
+    kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(data, kj::Array<const byte>) {
@@ -191,7 +192,7 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlResult::mapBindings(
   };
 }
 
-jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bindings) {
+jsg::Ref<SqlDatabase::Cursor> SqlDatabase::Statement::run(jsg::Arguments<BindingValue> bindings) {
   auto& statementRef = *statement;  // validate we're in the right IoContext
 
   KJ_IF_MAYBE(c, currentCursor) {
@@ -209,7 +210,7 @@ jsg::Ref<SqlResult> SqlPreparedStatement::run(jsg::Arguments<SqlBindingValue> bi
     currentCursor = nullptr;
   }
 
-  auto result = jsg::alloc<SqlResult>(cachedColumnNames, statementRef, kj::mv(bindings));
+  auto result = jsg::alloc<Cursor>(cachedColumnNames, statementRef, kj::mv(bindings));
 
   result->selfRef = currentCursor;
   currentCursor = *result;

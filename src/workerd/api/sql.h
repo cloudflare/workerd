@@ -13,19 +13,19 @@ namespace workerd::api {
 
 class DurableObjectStorage;
 
-typedef kj::OneOf<kj::Array<const byte>, kj::String, double> SqlBindingValue;
-class SqlDatabase;
-class SqlPreparedStatement;
-class SqlResult;
-
 class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
 public:
   SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
   ~SqlDatabase();
 
-  jsg::Ref<SqlResult> exec(jsg::Lock& js, kj::String query, jsg::Arguments<SqlBindingValue> bindings);
+  using BindingValue = kj::OneOf<kj::Array<const byte>, kj::String, double>;
 
-  jsg::Ref<SqlPreparedStatement> prepare(jsg::Lock& js, kj::String query);
+  class Cursor;
+  class Statement;
+
+  jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
+
+  jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
   JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
@@ -43,27 +43,24 @@ private:
 
   IoPtr<SqliteDatabase> sqlite;
   jsg::Ref<DurableObjectStorage> storage;
-
-  friend class SqlPreparedStatement;
-  friend SqlResult;
 };
 
-class SqlResult final: public jsg::Object {
+class SqlDatabase::Cursor final: public jsg::Object {
   class CachedColumnNames;
 public:
   template <typename... Params>
-  SqlResult(Params&&... params)
+  Cursor(Params&&... params)
       : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
         ownCachedColumnNames(nullptr),  // silence bogus Clang warning on next line
         cachedColumnNames(ownCachedColumnNames.emplace()) {}
 
   template <typename... Params>
-  SqlResult(CachedColumnNames& cachedColumnNames, Params&&... params)
+  Cursor(CachedColumnNames& cachedColumnNames, Params&&... params)
       : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
         cachedColumnNames(cachedColumnNames) {}
-  ~SqlResult() noexcept(false);
+  ~Cursor() noexcept(false);
 
-  JSG_RESOURCE_TYPE(SqlResult, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
   }
@@ -75,8 +72,8 @@ public:
   // JSG, which does not need to make a copy.
 
   using RowDict = jsg::Dict<Value, v8::Local<v8::String>>;
-  JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<SqlResult>, rowIteratorNext);
-  JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<SqlResult>, rawIteratorNext);
+  JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
+  JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
 
 private:
   class CachedColumnNames {
@@ -98,7 +95,7 @@ private:
     kj::Own<void> dependency;
     // Refcount on the SqliteDatabase::Statement underlying the query, if any.
 
-    kj::Array<SqlBindingValue> bindings;
+    kj::Array<BindingValue> bindings;
     // The bindings that were used to construct `query`. We have to keep these alive until the query
     // is done since it might contain pointers into strings and blobs.
 
@@ -107,9 +104,9 @@ private:
     bool isFirst = true;
 
     State(kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
-          kj::Array<SqlBindingValue> bindings);
+          kj::Array<BindingValue> bindings);
     State(SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
-          kj::StringPtr sqlCode, kj::Array<SqlBindingValue> bindings);
+          kj::StringPtr sqlCode, kj::Array<BindingValue> bindings);
   };
 
   kj::Maybe<IoOwn<State>> state;
@@ -119,58 +116,58 @@ private:
   // True if the cursor was canceled by a new call to the same statement. This is used only to
   // flag an error if the application tries to reuse the cursor.
 
-  kj::Maybe<kj::Maybe<SqlResult&>&> selfRef;
+  kj::Maybe<kj::Maybe<Cursor&>&> selfRef;
   // Reference to a weak reference that might point back to this object. If so, null it out at
-  // destruction. Used by SqlPreparedStatement to invalidate past cursors when the statement is
+  // destruction. Used by Statement to invalidate past cursors when the statement is
   // executed again.
 
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
-      kj::ArrayPtr<SqlBindingValue> values);
+      kj::ArrayPtr<BindingValue> values);
 
-  static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
-  static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<SqlResult>& obj);
+  static kj::Maybe<RowDict> rowIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
+  static kj::Maybe<kj::Array<Value>> rawIteratorNext(jsg::Lock& js, jsg::Ref<Cursor>& obj);
   template <typename Func>
-  static auto iteratorImpl(jsg::Lock& js, jsg::Ref<SqlResult>& obj, Func&& func)
+  static auto iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
       -> kj::Maybe<kj::Array<
           decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>>;
 
-  friend class SqlPreparedStatement;
+  friend class Statement;
 };
 
-class SqlPreparedStatement final: public jsg::Object {
+class SqlDatabase::Statement final: public jsg::Object {
 public:
-  SqlPreparedStatement(SqliteDatabase::Statement&& statement);
+  Statement(SqliteDatabase::Statement&& statement);
 
-  jsg::Ref<SqlResult> run(jsg::Arguments<SqlBindingValue> bindings);
+  jsg::Ref<Cursor> run(jsg::Arguments<BindingValue> bindings);
 
-  JSG_RESOURCE_TYPE(SqlPreparedStatement, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Statement, CompatibilityFlags::Reader flags) {
     JSG_CALLABLE(run);
   }
 
 private:
   IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>> statement;
 
-  kj::Maybe<SqlResult&> currentCursor;
-  // Weak reference to the SqlResult that is currently using this statement.
+  kj::Maybe<Cursor&> currentCursor;
+  // Weak reference to the Cursor that is currently using this statement.
 
-  SqlResult::CachedColumnNames cachedColumnNames;
+  Cursor::CachedColumnNames cachedColumnNames;
   // All queries from the same prepared statement have the same column names, so we can cache them
   // on the statement.
 
-  friend class SqlResult;
+  friend class Cursor;
 };
 
-#define EW_SQL_ISOLATE_TYPES                \
-  api::SqlDatabase,                         \
-  api::SqlPreparedStatement,                \
-  api::SqlResult,                           \
-  api::SqlResult::RowIterator,              \
-  api::SqlResult::RowIterator::Next,        \
-  api::SqlResult::RawIterator,              \
-  api::SqlResult::RawIterator::Next
+#define EW_SQL_ISOLATE_TYPES                    \
+  api::SqlDatabase,                             \
+  api::SqlDatabase::Statement,                  \
+  api::SqlDatabase::Cursor,                     \
+  api::SqlDatabase::Cursor::RowIterator,        \
+  api::SqlDatabase::Cursor::RowIterator::Next,  \
+  api::SqlDatabase::Cursor::RawIterator,        \
+  api::SqlDatabase::Cursor::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
