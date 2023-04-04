@@ -197,7 +197,7 @@ public:
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
-  jsg::Ref<SqlDatabase> getSql(jsg::Lock& js);
+  jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);

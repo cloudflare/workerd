@@ -7,46 +7,46 @@
 
 namespace workerd::api {
 
-SqlDatabase::SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
+SqlStorage::SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage)
     : sqlite(IoContext::current().addObject(sqlite)), storage(kj::mv(storage)) {}
 
-SqlDatabase::~SqlDatabase() {}
+SqlStorage::~SqlStorage() {}
 
-jsg::Ref<SqlDatabase::Cursor> SqlDatabase::exec(jsg::Lock& js, kj::String querySql,
-                                                jsg::Arguments<BindingValue> bindings) {
+jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js, kj::String querySql,
+                                              jsg::Arguments<BindingValue> bindings) {
   SqliteDatabase::Regulator& regulator = *this;
   return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
 
-jsg::Ref<SqlDatabase::Statement> SqlDatabase::prepare(jsg::Lock& js, kj::String query) {
+jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
   return jsg::alloc<Statement>(sqlite->prepare(*this, query));
 }
 
-bool SqlDatabase::isAllowedName(kj::StringPtr name) {
+bool SqlStorage::isAllowedName(kj::StringPtr name) {
   return !name.startsWith("_cf_");
 }
 
-bool SqlDatabase::isAllowedTrigger(kj::StringPtr name) {
+bool SqlStorage::isAllowedTrigger(kj::StringPtr name) {
   return true;
 }
 
-void SqlDatabase::onError(kj::StringPtr message) {
+void SqlStorage::onError(kj::StringPtr message) {
   JSG_ASSERT(false, Error, message);
 }
 
-SqlDatabase::Cursor::State::State(
+SqlStorage::Cursor::State::State(
     kj::RefcountedWrapper<SqliteDatabase::Statement>& statement, kj::Array<BindingValue> bindingsParam)
     : dependency(statement.addWrappedRef()),
       bindings(kj::mv(bindingsParam)),
       query(statement.getWrapped().run(mapBindings(bindings).asPtr())) {}
 
-SqlDatabase::Cursor::State::State(
+SqlStorage::Cursor::State::State(
     SqliteDatabase& db, SqliteDatabase::Regulator& regulator,
     kj::StringPtr sqlCode, kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
       query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
 
-SqlDatabase::Cursor::~Cursor() noexcept(false) {
+SqlStorage::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
   KJ_IF_MAYBE(s, selfRef) {
     KJ_IF_MAYBE(p, *s) {
@@ -57,7 +57,7 @@ SqlDatabase::Cursor::~Cursor() noexcept(false) {
   }
 }
 
-void SqlDatabase::Cursor::CachedColumnNames::ensureInitialized(
+void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
     jsg::Lock& js, SqliteDatabase::Query& source) {
   if (names == nullptr) {
     v8::HandleScope scope(js.v8Isolate);
@@ -69,7 +69,7 @@ void SqlDatabase::Cursor::CachedColumnNames::ensureInitialized(
   }
 }
 
-jsg::Ref<SqlDatabase::Cursor::RowIterator> SqlDatabase::Cursor::rows(
+jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(
     jsg::Lock& js,
     CompatibilityFlags::Reader featureFlags) {
   KJ_IF_MAYBE(s, state) {
@@ -78,7 +78,7 @@ jsg::Ref<SqlDatabase::Cursor::RowIterator> SqlDatabase::Cursor::rows(
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
 
-kj::Maybe<SqlDatabase::Cursor::RowDict> SqlDatabase::Cursor::rowIteratorNext(
+kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   auto names = obj->cachedColumnNames.get();
   return iteratorImpl(js, obj,
@@ -95,13 +95,13 @@ kj::Maybe<SqlDatabase::Cursor::RowDict> SqlDatabase::Cursor::rowIteratorNext(
   });
 }
 
-jsg::Ref<SqlDatabase::Cursor::RawIterator> SqlDatabase::Cursor::raw(
+jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(
     jsg::Lock&,
     CompatibilityFlags::Reader featureFlags) {
   return jsg::alloc<RawIterator>(JSG_THIS);
 }
 
-kj::Maybe<kj::Array<SqlDatabase::Cursor::Value>> SqlDatabase::Cursor::rawIteratorNext(
+kj::Maybe<kj::Array<SqlStorage::Cursor::Value>> SqlStorage::Cursor::rawIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   return iteratorImpl(js, obj,
       [&](State& state, uint i, Value&& value) {
@@ -110,7 +110,7 @@ kj::Maybe<kj::Array<SqlDatabase::Cursor::Value>> SqlDatabase::Cursor::rawIterato
 }
 
 template <typename Func>
-auto SqlDatabase::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
+auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func&& func)
     -> kj::Maybe<kj::Array<
         decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()))>> {
   using Element = decltype(func(kj::instance<State&>(), uint(), kj::instance<Value&&>()));
@@ -170,11 +170,11 @@ auto SqlDatabase::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Fun
   return results.finish();
 }
 
-SqlDatabase::Statement::Statement(SqliteDatabase::Statement&& statement)
+SqlStorage::Statement::Statement(SqliteDatabase::Statement&& statement)
     : statement(IoContext::current().addObject(
         kj::refcountedWrapper<SqliteDatabase::Statement>(kj::mv(statement)))) {}
 
-kj::Array<const SqliteDatabase::Query::ValuePtr> SqlDatabase::Cursor::mapBindings(
+kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
     KJ_SWITCH_ONEOF(value) {
@@ -192,7 +192,7 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlDatabase::Cursor::mapBinding
   };
 }
 
-jsg::Ref<SqlDatabase::Cursor> SqlDatabase::Statement::run(jsg::Arguments<BindingValue> bindings) {
+jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingValue> bindings) {
   auto& statementRef = *statement;  // validate we're in the right IoContext
 
   KJ_IF_MAYBE(c, currentCursor) {

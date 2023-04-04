@@ -13,10 +13,10 @@ namespace workerd::api {
 
 class DurableObjectStorage;
 
-class SqlDatabase final: public jsg::Object, private SqliteDatabase::Regulator {
+class SqlStorage final: public jsg::Object, private SqliteDatabase::Regulator {
 public:
-  SqlDatabase(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
-  ~SqlDatabase();
+  SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
+  ~SqlStorage();
 
   using BindingValue = kj::OneOf<kj::Array<const byte>, kj::String, double>;
 
@@ -27,7 +27,7 @@ public:
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
-  JSG_RESOURCE_TYPE(SqlDatabase, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
 
@@ -48,7 +48,7 @@ private:
   jsg::Ref<DurableObjectStorage> storage;
 };
 
-class SqlDatabase::Cursor final: public jsg::Object {
+class SqlStorage::Cursor final: public jsg::Object {
   class CachedColumnNames;
 public:
   template <typename... Params>
@@ -140,7 +140,7 @@ private:
   friend class Statement;
 };
 
-class SqlDatabase::Statement final: public jsg::Object {
+class SqlStorage::Statement final: public jsg::Object {
 public:
   Statement(SqliteDatabase::Statement&& statement);
 
@@ -164,13 +164,13 @@ private:
 };
 
 #define EW_SQL_ISOLATE_TYPES                    \
-  api::SqlDatabase,                             \
-  api::SqlDatabase::Statement,                  \
-  api::SqlDatabase::Cursor,                     \
-  api::SqlDatabase::Cursor::RowIterator,        \
-  api::SqlDatabase::Cursor::RowIterator::Next,  \
-  api::SqlDatabase::Cursor::RawIterator,        \
-  api::SqlDatabase::Cursor::RawIterator::Next
+  api::SqlStorage,                              \
+  api::SqlStorage::Statement,                   \
+  api::SqlStorage::Cursor,                      \
+  api::SqlStorage::Cursor::RowIterator,         \
+  api::SqlStorage::Cursor::RowIterator::Next,   \
+  api::SqlStorage::Cursor::RawIterator,         \
+  api::SqlStorage::Cursor::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api
