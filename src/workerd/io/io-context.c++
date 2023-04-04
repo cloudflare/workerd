@@ -452,8 +452,9 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
     if (metrics.getSpan().isObserved()) {
+      auto span = metrics.getSpan().newChild("wait_until"_kj);
       metrics.addedWaitUntilTask();
-      promise = promise.attach(kj::defer([metrics = kj::addRef(metrics)]() mutable {
+      promise = promise.attach(kj::defer([metrics = kj::addRef(metrics),span=kj::mv(span)]() mutable {
         metrics->finishedWaitUntilTask();
       }));
     }
