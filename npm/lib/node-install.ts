@@ -177,7 +177,9 @@ function maybeOptimizePackage(binPath: string): void {
   // just running the binary executable directly.
   //
   // Here we optimize for this by replacing the JavaScript file with the binary
-  // executable at install time.
+  // executable at install time. This optimization does not work on Windows
+  // because on Windows the binary executable must be called "workerd.exe"
+  // instead of "workerd".
   //
   // This doesn't work with Yarn both because of lack of support for binary
   // files in Yarn 2+ (see https://github.com/yarnpkg/berry/issues/882) and
@@ -187,7 +189,7 @@ function maybeOptimizePackage(binPath: string): void {
   //
   // This optimization also doesn't apply when npm's "--ignore-scripts" flag is
   // used since in that case this install script will not be run.
-  if (!isYarn()) {
+  if (os.platform() !== "win32" && !isYarn()) {
     const tempPath = path.join(__dirname, "bin-workerd");
     try {
       // First link the binary with a temporary file. If this fails and throws an
