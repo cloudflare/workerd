@@ -106,6 +106,120 @@ kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   }
 }
 
+static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
+  // We allowlist these SQLite functions.
+
+  // https://www.sqlite.org/lang_corefunc.html
+  "abs"_kj,
+  "changes"_kj,
+  "char"_kj,
+  "coalesce"_kj,
+  "format"_kj,
+  "glob"_kj,
+  "hex"_kj,
+  "ifnull"_kj,
+  "iif"_kj,
+  "instr"_kj,
+  "last_insert_rowid"_kj,
+  "length"_kj,
+  "like"_kj,
+  "likelihood"_kj,
+  "likely"_kj,
+  "load_extension"_kj,
+  "lower"_kj,
+  "ltrim"_kj,
+  "max_scalar"_kj,
+  "min_scalar"_kj,
+  "nullif"_kj,
+  "printf"_kj,
+  "quote"_kj,
+  "random"_kj,
+  "randomblob"_kj,
+  "replace"_kj,
+  "round"_kj,
+  "rtrim"_kj,
+  "sign"_kj,
+  "soundex"_kj,
+  // These functions query SQLite internals and build details in a way we'd prefer not to reveal.
+  // "sqlite_compileoption_get"_kj,
+  // "sqlite_compileoption_used"_kj,
+  // "sqlite_offset"_kj,
+  // "sqlite_source_id"_kj,
+  // "sqlite_version"_kj,
+  "substr"_kj,
+  "total_changes"_kj,
+  "trim"_kj,
+  "typeof"_kj,
+  "unhex"_kj,
+  "unicode"_kj,
+  "unlikely"_kj,
+  "upper"_kj,
+  "zeroblob"_kj,
+
+  // https://www.sqlite.org/lang_datefunc.html
+  "date"_kj,
+  "time"_kj,
+  "datetime"_kj,
+  "julianday"_kj,
+  "unixepoch"_kj,
+  "stftime"_kj,
+
+  // https://www.sqlite.org/lang_aggfunc.html
+  "aggfilter"_kj,
+  "aggfunclist"_kj,
+  "avg"_kj,
+  "count"_kj,
+  "group_concat"_kj,
+  "max_agg"_kj,
+  "min_agg"_kj,
+  "sumunc"_kj,
+
+  // https://www.sqlite.org/windowfunctions.html#biwinfunc
+  "row_number"_kj,
+  "rank"_kj,
+  "dense_rank"_kj,
+  "percent_rank"_kj,
+  "cume_dist"_kj,
+  "ntile"_kj,
+  "lag"_kj,
+  "lead"_kj,
+  "first_value"_kj,
+  "last_value"_kj,
+  "nth_value"_kj,
+
+  // https://www.sqlite.org/lang_mathfunc.html
+  "acos"_kj,
+  "acosh"_kj,
+  "asin"_kj,
+  "asinh"_kj,
+  "atan"_kj,
+  "atan2"_kj,
+  "atanh"_kj,
+  "ceil"_kj,
+  "cos"_kj,
+  "cosh"_kj,
+  "degrees"_kj,
+  "exp"_kj,
+  "floor"_kj,
+  "ln"_kj,
+  "log"_kj,
+  "log2"_kj,
+  "mod"_kj,
+  "pi"_kj,
+  "pow"_kj,
+  "radians"_kj,
+  "sin"_kj,
+  "sinh"_kj,
+  "sqrt"_kj,
+  "tan"_kj,
+  "tanh"_kj,
+  "trunc"_kj,
+
+  // TODO(someday): Enable JSON? https://www.sqlite.org/json1.html
+  //   This only recently (2022) became a default feature of SQLite. It seems like a big new attack
+  //   surface. I'd rather people use V8's JSON parser TBH.
+};
+
 }  // namespace
 
 // =======================================================================================
@@ -313,12 +427,42 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
 
     case SQLITE_PRAGMA             :   /* Pragma Name     1st arg or NULL */
-      // TODO(sqlite): Decide which pragmas are OK.
+      // We currently only permit a few pragmas.
+      {
+        kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
+        if (pragma == "table_list") {
+          // Annoyingly, this will list internal tables. However, the existence of these tables
+          // isn't really a secret, we just don't want people to access them.
+          return param2 == nullptr;  // should always be true?
+        } else if (pragma == "table_info") {
+          // Allow if the specific named table is not protected.
+          KJ_IF_MAYBE(name, param2) {
+            return regulator.isAllowedName(*name);
+          } else {
+            return false;  // shouldn't happen?
+          }
+        } else if (pragma == "data_version") {
+          return true;
+        } else if (pragma == "foreign_keys") {
+          return true;
+        }
+      }
+
       return false;
 
     case SQLITE_FUNCTION           :   /* NULL            Function Name   */
       // TODO(sqlite): Decide which function are OK.
-      return false;
+
+      {
+        const kj::HashSet<kj::StringPtr> allowSet = []() {
+          kj::HashSet<kj::StringPtr> result;
+          for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
+            result.insert(func);
+          }
+          return result;
+        }();
+        return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+      }
 
     // ---------------------------------------------------------------
     // Stuff that is never allowed

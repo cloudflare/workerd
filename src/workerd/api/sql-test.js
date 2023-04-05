@@ -97,6 +97,30 @@ function test(sql) {
   // Accessing pragmas is not allowed
   requireException(() => sql.exec("PRAGMA hard_heap_limit = 1024"),
     "not authorized");
+
+  // PRAGMA table_info is allowed.
+  sql.exec("CREATE TABLE myTable (foo TEXT, bar INTEGER)");
+  {
+    let info = [...sql.exec("PRAGMA table_info(myTable)")];
+    assert.equal(info.length, 2);
+    assert.equal(info[0].name, "foo");
+    assert.equal(info[1].name, "bar");
+  }
+
+  // Can't get table_info for _cf_KV.
+  requireException(() => sql.exec("PRAGMA table_info(_cf_KV)"), "not authorized");
+
+  // Basic functions like abs() work.
+  assert.equal([...sql.exec("SELECT abs(-123)").raw()][0][0], 123);
+
+  // We don't permit sqlite_*() functions.
+  requireException(() => sql.exec("SELECT sqlite_version()"),
+      "not authorized to use function: sqlite_version");
+
+  // At present we don't permit JSON. This includes the -> operator, which is considered a
+  // function.
+  requireException(() => sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$'"),
+      "not authorized to use function: ->");
 }
 
 export class DurableObjectExample {
