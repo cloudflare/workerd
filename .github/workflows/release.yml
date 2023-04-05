@@ -40,18 +40,26 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
 
       - name: Setup Linux
-        if: ${{ runner.os == 'Linux' }}
+        if: runner.os == 'Linux'
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get install -y build-essential git clang libc++-dev
       - name: Setup Windows
-        if: ${{ runner.os == 'Windows' }}
+        if: runner.os == 'Windows'
         run: |
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
 
       - name: Bazel build
         run: |
           bazelisk build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev -c opt //src/workerd/server:workerd
+      - name: Strip debug symbols
+        if: runner.os != 'Windows'
+        run: |
+          # bazel makes the output directory read-only, fix permissions for binary
+          chmod +w bazel-bin/src/workerd/server/workerd
+          # Strip debug information from the binary, this is acceptable as debug symbols are not
+          # generated for the release configuration. Regular symbols are still included.
+          strip -S bazel-bin/src/workerd/server/workerd
       - name: Upload binary
         uses: actions/upload-artifact@v3.1.0
         with:
@@ -116,16 +124,25 @@ jobs:
         with:
           name: ${{ matrix.name }}-binary
           path: /tmp
-      - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} /tmp/workerd-${{ matrix.arch }}
-      - run: chmod +x /tmp/workerd-${{ matrix.arch }}
-        if: ${{ matrix.arch != 'windows-64' }}
-      - name: Upload Release Asset
+      # Set execute permissions before compressing the binary
+      - if: matrix.arch != 'windows-64'
+        run: chmod +x /tmp/workerd
+      - name: Compress release binary
+        run: |
+            # As of release v1.20230404.0 the Linux x64 binary after debug_strip is 65.8 MB,
+            # 21.0 MB with gzip and 17.3 MB with brotli -9. Use gzip as a widely supported format
+            # which still produces an acceptable compressed size.
+            gzip -9N /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+      - run: mv /tmp/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}.gz /tmp/workerd-${{ matrix.arch }}.gz
+      # Upload compressed release binaries – one set of artifacts is sufficient with gzip being
+      # widely supported
+      - name: Upload Release Assets
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.tag-and-release.outputs.upload_url }}
-          asset_path: /tmp/workerd-${{ matrix.arch }}
-          asset_name: workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }}
-          asset_content_type: application/octet-stream
+          asset_path: /tmp/workerd-${{ matrix.arch }}.gz
+          asset_name: workerd-${{ matrix.arch }}.gz
+          asset_content_type: application/gzip

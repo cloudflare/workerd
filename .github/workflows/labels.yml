@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check for label
-        if: ${{ contains(github.event.*.labels.*.name, 'needs-internal-pr') }}
+        if: contains(github.event.*.labels.*.name, 'needs-internal-pr')
         run: |
           echo "Pull request is labeled as 'needs-internal-pr'"
           echo "This workflow fails so the pull request cannot be merged"
