@@ -237,9 +237,9 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
                                     SQLITE_OPEN_READONLY, vfs.getName().cStr()));
   }
 
-  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
-  //   from this throwing.
-  setupAuthorizer();
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
+  setupSecurity();
 }
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
@@ -265,9 +265,9 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
                                     flags, vfs.getName().cStr()));
   }
 
-  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
-  //   from this throwing.
-  setupAuthorizer();
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
+  setupSecurity();
 }
 
 SqliteDatabase::~SqliteDatabase() noexcept(false) {
@@ -505,7 +505,30 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 }
 
-void SqliteDatabase::setupAuthorizer() {
+void SqliteDatabase::setupSecurity() {
+  // Set up security restrictions.
+  // See: https://www.sqlite.org/security.html
+
+  // 1. Set defensive mode.
+  SQLITE_CALL_NODB(sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr));
+
+  // 2. Reduce limits
+  // We use the suggested limits from the web site. Note that sqlite3_limit() does NOT return an
+  // error code; it returns the old limit.
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 1000000);
+  sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
+  sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
+  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 3);
+  sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 25000);
+  sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 8);
+  sqlite3_limit(db, SQLITE_LIMIT_ATTACHED, 0);
+  sqlite3_limit(db, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
+  sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_WORKER_THREADS, 0);
+
+  // 3. Setup authorizer.
   SQLITE_CALL_NODB(sqlite3_set_authorizer(db,
       [](void* userdata, int actionCode,
          const char* param1, const char* param2,
@@ -521,6 +544,33 @@ void SqliteDatabase::setupAuthorizer() {
       return SQLITE_DENY;
     }
   }, this));
+
+  // 4. Set a progress handler or use interrupt() to limit CPU time.
+  // TODO(sqlite): Call sqlite3_interrupt() at the same time as v8::Isolate::TerminateExecution().
+
+  // 5. Limit heap size.
+  // Annoyingly, this sets a process-wide limit. We'll set 128MB "soft" limit (to try to control
+  // how much page caching SQLite does) and 512MB "hard" limit (to block DoS attacks from taking
+  // down the whole system).
+  // TODO(perf): Revisit as popularity grows. Maybe make configurable? Maybe patch SQLite to allow
+  //   these to be controlled per-database? Is page caching even all that important when the kernel
+  //   does its own page caching?
+  static bool doOnce KJ_UNUSED = []() {
+    sqlite3_soft_heap_limit64(128u << 20);
+    sqlite3_hard_heap_limit64(512u << 20);
+    return false;
+  }();
+
+  // 6. Set SQLITE_MAX_ALLOCATION_SIZE compile flag.
+  // (handled in BUILD.sqlite3)
+
+  // 7. Consider giving SQLite a fixed heap space.
+  // This is suggested mainly for embedded systems. It involves giving SQLite a fixed preallocated
+  // heap space which the library restricts itself to instead of using malloc. We probably don't
+  // want this.
+
+  // 8. Set the SQLITE_PRINTF_PRECISION_LIMIT compile flag.
+  // (handled in BUILD.sqlite3)
 }
 
 SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::StringPtr sqlCode) {

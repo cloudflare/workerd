@@ -5,4 +5,8 @@ cc_library(
     visibility = ["//visibility:public"],
     include_prefix = ".",
     copts = ["-w"],  # Ignore all warnings. This is not our code, we can't fix the warnings.
+    defines = [
+        "SQLITE_MAX_ALLOCATION_SIZE=16777216",  # 16MB
+        "SQLITE_PRINTF_PRECISION_LIMIT=100000",
+    ]
 )
