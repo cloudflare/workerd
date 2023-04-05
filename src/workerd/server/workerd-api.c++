@@ -112,12 +112,6 @@ struct WorkerdApiIsolate::Impl {
     lock.setAllowEval(true);
     KJ_DEFER(lock.setAllowEval(false));
 
-    // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
-    // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
-    // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
-    // compiles fast but runs slower.
-    AllowV8BackgroundThreadsScope scope;
-
     return jsg::compileWasmModule(lock, reader);
   };
 

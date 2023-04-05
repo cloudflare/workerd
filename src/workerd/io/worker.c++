@@ -2127,12 +2127,6 @@ public:
           Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
           auto& lock = *recordedLock.lock;
 
-          // We have at times observed V8 bugs where the inspector queues a background task and
-          // then synchronously waits for it to complete, which would deadlock if background
-          // threads are disallowed. Since the inspector is in a process sandbox anyway, it's not
-          // a big deal to just permit those background threads.
-          AllowV8BackgroundThreadsScope allowBackgroundThreads;
-
           kj::Maybe<kj::Exception> maybeLimitError;
           {
             auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(lock, maybeLimitError);

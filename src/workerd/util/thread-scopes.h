@@ -17,22 +17,6 @@
 
 namespace workerd {
 
-class AllowV8BackgroundThreadsScope {
-  // Normally, we prohibit V8 worker threads, but in some cases it's useful to temporarily allow
-  // them. Create this on the stack to temporarily allow V8 code running in the current thread to
-  // spawn worker threads.
-  //
-  // In particular this is used when loading Wasm modules, to properly enable Liftoff and Tier-up.
-
-public:
-  AllowV8BackgroundThreadsScope();
-  ~AllowV8BackgroundThreadsScope() noexcept(false);
-
-  static bool isActive();
-
-  KJ_DISALLOW_COPY_AND_MOVE(AllowV8BackgroundThreadsScope);
-};
-
 class IsolateShutdownScope {
   // Create this on the stack when tearing down isolates. This hints to the PageAllocator that all
   // page discards should be deferred until the whole cage is destroyed.

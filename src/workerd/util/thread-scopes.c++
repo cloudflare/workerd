@@ -12,7 +12,6 @@ using kj::uint;
 
 namespace {
 
-thread_local uint allowV8BackgroundThreadScopeCount = 0;
 thread_local uint isolateShutdownThreadScopeCount = 0;
 thread_local uint noProxyLoggingScope = 0;
 
@@ -25,18 +24,6 @@ thread_local ThreadProgressCounter* activeProgressCounter = nullptr;
 // other threads.
 
 }  // namespace
-
-AllowV8BackgroundThreadsScope::AllowV8BackgroundThreadsScope() {
-  ++allowV8BackgroundThreadScopeCount;
-}
-
-AllowV8BackgroundThreadsScope::~AllowV8BackgroundThreadsScope() noexcept(false) {
-  --allowV8BackgroundThreadScopeCount;
-}
-
-bool AllowV8BackgroundThreadsScope::isActive() {
-  return allowV8BackgroundThreadScopeCount > 0;
-}
 
 IsolateShutdownScope::IsolateShutdownScope() {
   ++isolateShutdownThreadScopeCount;
