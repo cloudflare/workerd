@@ -432,19 +432,19 @@ struct Worker {
       # A binding that wraps a group of (lower-level) bindings in a common API.
 
       moduleName @0 :Text;
-      # Wrapper module nume.
-      # Can be both a module from current worker or a built-in module.
-      # The module will be instantitated during binding initialization phase.
-      # Module needs to exports "wrapBindings(env)" function.
-      # Env argument is a dictionary with all the inner bindings.
+      # Wrapper module name.
+      # The module must be an internal one (provided by extension or registered in the c++ code).
+      # Module will be instantitated during binding initialization phase.
+
+      wrapWithFn @1 :Text = "wrapBindings";
+      # Module needs to export a function with a given name accepting a single `env` argument.
+      # `env` is a dictionary with all the inner bindings.
       # Function will be invoked during initialization phase and its return value will be used as
       # resulting binding value.
 
-      wrapWithFn @1 :Text = "wrapBindings";
-
       innerBindings @2 :List(Binding);
       # Inner bindings that will be created and passed in the env dictionary.
-      # These bindings shall be used to implement then end-user api, and are not available to the
+      # These bindings shall be used to implement end-user api, and are not available to the
       # binding consumers unless "re-exported" in wrapBindings function.
     }
   }
