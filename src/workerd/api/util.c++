@@ -300,6 +300,10 @@ kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
 }
 
 void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle) {
+  // TODO(soon): fix structuredClone() error, reenable bot management tracking.
+  if ((true)) {
+    return;
+  }
   auto context = isolate->GetCurrentContext();
   auto botManagement = jsg::v8StrIntern(isolate, "botManagement");
   v8::Local<v8::Value> maybeBotManagement = jsg::check(handle->Get(context, botManagement));
