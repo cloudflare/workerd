@@ -7,7 +7,7 @@ RUN apt-get install -y curl clang libc++-dev libc++abi-dev
 
 COPY . .
 COPY .bazel-cache /bazel-disk-cache
-RUN npm install -g pnpm
+RUN npm install -g pnpm@latest-7
 RUN pnpm install
 
 RUN pnpm exec bazelisk build --disk_cache=/bazel-disk-cache -c opt //src/workerd/server:workerd

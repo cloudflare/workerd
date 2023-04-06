@@ -8,8 +8,7 @@
     "node": ">=16"
   },
   "os": [
-    "linux",
-    "win32"
+    "linux"
   ],
   "cpu": [
     "x64"
