@@ -391,14 +391,6 @@ bool IsolateBase::allowWasmCallback(
   return self->evalAllowed;
 }
 
-#ifdef KJ_DEBUG
-#define DEBUG_FAIL_PROD_LOG(...) \
-  KJ_FAIL_ASSERT(__VA_ARGS__);
-#else
-#define DEBUG_FAIL_PROD_LOG(...) \
-  KJ_LOG(ERROR, __VA_ARGS__);
-#endif
-
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source
   // code locations, which we use when reporting stack traces during crashes.
@@ -462,7 +454,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
 
     case v8::JitCodeEvent::CODE_REMOVED:
       if (!codeMap.erase(startAddr)) {
-        DEBUG_FAIL_PROD_LOG("CODE_REMOVED for unknown code block?");
+        DEBUG_FATAL_RELEASE_LOG(ERROR, "CODE_REMOVED for unknown code block?");
       }
       break;
 
