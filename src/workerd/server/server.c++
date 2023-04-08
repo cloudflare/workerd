@@ -1270,8 +1270,10 @@ public:
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_MAYBE(as, channels.actorStorage) {
-                return kj::heap<ActorSqlite>(**as,
-                    kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}));
+                auto db = kj::heap<SqliteDatabase>(**as,
+                    kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}),
+                    kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+                return kj::heap<ActorSqlite>(kj::mv(db));
               } else {
                 // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
                 // ActorCache never to flush, so this effectively creates in-memory storage.

@@ -19,11 +19,7 @@ class ActorSqlite final: public ActorCacheInterface {
   //   here is easier and not too costly.
 
 public:
-  ActorSqlite(SqliteDatabase::Vfs& vfs, kj::PathPtr path)
-      : db(kj::heap<SqliteDatabase>(vfs, path,
-            kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT)),
-        kv(*db) {}
-  ActorSqlite(kj::Own<SqliteDatabase> dbParam)
+  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam)
       : db(kj::mv(dbParam)),
         kv(*db) {}
 
