@@ -41,6 +41,11 @@ function test(sql) {
   assert.equal(resultBinding.length, 1);
   assert.equal(resultBinding[0]["?"], 456);
 
+  // Test multiple binding values
+  const resultBinding2 = [...sql.exec("SELECT ? + ?", 123, 456)];
+  assert.equal(resultBinding2.length, 1);
+  assert.equal(resultBinding2[0]["? + ?"], 579);
+
   // Empty statements
   requireException(() => sql.exec(""),
     "SQL code did not contain a statement");
