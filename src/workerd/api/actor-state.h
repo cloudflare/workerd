@@ -210,7 +210,9 @@ public:
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
-    JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    }
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;
