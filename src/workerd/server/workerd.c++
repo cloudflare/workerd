@@ -257,8 +257,6 @@ private:
   kj::UnixEventPort::FdObserver observer;
   kj::Vector<kj::AutoCloseFd> filesWatched;
 
-  bool sawChange = false;
-
   static kj::AutoCloseFd makeKqueue() {
     int fd_;
     KJ_SYSCALL(fd_ = kqueue());

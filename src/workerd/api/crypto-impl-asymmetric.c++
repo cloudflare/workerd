@@ -113,31 +113,9 @@ public:
       RSA& rsa = JSG_REQUIRE_NONNULL(EVP_PKEY_get0_RSA(getEvpPkey()), DOMDataError,
           "Missing RSA key", tryDescribeOpensslErrors());
 
-      // TODO(soon): Use more thorough checks for now to detect if requiring 32 bytes beyond the
-      // digest size would break existing scripts. Prefix sizes derived from boringssl's
-      // kPKCS1SigPrefixes.
-#define RSA_PKCS1_PADDING_SIZE 11
-#define RSA_PKCS1_MD5_PREFIX_SIZE 18
-#define RSA_PKCS1_SHA1_PREFIX_SIZE 15
-#define RSA_PKCS1_SHA_PREFIX_SIZE 19
-
-      const auto& hashName = lookupDigestAlgorithm(chooseHash(algorithm.hash)).first;
-      auto paddingOverhead = RSA_PKCS1_PADDING_SIZE;
-      if (hashName == "MD5") {
-        paddingOverhead += RSA_PKCS1_MD5_PREFIX_SIZE;
-      } else if (hashName == "SHA-1") {
-        paddingOverhead += RSA_PKCS1_SHA1_PREFIX_SIZE;
-      } else {
-        paddingOverhead += RSA_PKCS1_SHA_PREFIX_SIZE;
-      }
-
-      JSG_REQUIRE(EVP_MD_size(type) + paddingOverhead <= RSA_size(&rsa), DOMOperationError,
-          "key too small for signing with given digest");
-      JSG_WARN_ONCE_IF(RSA_size(&rsa) < EVP_MD_size(type) + 32,
-          "Signing with peculiar key size of ", RSA_size(&rsa), " bytes");
-
-      // JSG_REQUIRE(EVP_MD_size(type) + 32 <= RSA_size(&rsa), DOMOperationError,
-      //     "key too small for signing with given digest");
+      JSG_REQUIRE(EVP_MD_size(type) + 32 <= RSA_size(&rsa), DOMOperationError,
+          "key too small for signing with given digest, need at least ",
+          8 * (EVP_MD_size(type) + 32), "bits.");
     } else if (getAlgorithmName() == "RSA-PSS") {
       // Similarly, RSA-PSS requires keys to be at least the size of the digest and salt plus 2
       // bytes, see https://developer.mozilla.org/en-US/docs/Web/API/RsaPssParams for details.
@@ -145,8 +123,8 @@ public:
           "Missing RSA key", tryDescribeOpensslErrors());
       auto salt = JSG_REQUIRE_NONNULL(algorithm.saltLength, DOMDataError,
           "Failed to provide salt for RSA-PSS key operation which requires a salt");
-      JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative (provided ",
-          salt, ").");
+      JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative ",
+          "(provided ", salt, ").");
       JSG_REQUIRE(EVP_MD_size(type) + 2 <= RSA_size(&rsa), DOMOperationError,
           "key too small for signing with given digest");
       JSG_REQUIRE(salt <= RSA_size(&rsa) - EVP_MD_size(type) - 2, DOMOperationError,
@@ -353,13 +331,11 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
           " trailing bytes after SPKI input.");
     }
-    JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
-        "importing spki-based public ECDH key with non-empty usages");
+    // usages must be empty for ECDH public keys.
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
-                                    CryptoKeyUsageSet::derivationKeyMask() :
-                                    CryptoKeyUsageSet::publicKeyMask()));
+                                    CryptoKeyUsageSet() : CryptoKeyUsageSet::publicKeyMask()));
     return { kj::mv(evpPkey), "public"_kj, usages };
   } else if (format == "pkcs8") {
     kj::ArrayPtr<const kj::byte> keyBytes = JSG_REQUIRE_NONNULL(
@@ -483,7 +459,7 @@ public:
   void addSalt(EVP_PKEY_CTX* pctx, const SubtleCrypto::SignAlgorithm& algorithm) const override {
     auto salt = JSG_REQUIRE_NONNULL(algorithm.saltLength, TypeError,
         "Failed to provide salt for RSA-PSS key operation which requires a salt");
-    JSG_REQUIRE(salt >= 0, TypeError, "SaltLength for RSA-PSS must be non-negative (provided ",
+    JSG_REQUIRE(salt >= 0, DOMDataError, "SaltLength for RSA-PSS must be non-negative (provided ",
         salt, ").");
     OSSLCALL(EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING));
     OSSLCALL(EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, salt));
