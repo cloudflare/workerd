@@ -949,6 +949,14 @@ void IoContext::taskFailed(kj::Exception&& exception) {
       waitUntilStatusValue = *status;
     } else {
       waitUntilStatusValue = EventOutcome::EXCEPTION;
+      if (auto desc = exception.getDescription();
+          !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
+        if (isInterestingException(exception)) { // Not sure on this one
+          LOG_EXCEPTION("IoContextErrorHandler"_kj, exception);
+        } else {
+          LOG_NOSENTRY(ERROR, "IOContextErrorHandler"_kj, exception);
+        }
+      }
     }
   }
 

@@ -59,10 +59,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
       }
     });
   } catch(kj::Exception e) {
-    if (auto desc = e.getDescription();
-        !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-      LOG_EXCEPTION("HibernatableWebSocketCustomEventImpl"_kj, e);
-    }
+    LOG_EXCEPTION_IF_INTERNAL("HibernatableWebSocketCustomEventImpl"_kj, e);
     outcome = EventOutcome::EXCEPTION;
   }
 
