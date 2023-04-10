@@ -540,6 +540,38 @@ static v8::Local<v8::Value> createBindingValue(
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
       value = lock.wrap(context, kj::heapArray(data.asPtr()));
     }
+
+    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
+      auto moduleRegistry = jsg::ModuleRegistry::from(lock);
+      auto moduleName = kj::Path::parse(wrapped.moduleName);
+
+      // wrapped bindings can be produced by internal modules only
+      KJ_IF_MAYBE(moduleInfo, moduleRegistry->resolve(lock, moduleName, true /* internalOnly */)) {
+        // obtain the module
+        auto module = moduleInfo->module.getHandle(lock);
+        jsg::instantiateModule(lock, module);
+
+        // build env object with inner bindings
+        auto env = v8::Object::New(lock.v8Isolate);
+        for (const auto& innerBinding: wrapped.innerBindings) {
+          jsg::check(env->Set(context,
+              lock.wrapString(innerBinding.name),
+              createBindingValue(lock, innerBinding, featureFlags)));
+        }
+
+        // obtain exported function to call
+        auto moduleNs = jsg::check(module->GetModuleNamespace()->ToObject(context));
+        auto fn = jsg::check(moduleNs->Get(context, jsg::v8Str(lock.v8Isolate, wrapped.entrypoint)));
+        KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
+
+        // invoke the function, its result will be binding value
+        auto args = kj::arr(env.As<v8::Value>());
+        value = jsg::check(v8::Function::Cast(*fn)-> Call(context, context->Global(),
+            args.size(), args.begin()));
+      } else {
+        KJ_LOG(ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);
+      }
+    }
   }
 
   return value;
@@ -607,6 +639,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
       result.value = kj::heapArray(data.asPtr());
+    }
+    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
+      result.value = wrapped.clone();
     }
   }
 

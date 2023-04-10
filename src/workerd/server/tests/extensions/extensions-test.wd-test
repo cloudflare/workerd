@@ -10,7 +10,25 @@ const unitTests :Workerd.Config = (
         ],
         compatibilityDate = "2023-01-15",
         compatibilityFlags = ["nodejs_compat"],
-      )
+        bindings = [
+          (
+            name = "door",
+            wrapped = (
+              moduleName = "test:binding",
+              innerBindings = [ (name = "secret", text = "open sesame") ],
+            )
+          ),
+          (
+            name = "customDoor",
+            wrapped = (
+              moduleName = "test:binding",
+              # test custom wrap function name
+              entrypoint = "wrap",
+              innerBindings = [ (name = "secret", text = "custom open sesame") ],
+            )
+          )
+        ],
+     )
     ),
   ],
   extensions = [ TestExtension.extension ],

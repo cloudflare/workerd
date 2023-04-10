@@ -1786,6 +1786,25 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       });
       return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
     }
+
+    case config::Worker::Binding::WRAPPED: {
+      auto wrapped = binding.getWrapped();
+      kj::Vector<Global> innerGlobals;
+      for (const auto& innerBinding: wrapped.getInnerBindings()) {
+        KJ_IF_MAYBE(global, createBinding(workerName, conf, innerBinding,
+            errorReporter, subrequestChannels, actorChannels, actorConfigs)) {
+          innerGlobals.add(kj::mv(*global));
+        } else {
+          // we've already communicated the error
+          return nullptr;
+        }
+      }
+      return makeGlobal(Global::Wrapped {
+        .moduleName = kj::str(wrapped.getModuleName()),
+        .entrypoint = kj::str(wrapped.getEntrypoint()),
+        .innerBindings = innerGlobals.releaseAsArray(),
+      });
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "

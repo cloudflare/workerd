@@ -117,9 +117,23 @@ public:
         return *this;
       }
     };
+    struct Wrapped {
+      // data carrier for configured WrappedBinding
+      kj::String moduleName;
+      kj::String entrypoint;
+      kj::Array<Global> innerBindings;
+
+      Wrapped clone() const {
+        return Wrapped {
+          .moduleName = kj::str(moduleName),
+          .entrypoint = kj::str(entrypoint),
+          .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }
+        };
+      }
+    };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, kj::String, kj::Array<byte>> value;
+              DurableActorNamespace, kj::String, kj::Array<byte>, Wrapped> value;
 
     Global clone() const;
   };
