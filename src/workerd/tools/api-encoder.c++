@@ -43,6 +43,7 @@
   F("url-standard", EW_URL_STANDARD_ISOLATE_TYPES)                             \
   F("url-pattern", EW_URLPATTERN_ISOLATE_TYPES)                                \
   F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                   \
+  F("sql", EW_SQL_ISOLATE_TYPES)                                               \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
   F("node", EW_NODE_ISOLATE_TYPES)
 

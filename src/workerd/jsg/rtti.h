@@ -412,6 +412,14 @@ FOR_EACH_JSG_IMPL_TYPE(DECLARE_JSG_IMPL_TYPE)
 #undef FOR_EACH_JSG_IMPL_TYPE
 #undef DECLARE_JSG_IMPL_TYPE
 
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, Arguments<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    // TODO(someday): Create a representation of Arguments<T> that actually encodes the type T.
+    builder.initJsgImpl().setType(JsgImplType::Type::JSG_VARARGS);
+  }
+};
+
 template<typename Configuration>
 struct BuildRtti<Configuration, Configuration> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
@@ -477,6 +485,9 @@ struct MemberCounter {
 
   template<const char* name, typename Method, Method method>
   inline void registerMethod() { ++count; }
+
+  template<typename Method, Method method>
+  inline void registerCallable() { /* not a member */ }
 
   template<typename Type>
   inline void registerInherit() { /* inherit is not a member */ }
@@ -638,6 +649,16 @@ struct MembersBuilder {
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
     TupleRttiBuilder<Configuration, Args>::build(method.initArgs(std::tuple_size_v<Args>), rtti);
+  }
+
+  template<typename Method, Method method>
+  inline void registerCallable() {
+    auto func = structure.initCallable();
+
+    using Traits = FunctionTraits<Method>;
+    BuildRtti<Configuration, typename Traits::ReturnType>::build(func.initReturnType(), rtti);
+    using Args = typename Traits::ArgsTuple;
+    TupleRttiBuilder<Configuration, Args>::build(func.initArgs(std::tuple_size_v<Args>), rtti);
   }
 
   template<const char* name, typename Method, Method>

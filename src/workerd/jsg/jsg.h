@@ -277,19 +277,10 @@ private:
 
 #define JSG_CALLABLE(name) \
   do { \
-    static const char NAME[] = #name; \
-    registry.template registerCallable<NAME, decltype(&Self::name), &Self::name>(); \
+    registry.template registerCallable<decltype(&Self::name), &Self::name>(); \
   } while (false)
 // Use inside a JSG_RESOURCE_TYPE to declare that the resource type itself can be invoked as
 // a function.
-
-#define JSG_CALLABLE_NAMED(name, method) \
-  do { \
-    static const char NAME[] = #name; \
-    registry.template registerCallable<NAME, decltype(&Self::method), &Self::method>(); \
-  } while (false)
-// Use inside a JSG_RESOURCE_TYPE to declare that the instance of the resource type itself can
-// be invoked as a function.
 
 #define JSG_METHOD(name) \
   do { \
@@ -523,8 +514,7 @@ using HasGetTemplateOverload = decltype(
 
 #define JSG_NESTED_TYPE(Type) \
   do { \
-    static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE, \
-        #Type " is not a resource type, and therefore cannot not be declared nested"); \
+    /* Note that `Type` may be incomplete here, we should be OK with that. */ \
     static const char NAME[] = #Type; \
     registry.template registerNestedType<Type, NAME>(); \
   } while (false)
@@ -535,8 +525,7 @@ using HasGetTemplateOverload = decltype(
 
 #define JSG_NESTED_TYPE_NAMED(Type, Name) \
   do { \
-    static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE, \
-        #Type " is not a resource type, and therefore cannot not be declared nested"); \
+    /* Note that `Type` may be incomplete here, we should be OK with that. */ \
     static const char NAME[] = #Name; \
     registry.template registerNestedType<Type, NAME>(); \
   } while (false)
@@ -978,8 +967,26 @@ struct Dict {
 
 template <typename T> class TypeHandler;
 
+template <typename T>
+class Arguments: public kj::Array<T> {
+  // When used as a function argument type, captures all remaining arguments passed to the method,
+  // unwrapping them all as type T.
+public:
+  Arguments(kj::Array<T>&& value): kj::Array<T>(kj::mv(value)) {}
+
+  using ElementType = T;
+};
+
+template <typename T> struct IsArguments_ { static constexpr bool value = false; };
+template <typename T> struct IsArguments_<Arguments<T>> { static constexpr bool value = true; };
+template <typename T>
+constexpr bool isArguments() { return IsArguments_<T>::value; }
+// Is `T` some specialization of `Arguments<U>`?
+
 class Varargs {
   // An array of local values placed on the end of a parameter list to capture all trailing values
+  //
+  // TODO(cleanup): Can all use cases of this be replaced with Arguments<Value>?
 public:
   Varargs(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args): startIndex(index), args(args) {
     if (index > args.Length()) {

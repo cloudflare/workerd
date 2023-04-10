@@ -23,6 +23,8 @@ public:
       : db(vfs, path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
         kv(db) {}
 
+  SqliteDatabase& getSqliteDatabase() { return db; }
+
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(

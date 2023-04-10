@@ -693,11 +693,14 @@ struct ResourceTypeBuilder {
     constructor->Inherit(intrinsicPrototype);
   }
 
-  template <const char* name, typename Method, Method method>
+  template <typename Method, Method method>
   inline void registerCallable() {
     // Note that we set the call handler on the instance and not the prototype.
+    // TODO(cleanup): Specifying the name (for error messages) as "(called as function)" is a bit
+    //   hacky but it's hard to do better while reusing `MethodCallback`.
+    static const char NAME[] = "(called as function)";
     instance->SetCallAsFunctionHandler(
-        &MethodCallback<TypeWrapper, name, isContext,
+        &MethodCallback<TypeWrapper, NAME, isContext,
                         Self, Method, method,
                         ArgumentIndexes<Method>>::callback);
   }
@@ -829,6 +832,9 @@ struct ResourceTypeBuilder {
 
   template<typename Type, const char* name>
   inline void registerNestedType() {
+    static_assert(Type::JSG_KIND == ::workerd::jsg::JsgKind::RESOURCE,
+        "Type is not a resource type, and therefore cannot not be declared nested");
+
     constexpr auto hasGetTemplate = ::workerd::jsg::isDetected<
         ::workerd::jsg::HasGetTemplateOverload, decltype(typeWrapper), Type>();
     static_assert(hasGetTemplate,

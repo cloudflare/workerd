@@ -498,6 +498,13 @@ public:
 
     if constexpr(kj::isSameType<V, Varargs>()) {
       return Varargs(parameterIndex, args);
+    } else if constexpr(isArguments<V>()) {
+      using E = typename V::ElementType;
+      auto builder = kj::heapArrayBuilder<E>(args.Length() - parameterIndex);
+      for (size_t i = parameterIndex; i < args.Length(); i++) {
+        builder.add(unwrap<E>(context, args[i], errorContext));
+      }
+      return builder.finish();
     } else if constexpr(isValueLessParameter<Self, V>) {
       // C++ parameters which don't unwrap JS values, like v8::Isolate* and TypeHandlers.
       return unwrap(context, (V*)nullptr);

@@ -15,6 +15,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include "util.h"
 #include <workerd/io/actor-cache.h>
+#include "sql.h"
 
 namespace workerd::api {
 
@@ -196,6 +197,8 @@ public:
 
   jsg::Promise<void> sync(jsg::Lock& js);
 
+  jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -207,6 +210,9 @@ public:
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    }
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string, options?: DurableObjectGetOptions): Promise<T | undefined>;

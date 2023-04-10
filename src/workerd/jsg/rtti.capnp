@@ -214,6 +214,9 @@ struct Structure {
   # See `JSG_TS_DEFINE`'s documentation in the `## TypeScript` section of the JSG README.md.
   # If `JSG_(STRUCT_)TS_DEFINE` is declared for a type, this value will be the contents of the
   # macro declaration verbatim.
+
+  callable @11 :FunctionType;
+  # If this type is callable as a function, the signature of said function. Otherwise, null.
 }
 
 struct Member {

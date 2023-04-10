@@ -225,8 +225,8 @@ void doLockTest(bool walMode) {
     INSERT INTO foo VALUES (0, 1)
   )");
 
-  static constexpr auto GET_COUNT = "SELECT counter FROM foo WHERE id = 0"_kj;
-  static constexpr auto INCREMENT = "UPDATE foo SET counter = counter + 1 WHERE id = 0"_kj;
+  static constexpr char GET_COUNT[] = "SELECT counter FROM foo WHERE id = 0";
+  static constexpr char INCREMENT[] = "UPDATE foo SET counter = counter + 1 WHERE id = 0";
 
   KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 1);
 

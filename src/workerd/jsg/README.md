@@ -1125,7 +1125,7 @@ const bar = new Foo.Bar();
 const baz = new Foo.Baz();
 ```
 
-#### Callable objects (`JSG_CALLABLE()` and `JSG_CALLABLE_NAMED()`)
+#### Callable objects (`JSG_CALLABLE()`)
 
 The `JSG_CALLABLE(name)` macro allows a Resource Type to be called as a function. For instance,
 given the following resource type:
