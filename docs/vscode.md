@@ -35,12 +35,11 @@ tasks for building and testing.
 
 ## Debugging
 
-There is a `.vscode/launch.json` file included in the project that is with a single configuration
-for debugging the `workerd` binary on Linux.
+There is a `.vscode/launch.json` file included in the project for launching the `workerd` binary with
+the debugger attached from VSCode. This is supported on Linux (x64) and OS X (arm64).
 
 The debug from vscode, first ensure that you have saved a vscode workspace for workerd,
 `File -> Save Workspace As...`, then `Run -> Start Debugging (F5)`.
 
-Running the project will prompt you for workerd configuration and proceed to serve it from workerd
-running under `gdb`. To use the helloworld sample, the configuration argument would be
-`serve ${workspaceFolder}/samples/helloworld/config.capnp`.
+Running the project will prompt you for workerd configuration. To use the helloworld sample, the
+configuration argument would be `serve ${workspaceFolder}/samples/helloworld/config.capnp`.
