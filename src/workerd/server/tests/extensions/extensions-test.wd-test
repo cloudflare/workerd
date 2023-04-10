@@ -15,10 +15,18 @@ const unitTests :Workerd.Config = (
             name = "door",
             wrapped = (
               moduleName = "test:binding",
-              # test custon wrap function name
-              wrapWithFn = "wrap",
               innerBindings = [ (name = "secret", text = "open sesame") ],
-            ))
+            )
+          ),
+          (
+            name = "customDoor",
+            wrapped = (
+              moduleName = "test:binding",
+              # test custom wrap function name
+              entrypoint = "wrap",
+              innerBindings = [ (name = "secret", text = "custom open sesame") ],
+            )
+          )
         ],
      )
     ),

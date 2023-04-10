@@ -436,9 +436,9 @@ struct Worker {
       # The module must be an internal one (provided by extension or registered in the c++ code).
       # Module will be instantitated during binding initialization phase.
 
-      wrapWithFn @1 :Text = "wrapBindings";
-      # Module needs to export a function with a given name accepting a single `env` argument.
-      # `env` is a dictionary with all the inner bindings.
+      entrypoint @1 :Text = "default";
+      # Module needs to export a function with a given name (default export gets "default" name).
+      # The function needs to accept a single `env` argument - a dictionary with inner bindings.
       # Function will be invoked during initialization phase and its return value will be used as
       # resulting binding value.
 

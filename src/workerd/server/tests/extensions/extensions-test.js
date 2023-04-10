@@ -36,5 +36,9 @@ export const test_wrapped_binding = {
     // check there are no other properties available
     assert.deepEqual(Object.keys(env.door), ["tryOpen"]);
     assert.deepEqual(Object.getOwnPropertyNames(env.door), ["tryOpen"]);
+
+    assert.ok(env.customDoor, "custom binding is not present");
+    assert.ok(!env.customDoor.tryOpen("open sesame"));
+    assert.ok(env.customDoor.tryOpen("custom open sesame"));
   }
 }

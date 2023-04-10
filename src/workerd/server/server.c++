@@ -1801,7 +1801,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       }
       return makeGlobal(Global::Wrapped {
         .moduleName = kj::str(wrapped.getModuleName()),
-        .wrapWithFn = kj::str(wrapped.getWrapWithFn()),
+        .entrypoint = kj::str(wrapped.getEntrypoint()),
         .innerBindings = innerGlobals.releaseAsArray(),
       });
     }

@@ -1,5 +1,7 @@
 import { BurritoShop } from "burrito-shop-internal:burrito-shop-impl";
 
-export function wrapBindings(env) {
+function makeBinding(env) {
   return new BurritoShop(env.recipes);
 }
+
+export default makeBinding;

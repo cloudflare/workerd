@@ -9,3 +9,6 @@ export function wrap(env) {
     }
   }
 }
+
+
+export default wrap;

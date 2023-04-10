@@ -120,13 +120,13 @@ public:
     struct Wrapped {
       // data carrier for configured WrappedBinding
       kj::String moduleName;
-      kj::String wrapWithFn;
+      kj::String entrypoint;
       kj::Array<Global> innerBindings;
 
       Wrapped clone() const {
         return Wrapped {
           .moduleName = kj::str(moduleName),
-          .wrapWithFn = kj::str(wrapWithFn),
+          .entrypoint = kj::str(entrypoint),
           .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }
         };
       }
