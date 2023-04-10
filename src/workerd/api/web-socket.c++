@@ -10,6 +10,21 @@
 
 namespace workerd::api {
 
+
+
+kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
+  // TODO(someday) We might care more about this `OneOf` than its which, that probably means
+  // returning a kj::String instead.
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(ac, WebSocket::AwaitingConnection) return "AwaitingConnection";
+    KJ_CASE_ONEOF(aaoc, WebSocket::AwaitingAcceptanceOrCoupling)
+        return "AwaitingAcceptanceOrCoupling";
+    KJ_CASE_ONEOF(a, WebSocket::Accepted) return "Accepted";
+    KJ_CASE_ONEOF(r, WebSocket::Released) return "Released";
+  }
+  KJ_UNREACHABLE;
+}
+
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
     : url(nullptr),
       farNative(nullptr),
@@ -582,9 +597,14 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
         // this didn't cause our writes to fail, maybe due to timing. Let's set the error now.
         reportError(js, KJ_EXCEPTION(DISCONNECTED, "WebSocket peer disconnected"));
       } else if (native.closedIncoming && native.closedOutgoing) {
-        // Native WebSocket no longer needed; release.
-        KJ_ASSERT(native.state.is<Accepted>());
-        native.state.init<Released>();
+        if (native.state.is<Accepted>()) {
+          // Native WebSocket no longer needed; release.
+          native.state.init<Released>();
+        } else if (native.state.is<Released>()) {
+          // While we were awaiting the jsg::Promise, someone else released our state. That's fine.
+        } else {
+          KJ_FAIL_ASSERT("Unexpected native web socket state", native.state);
+        }
       }
     }, [this](jsg::Lock& js, jsg::Value&& exception) mutable {
       reportError(js, kj::mv(exception));

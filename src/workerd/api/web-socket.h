@@ -287,9 +287,12 @@ private:
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
   };
   struct Released {};
+  using NativeState =
+      kj::OneOf<AwaitingConnection, AwaitingAcceptanceOrCoupling, Accepted, Released>;
+  friend kj::StringPtr KJ_STRINGIFY(const NativeState&);
 
   struct Native {
-    kj::OneOf<AwaitingConnection, AwaitingAcceptanceOrCoupling, Accepted, Released> state;
+    NativeState state;
 
     bool isPumping = false;
     // Is there currently a task running to pump outgoing messages?
