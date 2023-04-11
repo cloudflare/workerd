@@ -392,8 +392,7 @@ interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
 interface IncomingRequestCfPropertiesBotManagementBase {
   /**
    * Cloudflare’s [level of certainty](https://developers.cloudflare.com/bots/concepts/bot-score/) that a request comes from a bot,
-   * represented as an integer percentage between `1` (almost certainly human)
-   * and `99` (almost certainly a bot).
+   * represented as an integer percentage between `1` (almost certainly a bot) and `99` (almost certainly human).
    *
    * @example 54
    */
