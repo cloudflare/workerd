@@ -1,0 +1,79 @@
+From 620a98cc888b1b3c0a7b2ad738ca9e7c1a326de6 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Tue, 11 Apr 2023 14:41:31 -0400
+Subject: [PATCH 8/8] Disable bazel whole-archive build
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+V8's bazel configuration system adds the alwayslink parameter (equivalent
+to --Wl,-whole-archive on Linux) to all V8 libraries, causing all V8
+object files to be included even if they are not referenced. This is more
+aggressive than what's done in the GN build system and not needed for
+workerd – disabling alwayslink improves the binary size by ~ 1MB as it
+allows the linker to eliminate unused symbols.
+---
+ bazel/BUILD.icu | 6 +++---
+ bazel/defs.bzl  | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 4843ea09f99..5e53e218994 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -56,7 +56,7 @@ cc_library(
+         "source/i18n",
+     ],
+     tags = ["requires-rtti"],
+-    alwayslink = 1,
++    alwayslink = 0,
+ )
+ 
+ cc_library(
+@@ -85,7 +85,7 @@ cc_library(
+         "//conditions:default": [],
+     }),
+     deps = [":icuuc"],
+-    alwayslink = 1,
++    alwayslink = 0,
+ )
+ 
+ cc_library(
+@@ -122,5 +122,5 @@ cc_library(
+         ":icui18n",
+         ":icuuc",
+     ],
+-    alwayslink = 1,
++    alwayslink = 0,
+ )
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 0155e2c5b93..a72f4377e2f 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -287,7 +287,7 @@ def v8_library(
+             includes = includes + ["noicu/"] + default.includes,
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+-            alwayslink = 1,
++            alwayslink = 0,
+             linkstatic = 1,
+             **kwargs
+         )
+@@ -306,7 +306,7 @@ def v8_library(
+             includes = includes + ["icu/"] + default.includes,
+             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
+             linkopts = linkopts + default.linkopts,
+-            alwayslink = 1,
++            alwayslink = 0,
+             linkstatic = 1,
+             **kwargs
+         )
+@@ -326,7 +326,7 @@ def v8_library(
+             includes = includes + default.includes,
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+-            alwayslink = 1,
++            alwayslink = 0,
+             linkstatic = 1,
+             **kwargs
+         )
