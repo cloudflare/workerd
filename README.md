@@ -73,6 +73,10 @@ On other platforms, you may have to do tinkering to make things work.
 To build `workerd`, you need:
 
 * [Bazel](https://bazel.build/)
+* [Python 3](https://www.python.org/downloads/) with a `python3` executable on the `PATH`
+  * [Ensure that pip is installed as well](https://packaging.python.org/en/latest/tutorials/installing-packages/#ensure-you-can-run-pip-from-the-command-line),
+  pip is not guarenteed to be be included in the base python three installation and may be excluded
+  by your systems package manager.
 * On Linux:
   * Clang 11+ (e.g. package `clang` on Debian Bullseye)
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
@@ -82,7 +86,6 @@ To build `workerd`, you need:
   * Visual Studio Community 2022, including "Desktop development with C++" features
   * [LLVM 15](https://github.com/llvm/llvm-project/releases/)
   * [MSYS2](https://www.msys2.org/) installed to `C:\tools\msys64` with the `BAZEL_SH` environment variable set to `C:\tools\msys64\usr\bin\bash.exe`
-  * [Python 3](https://www.python.org/downloads/) with a `python3` executable on the `PATH`
   * GNU `patch` executable on the `PATH` (e.g. `pacman -S patch` in MSYS2 terminal, then copy `patch.exe` and `msys-2.0.dll` from `C:\tools\msys64\usr\bin` to a directory on the `PATH`)
   * Add `startup --output_user_root=C:/tmp` to the `.bazelrc` file in your user directory
   * Enable 8.3 filename support with `fsutil 8dot3name set 0` in an administrator command prompt
