@@ -1787,6 +1787,16 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
     }
 
+    case config::Worker::Binding::QUEUE: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getQueue(),
+        kj::mv(errorContext)
+      });
+
+      return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
+    }
+
     case config::Worker::Binding::WRAPPED: {
       auto wrapped = binding.getWrapped();
       kj::Vector<Global> innerGlobals;
@@ -1805,6 +1815,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
         .innerBindings = innerGlobals.releaseAsArray(),
       });
     }
+
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "
