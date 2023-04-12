@@ -103,7 +103,7 @@ public:
     }
   };
 
-  AsyncContextFrame(Lock& js, StorageEntry storageEntry);
+  AsyncContextFrame(Lock& js, StorageEntry&& storageEntry);
 
   inline Ref<AsyncContextFrame> addRef() { return JSG_THIS; }
 
@@ -115,7 +115,7 @@ public:
   // Convenience variation on current() that returns the result wrapped in a Ref for when we
   // need to make sure the frame stays alive.
 
-  static Ref<AsyncContextFrame> create(Lock& js, StorageEntry storageEntry);
+  static Ref<AsyncContextFrame> create(Lock& js, StorageEntry&& storageEntry);
   // Create a new AsyncContextFrame. The new frame inherits the storage context of the current
   // frame (if any) and the given StorageEntry is added.
 

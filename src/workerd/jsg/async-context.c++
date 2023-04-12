@@ -22,7 +22,7 @@ inline void maybeSetV8ContinuationContext(
 }
 }  // namespace
 
-AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
+AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry&& storageEntry)
     : isolate(IsolateBase::from(js.v8Isolate)) {
   KJ_IF_MAYBE(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
@@ -59,7 +59,7 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
   return nullptr;
 }
 
-Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
+Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry&& storageEntry) {
   return alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
 }
 
