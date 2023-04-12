@@ -8,6 +8,7 @@
 #include <capnp/serialize-text.h>
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
+#include <regex>
 
 namespace workerd::server {
 namespace {
@@ -95,6 +96,15 @@ public:
       KJ_FAIL_EXPECT_AT(loc, "message never received");
     } else {
       KJ_EXPECT_AT(actual == expected, loc);
+    }
+  }
+  void recvRegex(kj::StringPtr matcher, kj::SourceLocation loc = {}) {
+    auto actual = readAllAvailable();
+    if (actual == nullptr) {
+      KJ_FAIL_EXPECT_AT(loc, "message never received");
+    } else {
+      std::regex target(matcher.cStr());
+      KJ_EXPECT(std::regex_match(actual.cStr(), target), actual, matcher, loc);
     }
   }
 
@@ -995,6 +1005,8 @@ KJ_TEST("Server: capability bindings") {
                 `    items.push(await (await env.fetcher.fetch("http://foo")).text());
                 `    items.push(await env.kv.get("bar"));
                 `    items.push(await (await env.r2.get("baz")).text());
+                `    await env.queue.send("hello");
+                `    items.push("Hello from Queue\n");
                 `    return new Response(items.join(""));
                 `  }
                 `}
@@ -1009,6 +1021,9 @@ KJ_TEST("Server: capability bindings") {
             ),
             ( name = "r2",
               r2Bucket = "r2-outbound"
+            ),
+            ( name = "queue",
+              queue = "queue-outbound"
             )
           ]
         )
@@ -1016,6 +1031,7 @@ KJ_TEST("Server: capability bindings") {
       ( name = "service-outbound", external = "service-host" ),
       ( name = "kv-outbound", external = "kv-host" ),
       ( name = "r2-outbound", external = "r2-host" ),
+      ( name = "queue-outbound", external = "queue-host" ),
     ],
     sockets = [
       ( name = "main",
@@ -1078,10 +1094,30 @@ KJ_TEST("Server: capability bindings") {
     )"_blockquote);
   }
 
+  {
+    auto subreq = test.receiveSubrequest("queue-host");
+    // We use a regex match to avoid dealing with the non-text characters in the POST body (which
+    // may change as v8 serialization versions change over time).
+    subreq.recvRegex(R"(
+      POST /message HTTP/1.1
+      Content-Length: 9
+      Host: fake-host
+      Content-Type: application/octet-stream
+
+      .+hello)"_blockquote);
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      Content-Length: 2
+
+      OK
+    )"_blockquote);
+  }
+
   conn.recvHttp200(R"(
     Hello from HTTP
     Hello from KV
     Hello from R2
+    Hello from Queue
   )"_blockquote);
 }
 

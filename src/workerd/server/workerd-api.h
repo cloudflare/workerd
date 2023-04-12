@@ -74,6 +74,13 @@ public:
         return *this;
       }
     };
+    struct QueueBinding {
+      uint subrequestChannel;
+
+      QueueBinding clone() const {
+        return *this;
+      }
+    };
     struct CryptoKey {
       kj::String format;
       kj::OneOf<kj::Array<byte>, Json> keyData;
@@ -133,7 +140,7 @@ public:
     };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, kj::String, kj::Array<byte>, Wrapped> value;
+              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped> value;
 
     Global clone() const;
   };

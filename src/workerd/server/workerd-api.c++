@@ -14,6 +14,7 @@
 #include <workerd/api/crypto-impl.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/queue.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/r2.h>
@@ -56,6 +57,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_HTTP_ISOLATE_TYPES,
   EW_SOCKETS_ISOLATE_TYPES,
   EW_KV_ISOLATE_TYPES,
+  EW_QUEUE_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
   EW_SCHEDULED_ISOLATE_TYPES,
@@ -506,6 +508,10 @@ static v8::Local<v8::Value> createBindingValue(
           jsg::alloc<api::public_beta::R2Admin>(featureFlags, r2a.subrequestChannel));
     }
 
+    KJ_CASE_ONEOF(ns, Global::QueueBinding) {
+      value = lock.wrap(context, jsg::alloc<api::WorkerQueue>(ns.subrequestChannel));
+    }
+
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
       api::SubtleCrypto::ImportKeyData keyData;
       KJ_SWITCH_ONEOF(key.keyData) {
@@ -632,6 +638,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(r2Admin, Global::R2Admin) {
       result.value = r2Admin.clone();
+    }
+    KJ_CASE_ONEOF(queueBinding, Global::QueueBinding) {
+      result.value = queueBinding.clone();
     }
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
       result.value = key.clone();
