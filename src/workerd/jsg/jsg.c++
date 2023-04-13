@@ -77,13 +77,6 @@ void Data::destroy() {
   }
 }
 
-#ifdef KJ_DEBUG
-void Data::assertInvariantImpl() {
-    // Assert that only empty values are associated with null isolates.
-  KJ_DASSERT(isolate != nullptr || handle.IsEmpty());
-}
-#endif
-
 Lock::Lock(v8::Isolate* v8Isolate)
     : v8Isolate(v8Isolate), locker(v8Isolate), scope(v8Isolate),
       previousData(v8Isolate->GetData(2)),
