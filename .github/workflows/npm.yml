@@ -38,7 +38,7 @@ jobs:
           echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
   publish-arch-specific:
-    # if: ${{ github.repository_owner == 'cloudflare' }}
+    # if: github.repository_owner == 'cloudflare'
     name: Publish arch-specific packages to npm
     needs: version
     runs-on: ubuntu-latest
@@ -64,22 +64,25 @@ jobs:
       - uses: robinraju/release-downloader@v1.5
         with:
           tag: v${{ needs.version.outputs.release_version }}
-          fileName: workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+          fileName: workerd-${{ matrix.arch }}.gz
           tarBall: false
           zipBall: false
           out-file-path: "release-downloads"
           token: ${{ secrets.GITHUB_TOKEN }}
-      - run: chmod +x $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}
-        if: ${{ matrix.arch != 'windows-64' }}
+        # release-downloader does not support .gz files (unlike .tar.gz), decompress manually
+        # Using the -N flag the right file name should be restored
+      - run: gzip -dN workerd-${{ matrix.arch }}.gz
+      - run: chmod +x $GITHUB_WORKSPACE/release-downloads/workerd
+        if: matrix.arch != 'windows-64'
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
-      - run: cp $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
+      - run: cp $GITHUB_WORKSPACE/release-downloads/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }} npm/workerd-${{ matrix.arch }}/bin/workerd${{ matrix.arch == 'windows-64' && '.exe' || '' }}
       - run: echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > npm/workerd-${{ matrix.arch }}/.npmrc
       - run: cd npm/workerd-${{ matrix.arch }} && npm publish --access public --tag ${{ inputs.prerelease == true && 'beta' || 'latest'}}
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
   publish-wrapper:
-    # if: ${{ github.repository_owner == 'cloudflare' }}
+    # if: github.repository_owner == 'cloudflare'
     name: Publish `workerd` to NPM
     needs: [version, publish-arch-specific]
     runs-on: ubuntu-latest
