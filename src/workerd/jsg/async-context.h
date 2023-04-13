@@ -66,10 +66,11 @@ public:
     // An opaque key that identifies an async-local storage cell within the frame.
   public:
     StorageKey() : hash(kj::hashCode(this)) {}
+    KJ_DISALLOW_COPY_AND_MOVE(StorageKey);
 
     void reset() { dead = true; }
     // The owner of the key should reset it when it goes away.
-    // The StorageKey is typically owned by an instance of AsyncLocalstorage (see
+    // The StorageKey is typically owned by an instance of AsyncLocalStorage (see
     // the api/node/async-hooks.h). When the ALS instance is garbage collected, it
     // must call reset to signal that this StorageKey is "dead" and can never be
     // looked up again. Subsequent accesses to a frame will remove dead keys from
@@ -83,7 +84,7 @@ public:
     bool isDead() const { return dead; }
     inline uint hashCode() const { return hash; }
     inline bool operator==(const StorageKey& other) const {
-      return hash == other.hash;
+      return this == &other;
     }
 
   private:
@@ -181,7 +182,7 @@ private:
     }
 
     bool matches(const StorageEntry& entry, StorageKey& key) const {
-      return entry.key->hashCode() == key.hashCode();
+      return entry.key.get() == &key;
     }
 
     uint hashCode(StorageKey& key) const {
@@ -191,8 +192,6 @@ private:
 
   using Storage = kj::Table<StorageEntry, kj::HashIndex<StorageEntryCallbacks>>;
   Storage storage;
-
-  IsolateBase& isolate;
 
   void jsgVisitForGc(GcVisitor& visitor) override;
 
