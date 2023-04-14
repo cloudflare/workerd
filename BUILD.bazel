@@ -3,6 +3,8 @@ load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package", "npm_package")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//lib:selects.bzl", "selects")
 
 cc_capnp_library(
     name = "icudata-embed",
@@ -28,4 +30,42 @@ npm_link_package(
 capnpc_ts_bin.capnpc_ts_binary(
     name = "capnpc_ts",
     visibility = ["//visibility:public"],
+)
+
+# bazel enables the --ffunction-sections, --gc-sections flags used to remove dead code by default
+# on Linux opt builds. Enable the equivalent macOS flag -Wl,-dead_strip here to work around bazel
+# idiosyncrasies.
+# Note that the flag is defined for all non-debug builds of kj_test() and wd_cc_binary() on mac as
+# it surprisingly appears to be faster, perhaps because the linker generates and writes binaries
+# with much fewer symbols. This also helps reduce local and CI disk usage. If needed, dead code
+# stripping can be limited to optimized builds.
+config_setting(
+    name = "fast_build",
+    values = {"compilation_mode": "fastbuild"},
+)
+
+config_setting(
+    name = "opt_build",
+    values = {"compilation_mode": "opt"},
+)
+
+bool_flag(
+    name = "dead_strip",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "set_dead_strip",
+    flag_values = {"dead_strip": "True"},
+)
+
+# Workaround for bazel not supporting negated conditions (https://github.com/bazelbuild/bazel-skylib/issues/272)
+selects.config_setting_group(
+    name = "not_dbg_build",
+    match_any = [":fast_build", ":opt_build"],
+)
+
+selects.config_setting_group(
+    name = "use_dead_strip",
+    match_all = ["@platforms//os:macos", ":set_dead_strip", ":not_dbg_build"],
 )

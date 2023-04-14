@@ -22,9 +22,10 @@ build:fastdbg -c fastbuild
 build:fastdbg --cxxopt='-gline-tables-only' --host_cxxopt='-gline-tables-only'
 build:fastdbg --linkopt='-gline-tables-only' --host_linkopt='-gline-tables-only'
 build:fastdbg --strip=never
+build:fastdbg --//:dead_strip=False
 
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
-# Need to disable debug-assertions for fastdbg, should be off automatically for opt
+# Need to disable debug-assertions for fastbuild, should be off automatically for opt
 build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n
 
 build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1

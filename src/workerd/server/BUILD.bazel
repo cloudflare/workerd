@@ -2,7 +2,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 
 config_setting(

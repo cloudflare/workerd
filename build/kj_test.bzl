@@ -13,4 +13,8 @@ def kj_test(
             "@platforms//os:windows": [],
             "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
         }) + deps,
+        linkopts = select({
+          "@//:use_dead_strip": ["-Wl,-dead_strip"],
+          "//conditions:default": [""],
+        }),
     )
