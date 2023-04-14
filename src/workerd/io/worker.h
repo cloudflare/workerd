@@ -36,6 +36,7 @@ namespace api {
   class ServiceWorkerGlobalScope;
   struct ExportedHandler;
   struct CryptoAlgorithm;
+  struct QueueExportedHandler;
 }
 
 class IoContext;
@@ -493,6 +494,8 @@ public:
   };
   virtual const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const = 0;
+  virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
+      jsg::Lock& lock) const = 0;
 
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of

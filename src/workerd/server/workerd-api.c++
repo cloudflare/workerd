@@ -162,6 +162,11 @@ const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
 
+const jsg::TypeHandler<api::QueueExportedHandler>&
+    WorkerdApiIsolate::getQueueTypeHandler(jsg::Lock& lock) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
+}
+
 struct NoopCompilationObserver final : public jsg::CompilationObserver {
   kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
       kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {

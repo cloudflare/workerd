@@ -18,6 +18,7 @@
 #include "html-rewriter.h"
 #include "trace.h"
 #include "scheduled.h"
+#include "queue.h"
 #include "hibernatable-web-socket.h"
 #include "blob.h"
 #include "sockets.h"
@@ -92,6 +93,7 @@ public:
     JSG_TS_DEFINE(type WorkerGlobalScopeEventMap = {
       fetch: FetchEvent;
       scheduled: ScheduledEvent;
+      queue: QueueEvent;
       unhandledrejection: PromiseRejectionEvent;
       rejectionhandled: PromiseRejectionEvent;
     });
