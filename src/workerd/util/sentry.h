@@ -86,4 +86,23 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     }                                                                          \
   } while (0)
 
+// The DEBUG_FATAL_RELEASE_LOG macros is for assertions that should definitely break in tests but
+// are not worth breaking production over. Instead, it logs the assertion message to sentry so that
+// we can notice the event. If your code requires that an assertion is true for safety (e.g.
+// checking if a value is not null), this is not the macro for you.
+#ifdef KJ_DEBUG
+#define DEBUG_FATAL_RELEASE_LOG(severity, ...)                                 \
+  ([&]() noexcept {                                                            \
+    KJ_FAIL_ASSERT(__VA_ARGS__);                                               \
+  })()
+#else
+#define DEBUG_FATAL_RELEASE_LOG(severity, ...)                                 \
+  do {                                                                         \
+    static bool logOnce KJ_UNUSED = [&]() {                                    \
+      KJ_LOG(severity, __VA_ARGS__);                                           \
+      return true;                                                             \
+    }();                                                                       \
+  } while (0)
+#endif
+
 } // namespace workerd

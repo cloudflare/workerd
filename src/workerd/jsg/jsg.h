@@ -11,6 +11,7 @@
 #include <kj/function.h>
 #include <kj/exception.h>
 #include <kj/one-of.h>
+#include <kj/debug.h>
 #include <type_traits>
 #include <v8.h>
 #include "macro-meta.h"
@@ -773,13 +774,13 @@ private:
 
   // Debugging helpers.
   void assertInvariant() {
-#ifdef KJ_DEBUG
-    assertInvariantImpl();
-#endif
+    // Assert that only empty values are associated with null isolates.
+    //
+    // Note that we use IASSERT (which is only enabled in debug) here because this function is
+    // intended to be invoked from the move ctor and assignment operator. We expect them to be
+    // invoked a lot and want them to be as optimizable as possible.
+    KJ_IASSERT(isolate != nullptr || handle.IsEmpty());
   }
-#ifdef KJ_DEBUG
-  void assertInvariantImpl();
-#endif
 };
 
 template <typename T>
