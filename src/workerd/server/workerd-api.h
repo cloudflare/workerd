@@ -25,6 +25,8 @@ public:
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
   const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
+  const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
+      jsg::Lock& lock) const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

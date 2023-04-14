@@ -110,6 +110,22 @@ struct AlarmRun @0xfa8ea4e97e23b03d {
   retryCountsAgainstLimit @2 :Bool = true;
 }
 
+struct QueueMessage @0x944adb18c0352295 {
+  id @0 :Text;
+  timestampNs @1 :Int64;
+  data @2 :Data;
+}
+
+struct QueueResponse @0x90e98932c0bfc0de {
+  outcome @0 :EventOutcome;
+  retryAll @1 :Bool;
+  ackAll @2 :Bool;
+  explicitRetries @3 :List(Text);
+  # List of Message IDs that were explicitly marked for retry
+  explicitAcks @4 :List(Text);
+  # List of Message IDs that were explicitly marked as acknowledged
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -137,6 +153,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   # TODO(cleanup): runAlarm()'s implementation currently relies on *not* allowing cancellation.
   #   It would be cleaner to handle that inside the implementation so we could mark the entire
   #   interface (and file) with allowCancellation.
+
+  queue @8 (messages :List(QueueMessage), queueName :Text) -> (result :QueueResponse)
+      $Cxx.allowCancellation;
+  # Delivers a batch of queue messages to a worker's queue event handler. Returns information about
+  # the success of the batch, including which messages should be considered acknowledged and which
+  # should be retried.
 
   obsolete5 @5();
   obsolete6 @6();
