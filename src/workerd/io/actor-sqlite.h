@@ -19,11 +19,11 @@ class ActorSqlite final: public ActorCacheInterface {
   //   here is easier and not too costly.
 
 public:
-  ActorSqlite(SqliteDatabase::Vfs& vfs, kj::PathPtr path)
-      : db(vfs, path, kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT),
-        kv(db) {}
+  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam)
+      : db(kj::mv(dbParam)),
+        kv(*db) {}
 
-  SqliteDatabase& getSqliteDatabase() { return db; }
+  SqliteDatabase& getSqliteDatabase() { return *db; }
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
@@ -52,7 +52,7 @@ public:
   // See ActorCacheInterface
 
 private:
-  SqliteDatabase db;
+  kj::Own<SqliteDatabase> db;
   SqliteKv kv;
 };
 

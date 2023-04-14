@@ -106,15 +106,14 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::evictStale(kj::Date now) {
-  // TODO(sqlite): This is called every time the isolate lock is taken. We can temporarily delay
-  //   the lock by returning a promise. This could be a good time to apply backpressure on the
-  //   application e.g. while waiting for an asynchronous checkpoint to complete or for replication
-  //   buffers to go down.
+  // This implementation never needs to apply backpressure.
   return nullptr;
 }
 
 void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
-  // Nothing here (yet).
+  // TODO(sqlite): In theory this should cause all future storage ops to fail and should even
+  //   roll back any storage writes that weren't "committed" yet according to the automatic
+  //   atomic write batching policy.
 }
 
 kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
@@ -126,7 +125,7 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
-  // TODO(sqlite): onNoPendingFlush() should wait for replication if applicable.
+  // SQLite data is synced to local disk on commit, there's nothing to wait for.
   return nullptr;
 }
 
