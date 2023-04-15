@@ -2,10 +2,39 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Bazel Build",
+      "label": "Bazel Build (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "//src/workerd/server"],
+      "linux": {
+        "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
+      },
+      "osx": {
+        // OS X needs additional build options for symbols to work correctly
+        // (https://github.com/bazelbuild/bazel/issues/6327), hence the additional
+        // flags for the spawn_strategy and oso_prefix. Ideally these would
+        // be in a platform specific config in .bazelrc, but this is not supported
+        // (https://github.com/bazelbuild/bazel/issues/5055).
+        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "--features=oso_prefix_is_pwd", "//src/workerd/server:workerd"],
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel Build (fastbuild)",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["build", "--config", "fastbuild", "//src/workerd/server:workerd"],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -24,7 +53,7 @@
       "label": "Bazel Build (opt)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "opt", "//src/workerd/server"],
+      "args": ["build", "-c", "opt", "//src/workerd/server:workerd"],
       "group": {
         "kind": "build",
         "isDefault": false

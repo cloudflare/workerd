@@ -6,27 +6,85 @@
   "configurations": [
     {
       "name": "workerd debug",
-      "preLaunchTask": "Bazel Build",
+      "preLaunchTask": "Bazel Build (dbg)",
+      "program": "linux-or-os-only",
+      "request": "launch",
+      "type": "cppdbg",
+      "linux": {
+        "name": "workerd debug",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+        "program": "workerd",
+        "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/",
+      },
+      "osx": {
+        "name": "workerd debug",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "program": "${workspaceFolder}/bazel-out/darwin_arm64-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
+        "targetArchitecture": "arm64",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+         "cwd": "${workspaceFolder}",
+      },
+      "args": [
+        "serve",
+        "${input:workerdConfig}"
+      ],
+      "stopAtEntry": false,
+      "externalConsole": false
+    },
+    {
+      "name": "workerd debug with inspector enabled",
+      "preLaunchTask": "Bazel Build (dbg)",
+      "program": "linux-or-os-only",
       "type": "cppdbg",
       "request": "launch",
-      "MIMode": "gdb",
-      "program": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd",
+      "linux": {
+        "name": "workerd debug with inspector enabled",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+        "program": "workerd",
+        "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/",
+      },
+      "osx": {
+        "name": "workerd debug with inspector enabled",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "program": "${workspaceFolder}/bazel-out/darwin_arm64-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
+        "targetArchitecture": "arm64",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+         "cwd": "${workspaceFolder}",
+      },
       "args": [
-        // A prompt will be displayed asking for the configuration
-        // arguments for the workerd process
-        "${input:debugargs}"
+        "serve",
+        "-i0.0.0.0",
+        "--verbose",
+        "${input:workerdConfig}"
       ],
-      "cwd": "${workspaceFolder}/bazel-out/k8-fastbuild/bin/src/workerd/server/workerd.runfiles/workerd",
-
+      "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd",
       "stopAtEntry": false,
       "externalConsole": false
     }
   ],
   "inputs": [
     {
-      "id": "debugargs",
-      "description": "workerd arguments",
-      "default": "--help",
+      "id": "workerdConfig",
+      "description": "Workerd configuration to serve",
+      "default": "${workspaceFolder}/samples/helloworld/config.capnp",
       "type": "promptString"
     }
   ]
