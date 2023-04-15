@@ -310,7 +310,7 @@ public:
     // constructing a `Lock` on the stack.
 
   public:
-    Lock(const Isolate& isolate)
+    Lock(const Isolate& isolate, V8StackScope& scope)
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
       jsgIsolate.clearDestructionQueue();
     }

@@ -471,12 +471,14 @@ void WorkerEntrypoint::maybeAddGcPassForTest(
     auto worker = kj::atomicAddRef(context.getWorker());
     if constexpr (kj::isSameType<T, void>()) {
       promise = promise.then([worker = kj::mv(worker)]() {
-        auto lock = worker->getIsolate().getApiIsolate().lock();
+        jsg::V8StackScope stackScope;
+        auto lock = worker->getIsolate().getApiIsolate().lock(stackScope);
         lock->requestGcForTesting();
       });
     } else {
       promise = promise.then([worker = kj::mv(worker)](auto res) {
-        auto lock = worker->getIsolate().getApiIsolate().lock();
+        jsg::V8StackScope stackScope;
+        auto lock = worker->getIsolate().getApiIsolate().lock(stackScope);
         lock->requestGcForTesting();
         return res;
       });

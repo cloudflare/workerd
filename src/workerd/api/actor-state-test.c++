@@ -32,7 +32,8 @@ JSG_DECLARE_ISOLATE_TYPE(ActorStateIsolate, ActorStateContext);
 KJ_TEST("v8 serialization version tag hasn't changed") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   ActorStateIsolate &actorStateIsolate = e.getIsolate();
-  ActorStateIsolate::Lock isolateLock(actorStateIsolate);
+  jsg::V8StackScope stackScope;
+  ActorStateIsolate::Lock isolateLock(actorStateIsolate, stackScope);
   auto* isolate = isolateLock.v8Isolate;
   v8::HandleScope handleScope(isolate);
   auto v8Context = isolateLock.newContext<ActorStateContext>().getHandle(isolate);
@@ -61,7 +62,8 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
 KJ_TEST("we support deserializing up to v15") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   ActorStateIsolate &actorStateIsolate = e.getIsolate();
-  ActorStateIsolate::Lock isolateLock(actorStateIsolate);
+  jsg::V8StackScope stackScope;
+  ActorStateIsolate::Lock isolateLock(actorStateIsolate, stackScope);
   auto* isolate = isolateLock.v8Isolate;
   v8::HandleScope handleScope(isolate);
   auto v8Context = isolateLock.newContext<ActorStateContext>().getHandle(isolate);
@@ -109,7 +111,8 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
 
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   ActorStateIsolate &actorStateIsolate = e.getIsolate();
-  ActorStateIsolate::Lock isolateLock(actorStateIsolate);
+  jsg::V8StackScope stackScope;
+  ActorStateIsolate::Lock isolateLock(actorStateIsolate, stackScope);
   auto* isolate = isolateLock.v8Isolate;
   v8::HandleScope handleScope(isolate);
   auto v8Context = isolateLock.newContext<ActorStateContext>().getHandle(isolate);

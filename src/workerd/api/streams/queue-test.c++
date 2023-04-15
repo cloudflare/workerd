@@ -18,13 +18,14 @@ JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);
 
 struct Preamble {
   QueueIsolate isolate;
+  jsg::V8StackScope stackScope;
   QueueIsolate::Lock lock;
   v8::HandleScope scope;
   v8::Local<v8::Context> context;
   v8::Context::Scope contextScope;
   Preamble()
     : isolate(v8System),
-      lock(isolate),
+      lock(isolate, stackScope),
       scope(lock.v8Isolate),
       context(lock.newContext<QueueContext>().getHandle(lock.v8Isolate)),
       contextScope(context) {}

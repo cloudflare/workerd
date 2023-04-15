@@ -552,7 +552,8 @@ struct Worker::Isolate::Impl {
     // Always use this wrapper in code which may face lock contention (that's mostly everywhere).
 
   public:
-    explicit Lock(const Worker::Isolate& isolate, Worker::LockType lockType)
+    explicit Lock(const Worker::Isolate& isolate, Worker::LockType lockType,
+                  jsg::V8StackScope& stackScope)
         : impl(*isolate.impl),
           metrics([&isolate, &lockType]()
               -> kj::Maybe<kj::Own<IsolateObserver::LockTiming>> {
@@ -573,7 +574,7 @@ struct Worker::Isolate::Impl {
           progressCounter(impl.lockSuccessCount),
           oldCurrentApiIsolate(currentApiIsolate),
           limitEnforcer(isolate.getLimitEnforcer()),
-          lock(isolate.apiIsolate->lock()) {
+          lock(isolate.apiIsolate->lock(stackScope)) {
       if (warnAboutIsolateLockScopeCount > 0) {
         KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
       }
@@ -713,7 +714,8 @@ struct Worker::Isolate::Impl {
       : metrics(metrics),
         inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
-    auto lock = apiIsolate.lock();
+    jsg::V8StackScope stackScope;
+    auto lock = apiIsolate.lock(stackScope);
     limitEnforcer.customizeIsolate(lock->v8Isolate);
 
     if (inspectorPolicy != InspectorPolicy::DISALLOW) {
@@ -988,7 +990,8 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
       weakIsolateRef(kj::atomicRefcounted<WeakIsolateRef>(this)) {
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
-  auto lock = apiIsolate->lock();
+  jsg::V8StackScope stackScope;
+  auto lock = apiIsolate->lock(stackScope);
   auto features = apiIsolate->getFeatureFlags();
 
   lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
@@ -1065,7 +1068,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
   //   previews, where it doesn't matter. If we ever do co-locate multiple scripts in the same
   //   isolate, we may wish to make the RequestObserver object available here, in order to
   //   attribute lock timing to that request.
-  Isolate::Impl::Lock recordedLock(*isolate, Worker::Lock::TakeSynchronously(nullptr));
+  jsg::V8StackScope stackScope;
+  Isolate::Impl::Lock recordedLock(*isolate, Worker::Lock::TakeSynchronously(nullptr), stackScope);
   auto& lock = *recordedLock.lock;
 
   // If we throw an exception, it's important that `impl` is destroyed under lock.
@@ -1194,7 +1198,8 @@ Worker::Isolate::~Isolate() noexcept(false) {
   // is about to be destroyed, but we have to take the lock in order to enter the isolate.
   // It's also important that we lock one last time, in order to destroy any remaining workers in
   // worker destruction queue.
-  Isolate::Impl::Lock recordedLock(*this, Worker::Lock::TakeSynchronously(nullptr));
+  jsg::V8StackScope stackScope;
+  Isolate::Impl::Lock recordedLock(*this, Worker::Lock::TakeSynchronously(nullptr), stackScope);
   metrics->teardownLockAcquired();
   auto inspector = kj::mv(impl->inspector);
 }
@@ -1205,7 +1210,8 @@ Worker::Script::~Script() noexcept(false) {
   //   multiple scripts are co-located in the same isolate. As of this writing, that doesn't happen
   //   except in preview. In any case, Scripts are destroyed in the GC thread, where we don't care
   //   too much about lock latency.
-  Isolate::Impl::Lock recordedLock(*isolate, Worker::Lock::TakeSynchronously(nullptr));
+  jsg::V8StackScope stackScope;
+  Isolate::Impl::Lock recordedLock(*isolate, Worker::Lock::TakeSynchronously(nullptr), stackScope);
   KJ_IF_MAYBE(c, impl->moduleContext) {
     recordedLock.disposeContext(kj::mv(*c));
   }
@@ -1256,7 +1262,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>()){
   // Enter/lock isolate.
-  Isolate::Impl::Lock recordedLock(*script->isolate, lockType);
+  jsg::V8StackScope stackScope;
+  Isolate::Impl::Lock recordedLock(*script->isolate, lockType, stackScope);
   auto& lock = *recordedLock.lock;
 
   // If we throw an exception, it's important that `impl` is destroyed under lock.
@@ -1553,15 +1560,17 @@ struct Worker::Lock::Impl {
   Isolate::Impl::Lock recordedLock;
   jsg::Lock& inner;
 
-  Impl(const Worker& worker, LockType lockType)
-      : recordedLock(worker.getIsolate(), lockType),
+  Impl(const Worker& worker, LockType lockType, jsg::V8StackScope& stackScope)
+      : recordedLock(worker.getIsolate(), lockType, stackScope),
         inner(*recordedLock.lock) {}
 };
 
 Worker::Lock::Lock(const Worker& constWorker, LockType lockType)
     : // const_cast OK because we took out a lock.
       worker(const_cast<Worker&>(constWorker)),
-      impl(kj::heap<Impl>(worker, lockType)) {}
+      impl(kj::heap<Impl>(worker, lockType, stackScope)) {
+  kj::requireOnStack(this, "Worker::Lock MUST be allocated on the stack.");
+}
 Worker::Lock::~Lock() noexcept(false) {
   // const_cast OK because we hold -- nay, we *are* -- a lock on the script.
   auto& isolate = const_cast<Isolate&>(worker.getIsolate());
@@ -1976,7 +1985,8 @@ public:
     // Delete session under lock.
     auto state = this->state.lockExclusive();
 
-    Isolate::Impl::Lock recordedLock(*state->get()->isolate, InspectorLock(nullptr));
+    jsg::V8StackScope stackScope;
+    Isolate::Impl::Lock recordedLock(*state->get()->isolate, InspectorLock(nullptr), stackScope);
     KJ_IF_MAYBE(p, state->get()->isolate->currentInspectorSession) {
       if (p == this) {
         const_cast<Isolate&>(*state->get()->isolate).currentInspectorSession = nullptr;;
@@ -2063,7 +2073,8 @@ public:
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
                 KJ_IF_MAYBE(p, isolate.impl->profiler) {
-                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                  jsg::V8StackScope stackScope;
+                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
                   auto& lock = *recordedLock.lock;
                   stopProfiling(**p, lock.v8Isolate, cmd);
                 }
@@ -2074,7 +2085,8 @@ public:
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
                 KJ_IF_MAYBE(p, isolate.impl->profiler) {
-                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                  jsg::V8StackScope stackScope;
+                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
                   auto& lock = *recordedLock.lock;
                   startProfiling(**p, lock.v8Isolate);
                 }
@@ -2085,7 +2097,8 @@ public:
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
                 KJ_IF_MAYBE(p, isolate.impl->profiler) {
-                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                  jsg::V8StackScope stackScope;
+                  Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
                   auto interval = cmd.getProfilerSetSamplingInterval().getParams().getInterval();
                   setSamplingInterval(**p, interval);
                 }
@@ -2094,7 +2107,8 @@ public:
               case cdp::Command::PROFILER_ENABLE: {
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
-                Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                jsg::V8StackScope stackScope;
+                Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
                 auto& lock = *recordedLock.lock;
                 isolate.impl->profiler = kj::Own<v8::CpuProfiler>(
                     v8::CpuProfiler::New(lock.v8Isolate, v8::kDebugNaming, v8::kLazyLogging),
@@ -2104,7 +2118,8 @@ public:
               case cdp::Command::TAKE_HEAP_SNAPSHOT: {
                 auto state = this->state.lockExclusive();
                 Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
-                Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+                jsg::V8StackScope stackScope;
+                Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
                 auto& lock = *recordedLock.lock;
                 auto params = cmd.getTakeHeapSnapshot().getParams();
                 takeHeapSnapshot(lock,
@@ -2124,7 +2139,8 @@ public:
 
           // const_cast OK because we're going to lock it
           Isolate& isolate = const_cast<Isolate&>(*state->get()->isolate);
-          Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr));
+          jsg::V8StackScope stackScope;
+          Isolate::Impl::Lock recordedLock(isolate, InspectorLock(nullptr), stackScope);
           auto& lock = *recordedLock.lock;
 
           // We have at times observed V8 bugs where the inspector queues a background task and
@@ -2305,7 +2321,8 @@ private:
                       "teardownUnderLock()", kj::getStackTrace());
 
         // Isolate locks are recursive so it should be safe to lock here.
-        Isolate::Impl::Lock recordedLock(*isolate, InspectorLock(nullptr));
+        jsg::V8StackScope stackScope;
+        Isolate::Impl::Lock recordedLock(*isolate, InspectorLock(nullptr), stackScope);
         session = nullptr;
       }
     }
@@ -2413,7 +2430,8 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::WebSocket& webSocket) const {
   KJ_REQUIRE(impl->inspector != nullptr);
 
-  Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(nullptr));
+  jsg::V8StackScope stackScope;
+  Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(nullptr), stackScope);
   auto& lock = *recordedLock.lock;
   auto& lockedSelf = const_cast<Worker::Isolate&>(*this);
 
@@ -3168,7 +3186,8 @@ public:
   }
 
   ~ResponseStreamWrapper() noexcept(false) {
-    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics));
+    jsg::V8StackScope stackScope;
+    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
     KJ_IF_MAYBE(i, isolate.currentInspectorSession) {
@@ -3220,7 +3239,8 @@ public:
     }
     auto decodedChunkSize = decodedBuf.getWrittenSize() - prevDecodedSize;
 
-    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics));
+    jsg::V8StackScope stackScope;
+    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
     KJ_IF_MAYBE(i, isolate.currentInspectorSession) {
@@ -3265,7 +3285,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
   auto signalRequest =
       [this, method, urlCopy = kj::str(url), headersCopy = headers.clone()]
       () -> kj::Maybe<kj::String> {
-    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics));
+    jsg::V8StackScope stackScope;
+    Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics), stackScope);
     auto& lock = *recordedLock.lock;
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
@@ -3393,7 +3414,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
          requestId = kj::mv(requestId)]
         () mutable -> kj::Own<kj::AsyncOutputStream> {
       // Now we know we can lock...
-      Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics));
+      jsg::V8StackScope stackScope;
+      Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics), stackScope);
       auto& isolate = const_cast<Isolate&>(*constIsolate);
 
       // We shouldn't even get here if network inspection isn't active since signalRequest() would
