@@ -78,6 +78,10 @@ V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr
     : V8System(userPlatform(platformParam), flags) {}
 V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
     : platform(kj::mv(platformParam)) {
+#if V8_HAS_STACK_START_MARKER
+  v8::StackStartMarker::EnableForProcess();
+#endif
+
   v8::V8::SetDcheckErrorHandler(&v8DcheckError);
 
   // Note that v8::V8::SetFlagsFromString() simply ignores flags it doesn't recognize, which means
@@ -240,6 +244,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
 
 namespace {
   static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params) {
+    V8StackScope stackScope;
     if (params.array_buffer_allocator == nullptr &&
         params.array_buffer_allocator_shared == nullptr) {
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
@@ -253,6 +258,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
       heapTracer(ptr) {
+  V8StackScope stackScope;
+
   v8::CppHeapCreateParams params {
     {},
     v8::WrapperDescriptor(
@@ -325,6 +332,8 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {
+  V8StackScope stackScope;
+
   ptr->DetachCppHeap();
 
   // It's not really clear CppHeap's destructor automatically destroys all heap-allocated objects.
@@ -340,6 +349,7 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 
 void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Delete all wrappers.
+  V8StackScope stackScope;
   v8::Locker lock(ptr);
   v8::Isolate::Scope scope(ptr);
 

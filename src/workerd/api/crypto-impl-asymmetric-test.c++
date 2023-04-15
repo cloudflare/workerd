@@ -50,7 +50,8 @@ KJ_TEST("RSA-PSS generateKey infinite loop") {
 KJ_TEST("EDDSA ED25519 generateKey") {
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
   CryptoIsolate &cryptoIsolate = e.getIsolate();
-  CryptoIsolate::Lock isolateLock(cryptoIsolate);
+  jsg::V8StackScope stackScope;
+  CryptoIsolate::Lock isolateLock(cryptoIsolate, stackScope);
   auto isolate = isolateLock.v8Isolate;
   v8::HandleScope handleScope(isolate);
   auto context = isolateLock.newContext<CryptoContext>().getHandle(isolate);

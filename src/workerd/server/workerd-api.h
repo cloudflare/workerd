@@ -18,7 +18,7 @@ public:
       IsolateLimitEnforcer& limitEnforcer);
   ~WorkerdApiIsolate() noexcept(false);
 
-  kj::Own<jsg::Lock> lock() const override;
+  kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const override;
   jsg::Dict<NamedExport> unwrapExports(

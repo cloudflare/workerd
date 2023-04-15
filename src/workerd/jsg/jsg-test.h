@@ -29,7 +29,8 @@ public:
   }
 
   void expectEval(kj::StringPtr code, kj::StringPtr expectedType, kj::StringPtr expectedValue) {
-    typename IsolateType::Lock lock(getIsolate());
+    V8StackScope stackScope;
+    typename IsolateType::Lock lock(getIsolate(), stackScope);
 
     // Create a stack-allocated handle scope.
     v8::HandleScope handleScope(lock.v8Isolate);
@@ -72,17 +73,20 @@ public:
   }
 
   void setAllowEval(bool b) {
-    typename IsolateType::Lock lock(getIsolate());
+    V8StackScope stackScope;
+    typename IsolateType::Lock lock(getIsolate(), stackScope);
     lock.setAllowEval(b);
   }
 
   void setCaptureThrowsAsRejections(bool b) {
-    typename IsolateType::Lock lock(getIsolate());
+    V8StackScope stackScope;
+    typename IsolateType::Lock lock(getIsolate(), stackScope);
     lock.setCaptureThrowsAsRejections(b);
   }
 
   void runMicrotasks() {
-    typename IsolateType::Lock lock(getIsolate());
+    V8StackScope stackScope;
+    typename IsolateType::Lock lock(getIsolate(), stackScope);
     lock.v8Isolate->PerformMicrotaskCheckpoint();
   }
 

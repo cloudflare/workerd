@@ -2053,6 +2053,26 @@ private:
   bool warningsLogged;
 };
 
+class V8StackScope {
+  // One of this MUST be allocated on the stack before taking an isolate lock. It must be allocated
+  // before any handles on the stack. This MUST NOT be allocated on the heap.
+  //
+  // The reason why Isolate::Lock doesn't take care of this automatically is because it is often
+  // allocated on the heap. The purpose of V8StackScope is to capture the start of the stack
+  // range that V8 must scan when performing conservative stack-scanning garbage collection.
+public:
+  // No interface.
+
+private:
+#if V8_HAS_STACK_START_MARKER
+  // This currently depends on a V8 patch which hasn't been upstreamed. Note that workerd does
+  // not use this patch; it's only used internally. The patch is needed in order to work around
+  // oddities of our internal environment which do not apply to workerd. For workerd, V8's default
+  // behavior is just fine.
+  v8::StackStartMarker v8Marker;
+#endif
+};
+
 // =======================================================================================
 // inline implementation details
 

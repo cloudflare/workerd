@@ -138,8 +138,8 @@ WorkerdApiIsolate::WorkerdApiIsolate(jsg::V8System& v8System,
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer)) {}
 WorkerdApiIsolate::~WorkerdApiIsolate() noexcept(false) {}
 
-kj::Own<jsg::Lock> WorkerdApiIsolate::lock() const {
-  return kj::heap<JsgWorkerdIsolate::Lock>(impl->jsgIsolate);
+kj::Own<jsg::Lock> WorkerdApiIsolate::lock(jsg::V8StackScope& stackScope) const {
+  return kj::heap<JsgWorkerdIsolate::Lock>(impl->jsgIsolate, stackScope);
 }
 CompatibilityFlags::Reader WorkerdApiIsolate::getFeatureFlags() const {
   return *impl->features;

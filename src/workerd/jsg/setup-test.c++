@@ -22,14 +22,16 @@ KJ_TEST("eval() is blocked") {
       "throws", "EvalError: Code generation from strings disallowed for this context");
 
   {
-    EvalIsolate::Lock(e.getIsolate()).setAllowEval(true);
+    V8StackScope stackScope;
+    EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(true);
   }
 
   e.expectEval("eval('123')", "number", "123");
   e.expectEval("new Function('a', 'b', 'return a + b;')(123, 321)", "number", "444");
 
   {
-    EvalIsolate::Lock(e.getIsolate()).setAllowEval(false);
+    V8StackScope stackScope;
+    EvalIsolate::Lock(e.getIsolate(), stackScope).setAllowEval(false);
   }
 
   e.expectEval("eval('123')",
@@ -65,7 +67,8 @@ JSG_DECLARE_ISOLATE_TYPE(ConfigIsolate, ConfigContext, ConfigContext::Nested,
 KJ_TEST("configuration values reach nested type declarations") {
   {
     ConfigIsolate isolate(v8System, 123);
-    ConfigIsolate::Lock lock(isolate);
+    V8StackScope stackScope;
+    ConfigIsolate::Lock lock(isolate, stackScope);
     v8::HandleScope handleScope(lock.v8Isolate);
     lock.newContext<ConfigContext>().getHandle(lock.v8Isolate);
   }
@@ -73,7 +76,8 @@ KJ_TEST("configuration values reach nested type declarations") {
     KJ_EXPECT_LOG(ERROR, "failed: expected configuration == 123");
 
     ConfigIsolate isolate(v8System, 456);
-    ConfigIsolate::Lock lock(isolate);
+    V8StackScope stackScope;
+    ConfigIsolate::Lock lock(isolate, stackScope);
     v8::HandleScope handleScope(lock.v8Isolate);
     lock.newContext<ConfigContext>().getHandle(lock.v8Isolate);
   }

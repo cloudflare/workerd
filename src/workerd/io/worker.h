@@ -24,6 +24,7 @@ namespace workerd {
 
 namespace jsg {
   class V8System;
+  class V8StackScope;
   class DOMException;
   class ModuleRegistry;
 }
@@ -464,7 +465,7 @@ public:
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::curent() dosen't work in
   //   the global scope (when no request is running). We need a better design here.
 
-  virtual kj::Own<jsg::Lock> lock() const = 0;
+  virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // Take a lock on the isolate.
   //
   // TODO(cleanup): Change all locking to a synchrenous callback style rather than RAII style, so
@@ -515,6 +516,8 @@ class Worker::Lock {
   // A Worker may bounce between threads as it handles multiple requests, but can only actually
   // execute on one thread at a time. Each thread must therefore lock the Worker while executing
   // code.
+  //
+  // A Worker::Lock MUST be allocated on the stack.
 
 public:
   class TakeSynchronously {
@@ -582,6 +585,7 @@ public:
 private:
   struct Impl;
 
+  jsg::V8StackScope stackScope;
   Worker& worker;
   kj::Own<Impl> impl;
 
