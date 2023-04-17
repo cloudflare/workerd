@@ -447,13 +447,13 @@ jsg::Promise<void> ReadableStream::returnFunction(
   return js.resolvedPromise();
 }
 
-jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js) {
-  JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
+jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDisturbed) {
+  JSG_REQUIRE(!isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
   KJ_SWITCH_ONEOF(controller) {
     KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
       return jsg::alloc<ReadableStream>(IoContext::current(),
-          KJ_REQUIRE_NONNULL(c->removeSource(js)));
+          KJ_REQUIRE_NONNULL(c->removeSource(js, ignoreDisturbed)));
     }
     KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
       auto stream = jsg::alloc<ReadableStream>(c->detach(js));

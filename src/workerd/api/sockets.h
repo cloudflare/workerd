@@ -31,8 +31,8 @@ class Socket: public jsg::Object {
 public:
   Socket(jsg::Lock& js, jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
-      jsg::Optional<SocketOptions> options, kj::TlsStarterCallback tlsStarter, bool isSecureSocket,
-      kj::String domain)
+      jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
+      bool isSecureSocket, kj::String domain)
       : readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
         closedPromise(kj::mv(closeFulfiller.promise)),
@@ -83,7 +83,7 @@ private:
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Promise<void> writeDisconnectedPromise;
   jsg::Optional<SocketOptions> options;
-  kj::TlsStarterCallback tlsStarter;
+  kj::Own<kj::TlsStarterCallback> tlsStarter;
   // Callback used to upgrade the existing connection to a secure one.
   bool isSecureSocket;
   // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by

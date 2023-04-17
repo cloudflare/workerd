@@ -609,10 +609,10 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
 }
 
 kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::removeSource(
-    jsg::Lock& js) {
+    jsg::Lock& js, bool ignoreDisturbed) {
   JSG_REQUIRE(!isLockedToReader(), TypeError,
                "This ReadableStream is currently locked to a reader.");
-  JSG_REQUIRE(!disturbed, TypeError, "This ReadableStream is disturbed.");
+  JSG_REQUIRE(!disturbed || ignoreDisturbed, TypeError, "This ReadableStream is disturbed.");
 
   readState.init<Locked>();
   disturbed = true;
