@@ -810,7 +810,7 @@ public:
   kj::Own<CacheClient> getCacheClient();
   // Get an HttpClient to use for Cache API subrequests.
 
-  jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+  jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
   // Returns an object that ensures an async JS operation started in the current scope captures the
   // current request's trace span.
 
@@ -966,8 +966,6 @@ private:
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
-
-  kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
 
   void setTimeoutImpl(TimeoutId timeoutId, bool repeat, jsg::V8Ref<v8::Function> function,
     double msDelay, kj::Array<jsg::Value> args);

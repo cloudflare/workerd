@@ -161,7 +161,6 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
       waitUntilTasks(*this),
-      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
       timeoutManager(kj::heap<TimeoutManagerImpl>()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
@@ -918,20 +917,22 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   return getIoChannelFactory().getCache();
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(jsg::Lock& js) {
-  auto context = js.v8Isolate->GetCurrentContext();
+jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(Worker::Lock& lock) {
+  jsg::Lock& jsgLock = lock;
+  auto context = jsgLock.v8Isolate->GetCurrentContext();
   auto ioOwnSpanParent = IoContext::current().addObject(kj::heap(getMetrics().getSpan()));
   auto spanHandle = jsg::wrapOpaque(context, kj::mv(ioOwnSpanParent));
-  return jsg::AsyncContextFrame::StorageScope(js, *traceAsyncContextKey, js.v8Ref(spanHandle));
+  return jsg::AsyncContextFrame::StorageScope(
+      jsgLock, lock.getTraceAsyncContextKey(), jsgLock.v8Ref(spanHandle));
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
   // If called while lock is held, try to use the trace info stored in the async context.
-  KJ_IF_MAYBE (js, currentLock) {
-    KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*js)) {
-      KJ_IF_MAYBE (value, frame->get(*traceAsyncContextKey)) {
-        auto handle = value->getHandle(*js);
-        jsg::Lock& jsgLock = *js;
+  KJ_IF_MAYBE (lock, currentLock) {
+    KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*lock)) {
+      KJ_IF_MAYBE (value, frame->get(lock->getTraceAsyncContextKey())) {
+        auto handle = value->getHandle(*lock);
+        jsg::Lock& jsgLock = *lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(jsgLock.v8Isolate, handle);
         return spanParent->newChild(operationName);
       }
