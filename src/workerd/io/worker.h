@@ -12,6 +12,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/async-context.h>
 #include <kj/mutex.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/actor-storage.capnp.h>
@@ -444,6 +445,7 @@ private:
   class LimitedBodyWrapper;
 
   size_t nextRequestId = 0;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
 
   friend class Worker;
   friend class IsolateChannelImpl;
@@ -581,6 +583,9 @@ public:
 
   api::ServiceWorkerGlobalScope& getGlobalScope();
   // Get the C++ object representing the global scope.
+
+  jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+  // Get the opaque storage key to use for recording trace information in async contexts.
 
 private:
   struct Impl;
