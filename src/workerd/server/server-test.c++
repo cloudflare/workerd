@@ -1265,6 +1265,74 @@ KJ_TEST("Server: invalid entrypoint") {
           "has no such named entrypoint.\n");
 }
 
+KJ_TEST("Server: call queue handler on service binding") {
+  TestServer test(R"((
+    services = [
+      ( name = "service1",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          compatibilityFlags = ["service_binding_extra_handlers"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let result = await env.service2.queue("queueName1", [
+                `        {id: "1", timestamp: 12345, body: "my message"},
+                `        {id: "msg2", timestamp: 23456, body: 22},
+                `    ]);
+                `    return new Response(`queue outcome: ${result.outcome}, ackAll: ${result.ackAll}`);
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "service2", service = "service2")]
+        )
+      ),
+      ( name = "service2",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("unimplemented");
+                `  },
+                `  async queue(event) {
+                `    if (event.queue == "queueName1" &&
+                `        event.messages.length == 2 &&
+                `        event.messages[0].id == "1" &&
+                `        event.messages[0].timestamp.getTime() == 12345 &&
+                `        event.messages[0].body == "my message" &&
+                `        event.messages[1].id == "msg2" &&
+                `        event.messages[1].timestamp.getTime() == 23456 &&
+                `        event.messages[1].body == 22) {
+                `      event.ackAll();
+                `      return;
+                `    }
+                `    throw new Error("messages didn't match expectations: " + JSON.stringify(event.messages));
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "service1"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "queue outcome: 1, ackAll: true");
+}
+
 KJ_TEST("Server: Durable Objects (in memory)") {
   TestServer test(R"((
     services = [

@@ -2014,6 +2014,43 @@ jsg::Promise<void> Fetcher::delete_(
       js, JSG_THIS, kj::mv(url), kj::mv(subInit), featureFlags));
 }
 
+jsg::Promise<QueueResponse> Fetcher::queue(
+      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages) {
+  auto& ioContext = IoContext::current();
+  auto worker = getClient(ioContext, nullptr, "queue"_kj);
+
+  auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
+  for (auto& msg : messages) {
+    jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+        .version = 15,
+        .omitHeader = false,
+    });
+    serializer.write(kj::mv(msg.body));
+    encodedMessages.add(IncomingQueueMessage{
+        .id=kj::mv(msg.id),
+        .timestamp=msg.timestamp,
+        .body=serializer.release().data,
+    });
+  }
+
+  auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params{
+      .queueName=kj::mv(queueName),
+      .messages=encodedMessages.finish(),
+  });
+
+  auto eventRef = kj::addRef(*event); // attempt to work around windows-specific null pointer deref.
+  return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
+      [event=kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
+    return QueueResponse{
+        .outcome=static_cast<uint16_t>(result.outcome),
+        .retryAll=event->getRetryAll(),
+        .ackAll=event->getAckAll(),
+        .explicitRetries=event->getExplicitRetries(),
+        .explicitAcks=event->getExplicitAcks(),
+    };
+  });
+}
+
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::StringPtr operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {

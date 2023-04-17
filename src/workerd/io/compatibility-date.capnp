@@ -286,4 +286,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the tunneling of exceptions from a dynamic dispatch callee back into the caller.
   # Previously any uncaught exception in the callee would be returned to the caller as an empty
   # HTTP 500 response.
+
+   serviceBindingExtraHandlers @28 :Bool
+      $compatEnableFlag("service_binding_extra_handlers")
+      $experimental;
+  # Allows service bindings to call additional event handler methods on the target Worker.
+  # Initially only includes support for calling the queue() handler.
 }
