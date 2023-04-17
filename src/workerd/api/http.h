@@ -16,6 +16,7 @@
 #include "url.h"
 #include "url-standard.h"
 #include "blob.h"
+#include "queue.h"
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
@@ -463,10 +464,29 @@ public:
   jsg::Promise<void> delete_(jsg::Lock& js, kj::String url,
       CompatibilityFlags::Reader featureFlags);
 
+  struct ServiceBindingQueueMessage {
+    // Representation of a queue message for use when invoking the queue() event handler on another
+    // worker via a service binding.
+    kj::String id;
+    kj::Date timestamp;
+    jsg::Value body;
+    JSG_STRUCT(id, timestamp, body);
+    JSG_STRUCT_TS_OVERRIDE(ServiceBindingQueueMessage<Body = unknown> {
+      body: Body;
+    });
+  };
+
+  jsg::Promise<QueueResponse> queue(
+      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
+
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     JSG_METHOD(fetch);
     if (flags.getTcpSocketsSupport()) {
       JSG_METHOD(connect);
+    }
+
+    if (flags.getServiceBindingExtraHandlers()) {
+      JSG_METHOD(queue);
     }
 
     JSG_METHOD(get);
@@ -1080,7 +1100,8 @@ kj::String makeRandomBoundaryCharacters();
   api::Request,                       \
   api::Request::InitializerDict,      \
   api::Fetcher,                       \
-  api::Fetcher::PutOptions
+  api::Fetcher::PutOptions,           \
+  api::Fetcher::ServiceBindingQueueMessage
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
