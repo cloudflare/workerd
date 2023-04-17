@@ -164,8 +164,11 @@ bool setDurableObjectResetError(v8::Isolate* isolate, v8::Local<v8::Value>& exce
 }
 
 struct TunneledErrorType {
-  kj::StringPtr type;
-  // What type of JavaScript error to throw.
+  kj::StringPtr message;
+  // The original error message stripped of prefixes.
+
+  bool isJsgError;
+  // Was this error prefixed by JSG already?
 
   bool isInternal;
   // Is this error internal? If so, the error message should be logged to syslog and hidden from
@@ -230,7 +233,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
       -> kj::Maybe<TunneledErrorType> {
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_CFJS)) {
       return TunneledErrorType{
-        .type = msg.slice(ERROR_TUNNELED_PREFIX_CFJS.size()),
+        .message = msg.slice(ERROR_TUNNELED_PREFIX_CFJS.size()),
+        .isJsgError = true,
         .isInternal = false,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
@@ -238,7 +242,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     }
     if (msg.startsWith(ERROR_TUNNELED_PREFIX_JSG)) {
       return TunneledErrorType{
-        .type = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
+        .message = msg.slice(ERROR_TUNNELED_PREFIX_JSG.size()),
+        .isJsgError = true,
         .isInternal = false,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
@@ -246,7 +251,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_CFJS)) {
       return TunneledErrorType{
-        .type = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_CFJS.size()),
+        .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_CFJS.size()),
+        .isJsgError = true,
         .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
@@ -254,7 +260,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
       return TunneledErrorType{
-        .type = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
+        .message = msg.slice(ERROR_INTERNAL_SOURCE_PREFIX_JSG.size()),
+        .isJsgError = true,
         .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
@@ -264,9 +271,10 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     return nullptr;
   };
 
-  auto makeDefaultError = [](Properties properties) {
+  auto makeDefaultError = [](kj::StringPtr msg, Properties properties) {
     return TunneledErrorType{
-      .type = "Error",
+      .message = msg,
+      .isJsgError = false,
       .isInternal = true,
       .isFromRemote = properties.isFromRemote,
       .isDurableObjectReset = properties.isDurableObjectReset,
@@ -286,7 +294,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     }
 
     // We failed to extract an expected error, make a default one.
-    return makeDefaultError(properties);
+    return makeDefaultError(internalMessage, properties);
   }
 
   while (internalMessage.startsWith("broken.")) {
@@ -300,7 +308,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   KJ_IF_MAYBE(e, tryExtractError(internalMessage, properties)) {
     return kj::mv(*e);
   } else {
-    return makeDefaultError(properties);
+    return makeDefaultError(internalMessage, properties);
   }
 }
 struct DecodedException {
@@ -332,7 +340,7 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
   auto tunneledInfo = tunneledErrorType(internalMessage);
 
-  auto errorType = tunneledInfo.type;
+  auto errorType = tunneledInfo.message;
   auto appMessage = [&](kj::StringPtr errorString) -> kj::StringPtr {
     if (tunneledInfo.isInternal) {
       return "internal error"_kj;
@@ -353,24 +361,26 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
   }
 
   do {
-    HANDLE_V8_ERROR("Error", Error);
-    HANDLE_V8_ERROR("RangeError", RangeError);
-    HANDLE_V8_ERROR("TypeError", TypeError);
-    HANDLE_V8_ERROR("SyntaxError", SyntaxError);
-    HANDLE_V8_ERROR("ReferenceError", ReferenceError);
-    HANDLE_V8_ERROR("CompileError", WasmCompileError);
-    HANDLE_V8_ERROR("LinkError", WasmCompileError);
-    HANDLE_V8_ERROR("RuntimeError", WasmCompileError);
+    if (tunneledInfo.isJsgError) {
+      HANDLE_V8_ERROR("Error", Error);
+      HANDLE_V8_ERROR("RangeError", RangeError);
+      HANDLE_V8_ERROR("TypeError", TypeError);
+      HANDLE_V8_ERROR("SyntaxError", SyntaxError);
+      HANDLE_V8_ERROR("ReferenceError", ReferenceError);
+      HANDLE_V8_ERROR("CompileError", WasmCompileError);
+      HANDLE_V8_ERROR("LinkError", WasmCompileError);
+      HANDLE_V8_ERROR("RuntimeError", WasmCompileError);
 
-    // DOMExceptions require a parenthesized error name argument, like DOMException(SyntaxError).
-    if (errorType.startsWith("DOMException(")) {
-      errorType = errorType.slice(strlen("DOMException("));
-      // Check for closing brace
-      KJ_IF_MAYBE(closeParen, errorType.findFirst(')')) {
-        auto errorName = kj::str(errorType.slice(0, *closeParen));
-        auto message = appMessage(errorType.slice(1 + *closeParen));
-        result.handle = tryMakeDomExceptionOrDefaultError(isolate, message, errorName);
-        break;
+      // DOMExceptions require a parenthesized error name argument, like DOMException(SyntaxError).
+      if (errorType.startsWith("DOMException(")) {
+        errorType = errorType.slice(strlen("DOMException("));
+        // Check for closing brace
+        KJ_IF_MAYBE(closeParen, errorType.findFirst(')')) {
+          auto errorName = kj::str(errorType.slice(0, *closeParen));
+          auto message = appMessage(errorType.slice(1 + *closeParen));
+          result.handle = tryMakeDomExceptionOrDefaultError(isolate, message, errorName);
+          break;
+        }
       }
     }
     // unrecognized exception type
@@ -392,13 +402,19 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
 
 }  // namespace
 
-kj::String extractTunneledExceptionDescription(kj::StringPtr message) {
-  return kj::str(tunneledErrorType(message).type);
+kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
+  auto tunneledError = tunneledErrorType(message);
+  if (tunneledError.isInternal) {
+    return "Error: internal error";
+  } else {
+    return tunneledError.message;
+  }
 }
 
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason) {
   // TODO(soon) Once we support multiple brokenness reasons, we can make this much simpler.
 
+  KJ_LOG(INFO, "Annotating with brokenness", internalMessage, brokenessReason);
   auto tunneledInfo = tunneledErrorType(internalMessage);
 
   kj::StringPtr remotePrefix;
@@ -407,12 +423,18 @@ kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokeness
   }
 
   kj::StringPtr prefixType = ERROR_TUNNELED_PREFIX_JSG;
+  kj::StringPtr internalErrorType;
   if (tunneledInfo.isInternal) {
     prefixType = ERROR_INTERNAL_SOURCE_PREFIX_JSG;
+    if (!tunneledInfo.isJsgError) {
+      // This is not a JSG error, so we need to give it a type.
+      internalErrorType = "Error: "_kj;
+    }
   }
 
   return kj::str(
-      remotePrefix, brokenessReason, ERROR_PREFIX_DELIM, prefixType, tunneledInfo.type);
+      remotePrefix, brokenessReason, ERROR_PREFIX_DELIM, prefixType, internalErrorType,
+      tunneledInfo.message);
 }
 
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {

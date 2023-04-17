@@ -330,7 +330,7 @@ void reportStartupError(
 
       auto& ex = permanentException.emplace(kj::mv(*limitError));
       KJ_IF_MAYBE(e, errorReporter) {
-        e->addError(kj::mv(description));
+        e->addError(kj::heapString(description));
       } else KJ_IF_MAYBE(i, inspector) {
         // We want to extend just enough cpu time as is necessary to report the exception
         // to the inspector here. 10 milliseconds should be more than enough.
