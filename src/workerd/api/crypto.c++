@@ -118,6 +118,8 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"ECDSA"_kj,             &CryptoKey::Impl::importEcdsa, &CryptoKey::Impl::generateEcdsa},
     {"ECDH"_kj,              &CryptoKey::Impl::importEcdh, &CryptoKey::Impl::generateEcdh},
     {"NODE-ED25519"_kj,      &CryptoKey::Impl::importEddsa, &CryptoKey::Impl::generateEddsa},
+    {"Ed25519"_kj,           &CryptoKey::Impl::importEddsa, &CryptoKey::Impl::generateEddsa},
+    {"X25519"_kj,            &CryptoKey::Impl::importEddsa, &CryptoKey::Impl::generateEddsa},
     {"RSA-RAW"_kj,           &CryptoKey::Impl::importRsaRaw},
   };
 

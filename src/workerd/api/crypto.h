@@ -14,7 +14,7 @@
 
 namespace workerd::api {
 namespace {
-class EdDsaKey;
+class EdDsaKeyBase;
 class EllipticKey;
 }
 
@@ -230,7 +230,7 @@ private:
 
   friend class SubtleCrypto;
   friend class EllipticKey;
-  friend class EdDsaKey;
+  friend class EdDsaKeyBase;
 };
 
 struct CryptoKeyPair {
