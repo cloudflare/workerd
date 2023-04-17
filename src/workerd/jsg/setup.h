@@ -310,8 +310,12 @@ public:
     // constructing a `Lock` on the stack.
 
   public:
-    Lock(const Isolate& isolate, V8StackScope& scope)
+    Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
+      // `V8StackScope` must be provided to prove that one has been created on the stack before
+      // taking a lock. Any GC'dp ointers stored on the stack must be kept within this scope in
+      // order for V8's stack-scanning GC to find them.
+
       jsgIsolate.clearDestructionQueue();
     }
 

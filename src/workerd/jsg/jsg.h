@@ -2062,6 +2062,9 @@ class V8StackScope {
   // allocated on the heap. The purpose of V8StackScope is to capture the start of the stack
   // range that V8 must scan when performing conservative stack-scanning garbage collection.
 public:
+  V8StackScope();
+  KJ_DISALLOW_COPY_AND_MOVE(V8StackScope);
+
   // No interface.
 
 private:
