@@ -387,7 +387,7 @@ void AbortSignal::throwIfAborted(jsg::Lock& js) {
 jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   auto signal = jsg::alloc<AbortSignal>();
 
-  auto context = js.v8Isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
       context, context->Global());
@@ -477,7 +477,7 @@ kj::Promise<void> Scheduler::wait(
   //   the abort signal to support wrapping jsg promises.
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  auto context = js.v8Isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
       context, context->Global());

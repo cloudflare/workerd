@@ -1006,8 +1006,7 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
         // on the stack? Once logMessage is updated to take a jsg::Lock reference we
         // can remove the v8::HandleScope here.
         v8::HandleScope scope(js.v8Isolate);
-        logMessage(js.v8Isolate->GetCurrentContext(),
-                    static_cast<uint16_t>(cdp::LogType::WARNING), message);
+        logMessage(js.v8Context(), static_cast<uint16_t>(cdp::LogType::WARNING), message);
       }
       KJ_LOG(INFO, "console warning", message);
     });
@@ -1355,7 +1354,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
         KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
           auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-          unboundScript.run(lock.v8Isolate->GetCurrentContext());
+          unboundScript.run(lock.v8Context());
         }
         KJ_CASE_ONEOF(mainModule, kj::Path) {
           // const_cast OK because we hold the lock.
@@ -1478,7 +1477,7 @@ void Worker::handleLog(jsg::Lock& js, LogLevel level, const v8::FunctionCallback
       //
       // Otherwise we stringify the argument.
       v8::HandleScope handleScope(js.v8Isolate);
-      auto context = js.v8Isolate->GetCurrentContext();
+      auto context = js.v8Context();
       bool shouldSerialiseToJson = false;
       if (arg->IsNull() || arg->IsNumber() || arg->IsArray() || arg->IsBoolean() || arg->IsString() ||
           arg->IsUndefined()) { // This is special cased for backwards compatibility.

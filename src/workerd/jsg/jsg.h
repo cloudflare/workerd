@@ -1839,6 +1839,8 @@ public:
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
   // needed outside JSG itself.
 
+  v8::Local<v8::Context> v8Context() { return v8Isolate->GetCurrentContext(); }
+
   static Lock& from(v8::Isolate* v8Isolate) {
     // Get the current Lock for the given V8 isolate. Segfaults if the isolate is not locked.
     //
@@ -2112,7 +2114,7 @@ v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Val
 
 template <typename T>
 V8Ref<T> V8Ref<T>::deepClone(jsg::Lock& js) {
-  return js.v8Ref(jsg::deepClone(js.v8Isolate->GetCurrentContext(), getHandle(js))
+  return js.v8Ref(jsg::deepClone(js.v8Context(), getHandle(js))
       .template As<T>());
 }
 

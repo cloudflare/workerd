@@ -617,7 +617,7 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
       [function = function.addRef(js),
        argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
     auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
       return arg.getHandle(js);
@@ -651,7 +651,7 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
       [function = function.addRef(js),
        argv = kj::mv(argv)]
        (jsg::Lock& js) mutable {
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
     auto localFunction = function.getHandle(js);
     auto localArgs = KJ_MAP(arg, argv) {
       return arg.getHandle(js);

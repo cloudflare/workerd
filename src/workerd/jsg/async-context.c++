@@ -70,14 +70,11 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
 }
 
 v8::Local<v8::Function> AsyncContextFrame::wrapSnapshot(Lock& js) {
-  auto isolate = js.v8Isolate;
-  auto context = isolate->GetCurrentContext();
-
-  return js.wrapReturningFunction(context, JSG_VISITABLE_LAMBDA(
+  return js.wrapReturningFunction(js.v8Context(), JSG_VISITABLE_LAMBDA(
     (frame = AsyncContextFrame::currentRef(js)),
     (frame),
     (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
-      auto context = js.v8Isolate->GetCurrentContext();
+      auto context = js.v8Context();
       JSG_REQUIRE(args[0]->IsFunction(), TypeError, "The first argument must be a function");
       auto fn = args[0].As<v8::Function>();
       kj::Vector<v8::Local<v8::Value>> argv(args.Length() - 1);
@@ -95,8 +92,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
     Lock& js,
     v8::Local<v8::Function> fn,
     kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  auto isolate = js.v8Isolate;
-  auto context = isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   return js.wrapReturningFunction(context, JSG_VISITABLE_LAMBDA(
       (
@@ -107,7 +103,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrap(
       (frame, thisArg, fn),
       (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto function = fn.getHandle(js);
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
 
     kj::Vector<v8::Local<v8::Value>> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {
@@ -123,8 +119,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
     Lock& js,
     v8::Local<v8::Function> fn,
     kj::Maybe<v8::Local<v8::Value>> thisArg) {
-  auto isolate = js.v8Isolate;
-  auto context = isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   return js.wrapReturningFunction(context, JSG_VISITABLE_LAMBDA(
       (
@@ -134,7 +129,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
       (thisArg, fn),
       (Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto function = fn.getHandle(js);
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
 
     kj::Vector<v8::Local<v8::Value>> argv(args.Length());
     for (int n = 0; n < args.Length(); n++) {

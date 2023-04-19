@@ -388,7 +388,7 @@ Part::Modifier maybeTokenToModifier(kj::Maybe<Token&> modifierToken) {
 // TODO (later): Investigate whether there is a more efficient way to handle this.
 bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& component) {
   auto handle = component.regex.getHandle(js);
-  auto context = js.v8Isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   const auto checkIt = [&handle, &js, &context](const char* name) {
     return !jsg::check(handle->Exec(context, jsg::v8Str(js.v8Isolate, name)))->IsNullOrUndefined();
@@ -1125,7 +1125,7 @@ RegexAndNameList generateRegularExpressionAndNameList(
   // regular expression syntax is invalid as opposed to the default SyntaxError
   // that V8 throws.
   return js.tryCatch([&]() {
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
     return RegexAndNameList {
       js.v8Ref(jsg::check(v8::RegExp::New(context,
                         v8Str(js.v8Isolate, result.finish()),
@@ -1835,7 +1835,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
     jsg::UsvStringPtr input) {
   using Groups = jsg::Dict<jsg::UsvString, jsg::UsvString>;
 
-  auto context = js.v8Isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   auto execResult =
       jsg::check(component.regex.getHandle(js)->Exec(

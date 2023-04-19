@@ -479,7 +479,7 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(jwk, JsonWebKey) {
         auto jwkValue = jwkHandler.wrap(js, kj::mv(jwk));
-        auto stringified = jsg::check(v8::JSON::Stringify(isolate->GetCurrentContext(), jwkValue));
+        auto stringified = jsg::check(v8::JSON::Stringify(js.v8Context(), jwkValue));
         kj::Vector<kj::byte> converted;
 
         auto serializedLength = stringified->Utf8Length(isolate);
@@ -530,7 +530,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js, kj::Str
     if (format == "jwk") {
       auto jsonJwk = jsg::v8Str(isolate, bytes.asChars());
 
-      auto jwkDict = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonJwk));
+      auto jwkDict = jsg::check(v8::JSON::Parse(js.v8Context(), jsonJwk));
 
       importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict), DOMDataError,
           "Missing \"kty\" field or corrupt JSON unwrapping key?");

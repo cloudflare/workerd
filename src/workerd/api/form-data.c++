@@ -423,7 +423,7 @@ void FormData::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
-  auto context = isolate->GetCurrentContext();  // Needed later for Call().
+  auto context = js.v8Context();  // Needed later for Call().
 
   // On each iteration of the for loop, a JavaScript callback is invokved. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick

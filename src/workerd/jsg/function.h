@@ -342,7 +342,7 @@ public:
       auto& typeWrapper = TypeWrapper::from(isolate);
 
       v8::HandleScope scope(isolate);
-      auto context = isolate->GetCurrentContext();
+      auto context = js.v8Context();
       v8::Local<v8::Value> argv[sizeof...(Args)] {
         typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
       };
@@ -378,7 +378,7 @@ public:
       auto& typeWrapper = TypeWrapper::from(isolate);
 
       v8::HandleScope scope(isolate);
-      auto context = isolate->GetCurrentContext();
+      auto context = js.v8Context();
       v8::Local<v8::Value> argv[sizeof...(Args)] {
         typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
       };

@@ -80,7 +80,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     r2Result.throwIfError("listBucket", errorType);
 
     auto isolate = js.v8Isolate;
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Context();
 
     capnp::MallocMessageBuilder responseMessage;
     capnp::JsonCodec json;
