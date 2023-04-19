@@ -812,7 +812,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
       kj::mv(keyAlgorithm), extractable, usages);
 }
 
-kj::Own<EVP_PKEY> importRsaFromJwk(SubtleCrypto::JsonWebKey&& keyDataJwk) {
+kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
   auto rsaKey = OSSL_NEW(RSA);
 
   auto modulus = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.n),
@@ -946,7 +946,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
           "algorithm \"", jwkHash->first, "\".");
     }
 
-    return importRsaFromJwk(kj::mv(keyDataJwk));
+    return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
   // get0 avoids adding a refcount...
@@ -1018,7 +1018,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
           "Unrecognized or unimplemented algorithm \"", *alg,
           "\" listed in JSON Web Key Algorithm parameter.");
     }
-    return importRsaFromJwk(kj::mv(keyDataJwk));
+    return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
   JSG_REQUIRE(keyType == "private", DOMDataError,
