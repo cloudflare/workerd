@@ -1277,8 +1277,8 @@ public:
   inline int hashCode() const { return hash; }
 
 private:
-  kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
   int hash;
+  kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;
 
   kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> getUnwrapped(v8::Isolate* isolate);
 
