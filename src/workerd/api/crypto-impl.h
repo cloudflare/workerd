@@ -10,6 +10,7 @@
 #include "crypto.h"
 #include <kj/encoding.h>
 #include <openssl/evp.h>
+#include <openssl/bio.h>
 
 #define OSSLCALL(...) if ((__VA_ARGS__) != 1) \
     ::workerd::api::throwOpensslError(__FILE__, __LINE__, #__VA_ARGS__)
@@ -257,6 +258,12 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 #define BIGNUM_new BN_new
 #define BIGNUM_free BN_free
 // BIGNUM obnoxiously doesn't follow the naming convention...
+#define BIO_new BIO_new_mem_buf
+#define BIO_free BIO_free_all
+// Neither does BIO...
+
+#define OSSL_BIO(buf, ...) OSSL_NEW(BIO, buf.begin(), buf.size())
+// Wrap a kj::Array<kj::byte> (or kj::ArrayPtr) with an openssl BIO
 
 template <typename T>
 static inline T integerCeilDivision(T a, T b) {
