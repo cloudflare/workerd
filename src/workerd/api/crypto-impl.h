@@ -287,6 +287,8 @@ static inline T integerCeilDivision(T a, T b) {
   return a == 0 ? 0 : 1 + (a - 1) / b;
 }
 
+kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk);
+
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(EC_KEY);
