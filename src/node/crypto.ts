@@ -40,12 +40,28 @@ import {
   ArrayLike,
 } from 'node-internal:crypto_pbkdf2';
 
+import {
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
+} from 'node-internal:crypto_keys';
+
 export {
+  // Random
   randomBytes,
   randomFillSync,
   randomFill,
   randomInt,
   randomUUID,
+  // Primes
   PrimeNum as primeNum,
   GeneratePrimeOptions as generatePrimeOptions,
   CheckPrimeOptions as checkPrimeOptions,
@@ -53,9 +69,22 @@ export {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
   ArrayLike as arrayLike,
+  // Keys
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
 }
 
 // We do not implement the openssl secure heap.
@@ -83,6 +112,18 @@ export const fips = true;
 export function getFips() { return fips; }
 
 export default {
+  // Keys,
+  KeyObject,
+  PublicKeyObject,
+  PrivateKeyObject,
+  SecretKeyObject,
+  generateKey,
+  generateKeyPair,
+  generateKeyPairSync,
+  generateKeySync,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
   // Random
   getRandomValues,
   randomBytes,
