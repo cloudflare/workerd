@@ -52,7 +52,7 @@ compat_dates = [
     # https://developers.cloudflare.com/workers/platform/compatibility-dates/#compliant-transformstream-constructor
     ("2022-11-30", "2022-11-30"),
     # Latest compatibility date (note these types should be the same as the previous entry)
-    ("2030-01-01", "experimental"),
+    (None, "experimental"),
 ]
 
 filegroup(
@@ -61,11 +61,11 @@ filegroup(
         "//src/workerd/tools:api_encoder_" + label
         for (date, label) in compat_dates
     ],
-    visibility = ["//visibility:public"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    visibility = ["//visibility:public"],
 )
 
 [
@@ -75,15 +75,16 @@ filegroup(
         args = [
             "--output",
             "$(location " + label + ".api.capnp.bin)",
+        ] + ([
             "--compatibility-date",
             date,
-        ],
-        tool = "api_encoder_bin",
-        visibility = ["//visibility:public"],
+        ] if date else []),
         target_compatible_with = select({
             "@platforms//os:windows": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        tool = "api_encoder_bin",
+        visibility = ["//visibility:public"],
     )
     for (date, label) in compat_dates
 ]
@@ -98,16 +99,20 @@ cc_ast_dump(
     name = "dump_api_ast",
     src = api_encoder_src,
     out = "api.ast.json.gz",
-    deps = [":api_encoder_lib"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    deps = [":api_encoder_lib"],
 )
 
 rust_binary(
     name = "param_extractor_bin",
     srcs = ["param-extractor.rs"],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
     deps = [
         "@crates_vendor//:anyhow",
         "@crates_vendor//:clang-ast",
@@ -116,10 +121,6 @@ rust_binary(
         "@crates_vendor//:serde",
         "@crates_vendor//:serde_json",
     ],
-    target_compatible_with = select({
-        "@platforms//os:windows": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
 )
 
 run_binary(
@@ -134,10 +135,10 @@ run_binary(
         "--output",
         "$(location param-names.json)",
     ],
-    tool = "param_extractor_bin",
-    visibility = ["//visibility:public"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    tool = "param_extractor_bin",
+    visibility = ["//visibility:public"],
 )
