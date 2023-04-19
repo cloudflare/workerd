@@ -265,6 +265,21 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 #define OSSL_BIO(buf, ...) OSSL_NEW(BIO, buf.begin(), buf.size())
 // Wrap a kj::Array<kj::byte> (or kj::ArrayPtr) with an openssl BIO
 
+// Adopted from Node.js' crypto implementation. the MarkPopErrorOnReturn
+// and ClearErrorOnReturn mechanisms make working with the openssl error
+// stack a bit easier...
+struct MarkPopErrorOnReturn {
+  MarkPopErrorOnReturn() { ERR_set_mark(); }
+  ~MarkPopErrorOnReturn() { ERR_pop_to_mark(); }
+  KJ_DISALLOW_COPY_AND_MOVE(MarkPopErrorOnReturn);
+};
+
+struct ClearErrorOnReturn {
+  ClearErrorOnReturn() = default;
+  ~ClearErrorOnReturn() { ERR_clear_error(); }
+  KJ_DISALLOW_COPY_AND_MOVE(ClearErrorOnReturn);
+};
+
 template <typename T>
 static inline T integerCeilDivision(T a, T b) {
   // Returns ceil(a / b) for integers (std::ceil always returns a floating point result).
