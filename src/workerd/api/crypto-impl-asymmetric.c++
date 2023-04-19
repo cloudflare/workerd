@@ -1488,7 +1488,7 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
 }  // namespace
 
-kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk) {
+kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk) {
   if (curveId == NID_ED25519 || curveId == NID_X25519) {
     auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
     auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
