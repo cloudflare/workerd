@@ -288,6 +288,7 @@ static inline T integerCeilDivision(T a, T b) {
 }
 
 kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk);
+kj::Own<EVP_PKEY> importRsaFromJwk(SubtleCrypto::JsonWebKey&& keyDataJwk);
 
 }  // namespace workerd::api
 
