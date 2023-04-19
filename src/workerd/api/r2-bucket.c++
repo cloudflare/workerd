@@ -188,6 +188,24 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(kj::StringPtr action, R2Result
   return parseObjectMetadata<T>(responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
+void addEtagsToBuilder(capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
+  R2Bucket::Etag* currentEtag = etagArray.begin();
+  for (unsigned int i = 0; i < etagArray.size(); i++) {
+    KJ_SWITCH_ONEOF(*currentEtag) {
+      KJ_CASE_ONEOF(e, R2Bucket::WildcardEtag) {
+        etagListBuilder[i].initType().setWildcard();
+      } KJ_CASE_ONEOF(e, R2Bucket::StrongEtag) {
+        etagListBuilder[i].initType().setStrong();
+        etagListBuilder[i].setValue(e.value);
+      } KJ_CASE_ONEOF(e, R2Bucket::WeakEtag) {
+        etagListBuilder[i].initType().setWeak();
+        etagListBuilder[i].setValue(e.value);
+      }
+    }
+    currentEtag = std::next(currentEtag);
+  }
+}
+
 template <typename Builder, typename Options>
 void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_MAYBE(i, o.onlyIf) {
@@ -203,12 +221,20 @@ void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
       KJ_UNREACHABLE;
     }();
 
-    auto onlyIfBuilder = builder.initOnlyIf();
-    KJ_IF_MAYBE(e, c.etagMatches) {
-      onlyIfBuilder.setEtagMatches(*e);
+    R2Conditional::Builder onlyIfBuilder = builder.initOnlyIf();
+    KJ_IF_MAYBE(etagArray, c.etagMatches) {
+      capnp::List<R2Etag>::Builder etagMatchList = onlyIfBuilder.initEtagMatches(etagArray->size());
+      addEtagsToBuilder(
+        etagMatchList,
+        kj::arrayPtr<R2Bucket::Etag>(etagArray->begin(), etagArray->size())
+      );
     }
-    KJ_IF_MAYBE(e, c.etagDoesNotMatch) {
-      onlyIfBuilder.setEtagDoesNotMatch(*e);
+    KJ_IF_MAYBE(etagArray, c.etagDoesNotMatch) {
+      auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray->size());
+      addEtagsToBuilder(
+        etagDoesNotMatchList,
+        kj::arrayPtr<R2Bucket::Etag>(etagArray->begin(), etagArray->size())
+      );
     }
     KJ_IF_MAYBE(d, c.uploadedBefore) {
       onlyIfBuilder.setUploadedBefore(
@@ -797,17 +823,94 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
   });
 }
 
+kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
+  kj::StringPtr condHeader,
+  kj::Vector<R2Bucket::Etag> etagAccumulator = kj::Vector<R2Bucket::Etag>(),
+  bool leadingCommaRequired = false
+) {
+  // Vague recursion termination proof:
+  // Stop condition triggers when no more etags and wildcards are found
+  // => empty string also results in termination
+  // There are 2 recursive calls in this function body, each of them always moves the start of the
+  // condHeader to some value found in the condHeader + 1.
+  // => upon each recursion, the size of condHeader is reduced by at least 1.
+  // Eventually we must arrive at an empty string, hence triggering the stop condition.
+
+  size_t nextWildcard = condHeader.findFirst('*').orDefault(SIZE_MAX);
+  size_t nextQuotation = condHeader.findFirst('"').orDefault(SIZE_MAX);
+  size_t nextWeak = condHeader.findFirst('W').orDefault(SIZE_MAX);
+  size_t nextComma = condHeader.findFirst(',').orDefault(SIZE_MAX);
+
+  if (nextQuotation == SIZE_MAX && nextWildcard == SIZE_MAX) {
+  // Both of these being SIZE_MAX means no more wildcards or double quotes are left in the header.
+  // When this is the case, there's no more useful etags that can potentially still be extracted.
+    return etagAccumulator.releaseAsArray();
+  }
+
+  if (nextComma < nextWildcard && nextComma < nextQuotation && nextComma < nextWeak) {
+  // Get rid of leading commas, this can happen during recursion because servers must deal with
+  // empty list elements. E.g.: If-None-Match "abc", , "cdef" should be accepted by the server.
+    // This slice is always safe, since we're at most setting start to the last index + 1,
+    // which just results in an empty list if it's out of bounds by 1.
+    return parseConditionalEtagHeader(condHeader.slice(nextComma + 1), kj::mv(etagAccumulator));
+  } else if (leadingCommaRequired) {
+  // Did not find a leading comma, and we expected a leading comma before any further etags
+    KJ_FAIL_REQUIRE("Comma was expected to separate etags");
+  }
+
+  if (nextWildcard < nextQuotation) {
+    // Unquoted wildcard found
+    // remove all other etags since they're overridden by the wildcard anyways
+    etagAccumulator.clear();
+    struct R2Bucket::WildcardEtag etag = {};
+    etagAccumulator.add(kj::mv(etag));
+    return etagAccumulator.releaseAsArray();
+  }
+  if (nextQuotation < nextWildcard) {
+    size_t etagValueStart = nextQuotation + 1;
+    // Find closing quotation mark, instead of going by the next comma.
+    // This is done because commas are allowed in etags, and double quotes are not.
+    kj::Maybe<size_t> closingQuotation =
+      condHeader.slice(etagValueStart)
+      .findFirst('"')
+      .map([=](size_t cq) { return cq + etagValueStart; });
+
+    KJ_IF_MAYBE(cq, closingQuotation) {
+      // Slice end is non inclusive, meaning that this drops the closingQuotation from the etag
+      kj::String etagValue = kj::str(condHeader.slice(etagValueStart, *cq));
+      if (nextWeak < nextQuotation) {
+        KJ_REQUIRE(
+          condHeader.size() > nextWeak + 2
+            && condHeader[nextWeak + 1] == '/'
+            && nextWeak + 2 == nextQuotation,
+          "Weak etags must start with W/ and their value must be quoted"
+        );
+        R2Bucket::WeakEtag etag = {kj::mv(etagValue)};
+        etagAccumulator.add(kj::mv(etag));
+      } else {
+        R2Bucket::StrongEtag etag = {kj::mv(etagValue)};
+        etagAccumulator.add(kj::mv(etag));
+      }
+      return parseConditionalEtagHeader(
+        condHeader.slice(*cq + 1),
+        kj::mv(etagAccumulator),
+        true
+      );
+    } else {
+      KJ_FAIL_REQUIRE("Unclosed double quote for Etag");
+    }
+  } else {
+    KJ_FAIL_REQUIRE("Invalid conditional header");
+  }
+}
+
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
   KJ_IF_MAYBE(e, h.get(jsg::ByteString(kj::str("if-match")))) {
-    JSG_REQUIRE(isQuotedEtag(*e), TypeError,
-        "ETag in HTTP header needs to be wrapped in quotes (", *e, ").");
-    etagMatches = kj::str(e->slice(1, e->size() - 1));
+    etagMatches = parseConditionalEtagHeader(kj::str(*e));
   }
   KJ_IF_MAYBE(e, h.get(jsg::ByteString(kj::str("if-none-match")))) {
-    JSG_REQUIRE(isQuotedEtag(*e), TypeError,
-        "ETag in HTTP header needs to be wrapped in quotes (", *e, ").");
-    etagDoesNotMatch = kj::str(e->slice(1, e->size() - 1));
+    etagDoesNotMatch = parseConditionalEtagHeader(kj::str(*e));
   }
   KJ_IF_MAYBE(d, h.get(jsg::ByteString(kj::str("if-modified-since")))) {
     auto date = parseDate(js, *d);
@@ -819,17 +922,24 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
   }
 }
 
+kj::Array<R2Bucket::Etag> buildSingleStrongEtagArray(kj::StringPtr etagValue) {
+  struct R2Bucket::StrongEtag etag = {.value = kj::str(etagValue)};
+  kj::ArrayBuilder<R2Bucket::Etag> etagArrayBuilder = kj::heapArrayBuilder<R2Bucket::Etag>(1);
+  etagArrayBuilder.add(kj::mv(etag));
+  return etagArrayBuilder.finish();
+}
+
 R2Bucket::UnwrappedConditional::UnwrappedConditional(const Conditional& c)
   : secondsGranularity(c.secondsGranularity.orDefault(false)) {
   KJ_IF_MAYBE(e, c.etagMatches) {
     JSG_REQUIRE(!isQuotedEtag(e->value), TypeError,
       "Conditional ETag should not be wrapped in quotes (", e->value, ").");
-    etagMatches = kj::str(e->value);
+    etagMatches = buildSingleStrongEtagArray(e->value);
   }
   KJ_IF_MAYBE(e, c.etagDoesNotMatch) {
     JSG_REQUIRE(!isQuotedEtag(e->value), TypeError,
       "Conditional ETag should not be wrapped in quotes (", e->value, ").");
-    etagDoesNotMatch = kj::str(e->value);
+    etagDoesNotMatch = buildSingleStrongEtagArray(e->value);
   }
   KJ_IF_MAYBE(d, c.uploadedAfter) {
     uploadedAfter = *d;
