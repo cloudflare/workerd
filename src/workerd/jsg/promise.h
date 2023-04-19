@@ -442,7 +442,7 @@ private:
   // the isolate pointer every time.
 
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
-  bool markedAsHandled;
+  bool markedAsHandled = false;
 
   v8::Local<v8::Promise> getInner(Lock& js) {
     return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
