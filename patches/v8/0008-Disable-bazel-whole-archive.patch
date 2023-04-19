@@ -30,7 +30,7 @@ index 4843ea09f99..5e53e218994 100644
  )
  
  cc_library(
-@@ -85,7 +85,7 @@ cc_library(
+@@ -85,6 +85,6 @@ cc_library(
          "//conditions:default": [],
      }),
      deps = [":icuuc"],
@@ -38,38 +38,12 @@ index 4843ea09f99..5e53e218994 100644
 +    alwayslink = 0,
  )
  
- cc_library(
-@@ -122,5 +122,5 @@ cc_library(
-         ":icui18n",
-         ":icuuc",
-     ],
--    alwayslink = 1,
-+    alwayslink = 0,
- )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
 index 0155e2c5b93..a72f4377e2f 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -287,7 +287,7 @@ def v8_library(
              includes = includes + ["noicu/"] + default.includes,
-             copts = copts + default.copts,
-             linkopts = linkopts + default.linkopts,
--            alwayslink = 1,
-+            alwayslink = 0,
-             linkstatic = 1,
-             **kwargs
-         )
-@@ -306,7 +306,7 @@ def v8_library(
-             includes = includes + ["icu/"] + default.includes,
-             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
-             linkopts = linkopts + default.linkopts,
--            alwayslink = 1,
-+            alwayslink = 0,
-             linkstatic = 1,
-             **kwargs
-         )
-@@ -326,7 +326,7 @@ def v8_library(
-             includes = includes + default.includes,
              copts = copts + default.copts,
              linkopts = linkopts + default.linkopts,
 -            alwayslink = 1,
