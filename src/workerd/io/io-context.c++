@@ -390,10 +390,10 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
     RunnableImpl(UncaughtExceptionSource source, kj::Exception&& exception)
         : source(source), exception(kj::mv(exception)) {}
     void run(Worker::Lock& lock) override {
-      jsg::Lock& jsgLock = lock;
-      auto error = jsgLock.exceptionToJs(kj::mv(exception));
+      jsg::Lock& js = lock;
+      auto error = js.exceptionToJs(kj::mv(exception));
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, error.getHandle(jsgLock.v8Isolate));
+      lock.logUncaughtException(source, error.getHandle(js.v8Isolate));
     }
   };
 
@@ -918,12 +918,12 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 }
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(Worker::Lock& lock) {
-  jsg::Lock& jsgLock = lock;
-  auto context = jsgLock.v8Isolate->GetCurrentContext();
+  jsg::Lock& js = lock;
+  auto context = js.v8Isolate->GetCurrentContext();
   auto ioOwnSpanParent = IoContext::current().addObject(kj::heap(getMetrics().getSpan()));
   auto spanHandle = jsg::wrapOpaque(context, kj::mv(ioOwnSpanParent));
   return jsg::AsyncContextFrame::StorageScope(
-      jsgLock, lock.getTraceAsyncContextKey(), jsgLock.v8Ref(spanHandle));
+      js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
@@ -932,8 +932,8 @@ SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
     KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*lock)) {
       KJ_IF_MAYBE (value, frame->get(lock->getTraceAsyncContextKey())) {
         auto handle = value->getHandle(*lock);
-        jsg::Lock& jsgLock = *lock;
-        auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(jsgLock.v8Isolate, handle);
+        jsg::Lock& js = *lock;
+        auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
         return spanParent->newChild(operationName);
       }
     }
