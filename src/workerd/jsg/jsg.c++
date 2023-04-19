@@ -178,16 +178,16 @@ Name Lock::newApiSymbol(kj::StringPtr symbol) {
 }
 
 Name::Name(kj::String string)
-    : inner(kj::mv(string)),
-      hash(kj::hashCode(string)) {}
+    : hash(kj::hashCode(string)),
+      inner(kj::mv(string)) {}
 
 Name::Name(kj::StringPtr string)
-    : inner(kj::str(string)),
-      hash(kj::hashCode(string)) {}
+    : hash(kj::hashCode(string)),
+      inner(kj::str(string)) {}
 
 Name::Name(Lock& js, v8::Local<v8::Symbol> symbol)
-    : inner(js.v8Ref(symbol)),
-      hash(symbol->GetIdentityHash()) {}
+    : hash(symbol->GetIdentityHash()),
+      inner(js.v8Ref(symbol)) {}
 
 kj::OneOf<kj::StringPtr, v8::Local<v8::Symbol>> Name::getUnwrapped(v8::Isolate* isolate) {
   KJ_SWITCH_ONEOF(inner) {
