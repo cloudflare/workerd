@@ -22,8 +22,7 @@ inline void maybeSetV8ContinuationContext(
 }
 }  // namespace
 
-AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
-    : isolate(IsolateBase::from(js.v8Isolate)) {
+AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
   KJ_IF_MAYBE(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
@@ -33,6 +32,10 @@ AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
       storage.insert(entry.clone(js));
     }
   }
+
+  // This case is extremely unlikely to happen but let's handle it anyway
+  // just out of an excess of caution.
+  if (storageEntry.key->isDead()) return;
 
   storage.upsert(kj::mv(storageEntry), [](StorageEntry& existing, StorageEntry&& row) mutable {
     existing.value = kj::mv(row.value);
