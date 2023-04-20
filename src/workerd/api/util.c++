@@ -342,7 +342,7 @@ void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle) 
         }
         if (args[0]->IsObject()) {
           return jsg::check(args[0].As<v8::Object>()->Get(
-              js.v8Isolate->GetCurrentContext(), args[1]));
+              js.v8Context(), args[1]));
         } else {
           return js.v8Undefined();
         }

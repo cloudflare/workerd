@@ -337,13 +337,14 @@ public:
     void resolve(Lock& js, kj::NoInfer<U>&& value) {
       auto isolate = js.v8Isolate;
       v8::HandleScope scope(isolate);
+      auto context = js.v8Context();
       v8::Local<v8::Value> handle;
       if constexpr (isV8Ref<U>()) {
         handle = value.getHandle(isolate);
       } else {
-        handle = wrapOpaque(isolate->GetCurrentContext(), kj::mv(value));
+        handle = wrapOpaque(context, kj::mv(value));
       }
-      check(v8Resolver.getHandle(isolate)->Resolve(isolate->GetCurrentContext(), handle));
+      check(v8Resolver.getHandle(isolate)->Resolve(context, handle));
     }
 
     template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
@@ -351,21 +352,20 @@ public:
       auto isolate = js.v8Isolate;
       v8::HandleScope scope(isolate);
       check(v8Resolver.getHandle(isolate)->Resolve(
-          isolate->GetCurrentContext(), v8::Undefined(isolate)));
+          js.v8Context(), v8::Undefined(isolate)));
     }
 
     void resolve(Lock& js, Promise&& promise) {
       // Resolve to another Promise.
       auto isolate = js.v8Isolate;
       check(v8Resolver.getHandle(isolate)->Resolve(
-          isolate->GetCurrentContext(),
-          promise.consumeHandle(isolate)));
+          js.v8Context(), promise.consumeHandle(isolate)));
     }
 
     void reject(Lock& js, v8::Local<v8::Value> exception) {
       auto isolate = js.v8Isolate;
       v8::HandleScope scope(isolate);
-      check(v8Resolver.getHandle(isolate)->Reject(isolate->GetCurrentContext(), exception));
+      check(v8Resolver.getHandle(isolate)->Reject(js.v8Context(), exception));
     }
 
     Resolver addRef(Lock& js) {
@@ -454,7 +454,7 @@ private:
       : deprecatedIsolate(js.v8Isolate) {
     auto isolate = js.v8Isolate;
     v8::HandleScope scope(isolate);
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Context();
     auto resolver = check(v8::Promise::Resolver::New(context));
     v8::Local<v8::Value> handle;
     if constexpr (isV8Ref<U>()) {
@@ -471,7 +471,7 @@ private:
       : deprecatedIsolate(js.v8Isolate) {
     auto isolate = js.v8Isolate;
     v8::HandleScope scope(isolate);
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Context();
     auto resolver = check(v8::Promise::Resolver::New(context));
     check(resolver->Resolve(context, v8::Undefined(isolate)));
     v8Promise.emplace(isolate, resolver->GetPromise());
@@ -483,7 +483,7 @@ private:
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
     v8::HandleScope scope(js.v8Isolate);
-    auto context = js.v8Isolate->GetCurrentContext();
+    auto context = js.v8Context();
 
     auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
 
@@ -523,7 +523,7 @@ struct PromiseResolverPair {
 template <typename T>
 PromiseResolverPair<T> Lock::newPromiseAndResolver() {
   v8::HandleScope scope(v8Isolate);
-  auto context = v8Isolate->GetCurrentContext();
+  auto context = v8Context();
   auto resolver = check(v8::Promise::Resolver::New(context));
   auto promise = resolver->GetPromise();
   return {

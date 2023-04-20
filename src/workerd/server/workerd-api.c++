@@ -129,7 +129,7 @@ struct WorkerdApiIsolate::Impl {
   static v8::Local<v8::Value> compileJsonGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
     return jsg::check(v8::JSON::Parse(
-        lock.v8Isolate->GetCurrentContext(),
+        lock.v8Context(),
         lock.wrapNoContext(reader)));
   };
 
@@ -155,7 +155,7 @@ jsg::JsContext<api::ServiceWorkerGlobalScope>
 jsg::Dict<NamedExport> WorkerdApiIsolate::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
-      .unwrap<jsg::Dict<NamedExport>>(lock.v8Isolate->GetCurrentContext(), moduleNamespace);
+      .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
 }
 const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
     WorkerdApiIsolate::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
@@ -480,7 +480,7 @@ static v8::Local<v8::Value> createBindingValue(
     const WorkerdApiIsolate::Global& global,
     CompatibilityFlags::Reader featureFlags) {
   using Global = WorkerdApiIsolate::Global;
-  auto context = lock.v8Isolate->GetCurrentContext();
+  auto context = lock.v8Context();
 
   v8::Local<v8::Value> value;
 
@@ -602,7 +602,7 @@ void WorkerdApiIsolate::compileGlobals(
     uint32_t ownerId) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
-  auto context = lock.v8Isolate->GetCurrentContext();
+  auto context = lock.v8Context();
   auto& featureFlags = *impl->features;
 
   for (auto& global: globals) {

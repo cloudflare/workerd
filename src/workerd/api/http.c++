@@ -409,7 +409,7 @@ void Headers::forEach(
   // from JavaScript, which means a Headers JS wrapper object must already exist.
   auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
-  auto context = isolate->GetCurrentContext();  // Needed later for Call().
+  auto context = js.v8Context();  // Needed later for Call().
   for (auto& entry: getDisplayedHeaders(featureFlags)) {
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {

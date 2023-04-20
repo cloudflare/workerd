@@ -123,7 +123,7 @@ public:
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
     return static_cast<ModuleRegistry*>(
-        js.v8Isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
   }
 
   struct CapnpModuleInfo {
@@ -157,7 +157,7 @@ public:
         kj::StringPtr content) {
       v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
       v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
-      auto context = lock.v8Isolate->GetCurrentContext();
+      auto context = lock.v8Context();
       auto handle = lock.wrap(context, moduleContext.addRef());
       auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
           context,
@@ -304,7 +304,7 @@ public:
   void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
     addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
-      auto wrap = wrapper.wrap(js.v8Isolate->GetCurrentContext(), nullptr, alloc<T>());
+      auto wrap = wrapper.wrap(js.v8Context(), nullptr, alloc<T>());
       return ModuleInfo(js, specifier, nullptr, ObjectModuleInfo(js, wrap));
     }, type);
   }
@@ -523,7 +523,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 template <typename TypeWrapper>
 void setModulesForResolveCallback(jsg::Lock& js, ModuleRegistry* table) {
   KJ_ASSERT(table != nullptr);
-  js.v8Isolate->GetCurrentContext()->SetAlignedPointerInEmbedderData(2, table);
+  js.v8Context()->SetAlignedPointerInEmbedderData(2, table);
   js.v8Isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
 }
 

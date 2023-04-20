@@ -557,13 +557,13 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
 public:
   v8::Local<v8::Value> wrap(Lock& js, T value) const override {
     auto isolate = js.v8Isolate;
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Context();
     return TypeWrapper::from(isolate).wrap(context, nullptr, kj::mv(value));
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const override {
     auto isolate = js.v8Isolate;
-    auto context = isolate->GetCurrentContext();
+    auto context = js.v8Context();
     return TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, nullptr);
   }
 };

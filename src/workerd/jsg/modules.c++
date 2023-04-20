@@ -277,7 +277,7 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
-  auto context = isolate->GetCurrentContext();
+  auto context = js.v8Context();
 
   jsg::check(module->InstantiateModule(context, &resolveCallback));
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();

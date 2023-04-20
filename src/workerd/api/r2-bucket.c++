@@ -25,7 +25,7 @@ static bool isWholeNumber(double x) {
 // concerns about the user overriding the methods we're invoking.
 static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
   auto isolate = js.v8Isolate;
-  const auto context = isolate->GetCurrentContext();
+  const auto context = js.v8Context();
   const auto tmp = jsg::check(v8::Date::New(context, 0));
   KJ_REQUIRE(tmp->IsDate());
   const auto constructor = jsg::check(tmp.template As<v8::Date>()->Get(
@@ -43,7 +43,7 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
   // NOTE: If you need toISOString just unify it into this function as the only difference will be
   // the function name called.
   auto isolate = js.v8Isolate;
-  const auto context = isolate->GetCurrentContext();
+  const auto context = js.v8Context();
   const auto converted = jsg::check(v8::Date::New(
       context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
   KJ_REQUIRE(converted->IsDate());
