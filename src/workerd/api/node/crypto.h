@@ -6,8 +6,9 @@ namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
 public:
-
+  bool checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks);
   JSG_RESOURCE_TYPE(CryptoImpl) {
+    JSG_METHOD(checkPrimeSync);
   }
 };
 

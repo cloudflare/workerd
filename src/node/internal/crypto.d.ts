@@ -3,3 +3,4 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export function getRandomInt(min: number, max: number): number;
+export function checkPrimeSync(candidate: ArrayBufferView, num_checks: number): boolean;

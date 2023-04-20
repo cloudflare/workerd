@@ -25,6 +25,7 @@ import {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrimeSync,
 } from 'node-internal:crypto_random';
 
 export {
@@ -33,6 +34,7 @@ export {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrimeSync,
 }
 
 // We do not implement the openssl secure heap.
@@ -67,6 +69,7 @@ export default {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrimeSync,
   // Misc
   secureHeapUsed,
   setEngine,
@@ -98,7 +101,7 @@ export default {
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes
 //   * [ ] crypto.checkPrime(candidate[, options], callback)
-//   * [ ] crypto.checkPrimeSync(candidate[, options])
+//   * [x] crypto.checkPrimeSync(candidate[, options])
 //   * [ ] crypto.generatePrime(size[, options[, callback]])
 //   * [ ] crypto.generatePrimeSync(size[, options])
 // * Ciphers

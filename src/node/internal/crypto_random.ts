@@ -26,10 +26,13 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
+import { default as cryptoImpl } from 'node-internal:crypto';
+
 import {
   validateObject,
   validateBoolean,
   validateFunction,
+  validateInt32,
   validateInteger,
 } from 'node-internal:validators';
 
@@ -238,4 +241,41 @@ export function randomUUID(options?: any) {
     }
   }
   return crypto.randomUUID();
+}
+
+function unsignedBigIntToBuffer(bigint: bigint, name: string) {
+  if (bigint < 0) {
+    throw new ERR_OUT_OF_RANGE(name, '>= 0', bigint);
+  }
+
+  const hex = bigint.toString(16);
+  const padded = hex.padStart(hex.length + (hex.length % 2), '0');
+  return Buffer.from(padded, 'hex');
+}
+
+export function checkPrimeSync(candidate: ArrayBuffer | ArrayBufferView | SharedArrayBuffer | bigint, options: any = {}) {
+  if (typeof candidate === 'bigint')
+    candidate = unsignedBigIntToBuffer(candidate, 'candidate');
+  if (!isAnyArrayBuffer(candidate) && !isArrayBufferView(candidate)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'candidate',
+      [
+        'ArrayBuffer',
+        'TypedArray',
+        'Buffer',
+        'DataView',
+        'bigint',
+      ],
+      candidate,
+    );
+  }
+
+  validateObject(options, 'options', {});
+  const {
+    checks = 0,
+  } = options;
+  // The checks option is unsigned but must fit into a signed 32-bit integer for OpenSSL.
+  validateInt32(checks, 'options.checks', 0);
+
+  return cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks as number);
 }
