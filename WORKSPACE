@@ -35,10 +35,10 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "9dd4850a9cd8d2ff9a3cff2aedd0b1af956c3645d11c443adcdd9c8d312bb623",
-    strip_prefix = "capnproto-capnproto-4544af1/c++",
+    sha256 = "d361f4405ee941e97d68c08c62534c3d246ef841ec464a16aeaffa8f96a6062c",
+    strip_prefix = "capnproto-capnproto-cdcebca/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/4544af13a83d6ed4127e6f91d48f8a1b57b44c91"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/cdcebca7f9caa9f3fa3f63b2a370392b0093d908"],
 )
 
 http_archive(
@@ -309,11 +309,6 @@ pip_install(
     name = "v8_python_deps",
     extra_pip_args = ["--require-hashes"],
     requirements = "@v8//:bazel/requirements.txt",
-)
-
-bind(
-    name = "zlib_compression_utils",
-    actual = "@com_googlesource_chromium_zlib//:zlib_compression_utils",
 )
 
 bind(
