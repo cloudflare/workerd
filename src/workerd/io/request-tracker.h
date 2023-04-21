@@ -29,7 +29,6 @@ public:
 
   public:
     ActiveRequest(ActiveRequest&& other) = default;
-    ActiveRequest& operator=(ActiveRequest&& other) = default;
     ~ActiveRequest();
 
   private:
