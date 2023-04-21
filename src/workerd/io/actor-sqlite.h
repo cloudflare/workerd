@@ -23,7 +23,7 @@ public:
       : db(kj::mv(dbParam)),
         kv(*db) {}
 
-  SqliteDatabase& getSqliteDatabase() { return *db; }
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return *db; }
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;

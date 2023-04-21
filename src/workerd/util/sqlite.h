@@ -224,7 +224,7 @@ public:
   }
 
 private:
-  sqlite3* db;
+  SqliteDatabase& db;
   Regulator& regulator;
   kj::Own<sqlite3_stmt> ownStatement;   // for one-off queries
   sqlite3_stmt* statement;

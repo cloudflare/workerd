@@ -639,8 +639,8 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
-  if (ActorSqlite* actorSql = dynamic_cast<ActorSqlite*>(&*cache)) {
-    return jsg::alloc<SqlStorage>(actorSql->getSqliteDatabase(), JSG_THIS);
+  KJ_IF_MAYBE(db, cache->getSqliteDatabase()) {
+    return jsg::alloc<SqlStorage>(*db, JSG_THIS);
   } else {
     JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
   }

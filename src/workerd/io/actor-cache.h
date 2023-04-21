@@ -19,6 +19,7 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 class OutputGate;
+class SqliteDatabase;
 
 struct ActorCacheReadOptions {
   bool noCache = false;
@@ -163,6 +164,9 @@ class ActorCacheInterface: public ActorCacheOps {
   // ActorCache::Transaction.
 
 public:
+  virtual kj::Maybe<SqliteDatabase&> getSqliteDatabase() = 0;
+  // If the actor's storage is backed by SQLite, return the underlying database.
+
   class Transaction: public ActorCacheOps {
   public:
     virtual kj::Maybe<kj::Promise<void>> commit() = 0;
@@ -247,6 +251,7 @@ public:
   ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru, OutputGate& gate);
   ~ActorCache() noexcept(false);
 
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return nullptr; }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(

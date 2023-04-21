@@ -468,6 +468,11 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
 }
 
 void SqliteDatabase::Query::nextRow() {
+  // The statement could be "re-prepared" during sqlite3_step, so we must set up the regulator.
+  KJ_ASSERT(db.currentRegulator == nullptr, "recursive nextRow()?");
+  KJ_DEFER(db.currentRegulator = nullptr);
+  db.currentRegulator = regulator;
+
   int err = sqlite3_step(statement);
   if (err == SQLITE_DONE) {
     done = true;
