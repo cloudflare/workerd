@@ -349,6 +349,8 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     api::node::registerNodeJsCompatModules(*modules, getFeatureFlags());
   }
 
+  api::registerSocketsModule(*modules, getFeatureFlags());
+
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
 
   // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
