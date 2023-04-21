@@ -45,7 +45,7 @@ As of this writing, some major features are missing which we intend to fix short
 * **Cache API** emulation is not implemented yet.
 * **Cron trigger** emulation is not supported yet. We need to figure out how, exactly, this should work in the first place. Typically if you have a cluster of machines, you only want a cron event to run on one of the machines, so some sort of coordination or external driver is needed.
 * **Parameterized workers** are not implemented yet. This is a new feature specified in the config schema, which doesn't have any precedent on Cloudflare.
-* **Devtools inspection** is not supported yet, but this should be straightforward to hook up.
+* There is rudimentary **Devtools inspection** support, see [docs/devtools.md](docs/devtools.md) for more details.
 * **Tests** for most APIs are conspicuously missing. This is because the testing harness we have used for the past five years is deeply tied to the internal version of the codebase. Ideally, we need to translate those tests into the new `workerd test` format and move them to this repo; this is an ongoing effort. For the time being, we will be counting on the internal tests to catch bugs. We understand this is not ideal for external contributors trying to test their changes.
 * **Documentation** is growing quickly but is definitely still a work in progress.
 

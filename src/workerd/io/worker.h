@@ -287,11 +287,13 @@ public:
       const kj::HttpHeaderTable& headerTable,
       kj::HttpHeaderId controlHeaderId) const;
   // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
+  // This method exists for use in Edgeworker.
 
   kj::Promise<void> attachInspector(
       kj::Timer& timer,
       kj::Duration timerOffset,
       kj::WebSocket& webSocket) const;
+  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
 
   void logWarning(kj::StringPtr description, Worker::Lock& lock);
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
@@ -313,6 +315,8 @@ public:
 
   void completedRequest() const;
   // Called after each completed request. Does not require a lock.
+
+  void deliverMessageToSession(kj::StringPtr msg);
 
   kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
   kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
@@ -390,7 +394,7 @@ private:
   // has already run).
 
   class InspectorChannelImpl;
-  kj::Maybe<InspectorChannelImpl&> currentInspectorSession;
+  kj::Own<InspectorChannelImpl> inspectorChannel;
 
   struct AsyncWaiterList {
     kj::Maybe<AsyncWaiter&> head = nullptr;

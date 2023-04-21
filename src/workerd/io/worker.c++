@@ -436,6 +436,9 @@ uint64_t getCurrentThreadId() {
 
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
 public:
+  InspectorClient() = default;
+  ~InspectorClient() noexcept(true) override {}
+
   double currentTimeMS() override {
     // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
     // function to implement timers.
@@ -460,6 +463,54 @@ public:
     return (timePoint - kj::UNIX_EPOCH) / kj::MILLISECONDS;
   }
 
+  void runMessageLoopOnPause(int contextGroupId) override {
+    // Method called by v8 when a breakpoint is hit. The implementation
+    // is expected to dispatch CDP messages on the thread that has hit the
+    // breakpoint. A subset of CDP message handlers enforce this constraint.
+    auto lockedMessagePump = messagePump.lockExclusive();
+    lockedMessagePump->active = true;
+    do {
+      lockedMessagePump.wait([](const MessagePump& pump) {
+        return pump.messageQueue.size() > 0 || !pump.active;
+      });
+      for (auto& message : lockedMessagePump->messageQueue) {
+        dispatchProtocolMessage(lockedMessagePump, message);
+      }
+      lockedMessagePump->messageQueue.clear();
+    } while (lockedMessagePump->active);
+  }
+
+  void quitMessageLoopOnPause() override {
+    // Method called by v8 when the Debugger.resume CDP message is received.
+    // This method is called from within `dispatchProtocolMessage` in `runMessageLoopOnPause()`,
+    // and the lock for the messagePump is held there.
+    auto& lockedMessagePump = messagePump.getAlreadyLockedExclusive();
+    lockedMessagePump.active = false;
+  }
+
+  bool deliverMessageIfDebugging(kj::StringPtr message) {
+    auto lockedMessagePump = messagePump.lockExclusive();
+    if (lockedMessagePump->active) {
+      lockedMessagePump->messageQueue.add(kj::heapString(message));
+    }
+    return lockedMessagePump->active;
+  }
+
+  void setChannel(Worker::Isolate::InspectorChannelImpl& channel) {
+    // Bind the message pump to a channel to dispatch messages on. This is used
+    // in dispatchProtocolMessage().
+    auto lockedMessagePump = messagePump.lockExclusive();
+    lockedMessagePump->channel = channel;
+  }
+
+  void resetChannel() {
+    // Method to forcibly stop pumping messages in runMessageLoopOnPause when
+    // the underlying channel fails / disconnects.
+    auto lockedMessagePump = messagePump.lockExclusive();
+    lockedMessagePump->channel = {};
+    lockedMessagePump->active = false;
+  }
+
   // Nothing else. We ignore everything the inspector tells us, because we only care about the
   // devtools inspector protocol, which is handled separately.
 
@@ -469,6 +520,17 @@ public:
   }
 
 private:
+  struct MessagePump {
+    kj::Maybe<Worker::Isolate::InspectorChannelImpl&> channel;
+    kj::Vector<kj::String> messageQueue;
+    bool active;
+  };
+
+  kj::MutexGuarded<MessagePump> messagePump;
+
+  static void dispatchProtocolMessage(kj::Locked<MessagePump>& lockedMessagePump, kj::StringPtr message);
+  // Send message over the channel associated with the messagePump to v8 for handling.
+
   struct InspectorTimerInfo {
     kj::Timer& timer;
     kj::Duration timerOffset;
@@ -520,7 +582,7 @@ struct Worker::Isolate::Impl {
   // noted.
 
   IsolateObserver& metrics;
-  InspectorClient inspectorClient;
+  kj::Own<InspectorClient> inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
@@ -718,10 +780,11 @@ struct Worker::Isolate::Impl {
     auto lock = apiIsolate.lock(stackScope);
     limitEnforcer.customizeIsolate(lock->v8Isolate);
 
+    inspectorClient = kj::heap<InspectorClient>();
     if (inspectorPolicy != InspectorPolicy::DISALLOW) {
       // We just created our isolate, so we don't need to use Isolate::Impl::Lock.
       KJ_ASSERT(!isMultiTenantProcess(), "inspector is not safe in multi-tenant processes");
-      inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, &inspectorClient);
+      inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient);
     }
   }
 };
@@ -1976,8 +2039,10 @@ private:
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
 public:
   InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam,
-                       kj::WebSocket& webSocket)
+                       kj::WebSocket& webSocket,
+                       InspectorClient& client)
       : webSocket(webSocket),
+        client(client),
         state(kj::heap<State>(this, kj::mv(isolateParam))) {}
 
   using InspectorLock = Worker::Lock::TakeSynchronously;
@@ -1990,15 +2055,11 @@ public:
 
     // Delete session under lock.
     auto state = this->state.lockExclusive();
-
-    jsg::V8StackScope stackScope;
-    Isolate::Impl::Lock recordedLock(*state->get()->isolate, InspectorLock(nullptr), stackScope);
-    KJ_IF_MAYBE(p, state->get()->isolate->currentInspectorSession) {
-      if (p == this) {
-        const_cast<Isolate&>(*state->get()->isolate).currentInspectorSession = nullptr;;
-      }
+    if (state->get()->isolate->inspectorChannel.get() == this) {
+      const_cast<Isolate&>(*state->get()->isolate).inspectorChannel = nullptr;
     }
     state->get()->teardownUnderLock();
+    client.resetChannel();
   } catch (...) {
     // Unfortunately since we're inheriting from Channel which declares a virtual destructor with
     // default exception constraints, we have to catch all exceptions here and log them.
@@ -2021,6 +2082,7 @@ public:
     // Fake like the client requested close. This will cause outgoingLoop() to exit and everything
     // will be cleaned up.
     receivedClose = true;
+    client.resetChannel();
     outgoingQueueNotifier->notify();
   }
 
@@ -2141,6 +2203,12 @@ public:
             }
           }
 
+          if (client.deliverMessageIfDebugging(text)) {
+            // Message delivered to the inspector client to then be handed over to the
+            // inspector session on the thread running code in the isolate.
+            return incomingLoop();
+          }
+
           auto state = this->state.lockExclusive();
 
           // const_cast OK because we're going to lock it
@@ -2155,6 +2223,8 @@ public:
           // a big deal to just permit those background threads.
           AllowV8BackgroundThreadsScope allowBackgroundThreads;
 
+          v8::Isolate::Scope isolateScope(lock.v8Isolate);
+          v8::Locker locker(lock.v8Isolate);
           kj::Maybe<kj::Exception> maybeLimitError;
           {
             auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(lock, maybeLimitError);
@@ -2209,6 +2279,16 @@ public:
     });
   }
 
+  void dispatchOne(kj::StringPtr text) {
+    jsg::V8StackScope stackScope;
+    AllowV8BackgroundThreadsScope allowBackgroundThreads;
+
+    auto state = this->state.lockExclusive();
+    state->get()->session->dispatchProtocolMessage(toStringView(text));
+
+    // TODO: run PerformMicroTask checkpoint in case of async method calls.
+  }
+
   // ---------------------------------------------------------------------------
   // implements Channel
   //
@@ -2252,6 +2332,7 @@ public:
 
 private:
   kj::WebSocket& webSocket;
+  InspectorClient& client;
 
   void takeHeapSnapshot(jsg::Lock& js, bool exposeInternals, bool captureNumericValue) {
     struct Activity: public v8::ActivityControl {
@@ -2435,45 +2516,47 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::Duration timerOffset,
     kj::WebSocket& webSocket) const {
   KJ_REQUIRE(impl->inspector != nullptr);
+  // If another inspector was already connected, boot it, on the assumption that that connection
+  // is dead and this is why the user reconnected. While we could actually allow both inspector
+  // sessions to stay open (V8 supports this!), we'd then need to store a set of all connected
+  // inspectors in order to be able to disconnect all of them in case of an isolate purge... let's
+  // just not.
+  //
+  // NB This method is only called from the main thread. If an earlier session was in the midst
+  // of breakpoint when the connection is lost, then there is scope in multiple places for deadlock,
+  // including here trying to acquire the `recordedLock`. For this reason, we call `disconnectInspector`
+  // without holding a lock.
+  const_cast<Worker::Isolate&>(*this).disconnectInspector();
 
   jsg::V8StackScope stackScope;
   Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(nullptr), stackScope);
   auto& lock = *recordedLock.lock;
   auto& lockedSelf = const_cast<Worker::Isolate&>(*this);
 
-  // If another inspector was already connected, boot it, on the assumption that that connection
-  // is dead and this is why the user reconnected. While we could actually allow both inspector
-  // sessions to stay open (V8 supports this!), we'd then need to store a set of all connected
-  // inspectors in order to be able to disconnect all of them in case of an isolate purge... let's
-  // just not.
-  lockedSelf.disconnectInspector();
-
-  auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
-      kj::atomicAddRef(*this), webSocket);
-  lockedSelf.currentInspectorSession = *channel;
-
-  lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
+  lockedSelf.inspectorChannel = kj::heap<Worker::Isolate::InspectorChannelImpl>(
+      kj::atomicAddRef(*this), webSocket, *lockedSelf.impl->inspectorClient);
+  lockedSelf.impl->inspectorClient->setChannel(*lockedSelf.inspectorChannel);
+  lockedSelf.impl->inspectorClient->setInspectorTimerInfo(timer, timerOffset);
 
   // Send any queued notifications.
   {
     v8::HandleScope handleScope(lock.v8Isolate);
     for (auto& notification: lockedSelf.impl->queuedNotifications) {
-      channel->sendNotification(kj::mv(notification));
+      lockedSelf.inspectorChannel->sendNotification(kj::mv(notification));
     }
     lockedSelf.impl->queuedNotifications.clear();
   }
 
-  return channel->incomingLoop()
-      .exclusiveJoin(channel->outgoingLoop())
-      .attach(kj::mv(channel));
+  return lockedSelf.inspectorChannel->incomingLoop()
+      .exclusiveJoin(lockedSelf.inspectorChannel->outgoingLoop());
 }
 
 void Worker::Isolate::disconnectInspector() {
   // If an inspector session is connected, proactively drop it, so as to force it to drop its
   // reference on the script, so that the script can be deleted.
 
-  KJ_IF_MAYBE(current, currentInspectorSession) {
-    current->disconnect();
+  if (inspectorChannel.get() != nullptr) {
+    inspectorChannel->disconnect();
   }
 }
 
@@ -2536,12 +2619,12 @@ void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
     params.setType(static_cast<cdp::LogType>(type));
     params.initArgs(1)[0].initString().setValue(description);
     params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(context));
-    params.setTimestamp(impl->inspectorClient.currentTimeMS());
+    params.setTimestamp(impl->inspectorClient->currentTimeMS());
     stackTraceToCDP(isolate, params.initStackTrace());
 
     auto notification = getCdpJsonCodec().encode(event);
-    KJ_IF_MAYBE(i, currentInspectorSession) {
-      i->sendNotification(kj::mv(notification));
+    if (inspectorChannel.get() != nullptr) {
+      inspectorChannel->sendNotification(kj::mv(notification));
     } else {
       impl->queuedNotifications.add(kj::mv(notification));
     }
@@ -3140,6 +3223,16 @@ bool Worker::Isolate::isInspectorEnabled() const {
   return impl->inspector != nullptr;
 }
 
+// =======================================================================================
+
+void Worker::InspectorClient::dispatchProtocolMessage(
+    kj::Locked<Worker::InspectorClient::MessagePump>& messagePump,
+    kj::StringPtr message) {
+  KJ_IF_MAYBE(channel, messagePump->channel) {
+    channel->dispatchOne(message);
+  }
+}
+
 namespace {
 
 // We only run the inspector within process sandboxes. There, it is safe to query the real clock
@@ -3196,7 +3289,7 @@ public:
     Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
-    KJ_IF_MAYBE(i, isolate.currentInspectorSession) {
+    if (isolate.inspectorChannel.get() != nullptr) {
       capnp::MallocMessageBuilder message;
 
       auto event = message.initRoot<cdp::Event>();
@@ -3211,7 +3304,7 @@ public:
         response.setBody(kj::encodeBase64(*body));
       }
 
-      i->sendNotification(event);
+      isolate.inspectorChannel->sendNotification(event);
     }
   }
 
@@ -3249,7 +3342,7 @@ public:
     Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(requestMetrics), stackScope);
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
-    KJ_IF_MAYBE(i, isolate.currentInspectorSession) {
+    if (isolate.inspectorChannel.get() != nullptr) {
       capnp::MallocMessageBuilder message;
 
       auto event = message.initRoot<cdp::Event>();
@@ -3260,7 +3353,7 @@ public:
       params.setDataLength(decodedChunkSize);
       params.setTimestamp(getMonotonicTimeForProcessSandboxOnly());
 
-      i->sendNotification(event);
+      isolate.inspectorChannel->sendNotification(event);
     }
   }
 
@@ -3296,12 +3389,11 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
     auto& lock = *recordedLock.lock;
     auto& isolate = const_cast<Isolate&>(*constIsolate);
 
-    if (isolate.currentInspectorSession == nullptr) {
+    if (isolate.inspectorChannel.get() == nullptr) {
       return nullptr;
     }
 
-    auto& i = KJ_ASSERT_NONNULL(isolate.currentInspectorSession);
-    if (!i.isNetworkEnabled()) {
+    if (!isolate.inspectorChannel->isNetworkEnabled()) {
       return nullptr;
     }
 
@@ -3330,7 +3422,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
 
     headersToCDP(headersCopy, request.initHeaders());
 
-    i.sendNotification(event);
+    isolate.inspectorChannel->sendNotification(event);
     return kj::mv(requestId);
   };
 
@@ -3426,16 +3518,15 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
 
       // We shouldn't even get here if network inspection isn't active since signalRequest() would
       // have returned null... but double-check anyway.
-      if (isolate.currentInspectorSession == nullptr) {
+      if (isolate.inspectorChannel.get() == nullptr) {
         return kj::mv(responseBody);
       }
 
-      auto& i = KJ_ASSERT_NONNULL(isolate.currentInspectorSession);
-      if (!i.isNetworkEnabled()) {
+      if (!isolate.inspectorChannel->isNetworkEnabled()) {
         return kj::mv(responseBody);
       }
 
-      i.sendNotification(event);
+      isolate.inspectorChannel->sendNotification(event);
 
       return kj::heap<ResponseStreamWrapper>(kj::atomicAddRef(*constIsolate),
                                              kj::mv(requestId),
