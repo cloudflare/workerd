@@ -287,5 +287,58 @@ KJ_TEST("SQLite locks: WAL mode") {
   doLockTest(true);
 }
 
+KJ_TEST("SQLite Regulator") {
+  TempDirOnDisk dir;
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  class RegulatorImpl: public SqliteDatabase::Regulator {
+  public:
+    RegulatorImpl(kj::StringPtr blocked): blocked(blocked) {}
+
+    bool isAllowedName(kj::StringPtr name) override {
+      if (alwaysFail) return false;
+      return name != blocked;
+    }
+
+    bool alwaysFail = false;
+
+  private:
+    kj::StringPtr blocked;
+  };
+
+  db.run(R"(
+    CREATE TABLE foo(value INTEGER);
+    CREATE TABLE bar(value INTEGER);
+    INSERT INTO foo VALUES (123);
+    INSERT INTO bar VALUES (456);
+  )");
+
+  RegulatorImpl noFoo("foo");
+  RegulatorImpl noBar("bar");
+
+  // We can prepare and run statements that comply with the regulator.
+  auto getFoo = db.prepare(noBar, "SELECT value FROM foo");
+  auto getBar = db.prepare(noFoo, "SELECT value FROM bar");
+
+  KJ_EXPECT(getFoo.run().getInt(0) == 123);
+  KJ_EXPECT(getBar.run().getInt(0) == 456);
+
+  // Trying to prepare a statement that violates the regulator fails.
+  KJ_EXPECT_THROW_MESSAGE("access to foo.value is prohibited",
+      db.prepare(noFoo, "SELECT value FROM foo"));
+
+  // If we create a new table, all statements must be re-prepared, which re-runs the regulator.
+  // Make sure that works.
+  db.run("CREATE TABLE baz(value INTEGER)");
+
+  KJ_EXPECT(getFoo.run().getInt(0) == 123);
+
+  // Let's screw with SQLite and make the regulator fail on re-run to see what happens.
+  noFoo.alwaysFail = true;
+  KJ_EXPECT_THROW_MESSAGE("access to bar.value is prohibited",
+      KJ_EXPECT(getBar.run().getInt(0) == 456));
+}
+
 }  // namespace
 }  // namespace workerd
