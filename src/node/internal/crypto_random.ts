@@ -243,6 +243,150 @@ export function randomUUID(options?: any) {
   return crypto.randomUUID();
 }
 
+export type PrimeNum = ArrayBuffer | SharedArrayBuffer | Buffer | DataView | bigint;
+export interface GeneratePrimeOptions {
+  add?: PrimeNum;
+  rem?: PrimeNum;
+  safe?: boolean;
+  bigint?: boolean;
+}
+
+export interface CheckPrimeOptions {
+  checks?: number;
+}
+
+export type GeneratePrimeCallback = (err?: any, prime?: bigint|ArrayBuffer) => void;
+export type CheckPrimeCallback = (err?: any, prime?: boolean) => void;
+
+function processGeneratePrimeOptions(options: GeneratePrimeOptions) : {
+    add: ArrayBufferView,
+    rem: ArrayBufferView,
+    safe: boolean,
+    bigint: boolean } {
+  validateObject(options, 'options', {});
+  const {
+    safe = false,
+    bigint = false,
+  } = options;
+  let {
+    add,
+    rem,
+  } = options;
+  validateBoolean(safe, 'options.safe');
+  validateBoolean(bigint, 'options.bigint');
+
+  if (add !== undefined) {
+    if (typeof add === 'bigint') {
+      add = unsignedBigIntToBuffer(add, 'options.add');
+    } else if (!isAnyArrayBuffer(add) && !isArrayBufferView(add)) {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.add',
+        [
+          'ArrayBuffer',
+          'TypedArray',
+          'Buffer',
+          'DataView',
+          'bigint',
+        ],
+        add);
+    }
+  }
+
+  if (rem !== undefined) {
+    if (typeof rem === 'bigint') {
+      rem = unsignedBigIntToBuffer(rem, 'options.rem');
+    } else if (!isAnyArrayBuffer(rem) && !isArrayBufferView(rem)) {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.rem',
+        [
+          'ArrayBuffer',
+          'TypedArray',
+          'Buffer',
+          'DataView',
+          'bigint',
+        ],
+        rem);
+    }
+  }
+
+  return {
+    safe,
+    bigint,
+    add: add as ArrayBufferView,
+    rem: rem as ArrayBufferView,
+  }
+}
+
+export function generatePrimeSync(size: number, options: GeneratePrimeOptions = {}) {
+  validateInt32(size, 'size', 1);
+  const {
+    safe,
+    bigint,
+    add,
+    rem,
+  } = processGeneratePrimeOptions(options);
+
+  let primeBuf = cryptoImpl.randomPrime(size, safe, add, rem);
+  return bigint ? arrayBufferToUnsignedBigInt(primeBuf) : primeBuf;
+}
+
+export function generatePrime(size: number,
+                              options: GeneratePrimeOptions,
+                              callback: GeneratePrimeCallback) : void;
+export function generatePrime(size: number, callback: GeneratePrimeCallback) : void;
+export function generatePrime(size: number,
+                              options: GeneratePrimeOptions|GeneratePrimeCallback,
+                              callback?: GeneratePrimeCallback) : void {
+  validateInt32(size, 'size', 1);
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  validateFunction(callback, 'callback');
+
+  const {
+    safe,
+    bigint,
+    add,
+    rem
+  } = processGeneratePrimeOptions(options as GeneratePrimeOptions);
+
+  new Promise<bigint|ArrayBuffer>((res, rej) => {
+    try {
+      const primeBuf = cryptoImpl.randomPrime(size, safe, add, rem);
+      res(bigint ? arrayBufferToUnsignedBigInt(primeBuf) : primeBuf);
+    } catch(err) {
+      rej(err);
+    }
+  }).then((val) => callback!(null, val), (err) => callback!(err));
+}
+
+/**
+ * 48 is the ASCII code for '0', 97 is the ASCII code for 'a'.
+ * @param {number} number An integer between 0 and 15.
+ * @returns {number} corresponding to the ASCII code of the hex representation
+ *                   of the parameter.
+ */
+const numberToHexCharCode = (number : number) => (number < 10 ? 48 : 87) + number;
+
+/**
+ * @param {ArrayBuffer} buf An ArrayBuffer.
+ * @return {bigint}
+ */
+function arrayBufferToUnsignedBigInt(buf: ArrayBuffer) {
+  const length = buf.byteLength;
+  const chars = Array(length * 2);
+  const view = new DataView(buf);
+
+  for (let i = 0; i < length; i++) {
+    const val = view.getUint8(i);
+    chars[2 * i] = numberToHexCharCode(val >> 4);
+    chars[2 * i + 1] = numberToHexCharCode(val & 0xf);
+  }
+
+  return BigInt(`0x${String.fromCharCode.apply(null, chars)}`);
+}
+
 function unsignedBigIntToBuffer(bigint: bigint, name: string) {
   if (bigint < 0) {
     throw new ERR_OUT_OF_RANGE(name, '>= 0', bigint);
@@ -253,7 +397,7 @@ function unsignedBigIntToBuffer(bigint: bigint, name: string) {
   return Buffer.from(padded, 'hex');
 }
 
-export function checkPrimeSync(candidate: ArrayBuffer | ArrayBufferView | SharedArrayBuffer | bigint, options: any = {}) {
+function validateCandidate(candidate: PrimeNum) : Buffer {
   if (typeof candidate === 'bigint')
     candidate = unsignedBigIntToBuffer(candidate, 'candidate');
   if (!isAnyArrayBuffer(candidate) && !isArrayBufferView(candidate)) {
@@ -269,29 +413,46 @@ export function checkPrimeSync(candidate: ArrayBuffer | ArrayBufferView | Shared
       candidate,
     );
   }
+  return candidate as Buffer;
+}
 
-  validateObject(options, 'options', {});
+function validateChecks(options : CheckPrimeOptions) : number {
   const {
     checks = 0,
   } = options;
   // The checks option is unsigned but must fit into a signed 32-bit integer for OpenSSL.
   validateInt32(checks, 'options.checks', 0);
-
-  return cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks as number);
+  return checks;
 }
 
-export function checkPrime(candidate: ArrayBuffer | ArrayBufferView | SharedArrayBuffer | bigint, options: any = {}, callback?: any) {
+export function checkPrimeSync(candidate: PrimeNum, options: CheckPrimeOptions = {}) {
+  candidate = validateCandidate(candidate);
+  validateObject(options, 'options', {});
+  const checks = validateChecks(options);
+  return cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks);
+}
+
+export function checkPrime(candidate: PrimeNum,
+                           options: CheckPrimeOptions,
+                           callback: CheckPrimeCallback) : void;
+export function checkPrime(candidate: PrimeNum,
+                           callback: CheckPrimeCallback) : void;
+export function checkPrime(candidate: PrimeNum,
+                           options: CheckPrimeOptions|CheckPrimeCallback,
+                           callback?: CheckPrimeCallback) : void {
+  candidate = validateCandidate(candidate);
   if (typeof options === 'function') {
     callback = options;
     options = {};
   }
+  validateObject(options, 'options', {});
   validateFunction(callback, 'callback');
-  // TODO: Returning exceptions to the callback function might not be working
-  new Promise((res, rej) => {
+  const checks = validateChecks(options);
+  new Promise<boolean>((res, rej) => {
     try {
-      res(checkPrimeSync(candidate, options));
+      res(cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks));
     } catch(err) {
       rej(err);
     }
-  }).then((val) => { callback(null, val); }, (err) => { callback(err); });
+  }).then((val) => callback!(null, val), (err) => callback!(err));
 }
