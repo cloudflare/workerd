@@ -279,3 +279,19 @@ export function checkPrimeSync(candidate: ArrayBuffer | ArrayBufferView | Shared
 
   return cryptoImpl.checkPrimeSync(candidate as ArrayBufferView, checks as number);
 }
+
+export function checkPrime(candidate: ArrayBuffer | ArrayBufferView | SharedArrayBuffer | bigint, options: any = {}, callback?: any) {
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  validateFunction(callback, 'callback');
+  // TODO: Returning exceptions to the callback function might not be working
+  new Promise((res, rej) => {
+    try {
+      res(checkPrimeSync(candidate, options));
+    } catch(err) {
+      rej(err);
+    }
+  }).then((val) => { callback(null, val); }, (err) => { callback(err); });
+}

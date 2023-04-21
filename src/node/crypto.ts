@@ -25,6 +25,7 @@ import {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrime,
   checkPrimeSync,
 } from 'node-internal:crypto_random';
 
@@ -34,6 +35,7 @@ export {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrime,
   checkPrimeSync,
 }
 
@@ -69,6 +71,7 @@ export default {
   randomFill,
   randomInt,
   randomUUID,
+  checkPrime,
   checkPrimeSync,
   // Misc
   secureHeapUsed,
@@ -100,7 +103,7 @@ export default {
 //   * [ ] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes
-//   * [ ] crypto.checkPrime(candidate[, options], callback)
+//   * [x] crypto.checkPrime(candidate[, options], callback)
 //   * [x] crypto.checkPrimeSync(candidate[, options])
 //   * [ ] crypto.generatePrime(size[, options[, callback]])
 //   * [ ] crypto.generatePrimeSync(size[, options])
