@@ -5,9 +5,7 @@
       "label": "Bazel Build (dbg)",
       "type": "shell",
       "command": "bazel",
-      "linux": {
-        "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
-      },
+      "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
       "osx": {
         // OS X needs additional build options for symbols to work correctly
         // (https://github.com/bazelbuild/bazel/issues/6327), hence the additional
@@ -101,7 +99,7 @@
         "panel": "dedicated"
       },
       "runOptions": {
-        "runOn": "folderOpen"
+        "runOn": "default"
       }
     },
     {
@@ -118,7 +116,7 @@
         "panel": "dedicated"
       },
       "runOptions": {
-        "runOn": "folderOpen"
+        "runOn": "default"
       }
     }
   ]
