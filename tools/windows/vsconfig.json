@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "components": [
+    "Microsoft.VisualStudio.Component.CoreEditor",
+    "Microsoft.VisualStudio.Workload.CoreEditor",
+    "Microsoft.VisualStudio.Component.TypeScript.TSServer",
+    "Microsoft.VisualStudio.ComponentGroup.WebToolsExtensions",
+    "Microsoft.VisualStudio.Component.JavaScript.TypeScript",
+    "Microsoft.VisualStudio.Component.Roslyn.Compiler",
+    "Microsoft.Component.MSBuild",
+    "Microsoft.VisualStudio.Component.Roslyn.LanguageServices",
+    "Microsoft.VisualStudio.Component.TextTemplating",
+    "Microsoft.VisualStudio.Component.NuGet",
+    "Microsoft.VisualStudio.Component.Debugger.JustInTime",
+    "Component.Microsoft.VisualStudio.LiveShare.2022",
+    "Microsoft.VisualStudio.Component.IntelliCode",
+    "Microsoft.VisualStudio.Component.VC.CoreIde",
+    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "Microsoft.VisualStudio.Component.Graphics.Tools",
+    "Microsoft.VisualStudio.Component.VC.DiagnosticTools",
+    "Microsoft.VisualStudio.Component.Windows11SDK.22000",
+    "Microsoft.VisualStudio.Component.VC.ATL",
+    "Microsoft.VisualStudio.Component.SecurityIssueAnalysis",
+    "Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
+    "Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
+    "Microsoft.VisualStudio.ComponentGroup.WebToolsExtensions.CMake",
+    "Microsoft.VisualStudio.Component.VC.CMake.Project",
+    "Microsoft.VisualStudio.Component.VC.TestAdapterForBoostTest",
+    "Microsoft.VisualStudio.Component.VC.TestAdapterForGoogleTest",
+    "Microsoft.VisualStudio.Component.VC.ASAN",
+    "Microsoft.VisualStudio.Workload.NativeDesktop"
+  ]
+}
