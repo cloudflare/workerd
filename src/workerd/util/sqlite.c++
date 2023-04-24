@@ -115,6 +115,7 @@ SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
   KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
     // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+    // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
     SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
                                     SQLITE_OPEN_READONLY, nullptr));
   } else {
@@ -142,6 +143,7 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
 
   KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
     // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
+    // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
     SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
                                     flags, nullptr));
   } else {
@@ -604,6 +606,7 @@ static int replaced_lstat(const char* path, struct stat* stats) {
 struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
   // The sqlite3_file implementation we use when wrapping the native filesystem.
 
+  const Vfs* vfs;
   int rootFd;
 
   // It's expected that the wrapped sqlite_file begins in memory immediately after this object.
@@ -667,7 +670,15 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
   WRAP(xCheckReservedLock),
   WRAP(xFileControl),
   WRAP(xSectorSize),
-  WRAP(xDeviceCharacteristics),
+  .xDeviceCharacteristics = [](sqlite3_file* file) noexcept -> int {
+    auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
+    file = wrapper->getWrapped();
+    KJ_ASSERT(currentVfsRoot == AT_FDCWD);
+    currentVfsRoot = wrapper->rootFd;
+    KJ_DEFER(currentVfsRoot = AT_FDCWD);
+    return (file->pMethods->xDeviceCharacteristics)(file) |
+        wrapper->vfs->options.deviceCharacteristics;
+  },
 
   WRAP(xShmMap),
   WRAP(xShmLock),
@@ -732,7 +743,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       file->pMethods = nullptr;
 
       // Set up currentVfsRoot.
-      auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
+      auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
       KJ_ASSERT(currentVfsRoot == AT_FDCWD);
       currentVfsRoot = self.rootFd;
       KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -745,6 +756,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
         wrapper->pMethods = nullptr;
       } else {
         wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
+        wrapper->vfs = &self;
         wrapper->rootFd = self.rootFd;
       }
 
@@ -802,6 +814,7 @@ struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   // In any case, as a result, `FileImpl`, unlike `VfsImpl`, is NOT just a namespace struct, but
   // an actual instance.
 
+  const Vfs& vfs;
   kj::Maybe<const kj::File&> writableFile;
   kj::Own<const kj::ReadableFile> file;
 
@@ -812,13 +825,15 @@ struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
   //
   // We leave this null if the file is not the main database file.
 
-  FileImpl(kj::Own<const kj::File> file, kj::Maybe<kj::Own<Lock>> lock)
+  FileImpl(const Vfs& vfs, kj::Own<const kj::File> file, kj::Maybe<kj::Own<Lock>> lock)
       : sqlite3_file { .pMethods = &FILE_METHOD_TABLE },
+        vfs(vfs),
         writableFile(*file),
         file(kj::mv(file)),
         lock(kj::mv(lock)) {}
-  FileImpl(kj::Own<const kj::ReadableFile> file, kj::Maybe<kj::Own<Lock>> lock)
+  FileImpl(const Vfs& vfs, kj::Own<const kj::ReadableFile> file, kj::Maybe<kj::Own<Lock>> lock)
       : sqlite3_file { .pMethods = &FILE_METHOD_TABLE },
+        vfs(vfs),
         file(kj::mv(file)),
         lock(kj::mv(lock)) {}
 
@@ -943,14 +958,9 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
     return 4096;
   },
   .xDeviceCharacteristics = [](sqlite3_file* file) noexcept -> int {
-    // This returns a bitfield of SQLITE_IOCAP_* flags that make promises to SQLite, presumably
-    // allowing it to perform better. These promises depend on the underlying filesystem details.
-    // We can't really make any promises since we don't know anything here. Weirdly enough, the
-    // standard unix implementation doesn't seem to set any bits at all, unless you're using f2fs
-    // on Linux, or you're using QNX. I guess a lot of this stuff is various guarantees that
-    // embedded device vendors implemented in hardware which allow sqlite to run faster on their
-    // device.
-    return 0;
+    WRAP_METHOD(SQLITE_IOERR, {
+      return self.vfs.options.deviceCharacteristics;
+    });
   },
 
   .xShmMap = [](sqlite3_file* file, int iRegion, int szRegion, int bExtend,
@@ -1051,7 +1061,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
     .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block) \
-      auto& self KJ_UNUSED = *static_cast<SqliteDatabase::Vfs*>(vfs->pAppData); \
+      auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData); \
       try block catch (kj::Exception& e) { \
         KJ_LOG(ERROR, "SQLite VFS I/O error", e); \
         return errorCode; \
@@ -1075,7 +1085,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             lock = self.lockManager.lock(path, *kjFile);
           }
 
-          kj::ctor(target, kj::mv(kjFile), kj::mv(lock));
+          kj::ctor(target, self, kj::mv(kjFile), kj::mv(lock));
         } else {
           kj::Own<const kj::File> kjFile;
           kj::Maybe<kj::Own<Lock>> lock;
@@ -1110,7 +1120,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             }
           }
 
-          kj::ctor(target, kj::mv(kjFile), kj::mv(lock));
+          kj::ctor(target, self, kj::mv(kjFile), kj::mv(lock));
         }
 
         // In theory if read-write was requested, but failed, we should retry read-only, and then
@@ -1404,10 +1414,11 @@ private:
   };
 };
 
-SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
+SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, Options options)
     : directory(directory),
       ownLockManager(kj::heap<DefaultLockManager>()),
       lockManager(*ownLockManager),
+      options(kj::mv(options)),
       native(*sqlite3_vfs_find(nullptr)) {
 #if _WIN32
   vfs = kj::heap(makeKjVfs());
@@ -1422,9 +1433,11 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory)
   sqlite3_vfs_register(vfs, false);
 }
 
-SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, const LockManager& lockManager)
+SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, const LockManager& lockManager,
+                         Options options)
     : directory(directory),
       lockManager(lockManager),
+      options(kj::mv(options)),
       native(*sqlite3_vfs_find(nullptr)),
       // Always use KJ VFS when using a custom LockManager.
       vfs(kj::heap(makeKjVfs())) {
