@@ -117,10 +117,10 @@ function test(sql) {
   requireException(() => sql.exec("SELECT sqlite_version()"),
       "not authorized to use function: sqlite_version");
 
-  // At present we don't permit JSON. This includes the -> operator, which is considered a
-  // function.
-  requireException(() => sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$'"),
-      "not authorized to use function: ->");
+  // JSON -> operator works
+  let jsonResult =
+      [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
+  assert.equal(jsonResult, "[4,5,{\"f\":7}]");
 }
 
 export class DurableObjectExample {

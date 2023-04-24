@@ -215,9 +215,26 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "tanh"_kj,
   "trunc"_kj,
 
-  // TODO(someday): Enable JSON? https://www.sqlite.org/json1.html
-  //   This only recently (2022) became a default feature of SQLite. It seems like a big new attack
-  //   surface. I'd rather people use V8's JSON parser TBH.
+  // https://www.sqlite.org/json1.html
+  "json"_kj,
+  "json_array"_kj,
+  "json_array_length"_kj,
+  "json_extract"_kj,
+  "->"_kj,
+  "->>"_kj,
+  "json_insert"_kj,
+  "json_object"_kj,
+  "json_patch"_kj,
+  "json_remove"_kj,
+  "json_replace"_kj,
+  "json_set"_kj,
+  "json_type"_kj,
+  "json_valid"_kj,
+  "json_quote"_kj,
+  "json_group_array"_kj,
+  "json_group_object"_kj,
+  "json_each"_kj,
+  "json_tree"_kj,
 };
 
 }  // namespace
