@@ -5,6 +5,7 @@
 #include "modules.h"
 #include "promise.h"
 #include <kj/mutex.h>
+#include <set>
 
 namespace workerd::jsg {
 namespace {
@@ -40,11 +41,6 @@ private:
   // The key is the address of the static global that was compiled to produce the CachedData.
 };
 
-ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
-  return static_cast<ModuleRegistry*>(
-      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
-}
-
 v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
                                            v8::Local<v8::String> specifier,
                                            v8::Local<v8::FixedArray> import_assertions,
@@ -74,7 +70,10 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         ref.specifier.parent().eval(spec) :
         kj::Path::parse(spec);
 
-    result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath, internalOnly), Error,
+    result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath,
+        internalOnly ?
+            ModuleRegistry::ResolveOption::INTERNAL_ONLY :
+            ModuleRegistry::ResolveOption::DEFAULT), Error,
         "No such module \"", targetPath.toString(),
         "\".\n  imported from \"", ref.specifier.toString(), "\"")
         .module.getHandle(js);
@@ -159,6 +158,11 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
           // leave `result` empty to propagate the JS exception
         }
       }
+      KJ_CASE_ONEOF(info, ModuleRegistry::NodeJsModuleInfo) {
+        result = info.evaluate(isolate,
+                               const_cast<ModuleRegistry::NodeJsModuleInfo&>(info),
+                               module);
+      }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
                                              v8StrIntern(isolate, "default"_kj),
@@ -216,6 +220,11 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 }
 
 }  // namespace
+
+ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
+  return static_cast<ModuleRegistry*>(
+      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+}
 
 v8::Local<v8::Value> CommonJsModuleContext::require(kj::String specifier, v8::Isolate* isolate) {
   auto modulesForResolveCallback = getModulesForResolveCallback(isolate);
@@ -282,6 +291,18 @@ void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;
   auto context = js.v8Context();
+
+  auto status = module->GetStatus();
+  // Nothing to do if the module is already instantiated, evaluated, or errored.
+  if (status == v8::Module::Status::kInstantiated ||
+      status == v8::Module::Status::kEvaluated ||
+      status == v8::Module::Status::kErrored) return;
+
+  JSG_REQUIRE(status == v8::Module::Status::kUninstantiated, Error,
+      "Module cannot be synchronously required while it is being instantiated or evaluated. "
+      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
+      "dependency on itself, and that a synchronous require() is being called while the module "
+      "is being loaded.");
 
   jsg::check(module->InstantiateModule(context, &resolveCallback));
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
@@ -432,5 +453,197 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
       js.v8Isolate,
       v8::MemorySpan<const uint8_t>(code.begin(), code.size())));
 }
+
+// ======================================================================================
+
+jsg::Ref<jsg::Object> ModuleRegistry::NodeJsModuleInfo::initModuleContext(
+    jsg::Lock& js,
+    kj::StringPtr name) {
+  return jsg::alloc<NodeJsModuleContext>(js.v8Isolate, kj::Path::parse(name));
+}
+
+v8::MaybeLocal<v8::Value> ModuleRegistry::NodeJsModuleInfo::evaluate(
+      v8::Isolate* isolate,
+      ModuleRegistry::NodeJsModuleInfo& info,
+      v8::Local<v8::Module> module) {
+
+  const auto makeResolvedPromise = [&]() {
+    v8::Local<v8::Promise::Resolver> resolver;
+    auto context = isolate->GetCurrentContext();
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+      // Return empty local and allow error to propagate.
+      return v8::Local<v8::Promise>();
+    }
+    if (!resolver->Resolve(context, v8::Undefined(isolate)).IsJust()) {
+      // Return empty local and allow error to propagate.
+      return v8::Local<v8::Promise>();
+    }
+    return resolver->GetPromise();
+  };
+
+  v8::MaybeLocal<v8::Value> result;
+  v8::TryCatch catcher(isolate);
+  auto& js = jsg::Lock::from(isolate);
+  try {
+    info.evalFunc(js);
+  } catch (const JsExceptionThrown&) {
+    if (catcher.CanContinue()) catcher.ReThrow();
+    // leave `result` empty to propagate the JS exception
+    return v8::MaybeLocal<v8::Value>();
+  }
+
+  auto ctx = static_cast<NodeJsModuleContext*>(info.moduleContext.get());
+
+  if (module->SetSyntheticModuleExport(
+          isolate,
+          v8StrIntern(isolate, "default"_kj),
+          ctx->module->getExports(js.v8Isolate)).IsJust()) {
+    result = makeResolvedPromise();
+  } else {
+    // leave `result` empty to propagate the JS exception
+  }
+  return result;
+}
+
+NodeJsModuleContext::NodeJsModuleContext(v8::Isolate* isolate, kj::Path path)
+    : module(jsg::alloc<NodeJsModuleObject>(isolate, path.toString(true))), path(kj::mv(path)),
+    exports(isolate, module->getExports(isolate)) {}
+
+v8::Local<v8::Value> NodeJsModuleContext::require(kj::String specifier, v8::Isolate* isolate) {
+  // This list must be kept in sync with the list of builtins from Node.js.
+  // It should be unlikely that anything is ever removed from this list, and
+  // adding items to it is considered a semver-major change in Node.js.
+  static const std::set<kj::StringPtr> NODEJS_BUILTINS {
+    "_http_agent",         "_http_client",        "_http_common",
+    "_http_incoming",      "_http_outgoing",      "_http_server",
+    "_stream_duplex",      "_stream_passthrough", "_stream_readable",
+    "_stream_transform",   "_stream_wrap",        "_stream_writable",
+    "_tls_common",         "_tls_wrap",           "assert",
+    "assert/strict",       "async_hooks",         "buffer",
+    "child_process",       "cluster",             "console",
+    "constants",           "crypto",              "dgram",
+    "diagnostics_channel", "dns",                 "dns/promises",
+    "domain",              "events",              "fs",
+    "fs/promises",         "http",                "http2",
+    "https",               "inspector",           "inspector/promises",
+    "module",              "net",                 "os",
+    "path",                "path/posix",          "path/win32",
+    "perf_hooks",          "process",             "punycode",
+    "querystring",         "readline",            "readline/promises",
+    "repl",                "stream",              "stream/consumers",
+    "stream/promises",     "stream/web",          "string_decoder",
+    "sys",                 "timers",              "timers/promises",
+    "tls",                 "trace_events",        "tty",
+    "url",                 "util",                "util/types",
+    "v8",                  "vm",                  "worker_threads",
+    "zlib"
+  };
+
+  // If it is a bare specifier known to be a Node.js built-in, then prefix the
+  // specifier with node:
+  bool isNodeBuiltin = false;
+  auto resolveOption = jsg::ModuleRegistry::ResolveOption::DEFAULT;
+  if (NODEJS_BUILTINS.contains(specifier)) {
+    specifier = kj::str("node:", specifier);
+    isNodeBuiltin = true;
+    resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+  } else if (specifier.startsWith("node:")) {
+    isNodeBuiltin = true;
+    resolveOption = jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+  }
+
+  // TODO(cleanup): This implementation from here on is identical to the
+  // CommonJsModuleContext::require. We should consolidate these as the
+  // next step.
+
+  auto modulesForResolveCallback = jsg::getModulesForResolveCallback(isolate);
+  KJ_REQUIRE(modulesForResolveCallback != nullptr, "didn't expect resolveCallback() now");
+
+  kj::Path targetPath = path.parent().eval(specifier);
+  auto& js = jsg::Lock::from(isolate);
+
+  // require() is only exposed to worker bundle modules so the resolve here is only
+  // permitted to require worker bundle or built-in modules. Internal modules are
+  // excluded.
+  auto& info = JSG_REQUIRE_NONNULL(
+      modulesForResolveCallback->resolve(js, targetPath, resolveOption),
+      Error, "No such module \"", targetPath.toString(), "\".");
+  // Adding imported from suffix here not necessary like it is for resolveCallback, since we have a
+  // js stack that will include the parent module's name and location of the failed require().
+
+  if (!isNodeBuiltin) {
+    JSG_REQUIRE_NONNULL(info.maybeSynthetic, TypeError,
+        "Cannot use require() to import an ES Module.");
+  }
+
+  auto module = info.module.getHandle(js);
+  auto context = isolate->GetCurrentContext();
+
+  jsg::instantiateModule(js, module);
+
+  auto handle = jsg::check(module->Evaluate(context));
+  KJ_ASSERT(handle->IsPromise());
+  auto prom = handle.As<v8::Promise>();
+
+  // This assert should always pass since evaluateSyntheticModuleCallback() for CommonJS
+  // modules (below) always returns an already-resolved promise.
+  KJ_ASSERT(prom->State() != v8::Promise::PromiseState::kPending);
+
+  if (module->GetStatus() == v8::Module::kErrored) {
+    jsg::throwTunneledException(isolate, module->GetException());
+  }
+
+  return jsg::check(module->GetModuleNamespace().As<v8::Object>()
+      ->Get(context, jsg::v8StrIntern(isolate, "default")));
+}
+
+v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
+  auto value = require(kj::str("node:buffer"), js.v8Isolate);
+  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:buffer implementation");
+  auto module = value.As<v8::Object>();
+  auto buffer = jsg::check(module->Get(js.v8Context(), jsg::v8Str(js.v8Isolate, "Buffer")));
+  JSG_REQUIRE(buffer->IsFunction(), TypeError, "Invalid node:buffer implementation");
+  return buffer;
+}
+
+v8::Local<v8::Value> NodeJsModuleContext::getProcess(jsg::Lock& js) {
+  auto value = require(kj::str("node:process"), js.v8Isolate);
+  JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:process implementation");
+  return value;
+}
+
+kj::String NodeJsModuleContext::getFilename() {
+  return path.toString(true);
+}
+
+kj::String NodeJsModuleContext::getDirname() {
+  return path.parent().toString(true);
+}
+
+jsg::Ref<NodeJsModuleObject> NodeJsModuleContext::getModule(v8::Isolate* isolate) {
+  return module.addRef();
+}
+
+v8::Local<v8::Value> NodeJsModuleContext::getExports(v8::Isolate* isolate) {
+  return exports.getHandle(isolate);
+}
+
+void NodeJsModuleContext::setExports(jsg::Value value) {
+  exports = kj::mv(value);
+}
+
+NodeJsModuleObject::NodeJsModuleObject(v8::Isolate* isolate, kj::String path)
+    : exports(isolate, v8::Object::New(isolate)),
+      path(kj::mv(path)) {}
+
+v8::Local<v8::Value> NodeJsModuleObject::getExports(v8::Isolate* isolate) {
+  return exports.getHandle(isolate);
+}
+
+void NodeJsModuleObject::setExports(jsg::Value value) {
+  exports = kj::mv(value);
+}
+
+kj::StringPtr NodeJsModuleObject::getPath() { return path; }
 
 }  // namespace workerd::jsg

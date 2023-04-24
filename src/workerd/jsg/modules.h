@@ -8,6 +8,7 @@
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <set>
 
 namespace workerd::jsg {
 
@@ -47,6 +48,85 @@ public:
   }
 
   jsg::Ref<CommonJsModuleObject> module;
+private:
+  kj::Path path;
+  jsg::Value exports;
+};
+
+// TODO(cleanup): Ideally these would exist over with the rest of the Node.js
+// compat related stuff in workerd/api/node but there's a dependency cycle issue
+// to work through there. Specifically, these are needed in jsg but jsg cannot
+// depend on workerd/api. We should revisit to see if we can get these moved over.
+
+// The NodeJsModuleContext is used in support of the NodeJsCompatModule type.
+// It adds additional extensions to the global context that would normally be
+// expected within the global scope of a Node.js compatible module (such as
+// Buffer and process).
+
+class NodeJsModuleObject: public jsg::Object {
+public:
+  NodeJsModuleObject(v8::Isolate* isolate, kj::String path);
+
+  v8::Local<v8::Value> getExports(v8::Isolate* isolate);
+  void setExports(jsg::Value value);
+  kj::StringPtr getPath();
+
+  // TODO(soon): Additional properties... We can likely get by without implementing most
+  // of these (if any).
+  // * children https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#modulechildren
+  // * filename https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#modulefilename
+  // * id https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#moduleid
+  // * isPreloading https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#moduleispreloading
+  // * loaded https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#moduleloaded
+  // * parent https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#moduleparent
+  // * paths https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#modulepaths
+  // * require https://nodejs.org/dist/latest-v20.x/docs/api/modules.html#modulerequireid
+
+  JSG_RESOURCE_TYPE(NodeJsModuleObject) {
+    JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
+    JSG_READONLY_INSTANCE_PROPERTY(path, getPath);
+  }
+private:
+  jsg::Value exports;
+  kj::String path;
+};
+
+class NodeJsModuleContext: public jsg::Object {
+  // The NodeJsModuleContext is similar in structure to CommonJsModuleContext
+  // with the exception that:
+  // (a) Node.js-compat built-in modules can be required without the `node:` specifier-prefix
+  //     (meaning that worker-bundle modules whose names conflict with the Node.js built-ins
+  //     are ignored), and
+  // (b) The common Node.js globals that we implement are exposed. For instance, `process`
+  //     and `Buffer` will be found at the global scope.
+public:
+  NodeJsModuleContext(v8::Isolate* isolate, kj::Path path);
+
+  v8::Local<v8::Value> require(kj::String specifier, v8::Isolate* isolate);
+  v8::Local<v8::Value> getBuffer(jsg::Lock& js);
+  v8::Local<v8::Value> getProcess(jsg::Lock& js);
+
+  // TODO(soon): Implement setImmediate/clearImmediate
+
+  jsg::Ref<NodeJsModuleObject> getModule(v8::Isolate* isolate);
+
+  v8::Local<v8::Value> getExports(v8::Isolate* isolate);
+  void setExports(jsg::Value value);
+
+  kj::String getFilename();
+  kj::String getDirname();
+
+  JSG_RESOURCE_TYPE(NodeJsModuleContext) {
+    JSG_METHOD(require);
+    JSG_READONLY_INSTANCE_PROPERTY(module, getModule);
+    JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
+    JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
+    JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
+    JSG_LAZY_INSTANCE_PROPERTY(__filename, getFilename);
+    JSG_LAZY_INSTANCE_PROPERTY(__dirname, getDirname);
+  }
+
+  jsg::Ref<NodeJsModuleObject> module;
 private:
   kj::Path path;
   jsg::Value exports;
@@ -121,6 +201,15 @@ public:
     INTERNAL,
   };
 
+  enum class ResolveOption {
+    // Default resolution. Check the worker bundle first, then builtins.
+    DEFAULT,
+    // Built-in resolution. Check only non-internal builtins.
+    BUILTIN_ONLY,
+    // Internal resolution. Check only internal builtins.
+    INTERNAL_ONLY,
+  };
+
   static inline ModuleRegistry* from(jsg::Lock& js) {
     return static_cast<ModuleRegistry*>(
         js.v8Context()->GetAlignedPointerFromEmbedderData(2));
@@ -135,6 +224,44 @@ public:
     CapnpModuleInfo(CapnpModuleInfo&&) = default;
     CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
   };
+
+  struct NodeJsModuleInfo {
+    jsg::Ref<jsg::Object> moduleContext;
+    jsg::Function<void()> evalFunc;
+
+    NodeJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
+        : moduleContext(initModuleContext(lock, name)),
+          evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
+
+    NodeJsModuleInfo(NodeJsModuleInfo&&) = default;
+    NodeJsModuleInfo& operator=(NodeJsModuleInfo&&) = default;
+
+    static jsg::Ref<jsg::Object> initModuleContext(
+        jsg::Lock& js,
+        kj::StringPtr name);
+
+    static v8::MaybeLocal<v8::Value> evaluate(v8::Isolate* isolate,
+                                              NodeJsModuleInfo& info,
+                                              v8::Local<v8::Module> module);
+
+    jsg::Function<void()> initEvalFunc(
+        auto& lock,
+        jsg::Ref<jsg::Object>& moduleContext,
+        kj::StringPtr name,
+        kj::StringPtr content) {
+      v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
+      v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
+      auto context = lock.v8Context();
+      auto handle = lock.wrap(context, moduleContext.addRef());
+      auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
+          context,
+          &source,
+          0, nullptr,
+          1, &handle));
+      return lock.template unwrap<jsg::Function<void()>>(context, fn);
+    }
+  };
+
   struct CommonJsModuleInfo {
     Ref<CommonJsModuleContext> moduleContext;
     jsg::Function<void()> evalFunc;
@@ -193,7 +320,8 @@ public:
                                           TextModuleInfo,
                                           WasmModuleInfo,
                                           JsonModuleInfo,
-                                          ObjectModuleInfo>;
+                                          ObjectModuleInfo,
+                                          NodeJsModuleInfo>;
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
 
     ModuleInfo(jsg::Lock& js,
@@ -224,7 +352,7 @@ public:
 
   virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
                                          const kj::Path& specifier,
-                                         bool internalOnly = false) = 0;
+                                         ResolveOption option = ResolveOption::DEFAULT) = 0;
 
   virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
 
@@ -311,16 +439,18 @@ public:
 
   kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
                                  const kj::Path& specifier,
-                                 bool internalOnly = false) override {
+                                 ResolveOption option = ResolveOption::DEFAULT) override {
     using Key = typename Entry::Key;
-    if (internalOnly) {
+    if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
         return entry->module(js, *observer);
       }
     } else {
-      // First, we try to resolve a worker bundle version of the module.
-      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
-        return entry->module(js, *observer);
+      if (option == ResolveOption::DEFAULT) {
+        // First, we try to resolve a worker bundle version of the module.
+        KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
+          return entry->module(js, *observer);
+        }
       }
       // Then we look for a built-in version of the module.
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUILTIN))) {
@@ -359,12 +489,12 @@ public:
     // built-in module, then the built-in was never registered and won't
     // be found.
     using Key = typename Entry::Key;
-    bool internalOnly = false;
+    auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
     KJ_IF_MAYBE(entry, entries.find(Key(referrer, Type::BUILTIN))) {
-      internalOnly = true;
+      resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
-    KJ_IF_MAYBE(info, resolve(js, specifier, internalOnly)) {
+    KJ_IF_MAYBE(info, resolve(js, specifier, resolveOption)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
         auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
           auto module = info.module.getHandle(isolate);
@@ -526,5 +656,7 @@ void setModulesForResolveCallback(jsg::Lock& js, ModuleRegistry* table) {
   js.v8Context()->SetAlignedPointerInEmbedderData(2, table);
   js.v8Isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
 }
+
+ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate);
 
 }  // namespace workerd::jsg

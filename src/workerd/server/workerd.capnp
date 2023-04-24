@@ -248,6 +248,12 @@ struct Worker {
 
       json @6 :Text;
       # Importing this will produce the result of parsing the given text as JSON.
+
+      nodeJsCompatModule @7 :Text;
+      # A Node.js module is a specialization of a commonJsModule that:
+      # (a) allows for importing Node.js-compat built-ins without the node: specifier-prefix
+      # (b) exposes the subset of common Node.js globals such as process, Buffer, etc that
+      #     we implement in the workerd runtime.
     }
   }
 
