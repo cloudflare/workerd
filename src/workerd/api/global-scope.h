@@ -315,10 +315,6 @@ public:
       jsg::Optional<Request::Initializer> requestInitr,
       CompatibilityFlags::Reader featureFlags);
 
-  jsg::Ref<Socket> connect(
-      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
-      CompatibilityFlags::Reader featureFlags);
-
   jsg::Ref<ServiceWorkerGlobalScope> getSelf() {
     return JSG_THIS;
   }
@@ -460,9 +456,6 @@ public:
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
-    if (flags.getTcpSocketsSupport()) {
-      JSG_METHOD(connect);
-    }
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(

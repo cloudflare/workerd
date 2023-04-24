@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules.h>
 #include "http.h"
 
 
@@ -122,11 +123,35 @@ jsg::Ref<Socket> connectImpl(
     jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags);
 
+class SocketsModule final: public jsg::Object {
+public:
+  jsg::Ref<Socket> connect(jsg::Lock& js, AnySocketAddress address,
+    jsg::Optional<SocketOptions> options,
+    CompatibilityFlags::Reader featureFlags) {
+    return connectImpl(js, nullptr, kj::mv(address), kj::mv(options), featureFlags);
+  }
+
+  JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
+    if (flags.getTcpSocketsSupport()) {
+      JSG_METHOD(connect);
+    }
+  }
+};
+
+template <typename TypeWrapper>
+void registerSocketsModule(
+    workerd::jsg::ModuleRegistryImpl<TypeWrapper>& registry, auto featureFlags) {
+  registry.template addBuiltinModule<SocketsModule>("cloudflare-internal:sockets",
+    workerd::jsg::ModuleRegistry::Type::INTERNAL);
+
+}
+
 #define EW_SOCKETS_ISOLATE_TYPES     \
   api::Socket,                       \
   api::SocketOptions,                \
   api::SocketAddress,                \
-  api::TlsOptions
+  api::TlsOptions,                   \
+  api::SocketsModule
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
