@@ -36,6 +36,7 @@ public:
   class Lock;
   class LockManager;
   class Regulator;
+  struct VfsOptions;
 
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path);
   SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode);
@@ -274,6 +275,27 @@ private:
   }
 };
 
+struct SqliteDatabase::VfsOptions {
+  // Options affecting SqliteDatabase::Vfs constructor.
+
+  int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
+  // Value that should be returned by the SQLite VFS's xDeviceCharacteristics method. This is
+  // a combination of SQLITE_IOCAP_* flags which can improve performance if the device is known
+  // to provide certain guarantees.
+  //
+  // SQLite's default filesystem driver sets this to 0 on unix. On Windows, it sets the
+  // SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN flag. SQLite also lets the application enable
+  // SQLITE_IOCAP_POWERSAFE_OVERWRITE explicitly via the SQLITE_FCNTL_POWERSAFE_OVERWRITE file
+  // control, or the `?psow=1` URL parameter. It is believed that almost all modern disks support
+  // powersafe overwrite, and being able to assume this significantly improves performance.
+  // See: https://www.sqlite.org/psow.html Because it's almost always desirable, this
+  // implementation enables powersafe overwrite by default.
+  //
+  // Note that when the underlying directory is a real disk directory, then this implementation
+  // will fall back to the native VFS implementation. In that case, the options you set here will
+  // be ORed with the ones set by the underlying VFS.
+};
+
 class SqliteDatabase::Vfs {
   // Implements a SQLite VFS based on a KJ directory.
   //
@@ -288,7 +310,11 @@ class SqliteDatabase::Vfs {
   // An instance of `Vfs` can safely be used across multiple threads.
 
 public:
-  explicit Vfs(const kj::Directory& directory);
+  using Options = VfsOptions;
+  // Pretend `Options` is declared nested here. Due to a C++ quirk, we cannot actually declare it
+  // nested while having default-initialized parameters of this type.
+
+  explicit Vfs(const kj::Directory& directory, Options options = {});
   // Create a VFS backed by the given kj::Directory.
   //
   // If the directory is a real disk directory (i.e. getFd() returns non-null), then this will
@@ -302,7 +328,8 @@ public:
   // Vfs. If, somehow, the same database file is opened for write via two different `Vfs` instances,
   // it will likely become corrupted.
 
-  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager);
+  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager,
+               Options options = {});
   // Create a VFS with custom lock management.
   //
   // Unlike the other constructor, this version never uses SQLite's native VFS implementation.
@@ -326,6 +353,7 @@ private:
   const kj::Directory& directory;
   kj::Own<LockManager> ownLockManager;
   const LockManager& lockManager;
+  Options options;
 
   kj::String name = makeName();
   // Value returned by getName();
