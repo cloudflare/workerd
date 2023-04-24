@@ -106,6 +106,137 @@ kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   }
 }
 
+static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
+  // We allowlist these SQLite functions.
+
+  // https://www.sqlite.org/lang_corefunc.html
+  "abs"_kj,
+  "changes"_kj,
+  "char"_kj,
+  "coalesce"_kj,
+  "format"_kj,
+  "glob"_kj,
+  "hex"_kj,
+  "ifnull"_kj,
+  "iif"_kj,
+  "instr"_kj,
+  "last_insert_rowid"_kj,
+  "length"_kj,
+  "like"_kj,
+  "likelihood"_kj,
+  "likely"_kj,
+  "load_extension"_kj,
+  "lower"_kj,
+  "ltrim"_kj,
+  "max_scalar"_kj,
+  "min_scalar"_kj,
+  "nullif"_kj,
+  "printf"_kj,
+  "quote"_kj,
+  "random"_kj,
+  "randomblob"_kj,
+  "replace"_kj,
+  "round"_kj,
+  "rtrim"_kj,
+  "sign"_kj,
+  "soundex"_kj,
+  // These functions query SQLite internals and build details in a way we'd prefer not to reveal.
+  // "sqlite_compileoption_get"_kj,
+  // "sqlite_compileoption_used"_kj,
+  // "sqlite_offset"_kj,
+  // "sqlite_source_id"_kj,
+  // "sqlite_version"_kj,
+  "substr"_kj,
+  "total_changes"_kj,
+  "trim"_kj,
+  "typeof"_kj,
+  "unhex"_kj,
+  "unicode"_kj,
+  "unlikely"_kj,
+  "upper"_kj,
+  "zeroblob"_kj,
+
+  // https://www.sqlite.org/lang_datefunc.html
+  "date"_kj,
+  "time"_kj,
+  "datetime"_kj,
+  "julianday"_kj,
+  "unixepoch"_kj,
+  "stftime"_kj,
+
+  // https://www.sqlite.org/lang_aggfunc.html
+  "aggfilter"_kj,
+  "aggfunclist"_kj,
+  "avg"_kj,
+  "count"_kj,
+  "group_concat"_kj,
+  "max_agg"_kj,
+  "min_agg"_kj,
+  "sumunc"_kj,
+
+  // https://www.sqlite.org/windowfunctions.html#biwinfunc
+  "row_number"_kj,
+  "rank"_kj,
+  "dense_rank"_kj,
+  "percent_rank"_kj,
+  "cume_dist"_kj,
+  "ntile"_kj,
+  "lag"_kj,
+  "lead"_kj,
+  "first_value"_kj,
+  "last_value"_kj,
+  "nth_value"_kj,
+
+  // https://www.sqlite.org/lang_mathfunc.html
+  "acos"_kj,
+  "acosh"_kj,
+  "asin"_kj,
+  "asinh"_kj,
+  "atan"_kj,
+  "atan2"_kj,
+  "atanh"_kj,
+  "ceil"_kj,
+  "cos"_kj,
+  "cosh"_kj,
+  "degrees"_kj,
+  "exp"_kj,
+  "floor"_kj,
+  "ln"_kj,
+  "log"_kj,
+  "log2"_kj,
+  "mod"_kj,
+  "pi"_kj,
+  "pow"_kj,
+  "radians"_kj,
+  "sin"_kj,
+  "sinh"_kj,
+  "sqrt"_kj,
+  "tan"_kj,
+  "tanh"_kj,
+  "trunc"_kj,
+
+  // https://www.sqlite.org/json1.html
+  "json"_kj,
+  "json_array"_kj,
+  "json_array_length"_kj,
+  "json_extract"_kj,
+  "->"_kj,
+  "->>"_kj,
+  "json_insert"_kj,
+  "json_object"_kj,
+  "json_patch"_kj,
+  "json_remove"_kj,
+  "json_replace"_kj,
+  "json_set"_kj,
+  "json_type"_kj,
+  "json_valid"_kj,
+  "json_quote"_kj,
+  "json_group_array"_kj,
+  "json_group_object"_kj,
+  "json_each"_kj,
+  "json_tree"_kj,
+};
+
 }  // namespace
 
 // =======================================================================================
@@ -123,9 +254,9 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
                                     SQLITE_OPEN_READONLY, vfs.getName().cStr()));
   }
 
-  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
-  //   from this throwing.
-  setupAuthorizer();
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
+  setupSecurity();
 }
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode mode) {
@@ -151,9 +282,9 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
                                     flags, vfs.getName().cStr()));
   }
 
-  // NOTE: sqlite3_set_authorizer() cannot actually fail, so I'm not worried about a memory leak
-  //   from this throwing.
-  setupAuthorizer();
+  KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
+
+  setupSecurity();
 }
 
 SqliteDatabase::~SqliteDatabase() noexcept(false) {
@@ -313,12 +444,42 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
 
     case SQLITE_PRAGMA             :   /* Pragma Name     1st arg or NULL */
-      // TODO(sqlite): Decide which pragmas are OK.
+      // We currently only permit a few pragmas.
+      {
+        kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
+        if (pragma == "table_list") {
+          // Annoyingly, this will list internal tables. However, the existence of these tables
+          // isn't really a secret, we just don't want people to access them.
+          return param2 == nullptr;  // should always be true?
+        } else if (pragma == "table_info") {
+          // Allow if the specific named table is not protected.
+          KJ_IF_MAYBE(name, param2) {
+            return regulator.isAllowedName(*name);
+          } else {
+            return false;  // shouldn't happen?
+          }
+        } else if (pragma == "data_version") {
+          return true;
+        } else if (pragma == "foreign_keys") {
+          return true;
+        }
+      }
+
       return false;
 
     case SQLITE_FUNCTION           :   /* NULL            Function Name   */
       // TODO(sqlite): Decide which function are OK.
-      return false;
+
+      {
+        const kj::HashSet<kj::StringPtr> allowSet = []() {
+          kj::HashSet<kj::StringPtr> result;
+          for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
+            result.insert(func);
+          }
+          return result;
+        }();
+        return allowSet.contains(KJ_ASSERT_NONNULL(param2));
+      }
 
     // ---------------------------------------------------------------
     // Stuff that is never allowed
@@ -361,7 +522,30 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 }
 
-void SqliteDatabase::setupAuthorizer() {
+void SqliteDatabase::setupSecurity() {
+  // Set up security restrictions.
+  // See: https://www.sqlite.org/security.html
+
+  // 1. Set defensive mode.
+  SQLITE_CALL_NODB(sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr));
+
+  // 2. Reduce limits
+  // We use the suggested limits from the web site. Note that sqlite3_limit() does NOT return an
+  // error code; it returns the old limit.
+  sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 1000000);
+  sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
+  sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
+  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 3);
+  sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 25000);
+  sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 8);
+  sqlite3_limit(db, SQLITE_LIMIT_ATTACHED, 0);
+  sqlite3_limit(db, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
+  sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_TRIGGER_DEPTH, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_WORKER_THREADS, 0);
+
+  // 3. Setup authorizer.
   SQLITE_CALL_NODB(sqlite3_set_authorizer(db,
       [](void* userdata, int actionCode,
          const char* param1, const char* param2,
@@ -377,6 +561,33 @@ void SqliteDatabase::setupAuthorizer() {
       return SQLITE_DENY;
     }
   }, this));
+
+  // 4. Set a progress handler or use interrupt() to limit CPU time.
+  // TODO(sqlite): Call sqlite3_interrupt() at the same time as v8::Isolate::TerminateExecution().
+
+  // 5. Limit heap size.
+  // Annoyingly, this sets a process-wide limit. We'll set 128MB "soft" limit (to try to control
+  // how much page caching SQLite does) and 512MB "hard" limit (to block DoS attacks from taking
+  // down the whole system).
+  // TODO(perf): Revisit as popularity grows. Maybe make configurable? Maybe patch SQLite to allow
+  //   these to be controlled per-database? Is page caching even all that important when the kernel
+  //   does its own page caching?
+  static bool doOnce KJ_UNUSED = []() {
+    sqlite3_soft_heap_limit64(128u << 20);
+    sqlite3_hard_heap_limit64(512u << 20);
+    return false;
+  }();
+
+  // 6. Set SQLITE_MAX_ALLOCATION_SIZE compile flag.
+  // (handled in BUILD.sqlite3)
+
+  // 7. Consider giving SQLite a fixed heap space.
+  // This is suggested mainly for embedded systems. It involves giving SQLite a fixed preallocated
+  // heap space which the library restricts itself to instead of using malloc. We probably don't
+  // want this.
+
+  // 8. Set the SQLITE_PRINTF_PRECISION_LIMIT compile flag.
+  // (handled in BUILD.sqlite3)
 }
 
 SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::StringPtr sqlCode) {
