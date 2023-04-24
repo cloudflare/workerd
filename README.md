@@ -76,6 +76,8 @@ To build `workerd`, you need:
 * On Linux:
   * Clang 11+ (e.g. package `clang` on Debian Bullseye)
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
+  * LLD 11+ (e.g. package `lld` on Debian Bullseye)
+  * `python3` and `python3-distutils`
 * On macOS:
   * full XCode 13+ installation
 * On Windows:
