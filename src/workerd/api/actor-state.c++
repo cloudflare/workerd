@@ -728,6 +728,10 @@ kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* is
     .version = 15,
     .omitHeader = false,
   });
+  // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
+  // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
+  // via structuredClone.
+  value = maybeUnwrapBotManagement(isolate, value);
   serializer.write(value);
   auto released = serializer.release();
   return kj::mv(released.data);
