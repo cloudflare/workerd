@@ -292,12 +292,13 @@ ReadableStream::ReadableStream(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source)
     : ioContext(ioContext),
-      controller(kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)))) {
+      controller(kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)))),
+      pipeToCalled(false) {
   getController().setOwnerRef(*this);
 }
 
 ReadableStream::ReadableStream(Controller controller)
-    : ioContext(tryGetIoContext()), controller(kj::mv(controller)) {
+    : ioContext(tryGetIoContext()), controller(kj::mv(controller)), pipeToCalled(false) {
   getController().setOwnerRef(*this);
 }
 
@@ -373,6 +374,7 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
   JSG_REQUIRE(!destination.isLockedToWriter(), TypeError,
                "This WritableStream is currently locked to a writer.");
 
+  pipeToCalled = true;
   auto options = kj::mv(maybeOptions).orDefault({});
   options.pipeThrough = true;
   maybePipeThrough = controller.pipeTo(js, destination, kj::mv(options)).then(js,
@@ -400,6 +402,9 @@ jsg::Promise<void> ReadableStream::pipeTo(
     return js.rejectedPromise<void>(
         js.v8TypeError("This WritableStream is currently locked to a writer"_kj));
   }
+
+  pipeToCalled = true;
+  destination->setPipeToCalled();
 
   auto options = kj::mv(maybeOptions).orDefault({});
   return getController().pipeTo(js, destination->getController(), kj::mv(options));

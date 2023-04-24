@@ -152,9 +152,17 @@ public:
     });
   }
 
+  bool getPipeToCalled() { return pipeToCalled; };
+  // Determines whether this WritableStream had been the target of a pipeTo().
+
+  void setPipeToCalled() { pipeToCalled = true; };
+  // Sets a flag on the WritableStream. Used whenever this WritableStream has been the target
+  // of a pipeTo().
+
 private:
   kj::Maybe<IoContext&> ioContext;
   Controller controller;
+  bool pipeToCalled;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(getController());

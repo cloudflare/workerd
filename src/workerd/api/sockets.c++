@@ -160,7 +160,9 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(!isSecureSocket, TypeError, "Cannot startTls on a TLS socket.");
   // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
-  JSG_REQUIRE(domain != nullptr, TypeError, "startTLS can only be called once.");
+  JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
+  JSG_REQUIRE(!readable->getPipeToCalled() && !writable->getPipeToCalled(), TypeError,
+      "Cannot call startTls after `pipeTo` was used.");
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about

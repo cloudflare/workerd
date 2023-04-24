@@ -365,10 +365,13 @@ public:
   void initEofResolverPair(jsg::Lock& js);
   // By default the eofResolverPair is not initialised, calling this method will initialise it so
   // that the signalling is active.
+  bool getPipeToCalled() { return pipeToCalled; };
+  // Determines whether `pipeTo` was called on this ReadableStream.
 private:
   kj::Maybe<IoContext&> ioContext;
   Controller controller;
   kj::Maybe<jsg::Promise<void>> maybePipeThrough;
+  bool pipeToCalled;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(getController(), maybePipeThrough);

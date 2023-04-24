@@ -192,13 +192,15 @@ WritableStream::WritableStream(
     kj::Maybe<uint64_t> maybeHighWaterMark)
     : ioContext(ioContext),
       controller(kj::heap<WritableStreamInternalController>(ioContext.addObject(kj::mv(sink)),
-                                                            maybeHighWaterMark)) {
+                                                            maybeHighWaterMark)),
+      pipeToCalled(false) {
   getController().setOwnerRef(*this);
 }
 
 WritableStream::WritableStream(Controller controller)
     : ioContext(tryGetIoContext()),
-      controller(kj::mv(controller)) {
+      controller(kj::mv(controller)),
+      pipeToCalled(false) {
   getController().setOwnerRef(*this);
 }
 
