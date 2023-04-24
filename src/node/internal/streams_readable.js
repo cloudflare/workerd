@@ -53,6 +53,11 @@ import {
 } from 'node-internal:streams_legacy';
 
 import {
+  newStreamReadableFromReadableStream,
+  newReadableStreamFromStreamReadable,
+} from 'node-internal:streams_adapters';
+
+import {
   Buffer,
 } from 'node-internal:internal_buffer';
 
@@ -1210,19 +1215,12 @@ function endWritableNT(stream) {
   }
 }
 
-// let webStreamsAdapters
-
-// // Lazy to avoid circular references
-// function lazyWebStreams() {
-//   if (webStreamsAdapters === undefined) webStreamsAdapters = {}
-//   return webStreamsAdapters
-// }
-// Readable.fromWeb = function (readableStream, options) {
-//   return lazyWebStreams().newStreamReadableFromReadableStream(readableStream, options)
-// }
-// Readable.toWeb = function (streamReadable, options) {
-//   return lazyWebStreams().newReadableStreamFromStreamReadable(streamReadable, options)
-// }
+Readable.fromWeb = function (readableStream, options) {
+  return newStreamReadableFromReadableStream(readableStream, options)
+}
+Readable.toWeb = function (streamReadable, options) {
+  return newReadableStreamFromStreamReadable(streamReadable, options)
+}
 
 Readable.wrap = function (src, options) {
   let _ref, _src$readableObjectMo;

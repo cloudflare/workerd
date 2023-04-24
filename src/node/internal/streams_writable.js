@@ -53,6 +53,11 @@ import {
 } from 'node-internal:streams_util';
 
 import {
+  newStreamWritableFromWritableStream,
+  newWritableStreamFromStreamWritable,
+} from 'node-internal:streams_adapters';
+
+import {
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MULTIPLE_CALLBACK,
@@ -830,16 +835,9 @@ Writable.prototype[EventEmitter.captureRejectionSymbol] = function (err) {
   this.destroy(err);
 }
 
-// let webStreamsAdapters
-
-// // Lazy to avoid circular references
-// function lazyWebStreams() {
-//   if (webStreamsAdapters === undefined) webStreamsAdapters = {}
-//   return webStreamsAdapters
-// }
-// Writable.fromWeb = function (writableStream, options) {
-//   return lazyWebStreams().newStreamWritableFromWritableStream(writableStream, options)
-// }
-// Writable.toWeb = function (streamWritable) {
-//   return lazyWebStreams().newWritableStreamFromStreamWritable(streamWritable)
-// }
+Writable.fromWeb = function (writableStream, options) {
+  return newStreamWritableFromWritableStream(writableStream, options)
+}
+Writable.toWeb = function (streamWritable) {
+  return newWritableStreamFromStreamWritable(streamWritable)
+}
