@@ -19,6 +19,7 @@ import {
 } from 'node:assert';
 
 import { default as assert } from 'node:assert';
+import { connect } from 'cloudflare:sockets';
 
 const strictEqualMessageStart = 'Expected values to be strictly equal:\n';
 const start = 'Expected values to be strictly deep-equal:';

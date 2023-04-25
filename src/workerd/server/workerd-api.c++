@@ -25,6 +25,7 @@
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
+#include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::server {
 
@@ -350,6 +351,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
   }
 
   api::registerSocketsModule(*modules, getFeatureFlags());
+  modules->addBuiltinBundle(CLOUDFLARE_BUNDLE);
 
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
 
