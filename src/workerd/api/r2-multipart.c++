@@ -45,8 +45,10 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
     auto requestJson = json.encode(requestBuilder);
     auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
 
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, nullptr, this->bucket->adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
-                                      kj::mv(requestJson), kj::mv(bucket));
+                                      kj::mv(requestJson), path, nullptr);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, partNumber]
@@ -98,10 +100,10 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
 
     auto requestJson = json.encode(requestBuilder);
 
-    auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
-
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, nullptr, this->bucket->adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+                                      path, nullptr);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType]
@@ -134,10 +136,10 @@ jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandle
 
     auto requestJson = json.encode(requestBuilder);
 
-    auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
-
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, nullptr, this->bucket->adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+                                      path, nullptr);
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {

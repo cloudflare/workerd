@@ -138,6 +138,7 @@ ThreadContext::HeaderIdBundle::HeaderIdBundle(kj::HttpHeaderTable::Builder& buil
       cfR2ErrorHeader(builder.add("CF-R2-Error")),
       cfBlobMetadataSize(builder.add("CF-R2-Metadata-Size")),
       cfBlobRequest(builder.add("CF-R2-Request")),
+      authorization(builder.add("Authorization")),
       secWebSocketProtocol(builder.add("Sec-WebSocket-Protocol")) {}
 
 ThreadContext::ThreadContext(

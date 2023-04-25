@@ -73,7 +73,8 @@ struct R2Result {
 kj::Promise<R2Result> doR2HTTPGetRequest(
     kj::Own<kj::HttpClient> client,
     kj::String metadataPayload,
-    kj::Maybe<kj::String> path);
+    kj::ArrayPtr<kj::StringPtr> path,
+    kj::Maybe<kj::StringPtr> jwt);
 
 kj::Promise<R2Result> doR2HTTPPutRequest(
     jsg::Lock& js,
@@ -82,6 +83,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(
     kj::Maybe<uint64_t> streamSize,
     // Deprecated. For internal beta API only.
     kj::String metadataPayload,
-    kj::Maybe<kj::String> path);
+    kj::ArrayPtr<kj::StringPtr> path,
+    kj::Maybe<kj::StringPtr> jwt);
 
 } // namespace workerd::api

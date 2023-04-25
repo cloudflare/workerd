@@ -323,9 +323,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(
     headBuilder.setObject(name);
 
     auto requestJson = json.encode(requestBuilder);
-
-    auto bucket = adminBucket.map([](const auto& b) { return kj::str(b); });
-    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), kj::mv(bucket));
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) {
       return parseObjectMetadata<HeadResult>("head", r2Result, errorType);
@@ -359,9 +359,9 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
       initGetOptions(js, getBuilder, *o);
     }
     auto requestJson = json.encode(requestBuilder);
-
-    auto bucket = adminBucket.map([](const auto& b) { return kj::str(b); });
-    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), kj::mv(bucket));
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise), [&context, &errorType](R2Result r2Result)
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
@@ -547,11 +547,12 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
     }
 
     auto requestJson = json.encode(requestBuilder);
-    auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
 
     cancelReader.cancel();
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
-                                      kj::mv(requestJson), kj::mv(bucket));
+                                      kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
@@ -634,10 +635,10 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     }
 
     auto requestJson = json.encode(requestBuilder);
-    auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
-
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+                                      path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, key=kj::mv(key), this] (jsg::Lock& js, R2Result r2Result) mutable {
@@ -688,10 +689,10 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Ar
 
     auto requestJson = json.encode(requestBuilder);
 
-    auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
-
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-        kj::mv(bucket));
+                                      path, jwt);
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {
@@ -789,8 +790,9 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
 
     auto requestJson = json.encode(requestBuilder);
 
-    auto bucket = adminBucket.map([](auto&& s) { return kj::str(s); });
-    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), kj::mv(bucket));
+    kj::StringPtr components[2];
+    auto path = fillR2Path(components, adminAccount, adminBucket);
+    auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise),
         [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType]
@@ -1088,5 +1090,19 @@ kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
   kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
     return parseObjectMetadata<R2Bucket::HeadResult>(action, r2Result, errorType);
 }
+
+kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[2], const kj::Maybe<kj::String>& account, const kj::Maybe<kj::String>& bucket) {
+  int numComponents = 0;
+
+  KJ_IF_MAYBE(a, account) {
+    pathStorage[numComponents++] = *a;
+  }
+  KJ_IF_MAYBE(b, bucket) {
+    pathStorage[numComponents++] = *b;
+  }
+
+  return kj::arrayPtr(pathStorage, numComponents);
+}
+
 
 } // namespace workerd::api::public_beta

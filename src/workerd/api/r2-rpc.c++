@@ -58,19 +58,22 @@ void R2Result::throwIfError(kj::StringPtr action,
 }
 
 kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
-    kj::String metadataPayload, kj::Maybe<kj::String> path) {
+    kj::String metadataPayload, kj::ArrayPtr<kj::StringPtr> path, kj::Maybe<kj::StringPtr> jwt) {
   auto& context = IoContext::current();
   kj::Url url;
   url.scheme = kj::str("https");
   url.host = kj::str("fake-host");
-  KJ_IF_MAYBE(p, path) {
-    url.path.add(kj::mv(*p));
+  for (const auto &p : path) {
+    url.path.add(kj::str(p));
   }
 
   auto& headerIds = context.getHeaderIds();
 
   auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
   requestHeaders.set(headerIds.cfBlobRequest, kj::mv(metadataPayload));
+  KJ_IF_MAYBE(j, jwt) {
+    requestHeaders.set(headerIds.authorization, kj::str("Bearer ", *j));
+  }
   return client->request(
       kj::HttpMethod::GET, url.toString(kj::Url::Context::HTTP_PROXY_REQUEST),
       requestHeaders)
@@ -130,7 +133,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
 
 kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> client,
     kj::Maybe<R2PutValue> supportedBody, kj::Maybe<uint64_t> streamSize, kj::String metadataPayload,
-    kj::Maybe<kj::String> path) {
+    kj::ArrayPtr<kj::StringPtr> path, kj::Maybe<kj::StringPtr> jwt) {
   // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
   // reusable?
   auto& context = IoContext::current();
@@ -138,8 +141,8 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   kj::Url url;
   url.scheme = kj::str("https");
   url.host = kj::str("fake-host");
-  KJ_IF_MAYBE(p, path) {
-    url.path.add(kj::mv(*p));
+  for (const auto &p : path) {
+    url.path.add(kj::str(p));
   }
 
   kj::Maybe<uint64_t> expectedBodySize;
@@ -177,6 +180,9 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
   }
 
   headers.set(context.getHeaderIds().cfBlobMetadataSize, kj::str(metadataPayload.size()));
+  KJ_IF_MAYBE(j, jwt) {
+    headers.set(context.getHeaderIds().authorization, kj::str("Bearer ", *j));
+  }
 
   auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
 

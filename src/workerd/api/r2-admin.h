@@ -8,9 +8,17 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/http.h>
 
+namespace edgeworker::api {
+class R2CrossAccount;
+}
+
 namespace workerd::api::public_beta {
 
 class R2Admin: public jsg::Object {
+
+  struct friend_tag_t {};
+  // A friend tag that grants access to an internal constructor for the R2CrossAccount binding
+
   // A capability to an R2 Admin interface.
 
   struct FeatureFlags: public R2Bucket::FeatureFlags {
@@ -22,6 +30,18 @@ public:
       : featureFlags(featureFlags), subrequestChannel(subrequestChannel) {}
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
+
+  R2Admin(FeatureFlags featureFlags,
+          uint subrequestChannel,
+          kj::String account,
+          kj::String jwt,
+          friend_tag_t)
+      : featureFlags(featureFlags),
+        subrequestChannel(subrequestChannel),
+        adminAccount(kj::mv(account)),
+        jwt(kj::mv(jwt)) {}
+  // This constructor is intended to be used by the R2CrossAccount binding, which has access to the
+  // friend_tag
 
   struct ListOptions {
     jsg::Optional<int> limit;
@@ -80,6 +100,10 @@ public:
 private:
   R2Bucket::FeatureFlags featureFlags;
   uint subrequestChannel;
+  kj::Maybe<kj::String> adminAccount;
+  kj::Maybe<kj::String> jwt;
+
+  friend class edgeworker::api::R2CrossAccount;
 };
 
 #define EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES \
