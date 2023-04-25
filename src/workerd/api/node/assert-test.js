@@ -17,6 +17,7 @@ import {
   strictEqual,
   throws,
 } from 'node:assert';
+import { bar } from "node:foo/bar";
 
 import { default as assert } from 'node:assert';
 
@@ -30,6 +31,7 @@ function thrower(errorConstructor) {
 
 export const test_ok = {
   test(ctrl, env, ctx) {
+    equal(bar(), "bar");
     // truthy values just work
     [true, 1, [], {}, 'hello'].forEach(ok);
     [true, 1, [], {}, 'hello'].forEach(assert);
