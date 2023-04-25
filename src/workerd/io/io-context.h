@@ -61,6 +61,7 @@ public:
     const kj::HttpHeaderId cfR2ErrorHeader;       // used by R2 binding implementation
     const kj::HttpHeaderId cfBlobMetadataSize;    // used by R2 binding implementation
     const kj::HttpHeaderId cfBlobRequest;         // used by R2 binding implementation
+    const kj::HttpHeaderId authorization;         // used by R2 binding implementation
     const kj::HttpHeaderId secWebSocketProtocol;
   };
 
