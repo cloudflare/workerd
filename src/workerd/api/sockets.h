@@ -11,6 +11,12 @@
 
 namespace workerd::api {
 
+enum class SecureTransportKind {
+  OFF, // plain-text
+  STARTTLS, // plain-text at first, with `startTls` available to upgrade at a later time
+  ON // TLS enabled immediately
+};
+
 struct SocketAddress {
   kj::String hostname;
   uint16_t port;
@@ -18,9 +24,9 @@ struct SocketAddress {
 };
 
 struct SocketOptions {
-  bool useSecureTransport = false;
+  jsg::Optional<kj::String> secureTransport;
   bool allowHalfOpen = false;
-  JSG_STRUCT(useSecureTransport, allowHalfOpen);
+  JSG_STRUCT(secureTransport, allowHalfOpen);
 };
 
 struct TlsOptions {

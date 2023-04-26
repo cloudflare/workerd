@@ -41,6 +41,20 @@ bool isValidHost(kj::StringPtr host) {
   return true;
 }
 
+SecureTransportKind parseSecureTransport(SocketOptions* opts) {
+  auto value = KJ_UNWRAP_OR_RETURN(opts->secureTransport, SecureTransportKind::OFF).begin();
+  if (value == "off"_kj) {
+    return SecureTransportKind::OFF;
+  } else if (value == "starttls"_kj) {
+    return SecureTransportKind::STARTTLS;
+  } else if (value == "on"_kj) {
+    return SecureTransportKind::ON;
+  } else {
+    JSG_FAIL_REQUIRE(TypeError,
+        kj::str("Unsupported value in secureTransport socket option: ", value));
+  }
+}
+
 jsg::Ref<Socket> setupSocket(
     jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
@@ -110,7 +124,8 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   auto httpClient = asHttpClient(kj::mv(client));
   kj::HttpConnectSettings httpConnectSettings = { .useTls = false };
   KJ_IF_MAYBE(opts, options) {
-    httpConnectSettings.useTls = opts->useSecureTransport;
+    httpConnectSettings.useTls =
+        parseSecureTransport(opts) == SecureTransportKind::ON;
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
   httpConnectSettings.tlsStarter = tlsStarter;
@@ -160,7 +175,15 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(!isSecureSocket, TypeError, "Cannot startTls on a TLS socket.");
   // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
-  JSG_REQUIRE(domain != nullptr, TypeError, "startTLS can only be called once.");
+  JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
+  auto invalidOptKindMsg =
+      "The `secureTransport` socket option must be set to 'allow' for startTls to be used.";
+  KJ_IF_MAYBE(opts, options) {
+    JSG_REQUIRE(parseSecureTransport(opts) == SecureTransportKind::STARTTLS,
+        TypeError, invalidOptKindMsg);
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, invalidOptKindMsg);
+  }
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about
