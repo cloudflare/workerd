@@ -145,9 +145,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
     KJ_ASSERT(handle->IsObject());
 
-    maybeWrapBotManagement(isolate, handle.As<v8::Object>());
-
-    NoRequestCfProxyLoggingScope noLoggingScope;
     // For the inbound request, we make the `cf` blob immutable.
     jsg::recursivelyFreeze(isolate->GetCurrentContext(), handle);
 
@@ -581,19 +578,6 @@ v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
       return transfer.asPtr();
     });
   }
-
-  // On the off chance the user is cloning the request.cf metadata, let's make sure
-  // any proxied logging is disabled here. Note that in this case we are not adding
-  // the proxied property handler to the resulting object which means they could
-  // clone the object and access proxied fields we'd normally log but that seems to
-  // be an edge case not worth handling here.
-  NoRequestCfProxyLoggingScope noLoggingScope;
-
-  // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
-  // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
-  // via structuredClone.
-  value = maybeUnwrapBotManagement(isolate, value);
-
   return jsg::structuredClone(value, isolate, transfers);
 }
 

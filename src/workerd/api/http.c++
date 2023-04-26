@@ -1010,7 +1010,6 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   return cf.map([&](jsg::V8Ref<v8::Object>& obj) {
-    NoRequestCfProxyLoggingScope noLoggingScope;
     return js.serializeJson(obj);
   });
 }
@@ -2025,11 +2024,7 @@ jsg::Promise<QueueResponse> Fetcher::queue(
         .version = 15,
         .omitHeader = false,
     });
-    // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
-    // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
-    // via structuredClone.
-    auto value = maybeUnwrapBotManagement(js.v8Isolate, msg.body.getHandle(js.v8Isolate));
-    serializer.write(value);
+    serializer.write(msg.body.getHandle(js));
     encodedMessages.add(IncomingQueueMessage{
         .id=kj::mv(msg.id),
         .timestamp=msg.timestamp,

@@ -17,10 +17,6 @@ kj::Promise<void> WorkerQueue::send(
     .version = 15,
     .omitHeader = false,
   });
-  // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
-  // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
-  // via structuredClone.
-  body = maybeUnwrapBotManagement(isolate, body);
   serializer.write(body);
   kj::Array<kj::byte> serialized = serializer.release().data;
 
@@ -72,11 +68,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
       .version = 15,
       .omitHeader = false,
     });
-    // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
-    // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
-    // via structuredClone.
-    auto value = maybeUnwrapBotManagement(isolate, message.body.getHandle(isolate));
-    serializer.write(value);
+    serializer.write(kj::mv(message.body));
     builder.add(serializer.release().data);
     totalSize += builder.back().size();
     largestMessage = kj::max(largestMessage, builder.back().size());
