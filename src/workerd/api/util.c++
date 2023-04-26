@@ -299,11 +299,45 @@ kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
   return nullptr;
 }
 
-void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle) {
-  // TODO(soon): fix structuredClone() error, reenable bot management tracking.
-  if ((true)) {
-    return;
+v8::Local<v8::Value> maybeUnwrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  if (!value->IsObject()) return value;
+  auto context = isolate->GetCurrentContext();
+  auto name = jsg::v8StrIntern(isolate, "botManagement");
+  auto obj = value.As<v8::Object>();
+  auto bm = jsg::check(obj->Get(context, name));
+  if (bm->IsProxy()) {
+    auto proxy = bm.As<v8::Proxy>();
+    auto sym = v8::Private::ForApi(isolate, jsg::v8StrIntern(isolate, "loggingProxyHandler"));
+    auto handler = jsg::check(context->Global()->GetPrivate(context, sym));
+
+    // If it's a proxy, it doesn't mean it's *our* proxy. Make sure it's ours.
+    // JavaScript is fun.
+    if (proxy->GetHandler()->StrictEquals(handler)) {
+      // Sadly, we can't just simply manipulate the object in place since request.cf
+      // is frozen before we pass it out. If we just tried obj->Clone() the new clone
+      // would also be frozen. Doh! So we end up having to copy all of the properties
+      // individually.... which sucks.
+      auto properties = jsg::check(obj->GetOwnPropertyNames(context));
+      auto size = properties->Length();
+      kj::Vector<v8::Local<v8::Name>> names(size);
+      kj::Vector<v8::Local<v8::Value>> values(size);
+      for (uint32_t n = 0; n < properties->Length(); n++) {
+        auto prop = jsg::check(properties->Get(context, n));
+        names.add(prop.As<v8::Name>());
+        if (!jsg::check(name->Equals(context, name))) {
+          values.add(jsg::check(obj->Get(context, name)));
+        } else {
+          values.add(proxy->GetTarget());
+        }
+      }
+      value = v8::Object::New(isolate, v8::Null(isolate),
+                              names.begin(), values.begin(), size);
+    }
   }
+  return value;
+}
+
+void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle) {
   auto context = isolate->GetCurrentContext();
   auto botManagement = jsg::v8StrIntern(isolate, "botManagement");
   v8::Local<v8::Value> maybeBotManagement = jsg::check(handle->Get(context, botManagement));

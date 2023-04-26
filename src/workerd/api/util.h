@@ -148,4 +148,12 @@ kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
     jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf);
 void maybeWrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> handle);
 
+v8::Local<v8::Value> maybeUnwrapBotManagement(v8::Isolate* isolate, v8::Local<v8::Value> value);
+// This is a bit of a hack that fortunately we shouldn't need to live with forever. Specifically,
+// in order to facilitate logging of the request.cf.botManagement uses, we wrap it in a JS Proxy
+// object. Unfortunately, there are cases where we serialize request.cf using the structured
+// clone algorithm (v8::Serializer), which does not support proxies. So in those cases we need
+// to intercept the value and unwrap the proxy before we serialize. We should be able to drop
+// this as soon as we are no longer logging cf.botManagement accesses.
+
 }  // namespace workerd::api

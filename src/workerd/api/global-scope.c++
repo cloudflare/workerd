@@ -588,6 +588,12 @@ v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
   // clone the object and access proxied fields we'd normally log but that seems to
   // be an edge case not worth handling here.
   NoRequestCfProxyLoggingScope noLoggingScope;
+
+  // TODO(soon): Remove this terrible, horrible, no-good, very bad hack when we remove
+  // the cf.botManagement logging. The issue here is that Proxy objects are not cloneable
+  // via structuredClone.
+  value = maybeUnwrapBotManagement(isolate, value);
+
   return jsg::structuredClone(value, isolate, transfers);
 }
 
