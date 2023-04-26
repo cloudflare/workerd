@@ -12,6 +12,8 @@
 // - curl localhost:8080/ # Retrieve the main segment in gopher.floodgap.com.
 // - curl localhost:8080/gstats # Retrieve the "gstats" segment.
 // - curl localhost:8080/gstats?use_proxy=1 # Retrieve the "gstats" segment using the configured proxy.
+import { connect } from 'cloudflare:sockets';
+
 export default {
   async fetch(req, env) {
     const gopherAddr = "gopher.floodgap.com:70";
