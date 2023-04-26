@@ -1478,84 +1478,92 @@ export const duplex = {
     //   assert.strictEqual(written.val, 2);
     // });
 
-    // TODO(later): We do not yet implement fromWeb/toWeb
-    // // Duplex.fromWeb
-    // {
-    //   const dataToRead = Buffer.from('hello');
-    //   const dataToWrite = Buffer.from('world');
+    // Duplex.fromWeb
+    {
+      const dataToRead = Buffer.from('hello');
+      const dataToWrite = Buffer.from('world');
 
-    //   const readable = new ReadableStream({
-    //     start(controller) {
-    //       controller.enqueue(dataToRead);
-    //     },
-    //   });
+      const readable = new ReadableStream({
+        start(controller) {
+          controller.enqueue(dataToRead);
+        },
+      });
 
-    //   const writable = new WritableStream({
-    //     write: common.mustCall((chunk) => {
-    //       assert.strictEqual(chunk, dataToWrite);
-    //     })
-    //   });
+      const writable = new WritableStream({
+        write: (chunk) => {
+          strictEqual(chunk, dataToWrite);
+        }
+      });
 
-    //   const pair = { readable, writable };
-    //   const duplex = Duplex.fromWeb(pair);
+      const pair = { readable, writable };
+      const duplex = Duplex.fromWeb(pair);
 
-    //   duplex.write(dataToWrite);
-    //   duplex.once('data', common.mustCall((chunk) => {
-    //     assert.strictEqual(chunk, dataToRead);
-    //   }));
-    // }
-    //
-    // // Duplex.fromWeb - using utf8 and objectMode
-    // {
-    //   const dataToRead = 'hello';
-    //   const dataToWrite = 'world';
+      duplex.write(dataToWrite);
+      const p = deferredPromise();
+      duplex.once('data', (chunk) => {
+        strictEqual(chunk, dataToRead);
+        p.resolve();
+      });
+      await p.promise;
+    }
 
-    //   const readable = new ReadableStream({
-    //     start(controller) {
-    //       controller.enqueue(dataToRead);
-    //     },
-    //   });
+    // Duplex.fromWeb - using utf8 and objectMode
+    {
+      const dataToRead = 'hello';
+      const dataToWrite = 'world';
 
-    //   const writable = new WritableStream({
-    //     write: common.mustCall((chunk) => {
-    //       assert.strictEqual(chunk, dataToWrite);
-    //     })
-    //   });
+      const readable = new ReadableStream({
+        start(controller) {
+          controller.enqueue(dataToRead);
+        },
+      });
 
-    //   const pair = {
-    //     readable,
-    //     writable
-    //   };
-    //   const duplex = Duplex.fromWeb(pair, { encoding: 'utf8', objectMode: true });
+      const writable = new WritableStream({
+        write: (chunk) => {
+          strictEqual(chunk, dataToWrite);
+        }
+      });
 
-    //   duplex.write(dataToWrite);
-    //   duplex.once('data', common.mustCall((chunk) => {
-    //     assert.strictEqual(chunk, dataToRead);
-    //   }));
-    // }
+      const pair = {
+        readable,
+        writable
+      };
+      const duplex = Duplex.fromWeb(pair, { encoding: 'utf8', objectMode: true });
 
-    // // Duplex.toWeb
-    // {
-    //   const dataToRead = Buffer.from('hello');
-    //   const dataToWrite = Buffer.from('world');
+      duplex.write(dataToWrite);
+      const p = deferredPromise();
+      duplex.once('data', (chunk) => {
+        strictEqual(chunk, dataToRead);
+        p.resolve();
+      });
+      await p.promise;
+    }
 
-    //   const duplex = Duplex({
-    //     read() {
-    //       this.push(dataToRead);
-    //       this.push(null);
-    //     },
-    //     write: common.mustCall((chunk) => {
-    //       assert.strictEqual(chunk, dataToWrite);
-    //     })
-    //   });
+    // Duplex.toWeb
+    {
+      const dataToRead = Buffer.from('hello');
+      const dataToWrite = Buffer.from('world');
 
-    //   const { writable, readable } = Duplex.toWeb(duplex);
-    //   writable.getWriter().write(dataToWrite);
+      const duplex = Duplex({
+        read() {
+          this.push(dataToRead);
+          this.push(null);
+        },
+        write: (chunk) => {
+          strictEqual(chunk, dataToWrite);
+        }
+      });
 
-    //   readable.getReader().read().then(common.mustCall((result) => {
-    //     assert.deepStrictEqual(Buffer.from(result.value), dataToRead);
-    //   }));
-    // }
+      const { writable, readable } = Duplex.toWeb(duplex);
+      writable.getWriter().write(dataToWrite);
+
+      const p = deferredPromise();
+      readable.getReader().read().then((result) => {
+        deepStrictEqual(Buffer.from(result.value), dataToRead);
+        p.resolve();
+      });
+      await p.promise;
+    }
   }
 };
 
@@ -12028,5 +12036,94 @@ export const pipeCleanupPause = {
     reader.pipe(writer1);
     reader.push(buffer);
     await done.promise;
+  }
+};
+
+export const writableAdapter = {
+  async test(ctrl, env, ctx) {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    // toWeb
+    {
+      const p = deferredPromise();
+      const w = new Writable({
+        write(chunk, encoding, callback) {
+          strictEqual(dec.decode(chunk), 'ok');
+          p.resolve();
+        }
+      });
+      const ws = Writable.toWeb(w);
+      const writer = ws.getWriter();
+      await Promise.all([
+        writer.write(enc.encode('ok')),
+        p.promise
+      ]);
+    }
+
+    // fromWeb
+    {
+      const p = deferredPromise();
+      const ws = new WritableStream({
+        write(chunk) {
+          strictEqual(dec.decode(chunk), 'ok');
+          p.resolve();
+        }
+      });
+      const w = Writable.fromWeb(ws);
+      const p2 = deferredPromise();
+      w.write(enc.encode('ok'), p2.resolve);
+      await Promise.all([p.promise, p2.promise]);
+    }
+  }
+};
+
+export const readableAdapter = {
+  async test(ctrl, env, ctx) {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    // toWeb
+    {
+      const r = new Readable({
+        read() {
+          this.push(enc.encode('ok'));
+        }
+      });
+      const rs = Readable.toWeb(r);
+      const reader = rs.getReader();
+      const value = await reader.read();
+      strictEqual(dec.decode(value.value), 'ok');
+    }
+
+    {
+      // Using a Node.js stream to feed into a Response...
+      const r = new Readable({
+        highWaterMark: 2,
+        read() {}
+      });
+      setTimeout(() => r.push(enc.encode('ok')), 10);
+      setTimeout(() => r.push(enc.encode(' there')), 20);
+      setTimeout(() => r.push(null), 30);
+      const rs = Readable.toWeb(r);
+      const res = new Response(rs);
+      const text = await res.text();
+      strictEqual(text, 'ok there');
+    }
+
+    // fromWeb
+    {
+      const rs = new ReadableStream({
+        pull(c) {
+          c.enqueue(enc.encode('ok'));
+          c.close();
+        }
+      });
+      const r = Readable.fromWeb(rs);
+      const p = deferredPromise();
+      r.on('data', (chunk) => {
+        strictEqual(dec.decode(chunk), 'ok');
+        p.resolve();
+      });
+      await p.promise;
+    }
   }
 };

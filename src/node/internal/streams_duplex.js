@@ -36,6 +36,11 @@ import {
 } from 'node-internal:streams_writable';
 
 import {
+  newStreamDuplexFromReadableWritablePair,
+  newReadableWritablePairFromDuplex,
+} from 'node-internal:streams_adapters';
+
+import {
   createDeferredPromise,
 } from 'node-internal:internal_utils';
 
@@ -141,19 +146,12 @@ Object.defineProperties(Duplex.prototype, {
   }
 });
 
-// let webStreamsAdapters
-
-// // Lazy to avoid circular references
-// function lazyWebStreams() {
-//   if (webStreamsAdapters === undefined) webStreamsAdapters = {}
-//   return webStreamsAdapters
-// }
-// Duplex.fromWeb = function (pair, options) {
-//   return lazyWebStreams().newStreamDuplexFromReadableWritablePair(pair, options)
-// }
-// Duplex.toWeb = function (duplex) {
-//   return lazyWebStreams().newReadableWritablePairFromDuplex(duplex)
-// }
+Duplex.fromWeb = function (pair, options) {
+  return newStreamDuplexFromReadableWritablePair(pair, options)
+}
+Duplex.toWeb = function (duplex) {
+  return newReadableWritablePairFromDuplex(duplex)
+}
 
 // ======================================================================================
 
