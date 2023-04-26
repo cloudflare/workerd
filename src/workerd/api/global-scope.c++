@@ -88,6 +88,41 @@ private:
   }
 };
 
+void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) {
+  // When the cfBotManagementNoOp compatibility flag is set, we'll check the
+  // request cf blob to see if it contains a botManagement field. If it does
+  // *not* we will add it using the following default fields.
+  // Note that if the botManagement team changes any of the fields they provide,
+  // this default value may need to be changed also.
+  static constexpr auto DEFAULT_BM = R"DATA({
+    "corporateProxy": false,
+    "verifiedBot": false,
+    "ja3Hash": "25b4882c2bcb50cd6b469ff28c596742",
+    "jsDetection": { "passed": false },
+    "staticResource": false,
+    "detectionIds": {},
+    "score": 99
+  })DATA"_kj;
+
+  auto context = isolate->GetCurrentContext();
+  auto name = jsg::v8StrIntern(isolate, "botManagement"_kj);
+  if (!jsg::check(cf->Has(context, name))) {
+    auto sym = v8::Private::ForApi(isolate, name);
+    // For performance reasons, we only want to construct the default values
+    // once per isolate so we cache the constructed value using an internal
+    // private field on the global scope. Whenever we need to use it again we
+    // pull the exact same value.
+    auto defaultBm = jsg::check(context->Global()->GetPrivate(context, sym));
+    if (defaultBm->IsUndefined()) {
+      defaultBm = jsg::check(v8::JSON::Parse(context, jsg::v8Str(isolate, DEFAULT_BM)));
+      KJ_ASSERT(defaultBm->IsObject());
+      jsg::recursivelyFreeze(context, defaultBm);
+      jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));
+    }
+    jsg::check(cf->Set(context, name, defaultBm));
+  }
+}
+
 }  // namespace
 
 void ExecutionContext::waitUntil(kj::Promise<void> promise) {
@@ -144,6 +179,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
     auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
     KJ_ASSERT(handle->IsObject());
+
+    if (!lock.getWorker()
+             .getIsolate()
+             .getApiIsolate()
+             .getFeatureFlags()
+             .getNoCfBotManagementDefault()) {
+      handleDefaultBotManagement(isolate, handle.As<v8::Object>());
+    }
 
     // For the inbound request, we make the `cf` blob immutable.
     jsg::recursivelyFreeze(isolate->GetCurrentContext(), handle);

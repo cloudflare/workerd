@@ -287,9 +287,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Previously any uncaught exception in the callee would be returned to the caller as an empty
   # HTTP 500 response.
 
-   serviceBindingExtraHandlers @28 :Bool
+  serviceBindingExtraHandlers @28 :Bool
       $compatEnableFlag("service_binding_extra_handlers")
       $experimental;
   # Allows service bindings to call additional event handler methods on the target Worker.
   # Initially only includes support for calling the queue() handler.
+
+  noCfBotManagementDefault @29 :Bool
+      $compatEnableFlag("no_cf_botmanagement_default")
+      $compatDisableFlag("cf_botmanagement_default")
+      $compatEnableDate("2023-08-01");
+  # This one operates a bit backwards. With the flag *enabled* no default cfBotManagement
+  # data will be included. The the flag *disable*, default cfBotManagement data will be
+  # included in the request.cf if the field is not present.
 }
