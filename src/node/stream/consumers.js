@@ -25,47 +25,48 @@
 
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
+import { Buffer } from 'node-internal:internal_buffer';
 
-import {
-  isIterable,
-  isNodeStream,
-  finished,
-} from 'node-internal:streams_util';
-
-import {
-  pipelineImpl as pl
-} from 'node-internal:streams_pipeline';
-
-export { finished };
-
-export function pipeline(...streams) {
-  return new Promise((resolve, reject) => {
-    let signal;
-    let end;
-    const lastArg = streams[streams.length - 1];
-    if (lastArg && typeof lastArg === 'object' && !isNodeStream(lastArg) && !isIterable(lastArg)) {
-      const options = streams.pop();
-      signal = options.signal;
-      end = options.end;
-    }
-    pl(
-      streams,
-      (err, value) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(value);
-        }
-      },
-      {
-        signal,
-        end
-      }
-    );
-  });
+export async function blob(stream) {
+  const chunks = [];
+  for await (const chunk of stream)
+    chunks.push(chunk);
+  return new Blob(chunks);
 }
 
-export const promises = {
-  pipeline,
-  finished,
+export async function arrayBuffer(stream) {
+  const ret = await blob(stream);
+  return ret.arrayBuffer();
+}
+
+export async function buffer(stream) {
+  return Buffer.from(await arrayBuffer(stream));
+}
+
+export async function text(stream) {
+  const dec = new TextDecoder();
+  let str = '';
+  for await (const chunk of stream) {
+    if (typeof chunk === 'string')
+      str += chunk;
+    else
+      str += dec.decode(chunk, { stream: true });
+  }
+  // Flush the streaming TextDecoder so that any pending
+  // incomplete multibyte characters are handled.
+  str += dec.decode(undefined, { stream: false });
+  return str;
+}
+
+export async function json(stream) {
+  const str = await text(stream);
+  return JSON.parse(str);
+}
+
+export default {
+  arrayBuffer,
+  blob,
+  buffer,
+  text,
+  json,
 };

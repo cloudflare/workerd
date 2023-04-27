@@ -1,10 +1,15 @@
 import {
   Readable,
   Transform,
-  promises,
 } from 'node:stream';
 
-const { pipeline } = promises;
+import {
+  text,
+} from 'node:stream/consumers';
+
+import {
+  pipeline,
+} from 'node:stream/promises';
 
 class MyTransform extends Transform {
   constructor() {
@@ -46,11 +51,8 @@ export default {
 
     const transform = new MyTransform();
 
-    let ret = '';
-    transform.on('data', (chunk) => ret += chunk);
-
     await pipeline(readable, transform);
 
-    return new Response(ret);
+    return new Response(await text(transform));
   }
 };
