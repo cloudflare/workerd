@@ -1078,6 +1078,10 @@ public:
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
+  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override {
+    KJ_UNIMPLEMENTED("expected WritableStreamInternalController implementation to be enough");
+  }
+
   void doClose() override;
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason) override;

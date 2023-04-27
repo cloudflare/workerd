@@ -239,6 +239,14 @@ jsg::Promise<void> WritableStream::close(jsg::Lock& js) {
   return getController().close(js);
 }
 
+jsg::Promise<void> WritableStream::flush(jsg::Lock& js) {
+  if (isLocked()) {
+    return js.rejectedPromise<void>(
+        js.v8TypeError("This WritableStream is currently locked to a writer."_kj));
+  }
+  return getController().flush(js);
+}
+
 jsg::Ref<WritableStreamDefaultWriter> WritableStream::getWriter(jsg::Lock& js) {
   return WritableStreamDefaultWriter::constructor(js, JSG_THIS);
 }

@@ -247,6 +247,8 @@ public:
 
   jsg::Promise<void> close(jsg::Lock& js, bool markAsHandled = false) override;
 
+  jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) override;
+
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
 
   kj::Maybe<jsg::Promise<void>> tryPipeFrom(
@@ -329,6 +331,9 @@ private:
   struct Close {
     kj::Maybe<jsg::Promise<void>::Resolver> promise;
   };
+  struct Flush {
+    kj::Maybe<jsg::Promise<void>::Resolver> promise;
+  };
   struct Pipe {
     WritableStreamInternalController& parent;
     ReadableStreamController::PipeController& source;
@@ -344,7 +349,7 @@ private:
   };
   struct WriteEvent {
     kj::Maybe<IoOwn<kj::Promise<void>>> outputLock;  // must wait for this before actually writing
-    kj::OneOf<Write, Pipe, Close> event;
+    kj::OneOf<Write, Pipe, Close, Flush> event;
   };
 
   std::deque<WriteEvent> queue;
