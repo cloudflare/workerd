@@ -24,12 +24,15 @@
     ],
     "paths": {
       "node:*": ["./*"],
+      "node:stream/*": ["./*"],
       "node-internal:*": ["./internal/*"],
       "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
   "include": [
     "*.ts",
+    "stream/*.ts",
+    "stream/*.js",
     "internal/*.ts"
   ],
 }

@@ -11,6 +11,7 @@ wd_ts_bundle(
     modules = glob([
         "*.ts",
         "*.js",
+        "stream/*.js",
     ]),
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
