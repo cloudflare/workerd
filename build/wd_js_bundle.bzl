@@ -67,13 +67,12 @@ def _copy_modules(modules):
     Returns new module map using file copies.
     This is necessary since capnp compiler doesn't allow embeds outside of current subidrectory.
     """
+    result = dict()
     for m in modules:
-        copy_file(
-            name = modules[m].replace(":", "_") + "@copy",
-            src = m,
-            out = modules[m].replace(":", "_"),
-        )
-    return dict([(modules[m].replace(":", "_"), modules[m]) for m in modules])
+        new_filename = modules[m].replace(":", "_").replace("/", "_")
+        copy_file(name = new_filename + "@copy", src = m, out = new_filename)
+        result[new_filename] = modules[m]
+    return result
 
 def wd_js_bundle(
         name,
