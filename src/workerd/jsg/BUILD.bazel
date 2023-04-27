@@ -18,6 +18,7 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
+        "@workerd//:icudata-embed",
         "//src/workerd/util",
     ],
 )

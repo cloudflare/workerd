@@ -1,6 +1,6 @@
 {
     "files.exclude": {
-        "bazel-*": true
+        //"bazel-*": true
     },
     "files.insertFinalNewline": true,
     "files.trimTrailingWhitespace": true,

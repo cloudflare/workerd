@@ -28,7 +28,9 @@ http_archive(
 
 load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
 
-rules_foreign_cc_dependencies()
+rules_foreign_cc_dependencies(
+    register_built_tools = False # Required, otherwise we get a circular dep in the chromium toolchain
+)
 
 # ========================================================================================
 # Simple dependencies
@@ -100,12 +102,10 @@ http_file(
     ],
 )
 
-http_archive(
+git_repository(
     name = "rules_rust",
-    sha256 = "0cc7e6b39e492710b819e00d48f2210ae626b717a3ab96e048c43ab57e61d204",
-    urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/rules_rust-v0.10.0.tar.gz",
-    ],
+    commit = "f12df9170f1d3e32e4750910e31ee26f1e899e94",
+    remote = "git@github.com:xortive/rules_rust.git"
 )
 
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
@@ -114,7 +114,6 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2018",
-    version = "1.66.0",
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
@@ -241,10 +240,10 @@ pip_install(
     requirements = "@v8//:bazel/requirements.txt",
 )
 
-bind(
-    name = "zlib_compression_utils",
-    actual = "@com_googlesource_chromium_zlib//:zlib_compression_utils",
-)
+# bind(
+#     name = "zlib_compression_utils",
+#     actual = "@com_googlesource_chromium_zlib//:zlib_compression_utils",
+# )
 
 bind(
     name = "icu",
@@ -265,7 +264,7 @@ new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
-        deps = ["@v8//:v8_icu", "@workerd//:icudata-embed"],
+        deps = ["@v8//:v8_icu"],
         visibility = ["//visibility:public"])""",
     path = "empty",
 )
@@ -285,3 +284,25 @@ http_archive(
 load("@hedron_compile_commands//:workspace_setup.bzl", "hedron_compile_commands_setup")
 
 hedron_compile_commands_setup()
+
+# ========================================================================================
+# Toolchain
+
+local_repository(
+    name = "chromium_repo",
+    path = "../../Code/chromium-toolchain",
+    
+)
+
+load("@chromium_repo//deps:repositories.bzl", "toolchain_deps_repositories")
+
+toolchain_deps_repositories()
+
+load("@chromium_repo//deps:load.bzl", "load_toolchain_dependencies")
+
+load_toolchain_dependencies()
+
+load("@chromium_repo//toolchains:repositories.bzl", "toolchain_repositories", "register_chromium_toolchains")
+
+toolchain_repositories()
+register_chromium_toolchains()
