@@ -116,14 +116,52 @@ struct ApiEncoderMain {
     return kj::mv(reader);
   }
 
+  void compileAllCompatibilityFlags(CompatibilityFlags::Builder output) {
+
+    auto schema = capnp::Schema::from<CompatibilityFlags>();
+    auto dynamicOutput = capnp::toDynamic(output);
+
+    for (auto field: schema.getFields()) {
+      bool isNode = false;
+
+      kj::StringPtr enableFlagName;
+
+      for (auto annotation: field.getProto().getAnnotations()) {
+        if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+          enableFlagName = annotation.getValue().getText();
+          // Exclude nodejs_compat, since the type generation scripts don't support node:* imports
+          // TODO: Figure out typing for node compat
+          isNode = enableFlagName == "nodejs_compat";
+        }
+      }
+
+      dynamicOutput.set(field, !isNode);
+    }
+  }
+
+  CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
+
+    auto output = message.initRoot<CompatibilityFlags>();
+
+    compileAllCompatibilityFlags(output);
+
+    auto reader = output.asReader();
+    return kj::mv(reader);
+  }
+
   bool run() {
-    // Create RTTI builder with all non-experimental compatibility flags enabled
+    // Create RTTI builder with either:
+    //  * All (non-experimental) compatibility flags as of a specific compatibility date
+    //    (if one is specified)
+    //  * All (including experimental, but excluding nodejs_compat) compatibility flags
+    //    (if no compatibility date is provided)
+
     capnp::MallocMessageBuilder flagsMessage;
     CompatibilityFlags::Reader flags;
     KJ_IF_MAYBE (date, compatibilityDate) {
       flags = compileFlags(flagsMessage, *date, false, {});
     } else {
-      flags = compileFlags(flagsMessage, "2021-01-01", false, {});
+      flags = compileAllFlags(flagsMessage);
     }
     auto builder = rtti::Builder(flags);
 
