@@ -164,23 +164,34 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
   // The current socket's writable buffers need to be flushed. The socket's WritableStream is backed
   // by an AsyncIoStream which doesn't implement any buffering, so we don't need to worry about
-  // flushing. But this is something to keep in mind in case this assumption no longer holds in
-  // the future.
+  // flushing. But the JS WritableStream holds a queue so some data may still be buffered. This
+  // means we need to flush the WritableStream.
   //
   // Detach the AsyncIoStream from the Writable/Readable streams and make them unusable.
-  writable->removeSink(js);
-  readable = readable->detach(js, true);
-  closeFulfiller.resolver.resolve();
+  auto& context = IoContext::current();
+  auto secureStreamPromise = context.awaitJs(writable->flush(js).then(js,
+      [this, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
+      tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
+    writable->removeSink(js);
+    readable = readable->detach(js, true);
+    closeFulfiller.resolver.resolve();
 
-  auto acceptedHostname = domain.asPtr();
-  KJ_IF_MAYBE(s, tlsOptions) {
-    KJ_IF_MAYBE(expectedHost, s->expectedServerHostname) {
-      acceptedHostname = *expectedHost;
+    auto acceptedHostname = domain.asPtr();
+    KJ_IF_MAYBE(s, tlsOptions) {
+      KJ_IF_MAYBE(expectedHost, s->expectedServerHostname) {
+        acceptedHostname = *expectedHost;
+      }
     }
-  }
-  // All non-secure sockets should have a tlsStarter.
-  kj::Own<kj::AsyncIoStream> secure = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname);
-  return setupSocket(js, kj::mv(secure), kj::mv(options), kj::mv(tlsStarter), true, kj::mv(domain));
+    // All non-secure sockets should have a tlsStarter.
+    kj::Own<kj::AsyncIoStream> secure = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname);
+    return secure;
+  }));
+
+  // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
+  // to `setupSocket`.
+  auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::mv(options),
+      kj::mv(newTlsStarter), true, kj::mv(domain));
 }
 
 void Socket::handleProxyStatus(

@@ -420,6 +420,10 @@ public:
   // Indicates that no additional data will be written to the controller. All
   // existing pending writes should be allowed to complete.
 
+  virtual jsg::Promise<void> flush(jsg::Lock& js, bool markAsHandled = false) = 0;
+  // Waits for pending data to be written. The returned promise is resolved when all pending writes
+  // have completed.
+
   virtual jsg::Promise<void> abort(
       jsg::Lock& js,
       jsg::Optional<v8::Local<v8::Value>> reason) = 0;

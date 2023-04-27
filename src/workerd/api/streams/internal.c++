@@ -854,6 +854,40 @@ jsg::Promise<void> WritableStreamInternalController::close(
   KJ_UNREACHABLE;
 }
 
+jsg::Promise<void> WritableStreamInternalController::flush(
+    jsg::Lock& js,
+    bool markAsHandled) {
+  if (isClosedOrClosing()) {
+    auto reason = js.v8TypeError("This WritableStream has been closed."_kj);
+    return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
+  }
+
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) {
+      // Handled by isClosedOrClosing().
+      KJ_UNREACHABLE;
+    }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) {
+      auto reason = errored.getHandle(js);
+      return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
+    }
+    KJ_CASE_ONEOF(writable, Writable) {
+      auto prp = js.newPromiseAndResolver<void>();
+      if (markAsHandled) {
+        prp.promise.markAsHandled();
+      }
+      queue.push_back(WriteEvent {
+        .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
+        .event = Flush { .promise = kj::mv(prp.resolver) }
+      });
+      ensureWriting(js);
+      return kj::mv(prp.promise);
+    }
+  }
+
+  KJ_UNREACHABLE;
+}
+
 jsg::Promise<void> WritableStreamInternalController::abort(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
@@ -1117,7 +1151,9 @@ void WritableStreamInternalController::releaseWriter(
 }
 
 bool WritableStreamInternalController::isClosedOrClosing() {
-  return state.is<StreamStates::Closed>() || (!queue.empty() && queue.back().event.is<Close>());
+  bool isClosing = !queue.empty() && queue.back().event.is<Close>();
+  bool isFlushing = !queue.empty() && queue.back().event.is<Flush>();
+  return state.is<StreamStates::Closed>() || isClosing || isFlushing;
 }
 
 void WritableStreamInternalController::doClose() {
@@ -1426,6 +1462,20 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
         finishError(js, handle);
       }));
     }
+    KJ_CASE_ONEOF(request, Flush) {
+      // This is not a standards-defined state for a WritableStream and is only used internally
+      // for Socket's startTls call.
+      //
+      // Flushing is similar to closing the stream, the main difference is that `finishClose`
+      // and `writable->end()` are never called.
+      auto check = makeChecker(request);
+
+      auto& checkReq = check();
+      maybeResolvePromise(checkReq.promise);
+      queue.pop_front();
+
+      return js.resolvedPromise();
+    }
   }
 
   KJ_UNREACHABLE;
@@ -1610,6 +1660,9 @@ void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value>
       KJ_CASE_ONEOF(closeRequest, Close) {
         maybeRejectPromise<void>(closeRequest.promise, reason);
       }
+      KJ_CASE_ONEOF(flushRequest, Flush) {
+        maybeRejectPromise<void>(flushRequest.promise, reason);
+      }
     }
     queue.pop_front();
   }
@@ -1623,6 +1676,9 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
       }
       KJ_CASE_ONEOF(close, Close) {
         visitor.visit(close.promise);
+      }
+      KJ_CASE_ONEOF(flush, Flush) {
+        visitor.visit(flush.promise);
       }
       KJ_CASE_ONEOF(pipe, Pipe) {
         visitor.visit(pipe.maybeSignal, pipe.promise);

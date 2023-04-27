@@ -134,6 +134,7 @@ public:
   // then its abort algorithm causes the transform's readable side to become errored with `reason`.
 
   jsg::Promise<void> close(jsg::Lock& js);
+  jsg::Promise<void> flush(jsg::Lock& js);
 
   jsg::Ref<WritableStreamDefaultWriter> getWriter(jsg::Lock& js);
 
