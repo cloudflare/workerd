@@ -15,6 +15,8 @@ Microsoft Intellisense extension for this project.
 ## Generate a compile_commands.json file
 
 ```sh
+# Build workerd to ensure all generated sources are present.
+$ bazel build //...
 $ bazel run //:refresh_compile_commands
 ```
 
@@ -30,16 +32,32 @@ https://github.com/cloudflare/workerd/issues/506).
 
 ## VSCode Tasks
 
-There is a `.vscode/tasks.json` file included in the project that is seeded with a few useful
-tasks for building and testing.
+The [.vscode/tasks.json](../.vscode/tasks.json) file included provides a few useful tasks for use within VSCode:
+
+* Bazel build workerd (dbg)
+* Bazel build workerd (fastbuild)
+* Bazel build workerd (opt)
+* Bazel build all (dbg)
+* Bazel run all tests
 
 ## Debugging
 
-There is a `.vscode/launch.json` file included in the project for launching the `workerd` binary with
-the debugger attached from VSCode. This is supported on Linux (x64) and OS X (arm64).
+There are workerd debugging targets within Visual Studio Code. These
+are supported on Linux (x64) and OS X (arm64).
 
-The debug from vscode, first ensure that you have saved a vscode workspace for workerd,
+The file [.vscode/launch.json](../.vscode/launch.json) has launch targets to that can be debugged within VSCode.
+
+Before you start debugging, ensure that you have saved a vscode workspace for workerd,
 `File -> Save Workspace As...`, then `Run -> Start Debugging (F5)`.
 
-Running the project will prompt you for workerd configuration. To use the helloworld sample, the
-configuration argument would be `serve ${workspaceFolder}/samples/helloworld/config.capnp`.
+The main targets of interest are:
+
+* `workerd debug`
+* `workerd debug with inspector enabled`
+* `workerd test case`
+
+Launching either `workerd debug` or `workerd debug with inspector enabled` will prompt for a workerd configuration to launch
+workerd with, the default is `${workspaceFolder}/samples/helloworld/config.capnp`.
+
+Launching `workerd test case` will prompt for a test to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+

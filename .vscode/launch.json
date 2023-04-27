@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "workerd debug",
-      "preLaunchTask": "Bazel Build (dbg)",
+      "preLaunchTask": "Bazel build workerd (dbg)",
       "program": "workerd",
       "request": "launch",
       "type": "cppdbg",
@@ -47,7 +47,7 @@
     },
     {
       "name": "workerd debug with inspector enabled",
-      "preLaunchTask": "Bazel Build (dbg)",
+      "preLaunchTask": "Bazel build workerd (dbg)",
       "program": "workerd",
       "type": "cppdbg",
       "request": "launch",
@@ -74,7 +74,7 @@
          },
       },
       "windows": {
-        "name": "workerd debug",
+        "name": "workerd debug with inspector enabled",
         "type": "cppvsdbg",
         "request": "launch",
         "program": "${workspaceRoot}\\bazel-out\\x64_windows-dbg\\bin\\src\\workerd\\server\\workerd.exe",
@@ -87,6 +87,43 @@
       ],
       "stopAtEntry": false,
       "externalConsole": false
+    },
+    {
+      "name": "workerd test case",
+      "preLaunchTask": "Bazel build all (dbg)",
+      "program": "${workspaceFolder}/${input:testToDebug}",
+      "cwd": "${workspaceFolder}",
+      "type": "cppdbg",
+      "request": "launch",
+      "linux": {
+        "name": "workerd test case",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+        "program": "${workspaceFolder}/${input:testToDebug}",
+      },
+      "osx": {
+        "name": "workerd test case",
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+         "program": "${workspaceFolder}/${input:testToDebug}",
+      },
+      "windows": {
+        "name": "workerd test case",
+        "type": "cppvsdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/${input:testToDebug}",
+      },
+      "stopAtEntry": false,
+      "externalConsole": false
     }
   ],
   "inputs": [
@@ -95,6 +132,51 @@
       "description": "Workerd configuration to serve",
       "default": "${workspaceFolder}/samples/helloworld/config.capnp",
       "type": "promptString"
+    },
+    {
+      "id": "testToDebug",
+      "description": "Test to debug",
+      "type": "pickString",
+      "default": "bazel-bin/src/workerd/jsg/jsg-test",
+      "options": [
+        "bazel-bin/src/workerd/util/sqlite-test",
+        "bazel-bin/src/workerd/util/wait-list-test",
+        "bazel-bin/src/workerd/util/batch-queue-test",
+        "bazel-bin/src/workerd/util/sqlite-kv-test",
+        "bazel-bin/src/workerd/io/io-gate-test",
+        "bazel-bin/src/workerd/io/compatibility-date-test",
+        "bazel-bin/src/workerd/io/promise-wrapper-test",
+        "bazel-bin/src/workerd/io/actor-cache-test",
+        "bazel-bin/src/workerd/tests/test-fixture-test",
+        "bazel-bin/src/workerd/jsg/promise-test",
+        "bazel-bin/src/workerd/jsg/resource-test",
+        "bazel-bin/src/workerd/jsg/string-test",
+        "bazel-bin/src/workerd/jsg/tracing-test",
+        "bazel-bin/src/workerd/jsg/web-idl-test",
+        "bazel-bin/src/workerd/jsg/util-test",
+        "bazel-bin/src/workerd/jsg/dom-exception-test",
+        "bazel-bin/src/workerd/jsg/type-wrapper-test",
+        "bazel-bin/src/workerd/jsg/macro-meta-test",
+        "bazel-bin/src/workerd/jsg/rtti-test",
+        "bazel-bin/src/workerd/jsg/value-test",
+        "bazel-bin/src/workerd/jsg/setup-test",
+        "bazel-bin/src/workerd/jsg/function-test",
+        "bazel-bin/src/workerd/jsg/buffersource-test",
+        "bazel-bin/src/workerd/jsg/struct-test",
+        "bazel-bin/src/workerd/jsg/jsg-test",
+        "bazel-bin/src/workerd/jsg/iterator-test",
+        "bazel-bin/src/workerd/server/server-test",
+        "bazel-bin/src/workerd/api/actor-state-test",
+        "bazel-bin/src/workerd/api/basics-test",
+        "bazel-bin/src/workerd/api/streams/queue-test",
+        "bazel-bin/src/workerd/api/crypto-impl-aes-test",
+        "bazel-bin/src/workerd/api/crypto-impl-test",
+        "bazel-bin/src/workerd/api/util-test",
+        "bazel-bin/src/workerd/api/api-rtti-test",
+        "bazel-bin/src/workerd/api/node/buffer-test",
+        "bazel-bin/src/workerd/api/crypto-impl-asymmetric-test",
+        "bazel-bin/src/workerd/api/url-standard-test",
+      ],
     }
   ]
 }
