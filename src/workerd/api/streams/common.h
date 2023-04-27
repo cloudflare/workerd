@@ -473,43 +473,36 @@ public:
       ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<IoOwn<kj::Canceler>> canceler = nullptr)
-      : impl(Impl {
-          .reader = reader,
-          .closedFulfiller = kj::mv(closedFulfiller),
-          .canceler = kj::mv(canceler)}) {}
+      : reader(reader),
+        closedFulfiller(kj::mv(closedFulfiller)),
+        canceler(kj::mv(canceler)) {}
 
   ReaderLocked(ReaderLocked&&) = default;
   ~ReaderLocked() noexcept(false) {
-    KJ_IF_MAYBE(i, impl) {
-      i->reader.detach();
-    }
+    KJ_IF_MAYBE(r, reader) { r->detach(); }
   }
+  KJ_DISALLOW_COPY(ReaderLocked);
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_MAYBE(i, impl) {
-      visitor.visit(i->closedFulfiller);
-    }
+    visitor.visit(closedFulfiller);
   }
 
   ReadableStreamController::Reader& getReader() {
-    return KJ_ASSERT_NONNULL(impl).reader;
+    return KJ_ASSERT_NONNULL(reader);
   }
 
   kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
-    return KJ_ASSERT_NONNULL(impl).closedFulfiller;
+    return closedFulfiller;
   }
 
   kj::Maybe<IoOwn<kj::Canceler>>& getCanceler() {
-    return KJ_ASSERT_NONNULL(impl).canceler;
+    return canceler;
   }
 
 private:
-  struct Impl {
-    ReadableStreamController::Reader& reader;
-    kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
-    kj::Maybe<IoOwn<kj::Canceler>> canceler;
-  };
-  kj::Maybe<Impl> impl;
+  kj::Maybe<ReadableStreamController::Reader&> reader;
+  kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
+  kj::Maybe<IoOwn<kj::Canceler>> canceler;
 };
 
 class WriterLocked {
@@ -520,50 +513,42 @@ public:
       WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
       kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = nullptr)
-      : impl(Impl {
-          .writer = writer,
-          .closedFulfiller = kj::mv(closedFulfiller),
-          .readyFulfiller = kj::mv(readyFulfiller) }) {}
+      : writer(writer),
+        closedFulfiller(kj::mv(closedFulfiller)),
+        readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
-    KJ_IF_MAYBE(i, impl) {
-      i->writer.detach();
-    }
+    KJ_IF_MAYBE(w, writer) { w->detach(); }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_MAYBE(i, impl) {
-      visitor.visit(i->closedFulfiller, i->readyFulfiller);
-    }
+    visitor.visit(closedFulfiller, readyFulfiller);
   }
 
   WritableStreamController::Writer& getWriter() {
-    return KJ_ASSERT_NONNULL(impl).writer;
+    return KJ_ASSERT_NONNULL(writer);
   }
 
   kj::Maybe<jsg::Promise<void>::Resolver>& getClosedFulfiller() {
-    return KJ_ASSERT_NONNULL(impl).closedFulfiller;
+    return closedFulfiller;
   }
 
   kj::Maybe<jsg::Promise<void>::Resolver>& getReadyFulfiller() {
-    return KJ_ASSERT_NONNULL(impl).readyFulfiller;
+    return readyFulfiller;
   }
 
   void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
-    KJ_IF_MAYBE(i, impl) {
-      i->readyFulfiller = kj::mv(pair.resolver);
-      i->writer.replaceReadyPromise(kj::mv(pair.promise));
+    KJ_IF_MAYBE(w, writer) {
+      readyFulfiller = kj::mv(pair.resolver);
+      w->replaceReadyPromise(kj::mv(pair.promise));
     }
   }
 
 private:
-  struct Impl {
-    WritableStreamController::Writer& writer;
-    kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
-    kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
-  };
-  kj::Maybe<Impl> impl;
+  kj::Maybe<WritableStreamController::Writer&> writer;
+  kj::Maybe<jsg::Promise<void>::Resolver> closedFulfiller;
+  kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller;
 };
 
 template <typename T>
