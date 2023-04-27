@@ -62,13 +62,17 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
         "referrer passed to resolveCallback isn't in modules table");
 
-    kj::Path targetPath = ref.specifier.parent().eval(kj::str(specifier));
+    auto spec = kj::str(specifier);
 
     // If the referrer module is a built-in, it is only permitted to resolve
     // internal modules. If the worker bundle provided an override for a builtin,
     // then internalOnly will be false.
     bool internalOnly = ref.type == ModuleRegistry::Type::BUILTIN ||
                         ref.type == ModuleRegistry::Type::INTERNAL;
+
+    kj::Path targetPath = !internalOnly ?
+        ref.specifier.parent().eval(spec) :
+        kj::Path::parse(spec);
 
     result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath, internalOnly), Error,
         "No such module \"", targetPath.toString(),
