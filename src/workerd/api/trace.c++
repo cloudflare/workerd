@@ -14,14 +14,14 @@
 
 namespace workerd::api {
 
-TraceEvent::TraceEvent(kj::ArrayPtr<kj::Own<Trace>> traces)
-    : ExtendableEvent("trace"),
-      traces(KJ_MAP(t, traces) -> jsg::Ref<TraceItem> {
-        return jsg::alloc<TraceItem>(kj::addRef(*t));
+TailEvent::TailEvent(kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events)
+    : ExtendableEvent(kj::str(type)),
+      events(KJ_MAP(e, events) -> jsg::Ref<TraceItem> {
+        return jsg::alloc<TraceItem>(kj::addRef(*e));
       }) {}
 
-kj::Array<jsg::Ref<TraceItem>> TraceEvent::getTraces() {
-  return KJ_MAP(t, traces) -> jsg::Ref<TraceItem> { return t.addRef(); };
+kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
+  return KJ_MAP(e, events) -> jsg::Ref<TraceItem> { return e.addRef(); };
 }
 
 TraceItem::TraceItem(kj::Own<Trace> trace) : trace(kj::mv(trace)) {}

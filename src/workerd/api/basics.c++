@@ -23,6 +23,7 @@ bool isSpecialEventType(kj::StringPtr type) {
   //   leaving them out for now.
   return type == "fetch" ||
          type == "scheduled" ||
+         type == "tail" ||
          type == "trace" ||
          type == "alarm";
 }

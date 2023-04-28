@@ -347,21 +347,28 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
   auto isolate = lock.getIsolate();
 
-  auto event = jsg::alloc<TraceEvent>(traces);
-
   KJ_IF_MAYBE(h, exportedHandler) {
-    KJ_IF_MAYBE(f, h->trace) {
-      auto promise = (*f)(lock, event->getTraces(), h->env.addRef(isolate), h->getCtx(isolate));
-      event->waitUntil(kj::mv(promise));
+    KJ_IF_MAYBE(f, h->tail) {
+      auto tailEvent = jsg::alloc<TailEvent>("tail"_kj, traces);
+      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      tailEvent->waitUntil(kj::mv(promise));
+    } else KJ_IF_MAYBE(f, h->trace) {
+      auto traceEvent = jsg::alloc<TailEvent>("trace"_kj, traces);
+      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
-          "Attempted to send trace but we lack a handler, "
-          "did you remember to export a trace() function?");
-      JSG_FAIL_REQUIRE(Error, "Handler does not export a trace() function.");
+          "Attempted to send events but we lack a handler, "
+          "did you remember to export a tail() function?");
+      JSG_FAIL_REQUIRE(Error, "Handler does not export a tail() function.");
     }
   } else {
     // Fire off the handlers.
-    dispatchEventImpl(lock, event.addRef());
+    // We only create both events here.
+    auto tailEvent = jsg::alloc<TailEvent>("tail"_kj, traces);
+    auto traceEvent = jsg::alloc<TailEvent>("trace"_kj, traces);
+    dispatchEventImpl(lock, tailEvent.addRef());
+    dispatchEventImpl(lock, traceEvent.addRef());
 
     // We assume no action is necessary for "default" trace handling.
   }

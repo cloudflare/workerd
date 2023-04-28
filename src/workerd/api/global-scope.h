@@ -137,9 +137,10 @@ struct ExportedHandler {
       jsg::Ref<api::Request> request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
-  typedef kj::Promise<void> TraceHandler(
-      kj::Array<jsg::Ref<TraceItem>> traces, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
-  jsg::LenientOptional<jsg::Function<TraceHandler>> trace;
+  typedef kj::Promise<void> TailHandler(
+      kj::Array<jsg::Ref<TraceItem>> events, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<TailHandler>> tail;
+  jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
   typedef kj::Promise<void> ScheduledHandler(
       jsg::Ref<ScheduledController> controller, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -166,7 +167,7 @@ struct ExportedHandler {
   jsg::SelfRef self;
   // Self-ref potentially allows extracting other custom handlers from the object.
 
-  JSG_STRUCT(fetch, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, self);
+  JSG_STRUCT(fetch, tail, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, self);
 
   JSG_STRUCT_TS_ROOT();
   // ExportedHandler isn't included in the global scope, but we still want to
@@ -174,6 +175,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+    type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
@@ -181,6 +183,7 @@ struct ExportedHandler {
   );
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown, CfHostMetadata = unknown> {
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+    tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
     scheduled?: ExportedHandlerScheduledHandler<Env>;
     alarm: never;
@@ -389,7 +392,8 @@ public:
     JSG_NESTED_TYPE(ExtendableEvent);
     JSG_NESTED_TYPE(PromiseRejectionEvent);
     JSG_NESTED_TYPE(FetchEvent);
-    JSG_NESTED_TYPE(TraceEvent);
+    JSG_NESTED_TYPE(TailEvent);
+    JSG_NESTED_TYPE_NAMED(TailEvent, TraceEvent);
     JSG_NESTED_TYPE(ScheduledEvent);
     JSG_NESTED_TYPE(MessageEvent);
     JSG_NESTED_TYPE(CloseEvent);
