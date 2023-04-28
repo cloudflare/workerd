@@ -73,6 +73,7 @@ On other platforms, you may have to do tinkering to make things work.
 To build `workerd`, you need:
 
 * [Bazel](https://bazel.build/)
+  * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
   * Clang 11+ (e.g. package `clang` on Debian Bullseye)
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
@@ -89,11 +90,13 @@ To build `workerd`, you need:
   * When developing at the command-line, run [bazel-env.bat](tools/windows/bazel-env.bat) in your shell first
     to select tools and Windows SDK versions before running bazel.
 
-You may then build using:
+You may then build `workerd` at the command-line with:
 
 ```
-bazel build -c opt //src/workerd/server:workerd
+bazel build //src/workerd/server:workerd
 ```
+
+You can also build from within Visual Studio Code using the instructions in [docs/vscode.md](docs/vscode.md).
 
 The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
 
