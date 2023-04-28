@@ -26,9 +26,6 @@ bool getCommonJsExportDefault(v8::Isolate* isolate);
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
-// Annotate an internal message with the corresponding brokeness reason.
-
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
@@ -131,21 +128,6 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
 
 kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 // Given a KJ exception's description, strips any leading "remote exception: " prefixes.
-
-bool isTunneledException(kj::StringPtr internalMessage);
-// Given a KJ exception's description, returns whether it contains a tunneled exception that could
-// be converted back to JavaScript via makeInternalError().
-
-bool isDoNotLogException(kj::StringPtr internalMessage);
-// Given a KJ exception's description, returns whether it contains the magic constant that indicates
-// the exception is the script's fault and isn't worth logging.
-
-// Log an exception ala LOG_EXCEPTION, but only if it is worth logging and not a tunneled exception.
-#define LOG_EXCEPTION_IF_INTERNAL(context, exception) \
-  if (!jsg::isTunneledException(exception.getDescription()) && \
-      !jsg::isDoNotLogException(exception.getDescription())) { \
-    LOG_EXCEPTION(context, exception); \
-  }
 
 template <typename T>
 v8::Local<T> check(v8::MaybeLocal<T> maybe) {

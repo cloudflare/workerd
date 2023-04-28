@@ -8,20 +8,37 @@ wd_cc_library(
     name = "jsg",
     srcs = glob(
         ["*.c++"],
-        exclude = ["*-test.c++"],
+        exclude = [
+            "exception.c++",
+            "*-test.c++",
+        ],
     ),
     hdrs = glob(
         ["*.h"],
-        exclude = ["rtti.h"],
+        exclude = [
+            "exception.h",
+            "rtti.h",
+        ],
     ),
     visibility = ["//visibility:public"],
     deps = [
+        ":exception",
         ":modules_capnp",
+        "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "exception",
+    srcs = ["exception.c++"],
+    hdrs = ["exception.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -34,11 +51,11 @@ wd_cc_capnp_library(
 js_capnp_library(
     name = "rtti_capnp_js",
     srcs = ["rtti.capnp"],
-    visibility = ["//visibility:public"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    visibility = ["//visibility:public"],
 )
 
 npm_package(
