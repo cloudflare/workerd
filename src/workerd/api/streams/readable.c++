@@ -4,6 +4,7 @@
 
 #include "readable.h"
 #include "writable.h"
+#include <workerd/jsg/buffersource.h>
 
 namespace workerd::api {
 
@@ -291,36 +292,40 @@ void ReadableStreamBYOBReader::visitForGc(jsg::GcVisitor& visitor) {
 ReadableStream::ReadableStream(
     IoContext& ioContext,
     kj::Own<ReadableStreamSource> source)
-    : ioContext(ioContext),
-      controller(kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)))) {
+    : ReadableStream(newReadableStreamInternalController(ioContext, kj::mv(source))) {}
+
+ReadableStream::ReadableStream(kj::Own<ReadableStreamController> controller)
+    : ioContext(tryGetIoContext()),
+      controller(kj::mv(controller)) {
   getController().setOwnerRef(*this);
 }
 
-ReadableStream::ReadableStream(Controller controller)
-    : ioContext(tryGetIoContext()), controller(kj::mv(controller)) {
-  getController().setOwnerRef(*this);
+void ReadableStream::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(getController());
+  KJ_IF_MAYBE(pair, eofResolverPair) {
+    visitor.visit(pair->resolver);
+    visitor.visit(pair->promise);
+  }
 }
+
+jsg::Ref<ReadableStream> ReadableStream::addRef() { return JSG_THIS; }
+
+bool ReadableStream::isDisturbed() { return getController().isDisturbed(); }
+
+bool ReadableStream::isLocked() { return getController().isLockedToReader(); }
 
 void ReadableStream::initEofResolverPair(jsg::Lock& js) {
   eofResolverPair = js.newPromiseAndResolver<void>();
 }
 
 ReadableStreamController& ReadableStream::getController() {
-  KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-      return *c;
-    }
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-      return *c;
-    }
-  }
-  KJ_UNREACHABLE;
+  return *controller;
 }
 
 jsg::Promise<void> ReadableStream::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  if (getController().isLockedToReader()) {
+  if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
   }
@@ -368,22 +373,19 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
   auto& controller = getController();
 
   auto& destination = transform.writable->getController();
-  JSG_REQUIRE(!controller.isLockedToReader(), TypeError,
+  JSG_REQUIRE(!isLocked(), TypeError,
                "This ReadableStream is currently locked to a reader.");
   JSG_REQUIRE(!destination.isLockedToWriter(), TypeError,
                "This WritableStream is currently locked to a writer.");
 
   auto options = kj::mv(maybeOptions).orDefault({});
   options.pipeThrough = true;
-  maybePipeThrough = controller.pipeTo(js, destination, kj::mv(options)).then(js,
-      JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self), (jsg::Lock& js) {
-    maybePipeThrough = nullptr;
+  controller.pipeTo(js, destination, kj::mv(options)).then(js,
+      JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js) {
     return js.resolvedPromise();
-  }), JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
-    maybePipeThrough = nullptr;
+  }), JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
     return js.rejectedPromise<void>(kj::mv(exception));
-  }));
-  KJ_ASSERT_NONNULL(maybePipeThrough).markAsHandled();
+  })).markAsHandled();
   return kj::mv(transform.readable);
 }
 
@@ -391,7 +393,7 @@ jsg::Promise<void> ReadableStream::pipeTo(
     jsg::Lock& js,
     jsg::Ref<WritableStream> destination,
     jsg::Optional<PipeToOptions> maybeOptions) {
-  if (getController().isLockedToReader()) {
+  if (isLocked()) {
     return js.rejectedPromise<void>(
         js.v8TypeError("This ReadableStream is currently locked to a reader."_kj));
   }
@@ -450,17 +452,7 @@ jsg::Promise<void> ReadableStream::returnFunction(
 jsg::Ref<ReadableStream> ReadableStream::detach(jsg::Lock& js, bool ignoreDisturbed) {
   JSG_REQUIRE(!isDisturbed() || ignoreDisturbed, TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-  KJ_SWITCH_ONEOF(controller) {
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-      return jsg::alloc<ReadableStream>(IoContext::current(),
-          KJ_REQUIRE_NONNULL(c->removeSource(js, ignoreDisturbed)));
-    }
-    KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-      auto stream = jsg::alloc<ReadableStream>(c->detach(js));
-      return kj::mv(stream);
-    }
-  }
-  KJ_UNREACHABLE;
+  return jsg::alloc<ReadableStream>(getController().detach(js, ignoreDisturbed));
 }
 
 kj::Maybe<uint64_t> ReadableStream::tryGetLength(StreamEncoding encoding) {
@@ -476,37 +468,7 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
   return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
     JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
     JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-
-    KJ_SWITCH_ONEOF(controller) {
-      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamInternalController>) {
-        auto source = KJ_ASSERT_NONNULL(c->removeSource(js));
-
-        struct Holder: public kj::Refcounted {
-          kj::Own<WritableStreamSink> sink;
-          kj::Own<ReadableStreamSource> source;
-          Holder(kj::Own<WritableStreamSink> sink,
-                 kj::Own<ReadableStreamSource> source)
-              : sink(kj::mv(sink)), source(kj::mv(source)) {}
-        };
-
-        auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
-        return holder->source->pumpTo(*holder->sink, end).then(
-            [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
-          proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
-          return kj::mv(proxy);
-        }, [&holder=*holder](kj::Exception&& ex) mutable {
-          holder.sink->abort(kj::cp(ex));
-          holder.source->cancel(kj::cp(ex));
-          return kj::mv(ex);
-        }).attach(kj::mv(holder));
-      }
-      KJ_CASE_ONEOF(c, kj::Own<ReadableStreamJsController>) {
-        // It is important to note that the JavaScript-backed streams do not support
-        // the deferred proxy optimization.
-        return addNoopDeferredProxy(c->pumpTo(js, kj::mv(sink), end));
-      }
-    }
-    KJ_UNREACHABLE;
+    return getController().pumpTo(js, kj::mv(sink), end);
   });
 }
 
@@ -520,9 +482,8 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
                Error,
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");
-  auto stream = jsg::alloc<ReadableStream>(kj::heap<ReadableStreamJsController>());
-  static_cast<ReadableStreamJsController&>(
-      stream->getController()).setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
+  auto stream = jsg::alloc<ReadableStream>(newReadableStreamJsController());
+  stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
 

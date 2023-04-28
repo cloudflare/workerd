@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "internal.h"
-#include "standard.h"
+#include "common.h"
 #include <kj/function.h>
 
 namespace workerd::api {
@@ -191,19 +190,16 @@ private:
       jsg::Optional<jsg::Value> value);
 
 public:
-  using Controller = kj::OneOf<kj::Own<ReadableStreamInternalController>,
-                               kj::Own<ReadableStreamJsController>>;
-
   explicit ReadableStream(IoContext& ioContext,
                           kj::Own<ReadableStreamSource> source);
 
-  explicit ReadableStream(Controller controller);
+  explicit ReadableStream(kj::Own<ReadableStreamController> controller);
 
   ReadableStreamController& getController();
 
-  jsg::Ref<ReadableStream> addRef() { return JSG_THIS; }
+  jsg::Ref<ReadableStream> addRef();
 
-  bool isDisturbed() { return getController().isDisturbed(); }
+  bool isDisturbed();
 
   // ---------------------------------------------------------------------------
   // JS interface
@@ -217,7 +213,7 @@ public:
   // We use v8::Local<v8::Object>'s here instead of jsg structs because we need
   // to preserve the object references within the implementation.
 
-  bool isLocked() { return getController().isLockedToReader(); }
+  bool isLocked();
 
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   // Closes the stream. All present and future read requests are fulfilled with successful empty
@@ -367,16 +363,9 @@ public:
   // that the signalling is active.
 private:
   kj::Maybe<IoContext&> ioContext;
-  Controller controller;
-  kj::Maybe<jsg::Promise<void>> maybePipeThrough;
+  kj::Own<ReadableStreamController> controller;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(getController(), maybePipeThrough);
-    KJ_IF_MAYBE(pair, eofResolverPair) {
-      visitor.visit(pair->resolver);
-      visitor.visit(pair->promise);
-    }
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 struct QueuingStrategyInit {

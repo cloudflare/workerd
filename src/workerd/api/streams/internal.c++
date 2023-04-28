@@ -1815,6 +1815,35 @@ kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncodin
   KJ_UNREACHABLE;
 }
 
+kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
+    jsg::Lock& js, bool ignoreDetached) {
+  return newReadableStreamInternalController(IoContext::current(),
+      KJ_ASSERT_NONNULL(removeSource(js, ignoreDetached)));
+}
+
+kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
+  auto source = KJ_ASSERT_NONNULL(removeSource(js));
+
+  struct Holder: public kj::Refcounted {
+    kj::Own<WritableStreamSink> sink;
+    kj::Own<ReadableStreamSource> source;
+    Holder(kj::Own<WritableStreamSink> sink, kj::Own<ReadableStreamSource> source)
+        : sink(kj::mv(sink)), source(kj::mv(source)) {}
+  };
+
+  auto holder = kj::refcounted<Holder>(kj::mv(sink), kj::mv(source));
+  return holder->source->pumpTo(*holder->sink, end).then(
+      [&holder=*holder](DeferredProxy<void> proxy) mutable -> DeferredProxy<void> {
+    proxy.proxyTask = proxy.proxyTask.attach(kj::addRef(holder));
+    return kj::mv(proxy);
+  }, [&holder=*holder](kj::Exception&& ex) mutable {
+    holder.sink->abort(kj::cp(ex));
+    holder.source->cancel(kj::cp(ex));
+    return kj::mv(ex);
+  }).attach(kj::mv(holder));
+}
+
 kj::Promise<size_t> IdentityTransformStreamImpl::tryRead(
     void* buffer,
     size_t minBytes,
@@ -2067,6 +2096,21 @@ kj::Promise<void> IdentityTransformStreamImpl::writeHelper(kj::ArrayPtr<const kj
   }
 
   KJ_UNREACHABLE;
+}
+
+kj::Own<ReadableStreamController> newReadableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<ReadableStreamSource> source) {
+  return kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)));
+}
+
+kj::Own<WritableStreamController> newWritableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<WritableStreamSink> sink,
+    kj::Maybe<uint64_t> maybeHighWaterMark) {
+  return kj::heap<WritableStreamInternalController>(
+      ioContext.addObject(kj::mv(sink)),
+      maybeHighWaterMark);
 }
 
 }  // namespace workerd::api

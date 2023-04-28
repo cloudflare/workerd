@@ -31,6 +31,8 @@ class WritableStreamController;
 class WritableStreamSink;
 class WritableStreamDefaultController;
 
+class TransformStreamDefaultController;
+
 enum class StreamEncoding {
   IDENTITY,
   GZIP
@@ -49,6 +51,193 @@ struct ReadResult {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(value);
   }
+};
+
+struct StreamQueuingStrategy {
+  using SizeAlgorithm = uint64_t(v8::Local<v8::Value>);
+
+  jsg::Optional<uint64_t> highWaterMark;
+  jsg::Optional<jsg::Function<SizeAlgorithm>> size;
+
+  JSG_STRUCT(highWaterMark, size);
+  JSG_STRUCT_TS_OVERRIDE(QueuingStrategy<T = any> {
+    size?: (chunk: T) => number | bigint;
+  });
+};
+
+struct UnderlyingSource {
+  using Controller = kj::OneOf<jsg::Ref<ReadableStreamDefaultController>,
+                               jsg::Ref<ReadableByteStreamController>>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using PullAlgorithm = jsg::Promise<void>(Controller);
+  using CancelAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
+  // The autoAllocateChunkSize mechanism allows byte streams to operate as if a BYOB
+  // reader is being used even if it is just a default reader. Support is optional
+  // per the streams spec but our implementation will always enable it. Specifically,
+  // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
+  // this default.
+
+  jsg::Optional<kj::String> type;
+  // Per the spec, the type property for the UnderlyingSource should be either
+  // undefined, the empty string, or "bytes". When undefined, the empty string is
+  // used as the default. When type is the empty string, the stream is considered
+  // to be value-oriented rather than byte-oriented.
+
+  jsg::Optional<int> autoAllocateChunkSize;
+  // Used only when type is equal to "bytes", the autoAllocateChunkSize defines
+  // the size of automatically allocated buffer that is created when a default
+  // mode read is performed on a byte-oriented ReadableStream that supports
+  // BYOB reads. The stream standard makes this optional to support and defines
+  // no default value. We've chosen to use a default value of 4096. If given,
+  // the value must be greater than zero.
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<PullAlgorithm>> pull;
+  jsg::Optional<jsg::Function<CancelAlgorithm>> cancel;
+
+  JSG_STRUCT(type, autoAllocateChunkSize, start, pull, cancel);
+  JSG_STRUCT_TS_DEFINE(interface UnderlyingByteSource {
+    type: "bytes";
+    autoAllocateChunkSize?: number;
+    start?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    pull?: (controller: ReadableByteStreamController) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+  });
+  JSG_STRUCT_TS_OVERRIDE(<R = any> {
+    type?: "" | undefined;
+    autoAllocateChunkSize: never;
+    start?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    pull?: (controller: ReadableStreamDefaultController<R>) => void | Promise<void>;
+    cancel?: (reason: any) => void | Promise<void>;
+  });
+};
+
+struct UnderlyingSink {
+  using Controller = jsg::Ref<WritableStreamDefaultController>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using WriteAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using AbortAlgorithm = jsg::Promise<void>(v8::Local<v8::Value> reason);
+  using CloseAlgorithm = jsg::Promise<void>();
+
+  jsg::Optional<kj::String> type;
+  // Per the spec, the type property for the UnderlyingSink should always be either
+  // undefined or the empty string. Any other value will trigger a TypeError.
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<WriteAlgorithm>> write;
+  jsg::Optional<jsg::Function<AbortAlgorithm>> abort;
+  jsg::Optional<jsg::Function<CloseAlgorithm>> close;
+
+  JSG_STRUCT(type, start, write, abort, close);
+  // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
+  JSG_STRUCT_TS_OVERRIDE(<W = any> {
+    write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
+    start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
+    abort?: (reason: any) => void | Promise<void>;
+    close?: () => void | Promise<void>;
+  });
+};
+
+struct Transformer {
+  using Controller = jsg::Ref<TransformStreamDefaultController>;
+  using StartAlgorithm = jsg::Promise<void>(Controller);
+  using TransformAlgorithm = jsg::Promise<void>(v8::Local<v8::Value>, Controller);
+  using FlushAlgorithm = jsg::Promise<void>(Controller);
+
+  jsg::Optional<kj::String> readableType;
+  jsg::Optional<kj::String> writableType;
+
+  jsg::Optional<jsg::Function<StartAlgorithm>> start;
+  jsg::Optional<jsg::Function<TransformAlgorithm>> transform;
+  jsg::Optional<jsg::Function<FlushAlgorithm>> flush;
+
+  JSG_STRUCT(readableType, writableType, start, transform, flush);
+  JSG_STRUCT_TS_OVERRIDE(<I = any, O = any> {
+    start?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    transform?: (chunk: I, controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+    flush?: (controller: TransformStreamDefaultController<O>) => void | Promise<void>;
+  });
+};
+
+// ReadableStreamSource and WritableStreamSink
+//
+// These are implementation interfaces for ReadableStream and WritableStream. If you just need to
+// use a ReadableStream or WritableStream, you can safely skip reading this. If you need to
+// implement a new kind of stream, read on.
+
+// In the original Workers streams implementation, a ReadableStream would have a
+// ReadableStreamSource backing it. Likewise, a WritableStream would have a WritableStreamSink.
+// The ReadableStreamSource and WritableStreamSink are kj heap objects that provide a thin
+// wrapper on internal native stream sources originating from within the Workers runtime.
+//
+// With implementation of full streams standard support, we introduce the new abstraction APIs
+// ReadableStreamController and WritableStreamController, which will provide the underlying
+// implementation for both ReadableStream and WritableStream, respectively.
+//
+// When creating a new kind of *internal* ReadableStream, where the data is originating internally
+// from a kj stream, you will still implement the ReadableStreamSource API, just as before.
+// Likewise, when creating a new kind of *internal* WritableStream, where the data destination is
+// a kj stream, you will implement the WritableStreamSink API.
+
+class WritableStreamSink {
+public:
+  virtual kj::Promise<void> write(const void* buffer, size_t size)
+      KJ_WARN_UNUSED_RESULT = 0;
+  virtual kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces)
+      KJ_WARN_UNUSED_RESULT = 0;
+
+  virtual kj::Promise<void> end() KJ_WARN_UNUSED_RESULT = 0;
+  // Must call to flush and finish the stream.
+
+  virtual kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
+      ReadableStreamSource& input, bool end);
+
+  virtual void abort(kj::Exception reason) = 0;
+  // TODO(conform): abort() should return a promise after which closed fulfillers should be
+  //   rejected. This may necessitate an "erroring" state.
+};
+
+class ReadableStreamSource {
+public:
+  virtual kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) = 0;
+
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end);
+  // The ReadableStreamSource version of pumpTo() has no `amount` parameter, since the Streams spec
+  // only defines pumping everything.
+  //
+  // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
+  // important to take advantage of this when using deferred proxying since calling `end()`
+  // directly might attempt to use the `IoContext` to call `registerPendingEvent()`.
+
+  virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+
+  kj::Promise<kj::Array<byte>> readAllBytes(uint64_t limit);
+  kj::Promise<kj::String> readAllText(uint64_t limit);
+
+  virtual void cancel(kj::Exception reason);
+  // Hook to inform this ReadableStreamSource that the ReadableStream has been canceled. This only
+  // really means anything to TransformStreams, which are supposed to propagate the error to the
+  // writable side, and custom ReadableStreams, which we don't implement yet.
+  //
+  // NOTE: By "propagate the error back to the writable stream", I mean: if the WritableStream is in
+  //   the Writable state, set it to the Errored state and reject its closed fulfiller with
+  //   `reason`. I'm not sure how I'm going to do this yet.
+  //
+  // TODO(conform): Should return promise.
+  //
+  // TODO(conform): `reason` should be allowed to be any JS value, and not just an exception.
+  //   That is, something silly like `stream.cancel(42)` should be allowed and trigger a
+  //   rejection with the integer `42`.
+
+  struct Tee {
+    kj::Own<ReadableStreamSource> branches[2];
+  };
+
+  virtual kj::Maybe<Tee> tryTee(uint64_t limit);
+  // Implement this if your ReadableStreamSource has a better way to tee a stream than the naive
+  // method, which relies upon `tryRead()`. The default implementation returns nullptr.
 };
 
 struct PipeToOptions {
@@ -306,7 +495,22 @@ public:
   // The promise will reject if the read will produce more bytes than the limit.
 
   virtual kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) = 0;
+
+  virtual void setup(
+      jsg::Lock& js,
+      jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
+      jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {}
+
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(
+    jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) = 0;
+
+  virtual kj::Own<ReadableStreamController> detach(jsg::Lock& js, bool ignoreDisturbed) = 0;
 };
+
+kj::Own<ReadableStreamController> newReadableStreamJsController();
+kj::Own<ReadableStreamController> newReadableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<ReadableStreamSource> source);
 
 class WritableStreamController {
   // A WritableStreamController provides the underlying implementation for a WritableStream.
@@ -460,7 +664,17 @@ public:
   virtual kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
+
+  virtual void setup(jsg::Lock& js,
+                     jsg::Optional<UnderlyingSink> underlyingSink,
+                     jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
 };
+
+kj::Own<WritableStreamController> newWritableStreamJsController();
+kj::Own<WritableStreamController> newWritableStreamInternalController(
+    IoContext& ioContext,
+    kj::Own<WritableStreamSink> source,
+    kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
 
 struct Unlocked {};
 struct Locked {};

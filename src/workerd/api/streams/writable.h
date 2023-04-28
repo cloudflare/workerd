@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include "internal.h"
-#include "standard.h"
+#include "common.h"
 
 namespace workerd::api {
 
@@ -98,18 +97,15 @@ private:
 
 class WritableStream: public jsg::Object {
 public:
-  using Controller = kj::OneOf<kj::Own<WritableStreamInternalController>,
-                               kj::Own<WritableStreamJsController>>;
-
   explicit WritableStream(IoContext& ioContext,
                           kj::Own<WritableStreamSink> sink,
                           kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
 
-  explicit WritableStream(Controller controller);
+  explicit WritableStream(kj::Own<WritableStreamController> controller);
 
   WritableStreamController& getController();
 
-  jsg::Ref<WritableStream> addRef() { return JSG_THIS; }
+  jsg::Ref<WritableStream> addRef();
 
   virtual kj::Own<WritableStreamSink> removeSink(jsg::Lock& js);
   // Remove and return the underlying implementation of this WritableStream. Throw a TypeError if
@@ -125,7 +121,7 @@ public:
       jsg::Optional<StreamQueuingStrategy> queuingStrategy,
       CompatibilityFlags::Reader flags);
 
-  bool isLocked() { return getController().isLockedToWriter(); }
+  bool isLocked();
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   // Errors the stream. All present and future read requests are rejected with a TypeError to the
@@ -155,11 +151,9 @@ public:
 
 private:
   kj::Maybe<IoContext&> ioContext;
-  Controller controller;
+  kj::Own<WritableStreamController> controller;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(getController());
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 }  // namespace workerd::api

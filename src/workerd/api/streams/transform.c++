@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "transform.h"
+#include "standard.h"
 #include <workerd/jsg/function.h>
 #include <cmath>
 
