@@ -98,18 +98,4 @@ private:
 
   friend class Watchdog;
 };
-
-class NoRequestCfProxyLoggingScope {
-  // We current implement logging when the request.cf.botManagement properties are accessed.
-  // This scope is used specifically to suppress logging when we need to iterate or clone
-  // that structure.
-public:
-  NoRequestCfProxyLoggingScope();
-  ~NoRequestCfProxyLoggingScope() noexcept(false);
-
-  static bool isActive();
-
-  KJ_DISALLOW_COPY_AND_MOVE(NoRequestCfProxyLoggingScope);
-};
-
 }  // namespace workerd

@@ -14,7 +14,6 @@ namespace {
 
 thread_local uint allowV8BackgroundThreadScopeCount = 0;
 thread_local uint isolateShutdownThreadScopeCount = 0;
-thread_local uint noProxyLoggingScope = 0;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
@@ -112,18 +111,6 @@ void ThreadProgressCounter::acknowledgeProgress() {
   KJ_IF_MAYBE(progressCounter, activeProgressCounter) {
     progressCounter->savedValue = __atomic_load_n(&progressCounter->counter, __ATOMIC_RELAXED);
   }
-}
-
-NoRequestCfProxyLoggingScope::NoRequestCfProxyLoggingScope() {
-  ++noProxyLoggingScope;
-}
-
-NoRequestCfProxyLoggingScope::~NoRequestCfProxyLoggingScope() noexcept(false) {
-  --noProxyLoggingScope;
-}
-
-bool NoRequestCfProxyLoggingScope::isActive() {
-  return noProxyLoggingScope > 0;
 }
 
 }  // namespace workerd

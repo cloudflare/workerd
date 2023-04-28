@@ -70,9 +70,6 @@ public:
   virtual void finishedWaitUntilTask() {}
 
   virtual void setFailedOpen(bool value) {}
-
-  virtual void logBotManagementUse() {}
-  // Logging accesses to the request.cf.botManagement object.
 };
 
 class IsolateObserver: public kj::AtomicRefcounted {

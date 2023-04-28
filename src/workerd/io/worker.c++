@@ -1508,7 +1508,6 @@ void Worker::handleLog(jsg::Lock& js, LogLevel level, const v8::FunctionCallback
       KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
         // On the off chance the the arg is the request.cf object, let's make
         // sure we do not log proxied fields here.
-        NoRequestCfProxyLoggingScope noLoggingScope;
         if (shouldSerialiseToJson) {
           auto s = js.serializeJson(arg);
           // serializeJson returns the string "undefined" for some values (undefined,
