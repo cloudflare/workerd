@@ -7,17 +7,17 @@
     {
       "name": "workerd debug",
       "preLaunchTask": "Bazel Build (dbg)",
-      "program": "linux-or-os-only",
+      "program": "workerd",
       "request": "launch",
       "type": "cppdbg",
+      "cwd": "${workspaceFolder}",
       "linux": {
         "name": "workerd debug",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
-        "program": "workerd",
-        "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/",
+        "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
       },
       "osx": {
         "name": "workerd debug",
@@ -31,29 +31,34 @@
           "bazel-out" : "${workspaceFolder}/bazel-out",
           "external" : "${workspaceFolder}/external"
          },
-         "cwd": "${workspaceFolder}",
+      },
+      "windows": {
+        "name": "workerd debug",
+        "type": "cppvsdbg",
+        "request": "launch",
+        "program": "${workspaceRoot}\\bazel-out\\x64_windows-dbg\\bin\\src\\workerd\\server\\workerd.exe",
       },
       "args": [
         "serve",
         "${input:workerdConfig}"
       ],
       "stopAtEntry": false,
-      "externalConsole": false
+      "externalConsole": false,
     },
     {
       "name": "workerd debug with inspector enabled",
       "preLaunchTask": "Bazel Build (dbg)",
-      "program": "linux-or-os-only",
+      "program": "workerd",
       "type": "cppdbg",
       "request": "launch",
+      "cwd": "${workspaceFolder}",
       "linux": {
         "name": "workerd debug with inspector enabled",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
-        "program": "workerd",
-        "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/",
+        "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
       },
       "osx": {
         "name": "workerd debug with inspector enabled",
@@ -67,7 +72,12 @@
           "bazel-out" : "${workspaceFolder}/bazel-out",
           "external" : "${workspaceFolder}/external"
          },
-         "cwd": "${workspaceFolder}",
+      },
+      "windows": {
+        "name": "workerd debug",
+        "type": "cppvsdbg",
+        "request": "launch",
+        "program": "${workspaceRoot}\\bazel-out\\x64_windows-dbg\\bin\\src\\workerd\\server\\workerd.exe",
       },
       "args": [
         "serve",
@@ -75,7 +85,6 @@
         "--verbose",
         "${input:workerdConfig}"
       ],
-      "cwd": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd",
       "stopAtEntry": false,
       "externalConsole": false
     }
