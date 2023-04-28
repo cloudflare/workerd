@@ -76,7 +76,9 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
   Worker::ApiIsolate::ErrorInterface,
   jsg::CommonJsModuleObject,
-  jsg::CommonJsModuleContext);
+  jsg::CommonJsModuleContext,
+  jsg::NodeJsModuleObject,
+  jsg::NodeJsModuleContext);
 
 struct WorkerdApiIsolate::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
@@ -341,6 +343,21 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
                     module.getCommonJsModule())));
         break;
       }
+      case config::Worker::Module::NODE_JS_COMPAT_MODULE: {
+        KJ_REQUIRE(getFeatureFlags().getNodeJsCompat(),
+            "The nodejs_compat compatibility flag is required to use the nodeJsCompatModule type.");
+        modules->add(
+            path,
+            jsg::ModuleRegistry::ModuleInfo(
+                lock,
+                module.getName(),
+                nullptr,
+                jsg::ModuleRegistry::NodeJsModuleInfo(
+                    lock,
+                    module.getName(),
+                    module.getNodeJsCompatModule())));
+        break;
+      }
       default: {
         KJ_UNREACHABLE;
       }
@@ -570,7 +587,8 @@ static v8::Local<v8::Value> createBindingValue(
       auto moduleName = kj::Path::parse(wrapped.moduleName);
 
       // wrapped bindings can be produced by internal modules only
-      KJ_IF_MAYBE(moduleInfo, moduleRegistry->resolve(lock, moduleName, true /* internalOnly */)) {
+      KJ_IF_MAYBE(moduleInfo, moduleRegistry->resolve(lock, moduleName,
+           jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
         // obtain the module
         auto module = moduleInfo->module.getHandle(lock);
         jsg::instantiateModule(lock, module);
