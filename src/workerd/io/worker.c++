@@ -2694,7 +2694,9 @@ Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, A
     kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
     TimerChannel& timerChannel,
     kj::Own<ActorObserver> metrics)
-    : worker(kj::atomicAddRef(worker)), tracker(tracker) {
+    : worker(kj::atomicAddRef(worker)), tracker(tracker.map([](RequestTracker& tracker){
+      return tracker.addRef();
+    })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
                         kj::mv(makeStorage), timerChannel, kj::mv(metrics));
 

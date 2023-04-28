@@ -2,36 +2,38 @@
 
 namespace workerd {
 
-RequestTracker::Impl::Impl(Hooks& hooksImpl) : hooks(hooksImpl) {};
-RequestTracker::RequestTracker(Hooks& hooksImpl) : impl(kj::refcounted<Impl>(hooksImpl)) {};
+RequestTracker::RequestTracker(Hooks& hooksImpl) : hooks(hooksImpl) {};
 
-RequestTracker::~RequestTracker() noexcept(false) {
-  // Since we're destroying the RequestTracker, we want to prevent any hooks from running after
-  // this point.
-  impl->hooks = nullptr;
+RequestTracker::~RequestTracker() noexcept(false) {}
+
+RequestTracker::ActiveRequest::ActiveRequest(kj::Badge<RequestTracker>, RequestTracker& parent)
+  : maybeParent(kj::addRef(parent)) {
+  parent.requestActive();
+}
+RequestTracker::ActiveRequest::~ActiveRequest() noexcept(false) {
+  KJ_IF_MAYBE(p, maybeParent) {
+    p->get()->requestInactive();
+  }
 }
 
-RequestTracker::ActiveRequest::ActiveRequest(RequestTracker::Impl& parentRef)
-    : parent(kj::addRef(parentRef)) {
-  if (parentRef.activeRequests++ == 0) {
-    KJ_IF_MAYBE(h, parentRef.hooks) {
+void RequestTracker::requestActive() {
+  if (activeRequests++ == 0) {
+    KJ_IF_MAYBE(h, hooks) {
       h->active();
     }
   }
 }
 
-RequestTracker::ActiveRequest::~ActiveRequest() {
-  KJ_IF_MAYBE(p, parent) {
-    KJ_IF_MAYBE(h, (*p)->hooks) {
-      if (--(*p)->activeRequests == 0) {
-        h->inactive();
-      }
+void RequestTracker::requestInactive() {
+  KJ_IF_MAYBE(h, hooks) {
+    if (--activeRequests == 0) {
+      h->inactive();
     }
   }
 }
 
 RequestTracker::ActiveRequest RequestTracker::startRequest() {
-  return ActiveRequest(*this->impl.get());
+  return ActiveRequest({}, *this);
 }
 
 } // namespace workerd

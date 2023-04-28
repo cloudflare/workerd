@@ -736,21 +736,16 @@ public:
   // Runs an alarm in this actor. This function will handle deduplicating multiple alarms. If this
   // isn't a duplicate alarm, func will be called to run the alarm.
 
-  void unsetRequestTracker() {
-    // Unsets the RequestTracker if we're shutting down.
-    tracker = nullptr;
-  }
-
   kj::Own<Worker::Actor> addRef() {
     KJ_IF_MAYBE(t, tracker) {
-      return kj::addRef(*this).attach(t->startRequest());
+      return kj::addRef(*this).attach(t->get()->startRequest());
     } else {
       return kj::addRef(*this);
     }
   }
 private:
   kj::Own<const Worker> worker;
-  kj::Maybe<RequestTracker&> tracker;
+  kj::Maybe<kj::Own<RequestTracker>> tracker;
   struct Impl;
   kj::Own<Impl> impl;
 
