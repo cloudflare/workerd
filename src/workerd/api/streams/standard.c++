@@ -2417,7 +2417,13 @@ private:
           // If we're not done, the result value must be interpretable as
           // bytes for the read to make any sense.
           auto handle = KJ_ASSERT_NONNULL(result.value).getHandle(js);
-          if (!handle->IsArrayBufferView() && !handle->IsArrayBuffer()) {
+          if (handle.IsEmpty() || (!handle->IsArrayBufferView() && !handle->IsArrayBuffer())) {
+            if (handle.IsEmpty()) {
+              // This is a bit strange. It really should not happen as that would imply
+              // some error condition somewhere is not being properly checked. Not sure
+              // if this case is actually happening so let's log to find out.
+              KJ_LOG(WARNING, "ReadableStream read returned an empty value.");
+            }
             return js.v8Ref(js.v8TypeError("This ReadableStream did not return bytes."));
           }
 
