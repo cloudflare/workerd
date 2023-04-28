@@ -58,9 +58,6 @@ build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 
-# Temporary fix for zlib compilation on OS X with bazel 6.1.1 (https://github.com/bazelbuild/bazel/issues/17956).
-build:unix --per_file_copt='external/zlib[~/].*\.c@-std=c90' --host_per_file_copt='external/zlib[~/].*\.c@-std=c90'
-
 build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:libdl=True
 
 build:linux --config=unix
