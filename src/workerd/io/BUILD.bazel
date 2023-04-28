@@ -11,6 +11,7 @@ wd_cc_library(
     srcs = glob(
         ["*.c++"],
         exclude = [
+            "worker-interface.c++",
             "*-test.c++",
             "trace.c++",
         ],
@@ -32,11 +33,17 @@ wd_cc_library(
         # should be ok.
         #
         # TODO(soon): Fix this
+        exclude = [
+            "observer.h",
+            "worker-interface.h",
+        ],
     ) + ["//src/workerd/api:hdrs"],
     visibility = ["//visibility:public"],
     deps = [
         ":capnp",
+        ":observer",
         ":trace",
+        ":worker-interface",
         "//src/node",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:r2-api_capnp",
@@ -61,6 +68,23 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "observer",
+    hdrs = ["observer.h"],
+    visibility = ["//visibility:public"],
+    deps = [":trace"],
+)
+
+wd_cc_library(
+    name = "worker-interface",
+    srcs = ["worker-interface.c++"],
+    hdrs = ["worker-interface.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":trace",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+    ],
+)
 
 wd_cc_capnp_library(
     name = "capnp",
