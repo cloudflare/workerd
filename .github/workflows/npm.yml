@@ -71,7 +71,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
         # release-downloader does not support .gz files (unlike .tar.gz), decompress manually
         # Using the -N flag the right file name should be restored
-      - run: gzip -dN workerd-${{ matrix.arch }}.gz
+      - run: gzip -dN $GITHUB_WORKSPACE/release-downloads/workerd-${{ matrix.arch }}.gz
       - run: chmod +x $GITHUB_WORKSPACE/release-downloads/workerd
         if: matrix.arch != 'windows-64'
       - run: mkdir npm/workerd-${{ matrix.arch }}/bin
