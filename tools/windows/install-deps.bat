@@ -10,6 +10,20 @@ if %ERRORLEVEL% NEQ 0 (
 
 cls
 
+goto :InstallDependencies
+
+:AddToUserPathInEnvironment
+rem Function to add an element to the users PATH as defined in HCU\Environment.
+setlocal
+set "PATH_TO_ADD=%~1"
+for /F "usebackq tokens=3 skip=2" %%P IN (`reg query "HKEY_CURRENT_USER\Environment" /v PATH`) do set "USERPATH=%%P"
+setx PATH "%PATH_TO_ADD%;!USERPATH!"
+echo Added %PATH_TO_ADD% to default PATH.
+endlocal
+exit /b 0
+
+:InstallDependencies
+
 echo.Workerd dependency installation
 echo.-------------------------------
 echo.
@@ -54,7 +68,8 @@ setx BAZEL_SH "C:\msys64\usr\bin\bash.exe"
 echo.
 echo.* Step 6 Install msys2 tools suggested for bazel, from https://bazel.build/install/windows.
 @rem Invoking pacman like this reports an error updating GNU info files, no idea how to fix.
-c:\msys64\usr\bin\bash -c "/usr/bin/pacman -S --noconfirm zip unzip patch diffutils"
+C:\msys64\usr\bin\bash -c "/usr/bin/pacman -S --noconfirm zip unzip patch diffutils"
+call :AddToUserPathInEnvironment C:\msys64\usr\bin
 
 echo.
 echo.* Step 7: Install LLVM compiler toolchain.
@@ -62,11 +77,8 @@ winget install "LLVM" --version 15.0.7
 
 echo.
 echo.* Step 8: Install bazelisk as %LOCALAPPDATA%\Programs\bazelisk\bazel.exe.
-winget install bazelisk -l %LOCALAPPDATA%\Programs\bazelisk -r "bazel.exe"
-rem Add bazelisk to users path. First we need to extract users path from the registry, then extend.
-for /F "usebackq tokens=3 skip=2" %%P IN (`reg query "HKEY_CURRENT_USER\Environment" /v PATH`) do set "USERPATH=%%P"
-setx PATH "%LOCALAPPDATA%\Programs\bazelisk;!USERPATH!"
-echo Added %LOCALAPPDATA%\Programs\bazelisk to default PATH.
+winget install bazelisk -l "%LOCALAPPDATA%\Programs\bazelisk" -r "bazel.exe"
+call :AddToUserPathInEnvironment "%LOCALAPPDATA%\Programs\bazelisk"
 
 echo.
 echo.* Setup complete.
