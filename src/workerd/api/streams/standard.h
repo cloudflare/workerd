@@ -238,7 +238,6 @@ private:
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
   Algorithms algorithms;
 
-  bool closeRequested = false;
   bool disturbed = false;
   bool pullAgain = false;
   bool pulling = false;

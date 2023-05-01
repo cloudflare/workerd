@@ -878,7 +878,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
 
 template <typename Self>
 bool ReadableImpl<Self>::canCloseOrEnqueue() {
-  return state.template is<Queue>() && !closeRequested;
+  return state.template is<Queue>();
 }
 
 template <typename Self>
