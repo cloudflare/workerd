@@ -18,7 +18,8 @@ def wd_ts_bundle(
         internal_modules,
         tsconfig_json,
         eslintrc_json,
-        lint = True):
+        lint = True,
+        deps = []):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -32,6 +33,7 @@ def wd_ts_bundle(
       tsconfig_json: tsconfig.json label
       eslintrc_json: eslintrc.json label
       lint: enables/disables source linting
+      deps: additional typescript dependencies
     """
     ts_config(
         name = name + "@tsconfig",
@@ -46,6 +48,7 @@ def wd_ts_bundle(
         srcs = ts_srcs,
         allow_js = True,
         tsconfig = name + "@tsconfig",
+        deps = deps,
     )
 
     wd_js_bundle(
