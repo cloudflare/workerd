@@ -42,6 +42,23 @@ wd_cc_binary(
 )
 
 wd_cc_library(
+    name = "alarm-scheduler",
+    srcs = [
+        "alarm-scheduler.c++",
+    ],
+    hdrs = [
+        "alarm-scheduler.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/util:sqlite",
+        "//src/workerd/io:io",
+        "@capnp-cpp//src/kj:kj",
+        "@capnp-cpp//src/kj:kj-async",
+    ],
+)
+
+wd_cc_library(
     name = "server",
     srcs = [
         "server.c++",
@@ -57,6 +74,7 @@ wd_cc_library(
     deps = [
         ":workerd_capnp",
         "//src/cloudflare",
+        ":alarm-scheduler",
         "@capnp-cpp//src/capnp:capnpc",
         "//src/workerd/io",
         "//src/workerd/jsg",

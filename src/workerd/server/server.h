@@ -9,6 +9,8 @@
 #include <kj/one-of.h>
 #include <kj/async-io.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/util/sqlite.h>
+#include <workerd/server/alarm-scheduler.h>
 #include <kj/compat/http.h>
 
 namespace kj {
@@ -110,6 +112,9 @@ private:
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
+  kj::Own<AlarmScheduler> alarmScheduler;
+  // Initialized in startAlarmScheduler().
+
   struct ListedHttpServer {
     // An HttpServer object maintained in a linked list.
 
@@ -131,7 +136,7 @@ private:
   // All active HttpServer objects -- used to implement drain().
 
   kj::TaskSet tasks;
-  // Especially includes server loop tasks to listen on socokets. Any error is considered fatal.
+  // Especially includes server loop tasks to listen on sockets. Any error is considered fatal.
 
   void taskFailed(kj::Exception&& exception) override;
   // Reports an exception thrown by a task in `tasks`.
@@ -180,6 +185,9 @@ private:
   void startServices(jsg::V8System& v8System, config::Config::Reader config,
                      kj::HttpHeaderTable::Builder& headerTableBuilder,
                      kj::ForkedPromise<void>& forkedDrainWhen);
+
+  void startAlarmScheduler(config::Config::Reader config);
+  // Must be called after startServices!
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
                                     kj::HttpHeaderTable::Builder& headerTableBuilder,

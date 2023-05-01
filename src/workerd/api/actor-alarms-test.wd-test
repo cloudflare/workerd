@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+  alarmScheduler = (
+    alarmStorage = (
+      inMemory = void
+    )
+  )
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2022-09-16",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-alarms-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+);

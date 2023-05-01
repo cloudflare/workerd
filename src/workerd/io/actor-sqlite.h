@@ -19,8 +19,22 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   //   here is easier and not too costly.
 
 public:
+  class Hooks {
+    // Hooks to configure ActorSqlite behavior, right now only used to allow plugging in a backend
+    // for alarm operations.
+
+  public:
+    virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
+    virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
+    virtual kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date scheduledTime, bool noCache);
+    virtual void cancelDeferredAlarmDeletion();
+
+    static Hooks DEFAULT;
+  };
+
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
-                       kj::Function<kj::Promise<void>()> commitCallback);
+                       kj::Function<kj::Promise<void>()> commitCallback,
+                       Hooks& hooks = Hooks::DEFAULT);
   // Constructs ActorSqlite, arranging to honor the output gate, that is, any writes to the
   // database which occur without any `await`s in between will automatically be combined into a
   // single atomic write. This is accomplished using transactions. In addition to ensuring
@@ -65,6 +79,7 @@ private:
   kj::Own<SqliteDatabase> db;
   OutputGate& outputGate;
   kj::Function<kj::Promise<void>()> commitCallback;
+  Hooks& hooks;
   SqliteKv kv;
 
   SqliteDatabase::Statement beginTxn = db->prepare("BEGIN TRANSACTION");
