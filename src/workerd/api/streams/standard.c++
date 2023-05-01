@@ -2626,6 +2626,12 @@ private:
           return loop(js);
         };
 
+        // An important detail is that after calling read, the readable may be
+        // destroyed synchronously while read is being processed. Do not access
+        // it in either the onSuccess or onFailure callbacks above! Instead, call
+        // loop again to iterate to the next step which will check whether readable
+        // is still alive.
+
         return maybeAddFunctor(js, read(js), kj::mv(onSuccess), kj::mv(onFailure));
       }
     }
