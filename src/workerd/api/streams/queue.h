@@ -619,9 +619,7 @@ public:
     kj::Own<Entry> entry;
     QueueEntry clone(jsg::Lock& js);
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      if (entry) visitor.visit(*entry);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer final {
@@ -654,9 +652,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
 
   private:
     ConsumerImpl impl;
@@ -680,16 +676,11 @@ public:
 
   size_t getConsumerCount();
 
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
+  bool wantsRead() const;
 
-  bool hasPartiallyFulfilledRead() {
-    // A ValueQueue can never have a partially fulfilled read.
-    return false;
-  }
+  bool hasPartiallyFulfilledRead();
 
-  void visitForGc(jsg::GcVisitor& visitor) {}
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
   QueueImpl impl;
@@ -769,7 +760,7 @@ public:
 
     ~ByobRequest() noexcept(false);
 
-    ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
+    inline ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
 
     bool respond(jsg::Lock& js, size_t amount);
 
@@ -807,7 +798,7 @@ public:
 
     size_t getSize() const;
 
-    inline void visitForGc(jsg::GcVisitor& visitor) {}
+    void visitForGc(jsg::GcVisitor& visitor);
 
     kj::Own<Entry> clone(jsg::Lock& js);
 
@@ -821,7 +812,7 @@ public:
 
     QueueEntry clone(jsg::Lock& js);
 
-    void visitForGc(jsg::GcVisitor& visitor) {}
+    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer {
@@ -854,9 +845,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
 
   private:
     ConsumerImpl impl;
@@ -878,9 +867,7 @@ public:
 
   size_t getConsumerCount();
 
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
+  bool wantsRead() const;
 
   bool hasPartiallyFulfilledRead();
 
@@ -894,7 +881,7 @@ public:
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
 
-  void visitForGc(jsg::GcVisitor& visitor) {}
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
   QueueImpl impl;

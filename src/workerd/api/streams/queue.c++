@@ -54,6 +54,10 @@ ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
   return QueueEntry { .entry = entry->clone(js) };
 }
 
+void ValueQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {
+  if (entry) visitor.visit(*entry);
+}
+
 #pragma endregion ValueQueue::QueueEntry
 
 #pragma region ValueQueue::Consumer
@@ -104,6 +108,10 @@ kj::Own<ValueQueue::Consumer> ValueQueue::Consumer::clone(
 
 bool ValueQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
+}
+
+void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(impl);
 }
 
 #pragma endregion ValueQueue::Consumer
@@ -204,6 +212,17 @@ bool ValueQueue::handleMaybeClose(
 
 size_t ValueQueue::getConsumerCount() { return impl.getConsumerCount(); }
 
+bool ValueQueue::wantsRead() const {
+  return impl.wantsRead();
+}
+
+bool ValueQueue::hasPartiallyFulfilledRead() {
+  // A ValueQueue can never have a partially fulfilled read.
+  return false;
+}
+
+void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
+
 #pragma endregion ValueQueue
 
 // ======================================================================================
@@ -289,6 +308,8 @@ kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
   return kj::heap<ByteQueue::Entry>(store.clone());
 }
 
+void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
+
 #pragma endregion ByteQueue::Entry
 
 #pragma region ByteQueue::QueueEntry
@@ -299,6 +320,8 @@ ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
     .offset = offset,
   };
 }
+
+void ByteQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue::QueueEntry
 
@@ -350,6 +373,10 @@ kj::Own<ByteQueue::Consumer> ByteQueue::Consumer::clone(
 
 bool ByteQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
+}
+
+void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(impl);
 }
 
 #pragma endregion ByteQueue::Consumer
@@ -988,7 +1015,13 @@ bool ByteQueue::hasPartiallyFulfilledRead() {
   return false;
 }
 
+bool ByteQueue::wantsRead() const {
+  return impl.wantsRead();
+}
+
 size_t ByteQueue::getConsumerCount() { return impl.getConsumerCount(); }
+
+void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue
 
