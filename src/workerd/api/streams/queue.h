@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <deque>
 #include <kj/table.h>
+#include <set>
 
 namespace workerd::api {
 
@@ -162,8 +163,11 @@ public:
     // Closes the queue. The close is forwarded on to all consumers.
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        consumer.ref->close(js);
+      // We copy the list of consumers in case the consumers remove themselves
+      // from the queue during the close callback, invalidating the iterator.
+      auto consumers = ready->consumers;
+      for (auto consumer : consumers) {
+        consumer->close(js);
       }
       state.template init<Closed>();
     }
@@ -183,8 +187,11 @@ public:
     // all pending consume promises.
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        consumer.ref->error(js, reason.addRef(js));
+      // We copy the list of consumers in case the consumers remove themselves
+      // from the queue during the error callback, invalidating the iterator.
+      auto consumers = ready->consumers;
+      for (auto consumer : consumers) {
+        consumer->error(js, reason.addRef(js));
       }
       state = kj::mv(reason);
     }
@@ -196,8 +203,8 @@ public:
     // If we are already closed or errored, set totalQueueSize to zero.
     totalQueueSize = 0;
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        totalQueueSize = kj::max(totalQueueSize, consumer.ref->size());
+      for (auto consumer : ready->consumers) {
+        totalQueueSize = kj::max(totalQueueSize, consumer->size());
       }
     }
   }
@@ -213,14 +220,14 @@ public:
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(),
         "The queue is closed or errored.");
 
-    for (auto& consumer : ready.consumers) {
+    for (auto consumer : ready.consumers) {
       KJ_IF_MAYBE(skip, skipConsumer) {
-        if (consumer.ref == &(*skip)) {
+        if (&(*skip) == consumer) {
           continue;
         }
       }
 
-      consumer.ref->push(js, entry->clone(js));
+      consumer->push(js, entry->clone(js));
     }
   }
 
@@ -241,8 +248,8 @@ public:
       KJ_CASE_ONEOF(closed, Closed) { return false; }
       KJ_CASE_ONEOF(errored, Errored) { return false; }
       KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& consumer : ready.consumers) {
-          if (consumer.ref->hasReadRequests()) return true;
+        for (auto consumer : ready.consumers) {
+          if (consumer->hasReadRequests()) return true;
         }
         return false;
       }
@@ -263,18 +270,8 @@ private:
   struct Closed {};
   using Errored = jsg::Value;
 
-  struct ConsumerRef {
-    ConsumerImpl* ref;
-    bool operator==(ConsumerRef& other) const {
-      return hashCode() == other.hashCode();
-    }
-    auto hashCode() const {
-      return kj::hashCode(ref);
-    }
-  };
-
   struct Ready final: public State {
-    kj::HashSet<ConsumerRef> consumers;
+    std::set<ConsumerImpl*> consumers;
   };
 
   size_t highWaterMark;
@@ -283,13 +280,13 @@ private:
 
   void addConsumer(ConsumerImpl* consumer) {
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.insert(ConsumerRef { .ref = consumer });
+      ready->consumers.insert(consumer);
     }
   }
 
   void removeConsumer(ConsumerImpl* consumer) {
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.eraseMatch(ConsumerRef { .ref = consumer });
+      ready->consumers.erase(consumer);
       maybeUpdateBackpressure();
     }
   }
