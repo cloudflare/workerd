@@ -158,24 +158,30 @@ void ValueQueue::handleRead(
   // If there are no pending read requests and there is data in the buffer,
   // we will try to fulfill the read request immediately.
   if (state.readRequests.empty() && state.queueTotalSize > 0) {
-    auto entry = kj::mv(state.buffer.front());
-    state.buffer.pop_front();
+    auto& entry = state.buffer.front();
 
     KJ_SWITCH_ONEOF(entry) {
       KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
-        // The next item was a close sentinel! Resolve the read immediately with a close indicator.
+        // This case shouldn't actually happen. The queueTotalSize should be zero if the
+        // only item remaining in the queue is the close sentinel because we decrement the
+        // queueTotalSize every time we remove an item. If we get here, something is wrong.
+        // We'll handle it by resolving the read request and keep going but let's emit a log
+        // warning so we can investigate.
+        // Note that we do not want to remove the close sentinel here so that the next call to
+        // maybeDrainAndSetState will see it and handle the transition to the closed state.
+        KJ_LOG(WARNING, "ValueQueue::handleRead encountered a close sentinel in the queue "
+                        "with queueTotalSize > 0. This should not happen.", state.queueTotalSize);
         request.resolveAsDone(js);
       }
       KJ_CASE_ONEOF(entry, QueueEntry) {
         request.resolve(js, entry.entry->getValue(js));
         state.queueTotalSize -= entry.entry->getSize();
+        state.buffer.pop_front();
       }
     }
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
-    // Otherwise, if state.queueTotalSize is zero and isClosing() is true, we should
-    // have already drained but let's take care of that now. Specifically, in this case
-    // there's no data in the queue and close() has already been called, so there won't
-    // be any more data coming.
+    // Otherwise, if state.queueTotalSize is zero and isClosing() is true there won't be any
+    // more data coming. Just resolve the read as done and move on.
     request.resolveAsDone(js);
   } else {
     // Otherwise, push the read request into the pending readRequests. It will be
