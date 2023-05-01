@@ -516,6 +516,13 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
 ByteQueue::ByteQueue(size_t highWaterMark) : impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
+  KJ_IF_MAYBE(ready, impl.state.tryGet<Ready>()) {
+    while (!ready->pendingByobReadRequests.empty()) {
+      auto& req = ready->pendingByobReadRequests.front();
+      req->invalidate();
+      ready->pendingByobReadRequests.pop_front();
+    }
+  }
   impl.close(js);
 }
 
