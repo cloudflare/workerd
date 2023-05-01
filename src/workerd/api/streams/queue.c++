@@ -216,10 +216,21 @@ namespace {
 void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
   KJ_IF_MAYBE(byobRequest, req) {
     byobRequest->invalidate();
-    req = nullptr;
+    // The call to byobRequest->invalidate() should have cleared the reference.
+    KJ_ASSERT(req == nullptr);
   }
 }
 }  // namespace
+
+ByteQueue::ReadRequest::ReadRequest(
+    jsg::Promise<ReadResult>::Resolver resolver,
+    ByteQueue::ReadRequest::PullInto pullInto)
+    : resolver(kj::mv(resolver)),
+      pullInto(kj::mv(pullInto)) {}
+
+ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
+  maybeInvalidateByobRequest(byobReadRequest);
+}
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   if (pullInto.filled > 0) {
@@ -259,10 +270,6 @@ void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     ConsumerImpl& consumer,
     QueueImpl& queue) {
-  // Why refcounted? One ByobReadRequest reference will be held (eventually) by
-  // an instance of ReadableStreamBYOBRequest and the other by this ReadRequest.
-  // Depending on how the read is actually fulfilled, the ByobReadRequest will
-  // be invalidated by one or the other.
   auto req = kj::heap<ByobRequest>(*this, consumer, queue);
   byobReadRequest = *req;
   return kj::mv(req);

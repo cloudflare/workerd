@@ -730,13 +730,18 @@ public:
     // which happens either when respond(), respondWithNewView(), or invalidate()
     // is called, or when the ByobRequest is destroyed, whichever comes first.
 
-    struct {
+    struct PullInto {
       jsg::BackingStore store;
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
     } pullInto;
 
+    ReadRequest(jsg::Promise<ReadResult>::Resolver resolver,
+                PullInto pullInto);
+    ReadRequest(ReadRequest&&) = default;
+    ReadRequest& operator=(ReadRequest&&) = default;
+    ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::Value& value);

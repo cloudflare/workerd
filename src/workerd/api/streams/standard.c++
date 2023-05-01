@@ -1738,22 +1738,22 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
         // with the element size. No matter what, atLeast cannot be less than 1.
         auto atLeast = kj::max(source.getElementSize(), byob->atLeast.orDefault(1));
         atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
-        s->consumer->read(js, ByteQueue::ReadRequest {
-          .resolver = kj::mv(prp.resolver),
-          .pullInto {
+        s->consumer->read(js, ByteQueue::ReadRequest(
+          kj::mv(prp.resolver),
+          {
             .store = source.detach(js),
             .atLeast = atLeast,
             .type = ByteQueue::ReadRequest::Type::BYOB,
-          },
-        });
+          }
+        ));
       } else {
-        s->consumer->read(js, ByteQueue::ReadRequest {
-          .resolver = kj::mv(prp.resolver),
-          .pullInto {
+        s->consumer->read(js, ByteQueue::ReadRequest(
+          kj::mv(prp.resolver),
+          {
             .store = jsg::BackingStore::alloc(js, autoAllocateChunkSize),
             .type = ByteQueue::ReadRequest::Type::BYOB,
-          },
-        });
+          }
+        ));
       }
 
       return kj::mv(prp.promise);
