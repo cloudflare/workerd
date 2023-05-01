@@ -29,18 +29,17 @@ namespace workerd::api {
 //    is signaled. Additional data can always be pushed into the queue beyond
 //    the high water mark, but it is not advisable to do so.
 //
-//  - All data stored in the queue is in the form of refcounted entries. The
+//  - All data stored in the queue is in the form of entries. The
 //    specific type of entry depends on the queue type. Every entry has a
-//    calculated size, which is dependent on the type of entry. The reason
-//    these entries are refcounted is because...(see the next bullet point)
+//    calculated size, which is dependent on the type of entry.
 //
 //  - Every queue has one or more consumers. Each consumer maintains its own
-//    internal buffer of refcounted entries that it has yet to consume. Because
-//    entries are refcounted, there is ever only one copy of any given chunk of
-//    data in memory, with each consumer possessing only a reference to it.
-//    Whenever data is pushed into the queue, references are pushed into each of
-//    the consumers. As data is consumed from the internal buffer, the reference
-//    counted entries are freed. The underlying data is freed once the last
+//    internal buffer of entries that it has yet to consume. Entries are
+//    structured such that there is ever only one copy of any given chunk of
+//    data in memory, with each entry in each consumer possessing only a reference
+//    to it. Whenever data is pushed into the queue, references are pushed into
+//    each of the consumers. As data is consumed from the internal buffer, the
+//    entries are freed. The underlying data is freed once the last
 //    reference is released.
 //
 //  - Every consumer has an remaining buffer size, which is the sum of the sizes
@@ -59,7 +58,7 @@ namespace workerd::api {
 // in the same way but Byte Queue consumers have a number of unique details.
 //
 //  - As mentioned above, every consumer maintains an internal data buffer
-//    consisting of refcounted pointers to the data that has been pushed into
+//    consisting of references to the data that has been pushed into
 //    the queue.
 //
 //  - Every consumer maintains a list of pending reads. A read is a request to
@@ -88,8 +87,8 @@ namespace workerd::api {
 //
 // The bookkeeping for a value queue is fairly simple:
 //
-//  - A single refcounted value entry is created.
-//  - References to that single value entry are distributed to each of
+//  - A single value entry is created.
+//  - Clones of that single value entry are distributed to each of
 //    the value queue consumers.
 //  - If a consumer has a pending read, the read is fulfilled immediately
 //    and the reference is never added to that consumer's internal buffer.
