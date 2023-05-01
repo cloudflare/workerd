@@ -42,18 +42,16 @@ void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(value);
 }
 
-ValueQueue::Entry ValueQueue::Entry::clone(jsg::Lock& js) {
-  return Entry(value.addRef(js), size);
-}
-
 #pragma endregion ValueQueue::Entry
 
 #pragma region ValueQueue::QueueEntry
 
-ValueQueue::QueueEntry ValueQueue::QueueEntry::clone() {
-  return QueueEntry {
-    .entry = kj::addRef(*entry),
-  };
+kj::Own<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
+  return kj::heap<Entry>(getValue(js), getSize());
+}
+
+ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
+  return QueueEntry { .entry = entry->clone(js) };
 }
 
 #pragma endregion ValueQueue::QueueEntry
@@ -280,13 +278,17 @@ kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr() { return store.asArrayPtr(
 
 size_t ByteQueue::Entry::getSize() const { return store.size(); }
 
+kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
+  return kj::heap<ByteQueue::Entry>(store.clone());
+}
+
 #pragma endregion ByteQueue::Entry
 
 #pragma region ByteQueue::QueueEntry
 
-ByteQueue::QueueEntry ByteQueue::QueueEntry::clone() {
+ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
   return QueueEntry {
-    .entry = kj::addRef(*entry),
+    .entry = entry->clone(js),
     .offset = offset,
   };
 }
@@ -385,7 +387,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (queue.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
-    auto entry = kj::refcounted<Entry>(jsg::BackingStore::alloc(js, amount));
+    auto entry = kj::heap<Entry>(jsg::BackingStore::alloc(js, amount));
 
     auto start = sourcePtr.begin() + req.pullInto.filled;
 
@@ -426,7 +428,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
   if (unaligned > 0) {
     auto start = sourcePtr.begin() + (amount - unaligned);
-    auto excess = kj::refcounted<Entry>(jsg::BackingStore::alloc(js, unaligned));
+    auto excess = kj::heap<Entry>(jsg::BackingStore::alloc(js, unaligned));
     std::copy(start, start + unaligned, excess->toArrayPtr().begin());
     consumer.push(js, kj::mv(excess));
   }

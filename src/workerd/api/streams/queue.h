@@ -220,7 +220,7 @@ public:
         }
       }
 
-      consumer.ref->push(js, kj::addRef(*entry));
+      consumer.ref->push(js, entry->clone(js));
     }
   }
 
@@ -460,7 +460,7 @@ public:
               otherReady.buffer.push_back(Close {});
             }
             KJ_CASE_ONEOF(entry, QueueEntry) {
-              otherReady.buffer.push_back(entry.clone());
+              otherReady.buffer.push_back(entry.clone(js));
             }
           }
         }
@@ -599,7 +599,7 @@ public:
     void reject(jsg::Lock& js, jsg::Value& value);
   };
 
-  class Entry final: public kj::Refcounted {
+  class Entry {
     // A value queue entry consists of an arbitrary JavaScript value and a size that is
     // calculated by the size algorithm function provided in the stream constructor.
   public:
@@ -611,7 +611,7 @@ public:
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-    Entry clone(jsg::Lock& js);
+    kj::Own<Entry> clone(jsg::Lock& js);
 
   private:
     jsg::Value value;
@@ -620,7 +620,7 @@ public:
 
   struct QueueEntry {
     kj::Own<Entry> entry;
-    QueueEntry clone();
+    QueueEntry clone(jsg::Lock& js);
 
     void visitForGc(jsg::GcVisitor& visitor) {
       if (entry) visitor.visit(*entry);
@@ -795,7 +795,7 @@ public:
     std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
   };
 
-  class Entry final: public kj::Refcounted {
+  class Entry {
     // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
     // sequence of bytes. The size is determined by the number of bytes in the entry.
   public:
@@ -807,6 +807,8 @@ public:
 
     inline void visitForGc(jsg::GcVisitor& visitor) {}
 
+    kj::Own<Entry> clone(jsg::Lock& js);
+
   private:
     jsg::BackingStore store;
   };
@@ -815,7 +817,7 @@ public:
     kj::Own<Entry> entry;
     size_t offset;
 
-    QueueEntry clone();
+    QueueEntry clone(jsg::Lock& js);
 
     void visitForGc(jsg::GcVisitor& visitor) {}
   };

@@ -108,7 +108,7 @@ auto byobRead(jsg::Lock& js, auto& consumer, int size) {
 };
 
 auto getEntry(jsg::Lock& js, auto size) {
-  return kj::refcounted<ValueQueue::Entry>(js.v8Ref(v8::True(js.v8Isolate).As<v8::Value>()), size);
+  return kj::heap<ValueQueue::Entry>(js.v8Ref(v8::True(js.v8Isolate).As<v8::Value>()), size);
 }
 
 #pragma region ValueQueue Tests
@@ -388,7 +388,7 @@ KJ_TEST("ByteQueue basics work") {
   KJ_ASSERT(queue.desiredSize() == 2);
   KJ_ASSERT(queue.size() == 0);
 
-  auto entry = kj::refcounted<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
+  auto entry = kj::heap<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
 
   queue.push(js, kj::mv(entry));
 
@@ -400,7 +400,7 @@ KJ_TEST("ByteQueue basics work") {
   queue.close(js);
 
   try {
-    auto entry = kj::refcounted<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
+    auto entry = kj::heap<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
     queue.push(js, kj::mv(entry));
     KJ_FAIL_ASSERT("The queue push after close should have failed.");
   } catch (kj::Exception& ex) {
@@ -422,7 +422,7 @@ KJ_TEST("ByteQueue erroring works") {
   KJ_ASSERT(queue.desiredSize() == 0);
 
   try {
-    auto entry = kj::refcounted<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
+    auto entry = kj::heap<ByteQueue::Entry>(jsg::BackingStore::alloc(js, 4));
     queue.push(js, kj::mv(entry));
     KJ_FAIL_ASSERT("The queue push after close should have failed.");
   } catch (kj::Exception& ex) {
@@ -443,7 +443,7 @@ KJ_TEST("ByteQueue with single consumer") {
   auto store = jsg::BackingStore::alloc(js, 4);
   memset(store.asArrayPtr().begin(), 'a', store.size());
 
-  auto entry = kj::refcounted<ByteQueue::Entry>(kj::mv(store));
+  auto entry = kj::heap<ByteQueue::Entry>(kj::mv(store));
   queue.push(js, kj::mv(entry));
 
   // The item was pushed into the consumer.
@@ -929,7 +929,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
 
   const auto push = [&](auto store) {
     try {
-      queue.push(js, kj::refcounted<ByteQueue::Entry>(kj::mv(store)));
+      queue.push(js, kj::heap<ByteQueue::Entry>(kj::mv(store)));
     } catch (kj::Exception& ex) {
       KJ_DBG(ex.getDescription());
     }
@@ -1020,7 +1020,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
 
   const auto push = [&](auto store) {
     try {
-      queue.push(js, kj::refcounted<ByteQueue::Entry>(kj::mv(store)));
+      queue.push(js, kj::heap<ByteQueue::Entry>(kj::mv(store)));
     } catch (kj::Exception& ex) {
       KJ_DBG(ex.getDescription());
     }
@@ -1130,7 +1130,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
 
   const auto push = [&](auto store) {
     try {
-      queue.push(js, kj::refcounted<ByteQueue::Entry>(kj::mv(store)));
+      queue.push(js, kj::heap<ByteQueue::Entry>(kj::mv(store)));
     } catch (kj::Exception& ex) {
       KJ_DBG(ex.getDescription());
     }

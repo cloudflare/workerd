@@ -1897,7 +1897,7 @@ void ReadableStreamDefaultController::enqueue(
   }
 
   if (!errored) {
-    impl.enqueue(js, kj::refcounted<ValueQueue::Entry>(js.v8Ref(value), size), JSG_THIS);
+    impl.enqueue(js, kj::heap<ValueQueue::Entry>(js.v8Ref(value), size), JSG_THIS);
   }
 }
 
@@ -1988,7 +1988,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       // While this particular request may be invalidated, there are still
       // other branches we can push the data to. Let's do so.
       jsg::BufferSource source(js, impl.view.getHandle(js));
-      auto entry = kj::refcounted<ByteQueue::Entry>(source.detach(js));
+      auto entry = kj::heap<ByteQueue::Entry>(source.detach(js));
       impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
     } else {
       JSG_REQUIRE(bytesWritten > 0,
@@ -2026,7 +2026,7 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
     if (impl.readRequest->isInvalidated() && impl.controller->impl.consumerCount() >= 1) {
       // While this particular request may be invalidated, there are still
       // other branches we can push the data to. Let's do so.
-      auto entry = kj::refcounted<ByteQueue::Entry>(view.detach(js));
+      auto entry = kj::heap<ByteQueue::Entry>(view.detach(js));
       impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
     } else {
       JSG_REQUIRE(view.size() > 0,
@@ -2123,7 +2123,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
     (*byobRequest)->invalidate(js);
   }
 
-  impl.enqueue(js, kj::refcounted<ByteQueue::Entry>(chunk.detach(js)), JSG_THIS);
+  impl.enqueue(js, kj::heap<ByteQueue::Entry>(chunk.detach(js)), JSG_THIS);
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
