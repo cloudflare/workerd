@@ -190,6 +190,10 @@ public:
     byteLength -= bytes;
   }
 
+  inline BackingStore clone() {
+    return BackingStore(backingStore, byteLength, byteOffset, elementSize, ctor, integerType);
+  }
+
 private:
   std::shared_ptr<v8::BackingStore> backingStore;
   size_t byteLength;
