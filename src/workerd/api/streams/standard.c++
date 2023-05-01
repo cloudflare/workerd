@@ -1575,8 +1575,7 @@ struct ReadableState {
 };
 }  // namespace
 
-struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
-                            public kj::Refcounted {
+struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ReadableStreamDefaultController, api::ValueQueue::Consumer>;
   kj::Maybe<State> state;
 
@@ -1606,17 +1605,11 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
     // and starts to receive new data that becomes enqueued. When clone
     // is used, any state currently held by this consumer is copied to the
     // new consumer.
-    return kj::refcounted<ValueReadable>(js, owner, *this);
+    return kj::heap<ValueReadable>(js, owner, *this);
   }
 
   jsg::Promise<ReadResult> read(jsg::Lock& js) {
     KJ_IF_MAYBE(s, state) {
-      // It's possible for the controller to be closed synchronously while the
-      // read operation is executing. In that case, we want to make sure we keep
-      // a reference so it'll survice at least long enough for the read method
-      // to complete.
-      auto self KJ_UNUSED = kj::addRef(*this);
-
       auto prp = js.newPromiseAndResolver<ReadResult>();
       s->consumer->read(js, ValueQueue::ReadRequest {
         .resolver = kj::mv(prp.resolver),
@@ -1679,8 +1672,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener,
   }
 };
 
-struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
-                           public kj::Refcounted {
+struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   using State = ReadableState<ReadableByteStreamController, api::ByteQueue::Consumer>;
   kj::Maybe<State> state;
   int autoAllocateChunkSize;
@@ -1716,19 +1708,13 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener,
     // and starts to receive new data that becomes enqueued. When clone
     // is used, any state currently held by this consumer is copied to the
     // new consumer.
-    return kj::refcounted<ByteReadable>(js, owner, *this);
+    return kj::heap<ByteReadable>(js, owner, *this);
   }
 
   jsg::Promise<ReadResult> read(
       jsg::Lock& js,
       kj::Maybe<ReadableStreamController::ByobOptions> byobOptions) {
     KJ_IF_MAYBE(s, state) {
-      // It's possible for the controller to be closed synchronously while the
-      // read operation is executing. In that case, we want to make sure we keep
-      // a reference so it'll survice at least long enough for the read method
-      // to complete.
-      auto self KJ_UNUSED = kj::addRef(*this);
-
       auto prp = js.newPromiseAndResolver<ReadResult>();
 
       KJ_IF_MAYBE(byob, byobOptions) {
@@ -2420,7 +2406,7 @@ void ReadableStreamJsController::setup(
                 TypeError,
                 "The autoAllocateChunkSize option cannot be zero.");
 
-    state = kj::refcounted<ByteReadable>(controller.addRef(), this, autoAllocateChunkSize);
+    state = kj::heap<ByteReadable>(controller.addRef(), this, autoAllocateChunkSize);
     controller->start(js);
   } else {
     JSG_REQUIRE(type == "", TypeError,
@@ -2428,7 +2414,7 @@ void ReadableStreamJsController::setup(
     auto controller = jsg::alloc<ReadableStreamDefaultController>(
         kj::mv(underlyingSource),
         kj::mv(queuingStrategy));
-    state = kj::refcounted<ValueReadable>(controller.addRef(), this);
+    state = kj::heap<ValueReadable>(controller.addRef(), this);
     controller->start(js);
   }
 }
