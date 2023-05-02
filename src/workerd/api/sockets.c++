@@ -177,7 +177,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // TODO: Track closed state of socket properly and assert that it hasn't been closed here.
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
-      "The `secureTransport` socket option must be set to 'allow' for startTls to be used.";
+      "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   KJ_IF_MAYBE(opts, options) {
     JSG_REQUIRE(parseSecureTransport(opts) == SecureTransportKind::STARTTLS,
         TypeError, invalidOptKindMsg);
