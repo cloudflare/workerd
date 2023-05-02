@@ -1539,7 +1539,7 @@ private:
   //
   // No limits are enforced.
 
-  kj::Own<void> enterJs(jsg::Lock& lock) override { return {}; }
+  kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override { return {}; }
   void topUpActor() override {}
   void newSubrequest(bool isInHouse) override {}
   void newKvRequest(KvOpType op) override {}
