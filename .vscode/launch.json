@@ -11,23 +11,22 @@
       "request": "launch",
       "type": "cppdbg",
       "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "linux": {
         "name": "workerd debug",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
-        "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
       },
       "osx": {
         "name": "workerd debug",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "lldb",
-        "program": "${workspaceFolder}/bazel-out/darwin_arm64-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
-        "targetArchitecture": "arm64",
         "sourceFileMap": {
           "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
           "bazel-out" : "${workspaceFolder}/bazel-out",
           "external" : "${workspaceFolder}/external"
          },
@@ -36,7 +35,6 @@
         "name": "workerd debug",
         "type": "cppvsdbg",
         "request": "launch",
-        "program": "${workspaceRoot}\\bazel-out\\x64_windows-dbg\\bin\\src\\workerd\\server\\workerd.exe",
       },
       "args": [
         "serve",
@@ -48,27 +46,25 @@
     {
       "name": "workerd debug with inspector enabled",
       "preLaunchTask": "Bazel build workerd (dbg)",
-      "program": "workerd",
       "type": "cppdbg",
       "request": "launch",
       "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "linux": {
         "name": "workerd debug with inspector enabled",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
-        "program": "${workspaceFolder}/bazel-out/k8-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
       },
       "osx": {
         "name": "workerd debug with inspector enabled",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "lldb",
-        "program": "${workspaceFolder}/bazel-out/darwin_arm64-dbg/bin/src/workerd/server/workerd.runfiles/workerd/src/workerd/server/workerd",
-        "targetArchitecture": "arm64",
         "sourceFileMap": {
           "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
           "bazel-out" : "${workspaceFolder}/bazel-out",
           "external" : "${workspaceFolder}/external"
          },
@@ -77,7 +73,6 @@
         "name": "workerd debug with inspector enabled",
         "type": "cppvsdbg",
         "request": "launch",
-        "program": "${workspaceRoot}\\bazel-out\\x64_windows-dbg\\bin\\src\\workerd\\server\\workerd.exe",
       },
       "args": [
         "serve",
@@ -111,6 +106,7 @@
         "targetArchitecture": "arm64",
         "sourceFileMap": {
           "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
           "bazel-out" : "${workspaceFolder}/bazel-out",
           "external" : "${workspaceFolder}/external"
          },
