@@ -392,14 +392,17 @@ private:
   kj::Own<TypeWrapper> wrapper;  // Needs to be destroyed under lock...
 };
 
-#define JSG_DECLARE_ISOLATE_TYPE(Type, ...) \
-  class Type##_TypeWrapper; \
-  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__> \
-      Type##_TypeWrapperBase; \
-  class Type##_TypeWrapper final: public Type##_TypeWrapperBase { \
+#define JSG_DECLARE_TYPE_WRAPPER(TypeWrapperName, ...) \
+  class TypeWrapperName; \
+  typedef ::workerd::jsg::TypeWrapper<TypeWrapperName, jsg::DOMException, ##__VA_ARGS__> \
+      TypeWrapperName##Base; \
+  class TypeWrapperName final: public TypeWrapperName##Base { \
   public: \
-    using Type##_TypeWrapperBase::TypeWrapper; \
-  }; \
+    using TypeWrapperName##Base::TypeWrapper; \
+  }
+
+#define JSG_DECLARE_ISOLATE_TYPE(Type, ...) \
+  JSG_DECLARE_TYPE_WRAPPER(Type##_TypeWrapper, ##__VA_ARGS__); \
   class Type final: public ::workerd::jsg::Isolate<Type##_TypeWrapper> { \
   public: \
     using ::workerd::jsg::Isolate<Type##_TypeWrapper>::Isolate; \
