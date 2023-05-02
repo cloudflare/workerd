@@ -36,15 +36,55 @@ function test(sql) {
   const blob = new Uint8Array(resultBlob[0]["x'ff'"]);
   assert.equal(blob.length, 1);
   assert.equal(blob[0], 255);
-  // Test binding values
-  const resultBinding = [...sql.exec("SELECT ?", 456)];
-  assert.equal(resultBinding.length, 1);
-  assert.equal(resultBinding[0]["?"], 456);
 
-  // Test multiple binding values
-  const resultBinding2 = [...sql.exec("SELECT ? + ?", 123, 456)];
-  assert.equal(resultBinding2.length, 1);
-  assert.equal(resultBinding2[0]["? + ?"], 579);
+  {
+    // Test binding values
+    const result = [...sql.exec("SELECT ?", 456)];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["?"], 456);
+  }
+
+  {
+    // Test multiple binding values
+    const result = [...sql.exec("SELECT ? + ?", 123, 456)];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["? + ?"], 579);
+  }
+
+  {
+    // Test multiple rows
+    const result = [...sql.exec("SELECT 1 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 2 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 3 AS value;")];
+    assert.equal(result.length, 3);
+    assert.equal(result[0]["value"], 1);
+    assert.equal(result[1]["value"], 2);
+    assert.equal(result[2]["value"], 3);
+  }
+
+  // Test count
+  {
+    const result = [...sql.exec("SELECT count(value) from (SELECT 1 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 2 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 3 AS value);")];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["count(value)"], 3);
+  }
+
+  // Test sum
+  {
+    const result = [...sql.exec("SELECT sum(value) from (SELECT 1 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 2 AS value\n" +
+        "UNION ALL\n" +
+        "SELECT 3 AS value);")];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["sum(value)"], 6);
+  }
 
   // Empty statements
   requireException(() => sql.exec(""),

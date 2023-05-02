@@ -172,7 +172,8 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "group_concat"_kj,
   "max_agg"_kj,
   "min_agg"_kj,
-  "sumunc"_kj,
+  "sum"_kj,
+  "total"_kj,
 
   // https://www.sqlite.org/windowfunctions.html#biwinfunc
   "row_number"_kj,
