@@ -175,7 +175,12 @@ kj::Promise<void> WorkerEntrypoint::request(
     loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER,
                                       kj::cp(exception));
-    return kj::mv(exception);
+
+    // Do not allow the exception to escape the isolate without waiting for the output gate to
+    // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
+    return context.waitForOutputLocks()
+        .then([exception = kj::mv(exception)]() mutable
+              -> kj::Promise<void> { return kj::mv(exception); });
   }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     if (context.isFailOpen()) {
