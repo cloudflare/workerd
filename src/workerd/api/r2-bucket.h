@@ -374,12 +374,21 @@ public:
     }
   }
 
+  struct WildcardEtag {};
+  struct WeakEtag {
+    kj::String value;
+  };
+  struct StrongEtag {
+    kj::String value;
+  };
+  using Etag = kj::OneOf<WildcardEtag, WeakEtag, StrongEtag>;
+
   struct UnwrappedConditional {
     UnwrappedConditional(jsg::Lock& js, Headers& h);
     UnwrappedConditional(const Conditional& c);
 
-    kj::Maybe<kj::String> etagMatches;
-    kj::Maybe<kj::String> etagDoesNotMatch;
+    kj::Maybe<kj::Array<Etag>> etagMatches;
+    kj::Maybe<kj::Array<Etag>> etagDoesNotMatch;
     kj::Maybe<kj::Date> uploadedBefore;
     kj::Maybe<kj::Date> uploadedAfter;
     bool secondsGranularity = false;

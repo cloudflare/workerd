@@ -41,9 +41,18 @@ struct R2Range {
   suffix @2 :UInt64 = 0xffffffffffffffff;
 }
 
+struct R2Etag {
+  value @0 :Text;
+  type :union $Json.flatten() $Json.discriminator(name="type") {
+    strong @1 :Void;
+    weak @2 :Void;
+    wildcard @3 :Void;
+  }
+}
+
 struct R2Conditional {
-  etagMatches @0 :Text;
-  etagDoesNotMatch @1 :Text;
+  etagMatches @0 :List(R2Etag);
+  etagDoesNotMatch @1 :List(R2Etag);
   uploadedBefore @2 :UInt64 = 0xffffffffffffffff;
   uploadedAfter @3 :UInt64 = 0xffffffffffffffff;
   secondsGranularity @4 :Bool;
@@ -54,7 +63,7 @@ struct R2Conditional {
 struct R2Checksums {
   # The JSON name of these fields must comform to the representation of the ChecksumAlgorithm in
   # the R2 gateway worker.
-  md5 @0 :Data $Json.hex $Json.name("0") ;
+  md5 @0 :Data $Json.hex $Json.name("0");
   sha1 @1 :Data $Json.hex $Json.name("1");
   sha256 @2 :Data $Json.hex $Json.name("2");
   sha384 @3 :Data $Json.hex $Json.name("3");
