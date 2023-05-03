@@ -19,28 +19,30 @@ class TraceItem;
 class TraceException;
 class TraceLog;
 
-class TraceEvent final: public ExtendableEvent {
+class TailEvent final: public ExtendableEvent {
 public:
-  explicit TraceEvent(kj::ArrayPtr<kj::Own<Trace>> traces);
+  explicit TailEvent(kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events);
 
-  static jsg::Ref<TraceEvent> constructor(kj::String type) = delete;
+  static jsg::Ref<TailEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor?
 
   // TODO(perf): more efficient to build/return cached array object?  Or iterator?
-  kj::Array<jsg::Ref<TraceItem>> getTraces();
+  kj::Array<jsg::Ref<TraceItem>> getEvents();
 
-  JSG_RESOURCE_TYPE(TraceEvent) {
+  JSG_RESOURCE_TYPE(TailEvent) {
     JSG_INHERIT(ExtendableEvent);
 
-    JSG_READONLY_INSTANCE_PROPERTY(traces, getTraces);
+    JSG_READONLY_INSTANCE_PROPERTY(events, getEvents);
+    // Deprecated. Please, use `events` instead.
+    JSG_READONLY_INSTANCE_PROPERTY(traces, getEvents);
   }
 
 private:
-  kj::Array<jsg::Ref<TraceItem>> traces;
+  kj::Array<jsg::Ref<TraceItem>> events;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    for (auto& t: traces) {
-      visitor.visit(t);
+    for (auto& e: events) {
+      visitor.visit(e);
     }
   }
 };
@@ -335,7 +337,7 @@ private:
 };
 
 #define EW_TRACE_ISOLATE_TYPES                \
-  api::TraceEvent,                            \
+  api::TailEvent,                             \
   api::TraceItem,                             \
   api::TraceItem::AlarmEventInfo,             \
   api::TraceItem::CustomEventInfo,            \
