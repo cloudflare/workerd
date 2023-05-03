@@ -509,9 +509,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return false;
 
     case SQLITE_RECURSIVE          :   /* NULL            NULL            */
-      // Recursive select. Disallow because AFAICT there's no way to prevent infinite loops.
-      // TODO(someday): Find a way to apply CPU time limits to SQLite.
-      return false;
+      // Recursive select, this is fine.
+      return true;
 
     case SQLITE_COPY               :   /* No longer used */
       // These are operations we simply don't support today.
@@ -564,7 +563,7 @@ void SqliteDatabase::setupSecurity() {
   }, this));
 
   // 4. Set a progress handler or use interrupt() to limit CPU time.
-  // TODO(sqlite): Call sqlite3_interrupt() at the same time as v8::Isolate::TerminateExecution().
+  // This happens inside LimitEnforcer.
 
   // 5. Limit heap size.
   // Annoyingly, this sets a process-wide limit. We'll set 128MB "soft" limit (to try to control

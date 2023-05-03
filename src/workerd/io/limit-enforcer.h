@@ -10,6 +10,7 @@
 namespace workerd {
 
 struct ActorCacheSharedLruOptions;
+class IoContext;
 
 class IsolateLimitEnforcer {
   // Interface for an object that enforces resource limits on an Isolate level.
@@ -63,7 +64,7 @@ class LimitEnforcer  {
   // Abstract interface that enforces resource limits on a IoContext.
 
 public:
-  virtual kj::Own<void> enterJs(jsg::Lock& lock) = 0;
+  virtual kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) = 0;
   // Called just after taking the isolate lock, before executing JavaScript code, to enforce
   // limits on that code execution, particularly the CPU limit. The returned `Own<void>` should
   // be dropped when JavaScript is done, before unlocking the isolate.

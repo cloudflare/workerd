@@ -1139,7 +1139,7 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
     event = registerPendingEvent();
   }
 
-  auto limiterScope = limitEnforcer->enterJs(workerLock);
+  auto limiterScope = limitEnforcer->enterJs(workerLock, *this);
 
   bool gotTermination = false;
 
