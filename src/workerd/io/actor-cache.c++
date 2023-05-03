@@ -27,9 +27,11 @@ static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp
 // Note that in practice, the key size limit (options.maxKeysPerRpc) will kick in long before we
 // hit this limit, so this is just a sanity check.
 
+ActorCache::Hooks ActorCache::Hooks::DEFAULT;
+
 ActorCache::ActorCache(rpc::ActorStorage::Stage::Client storage, const SharedLru& lru,
-                       OutputGate& gate)
-    : storage(kj::mv(storage)), lru(lru), gate(gate),
+                       OutputGate& gate, Hooks& hooks)
+    : storage(kj::mv(storage)), lru(lru), gate(gate), hooks(hooks),
       currentValues(lru.cleanList.lockExclusive()) {}
 
 ActorCache::~ActorCache() noexcept(false) {
@@ -2122,14 +2124,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
       KJ_CASE_ONEOF(knownAlarmTime, ActorCache::KnownAlarmTime) {
         if (knownAlarmTime.status == KnownAlarmTime::Status::DIRTY) {
           knownAlarmTime.status = KnownAlarmTime::Status::CLEAN;
-          KJ_IF_MAYBE(t, knownAlarmTime.time) {
-            // TODO(cleanup): Break dependency on IoContext. ActorCache is intended to be
-            //   independent of the rest of the codebase.
-            maybeAlarmPreviewTask = IoContext::current().getActorOrThrow()
-                .makeAlarmTaskForPreview(*t);
-          } else {
-            maybeAlarmPreviewTask = nullptr;
-          }
+          hooks.updateAlarmInMemory(knownAlarmTime.time);
         }
       }
       KJ_CASE_ONEOF(deferredDelete, ActorCache::DeferredAlarmDelete) {
@@ -2138,7 +2133,7 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
             .status = KnownAlarmTime::Status::CLEAN,
             .time = nullptr,
           };
-          maybeAlarmPreviewTask = nullptr;
+          hooks.updateAlarmInMemory(nullptr);
         }
       }
       KJ_CASE_ONEOF(_, UnknownAlarmTime){}

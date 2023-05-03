@@ -646,7 +646,7 @@ class Worker::Actor final: public kj::Refcounted {
 
 public:
   using MakeActorCacheFunc = kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(
-      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate)>;
+      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks)>;
   // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
   // can be used to customize the storage implementation. This will be called synchronously in
   // the constructor.
@@ -661,10 +661,22 @@ public:
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
+  class Loopback {
+    // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
+    // onto this for longer than a Worker::Actor is alive.
+  public:
+    virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
+    // Send a request to this actor, potentially re-creating it if it is not currently active.
+    // The returned kj::Own<WorkerInterface> may be held longer than Loopback, and is assumed
+    // to keep the Worker::Actor alive as well.
+
+    virtual kj::Own<Loopback> addRef() = 0;
+  };
+
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
         bool hasTransient, MakeActorCacheFunc makeActorCache,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-        TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
+        kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics);
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
 
@@ -701,8 +713,10 @@ public:
 
   const Id& getId();
   Id cloneId();
+  static Id cloneId(Id& id);
   kj::Maybe<jsg::Value> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
+  kj::Own<Loopback> getLoopback();
 
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for

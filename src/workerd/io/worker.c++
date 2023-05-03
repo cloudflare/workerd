@@ -2572,10 +2572,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   // If the actor is backed by a class, this field tracks the instance through its stages. The
   // instance is constructed as part of the first request to be delivered.
 
-  class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks {
+  class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
   public:
-    HooksImpl(TimerChannel& timerChannel, ActorObserver& metrics)
-        : timerChannel(timerChannel), metrics(metrics) {}
+    HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
+        : loopback(kj::mv(loopback)), timerChannel(timerChannel), metrics(metrics) {}
 
     void inputGateLocked() override { metrics.inputGateLocked(); }
     void inputGateReleased() override { metrics.inputGateReleased(); }
@@ -2598,9 +2598,15 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
     void outputGateWaiterRemoved() override { metrics.outputGateWaiterRemoved(); }
     // Implements OutputGate::Hooks.
 
+    void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) override;
+    // Implements ActorCache::Hooks
+
   private:
-    TimerChannel& timerChannel;    // only for afterLimitTimeout()
+    kj::Own<Loopback> loopback;    // only for updateAlarmInMemory()
+    TimerChannel& timerChannel;    // only for afterLimitTimeout() and updateAlarmInMemory()
     ActorObserver& metrics;
+
+    kj::Maybe<kj::Promise<void>> maybeAlarmPreviewTask;
   };
 
   HooksImpl hooks;
@@ -2621,6 +2627,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   kj::Maybe<kj::Promise<void>> metricsFlushLoopTask;
   // Task which periodically flushes metrics. Initialized after `ioContext` is initialized.
+
+  kj::Own<Loopback> loopback;
+  // Allows sending requests back into this actor, recreating it as necessary. Safe to hold longer
+  // than the Worker::Actor is alive.
 
   TimerChannel& timerChannel;
 
@@ -2646,13 +2656,14 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, MakeActorCacheFunc makeActorCache,
-       MakeStorageFunc makeStorage, TimerChannel& timerChannel,
-       kj::Own<ActorObserver> metricsParam,
+       MakeStorageFunc makeStorage, kj::Own<Loopback> loopback,
+       TimerChannel& timerChannel, kj::Own<ActorObserver> metricsParam,
        kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
-        hooks(timerChannel, *metrics),
+        hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks), outputGate(hooks),
+        loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
         shutdownPromise(paf.promise.fork()), shutdownFulfiller(kj::mv(paf.fulfiller)),
         deletedAlarmTasks(*this) {
@@ -2663,7 +2674,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
       transient.emplace(isolate, v8::Object::New(isolate));
     }
 
-    actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate);
+    actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
   }
 
   void taskFailed(kj::Exception&& e) override {
@@ -2692,13 +2703,12 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
 Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Actor::Id actorId,
     bool hasTransient, MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-    TimerChannel& timerChannel,
-    kj::Own<ActorObserver> metrics)
+    kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics)
     : worker(kj::atomicAddRef(worker)), tracker(tracker.map([](RequestTracker& tracker){
       return tracker.addRef();
     })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
-                        kj::mv(makeStorage), timerChannel, kj::mv(metrics));
+                        kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics));
 
   KJ_IF_MAYBE(c, className) {
     KJ_IF_MAYBE(cls, lock.getWorker().impl->actorClasses.find(*c)) {
@@ -2825,8 +2835,8 @@ const Worker::Actor::Id& Worker::Actor::getId() {
   return impl->actorId;
 }
 
-Worker::Actor::Id Worker::Actor::cloneId() {
-  KJ_SWITCH_ONEOF(impl->actorId) {
+Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {
+  KJ_SWITCH_ONEOF(id) {
     KJ_CASE_ONEOF(coloLocalId, kj::String) {
       return kj::str(coloLocalId);
     }
@@ -2837,6 +2847,10 @@ Worker::Actor::Id Worker::Actor::cloneId() {
   KJ_UNREACHABLE;
 }
 
+Worker::Actor::Id Worker::Actor::cloneId() {
+  return cloneId(impl->actorId);
+}
+
 kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
   return impl->transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
@@ -2844,6 +2858,10 @@ kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {
   return impl->actorCache;
+}
+
+kj::Own<Worker::Actor::Loopback> Worker::Actor::getLoopback() {
+  return impl->loopback->addRef();
 }
 
 kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
@@ -2882,83 +2900,34 @@ void Worker::Actor::assertCanSetAlarm() {
   KJ_UNREACHABLE;
 }
 
-kj::Promise<void> Worker::Actor::makeAlarmTaskForPreview(kj::Date scheduledTime) {
-  auto& context = IoContext::current();
+void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> newTime) {
+  if (newTime == nullptr) {
+    maybeAlarmPreviewTask = nullptr;
+    return;
+  }
 
-  auto retry = kj::coCapture([this, originalTime = scheduledTime](auto runAlarmFunc)
+  auto scheduledTime = KJ_ASSERT_NONNULL(newTime);
+
+  auto retry = kj::coCapture([this, originalTime = scheduledTime]()
       -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
     for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
-      auto result = co_await impl->timerChannel.atTime(scheduledTime)
-          .then([originalTime, &runAlarmFunc]() {
-        return runAlarmFunc(originalTime);
+      auto result = co_await timerChannel.atTime(scheduledTime)
+          .then([this, originalTime]() {
+        return loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
       });
 
       if (result.outcome != EventOutcome::OK && result.retry) {
         auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-        auto& timeContext = this->impl->timerChannel;
-        scheduledTime = timeContext.now() + delay;
+        scheduledTime = timerChannel.now() + delay;
       } else {
         break;
       }
     }
   });
 
-  auto runAlarm = [this, &context](kj::Date scheduledTime)
-      -> kj::Promise<WorkerInterface::AlarmResult> {
-    auto& persistent = *KJ_ASSERT_NONNULL(impl->actorCache);
-
-    auto maybeDeferredDelete = persistent.armAlarmHandler(scheduledTime);
-
-    KJ_IF_MAYBE(deferredDelete, maybeDeferredDelete) {
-      // The alarm may expect to be treated as a new request as far as receiving a higher cpu limit
-      // so we should top it up.
-      context.getLimitEnforcer().topUpActor();
-
-      return dedupAlarm(scheduledTime, [this, &context]() {
-        return context.run([this](Worker::Lock& lock) {
-          auto& handler = KJ_ASSERT_NONNULL(getHandler());
-
-          // We skip logging a nice warning for the null case here
-          // since the time is kept in memory, so we know that setAlarm()
-          // verified the existence of the alarm handler and would have thrown
-          // if it was not present.
-          auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
-
-          return alarm(lock)
-              .then([]() -> kj::Promise<WorkerInterface::AlarmResult> {
-            return WorkerInterface::AlarmResult {
-              .retry = false,
-              .outcome = EventOutcome::OK,
-            };
-          }, [this](kj::Exception&& e) {
-            auto& persistent = *KJ_ASSERT_NONNULL(impl->actorCache);
-            persistent.cancelDeferredAlarmDeletion();
-
-            LOG_EXCEPTION_IF_INTERNAL("alarmRetry", e);
-
-            return WorkerInterface::AlarmResult {
-              .retry = true,
-              // TODO(soon): We should use the correct outcome here once we start reporting
-              // alarm runs in preview to wrangler tail.
-              .outcome = EventOutcome::EXCEPTION,
-            };
-          });
-        });
-      }).attach(kj::mv(*deferredDelete));
-    } else {
-      return WorkerInterface::AlarmResult {
-        .retry = false,
-        .outcome = EventOutcome::CANCELED,
-      };
-    }
-  };
-
-  auto task = retry(kj::mv(runAlarm)).fork();
-
-  IoContext::current().addWaitUntil(task.addBranch());
-  return task.addBranch();
+  maybeAlarmPreviewTask = retry();
 }
 
 kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(

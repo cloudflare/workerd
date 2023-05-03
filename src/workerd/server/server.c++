@@ -1243,13 +1243,51 @@ public:
 
     const ActorConfig& getConfig() { return config; }
 
-    kj::Own<IoChannelFactory::ActorChannel> getActor(Worker::Actor::Id id) {
+    kj::Own<WorkerInterface> getActor(Worker::Actor::Id id,
+        IoChannelFactory::SubrequestMetadata metadata) {
+      auto promise = getActorImpl(kj::mv(id))
+          .then([this, metadata = kj::mv(metadata)](kj::Own<Worker::Actor> actor) mutable {
+        return service.startRequest(kj::mv(metadata), className, kj::mv(actor));
+      });
+
+      return newPromisedWorkerInterface(service.waitUntilTasks, kj::mv(promise));
+    }
+
+    kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
+      return kj::heap<ActorChannelImpl>(*this, kj::mv(id));
+    }
+
+  private:
+    WorkerService& service;
+    kj::StringPtr className;
+    const ActorConfig& config;
+    kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
+
+    class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
+    public:
+      Loopback(ActorNamespace& ns, Worker::Actor::Id id) : ns(ns), id(kj::mv(id)) {}
+
+      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+        return ns.getActor(Worker::Actor::cloneId(id), kj::mv(metadata));
+      }
+
+      kj::Own<Worker::Actor::Loopback> addRef() {
+        return kj::addRef(*this);
+      }
+
+    private:
+      ActorNamespace& ns;
+      Worker::Actor::Id id;
+    };
+
+    kj::Promise<kj::Own<Worker::Actor>> getActorImpl(Worker::Actor::Id id) {
       // `getActor()` is often called with the calling isolate's lock held. We need to drop that
       // lock and take a lock on the target isolate before constructing the actor. Even if these
       // are the same isolate (as is commonly the case), we really don't want to do this stuff
       // synchronously, so this has the effect of pushing off to a later turn of the event loop.
-      auto promise = service.worker->takeAsyncLockWithoutRequest(nullptr).then(
-          [this, id = kj::mv(id)](Worker::AsyncLock asyncLock) mutable -> kj::Own<ActorChannel> {
+      return service.worker->takeAsyncLockWithoutRequest(nullptr).then(
+          [this, id = kj::mv(id)]
+          (Worker::AsyncLock asyncLock) mutable -> kj::Own<Worker::Actor> {
         kj::String idStr;
         KJ_SWITCH_ONEOF(id) {
           KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
@@ -1262,11 +1300,12 @@ public:
           }
         }
 
-        auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() {
+        auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() mutable {
           auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
 
           auto makeActorCache =
-              [&](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate) {
+              [&](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
+                  ActorCache::Hooks& hooks) {
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_MAYBE(as, channels.actorStorage) {
@@ -1278,7 +1317,7 @@ public:
                 // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
                 // ActorCache never to flush, so this effectively creates in-memory storage.
                 return kj::heap<ActorCache>(
-                    kj::heap<EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate);
+                    kj::heap<EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
               }
             });
           };
@@ -1292,10 +1331,11 @@ public:
 
           TimerChannel& timerChannel = service;
 
+          auto loopback = kj::refcounted<Loopback>(*this, Worker::Actor::cloneId(id));
           Worker::Lock lock(*service.worker, asyncLock);
           auto newActor = kj::refcounted<Worker::Actor>(
               *service.worker, nullptr, kj::mv(id), true, kj::mv(makeActorCache),
-              className, kj::mv(makeStorage), lock,
+              className, kj::mv(makeStorage), lock, kj::mv(loopback),
               timerChannel, kj::refcounted<ActorObserver>());
 
           // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
@@ -1305,17 +1345,9 @@ public:
           };
         }));
 
-        return kj::heap<ActorChannelImpl>(service, className, kj::mv(actor));
+        return kj::mv(actor);
       });
-
-      return kj::heap<PromisedActorChannel>(service.waitUntilTasks, kj::mv(promise));
     }
-
-  private:
-    WorkerService& service;
-    kj::StringPtr className;
-    const ActorConfig& config;
-    kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
   };
 
 private:
@@ -1353,44 +1385,17 @@ private:
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
   public:
-    ActorChannelImpl(WorkerService& service, kj::StringPtr className, kj::Own<Worker::Actor> actor)
-        : service(service), className(className), actor(kj::mv(actor)) {}
+    ActorChannelImpl(ActorNamespace& ns, Worker::Actor::Id id)
+        : ns(ns), id(kj::mv(id)) {}
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata) override {
-      return service.startRequest(kj::mv(metadata), className, kj::addRef(*actor));
+      return ns.getActor(Worker::Actor::cloneId(id), kj::mv(metadata));
     }
 
   private:
-    WorkerService& service;
-    kj::StringPtr className;
-    kj::Own<Worker::Actor> actor;
-  };
-
-  class PromisedActorChannel final: public IoChannelFactory::ActorChannel {
-  public:
-    PromisedActorChannel(kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<ActorChannel>> promise)
-        : waitUntilTasks(waitUntilTasks),
-          promise(promise.then([this](kj::Own<ActorChannel> result) {
-            channel = kj::mv(result);
-          }).fork()) {}
-
-    kj::Own<WorkerInterface> startRequest(
-        IoChannelFactory::SubrequestMetadata metadata) override {
-      KJ_IF_MAYBE(c, channel) {
-        return c->get()->startRequest(kj::mv(metadata));
-      } else {
-        return newPromisedWorkerInterface(waitUntilTasks,
-            promise.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
-          return KJ_ASSERT_NONNULL(channel)->startRequest(kj::mv(metadata));
-        }));
-      }
-    }
-
-  private:
-    kj::TaskSet& waitUntilTasks;
-    kj::ForkedPromise<void> promise;
-    kj::Maybe<kj::Own<ActorChannel>> channel;
+    ActorNamespace& ns;
+    Worker::Actor::Id id;
   };
 
   // ---------------------------------------------------------------------------
@@ -1501,7 +1506,7 @@ private:
     auto& ns = JSG_REQUIRE_NONNULL(channels.actor[channel], Error,
         "Actor namespace configuration was invalid.");
     KJ_REQUIRE(ns.getConfig().is<Durable>());  // should have been verified earlier
-    return ns.getActor(id.clone());
+    return ns.getActorChannel(id.clone());
   }
 
   kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id) override {
@@ -1512,7 +1517,7 @@ private:
     auto& ns = JSG_REQUIRE_NONNULL(channels.actor[channel], Error,
         "Actor namespace configuration was invalid.");
     KJ_REQUIRE(ns.getConfig().is<Ephemeral>());  // should have been verified earlier
-    return ns.getActor(kj::str(id));
+    return ns.getActorChannel(kj::str(id));
   }
 
   // ---------------------------------------------------------------------------
