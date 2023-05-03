@@ -699,6 +699,8 @@ public:
   kj::Date now();
   // Access the event loop's current time point. This will remain constant between ticks.
 
+  double performanceNow();
+
   kj::Promise<void> atTime(kj::Date when) { return getIoChannelFactory().getTimer().atTime(when); }
   // Returns a promise that resolves once `now() >= when`.
 

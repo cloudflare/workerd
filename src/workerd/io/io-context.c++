@@ -824,6 +824,15 @@ kj::Date IoContext::now() {
   return now(getCurrentIncomingRequest());
 }
 
+double IoContext::performanceNow() {
+  // If there are no incoming requests, this should always return 0.0.
+  // Otherwise, the time origin for an incoming request should always be set.
+  if (!incomingRequests.empty()) {
+    return (now() - kj::UNIX_EPOCH) / kj::NANOSECONDS * 1e-6;
+  }
+  return 0.0;
+}
+
 kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
     SubrequestOptions options) {

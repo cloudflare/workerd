@@ -711,4 +711,10 @@ jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
   return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit), featureFlags);
 }
 
+double Performance::now() {
+  // Time never progresses outside of an IoContext.
+  if (!IoContext::hasCurrent()) return 0.0;
+  return IoContext::current().performanceNow();
+}
+
 }  // namespace workerd::api
