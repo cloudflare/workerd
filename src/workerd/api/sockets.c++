@@ -155,9 +155,6 @@ jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options,
     CompatibilityFlags::Reader featureFlags) {
-  // `connect()` should be hidden when the feature flag is off, so we shouldn't even get here.
-  KJ_ASSERT(featureFlags.getTcpSocketsSupport());
-
   jsg::Ref<Fetcher> actualFetcher = nullptr;
   KJ_IF_MAYBE(f, fetcher) {
     actualFetcher = kj::mv(*f);

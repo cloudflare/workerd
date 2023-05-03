@@ -141,9 +141,7 @@ public:
   }
 
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
-    if (flags.getTcpSocketsSupport()) {
-      JSG_METHOD(connect);
-    }
+    JSG_METHOD(connect);
   }
 };
 

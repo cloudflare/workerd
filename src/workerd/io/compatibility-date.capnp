@@ -236,12 +236,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_nodejs_compat");
   # Enables nodejs compat imports in the application.
 
-  tcpSocketsSupport @22 :Bool
-      $compatEnableFlag("tcp_sockets_support")
-      $experimental;
-  # Enables TCP sockets in workerd.
-  # These are still under development and therefore subject to change.
-  # WARNING: DO NOT depend on this feature as its API is still subject to change.
+  obsolete22 @22 :Bool
+      $compatEnableFlag("tcp_sockets_support");
+  # Used to enables TCP sockets in workerd.
 
   specCompliantResponseRedirect @23 :Bool
       $compatEnableDate("2023-03-14")
