@@ -816,6 +816,10 @@ public:
   // Returns an object that ensures an async JS operation started in the current scope captures the
   // current request's trace span.
 
+  SpanParent getCurrentTraceSpan();
+  // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
+  // information from the current async context, if available.
+
   SpanBuilder makeTraceSpan(kj::StringPtr operationName);
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async

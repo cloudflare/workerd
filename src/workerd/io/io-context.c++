@@ -934,7 +934,7 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(Worker::Lock
       js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
 }
 
-SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_MAYBE (lock, currentLock) {
     KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*lock)) {
@@ -942,14 +942,18 @@ SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
         auto handle = value->getHandle(*lock);
         jsg::Lock& js = *lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
-        return spanParent->newChild(operationName);
+        return spanParent->addRef();
       }
     }
   }
 
   // If async context is unavailable (unset, or JS lock is not held), fall back to heuristic of
   // using the trace info from the most recent active request.
-  return getMetrics().getSpan().newChild(operationName);
+  return getMetrics().getSpan();
+}
+
+SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+  return getCurrentTraceSpan().newChild(operationName);
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
