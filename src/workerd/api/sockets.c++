@@ -62,8 +62,9 @@ jsg::Ref<Socket> setupSocket(
   auto& ioContext = IoContext::current();
   auto connDisconnPromise = connection->whenWriteDisconnected();
 
+  auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
-  auto sysStreams = newSystemMultiStream(kj::mv(connection), ioContext);
+  auto sysStreams = newSystemMultiStream(refcountedConnection->addWrappedRef(), ioContext);
   auto readable = jsg::alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
   readable->initEofResolverPair(js);
   auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable));
@@ -72,8 +73,16 @@ jsg::Ref<Socket> setupSocket(
   closeFulfiller.promise.markAsHandled();
 
   auto result = jsg::alloc<Socket>(
-      js, kj::mv(readable), kj::mv(writable), kj::mv(closeFulfiller), kj::mv(connDisconnPromise),
-      kj::mv(options), kj::mv(tlsStarter), isSecureSocket, kj::mv(domain));
+      js,
+      kj::mv(refcountedConnection),
+      kj::mv(readable),
+      kj::mv(writable),
+      kj::mv(closeFulfiller),
+      kj::mv(connDisconnPromise),
+      kj::mv(options),
+      kj::mv(tlsStarter),
+      isSecureSocket,
+      kj::mv(domain));
   result->handleReadableEof(js);
   return result;
 }
@@ -205,9 +214,13 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
         acceptedHostname = *expectedHost;
       }
     }
+
     // All non-secure sockets should have a tlsStarter.
-    kj::Own<kj::AsyncIoStream> secure = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname);
-    return secure;
+    auto secureStream = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).then(
+      [stream = connectionStream->addWrappedRef()]() mutable -> kj::Own<kj::AsyncIoStream> {
+        return kj::mv(stream);
+      });
+    return kj::newPromisedStream(kj::mv(secureStream));
   }));
 
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter

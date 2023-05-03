@@ -36,11 +36,13 @@ struct TlsOptions {
 
 class Socket: public jsg::Object {
 public:
-  Socket(jsg::Lock& js, jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
+  Socket(jsg::Lock& js, kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
+      jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
       bool isSecureSocket, kj::String domain)
-      : readable(kj::mv(readableParam)), writable(kj::mv(writable)),
+      : connectionStream(kj::mv(connectionStream)),
+        readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
         closedPromise(kj::mv(closeFulfiller.promise)),
         // Listen for abrupt disconnects and resolve the `closed` promise when they occur.
@@ -83,6 +85,7 @@ public:
   }
 
 private:
+  kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   jsg::PromiseResolverPair<void> closeFulfiller;
