@@ -463,6 +463,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           return true;
         } else if (pragma == "foreign_keys") {
           return true;
+        } else if (pragma == "page_count") {
+          return true;
+        } else if (pragma == "max_page_count") {
+          return true;
         }
       }
 

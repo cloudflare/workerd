@@ -13,7 +13,7 @@ function requireException(callback, expectStr) {
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
 }
 
-function test(sql) {
+function test(sql, isSmall) {
   // Test numeric results
   const resultNumber = [...sql.exec("SELECT 123")];
   assert.equal(resultNumber.length, 1);
@@ -146,6 +146,43 @@ function test(sql) {
     assert.equal(info[0].name, "foo");
     assert.equal(info[1].name, "bar");
   }
+  {
+    let info = [...sql.exec("PRAGMA page_count")];
+    assert.equal(info.length, 1);
+    assert.equal(info[0]["page_count"], 3);
+  }
+
+  // Only cap the small DBs
+  if (isSmall) {
+    let max_pages = [...sql.exec("PRAGMA max_page_count = 4")];
+    assert.equal(max_pages.length, 1);
+    assert.equal(max_pages[0]["max_page_count"], 4);
+  }
+
+  // Create a new table (4th page)
+  sql.exec("CREATE TABLE newTable (foo TEXT, bar INTEGER)");
+  {
+    let info = [...sql.exec("PRAGMA page_count")];
+    assert.equal(info.length, 1);
+    assert.equal(info[0]["page_count"], 4);
+  }
+
+  if (isSmall) {
+    // Should fail trying to make a 5th page
+    requireException(() => sql.exec("CREATE TABLE newTable2 (foo TEXT, bar INTEGER)"),
+      "Error: database or disk is full");
+  } else {
+    // Should have its own limits, not inherit the `PRAGMA max_page_count` from the Small one
+    let max_pages = [...sql.exec("PRAGMA max_page_count")];
+    assert.equal(max_pages.length, 1);
+    assert.equal(max_pages[0]["max_page_count"], 1073741823);
+
+    sql.exec("CREATE TABLE newTable2 (foo TEXT, bar INTEGER)")
+
+    let info = [...sql.exec("PRAGMA page_count")];
+    assert.equal(info.length, 1);
+    assert.equal(info[0]["page_count"], 5);
+  }
 
   // Can't get table_info for _cf_KV.
   requireException(() => sql.exec("PRAGMA table_info(_cf_KV)"), "not authorized");
@@ -168,16 +205,24 @@ export class DurableObjectExample {
     this.state = state;
   }
 
-  async fetch() {
-    test(this.state.storage.sql);
+  async fetch(request) {
+    const url = new URL(request.url)
+    test(this.state.storage.sql, url.pathname.endsWith('/small'));
     return new Response();
   }
 }
 
 export default {
   async test(ctrl, env, ctx) {
-    let id = env.ns.idFromName("A");
-    let obj = env.ns.get(id);
-    await obj.fetch("http://foo");
+    {
+      let id = env.ns.idFromName("A");
+      let obj = env.ns.get(id);
+      await obj.fetch("http://foo/small");
+    }
+    {
+      let id = env.ns.idFromName("B");
+      let obj = env.ns.get(id);
+      await obj.fetch("http://foo/big");
+    }
   }
 }
