@@ -812,9 +812,10 @@ public:
   kj::Own<CacheClient> getCacheClient();
   // Get an HttpClient to use for Cache API subrequests.
 
-  jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+  jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(
+      Worker::Lock& lock, kj::Maybe<SpanParent> spanParent = nullptr) KJ_WARN_UNUSED_RESULT;
   // Returns an object that ensures an async JS operation started in the current scope captures the
-  // current request's trace span.
+  // given trace span, or the current request's trace span, if no span is given.
 
   SpanParent getCurrentTraceSpan();
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace

@@ -926,9 +926,16 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   return getIoChannelFactory().getCache();
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(Worker::Lock& lock) {
+jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
+    Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
   jsg::Lock& js = lock;
-  auto ioOwnSpanParent = IoContext::current().addObject(kj::heap(getMetrics().getSpan()));
+  kj::Own<SpanParent> spanParent;
+  KJ_IF_MAYBE (spo, kj::mv(spanParentOverride)) {
+    spanParent = kj::heap(kj::mv(*spo));
+  } else {
+    spanParent = kj::heap(getMetrics().getSpan());
+  }
+  auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
