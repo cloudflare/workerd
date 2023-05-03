@@ -11,6 +11,19 @@ import {
   format,
 } from 'node:util';
 
+import { default as path } from 'node:path';
+
+console.log(path.resolve('a', 'b', 'c'));
+console.log(path.basename('/a/b/c/d.foo'));
+console.log(path.extname('/a/b/c/d.foo'));
+
+// Note that the path.win32 variants of the path API are not yet implemented.
+// While workerd is capable of running on Windows, we assume that the environment
+// is POSIX-like for now.
+throws(() => path.win32.resolve('a', 'b', 'c'), {
+  message: 'path.win32.resolve() is not implemented.'
+});
+
 // Callback function
 function doSomething(a, cb) {
   setTimeout(() => cb(null, a), 1);
