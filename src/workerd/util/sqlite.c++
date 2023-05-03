@@ -165,13 +165,11 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "stftime"_kj,
 
   // https://www.sqlite.org/lang_aggfunc.html
-  "aggfilter"_kj,
-  "aggfunclist"_kj,
   "avg"_kj,
   "count"_kj,
   "group_concat"_kj,
-  "max_agg"_kj,
-  "min_agg"_kj,
+  "max"_kj,
+  "min"_kj,
   "sum"_kj,
   "total"_kj,
 
