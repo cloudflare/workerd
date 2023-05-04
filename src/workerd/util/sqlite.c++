@@ -467,8 +467,6 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return false;
 
     case SQLITE_FUNCTION           :   /* NULL            Function Name   */
-      // TODO(sqlite): Decide which function are OK.
-
       {
         const kj::HashSet<kj::StringPtr> allowSet = []() {
           kj::HashSet<kj::StringPtr> result;
