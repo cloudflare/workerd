@@ -38,6 +38,20 @@ public:
   }
 };
 
+class Performance: public jsg::Object {
+public:
+  double getTimeOrigin() { return 0.0; }
+  // We always return a time origin of 0. For us this represents the time at which the
+  // IoContext was created.
+
+  double now();
+
+  JSG_RESOURCE_TYPE(Performance) {
+    JSG_READONLY_INSTANCE_PROPERTY(timeOrigin, getTimeOrigin);
+    JSG_METHOD(now);
+  }
+};
+
 class PromiseRejectionEvent: public Event {
 public:
   PromiseRejectionEvent(
@@ -334,6 +348,10 @@ public:
     return jsg::alloc<Navigator>();
   }
 
+  jsg::Ref<Performance> getPerformance() {
+    return jsg::alloc<Performance>();
+  }
+
   jsg::Unimplemented getOrigin() { return {}; }
   // TODO(conform): A browser-side service worker returns the origin for the URL on which it was
   //   installed, e.g. https://www.example.com for a service worker downloaded from
@@ -386,6 +404,7 @@ public:
     JSG_LAZY_INSTANCE_PROPERTY(crypto, getCrypto);
     JSG_LAZY_INSTANCE_PROPERTY(caches, getCaches);
     JSG_LAZY_INSTANCE_PROPERTY(scheduler, getScheduler);
+    JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
 
     JSG_NESTED_TYPE(Event);
@@ -599,6 +618,7 @@ private:
   api::ExportedHandler,                                  \
   api::ServiceWorkerGlobalScope::StructuredCloneOptions, \
   api::PromiseRejectionEvent,                            \
-  api::Navigator
+  api::Navigator,                                        \
+  api::Performance
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
