@@ -9,7 +9,7 @@
 
 namespace workerd {
 
-class ActorSqlite final: public ActorCacheInterface {
+class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorHandler {
   // An implementation of ActorCacheOps that is backed by SqliteKv.
   //
   // TODO(perf): This interface is not designed ideally for wrapping SqliteKv. In particular, we
@@ -19,9 +19,17 @@ class ActorSqlite final: public ActorCacheInterface {
   //   here is easier and not too costly.
 
 public:
-  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam)
-      : db(kj::mv(dbParam)),
-        kv(*db) {}
+  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
+                       kj::Function<kj::Promise<void>()> commitCallback);
+  // Constructs ActorSqlite, arranging to honor the output gate, that is, any writes to the
+  // database which occur without any `await`s in between will automatically be combined into a
+  // single atomic write. This is accomplished using transactions. In addition to ensuring
+  // atomicity, this tends to improve performance, as SQLite is able to coalesce writes across
+  // statements that modify the same page.
+  //
+  // `commitCallback` will be invoked after committing a transaction. The output gate will block on
+  // the returned promise. This can be used e.g. when the database needs to be replicated to other
+  // machines before being considered durable.
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return *db; }
 
@@ -53,9 +61,21 @@ public:
 
 private:
   kj::Own<SqliteDatabase> db;
+  OutputGate& outputGate;
+  kj::Function<kj::Promise<void>()> commitCallback;
   SqliteKv kv;
 
+  SqliteDatabase::Statement beginTxn = db->prepare("BEGIN TRANSACTION");
+  SqliteDatabase::Statement commitTxn = db->prepare("COMMIT TRANSACTION");
+
   kj::Maybe<kj::Exception> broken;
+
+  bool commitScheduled = false;
+  kj::TaskSet commitTasks;
+
+  void onWrite();
+
+  void taskFailed(kj::Exception&& exception) override;
 
   void requireNotBroken();
 };

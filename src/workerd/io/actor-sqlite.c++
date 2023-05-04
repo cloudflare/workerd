@@ -5,14 +5,63 @@
 #include "actor-sqlite.h"
 #include <algorithm>
 #include <workerd/jsg/jsg.h>
+#include "io-gate.h"
 
 namespace workerd {
+
+ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
+                         kj::Function<kj::Promise<void>()> commitCallback)
+    : db(kj::mv(dbParam)), outputGate(outputGate), commitCallback(kj::mv(commitCallback)),
+      kv(*db), commitTasks(*this) {
+  db->onWrite(KJ_BIND_METHOD(*this, onWrite));
+}
+
+void ActorSqlite::onWrite() {
+  if (!commitScheduled) {
+    beginTxn.run();
+    commitScheduled = true;
+
+    auto deferredRollback = kj::defer([this]() {
+      // Since this is rarely actually executed, we don't prepare a statement for it.
+      db->run("ROLLBACK TRANSACTION");
+    });
+
+    commitTasks.add(outputGate.lockWhile(kj::evalLater(
+        [this, deferredRollback = kj::mv(deferredRollback)]() mutable -> kj::Promise<void> {
+      // Don't commit if shutdown() has been called.
+      requireNotBroken();
+
+      deferredRollback.cancel();
+      commitTxn.run();
+
+      // The callback is only expected to commit writes up until this point. Any new writes that
+      // occur while the callback is in progress are NOT included, therefore require a new commit
+      // to be scheduled. So, we should set `commitScheduled = false` now, rather than after
+      // the callback.
+      commitScheduled = false;
+
+      return commitCallback();
+    })));
+  }
+}
+
+void ActorSqlite::taskFailed(kj::Exception&& exception) {
+  // The output gate should already have been broken since it wraps all commits tasks. So, we
+  // don't have to report anything here, the exception will already propagate elsewhere. We
+  // should block further operations, though.
+  if (broken == nullptr) {
+    broken = kj::mv(exception);
+  }
+}
 
 void ActorSqlite::requireNotBroken() {
   KJ_IF_MAYBE(e, broken) {
     kj::throwFatalException(kj::cp(*e));
   }
 }
+
+// =======================================================================================
+// ActorCacheInterface implementation
 
 kj::OneOf<kj::Maybe<ActorCacheOps::Value>,
           kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
@@ -185,8 +234,13 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
-  // SQLite data is synced to local disk on commit, there's nothing to wait for.
-  return nullptr;
+  // This implements sync().
+  //
+  // TODO(sqlite): When we implement `allowUnconfirmed`, this implementation becomes incorrect
+  //   because sync() should wait on all writes, even ones with that flag, whereas the output
+  //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
+  //   implemented `allowUnconfirmed` yet.
+  return outputGate.wait();
 }
 
 }  // namespace workerd
