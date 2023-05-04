@@ -161,6 +161,10 @@ function test(sql) {
   let jsonResult =
       [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
   assert.equal(jsonResult, "[4,5,{\"f\":7}]");
+
+  // Can't start transactions or savepoints.
+  requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
+  requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
 }
 
 export class DurableObjectExample {

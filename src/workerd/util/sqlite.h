@@ -130,6 +130,15 @@ public:
   // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
   // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
   // prohibited from causing such errors in the first place.
+
+  virtual bool allowTransactions() { return true; }
+  // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
+  // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
+  // not be able to create any sort of transaction.
+  //
+  // In Durable Objects, we disallow these statements because the platform provides an explicit
+  // API for transactions that is safer (e.g. it automatically rolls back on throw). Also, the
+  // platform automatically wraps every entry into the isolate lock in a transaction.
 };
 
 class SqliteDatabase::Statement {

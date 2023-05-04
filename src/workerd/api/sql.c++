@@ -34,6 +34,17 @@ void SqlStorage::onError(kj::StringPtr message) {
   JSG_ASSERT(false, Error, message);
 }
 
+bool SqlStorage::allowTransactions() {
+  if (IoContext::hasCurrent()) {
+    IoContext::current().logWarningOnce(
+        "To execute a transaction, please use the state.storage.transaction() API instead of the "
+        "SQL BEGIN TRANSACTION or SAVEPOINT statements. The JavaScript API is safer because it "
+        "will automatically roll back on exceptions, and because it interacts correctly with "
+        "Durable Objects' automatic atomic write coalescing.");
+  }
+  return false;
+}
+
 SqlStorage::Cursor::State::State(
     kj::RefcountedWrapper<SqliteDatabase::Statement>& statement,
     kj::Array<BindingValue> bindingsParam)

@@ -43,6 +43,7 @@ private:
   bool isAllowedName(kj::StringPtr name) override;
   bool isAllowedTrigger(kj::StringPtr name) override;
   void onError(kj::StringPtr message) override;
+  bool allowTransactions() override;
 
   IoPtr<SqliteDatabase> sqlite;
   jsg::Ref<DurableObjectStorage> storage;
