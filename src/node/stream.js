@@ -5,12 +5,6 @@
 
 /* eslint-disable */
 
-// TODO(soon): Remove this once assert is out of experimental
-import { default as CompatibilityFlags } from 'workerd:compatibility-flags';
-if (!CompatibilityFlags.workerdExperimental) {
-  throw new Error('node:stream is experimental.');
-}
-
 import { pipeline } from 'node-internal:streams_pipeline';
 import {
   destroyer,
