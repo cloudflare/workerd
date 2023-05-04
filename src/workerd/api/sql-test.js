@@ -134,8 +134,26 @@ function test(sql) {
   requireException(() => sql.exec("SELECT * FROM _cf_KV"),
     "access to _cf_KV.key is prohibited");
 
-  // Accessing pragmas is not allowed
+  // Some pragmas are completely not allowed
   requireException(() => sql.exec("PRAGMA hard_heap_limit = 1024"),
+    "not authorized");
+
+  // Test reading read-only pragmas
+  {
+    const result = [...sql.exec("pragma max_page_count;")];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["max_page_count"], 1073741823);
+  }
+  {
+    const result = [...sql.exec("pragma page_size;")];
+    assert.equal(result.length, 1);
+    assert.equal(result[0]["page_size"], 4096);
+  }
+
+  // Trying to write to read-only pragmas is not allowed
+  requireException(() => sql.exec("PRAGMA max_page_count = 65536"),
+    "not authorized");
+  requireException(() => sql.exec("PRAGMA page_size = 8192"),
     "not authorized");
 
   // PRAGMA table_info is allowed.
@@ -165,6 +183,49 @@ function test(sql) {
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
+
+  // Complex queries
+
+  // List num tables and total DB size
+  {
+    let result = [...sql.exec(`
+        SELECT (
+            SELECT count(1)
+            FROM sqlite_master
+            WHERE TYPE = "table"
+                AND tbl_name NOT LIKE "sqlite_%"
+                AND tbl_name NOT LIKE "d1_%"
+                AND tbl_name NOT LIKE "_cf_%"
+        ) as num_tables,
+        page_size * (total_pages - num_free) as db_size
+        FROM (
+            SELECT (
+                SELECT * from pragma_freelist_count
+            ) as num_free, (
+                SELECT * from pragma_page_count
+            ) as total_pages, (
+                SELECT * from pragma_page_size
+            ) as page_size
+        );`)];
+    assert.equal(result.length, 1);
+    assert.equal(result[0].num_tables, 1);
+    assert.equal(result[0].db_size, 12288);
+  }
+
+  // List table info
+  {
+    let result = [...sql.exec(`
+        SELECT name as tbl_name,
+               ncol as num_columns
+        FROM pragma_table_list
+        WHERE TYPE = "table"
+          AND tbl_name NOT LIKE "sqlite_%"
+          AND tbl_name NOT LIKE "d1_%"
+          AND tbl_name NOT LIKE "_cf_%"`)];
+    assert.equal(result.length, 1);
+    assert.equal(result[0].tbl_name, 'myTable');
+    assert.equal(result[0].num_columns, 2);
+  }
 }
 
 export class DurableObjectExample {
