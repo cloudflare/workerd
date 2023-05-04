@@ -234,6 +234,12 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "json_group_object"_kj,
   "json_each"_kj,
   "json_tree"_kj,
+
+  // https://www.sqlite.org/fts5.html
+  "match"_kj,
+  "highlight"_kj,
+  "bm25"_kj,
+  "snippet"_kj,
 };
 
 // https://www.sqlite.org/pragma.html
@@ -539,8 +545,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_CREATE_VTABLE      :   /* Table Name      Module Name     */
     case SQLITE_DROP_VTABLE        :   /* Table Name      Module Name     */
-      // Virtual tables are tables backed by some native-code callbacks. We don't support these.
-      return false;
+      // Virtual tables are tables backed by some native-code callbacks. We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
+      {
+        KJ_IF_MAYBE (moduleName, param2) {
+          if (*moduleName == "fts5") {
+            return true;
+          }
+        }
+        return false;
+      }
 
     case SQLITE_ATTACH             :   /* Filename        NULL            */
     case SQLITE_DETACH             :   /* Database Name   NULL            */

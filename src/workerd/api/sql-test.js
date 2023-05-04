@@ -184,6 +184,84 @@ function test(sql) {
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
 
+  // Full text search extension
+
+  sql.exec(`
+    CREATE TABLE documents (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL
+    );
+  `);
+  sql.exec(`
+    CREATE VIRTUAL TABLE documents_fts USING fts5(id, title, content, tokenize = porter);
+  `);
+  sql.exec(`
+    CREATE TRIGGER documents_fts_insert
+    AFTER INSERT ON documents
+    BEGIN
+      INSERT INTO documents_fts(id, title, content)
+        VALUES(new.id, new.title, new.content);
+    END;
+  `);
+  sql.exec(`
+    CREATE TRIGGER documents_fts_update
+    AFTER UPDATE ON documents
+    BEGIN
+      UPDATE documents_fts SET title=new.title, content=new.content WHERE id=old.id;
+    END;
+  `);
+  sql.exec(`
+    CREATE TRIGGER documents_fts_delete
+    AFTER DELETE ON documents
+    BEGIN
+      DELETE FROM documents_fts WHERE id=old.id;
+    END;
+  `);
+  sql.exec(`
+    INSERT INTO documents (title, content) VALUES ('Document 1', 'This is the contents of document 1 (of 2).');
+  `);
+  sql.exec(`
+    INSERT INTO documents (title, content) VALUES ('Document 2', 'This is the content of document 2 (of 2).');
+  `);
+  // Porter stemming makes 'contents' and 'content' the same
+  {
+    let results = Array.from(sql.exec(`
+      SELECT * FROM documents_fts WHERE documents_fts MATCH 'content' ORDER BY rank;
+    `));
+    assert.equal(results.length, 2)
+    assert.equal(results[0].id, 1) // Stemming makes doc 1 match first
+    assert.equal(results[1].id, 2)
+  }
+  // Ranking functions
+  {
+    let results = Array.from(sql.exec(`
+      SELECT *, bm25(documents_fts) FROM documents_fts WHERE documents_fts MATCH '2' ORDER BY rank;
+    `));
+    assert.equal(results.length, 2)
+    assert.equal(results[0]['bm25(documents_fts)'] < results[1]['bm25(documents_fts)'], true) // Better matches have lower bm25 (since they're all negative
+    assert.equal(results[0].id, 2) // Doc 2 comes first (sorted by rank)
+    assert.equal(results[1].id, 1)
+  }
+  // highlight() function
+  {
+    let results = Array.from(sql.exec(`
+        SELECT highlight(documents_fts, 2, '<b>', '</b>') as output FROM documents_fts WHERE documents_fts MATCH '2' ORDER BY rank;
+    `));
+    assert.equal(results.length, 2)
+    assert.equal(results[0].output, `This is the content of document <b>2</b> (of <b>2</b>).`) // two matches, two highlights
+    assert.equal(results[1].output, `This is the contents of document 1 (of <b>2</b>).`)
+  }
+  // snippet() function
+  {
+    let results = Array.from(sql.exec(`
+        SELECT snippet(documents_fts, 2, '<b>', '</b>', '...', 4) as output FROM documents_fts WHERE documents_fts MATCH '2' ORDER BY rank;
+    `));
+    assert.equal(results.length, 2)
+    assert.equal(results[0].output, `...document <b>2</b> (of <b>2</b>).`) // two matches, two highlights
+    assert.equal(results[1].output, `...document 1 (of <b>2</b>).`)
+  }
+
   // Complex queries
 
   // List num tables and total DB size
@@ -208,8 +286,8 @@ function test(sql) {
             ) as page_size
         );`)];
     assert.equal(result.length, 1);
-    assert.equal(result[0].num_tables, 1);
-    assert.equal(result[0].db_size, 12288);
+    assert.equal(result[0].num_tables, 8);
+    assert.equal(result[0].db_size, 36864);
   }
 
   // List table info
@@ -222,9 +300,11 @@ function test(sql) {
           AND tbl_name NOT LIKE "sqlite_%"
           AND tbl_name NOT LIKE "d1_%"
           AND tbl_name NOT LIKE "_cf_%"`)];
-    assert.equal(result.length, 1);
+    assert.equal(result.length, 2);
     assert.equal(result[0].tbl_name, 'myTable');
     assert.equal(result[0].num_columns, 2);
+    assert.equal(result[1].tbl_name, 'documents');
+    assert.equal(result[1].num_columns, 3);
   }
 }
 
