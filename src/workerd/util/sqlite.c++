@@ -530,11 +530,11 @@ void SqliteDatabase::setupSecurity() {
   // We use the suggested limits from the web site. Note that sqlite3_limit() does NOT return an
   // error code; it returns the old limit.
   sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 1000000);
-  sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
+  sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 1000000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
-  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 10);
-  sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 3);
-  sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 25000);
+  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 20);
+  sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 500);
+  sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 131072);
   sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 8);
   sqlite3_limit(db, SQLITE_LIMIT_ATTACHED, 0);
   sqlite3_limit(db, SQLITE_LIMIT_LIKE_PATTERN_LENGTH, 50);
