@@ -392,6 +392,9 @@ public:
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
   // incoming tasks.
 
+  void abort(kj::Exception&& e) { abortFulfiller->reject(kj::mv(e)); }
+  // Force context abort now.
+
   bool isFailOpen() { return failOpen; }
   // Has event.passThroughOnException() been called?
 
