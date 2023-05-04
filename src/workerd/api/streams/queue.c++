@@ -175,7 +175,7 @@ void ValueQueue::handleRead(
         // warning so we can investigate.
         // Note that we do not want to remove the close sentinel here so that the next call to
         // maybeDrainAndSetState will see it and handle the transition to the closed state.
-        KJ_LOG(WARNING, "ValueQueue::handleRead encountered a close sentinel in the queue "
+        KJ_LOG(ERROR, "ValueQueue::handleRead encountered a close sentinel in the queue "
                         "with queueTotalSize > 0. This should not happen.", state.queueTotalSize);
         request.resolveAsDone(js);
       }

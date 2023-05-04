@@ -503,28 +503,28 @@ struct ReadPendingScope {
   // handles this for us. It is constructed when we start a read and destructed
   // synchronously when the call to read completes.
   jsg::Lock& js;
-  C* controller;
-  ReadPendingScope(jsg::Lock& js, C* controller)
+  C& controller;
+  ReadPendingScope(jsg::Lock& js, C& controller)
       : js(js), controller(controller) {
-    controller->pendingReadCount++;
+    controller.pendingReadCount++;
   }
   KJ_DISALLOW_COPY_AND_MOVE(ReadPendingScope);
   ~ReadPendingScope() noexcept(false) {
     // When we have no pending reads left, we need to check to see if we have a
     // pending close or errored state.
-    --controller->pendingReadCount;
-    if (!controller->isReadPending()) {
-      KJ_IF_MAYBE(state, controller->maybePendingState) {
+    --controller.pendingReadCount;
+    if (!controller.isReadPending()) {
+      KJ_IF_MAYBE(state, controller.maybePendingState) {
         KJ_SWITCH_ONEOF(*state) {
           KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-            controller->doClose();
+            controller.doClose();
           }
           KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-            controller->doError(js, errored.getHandle(js));
+            controller.doError(js, errored.getHandle(js));
           }
         }
       }
-      controller->maybePendingState = nullptr;
+      controller.maybePendingState = nullptr;
     }
   }
 };
@@ -2417,11 +2417,11 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // The ReadableStreamDefaultController does not support ByobOptions.
       // It should never happen, but let's make sure.
       KJ_ASSERT(maybeByobOptions == nullptr);
-      ReadPendingScope readPendingScope(js, this);
+      ReadPendingScope readPendingScope(js, *this);
       return consumer->read(js);
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
-      ReadPendingScope readPendingScope(js, this);
+      ReadPendingScope readPendingScope(js, *this);
       return consumer->read(js, kj::mv(maybeByobOptions));
     }
   }
@@ -2733,7 +2733,7 @@ private:
       }
       KJ_CASE_ONEOF(readable, Readable) {
         const auto read = [&](auto& js) {
-          ReadPendingScope scope(js, this);
+          ReadPendingScope scope(js, *this);
           if constexpr (kj::isSameType<T, ByteReadable>()) {
             return readable->read(js, nullptr);
           } else {
