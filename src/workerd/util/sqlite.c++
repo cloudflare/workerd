@@ -470,7 +470,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // TODO(sqlite): Decide which function are OK.
 
       {
-        const kj::HashSet<kj::StringPtr> allowSet = []() {
+        static const kj::HashSet<kj::StringPtr> allowSet = []() {
           kj::HashSet<kj::StringPtr> result;
           for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
             result.insert(func);
