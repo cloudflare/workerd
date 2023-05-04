@@ -8,5 +8,7 @@ cc_library(
     defines = [
         "SQLITE_MAX_ALLOCATION_SIZE=16777216",  # 16MB
         "SQLITE_PRINTF_PRECISION_LIMIT=100000",
+        "SQLITE_ENABLE_UPDATE_DELETE_LIMIT=1", # https://sqlite.org/draft/compile.html#enable_update_delete_limit
+        "SQLITE_ENABLE_STAT4=1", # https://sqlite.org/draft/compile.html#enable_stat4
     ]
 )
