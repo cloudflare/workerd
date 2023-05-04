@@ -8,5 +8,6 @@ cc_library(
     defines = [
         "SQLITE_MAX_ALLOCATION_SIZE=16777216",  # 16MB
         "SQLITE_PRINTF_PRECISION_LIMIT=100000",
+        "SQLITE_ENABLE_FTS5",
     ]
 )
