@@ -236,6 +236,37 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "json_tree"_kj,
 };
 
+// https://www.sqlite.org/pragma.html
+static constexpr kj::StringPtr ALLOWED_READ_PRAGMAS[] = {
+  // We allowlist these SQLite pragmas (for read only, never with arguments).
+  "data_version"_kj,
+  "page_count"_kj,
+  "freelist_count"_kj,
+
+  // Let a user see some internal stats?
+  "max_page_count"_kj,
+  "page_size"_kj,
+};
+
+static constexpr kj::StringPtr ALLOWED_WRITE_PRAGMAS[] = {
+  // We allowlist some SQLite pragmas for changing internal state
+
+  // Toggle constraints on/off
+  "case_sensitive_like"_kj,
+  "foreign_keys"_kj,
+  "defer_foreign_keys"_kj,
+  "ignore_check_constraints"_kj,
+  "recursive_triggers"_kj,
+  "reverse_unordered_selects"_kj,
+
+  // Not "writable", but takes an argument of table name
+  "foreign_key_check"_kj,
+  "foreign_key_list"_kj,
+  "index_info"_kj,
+  "index_list"_kj,
+  "index_xinfo"_kj,
+};
+
 }  // namespace
 
 // =======================================================================================
@@ -447,21 +478,45 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // We currently only permit a few pragmas.
       {
         kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
+
         if (pragma == "table_list") {
           // Annoyingly, this will list internal tables. However, the existence of these tables
           // isn't really a secret, we just don't want people to access them.
           return true;
+          // TODO function_list & pragma_list should be authorized but return
+          // ALLOWED_SQLITE_FUNCTIONS & ALLOWED_[READ|WRITE]_PRAGMAS
+          // respectively
         } else if (pragma == "table_info") {
           // Allow if the specific named table is not protected.
-          KJ_IF_MAYBE(name, param2) {
+          KJ_IF_MAYBE (name, param2) {
             return regulator.isAllowedName(*name);
           } else {
-            return false;  // shouldn't happen?
+            return false; // shouldn't happen?
           }
-        } else if (pragma == "data_version") {
+        }
+
+        static const kj::HashSet<kj::StringPtr> allowedWritePragmas = []() {
+          kj::HashSet<kj::StringPtr> result;
+          for (const kj::StringPtr& func: ALLOWED_WRITE_PRAGMAS) {
+            result.insert(func);
+          }
+          return result;
+        }();
+
+        if (allowedWritePragmas.contains(pragma)) {
           return true;
-        } else if (pragma == "foreign_keys") {
-          return true;
+        }
+
+        static const kj::HashSet<kj::StringPtr> allowedReadPragmas = []() {
+          kj::HashSet<kj::StringPtr> result;
+          for (const kj::StringPtr& func: ALLOWED_READ_PRAGMAS) {
+            result.insert(func);
+          }
+          return result;
+        }();
+        if (allowedReadPragmas.contains(pragma)) {
+          // Only return true if there's no second argument.
+          return param2 == nullptr;
         }
       }
 
