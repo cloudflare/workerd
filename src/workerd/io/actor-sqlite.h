@@ -54,6 +54,10 @@ public:
 private:
   kj::Own<SqliteDatabase> db;
   SqliteKv kv;
+
+  kj::Maybe<kj::Exception> broken;
+
+  void requireNotBroken();
 };
 
 }  // namespace workerd
