@@ -1182,7 +1182,7 @@ public:
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
-      ActorNamespace ns(*this, entry.key, entry.value);
+      auto ns = kj::heap<ActorNamespace>(*this, entry.key, entry.value);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -1202,7 +1202,11 @@ public:
   }
 
   kj::Maybe<ActorNamespace&> getActorNamespace(kj::StringPtr name) {
-    return actorNamespaces.find(name);
+    KJ_IF_MAYBE(a, actorNamespaces.find(name)) {
+      return **a;
+    } else {
+      return nullptr;
+    }
   }
 
   kj::Own<WorkerInterface> startRequest(
@@ -1236,10 +1240,10 @@ public:
         kj::mv(metadata.cfBlobJson));
   }
 
-  class ActorNamespace {
+  class ActorNamespace final: private kj::TaskSet::ErrorHandler {
   public:
     ActorNamespace(WorkerService& service, kj::StringPtr className, const ActorConfig& config)
-        : service(service), className(className), config(config) {}
+        : service(service), className(className), config(config), onBrokenTasks(*this) {}
 
     const ActorConfig& getConfig() { return config; }
 
@@ -1262,6 +1266,12 @@ public:
     kj::StringPtr className;
     const ActorConfig& config;
     kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
+    kj::TaskSet onBrokenTasks;
+
+    void taskFailed(kj::Exception&& exception) override {
+      // Error from `actors.erase()`?
+      KJ_LOG(ERROR, exception);
+    }
 
     class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
     public:
@@ -1338,6 +1348,14 @@ public:
               className, kj::mv(makeStorage), lock, kj::mv(loopback),
               timerChannel, kj::refcounted<ActorObserver>());
 
+          // If the actor becomes broken, remove it from the map, so a new one will be created
+          // next time.
+          onBrokenTasks.add(newActor->onBroken()
+              .catch_([](kj::Exception&&) {})
+              .then([this, idStr = idStr.asPtr(), &actor = *newActor]() {
+            actors.erase(idStr);
+          }));
+
           // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
           //   a minute of inactivity...
           return kj::HashMap<kj::String, kj::Own<Worker::Actor>>::Entry {
@@ -1380,7 +1398,7 @@ private:
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
-  kj::HashMap<kj::StringPtr, ActorNamespace> actorNamespaces;
+  kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
