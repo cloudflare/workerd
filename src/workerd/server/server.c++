@@ -1294,6 +1294,8 @@ public:
     }
 
     class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
+      // Implements actor loopback, which is used by websocket hibernation to deliver events to the
+      // actor from the websocket's read loop.
     public:
       Loopback(ActorNamespace& ns, kj::String id) : ns(ns), id(kj::mv(id)) {}
 
