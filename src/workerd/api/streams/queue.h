@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <deque>
 #include <kj/table.h>
+#include <set>
 
 namespace workerd::api {
 
@@ -28,18 +29,17 @@ namespace workerd::api {
 //    is signaled. Additional data can always be pushed into the queue beyond
 //    the high water mark, but it is not advisable to do so.
 //
-//  - All data stored in the queue is in the form of refcounted entries. The
+//  - All data stored in the queue is in the form of entries. The
 //    specific type of entry depends on the queue type. Every entry has a
-//    calculated size, which is dependent on the type of entry. The reason
-//    these entries are refcounted is because...(see the next bullet point)
+//    calculated size, which is dependent on the type of entry.
 //
 //  - Every queue has one or more consumers. Each consumer maintains its own
-//    internal buffer of refcounted entries that it has yet to consume. Because
-//    entries are refcounted, there is ever only one copy of any given chunk of
-//    data in memory, with each consumer possessing only a reference to it.
-//    Whenever data is pushed into the queue, references are pushed into each of
-//    the consumers. As data is consumed from the internal buffer, the reference
-//    counted entries are freed. The underlying data is freed once the last
+//    internal buffer of entries that it has yet to consume. Entries are
+//    structured such that there is ever only one copy of any given chunk of
+//    data in memory, with each entry in each consumer possessing only a reference
+//    to it. Whenever data is pushed into the queue, references are pushed into
+//    each of the consumers. As data is consumed from the internal buffer, the
+//    entries are freed. The underlying data is freed once the last
 //    reference is released.
 //
 //  - Every consumer has an remaining buffer size, which is the sum of the sizes
@@ -58,7 +58,7 @@ namespace workerd::api {
 // in the same way but Byte Queue consumers have a number of unique details.
 //
 //  - As mentioned above, every consumer maintains an internal data buffer
-//    consisting of refcounted pointers to the data that has been pushed into
+//    consisting of references to the data that has been pushed into
 //    the queue.
 //
 //  - Every consumer maintains a list of pending reads. A read is a request to
@@ -87,8 +87,8 @@ namespace workerd::api {
 //
 // The bookkeeping for a value queue is fairly simple:
 //
-//  - A single refcounted value entry is created.
-//  - References to that single value entry are distributed to each of
+//  - A single value entry is created.
+//  - Clones of that single value entry are distributed to each of
 //    the value queue consumers.
 //  - If a consumer has a pending read, the read is fulfilled immediately
 //    and the reference is never added to that consumer's internal buffer.
@@ -162,8 +162,11 @@ public:
     // Closes the queue. The close is forwarded on to all consumers.
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        consumer.ref->close(js);
+      // We copy the list of consumers in case the consumers remove themselves
+      // from the queue during the close callback, invalidating the iterator.
+      auto consumers = ready->consumers;
+      for (auto consumer : consumers) {
+        consumer->close(js);
       }
       state.template init<Closed>();
     }
@@ -183,8 +186,11 @@ public:
     // all pending consume promises.
     // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        consumer.ref->error(js, reason.addRef(js));
+      // We copy the list of consumers in case the consumers remove themselves
+      // from the queue during the error callback, invalidating the iterator.
+      auto consumers = ready->consumers;
+      for (auto consumer : consumers) {
+        consumer->error(js, reason.addRef(js));
       }
       state = kj::mv(reason);
     }
@@ -196,8 +202,8 @@ public:
     // If we are already closed or errored, set totalQueueSize to zero.
     totalQueueSize = 0;
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto& consumer : ready->consumers) {
-        totalQueueSize = kj::max(totalQueueSize, consumer.ref->size());
+      for (auto consumer : ready->consumers) {
+        totalQueueSize = kj::max(totalQueueSize, consumer->size());
       }
     }
   }
@@ -213,14 +219,14 @@ public:
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(),
         "The queue is closed or errored.");
 
-    for (auto& consumer : ready.consumers) {
+    for (auto consumer : ready.consumers) {
       KJ_IF_MAYBE(skip, skipConsumer) {
-        if (consumer.ref == &(*skip)) {
+        if (&(*skip) == consumer) {
           continue;
         }
       }
 
-      consumer.ref->push(js, kj::addRef(*entry));
+      consumer->push(js, entry->clone(js));
     }
   }
 
@@ -241,8 +247,8 @@ public:
       KJ_CASE_ONEOF(closed, Closed) { return false; }
       KJ_CASE_ONEOF(errored, Errored) { return false; }
       KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& consumer : ready.consumers) {
-          if (consumer.ref->hasReadRequests()) return true;
+        for (auto consumer : ready.consumers) {
+          if (consumer->hasReadRequests()) return true;
         }
         return false;
       }
@@ -263,18 +269,8 @@ private:
   struct Closed {};
   using Errored = jsg::Value;
 
-  struct ConsumerRef {
-    ConsumerImpl* ref;
-    bool operator==(ConsumerRef& other) const {
-      return hashCode() == other.hashCode();
-    }
-    auto hashCode() const {
-      return kj::hashCode(ref);
-    }
-  };
-
   struct Ready final: public State {
-    kj::HashSet<ConsumerRef> consumers;
+    std::set<ConsumerImpl*> consumers;
   };
 
   size_t highWaterMark;
@@ -283,13 +279,13 @@ private:
 
   void addConsumer(ConsumerImpl* consumer) {
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.insert(ConsumerRef { .ref = consumer });
+      ready->consumers.insert(consumer);
     }
   }
 
   void removeConsumer(ConsumerImpl* consumer) {
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.eraseMatch(ConsumerRef { .ref = consumer });
+      ready->consumers.erase(consumer);
       maybeUpdateBackpressure();
     }
   }
@@ -460,7 +456,7 @@ public:
               otherReady.buffer.push_back(Close {});
             }
             KJ_CASE_ONEOF(entry, QueueEntry) {
-              otherReady.buffer.push_back(entry.clone());
+              otherReady.buffer.push_back(entry.clone(js));
             }
           }
         }
@@ -599,7 +595,7 @@ public:
     void reject(jsg::Lock& js, jsg::Value& value);
   };
 
-  class Entry final: public kj::Refcounted {
+  class Entry {
     // A value queue entry consists of an arbitrary JavaScript value and a size that is
     // calculated by the size algorithm function provided in the stream constructor.
   public:
@@ -611,7 +607,7 @@ public:
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-    Entry clone(jsg::Lock& js);
+    kj::Own<Entry> clone(jsg::Lock& js);
 
   private:
     jsg::Value value;
@@ -620,11 +616,9 @@ public:
 
   struct QueueEntry {
     kj::Own<Entry> entry;
-    QueueEntry clone();
+    QueueEntry clone(jsg::Lock& js);
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      if (entry) visitor.visit(*entry);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer final {
@@ -657,9 +651,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
 
   private:
     ConsumerImpl impl;
@@ -683,16 +675,11 @@ public:
 
   size_t getConsumerCount();
 
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
+  bool wantsRead() const;
 
-  bool hasPartiallyFulfilledRead() {
-    // A ValueQueue can never have a partially fulfilled read.
-    return false;
-  }
+  bool hasPartiallyFulfilledRead();
 
-  void visitForGc(jsg::GcVisitor& visitor) {}
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
   QueueImpl impl;
@@ -733,13 +720,18 @@ public:
     // which happens either when respond(), respondWithNewView(), or invalidate()
     // is called, or when the ByobRequest is destroyed, whichever comes first.
 
-    struct {
+    struct PullInto {
       jsg::BackingStore store;
       size_t filled = 0;
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
     } pullInto;
 
+    ReadRequest(jsg::Promise<ReadResult>::Resolver resolver,
+                PullInto pullInto);
+    ReadRequest(ReadRequest&&) = default;
+    ReadRequest& operator=(ReadRequest&&) = default;
+    ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::Value& value);
@@ -767,7 +759,7 @@ public:
 
     ~ByobRequest() noexcept(false);
 
-    ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
+    inline ReadRequest& getRequest() { return KJ_ASSERT_NONNULL(request); }
 
     bool respond(jsg::Lock& js, size_t amount);
 
@@ -795,7 +787,7 @@ public:
     std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
   };
 
-  class Entry final: public kj::Refcounted {
+  class Entry {
     // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
     // sequence of bytes. The size is determined by the number of bytes in the entry.
   public:
@@ -805,7 +797,9 @@ public:
 
     size_t getSize() const;
 
-    inline void visitForGc(jsg::GcVisitor& visitor) {}
+    void visitForGc(jsg::GcVisitor& visitor);
+
+    kj::Own<Entry> clone(jsg::Lock& js);
 
   private:
     jsg::BackingStore store;
@@ -815,9 +809,9 @@ public:
     kj::Own<Entry> entry;
     size_t offset;
 
-    QueueEntry clone();
+    QueueEntry clone(jsg::Lock& js);
 
-    void visitForGc(jsg::GcVisitor& visitor) {}
+    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer {
@@ -850,9 +844,7 @@ public:
 
     bool hasReadRequests();
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(impl);
-    }
+    void visitForGc(jsg::GcVisitor& visitor);
 
   private:
     ConsumerImpl impl;
@@ -874,9 +866,7 @@ public:
 
   size_t getConsumerCount();
 
-  bool wantsRead() const {
-    return impl.wantsRead();
-  }
+  bool wantsRead() const;
 
   bool hasPartiallyFulfilledRead();
 
@@ -890,7 +880,7 @@ public:
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
 
-  void visitForGc(jsg::GcVisitor& visitor) {}
+  void visitForGc(jsg::GcVisitor& visitor);
 
 private:
   QueueImpl impl;

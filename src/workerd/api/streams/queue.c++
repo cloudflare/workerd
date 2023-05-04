@@ -42,18 +42,20 @@ void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(value);
 }
 
-ValueQueue::Entry ValueQueue::Entry::clone(jsg::Lock& js) {
-  return Entry(value.addRef(js), size);
-}
-
 #pragma endregion ValueQueue::Entry
 
 #pragma region ValueQueue::QueueEntry
 
-ValueQueue::QueueEntry ValueQueue::QueueEntry::clone() {
-  return QueueEntry {
-    .entry = kj::addRef(*entry),
-  };
+kj::Own<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
+  return kj::heap<Entry>(getValue(js), getSize());
+}
+
+ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
+  return QueueEntry { .entry = entry->clone(js) };
+}
+
+void ValueQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {
+  if (entry) visitor.visit(*entry);
 }
 
 #pragma endregion ValueQueue::QueueEntry
@@ -108,6 +110,10 @@ bool ValueQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
 }
 
+void ValueQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(impl);
+}
+
 #pragma endregion ValueQueue::Consumer
 
 ValueQueue::ValueQueue(size_t highWaterMark) : impl(highWaterMark) {}
@@ -158,24 +164,30 @@ void ValueQueue::handleRead(
   // If there are no pending read requests and there is data in the buffer,
   // we will try to fulfill the read request immediately.
   if (state.readRequests.empty() && state.queueTotalSize > 0) {
-    auto entry = kj::mv(state.buffer.front());
-    state.buffer.pop_front();
+    auto& entry = state.buffer.front();
 
     KJ_SWITCH_ONEOF(entry) {
       KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
-        // The next item was a close sentinel! Resolve the read immediately with a close indicator.
+        // This case shouldn't actually happen. The queueTotalSize should be zero if the
+        // only item remaining in the queue is the close sentinel because we decrement the
+        // queueTotalSize every time we remove an item. If we get here, something is wrong.
+        // We'll handle it by resolving the read request and keep going but let's emit a log
+        // warning so we can investigate.
+        // Note that we do not want to remove the close sentinel here so that the next call to
+        // maybeDrainAndSetState will see it and handle the transition to the closed state.
+        KJ_LOG(ERROR, "ValueQueue::handleRead encountered a close sentinel in the queue "
+                        "with queueTotalSize > 0. This should not happen.", state.queueTotalSize);
         request.resolveAsDone(js);
       }
       KJ_CASE_ONEOF(entry, QueueEntry) {
         request.resolve(js, entry.entry->getValue(js));
         state.queueTotalSize -= entry.entry->getSize();
+        state.buffer.pop_front();
       }
     }
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
-    // Otherwise, if state.queueTotalSize is zero and isClosing() is true, we should
-    // have already drained but let's take care of that now. Specifically, in this case
-    // there's no data in the queue and close() has already been called, so there won't
-    // be any more data coming.
+    // Otherwise, if state.queueTotalSize is zero and isClosing() is true there won't be any
+    // more data coming. Just resolve the read as done and move on.
     request.resolveAsDone(js);
   } else {
     // Otherwise, push the read request into the pending readRequests. It will be
@@ -200,6 +212,17 @@ bool ValueQueue::handleMaybeClose(
 
 size_t ValueQueue::getConsumerCount() { return impl.getConsumerCount(); }
 
+bool ValueQueue::wantsRead() const {
+  return impl.wantsRead();
+}
+
+bool ValueQueue::hasPartiallyFulfilledRead() {
+  // A ValueQueue can never have a partially fulfilled read.
+  return false;
+}
+
+void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
+
 #pragma endregion ValueQueue
 
 // ======================================================================================
@@ -212,10 +235,21 @@ namespace {
 void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
   KJ_IF_MAYBE(byobRequest, req) {
     byobRequest->invalidate();
-    req = nullptr;
+    // The call to byobRequest->invalidate() should have cleared the reference.
+    KJ_ASSERT(req == nullptr);
   }
 }
 }  // namespace
+
+ByteQueue::ReadRequest::ReadRequest(
+    jsg::Promise<ReadResult>::Resolver resolver,
+    ByteQueue::ReadRequest::PullInto pullInto)
+    : resolver(kj::mv(resolver)),
+      pullInto(kj::mv(pullInto)) {}
+
+ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
+  maybeInvalidateByobRequest(byobReadRequest);
+}
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
   if (pullInto.filled > 0) {
@@ -255,10 +289,6 @@ void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     ConsumerImpl& consumer,
     QueueImpl& queue) {
-  // Why refcounted? One ByobReadRequest reference will be held (eventually) by
-  // an instance of ReadableStreamBYOBRequest and the other by this ReadRequest.
-  // Depending on how the read is actually fulfilled, the ByobReadRequest will
-  // be invalidated by one or the other.
   auto req = kj::heap<ByobRequest>(*this, consumer, queue);
   byobReadRequest = *req;
   return kj::mv(req);
@@ -274,16 +304,24 @@ kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr() { return store.asArrayPtr(
 
 size_t ByteQueue::Entry::getSize() const { return store.size(); }
 
+kj::Own<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
+  return kj::heap<ByteQueue::Entry>(store.clone());
+}
+
+void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
+
 #pragma endregion ByteQueue::Entry
 
 #pragma region ByteQueue::QueueEntry
 
-ByteQueue::QueueEntry ByteQueue::QueueEntry::clone() {
+ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
   return QueueEntry {
-    .entry = kj::addRef(*entry),
+    .entry = entry->clone(js),
     .offset = offset,
   };
 }
+
+void ByteQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue::QueueEntry
 
@@ -337,6 +375,10 @@ bool ByteQueue::Consumer::hasReadRequests() {
   return impl.hasReadRequests();
 }
 
+void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(impl);
+}
+
 #pragma endregion ByteQueue::Consumer
 
 #pragma region ByteQueue::ByobRequest
@@ -379,7 +421,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   if (queue.getConsumerCount() > 1) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
-    auto entry = kj::refcounted<Entry>(jsg::BackingStore::alloc(js, amount));
+    auto entry = kj::heap<Entry>(jsg::BackingStore::alloc(js, amount));
 
     auto start = sourcePtr.begin() + req.pullInto.filled;
 
@@ -420,7 +462,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
 
   if (unaligned > 0) {
     auto start = sourcePtr.begin() + (amount - unaligned);
-    auto excess = kj::refcounted<Entry>(jsg::BackingStore::alloc(js, unaligned));
+    auto excess = kj::heap<Entry>(jsg::BackingStore::alloc(js, unaligned));
     std::copy(start, start + unaligned, excess->toArrayPtr().begin());
     consumer.push(js, kj::mv(excess));
   }
@@ -474,6 +516,13 @@ v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
 ByteQueue::ByteQueue(size_t highWaterMark) : impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
+  KJ_IF_MAYBE(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
+    while (!ready->pendingByobReadRequests.empty()) {
+      auto& req = ready->pendingByobReadRequests.front();
+      req->invalidate();
+      ready->pendingByobReadRequests.pop_front();
+    }
+  }
   impl.close(js);
 }
 
@@ -973,7 +1022,13 @@ bool ByteQueue::hasPartiallyFulfilledRead() {
   return false;
 }
 
+bool ByteQueue::wantsRead() const {
+  return impl.wantsRead();
+}
+
 size_t ByteQueue::getConsumerCount() { return impl.getConsumerCount(); }
+
+void ByteQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue
 
