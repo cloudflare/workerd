@@ -70,11 +70,19 @@ public:
   Query run(const char (&sqlCode)[size], Params&&... bindings);
   // When the input is a string literal, we automatically use the TRUSTED regulator.
 
+  void onWrite(kj::Function<void()> callback) { onWriteCallback = kj::mv(callback); }
+  // Invokes the given callback whenever a query begins which may write to the database. The
+  // callback is called just before executing the query.
+  //
+  // Durable Objects uses this to automatically begin a transaction and close the output gate.
+
 private:
   sqlite3* db;
 
   kj::Maybe<Regulator&> currentRegulator;
   // Set while a query is compiling.
+
+  kj::Maybe<kj::Function<void()>> onWriteCallback;
 
   void close();
 

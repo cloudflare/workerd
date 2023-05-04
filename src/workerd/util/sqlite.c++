@@ -625,6 +625,12 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
       "A SQL prepared statement can only be executed once at a time.");
   SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement),
       "Wrong number of parameter bindings for SQL query.");
+
+  KJ_IF_MAYBE(cb, db.onWriteCallback) {
+    if (!sqlite3_stmt_readonly(statement)) {
+      (*cb)();
+    }
+  }
 }
 
 void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
