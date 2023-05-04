@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "path-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "path-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"]
+      )
+    ),
+  ],
+);
