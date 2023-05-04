@@ -450,7 +450,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         if (pragma == "table_list") {
           // Annoyingly, this will list internal tables. However, the existence of these tables
           // isn't really a secret, we just don't want people to access them.
-          return param2 == nullptr;  // should always be true?
+          return true;
         } else if (pragma == "table_info") {
           // Allow if the specific named table is not protected.
           KJ_IF_MAYBE(name, param2) {
