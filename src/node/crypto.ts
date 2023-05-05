@@ -34,6 +34,12 @@ import {
   checkPrimeSync,
 } from 'node-internal:crypto_random';
 
+import {
+  pbkdf2,
+  pbkdf2Sync,
+  ArrayLike,
+} from 'node-internal:crypto_pbkdf2';
+
 export {
   randomBytes,
   randomFillSync,
@@ -47,6 +53,9 @@ export {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  pbkdf2,
+  pbkdf2Sync,
+  ArrayLike as arrayLike,
 }
 
 // We do not implement the openssl secure heap.
@@ -85,6 +94,9 @@ export default {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  // Pbkdf2
+  pbkdf2,
+  pbkdf2Sync,
   // Misc
   secureHeapUsed,
   setEngine,
@@ -173,8 +185,8 @@ export default {
 // * Key Derivation
 //   * [ ] crypto.hkdf(digest, ikm, salt, info, keylen, callback)
 //   * [ ] crypto.hkdfSync(digest, ikm, salt, info, keylen)
-//   * [ ] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
-//   * [ ] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
+//   * [x] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
+//   * [x] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
 //   * [ ] crypto.scrypt(password, salt, keylen[, options], callback)
 //   * [ ] crypto.scryptSync(password, salt, keylen[, options])
 // * WebCrypto
