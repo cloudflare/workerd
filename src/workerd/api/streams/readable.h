@@ -356,14 +356,21 @@ public:
   // disturbed and the DeferredProxy returned will take over ownership of the internal
   // state of the readable.
 
-  kj::Maybe<jsg::PromiseResolverPair<void>> eofResolverPair;
-  // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
-  void initEofResolverPair(jsg::Lock& js);
-  // By default the eofResolverPair is not initialised, calling this method will initialise it so
-  // that the signalling is active.
+  jsg::Promise<void> onEof(jsg::Lock& js);
+  // Initialises signalling mechanism for EOF detection. Returns a promise that will resolve when
+  // EOF is reached.
+  //
+  // This method should only be called once.
+
+  void signalEof();
+  // Used by ReadableStreamInternalController to signal EOF being reached. Can be called even if
+  // `onEof` wasn't called.
 private:
   kj::Maybe<IoContext&> ioContext;
   kj::Own<ReadableStreamController> controller;
+
+  kj::Maybe<jsg::PromiseResolverPair<void>> eofResolverPair;
+  // Used to signal when this ReadableStream reads EOF. This signal is required for TCP sockets.
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

@@ -662,6 +662,8 @@ public:
   virtual void setup(jsg::Lock& js,
                      jsg::Optional<UnderlyingSink> underlyingSink,
                      jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
+
+  virtual bool isClosedOrClosing() = 0;
 };
 
 kj::Own<WritableStreamController> newWritableStreamJsController();

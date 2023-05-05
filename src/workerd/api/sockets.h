@@ -73,7 +73,7 @@ public:
       jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
   // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
 
-  void handleReadableEof(jsg::Lock& js);
+  void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
 
   JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {

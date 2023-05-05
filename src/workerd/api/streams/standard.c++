@@ -765,6 +765,8 @@ public:
     return kj::addRef(*weakRef);
   }
 
+  bool isClosedOrClosing() override;
+
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
 
@@ -3351,6 +3353,10 @@ jsg::Promise<void> WritableStreamJsController::abort(
 
 jsg::Ref<WritableStream> WritableStreamJsController::addRef() {
   return KJ_ASSERT_NONNULL(owner).addRef();
+}
+
+bool WritableStreamJsController::isClosedOrClosing() {
+  KJ_UNIMPLEMENTED("Only defined in WritableStreamInternalController.");
 }
 
 jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsHandled) {
