@@ -1,37 +1,27 @@
 # Developing workerd with Visual Studio Code
 
-A few helpful tips for developing workerd with Visual Studio Code.
+Visual Studio Code is a commonly used editor by workerd developers (other editors are great too!). These notes present some getting started tips. If you have tricks and tips that would improve the developer experience, please let us know!
 
-## clangd
+## Recommended extensions for developing workerd
 
-We use [clangd](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd)
-for code completion and diagnostics.
+The recommended extensions to install are:
 
-For debugging, you will need the [Microsoft C/C++ extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) installed.
+* [LLVM clangd extension](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd)
+for code completion and navigation.
 
-The Microsoft C/C++ extension has IntelliSense support that is not compatible with the clangd extension. We recommend disabling the
-Microsoft IntelliSense Engine for this project (`Settings -> C_Cpp.intelliSenseEngine -> disabled`).
+  For clangd to work well, you need to generate a `compile_commands.json` file. This is described below in [Generating compile_commands.json](#generating-compile_commandsjson).
 
-For clangd to work well, you need to generate a `compile_commands.json` file. This can be done from within VSCode using
-`Run Task -> Generate compile_commands.json` or at the command-line:
+* [Microsoft C/C++ extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) for debugging, syntax highlighting, etc.
 
-```sh
-# Build workerd to ensure all generated sources are present.
-$ bazel build //...
-$ bazel run //:refresh_compile_commands
-```
+  The Microsoft C/C++ extension has IntelliSense support that is not compatible with the clangd extension. We recommend disabling the Microsoft IntelliSense Engine for this project ("Settings → C_Cpp.intelliSenseEngine → disabled").
 
-If this command fails, try again after running:
+* [Capnproto-syntax extension](https://marketplace.visualstudio.com/items?itemName=abronan.capnproto-syntax) for syntax highlighting if you are editing `.capnp` files.
 
-```sh
-$ bazel clean --expunge
-$ bazel test //...
-```
+* [GitLens extension](https://marketplace.visualstudio.com/items?itemName=eamodio.gitlens) for super charged git functionality within Visual Studio Code.
 
-There is an issue between workerd's bazel setup and Hedron's compile_commands.json generator (tracked in
-https://github.com/cloudflare/workerd/issues/506).
+You can install all of these extensions with the **Extensions: Configure Recommended Extensions (Workspace Folder)** command. You can find this through the Visual Studio Code Command Palette (`shift+ctrl+p` on Linux / Windows, `shift+cmd+p` on OS X) and typing "Configure Recommended Extensions". The recommendations that will be installed can be found in the [.vscode/extensions.json](../.vscode/extensions.json) file.
 
-## VSCode Tasks
+## VSCode Tasks for workerd
 
 The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks for use within VSCode:
 
@@ -43,23 +33,55 @@ The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks
 * Generate compile_commands.json
 * Generate rust-project.json
 
-## Debugging
+The keyboard shortcut for **Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
+## Running and debugging workerd in Visual Studio Code
 
-There are workerd debugging targets within Visual Studio Code which are supported on Linux (x64), OS X (arm64), and Windows (x64).
+There are workerd debugging targets within Visual Studio Code which are supported on Linux, OS X, and Windows.
 
 The [.vscode/launch.json](../.vscode/launch.json) file has launch targets to that can be debugged within VSCode.
 
 Before you start debugging, ensure that you have saved a vscode workspace for workerd,
-`File -> Save Workspace As...`, then `Run -> Start Debugging (F5)`. For more information about workspaces, see https://code.visualstudio.com/docs/editor/workspaces.
+"File → Save Workspace As...". For more information about workspaces, see https://code.visualstudio.com/docs/editor/workspaces.
+
+The **Run and Debug** view in VSCode (accessible via `shift+ctrl+d` on Linux and Windows, `shift+cmd+d` on OS X) has a drop-down that allows you to choose which target to run and debug. After selecting a target, hitting `F5` will launch the
+target with the debugger attached.
 
 The main targets of interest are:
 
-* `workerd debug`
-* `workerd debug with inspector enabled`
-* `workerd test case`
+* workerd debug
+* workerd debug with inspector enabled
+* workerd test case
 
-Launching either `workerd debug` or `workerd debug with inspector enabled` will prompt for a workerd configuration for
-workerd to serve, the default is `${workspaceFolder}/samples/helloworld/config.capnp`.
+Launching either "workerd debug" or "workerd debug with inspector enabled" will prompt for a workerd configuration for
+workerd to serve, the default is [${workspaceFolder}/samples/helloworld/config.capnp](../samples/helloworld/config.capnp).
 
-Launching `workerd test case` will prompt for a test to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+Launching "workerd test case" will prompt for a test to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
 
+## Generating compile_commands.json
+
+We use clangd for code completion and navigation with the editor. Clangd requires a `compile_commands.json` file to find and process the project source code. This can be generated from within VSCode using the **Run Build Task** command and choosing "Generate compile_commands.json" (or via `shift+ctrl+b` on Linux / Windows, `shift_cmd+b` on OS X).
+
+Alternatively, you can generate `compile_commands.json` at the command-line directly:
+
+```sh
+bazel run //:refresh_compile_commands
+```
+
+There is an issue between workerd's bazel setup and Hedron's compile_commands.json generator (tracked in
+https://github.com/cloudflare/workerd/issues/506).
+
+If you hit any problems, you may find this helps (though it takes a long time!):
+
+```sh
+bazel clean --expunge
+bazel test //...
+bazel run //:refresh_compile_commands
+```
+
+## Miscellaneous tips
+
+* There is a handy guide to Visual Studio Code keyboard shortcuts at [aka.ms/vscodekeybindings](https://aka.ms/vscodekeybindings).
+* The Command Palette is a great way to find things (`shift+ctrl+p` on Linux / Windows, `shift+cmd+p` on OS X).
+* The Keyboard Shortcuts window is also a great resource (`ctrl+k ctrl+s` on Linux / Windows, `cmd+k cmd+s` on OS X).
+* Read [Visual Studio Code Tips and Tricks](https://code.visualstudio.com/docs/getstarted/tips-and-tricks).
+* Check out the [25 VS Code Productivity Tips and Speed Hacks](https://youtu.be/ifTF3ags0XI) video by Fireship.
