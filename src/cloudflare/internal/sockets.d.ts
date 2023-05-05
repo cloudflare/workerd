@@ -18,8 +18,8 @@ export type SocketAddress = {
 }
 
 export type SocketOptions = {
-  useSecureTransport: boolean
-  allowHalfOpen: boolean
+  secureTransport?: 'off' | 'on' | 'starttls'
+  allowHalfOpen?: boolean
 }
 
 export function connect(address: string | SocketAddress, options?: SocketOptions): Socket;
