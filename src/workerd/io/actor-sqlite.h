@@ -31,6 +31,8 @@ public:
   // the returned promise. This can be used e.g. when the database needs to be replicated to other
   // machines before being considered durable.
 
+  bool isCommitScheduled() { return commitScheduled; }
+
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return *db; }
 
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(

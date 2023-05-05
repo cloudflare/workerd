@@ -32,7 +32,17 @@ void ActorSqlite::onWrite() {
       requireNotBroken();
 
       deferredRollback.cancel();
-      commitTxn.run();
+
+      try {
+        commitTxn.run();
+      } catch (...) {
+        // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+        // instead of whatever SQLite threw.
+        requireNotBroken();
+
+        // No, we're not broken, so propagate the exception as-is.
+        throw;
+      }
 
       // The callback is only expected to commit writes up until this point. Any new writes that
       // occur while the callback is in progress are NOT included, therefore require a new commit
