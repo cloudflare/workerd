@@ -19,7 +19,7 @@ for code completion and navigation.
 
 * [GitLens extension](https://marketplace.visualstudio.com/items?itemName=eamodio.gitlens) for super charged git functionality within Visual Studio Code.
 
-You can install all of these extensions with the **Extensions: Configure Recommended Extensions (Workspace Folder)** command. You can do find this through the Visual Studio Code Command Palette (`shift+ctrl+p` on Linux / Windows, `shift+cmd+p` on OS X) and typing "Configure Recommended Extensions". The recommendations that will be installed can be found in the [.vscode/extensions.json](../.vscode/extensions.json) file.
+You can install all of these extensions with the **Extensions: Configure Recommended Extensions (Workspace Folder)** command. You can find this through the Visual Studio Code Command Palette (`shift+ctrl+p` on Linux / Windows, `shift+cmd+p` on OS X) and typing "Configure Recommended Extensions". The recommendations that will be installed can be found in the [.vscode/extensions.json](../.vscode/extensions.json) file.
 
 ## VSCode Tasks for workerd
 
