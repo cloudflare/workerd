@@ -38,36 +38,29 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
   return coloId == dogColoId ? "NOSENTRY"_kj : ""_kj;
 }
 
-#define LOG_NOSENTRY(severity, message, ...) \
-  KJ_LOG(severity,  "NOSENTRY " message, __VA_ARGS__);
+#define LOG_NOSENTRY(severity, ...) \
+  KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);
 
 #define LOG_IF_INTERESTING(exception, severity, ...) \
   if (!::workerd::isInterestingException(exception)) { \
     LOG_NOSENTRY(severity, __VA_ARGS__); \
   } else { \
-    KJ_LOG(severity,  __VA_ARGS__); \
+    KJ_LOG(severity, __VA_ARGS__); \
   }
 
 // Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY.
-#define LOG_ERROR_ONCE(msg, ...)                                               \
+#define LOG_ERROR_ONCE(...)                                                    \
   do {                                                                         \
     static bool logOnce KJ_UNUSED = [&]() {                                    \
-      KJ_LOG(ERROR, msg, ##__VA_ARGS__);                                       \
+      KJ_LOG(ERROR, __VA_ARGS__);                                              \
       return true;                                                             \
     }();                                                                       \
-  } while (0)
-
-#define LOG_ERROR_ONCE_IF(cond, msg, ...)                                      \
-  do {                                                                         \
-    if (cond) {                                                                \
-      LOG_ERROR_ONCE(msg, ##__VA_ARGS__);                                      \
-    }                                                                          \
   } while (0)
 
 // Slightly more expensive than LOG_ERROR_ONCE. Avoid putting into a hot path (e.g. within a loop)
 // where an overhead of ~hundreds of nanoseconds per evaluation to retrieve the current time would
 // be prohibitive.
-#define LOG_ERROR_PERIODICALLY(msg, ...)                                       \
+#define LOG_ERROR_PERIODICALLY(...)                                            \
   do {                                                                         \
     static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) =                          \
         kj::origin<kj::TimePoint>();                                           \
@@ -75,14 +68,7 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                     \
     if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                               \
       KJ_UNIQUE_NAME(lastLogged) = now;                                        \
-      KJ_LOG(ERROR, msg, ##__VA_ARGS__);                                       \
-    }                                                                          \
-  } while (0)
-
-#define LOG_ERROR_PERIODICALLY_IF(cond, msg, ...)                              \
-  do {                                                                         \
-    if (cond) {                                                                \
-      LOG_ERROR_PERIODICALLY(msg, ##__VA_ARGS__);                              \
+      KJ_LOG(ERROR, __VA_ARGS__);                                              \
     }                                                                          \
   } while (0)
 
