@@ -712,9 +712,9 @@ jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
 }
 
 double Performance::now() {
-  // Time never progresses outside of an IoContext.
-  if (!IoContext::hasCurrent()) return 0.0;
-  return IoContext::current().performanceNow();
+  // We define performance.now() for compatibility purposes, but due to spectre concerns it
+  // returns exactly what Date.now() returns.
+  return dateNow();
 }
 
 }  // namespace workerd::api
