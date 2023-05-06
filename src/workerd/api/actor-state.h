@@ -180,6 +180,8 @@ public:
   DurableObjectStorage(IoPtr<ActorCacheInterface> cache)
     : cache(kj::mv(cache)) {}
 
+  ActorCacheInterface& getActorCacheInterface() { return *cache; }
+
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
     jsg::Optional<bool> lowPriority;
@@ -351,11 +353,22 @@ public:
   jsg::Promise<jsg::Value> blockConcurrencyWhile(jsg::Lock& js,
       jsg::Function<jsg::Promise<jsg::Value>()> callback);
 
-  JSG_RESOURCE_TYPE(DurableObjectState) {
+  void abort(jsg::Optional<kj::String> reason);
+  // Reset the object, including breaking the output gate and canceling any writes that haven't
+  // been committed yet.
+
+  JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_METHOD(blockConcurrencyWhile);
+
+    if (flags.getWorkerdExperimental()) {
+      // TODO(someday): This currently exists for testing purposes only but maybe it could be
+      //   useful to apps in actual production? It's a convenient way to bail out when you discover
+      //   your state is inconsistent.
+      JSG_METHOD(abort);
+    }
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({

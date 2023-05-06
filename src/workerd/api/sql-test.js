@@ -161,6 +161,10 @@ function test(sql) {
   let jsonResult =
       [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
   assert.equal(jsonResult, "[4,5,{\"f\":7}]");
+
+  // Can't start transactions or savepoints.
+  requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
+  requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
 }
 
 export class DurableObjectExample {
@@ -168,9 +172,27 @@ export class DurableObjectExample {
     this.state = state;
   }
 
-  async fetch() {
-    test(this.state.storage.sql);
-    return new Response();
+  async fetch(req) {
+    if (req.url.endsWith("/sql-test")) {
+      test(this.state.storage.sql);
+      return new Response();
+    } else if (req.url.endsWith("/increment")) {
+      let val = (await this.state.storage.get("counter")) || 0;
+      ++val;
+      this.state.storage.put("counter", val);
+      return Response.json(val);
+    } else if (req.url.endsWith("/break")) {
+      // This `put()` should be discarded due to the actor aborting immediately after.
+      this.state.storage.put("counter", 888);
+
+      // Abort the actor, which also cancels unflushed writes.
+      this.state.abort("test broken");
+
+      // abort() always throws.
+      throw new Error("can't get here")
+    }
+
+    throw new Error("unknown url: " + req.url);
   }
 }
 
@@ -178,6 +200,33 @@ export default {
   async test(ctrl, env, ctx) {
     let id = env.ns.idFromName("A");
     let obj = env.ns.get(id);
-    await obj.fetch("http://foo");
+    await obj.fetch("http://foo/sql-test");
+
+    // Now let's test persistence through breakage and atomic write coalescing.
+    let doReq = async path => {
+      let resp = await obj.fetch("http://foo/" + path);
+      return await resp.json();
+    };
+
+    // Some increments.
+    assert.equal(await doReq("increment"), 1);
+    assert.equal(await doReq("increment"), 2);
+
+    // Now induce a failure.
+    try {
+      await doReq("break");
+      throw new Error("expected failure");
+    } catch (err) {
+      if (err.message != "test broken") {
+        throw err;
+      }
+      assert.equal(err.durableObjectReset, true);
+    }
+
+    // Get a new stub.
+    obj = env.ns.get(id);
+
+    // Everything's still consistent.
+    assert.equal(await doReq("increment"), 3);
   }
 }

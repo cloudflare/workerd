@@ -432,15 +432,16 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "COMMIT", op);
       }
       KJ_ASSERT(param2 == nullptr);
-      return true;
+      return regulator.allowTransactions();
 
     case SQLITE_SAVEPOINT          :   /* Operation       Savepoint Name  */
       {
         // Verify param1 is one of the values we expect.
         kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
-        KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "COMMIT", op);
+        KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "RELEASE", op);
       }
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+      return regulator.allowTransactions() &&
+          regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
 
     case SQLITE_PRAGMA             :   /* Pragma Name     1st arg or NULL */
       // We currently only permit a few pragmas.
@@ -467,8 +468,6 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       return false;
 
     case SQLITE_FUNCTION           :   /* NULL            Function Name   */
-      // TODO(sqlite): Decide which function are OK.
-
       {
         const kj::HashSet<kj::StringPtr> allowSet = []() {
           kj::HashSet<kj::StringPtr> result;
@@ -626,6 +625,12 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
       "A SQL prepared statement can only be executed once at a time.");
   SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement),
       "Wrong number of parameter bindings for SQL query.");
+
+  KJ_IF_MAYBE(cb, db.onWriteCallback) {
+    if (!sqlite3_stmt_readonly(statement)) {
+      (*cb)();
+    }
+  }
 }
 
 void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {

@@ -70,11 +70,19 @@ public:
   Query run(const char (&sqlCode)[size], Params&&... bindings);
   // When the input is a string literal, we automatically use the TRUSTED regulator.
 
+  void onWrite(kj::Function<void()> callback) { onWriteCallback = kj::mv(callback); }
+  // Invokes the given callback whenever a query begins which may write to the database. The
+  // callback is called just before executing the query.
+  //
+  // Durable Objects uses this to automatically begin a transaction and close the output gate.
+
 private:
   sqlite3* db;
 
   kj::Maybe<Regulator&> currentRegulator;
   // Set while a query is compiling.
+
+  kj::Maybe<kj::Function<void()>> onWriteCallback;
 
   void close();
 
@@ -130,6 +138,15 @@ public:
   // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
   // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
   // prohibited from causing such errors in the first place.
+
+  virtual bool allowTransactions() { return true; }
+  // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
+  // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
+  // not be able to create any sort of transaction.
+  //
+  // In Durable Objects, we disallow these statements because the platform provides an explicit
+  // API for transactions that is safer (e.g. it automatically rolls back on throw). Also, the
+  // platform automatically wraps every entry into the isolate lock in a transaction.
 };
 
 class SqliteDatabase::Statement {

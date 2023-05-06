@@ -723,6 +723,27 @@ jsg::Promise<jsg::Value> DurableObjectState::blockConcurrencyWhile(jsg::Lock& js
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
+void DurableObjectState::abort(jsg::Optional<kj::String> reason) {
+  kj::String description = kj::mv(reason).map([](kj::String&& text) {
+    return kj::str("broken.outputGateBroken; jsg.Error: ", text);
+  }).orDefault([]() {
+    return kj::str("broken.outputGateBroken; jsg.Error: Application called abort() to reset "
+        "Durable Object.");
+  });
+
+  kj::Exception error(kj::Exception::Type::FAILED, __FILE__, __LINE__, kj::mv(description));
+
+  KJ_IF_MAYBE(s, storage) {
+    // Make sure we _synchronously_ break storage so that there's no chance our promise fulfilling
+    // will race against the output gate, possibly allowing writes to complete before being
+    // canceled.
+    s->get()->getActorCacheInterface().shutdown(error);
+  }
+
+  IoContext::current().abort(kj::cp(error));
+  kj::throwFatalException(kj::mv(error));
+}
+
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate) {
   jsg::Serializer serializer(isolate, jsg::Serializer::Options {
     .version = 15,

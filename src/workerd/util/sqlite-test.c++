@@ -340,5 +340,21 @@ KJ_TEST("SQLite Regulator") {
       KJ_EXPECT(getBar.run().getInt(0) == 456));
 }
 
+KJ_TEST("SQLite onWrite callback") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  bool sawWrite = false;
+  db.onWrite([&]() { sawWrite = true; });
+
+  setupSql(db);
+  KJ_EXPECT(sawWrite);
+  sawWrite = false;
+
+  checkSql(db);
+  KJ_EXPECT(!sawWrite);  // checkSql() only does reads
+}
+
 }  // namespace
 }  // namespace workerd
