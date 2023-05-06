@@ -41,8 +41,18 @@ public:
 class Performance: public jsg::Object {
 public:
   double getTimeOrigin() { return 0.0; }
-  // We always return a time origin of 0. For us this represents the time at which the
-  // IoContext was created.
+  // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
+  // is no other appropriate time origin to use given that the Worker platform is intended to be
+  // treated like one big computer rather than many individual instances. In particular, if and
+  // when we start snapshotting applications after startup and then starting instances from that
+  // snapshot, what would the right time origin be? The time when the snapshot was created? This
+  // seems to leak implementation details in a weird way.
+  //
+  // Note that the purpose of `timeOrigin` is normally to allow `now()` to return a more-precise
+  // measurement. Measuring against a recent time allows the values returned by `now()` to be
+  // smaller in magnitude, which allows them to be more precise due to the nature of floating
+  // point numbers. In our case, though, we don't return precise measurements from this interface
+  // anyway, for Spectre reasons -- it returns the same as Date.now().
 
   double now();
 
