@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "analytics-engine.h"
-#include <capnp/serialize-text.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {

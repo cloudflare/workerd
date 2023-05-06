@@ -8,7 +8,6 @@
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/server/workerd-api.h>
-#include <workerd/server/workerd-api.h>
 
 #include "test-fixture.h"
 

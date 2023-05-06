@@ -11,7 +11,6 @@
 #include <kj/common.h>
 #include <kj/refcount.h>
 #include <kj/vector.h>
-#include <kj/string.h>
 #include <kj/list.h>
 #include <v8.h>
 

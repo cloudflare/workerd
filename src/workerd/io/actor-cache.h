@@ -12,7 +12,6 @@
 #include <kj/time.h>
 #include <kj/mutex.h>
 #include <atomic>
-#include <workerd/util/wait-list.h>
 
 namespace workerd {
 

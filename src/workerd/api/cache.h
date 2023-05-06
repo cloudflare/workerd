@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include <kj/async.h>
 #include "util.h"
 #include "http.h"
 

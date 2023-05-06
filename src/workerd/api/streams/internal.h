@@ -6,6 +6,7 @@
 
 #include "common.h"
 #include <workerd/io/io-context.h>
+#include <deque>
 
 namespace workerd::api {
 

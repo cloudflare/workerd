@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/io/io-context.h>
-#include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd {

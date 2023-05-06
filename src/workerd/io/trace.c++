@@ -7,7 +7,6 @@
 #include <kj/compat/http.h>
 #include <kj/debug.h>
 #include <cstdlib>
-#include <workerd/util/thread-scopes.h>
 
 namespace workerd {
 

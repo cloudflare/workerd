@@ -6,8 +6,9 @@
 
 #include <workerd/jsg/jsg.h>
 #include "http.h"
-#include "workerd/io/io-context.h"
+#include <workerd/io/limit-enforcer.h>
 
+namespace workerd { class IoContext; }
 namespace workerd::api {
 
 class KvNamespace: public jsg::Object {

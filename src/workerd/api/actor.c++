@@ -4,7 +4,6 @@
 
 #include "actor.h"
 #include "util.h"
-#include "system-streams.h"
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/byte-stream.h>

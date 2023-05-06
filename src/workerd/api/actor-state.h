@@ -12,8 +12,6 @@
 #include <workerd/io/actor-storage.capnp.h>
 #include <kj/async.h>
 #include <v8.h>
-#include <workerd/io/promise-wrapper.h>
-#include "util.h"
 #include <workerd/io/actor-cache.h>
 #include "sql.h"
 

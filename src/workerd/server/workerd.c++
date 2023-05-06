@@ -18,7 +18,7 @@
 #include "server.h"
 #include <workerd/jsg/setup.h>
 #include <openssl/rand.h>
-#include <workerd/io/compatibility-date.h>
+#include <workerd/io/compatibility-date.capnp.h>
 
 #if _WIN32
 #include <iostream>

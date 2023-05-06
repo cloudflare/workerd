@@ -5,7 +5,7 @@
 #include "kv.h"
 #include "util.h"
 #include "system-streams.h"
-#include "workerd/io/limit-enforcer.h"
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/util/http-util.h>
 #include <workerd/io/io-context.h>
 #include <kj/encoding.h>

@@ -11,7 +11,6 @@
 #include "util.h"
 #include <workerd/io/io-context.h>
 #include <workerd/util/uuid.h>
-#include <map>
 #include <set>
 #include <algorithm>
 #include <limits>

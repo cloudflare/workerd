@@ -7,6 +7,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/sentry.h>
+#include <kj/compat/url.h>
 
 namespace workerd::api {
 

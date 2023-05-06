@@ -21,6 +21,7 @@
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
+#include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>

@@ -3,11 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "string.h"
-#include <unicode/uchar.h>
-#include <unicode/ustring.h>
 #include <unicode/utf8.h>
 #include <unicode/utf16.h>
-#include <kj/encoding.h>
 #include <algorithm>
 
 namespace workerd::jsg {

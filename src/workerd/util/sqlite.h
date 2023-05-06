@@ -5,7 +5,6 @@
 #pragma once
 
 #include <kj/filesystem.h>
-#include <kj/async.h>
 #include <kj/one-of.h>
 #include <utility>
 

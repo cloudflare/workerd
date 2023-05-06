@@ -9,6 +9,7 @@
 #include <math.h>
 #include <workerd/api/util.h>
 #include <workerd/api/system-streams.h>
+#include <kj/encoding.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>

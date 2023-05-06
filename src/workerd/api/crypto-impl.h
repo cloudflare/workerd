@@ -8,6 +8,7 @@
 // Don't include this file unless your name is "crypto*.c++".
 
 #include "crypto.h"
+#include <kj/encoding.h>
 #include <openssl/evp.h>
 
 #define OSSLCALL(...) if ((__VA_ARGS__) != 1) \

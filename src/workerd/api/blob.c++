@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "blob.h"
-#include "system-streams.h"
+#include "streams.h"
+#include "util.h"
 
 namespace workerd::api {
 

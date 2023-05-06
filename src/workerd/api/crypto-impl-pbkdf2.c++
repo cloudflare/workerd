@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto-impl.h"
-#include <set>
 
 namespace workerd::api {
 namespace {

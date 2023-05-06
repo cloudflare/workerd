@@ -5,8 +5,8 @@
 #include "internal.h"
 #include "readable.h"
 #include "writable.h"
-#include "transform.h"
 #include <workerd/jsg/jsg.h>
+#include <kj/vector.h>
 
 namespace workerd::api {
 

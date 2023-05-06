@@ -7,7 +7,6 @@
 #include "buffer-base64.h"
 #include "buffer-string-search.h"
 #include <workerd/jsg/buffersource.h>
-#include <workerd/api/crypto-impl.h>
 #include <kj/encoding.h>
 #include <algorithm>
 

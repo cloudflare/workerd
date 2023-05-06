@@ -25,9 +25,6 @@ wd_cc_library(
     ),
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
@@ -56,7 +53,6 @@ wd_cc_library(
     hdrs = glob(["capnp-mock.h"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
     ],
 )

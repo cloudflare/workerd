@@ -5,18 +5,16 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
+#include <workerd/util/batch-queue.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/global-scope.h>
-#include <workerd/api/system-streams.h>  // for api::StreamEncoding
+#include <workerd/api/streams.h>  // for api::StreamEncoding
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
-#include <workerd/jsg/setup.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
-#include <workerd/util/wait-list.h>
 #include <capnp/compat/json.h>
-#include <capnp/schema-loader.h>
 #include <kj/compat/gzip.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
@@ -2619,7 +2617,6 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
 
   kj::Maybe<kj::Own<IoContext>> ioContext;
   // `ioContext` is initialized upon delivery of the first request.
-  // TODO(cleanup): Rename IoContext to IoContext.
 
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<void>>>> abortFulfiller;
   // If onBroken() is called while `ioContext` is still null, this is initialized. When

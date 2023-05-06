@@ -8,7 +8,6 @@
 #include <workerd/api/analytics-engine-impl.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/analytics-engine.capnp.h>
-#include <kj/async.h>
 
 namespace workerd::api {
 

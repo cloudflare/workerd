@@ -6,7 +6,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/async-context.h>
-#include <kj/table.h>
 
 namespace workerd::api::node {
 

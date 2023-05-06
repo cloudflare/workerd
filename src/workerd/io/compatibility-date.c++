@@ -2,14 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <stdio.h>
 #include "compatibility-date.h"
 #include "time.h"
 #include <capnp/schema.h>
 #include <capnp/dynamic.h>
-
-#if _WIN32
-#include <stdio.h>
-#endif
+#include <kj/map.h>
 
 namespace workerd {
 

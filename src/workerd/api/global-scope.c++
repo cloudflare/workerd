@@ -10,11 +10,8 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
-#include <workerd/io/trace.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/sentry.h>
-#include <workerd/util/sentry.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
 
 namespace workerd::api {

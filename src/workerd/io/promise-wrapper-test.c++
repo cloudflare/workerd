@@ -8,7 +8,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/jsg-test.h>
-#include <array>
 
 namespace workerd::jsg::test {  // workerd
 namespace {
