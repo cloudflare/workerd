@@ -256,12 +256,6 @@ struct PragmaInfo {
 static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
   // We allowlist these SQLite pragmas (for read only, never with arguments).
   { "data_version"_kj, PragmaSignature::NO_ARG },
-  { "page_count"_kj, PragmaSignature::NO_ARG },
-  { "freelist_count"_kj, PragmaSignature::NO_ARG },
-
-  // Let a user see some internal stats?
-  { "max_page_count"_kj, PragmaSignature::NO_ARG },
-  { "page_size"_kj, PragmaSignature::NO_ARG },
 
   // We allowlist some SQLite pragmas for changing internal state
 
