@@ -27,9 +27,17 @@ public:
 
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
+  double getDatabaseSize();
+
+  double getVoluntarySizeLimit();
+  void setVoluntarySizeLimit(int64_t value);
+
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
+
+    JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
+    JSG_PROTOTYPE_PROPERTY(voluntarySizeLimit, getVoluntarySizeLimit, setVoluntarySizeLimit);
 
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);
@@ -47,6 +55,35 @@ private:
 
   IoPtr<SqliteDatabase> sqlite;
   jsg::Ref<DurableObjectStorage> storage;
+
+  kj::Maybe<uint> pageSize;
+  kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaPageCount;
+  kj::Maybe<IoOwn<SqliteDatabase::Statement>> pragmaGetMaxPageCount;
+
+  template <size_t size, typename... Params>
+  SqliteDatabase::Query execMemoized(
+      kj::Maybe<IoOwn<SqliteDatabase::Statement>>& slot,
+      const char (&sqlCode)[size], Params&&... params) {
+    // Run a (trusted) statement, preparing it on the first call and reusing the prepared version
+    // for future calls.
+
+    SqliteDatabase::Statement* stmt;
+    KJ_IF_MAYBE(s, slot) {
+      stmt = &**s;
+    } else {
+      stmt = &*slot.emplace(IoContext::current().addObject(
+          kj::heap(sqlite->prepare(sqlCode))));
+    }
+    return stmt->run(kj::fwd<Params>(params)...);
+  }
+
+  uint64_t getPageSize() {
+    KJ_IF_MAYBE(p, pageSize) {
+      return *p;
+    } else {
+      return pageSize.emplace(sqlite->run("PRAGMA page_size;").getInt64(0));
+    }
+  }
 };
 
 class SqlStorage::Cursor final: public jsg::Object {

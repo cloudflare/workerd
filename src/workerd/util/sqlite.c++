@@ -21,6 +21,10 @@
 #include <kj/mutex.h>
 #include <atomic>
 
+#if _WIN32
+#define strncasecmp _strnicmp
+#endif
+
 namespace workerd {
 
 #define SQLITE_REQUIRE(condition, errorMessage, ...) \
@@ -234,6 +238,45 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "json_group_object"_kj,
   "json_each"_kj,
   "json_tree"_kj,
+
+  // https://www.sqlite.org/fts5.html
+  "match"_kj,
+  "highlight"_kj,
+  "bm25"_kj,
+  "snippet"_kj,
+};
+
+enum class PragmaSignature {
+  NO_ARG,
+  BOOLEAN,
+  OBJECT_NAME
+};
+struct PragmaInfo {
+  kj::StringPtr name;
+  PragmaSignature signature;
+};
+
+// https://www.sqlite.org/pragma.html
+static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
+  // We allowlist these SQLite pragmas (for read only, never with arguments).
+  { "data_version"_kj, PragmaSignature::NO_ARG },
+
+  // We allowlist some SQLite pragmas for changing internal state
+
+  // Toggle constraints on/off
+  { "case_sensitive_like"_kj, PragmaSignature::BOOLEAN },
+  { "foreign_keys"_kj, PragmaSignature::BOOLEAN },
+  { "defer_foreign_keys"_kj, PragmaSignature::BOOLEAN },
+  { "ignore_check_constraints"_kj, PragmaSignature::BOOLEAN },
+  { "recursive_triggers"_kj, PragmaSignature::BOOLEAN },
+  { "reverse_unordered_selects"_kj, PragmaSignature::BOOLEAN },
+
+  // Takes an argument of table name or index name, returns info about it.
+  { "foreign_key_check"_kj, PragmaSignature::OBJECT_NAME },
+  { "foreign_key_list"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_info"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_list"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_xinfo"_kj, PragmaSignature::OBJECT_NAME },
 };
 
 }  // namespace
@@ -447,29 +490,72 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       // We currently only permit a few pragmas.
       {
         kj::StringPtr pragma = KJ_ASSERT_NONNULL(param1);
+
         if (pragma == "table_list") {
           // Annoyingly, this will list internal tables. However, the existence of these tables
           // isn't really a secret, we just don't want people to access them.
-          return param2 == nullptr;  // should always be true?
+          return true;
+          // TODO function_list & pragma_list should be authorized but return
+          // ALLOWED_SQLITE_FUNCTIONS & ALLOWED_[READ|WRITE]_PRAGMAS
+          // respectively
         } else if (pragma == "table_info") {
           // Allow if the specific named table is not protected.
-          KJ_IF_MAYBE(name, param2) {
+          KJ_IF_MAYBE (name, param2) {
             return regulator.isAllowedName(*name);
           } else {
-            return false;  // shouldn't happen?
+            return false; // shouldn't happen?
           }
-        } else if (pragma == "data_version") {
-          return true;
-        } else if (pragma == "foreign_keys") {
-          return true;
         }
+
+        static const kj::HashMap<kj::StringPtr, PragmaSignature> allowedPragmas = []() {
+          kj::HashMap<kj::StringPtr, PragmaSignature> result;
+          for (auto& [name, signature]: ALLOWED_PRAGMAS) {
+            result.insert(name, signature);
+          }
+          return result;
+        }();
+
+        PragmaSignature sig = KJ_UNWRAP_OR(allowedPragmas.find(pragma), return false);
+        switch (sig) {
+          case PragmaSignature::NO_ARG:
+            return param2 == nullptr;
+          case PragmaSignature::BOOLEAN: {
+            // We allow omitting the argument in order to read back the current value.
+            auto val = KJ_UNWRAP_OR(param2, return true).asArray();
+
+            // SQLite offers many different ways to express booleans...
+
+            // They can be quoted. Remove quotes if present.
+            if (val.size() >= 2 &&
+                (val.front() == '\'' || val.front() == '\"') &&
+                val.back() == val.front()) {
+              val = val.slice(1, val.size() - 1);
+            }
+
+            // Compare against every possible representation. Case-insenstiive!
+            return strncasecmp(val.begin(), "true", 4) == 0
+                || strncasecmp(val.begin(), "false", 5) == 0
+                || strncasecmp(val.begin(), "yes", 3) == 0
+                || strncasecmp(val.begin(), "no", 2) == 0
+                || strncasecmp(val.begin(), "on", 2) == 0
+                || strncasecmp(val.begin(), "off", 3) == 0
+                || strncasecmp(val.begin(), "1", 1) == 0
+                || strncasecmp(val.begin(), "0", 1) == 0;
+          }
+          case PragmaSignature::OBJECT_NAME: {
+            // Argument is required.
+            auto val = KJ_UNWRAP_OR(param2, return false);
+            return regulator.isAllowedName(val);
+          }
+        }
+        KJ_UNREACHABLE;
       }
 
       return false;
 
     case SQLITE_FUNCTION           :   /* NULL            Function Name   */
       {
-        const kj::HashSet<kj::StringPtr> allowSet = []() {
+        static const kj::HashSet<kj::StringPtr> allowSet = []() {
           kj::HashSet<kj::StringPtr> result;
           for (const kj::StringPtr& func: ALLOWED_SQLITE_FUNCTIONS) {
             result.insert(func);
@@ -484,8 +570,15 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     case SQLITE_CREATE_VTABLE      :   /* Table Name      Module Name     */
     case SQLITE_DROP_VTABLE        :   /* Table Name      Module Name     */
-      // Virtual tables are tables backed by some native-code callbacks. We don't support these.
-      return false;
+      // Virtual tables are tables backed by some native-code callbacks. We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
+      {
+        KJ_IF_MAYBE (moduleName, param2) {
+          if (*moduleName == "fts5") {
+            return true;
+          }
+        }
+        return false;
+      }
 
     case SQLITE_ATTACH             :   /* Filename        NULL            */
     case SQLITE_DETACH             :   /* Database Name   NULL            */
@@ -532,7 +625,7 @@ void SqliteDatabase::setupSecurity() {
   sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 1000000);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
-  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 10);
+  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 20);
   sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 3);
   sqlite3_limit(db, SQLITE_LIMIT_VDBE_OP, 25000);
   sqlite3_limit(db, SQLITE_LIMIT_FUNCTION_ARG, 8);
