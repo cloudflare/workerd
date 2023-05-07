@@ -25,6 +25,13 @@ import {
   randomFill,
   randomInt,
   randomUUID,
+  PrimeNum,
+  GeneratePrimeOptions,
+  CheckPrimeOptions,
+  generatePrime,
+  generatePrimeSync,
+  checkPrime,
+  checkPrimeSync,
 } from 'node-internal:crypto_random';
 
 export {
@@ -33,6 +40,13 @@ export {
   randomFill,
   randomInt,
   randomUUID,
+  PrimeNum as primeNum,
+  GeneratePrimeOptions as generatePrimeOptions,
+  CheckPrimeOptions as checkPrimeOptions,
+  generatePrime,
+  generatePrimeSync,
+  checkPrime,
+  checkPrimeSync,
 }
 
 // We do not implement the openssl secure heap.
@@ -67,6 +81,10 @@ export default {
   randomFill,
   randomInt,
   randomUUID,
+  generatePrime,
+  generatePrimeSync,
+  checkPrime,
+  checkPrimeSync,
   // Misc
   secureHeapUsed,
   setEngine,
@@ -97,10 +115,10 @@ export default {
 //   * [ ] crypto.constants
 //   * [ ] crypto.DEFAULT_ENCODING
 // * Primes
-//   * [ ] crypto.checkPrime(candidate[, options], callback)
-//   * [ ] crypto.checkPrimeSync(candidate[, options])
-//   * [ ] crypto.generatePrime(size[, options[, callback]])
-//   * [ ] crypto.generatePrimeSync(size[, options])
+//   * [x] crypto.checkPrime(candidate[, options], callback)
+//   * [x] crypto.checkPrimeSync(candidate[, options])
+//   * [x] crypto.generatePrime(size[, options[, callback]])
+//   * [x] crypto.generatePrimeSync(size[, options])
 // * Ciphers
 //   * [ ] crypto.createCipher(algorithm, password[, options])
 //   * [ ] crypto.createCipheriv(algorithm, key, iv[, options])
