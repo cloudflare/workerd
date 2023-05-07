@@ -21,6 +21,10 @@
 #include <kj/mutex.h>
 #include <atomic>
 
+#if _WIN32
+#define strncasecmp _strnicmp
+#endif
+
 namespace workerd {
 
 #define SQLITE_REQUIRE(condition, errorMessage, ...) \
