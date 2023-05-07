@@ -316,6 +316,12 @@ async function test(sql) {
   assertInvalidBool("abcd");
   assertInvalidBool("\"foo\"");
   assertInvalidBool("'yes", "unrecognized token");
+
+  // Test database size interface.
+  assert.equal(sql.databaseSize, 36864);
+  assert.equal(sql.voluntarySizeLimit, 1073741823 * 4096);
+  sql.voluntarySizeLimit = 65536;
+  assert.equal(sql.voluntarySizeLimit, 65536);
 }
 
 export class DurableObjectExample {
