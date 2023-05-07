@@ -13,7 +13,7 @@ function requireException(callback, expectStr) {
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
 }
 
-function test(sql) {
+async function test(sql) {
   // Test numeric results
   const resultNumber = [...sql.exec("SELECT 123")];
   assert.equal(resultNumber.length, 1);
@@ -306,6 +306,45 @@ function test(sql) {
     assert.equal(result[1].tbl_name, 'documents');
     assert.equal(result[1].num_columns, 3);
   }
+
+  // Let the current open transaction commit. We have to do this before playing with the
+  // foreign_keys pragma because it doesn't work while a transaction is open.
+  await scheduler.wait(1);
+
+  let assertValidBool = (name, val) => {
+    sql.exec("PRAGMA foreign_keys = " + name + ";");
+    assert.equal([...sql.exec("PRAGMA foreign_keys;")][0].foreign_keys, val);
+  };
+  let assertInvalidBool = (name, msg) => {
+    requireException(() => sql.exec("PRAGMA foreign_keys = " + name + ";"),
+        msg || "not authorized");
+  };
+
+  assertValidBool("true", 1);
+  assertValidBool("false", 0);
+  assertValidBool("on", 1);
+  assertValidBool("off", 0);
+  assertValidBool("yes", 1);
+  assertValidBool("no", 0);
+  assertValidBool("1", 1);
+  assertValidBool("0", 0);
+
+  // case-insensitive
+  assertValidBool("tRuE", 1);
+  assertValidBool("NO", 0);
+
+  // quoted
+  assertValidBool("'true'", 1);
+  assertValidBool("\"yes\"", 1);
+  assertValidBool("\"0\"", 0);
+
+  // whitespace is trimmed by sqlite before passing to authorizer
+  assertValidBool("  true    ", 1);
+
+  // Don't accept anything invalid...
+  assertInvalidBool("abcd");
+  assertInvalidBool("\"foo\"");
+  assertInvalidBool("'yes", "unrecognized token");
 }
 
 export class DurableObjectExample {
@@ -315,7 +354,7 @@ export class DurableObjectExample {
 
   async fetch(req) {
     if (req.url.endsWith("/sql-test")) {
-      test(this.state.storage.sql);
+      await test(this.state.storage.sql);
       return new Response();
     } else if (req.url.endsWith("/increment")) {
       let val = (await this.state.storage.get("counter")) || 0;

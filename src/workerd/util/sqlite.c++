@@ -242,35 +242,43 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "snippet"_kj,
 };
 
-// https://www.sqlite.org/pragma.html
-static constexpr kj::StringPtr ALLOWED_READ_PRAGMAS[] = {
-  // We allowlist these SQLite pragmas (for read only, never with arguments).
-  "data_version"_kj,
-  "page_count"_kj,
-  "freelist_count"_kj,
-
-  // Let a user see some internal stats?
-  "max_page_count"_kj,
-  "page_size"_kj,
+enum class PragmaSignature {
+  NO_ARG,
+  BOOLEAN,
+  OBJECT_NAME
+};
+struct PragmaInfo {
+  kj::StringPtr name;
+  PragmaSignature signature;
 };
 
-static constexpr kj::StringPtr ALLOWED_WRITE_PRAGMAS[] = {
+// https://www.sqlite.org/pragma.html
+static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
+  // We allowlist these SQLite pragmas (for read only, never with arguments).
+  { "data_version"_kj, PragmaSignature::NO_ARG },
+  { "page_count"_kj, PragmaSignature::NO_ARG },
+  { "freelist_count"_kj, PragmaSignature::NO_ARG },
+
+  // Let a user see some internal stats?
+  { "max_page_count"_kj, PragmaSignature::NO_ARG },
+  { "page_size"_kj, PragmaSignature::NO_ARG },
+
   // We allowlist some SQLite pragmas for changing internal state
 
   // Toggle constraints on/off
-  "case_sensitive_like"_kj,
-  "foreign_keys"_kj,
-  "defer_foreign_keys"_kj,
-  "ignore_check_constraints"_kj,
-  "recursive_triggers"_kj,
-  "reverse_unordered_selects"_kj,
+  { "case_sensitive_like"_kj, PragmaSignature::BOOLEAN },
+  { "foreign_keys"_kj, PragmaSignature::BOOLEAN },
+  { "defer_foreign_keys"_kj, PragmaSignature::BOOLEAN },
+  { "ignore_check_constraints"_kj, PragmaSignature::BOOLEAN },
+  { "recursive_triggers"_kj, PragmaSignature::BOOLEAN },
+  { "reverse_unordered_selects"_kj, PragmaSignature::BOOLEAN },
 
-  // Not "writable", but takes an argument of table name
-  "foreign_key_check"_kj,
-  "foreign_key_list"_kj,
-  "index_info"_kj,
-  "index_list"_kj,
-  "index_xinfo"_kj,
+  // Takes an argument of table name or index name, returns info about it.
+  { "foreign_key_check"_kj, PragmaSignature::OBJECT_NAME },
+  { "foreign_key_list"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_info"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_list"_kj, PragmaSignature::OBJECT_NAME },
+  { "index_xinfo"_kj, PragmaSignature::OBJECT_NAME },
 };
 
 }  // namespace
@@ -501,29 +509,48 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           }
         }
 
-        static const kj::HashSet<kj::StringPtr> allowedWritePragmas = []() {
-          kj::HashSet<kj::StringPtr> result;
-          for (const kj::StringPtr& func: ALLOWED_WRITE_PRAGMAS) {
-            result.insert(func);
+        static const kj::HashMap<kj::StringPtr, PragmaSignature> allowedPragmas = []() {
+          kj::HashMap<kj::StringPtr, PragmaSignature> result;
+          for (auto& [name, signature]: ALLOWED_PRAGMAS) {
+            result.insert(name, signature);
           }
           return result;
         }();
 
-        if (allowedWritePragmas.contains(pragma)) {
-          return true;
-        }
+        PragmaSignature sig = KJ_UNWRAP_OR(allowedPragmas.find(pragma), return false);
+        switch (sig) {
+          case PragmaSignature::NO_ARG:
+            return param2 == nullptr;
+          case PragmaSignature::BOOLEAN: {
+            // We allow omitting the argument in order to read back the current value.
+            auto val = KJ_UNWRAP_OR(param2, return true).asArray();
 
-        static const kj::HashSet<kj::StringPtr> allowedReadPragmas = []() {
-          kj::HashSet<kj::StringPtr> result;
-          for (const kj::StringPtr& func: ALLOWED_READ_PRAGMAS) {
-            result.insert(func);
+            // SQLite offers many different ways to express booleans...
+
+            // They can be quoted. Remove quotes if present.
+            if (val.size() >= 2 &&
+                (val.front() == '\'' || val.front() == '\"') &&
+                val.back() == val.front()) {
+              val = val.slice(1, val.size() - 1);
+            }
+
+            // Compare against every possible representation. Case-insenstiive!
+            return strncasecmp(val.begin(), "true", 4) == 0
+                || strncasecmp(val.begin(), "false", 5) == 0
+                || strncasecmp(val.begin(), "yes", 3) == 0
+                || strncasecmp(val.begin(), "no", 2) == 0
+                || strncasecmp(val.begin(), "on", 2) == 0
+                || strncasecmp(val.begin(), "off", 3) == 0
+                || strncasecmp(val.begin(), "1", 1) == 0
+                || strncasecmp(val.begin(), "0", 1) == 0;
           }
-          return result;
-        }();
-        if (allowedReadPragmas.contains(pragma)) {
-          // Only return true if there's no second argument.
-          return param2 == nullptr;
+          case PragmaSignature::OBJECT_NAME: {
+            // Argument is required.
+            auto val = KJ_UNWRAP_OR(param2, return false);
+            return regulator.isAllowedName(val);
+          }
         }
+        KJ_UNREACHABLE;
       }
 
       return false;
