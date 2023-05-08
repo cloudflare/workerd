@@ -7,6 +7,8 @@ interface CompareOptions {
   bEnd?: number
 }
 
+type BufferSource = ArrayBufferView | ArrayBuffer;
+
 export function byteLength(value: string): number;
 export function compare(a: Uint8Array, b: Uint8Array, options?: CompareOptions): number;
 export function concat(list: Uint8Array[], length: number): ArrayBuffer;

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": [ "ESNext", "DOM" ],
+    "lib": [ "ESNext" ],
     "alwaysStrict": true,
     "strict": true,
     "allowJs": true,
@@ -21,6 +21,7 @@
     "types": [
       // todo: consume generated workerd types
       // "@cloudflare/workers-types"
+      "@types/node",
     ],
     "paths": {
       "node:*": ["./*"],

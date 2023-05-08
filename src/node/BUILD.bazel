@@ -15,4 +15,5 @@ wd_ts_bundle(
     ]),
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
+    deps = ["//:node_modules/@types/node"],
 )
