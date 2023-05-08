@@ -918,15 +918,22 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
   return getIoChannelFactory().getCache();
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(Worker::Lock& lock) {
+jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
+    Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
   jsg::Lock& js = lock;
-  auto ioOwnSpanParent = IoContext::current().addObject(kj::heap(getMetrics().getSpan()));
+  kj::Own<SpanParent> spanParent;
+  KJ_IF_MAYBE (spo, kj::mv(spanParentOverride)) {
+    spanParent = kj::heap(kj::mv(*spo));
+  } else {
+    spanParent = kj::heap(getMetrics().getSpan());
+  }
+  auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
 }
 
-SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
   KJ_IF_MAYBE (lock, currentLock) {
     KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*lock)) {
@@ -934,14 +941,18 @@ SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
         auto handle = value->getHandle(*lock);
         jsg::Lock& js = *lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
-        return spanParent->newChild(operationName);
+        return spanParent->addRef();
       }
     }
   }
 
   // If async context is unavailable (unset, or JS lock is not held), fall back to heuristic of
   // using the trace info from the most recent active request.
-  return getMetrics().getSpan().newChild(operationName);
+  return getMetrics().getSpan();
+}
+
+SpanBuilder IoContext::makeTraceSpan(kj::StringPtr operationName) {
+  return getCurrentTraceSpan().newChild(operationName);
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
