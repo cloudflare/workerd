@@ -322,6 +322,18 @@ async function test(sql) {
   assert.equal(sql.voluntarySizeLimit, 1073741823 * 4096);
   sql.voluntarySizeLimit = 65536;
   assert.equal(sql.voluntarySizeLimit, 65536);
+
+  // Test implicit rollbacks
+  {
+    await scheduler.wait(1);
+    requireException(() => {
+      sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
+      sql.exec("SELECT * FROM misspelled_table_name;")
+    }, "Error: no such table: misspelled_table_name");
+
+    const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
+    assert.equal(results.length, 0)
+  }
 }
 
 export class DurableObjectExample {
