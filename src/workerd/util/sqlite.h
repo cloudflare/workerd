@@ -75,6 +75,11 @@ public:
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
 
+  void notifyWrite();
+  // Indicates that a statement is about to be executed and so a new transaction should be opened.
+  // This is useful when the particular statement is considered "read only" but has some side-effect
+  // that requires it to be run inside a transaction, e.g. SAVEPOINT
+
 private:
   sqlite3* db;
 

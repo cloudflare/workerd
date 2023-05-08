@@ -342,6 +342,12 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
   KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) { break; }
 }
 
+void SqliteDatabase::notifyWrite() {
+  KJ_IF_MAYBE(cb, onWriteCallback) {
+    (*cb)();
+  }
+}
+
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
   // Set up the regulator that will be used for authorizer callbacks while preparing this
