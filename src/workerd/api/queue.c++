@@ -2,6 +2,7 @@
 
 #include <workerd/jsg/ser.h>
 #include <workerd/api/global-scope.h>
+#include <kj/encoding.h>
 
 namespace workerd::api {
 

@@ -5,7 +5,6 @@
 #include "server.h"
 #include <kj/test.h>
 #include <workerd/util/capnp-mock.h>
-#include <capnp/serialize-text.h>
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
 #include <regex>

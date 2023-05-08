@@ -8,7 +8,6 @@
 #endif
 
 #include "setup.h"
-#include "async-context.h"
 #include <workerd/util/uuid.h>
 #include "libplatform/libplatform.h"
 #include <v8-cppgc.h>

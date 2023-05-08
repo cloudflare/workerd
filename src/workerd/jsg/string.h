@@ -5,7 +5,6 @@
 #pragma once
 
 #include "jsg.h"
-#include <compare>
 
 namespace workerd::jsg {
 

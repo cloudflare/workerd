@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/string.h>
+#include <kj/compat/http.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.h>
 

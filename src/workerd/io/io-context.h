@@ -8,7 +8,6 @@
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 #include <kj/function.h>
-#include <kj/map.h>
 
 #include <workerd/io/trace.h>
 #include <workerd/io/worker.h>

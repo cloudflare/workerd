@@ -9,7 +9,6 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <workerd/io/io-context.h>
-#include <set>
 
 namespace workerd::api {
 namespace {

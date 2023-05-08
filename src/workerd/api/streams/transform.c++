@@ -4,8 +4,8 @@
 
 #include "transform.h"
 #include "standard.h"
+#include "internal.h"
 #include <workerd/jsg/function.h>
-#include <cmath>
 
 namespace workerd::api {
 

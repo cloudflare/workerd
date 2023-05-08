@@ -7,7 +7,6 @@
 #include <workerd/io/io-context.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
-#include <set>
 
 namespace workerd::api {
 namespace {

@@ -4,6 +4,7 @@
 
 #include "sqlite.h"
 #include <kj/debug.h>
+#include <kj/refcount.h>
 
 #if _WIN32
 #include <kj/win32-api-version.h>

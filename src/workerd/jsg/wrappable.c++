@@ -6,6 +6,7 @@
 #include "jsg.h"
 #include "setup.h"
 #include <kj/debug.h>
+#include <kj/async.h>
 #include <v8-cppgc.h>
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>

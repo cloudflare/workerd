@@ -10,7 +10,6 @@
 #include <openssl/crypto.h>
 #include <openssl/curve25519.h>
 #include <map>
-#include <set>
 #include <kj/function.h>
 #include <type_traits>
 #include "util.h"

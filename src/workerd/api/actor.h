@@ -9,7 +9,6 @@
 // to expect something that looked more specifically like Erlang, whereas our actors are much more
 // abstractly related.
 
-#include <kj/async.h>
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
 #include <workerd/api/http.h>

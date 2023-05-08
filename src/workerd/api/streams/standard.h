@@ -5,10 +5,8 @@
 #pragma once
 
 #include "common.h"
-#include "internal.h"
 #include "queue.h"
 #include <workerd/jsg/function.h>
-#include <workerd/jsg/buffersource.h>
 
 namespace workerd::api {
 

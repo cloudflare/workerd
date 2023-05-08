@@ -9,6 +9,7 @@
 #include <capnp/compat/http-over-capnp.h>
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
 
 namespace workerd {
 

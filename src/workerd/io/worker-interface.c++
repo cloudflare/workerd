@@ -4,7 +4,6 @@
 
 #include "worker-interface.h"
 #include <kj/debug.h>
-#include <workerd/util/own-util.h>
 
 namespace workerd {
 

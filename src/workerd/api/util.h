@@ -6,10 +6,9 @@
 
 #include <kj/async-io.h>
 #include <kj/compat/url.h>
-#include <kj/encoding.h>
+#include <kj/string.h>
 #include <workerd/jsg/jsg.h>
 #include <v8.h>
-#include <queue>
 
 namespace workerd::api {
 

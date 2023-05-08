@@ -3,12 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <kj/test.h>
+#include <kj/encoding.h>
 
 #include <fstream>
 #include <iostream>
 
-#include "streams.h"
 #include <workerd/api/util.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>

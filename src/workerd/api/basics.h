@@ -11,7 +11,7 @@
 #include <workerd/util/canceler.h>
 #include <kj/function.h>
 #include <kj/map.h>
-#include <workerd/io/io-context.h>
+#include <workerd/io/compatibility-date.capnp.h>
 #include "actor-state.h"
 
 namespace workerd::api {

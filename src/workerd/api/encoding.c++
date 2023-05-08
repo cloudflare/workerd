@@ -3,13 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
-#include "util.h"
-#include <kj/encoding.h>
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
 #include <algorithm>
-#include <array>
-#include <workerd/io/io-context.h>
+
 namespace workerd::api {
 
 // =======================================================================================

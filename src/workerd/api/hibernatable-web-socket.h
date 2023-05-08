@@ -7,8 +7,9 @@
 #include <kj/debug.h>
 
 #include <workerd/io/worker-interface.capnp.h>
-#include <workerd/api/global-scope.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/api/basics.h>
+#include <workerd/api/web-socket.h>
 
 namespace workerd::api {
 

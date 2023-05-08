@@ -7,7 +7,6 @@
 //
 // This file contains misc utility functions used elsewhere.
 
-#include <kj/async.h>
 #include <kj/debug.h>
 #include <kj/string.h>
 #include <kj/exception.h>

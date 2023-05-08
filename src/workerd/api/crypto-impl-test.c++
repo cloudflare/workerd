@@ -6,6 +6,7 @@
 
 #include "crypto-impl.h"
 
+#include <openssl/err.h>
 #include <openssl/rsa.h>
 #include <openssl/ec.h>
 

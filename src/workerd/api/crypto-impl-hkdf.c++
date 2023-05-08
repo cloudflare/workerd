@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto-impl.h"
-#include <set>
-#include <openssl/err.h>
 #include <openssl/hkdf.h>
 
 namespace workerd::api {

@@ -5,7 +5,6 @@
 #include "r2-admin.h"
 #include "r2-rpc.h"
 #include <workerd/api/util.h>
-#include <workerd/api/system-streams.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>

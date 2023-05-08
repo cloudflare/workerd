@@ -13,7 +13,6 @@
 #include "jsg.h"
 #include "web-idl.h"
 #include <kj/time.h>
-#include <kj/tuple.h>
 #include <kj/debug.h>
 #include <kj/one-of.h>
 
