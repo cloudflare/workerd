@@ -629,6 +629,25 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
   });
 }
 
+jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) {
+  KJ_IF_MAYBE(sqlite, cache->getSqliteDatabase()) {
+    // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
+    sqlite->notifyWrite();
+    // TODO(sqlite) allow nested savepoints, using a new savepoint name for each depth
+    sqlite->prepare("SAVEPOINT _cf_savepoint;").run();
+    return js.tryCatch([&]() {
+      auto result = callback(js);
+      sqlite->prepare("RELEASE _cf_savepoint;").run();
+      return kj::mv(result);
+    }, [&](jsg::Value exception) -> jsg::Value {
+      sqlite->prepare("ROLLBACK TO _cf_savepoint;").run();
+      js.throwException(kj::mv(exception));
+    });
+  } else {
+    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+  }
+}
+
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   KJ_IF_MAYBE(p, cache->onNoPendingFlush()) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're

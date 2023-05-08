@@ -13,7 +13,8 @@ function requireException(callback, expectStr) {
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
 }
 
-async function test(sql, storage) {
+async function test(storage) {
+  const sql = storage.sql
   // Test numeric results
   const resultNumber = [...sql.exec("SELECT 123")];
   assert.equal(resultNumber.length, 1);
@@ -379,6 +380,37 @@ async function test(sql, storage) {
     txn.rollback();
   });
   assert.equal(await storage.get("txnTest"), 3);
+
+  // Test savepoints, success
+  {
+    await scheduler.wait(1);
+    const result = storage.transactionSync(() => {
+      sql.exec("CREATE TABLE IF NOT EXISTS should_succeed (VALUE text);");
+      return "some data"
+    })
+
+    assert.equal(result, "some data")
+
+    const results = Array.from(sql.exec(`
+      SELECT * FROM sqlite_master WHERE tbl_name = 'should_succeed'
+    `))
+    assert.equal(results.length, 1)
+  }
+
+  // Test savepoints, failure
+  {
+    await scheduler.wait(1);
+
+    requireException(() => storage.transactionSync(() => {
+      sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
+      sql.exec("SELECT * FROM misspelled_table_name;")
+    }), "Error: no such table: misspelled_table_name")
+
+    const results = Array.from(sql.exec(`
+      SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'
+    `))
+    assert.equal(results.length, 0)
+  }
 }
 
 export class DurableObjectExample {
@@ -388,7 +420,7 @@ export class DurableObjectExample {
 
   async fetch(req) {
     if (req.url.endsWith("/sql-test")) {
-      await test(this.state.storage.sql, this.state.storage);
+      await test(this.state.storage);
       return new Response();
     } else if (req.url.endsWith("/increment")) {
       let val = (await this.state.storage.get("counter")) || 0;
