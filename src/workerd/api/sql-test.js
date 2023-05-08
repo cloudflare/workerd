@@ -13,7 +13,8 @@ function requireException(callback, expectStr) {
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
 }
 
-async function test(sql) {
+async function test(storage) {
+  const sql = storage.sql
   // Test numeric results
   const resultNumber = [...sql.exec("SELECT 123")];
   assert.equal(resultNumber.length, 1);
@@ -334,6 +335,25 @@ async function test(sql) {
     const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
     assert.equal(results.length, 0)
   }
+
+  // Test explicit rollbacks
+  {
+    await scheduler.wait(1);
+    await storage.transaction(async txn => {
+      let threw_error = false
+      try {
+        sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
+        sql.exec("SELECT * FROM misspelled_table_name;")
+      } catch (e) {
+        threw_error = true
+        txn.rollback()
+      }
+      assert.equal(threw_error, true)
+    })
+
+    const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
+    assert.equal(results.length, 0)
+  }
 }
 
 export class DurableObjectExample {
@@ -343,7 +363,7 @@ export class DurableObjectExample {
 
   async fetch(req) {
     if (req.url.endsWith("/sql-test")) {
-      await test(this.state.storage.sql);
+      await test(this.state.storage);
       return new Response();
     } else if (req.url.endsWith("/increment")) {
       let val = (await this.state.storage.get("counter")) || 0;
