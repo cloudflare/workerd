@@ -481,9 +481,7 @@ public:
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     JSG_METHOD(fetch);
-    if (flags.getTcpSocketsSupport()) {
-      JSG_METHOD(connect);
-    }
+    JSG_METHOD(connect);
 
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
