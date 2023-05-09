@@ -6,6 +6,7 @@
 #include "util.h"
 #include <kj/one-of.h>
 #include <kj/compat/gzip.h>
+#include <kj/compat/brotli.h>
 
 namespace workerd::api {
 
@@ -38,7 +39,8 @@ public:
   // data.
   //
   // This implementation of `tryTee()` is not technically required for correctness, but prevents
-  // re-encoding (and converting Content-Length responses to chunk-encoded responses) gzip streams.
+  // re-encoding (and converting Content-Length responses to chunk-encoded responses) gzip and
+  // brotli streams.
 
 private:
   friend class EncodedAsyncOutputStream;
@@ -68,6 +70,20 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
         "Gzip compressed stream ended prematurely."_kj },
       { "gzip decompression failed"_kj,
         "Gzip decompression failed." },
+      { "brotli state allocation failed"_kj,
+        "Brotli state allocation failed." },
+      { "invalid brotli window size"_kj,
+        "Invalid brotli window size." },
+      { "invalid brotli compression level"_kj,
+        "Invalid brotli compression level." },
+      { "brotli window size too big"_kj,
+        "Brotli window size too big." },
+      { "brotli decompression failed"_kj,
+        "Brotli decompression failed." },
+      { "brotli compression failed"_kj,
+        "Brotli compression failed." },
+      { "brotli compressed stream ended prematurely"_kj,
+        "Brotli compressed stream ended prematurely." },
     })) {
       return kj::mv(*e);
     }
@@ -105,8 +121,11 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
   if (encoding == StreamEncoding::GZIP) {
     inner = kj::heap<kj::GzipAsyncInputStream>(*inner).attach(kj::mv(inner));
     encoding = StreamEncoding::IDENTITY;
+  } else if (encoding == StreamEncoding::BROTLI) {
+    inner = kj::heap<kj::BrotliAsyncInputStream>(*inner).attach(kj::mv(inner));
+    encoding = StreamEncoding::IDENTITY;
   } else {
-    // gzip is the only non-identity encoding we currently support.
+    // We currently support gzip and brotli as non-identity content encodings.
     KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
   }
 }
@@ -153,7 +172,8 @@ private:
     // A sentinel indicating that the EncodedOutputStream has ended and is no longer usable.
   };
 
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>, Ended> inner;
+  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>,
+            kj::Own<kj::BrotliAsyncOutputStream>, Ended> inner;
   // I use a OneOf here rather than probing with downcasts because end() must be called for
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
   // but I'm paranoid.
@@ -218,6 +238,9 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
       KJ_IF_MAYBE(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
         promise = promise.then([&gz = *gz]() { return gz->end(); });
       }
+      KJ_IF_MAYBE(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
+        promise = promise.then([&br = *br]() { return br->end(); });
+      }
     }
 
     // Since this is a system stream, the pump task is eligible to be deferred past IoContext
@@ -235,6 +258,9 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
 
   KJ_IF_MAYBE(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
     promise = (*gz)->end().attach(kj::mv(*gz));
+  }
+  KJ_IF_MAYBE(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
+    promise = (*br)->end().attach(kj::mv(*br));
   }
 
   KJ_IF_MAYBE(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
@@ -261,8 +287,13 @@ void EncodedAsyncOutputStream::ensureIdentityEncoding() {
 
     inner = kj::heap<kj::GzipAsyncOutputStream>(*stream).attach(kj::mv(stream));
     encoding = StreamEncoding::IDENTITY;
+  } else if (encoding == StreamEncoding::BROTLI) {
+    auto& stream = inner.get<kj::Own<kj::AsyncOutputStream>>();
+
+    inner = kj::heap<kj::BrotliAsyncOutputStream>(*stream).attach(kj::mv(stream));
+    encoding = StreamEncoding::IDENTITY;
   } else {
-    // gzip is the only non-identity encoding we currently support.
+    // We currently support gzip and brotli as non-identity content encodings.
     KJ_ASSERT(encoding == StreamEncoding::IDENTITY);
   }
 }
@@ -274,6 +305,9 @@ kj::AsyncOutputStream& EncodedAsyncOutputStream::getInner() {
     }
     KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
       return *gz;
+    }
+    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+      return *br;
     }
     KJ_CASE_ONEOF(ended, Ended) {
       KJ_FAIL_ASSERT("the EncodedAsyncOutputStream has been ended or aborted.");
@@ -314,6 +348,8 @@ StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& hea
   KJ_IF_MAYBE(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
     if (*encodingStr == "gzip") {
       return StreamEncoding::GZIP;
+    } else if (*encodingStr == "br") {
+      return StreamEncoding::BROTLI;
     }
   }
   return StreamEncoding::IDENTITY;
