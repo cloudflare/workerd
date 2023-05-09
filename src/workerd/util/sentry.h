@@ -63,7 +63,7 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
 #define LOG_ERROR_PERIODICALLY(...)                                            \
   do {                                                                         \
     static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) =                          \
-        kj::origin<kj::TimePoint>();                                           \
+        kj::origin<kj::TimePoint>() - 1 * kj::HOURS;                           \
     const auto now = kj::systemCoarseMonotonicClock().now();                   \
     const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                     \
     if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                               \
