@@ -812,7 +812,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
       kj::mv(keyAlgorithm), extractable, usages);
 }
 
-kj::Own<EVP_PKEY> importRsaFromJwk(SubtleCrypto::JsonWebKey&& keyDataJwk) {
+kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
   auto rsaKey = OSSL_NEW(RSA);
 
   auto modulus = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.n),
@@ -946,7 +946,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
           "algorithm \"", jwkHash->first, "\".");
     }
 
-    return importRsaFromJwk(kj::mv(keyDataJwk));
+    return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
   // get0 avoids adding a refcount...
@@ -1018,7 +1018,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
           "Unrecognized or unimplemented algorithm \"", *alg,
           "\" listed in JSON Web Key Algorithm parameter.");
     }
-    return importRsaFromJwk(kj::mv(keyDataJwk));
+    return rsaJwkReader(kj::mv(keyDataJwk));
   }, allowedUsages);
 
   JSG_REQUIRE(keyType == "private", DOMDataError,
@@ -1441,7 +1441,54 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EllipticKey::generateElliptic(
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
 
-kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDataJwk) {
+ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
+    kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
+    CryptoKeyUsageSet allowedUsages) {
+  // Import an elliptic key represented by raw data, only public keys are supported.
+  JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
+      "Expected raw EC key but instead got a Json Web Key.");
+
+  const auto& raw = keyData.get<kj::Array<kj::byte>>();
+
+  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
+      "importing raw ECDH key with non-empty usages");
+  auto usages = CryptoKeyUsageSet::validate(normalizedName,
+      CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
+
+  if (curveId == NID_ED25519 || curveId == NID_X25519) {
+    auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
+    auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
+
+    JSG_REQUIRE(raw.size() == 32, DOMDataError, curveName, " raw keys must be exactly 32-bytes "
+        "(provided ", raw.size(), ").");
+
+    return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
+        raw.begin(), raw.size()), InternalDOMOperationError, "Failed to import raw public EDDSA",
+        raw.size(), internalDescribeOpensslErrors()), "public"_kj, usages };
+  }
+
+  auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
+      "Error importing EC key", tryDescribeOpensslErrors());
+  auto ecGroup = EC_KEY_get0_group(ecKey.get());
+
+  auto point = OSSL_NEW(EC_POINT, ecGroup);
+  JSG_REQUIRE(1 == EC_POINT_oct2point(ecGroup, point.get(), raw.begin(),
+      raw.size(), nullptr), DOMDataError, "Failed to import raw EC key data",
+      tryDescribeOpensslErrors());
+  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey.get(), point.get()), InternalDOMOperationError,
+      "Failed to set EC raw public key", internalDescribeOpensslErrors());
+  JSG_REQUIRE(1 == EC_KEY_check_key(ecKey.get()), DOMDataError, "Invalid raw EC key provided",
+      tryDescribeOpensslErrors());
+
+  auto evpPkey = OSSL_NEW(EVP_PKEY);
+  OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
+
+  return ImportAsymmetricResult{ kj::mv(evpPkey), "public"_kj, usages };
+}
+
+}  // namespace
+
+kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk) {
   if (curveId == NID_ED25519 || curveId == NID_X25519) {
     auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
     auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
@@ -1545,53 +1592,6 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey keyDat
   OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
   return evpPkey;
 }
-
-ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, int curveId,
-    kj::StringPtr normalizedName, kj::ArrayPtr<const kj::String> keyUsages,
-    CryptoKeyUsageSet allowedUsages) {
-  // Import an elliptic key represented by raw data, only public keys are supported.
-  JSG_REQUIRE(keyData.is<kj::Array<kj::byte>>(), DOMDataError,
-      "Expected raw EC key but instead got a Json Web Key.");
-
-  const auto& raw = keyData.get<kj::Array<kj::byte>>();
-
-  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
-      "importing raw ECDH key with non-empty usages");
-  auto usages = CryptoKeyUsageSet::validate(normalizedName,
-      CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
-
-  if (curveId == NID_ED25519 || curveId == NID_X25519) {
-    auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
-    auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
-
-    JSG_REQUIRE(raw.size() == 32, DOMDataError, curveName, " raw keys must be exactly 32-bytes "
-        "(provided ", raw.size(), ").");
-
-    return { OSSLCALL_OWN(EVP_PKEY, EVP_PKEY_new_raw_public_key(evpId, nullptr,
-        raw.begin(), raw.size()), InternalDOMOperationError, "Failed to import raw public EDDSA",
-        raw.size(), internalDescribeOpensslErrors()), "public"_kj, usages };
-  }
-
-  auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
-      "Error importing EC key", tryDescribeOpensslErrors());
-  auto ecGroup = EC_KEY_get0_group(ecKey.get());
-
-  auto point = OSSL_NEW(EC_POINT, ecGroup);
-  JSG_REQUIRE(1 == EC_POINT_oct2point(ecGroup, point.get(), raw.begin(),
-      raw.size(), nullptr), DOMDataError, "Failed to import raw EC key data",
-      tryDescribeOpensslErrors());
-  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey.get(), point.get()), InternalDOMOperationError,
-      "Failed to set EC raw public key", internalDescribeOpensslErrors());
-  JSG_REQUIRE(1 == EC_KEY_check_key(ecKey.get()), DOMDataError, "Invalid raw EC key provided",
-      tryDescribeOpensslErrors());
-
-  auto evpPkey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
-
-  return ImportAsymmetricResult{ kj::mv(evpPkey), "public"_kj, usages };
-}
-
-}  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
     kj::StringPtr normalizedName,
