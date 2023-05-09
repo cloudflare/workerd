@@ -18,6 +18,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <capnp/compat/json.h>
 #include <kj/compat/gzip.h>
+#include <kj/compat/brotli.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
@@ -3196,7 +3197,11 @@ public:
       : constIsolate(kj::mv(isolate)), requestId(kj::mv(requestId)), inner(kj::mv(inner)),
         requestMetrics(requestMetrics) {
     if (encoding == api::StreamEncoding::GZIP) {
-      gz.emplace(decodedBuf, kj::GzipOutputStream::DECOMPRESS);
+      compStream.emplace().init<kj::GzipOutputStream>(decodedBuf,
+          kj::GzipOutputStream::DECOMPRESS);
+    } else if (encoding == api::StreamEncoding::BROTLI) {
+      compStream.emplace().init<kj::BrotliOutputStream>(decodedBuf,
+          kj::BrotliOutputStream::DECOMPRESS);
     }
   }
 
@@ -3242,13 +3247,23 @@ public:
     rawSize += buffer.size();
 
     auto prevDecodedSize = decodedBuf.getWrittenSize();
-    KJ_IF_MAYBE(gzip, gz) {
-      // On invalid gzip discard the previously decoded body and rethrow to stop the stream.
-      // This way we will report sizes up to this point but won't read any more invalid data.
-      KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
+    KJ_IF_MAYBE(comp, compStream) {
+      KJ_SWITCH_ONEOF(*comp) {
+        KJ_CASE_ONEOF(gzip, kj::GzipOutputStream) {
+          // On invalid gzip discard the previously decoded body and rethrow to stop the stream.
+          // This way we will report sizes up to this point but won't read any more invalid data.
+          KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
 
-      gzip->write(buffer.begin(), buffer.size());
-      gzip->flush();
+          gzip.write(buffer.begin(), buffer.size());
+          gzip.flush();
+        }
+        KJ_CASE_ONEOF(brotli, kj::BrotliOutputStream) {
+          KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
+
+          brotli.write(buffer.begin(), buffer.size());
+          brotli.flush();
+        }
+      }
     } else {
       decodedBuf.write(buffer.begin(), buffer.size());
     }
@@ -3288,7 +3303,7 @@ private:
   kj::Own<kj::AsyncOutputStream> inner;
   size_t rawSize = 0;
   LimitedBodyWrapper decodedBuf;
-  kj::Maybe<kj::GzipOutputStream> gz;
+  kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
   RequestObserver& requestMetrics;
 };
 
@@ -3420,6 +3435,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
     KJ_IF_MAYBE(encodingStr, headers.get(contentEncodingHeaderId)) {
       if (*encodingStr == "gzip") {
         encoding = api::StreamEncoding::GZIP;
+      } else if (*encodingStr == "br") {
+        encoding = api::StreamEncoding::BROTLI;
       }
     }
 

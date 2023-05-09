@@ -64,7 +64,7 @@ build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualif
 # zlib release (https://github.com/madler/zlib/issues/633)
 build:unix --per_file_copt='external/zlib[~/].*\.c@-std=c90' --host_per_file_copt='external/zlib[~/].*\.c@-std=c90'
 
-build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:libdl=True
+build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True --@capnp-cpp//src/kj:libdl=True
 
 build:linux --config=unix
 build:macos --config=unix

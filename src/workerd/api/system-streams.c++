@@ -68,6 +68,20 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
         "Gzip compressed stream ended prematurely."_kj },
       { "gzip decompression failed"_kj,
         "Gzip decompression failed." },
+      { "brotli state allocation failed"_kj,
+        "Brotli state allocation failed." },
+      { "invalid brotli window size"_kj,
+        "Invalid brotli window size." },
+      { "invalid brotli compression level"_kj,
+        "Invalid brotli compression level." },
+      { "brotli window size too big"_kj,
+        "Brotli window size too big." },
+      { "brotli decompression failed"_kj,
+        "Brotli decompression failed." },
+      { "brotli compression failed"_kj,
+        "Brotli compression failed." },
+      { "brotli compressed stream ended prematurely"_kj,
+        "Brotli compressed stream ended prematurely." },
     })) {
       return kj::mv(*e);
     }

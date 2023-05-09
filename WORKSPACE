@@ -35,11 +35,16 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "d51c3ca9062d4fbd64f66722b08aafe18976aff3e9965aa0958a0afd4323d4b8",
-    strip_prefix = "capnproto-capnproto-b2afb7f/c++",
+    sha256 = "f5acb23912b9526b1b424132e9b14266089106620c5ba2a55030eb46f3598069",
+    strip_prefix = "capnproto-capnproto-f438b61/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/b2afb7f8fe393466a38e2fd2ad98482c34aafcee"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/f438b61c135d694870f7dc9a7789b6f74a0a549b"],
 )
+
+# Fetch brotli via capnproto. While workerd does not use brotli directly, this is required to work
+# around bazel shenanigans.
+load("@capnp-cpp//:build/load_br.bzl", "load_brotli")
+load_brotli()
 
 http_archive(
     name = "ssl",
