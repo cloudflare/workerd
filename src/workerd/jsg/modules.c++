@@ -70,13 +70,28 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         ref.specifier.parent().eval(spec) :
         kj::Path::parse(spec);
 
-    result = JSG_REQUIRE_NONNULL(registry->resolve(js, targetPath,
+    KJ_IF_MAYBE(resolved, registry->resolve(js, targetPath,
         internalOnly ?
             ModuleRegistry::ResolveOption::INTERNAL_ONLY :
-            ModuleRegistry::ResolveOption::DEFAULT), Error,
-        "No such module \"", targetPath.toString(),
-        "\".\n  imported from \"", ref.specifier.toString(), "\"")
-        .module.getHandle(js);
+            ModuleRegistry::ResolveOption::DEFAULT)) {
+      result = resolved->module.getHandle(js);
+    } else {
+      // This is a bit annoying. If the module was not found, then
+      // we need to check to see if it is a prefixed specifier. If it is,
+      // we'll try again with only the specifier and not the ref.specifier
+      // as parent. We have to do it this way just in case the worker bundle
+      // is using the prefix itself. (which isn't likely but is possible).
+      // We only need to do this if internalOnly is false.
+      if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
+        KJ_IF_MAYBE(resolve, registry->resolve(js, kj::Path::parse(spec),
+             ModuleRegistry::ResolveOption::DEFAULT)) {
+          result = resolve->module.getHandle(js);
+          return;
+        }
+      }
+      JSG_FAIL_REQUIRE(Error, "No such module \"", targetPath.toString(),
+        "\".\n  imported from \"", ref.specifier.toString(), "\"");
+    }
   }, [&](Value value) {
     isolate->ThrowException(value.getHandle(js));
     result = v8::MaybeLocal<v8::Module>();
