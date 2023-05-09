@@ -365,7 +365,8 @@ public:
   }
 
   kj::StringPtr getOrigin() { return "null"; }
-  // The origin is unknown, return "null" as advocated in https://developer.mozilla.org/en-US/docs/Web/API/origin.
+  // The origin is unknown, return "null" as described in
+  // https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque.
 
   jsg::Ref<CacheStorage> getCaches() {
     return jsg::alloc<CacheStorage>();
