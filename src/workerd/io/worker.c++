@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <cstdint>
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
@@ -2634,6 +2635,12 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   kj::ForkedPromise<void> shutdownPromise;
   kj::Own<kj::PromiseFulfiller<void>> shutdownFulfiller;
 
+  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
+  // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
+  // websocket. We eventually move the HibernationManager into the DeferredProxy task
+  // (since it's long lived), but can still refer to the HibernationManager by passing a reference
+  // in each CustomEvent.
+  kj::Maybe<uint16_t> hibernationEventType;
   kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct Alarm {
@@ -2655,6 +2662,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
        bool hasTransient, MakeActorCacheFunc makeActorCache,
        MakeStorageFunc makeStorage, kj::Own<Loopback> loopback,
        TimerChannel& timerChannel, kj::Own<ActorObserver> metricsParam,
+       kj::Maybe<kj::Own<HibernationManager>> manager, kj::Maybe<uint16_t>& hibernationEventType,
        kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)), makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
@@ -2662,7 +2670,10 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
         inputGate(hooks), outputGate(hooks),
         loopback(kj::mv(loopback)),
         timerChannel(timerChannel),
-        shutdownPromise(paf.promise.fork()), shutdownFulfiller(kj::mv(paf.fulfiller)),
+        shutdownPromise(paf.promise.fork()),
+        shutdownFulfiller(kj::mv(paf.fulfiller)),
+        hibernationManager(kj::mv(manager)),
+        hibernationEventType(kj::mv(hibernationEventType)),
         deletedAlarmTasks(*this) {
     v8::Isolate* isolate = lock.getIsolate();
     v8::HandleScope scope(isolate);
@@ -2700,12 +2711,14 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
 Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Actor::Id actorId,
     bool hasTransient, MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
-    kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics)
+    kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics,
+    kj::Maybe<kj::Own<HibernationManager>> manager, kj::Maybe<uint16_t> hibernationEventType)
     : worker(kj::atomicAddRef(worker)), tracker(tracker.map([](RequestTracker& tracker){
       return tracker.addRef();
     })) {
   impl = kj::heap<Impl>(*this, lock, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
-                        kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics));
+                        kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics),
+                        kj::mv(manager), hibernationEventType);
 
   KJ_IF_MAYBE(c, className) {
     KJ_IF_MAYBE(cls, lock.getWorker().impl->actorClasses.find(*c)) {
@@ -3067,6 +3080,21 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
       .eagerlyEvaluate([](kj::Exception&& e) {
     LOG_EXCEPTION("actorMetricsFlushLoop", e);
   });
+}
+
+kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
+  return impl->hibernationManager.map([](kj::Own<HibernationManager>& hib) -> HibernationManager& {
+    return *hib;
+  });
+}
+
+void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
+  KJ_REQUIRE(impl->hibernationManager == nullptr);
+  impl->hibernationManager = kj::mv(hib);
+}
+
+kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
+  return impl->hibernationEventType;
 }
 
 // =======================================================================================

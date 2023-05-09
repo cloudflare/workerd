@@ -1345,7 +1345,7 @@ public:
           auto newActor = kj::refcounted<Worker::Actor>(
               *service.worker, nullptr, kj::mv(id), true, kj::mv(makeActorCache),
               className, kj::mv(makeStorage), lock, kj::mv(loopback),
-              timerChannel, kj::refcounted<ActorObserver>());
+              timerChannel, kj::refcounted<ActorObserver>(), nullptr, nullptr);
 
           // If the actor becomes broken, remove it from the map, so a new one will be created
           // next time.

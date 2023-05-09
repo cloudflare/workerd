@@ -19,7 +19,7 @@
 #include "trace.h"
 #include "scheduled.h"
 #include "queue.h"
-#include "hibernatable-web-socket.h"
+#include "hibernation-event-params.h"
 #include "blob.h"
 #include "sockets.h"
 #include "streams.h"
@@ -184,7 +184,7 @@ struct ExportedHandler {
   typedef kj::Promise<void> HibernatableWebSocketMessageHandler(jsg::Ref<WebSocket>, kj::OneOf<kj::String, kj::Array<byte>> message);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketMessageHandler>> webSocketMessage;
 
-  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(jsg::Ref<WebSocket>, kj::String reason, int code);
+  typedef kj::Promise<void> HibernatableWebSocketCloseHandler(jsg::Ref<WebSocket>, int code, kj::String reason, bool wasClean);
   jsg::LenientOptional<jsg::Function<HibernatableWebSocketCloseHandler>> webSocketClose;
 
   typedef kj::Promise<void> HibernatableWebSocketErrorHandler(jsg::Ref<WebSocket>, jsg::Value);
@@ -289,12 +289,12 @@ public:
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketClose(
-      kj::String reason,
-      int code,
+      HibernatableSocketParams::Close close,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketError(
+      kj::Exception e,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
