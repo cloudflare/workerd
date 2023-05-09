@@ -2805,7 +2805,7 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
 }
 
 kj::Promise<void> Worker::Actor::onShutdown() {
-  return impl->shutdownPromise.addBranch();
+  return impl->shutdownPromise.addBranch().adoptEnvironment();
 }
 
 kj::Promise<void> Worker::Actor::onBroken() {

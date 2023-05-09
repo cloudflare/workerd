@@ -78,7 +78,7 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
       ownWaiter = kj::addRef(*waiter);
     }
 
-    return waiter->forkedPromise.addBranch().attach(kj::mv(ownWaiter));
+    return waiter->forkedPromise.addBranch().adoptEnvironment().attach(kj::mv(ownWaiter));
   } else {
     // No refcounting, no forked promise.
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
