@@ -41,7 +41,7 @@ import {
     ERR_INVALID_ARG_TYPE,
   } from 'node-internal:internal_errors';
 
-export function getArrayBufferOrView(buffer: ArrayBuffer | ArrayBufferView | SharedArrayBuffer | string, name: string, encoding?: string): Buffer | ArrayBuffer | ArrayBufferView | SharedArrayBuffer {
+export function getArrayBufferOrView(buffer: Buffer | ArrayBuffer | ArrayBufferView | string, name: string, encoding?: string): Buffer | ArrayBuffer | ArrayBufferView {
   if (isAnyArrayBuffer(buffer))
     return buffer as ArrayBuffer;
   if (typeof buffer === 'string') {

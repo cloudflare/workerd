@@ -243,7 +243,7 @@ export function randomUUID(options?: any) {
   return crypto.randomUUID();
 }
 
-export type PrimeNum = ArrayBuffer | SharedArrayBuffer | Buffer | DataView | bigint;
+export type PrimeNum = ArrayBuffer | ArrayBufferView | Buffer | bigint;
 export interface GeneratePrimeOptions {
   add?: PrimeNum;
   rem?: PrimeNum;
