@@ -13,13 +13,12 @@ namespace workerd::api::node {
 kj::Array<kj::byte> CryptoImpl::getPbkdf(kj::Array<kj::byte> password,
 kj::Array<kj::byte> salt, uint32_t num_iterations, uint32_t keylen, kj::String name) {
   // Should not be needed based on current memory limits, still good to have
-    JSG_REQUIRE(password.size() < INT32_MAX, RangeError,
-        "Pbkdf2 failed: password is too large");
-    JSG_REQUIRE(salt.size() < INT32_MAX, RangeError,
-        "Pbkdf2 failed: password is too large");
+  JSG_REQUIRE(password.size() < INT32_MAX, RangeError, "Pbkdf2 failed: password is too large");
+  JSG_REQUIRE(salt.size() < INT32_MAX, RangeError, "Pbkdf2 failed: salt is too large");
 
   const EVP_MD* digest = EVP_get_digestbyname(name.begin());
-  JSG_REQUIRE(digest != nullptr, TypeError, "Invalid Pbkdf2 digest: ", name, internalDescribeOpensslErrors());
+  JSG_REQUIRE(digest != nullptr, TypeError, "Invalid Pbkdf2 digest: ", name,
+              internalDescribeOpensslErrors());
 
   // Both pass and salt may be zero length here.
   auto buf = kj::heapArray<byte>(keylen);
