@@ -364,12 +364,9 @@ public:
     return jsg::alloc<Performance>();
   }
 
-  jsg::Unimplemented getOrigin() { return {}; }
-  // TODO(conform): A browser-side service worker returns the origin for the URL on which it was
-  //   installed, e.g. https://www.example.com for a service worker downloaded from
-  //   https://www.example.com/sw.js. This seems like something we could provide to scripts during
-  //   a FetchEvent callback (in between .request() and FetchEvent.respondWith()), and otherwise
-  //   throw.
+  kj::StringPtr getOrigin() { return "null"; }
+  // The origin is unknown, return "null" as described in
+  // https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque.
 
   jsg::Ref<CacheStorage> getCaches() {
     return jsg::alloc<CacheStorage>();
