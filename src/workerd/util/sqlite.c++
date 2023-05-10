@@ -483,8 +483,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         kj::StringPtr op = KJ_ASSERT_NONNULL(param1);
         KJ_ASSERT(op == "BEGIN" || op == "ROLLBACK" || op == "RELEASE", op);
       }
-      return regulator.allowTransactions() &&
-          regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
 
     case SQLITE_PRAGMA             :   /* Pragma Name     1st arg or NULL */
       // We currently only permit a few pragmas.

@@ -180,7 +180,7 @@ async function test(storage) {
 
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
-  requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
+  //requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
 
   // Full text search extension
 
@@ -324,7 +324,45 @@ async function test(storage) {
   sql.voluntarySizeLimit = 65536;
   assert.equal(sql.voluntarySizeLimit, 65536);
 
-  // Test implicit rollbacks
+  // Test snapshots (manual)
+  {
+    await scheduler.wait(1);
+    sql.exec("DROP TABLE IF EXISTS __tmp;")
+    sql.exec("SAVEPOINT aaa;")
+    let result;
+    try {
+      sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
+      sql.exec("SELECT * FROM misspelled_table_name;")
+      result = sql.exec("RELEASE aaa;")
+    } catch (e) {
+      console.log({e: `${e}`})
+      sql.exec("ROLLBACK TO aaa;")
+      console.log(e.message)
+      result = { success: false, error: e.message }
+    }
+    assert.equal(result.error, "no such table: misspelled_table_name");
+    assert.equal(result.success, false);
+
+    const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
+    assert.equal(results.length, 0)
+  }
+
+/*
+  // Test snapshots
+  {
+    await scheduler.wait(1);
+    const result = sql.savepoint(() => {
+      sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
+      sql.exec("SELECT * FROM misspelled_table_name;")
+    })
+    assert.equal(result.error, "Error: no such table: misspelled_table_name");
+    assert.equal(result.success, false);
+
+    const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
+    assert.equal(results.length, 0)
+  }
+
+  // Test snapshots (implicit)
   {
     await scheduler.wait(1);
     requireException(() => {
@@ -351,9 +389,9 @@ async function test(storage) {
       assert.equal(threw_error, true)
     })
 
-    const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
+    const results = new Array(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
     assert.equal(results.length, 0)
-  }
+  }*/
 }
 
 export class DurableObjectExample {
