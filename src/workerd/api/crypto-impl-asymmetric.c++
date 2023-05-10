@@ -180,6 +180,17 @@ public:
 
   EVP_PKEY* getEvpPkey() const { return keyData.get(); }
 
+  bool equals(const CryptoKey::Impl& other) const override final {
+    if (this == &other) return true;
+    KJ_IF_MAYBE(otherImpl, kj::dynamicDowncastIfAvailable<const AsymmetricKey>(other)) {
+      // EVP_PKEY_cmp will return 1 if the inputs match, 0 if they don't match,
+      // -1 if the key types are different, and -2 if the operation is not supported.
+      // We only really care about the first two cases.
+      return EVP_PKEY_cmp(keyData.get(), otherImpl->keyData.get()) == 1;
+    }
+    return false;
+  }
+
 private:
   virtual SubtleCrypto::JsonWebKey exportJwk() const = 0;
   virtual kj::Array<kj::byte> exportRaw() const = 0;

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "crypto-impl.h"
+#include <openssl/crypto.h>
 #include <openssl/hkdf.h>
 
 namespace workerd::api {
@@ -51,6 +52,15 @@ private:
 
   kj::StringPtr getAlgorithmName() const override { return "HKDF"; }
   CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+
+  bool equals(const CryptoKey::Impl& other) const override final {
+    return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
+  }
+
+  bool equals(const kj::Array<kj::byte>& other) const override final {
+    return keyData.size() == other.size() &&
+           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+  }
 
   kj::Array<kj::byte> keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;

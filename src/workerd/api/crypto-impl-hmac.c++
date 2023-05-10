@@ -84,6 +84,15 @@ private:
   kj::StringPtr getAlgorithmName() const override { return "HMAC"; }
   CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
 
+  bool equals(const CryptoKey::Impl& other) const override final {
+    return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
+  }
+
+  bool equals(const kj::Array<kj::byte>& other) const override final {
+    return keyData.size() == other.size() &&
+           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
+  }
+
   kj::Array<kj::byte> keyData;
   CryptoKey::HmacKeyAlgorithm keyAlgorithm;
 };

@@ -225,6 +225,13 @@ public:
   explicit CryptoKey(kj::Own<Impl> impl);
   // Treat as private -- needs to be public for jsg::alloc<T>()...
 
+  bool operator==(const CryptoKey& other) const;
+  // Compare the contents of this key with the other. Will return false if
+  // either key is not extractable or if the keys are a different type.
+  // For secret keys, we will compare only the actual key material and not
+  // the algorithm parameters or the algorithm name. We will also ensure
+  // that a timing-safe comparison is used for the key material.
+
 private:
   kj::Own<Impl> impl;
 

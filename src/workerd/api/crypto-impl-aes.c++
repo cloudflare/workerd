@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <openssl/aes.h>
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <workerd/io/io-context.h>
 
@@ -113,6 +114,15 @@ protected:
     // AesKeyAlgorithm is constructed from normalizedName which points into the static constant
     // defined in crypto.c++ for lookup.
     return keyAlgorithm.name;
+  }
+
+  bool equals(const CryptoKey::Impl& other) const override final {
+    return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));
+  }
+
+  bool equals(const kj::Array<kj::byte>& other) const override final {
+    return keyData.size() == other.size() &&
+           CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
 private:

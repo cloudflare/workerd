@@ -203,4 +203,8 @@ kj::EncodingResult<kj::Array<kj::byte>> decodeBase64Url(kj::String text) {
   return kj::decodeBase64(text);
 }
 
+bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
+  KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
+}
+
 }  // namespace workerd::api
