@@ -457,9 +457,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
             doClose();
           }
           KJ_IF_MAYBE(o, owner) {
-            KJ_IF_MAYBE(pair, o->eofResolverPair) {
-              pair->resolver.resolve();
-            }
+            o->signalEof();
           }
           return js.resolvedPromise(ReadResult { .done = true });
         }
@@ -1151,6 +1149,7 @@ void WritableStreamInternalController::releaseWriter(
 }
 
 bool WritableStreamInternalController::isClosedOrClosing() {
+
   bool isClosing = !queue.empty() && queue.back().event.is<Close>();
   bool isFlushing = !queue.empty() && queue.back().event.is<Flush>();
   return state.is<StreamStates::Closed>() || isClosing || isFlushing;

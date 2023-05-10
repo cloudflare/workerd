@@ -55,6 +55,15 @@ SecureTransportKind parseSecureTransport(SocketOptions* opts) {
   }
 }
 
+bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
+  KJ_IF_MAYBE(o, opts) {
+    return o->allowHalfOpen;
+  }
+
+  // The allowHalfOpen flag is false by default.
+  return false;
+}
+
 jsg::Ref<Socket> setupSocket(
     jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
@@ -66,7 +75,11 @@ jsg::Ref<Socket> setupSocket(
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
   auto sysStreams = newSystemMultiStream(refcountedConnection->addWrappedRef(), ioContext);
   auto readable = jsg::alloc<ReadableStream>(ioContext, kj::mv(sysStreams.readable));
-  readable->initEofResolverPair(js);
+  auto allowHalfOpen = getAllowHalfOpen(options);
+  kj::Maybe<jsg::Promise<void>> eofPromise;
+  if (!allowHalfOpen) {
+    eofPromise = readable->onEof(js);
+  }
   auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable));
 
   auto closeFulfiller = jsg::newPromiseAndResolver<void>(ioContext.getCurrentLock().getIsolate());
@@ -83,7 +96,9 @@ jsg::Ref<Socket> setupSocket(
       kj::mv(tlsStarter),
       isSecureSocket,
       kj::mv(domain));
-  result->handleReadableEof(js);
+  KJ_IF_MAYBE(p, eofPromise) {
+    result->handleReadableEof(js, kj::mv(*p));
+  }
   return result;
 }
 
@@ -245,9 +260,10 @@ void Socket::handleProxyStatus(
   result.markAsHandled();
 }
 
-void Socket::handleReadableEof(jsg::Lock& js) {
+void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
+  KJ_ASSERT(!getAllowHalfOpen(options));
   // Listen for EOF on the ReadableStream.
-  KJ_ASSERT_NONNULL(readable->eofResolverPair).promise.then(js,
+  onEof.then(js,
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
     return ref->maybeCloseWriteSide(js);
   })).markAsHandled();
@@ -255,11 +271,14 @@ void Socket::handleReadableEof(jsg::Lock& js) {
 
 jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // When `allowHalfOpen` is set to true then we do not automatically close the write side on EOF.
-  // The default value for `allowHalfOpen` is also false.
-  KJ_IF_MAYBE(opts, options) {
-    if (opts->allowHalfOpen) {
-      return js.resolvedPromise();
-    }
+  // This code shouldn't even run since we don't set up a callback which calls it unless
+  // `allowHalfOpen` is false.
+  KJ_ASSERT(!getAllowHalfOpen(options));
+
+  // Do not call `close` on a controller that has already been closed or is in the process
+  // of closing.
+  if (writable->getController().isClosedOrClosing()) {
+    return js.resolvedPromise();
   }
 
   // We want to close the socket, but only after its WritableStream has been flushed. We do this
@@ -267,14 +286,10 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // is flushed. Then once the `close` either completes or fails we can be sure that any data has
   // been flushed.
   return writable->getController().close(js).catch_(js,
-      [](jsg::Lock& js, workerd::jsg::V8Ref<v8::Value> exc) {
-    // A failure to close the WritableStream can indicate one of these things:
-    //   * The WritableStream hasn't been attached.
-    //   * The WritableStream has already been released or closed.
-    //
-    // We only want to ensure that the writable stream is flushed before closing the socket.
-    // With the above we are certain that it was flushed, so we are safe to close.
-  }).then(js, JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
+      JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value&& exc) {
+    ref->closeFulfiller.resolver.reject(js,
+        KJ_EXCEPTION(FAILED, kj::str(exc.getHandle(js.v8Isolate))));
+  })).then(js, JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
     ref->closeFulfiller.resolver.resolve();
   }));
 }

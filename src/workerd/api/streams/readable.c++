@@ -314,8 +314,15 @@ bool ReadableStream::isDisturbed() { return getController().isDisturbed(); }
 
 bool ReadableStream::isLocked() { return getController().isLockedToReader(); }
 
-void ReadableStream::initEofResolverPair(jsg::Lock& js) {
+jsg::Promise<void> ReadableStream::onEof(jsg::Lock& js) {
   eofResolverPair = js.newPromiseAndResolver<void>();
+  return kj::mv(KJ_ASSERT_NONNULL(eofResolverPair).promise);
+}
+
+void ReadableStream::signalEof() {
+  KJ_IF_MAYBE(pair, eofResolverPair) {
+    pair->resolver.resolve();
+  }
 }
 
 ReadableStreamController& ReadableStream::getController() {

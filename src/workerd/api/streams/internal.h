@@ -205,8 +205,8 @@ public:
 
   void setHighWaterMark(uint64_t highWaterMark);
 
+  bool isClosedOrClosing() override;
 private:
-  bool isClosedOrClosing();
 
   struct AbortOptions {
     bool reject = false;
