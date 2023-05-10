@@ -96,10 +96,10 @@ public:
   }
 
   void append(jsg::UsvString name, jsg::UsvString value);
-  void delete_(jsg::UsvString name);
+  void delete_(jsg::UsvString name, jsg::Optional<jsg::Value> value);
   kj::Maybe<jsg::UsvStringPtr> get(jsg::UsvString name);
   kj::Array<jsg::UsvStringPtr> getAll(jsg::UsvString name);
-  bool has(jsg::UsvString name);
+  bool has(jsg::UsvString name, jsg::Optional<jsg::Value> value);
   void set(jsg::UsvString name, jsg::UsvString value);
   void sort();
 
