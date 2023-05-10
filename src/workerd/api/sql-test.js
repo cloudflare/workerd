@@ -328,15 +328,15 @@ async function test(storage) {
   {
     await scheduler.wait(1);
     sql.exec("DROP TABLE IF EXISTS __tmp;")
-    sql.exec("SAVEPOINT aaa;")
+    sql.savepoint()
     let result;
     try {
       sql.exec("CREATE TABLE should_be_rolled_back (VALUE text);");
       sql.exec("SELECT * FROM misspelled_table_name;")
-      result = sql.exec("RELEASE aaa;")
+      sql.release()
     } catch (e) {
       console.log({e: `${e}`})
-      sql.exec("ROLLBACK TO aaa;")
+      sql.rollback()
       console.log(e.message)
       result = { success: false, error: e.message }
     }
@@ -347,7 +347,7 @@ async function test(storage) {
     assert.equal(results.length, 0)
   }
 
-/*
+  /*
   // Test snapshots
   {
     await scheduler.wait(1);
@@ -361,7 +361,6 @@ async function test(storage) {
     const results = Array.from(sql.exec("SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'"))
     assert.equal(results.length, 0)
   }
-
   // Test snapshots (implicit)
   {
     await scheduler.wait(1);

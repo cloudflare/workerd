@@ -25,6 +25,10 @@ public:
 
   jsg::Ref<Cursor> exec(jsg::Lock& js, kj::String query, jsg::Arguments<BindingValue> bindings);
 
+  void savepoint(jsg::Lock& js);
+  void release(jsg::Lock& js);
+  void rollback(jsg::Lock& js);
+
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
   double getDatabaseSize();
@@ -34,6 +38,9 @@ public:
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
+    JSG_METHOD(savepoint);
+    JSG_METHOD(release);
+    JSG_METHOD(rollback);
     JSG_METHOD(prepare);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);

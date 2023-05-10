@@ -18,6 +18,16 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js, kj::String querySql
   return jsg::alloc<Cursor>(*sqlite, regulator, querySql, kj::mv(bindings));
 }
 
+void SqlStorage::savepoint(jsg::Lock& js) {
+  sqlite->prepare("SAVEPOINT __USER_SAVEPOINT__;").run();
+}
+void SqlStorage::release(jsg::Lock& js) {
+  sqlite->prepare("RELEASE __USER_SAVEPOINT__;").run();
+}
+void SqlStorage::rollback(jsg::Lock& js) {
+  sqlite->prepare("ROLLBACK TO __USER_SAVEPOINT__;").run();
+}
+
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String query) {
   return jsg::alloc<Statement>(sqlite->prepare(*this, query));
 }
