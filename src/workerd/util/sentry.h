@@ -49,6 +49,15 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
   }
 
 // Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY.
+#define LOG_WARNING_ONCE(...)                                                  \
+  do {                                                                         \
+    static bool logOnce KJ_UNUSED = [&]() {                                    \
+      KJ_LOG(WARNING, __VA_ARGS__);                                            \
+      return true;                                                             \
+    }();                                                                       \
+  } while (0)
+
+// Log this to Sentry once ever per process. Typically will be better to use LOG_ERROR_PERIODICALLY.
 #define LOG_ERROR_ONCE(...)                                                    \
   do {                                                                         \
     static bool logOnce KJ_UNUSED = [&]() {                                    \
