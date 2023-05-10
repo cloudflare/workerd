@@ -1146,11 +1146,6 @@ private:
   friend class Registration;
 };
 
-kj::Own<Server::InspectorService> Server::makeInspectorService(
-    kj::HttpHeaderTable::Builder& headerTableBuilder) {
-  return kj::heap<InspectorService>(timer, headerTableBuilder);
-}
-
 // =======================================================================================
 
 class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHandler,
@@ -1969,6 +1964,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       "the schema?"));
 }
 
+void startInspector(kj::StringPtr inspectorAddress, kj::StringPtr name, Worker::Isolate* isolate);
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -2058,20 +2054,22 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
       featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
+  auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
+  KJ_IF_MAYBE(inspector, inspectorOverride) {
+    // For workerd, if the inspector is enabled, it is always fully trusted.
+    inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
+  }
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::mv(observer),
       name,
       kj::mv(limitEnforcer),
-      // For workerd, if the inspector is enabled, it is always fully trusted.
-      maybeInspectorService != nullptr ?
-          Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED :
-          Worker::Isolate::InspectorPolicy::DISALLOW);
+      inspectorPolicy);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
-  KJ_IF_MAYBE(inspector, maybeInspectorService) {
-    (*inspector)->registerIsolate(name, isolate.get());
+  KJ_IF_MAYBE(inspector, inspectorOverride) {
+    startInspector(*inspector, name, isolate.get());
   }
 
   auto script = isolate->newScript(
@@ -2480,33 +2478,42 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
       .attach(kj::mv(vfs));
 }
 
+void startInspector(kj::StringPtr inspectorAddress,
+                    Server::InspectorServiceIsolateRegistrar& registrar) {
+  // Configure and start the inspector socket.
+  kj::Thread thread([inspectorAddress, name, isolate](){
+    kj::AsyncIoContext io = kj::setupAsyncIo();
+
+    kj::HttpHeaderTable::Builder headerTableBuilder;
+
+    // Create the special inspector service.
+    kj::Own<Server::InspectorService> inspectorService(kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder));
+    auto ownHeaderTable = headerTableBuilder.build();
+
+    inspectorService->registerIsolate(name, isolate);
+
+    // Configure and start the inspector socket.
+    static constexpr uint DEFAULT_PORT = 9229;
+
+    auto& network = io.provider->getNetwork();
+    auto inspectorListener = network.parseAddress(inspectorAddress, DEFAULT_PORT)
+      .then([](kj::Own<kj::NetworkAddress> parsed) {
+      return parsed->listen();
+    });
+
+    auto listen = inspectorListener.then([&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
+      KJ_LOG(INFO, "Inspector is listening");
+      return inspectorService->listen(kj::mv(listener));
+    });
+
+    kj::NEVER_DONE.wait(io.waitScope);
+  });
+  thread.detach();
+}
+
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
                            kj::HttpHeaderTable::Builder& headerTableBuilder,
                            kj::ForkedPromise<void>& forkedDrainWhen) {
-  // ---------------------------------------------------------------------------
-  // Configure inspector.
-  static constexpr uint DEFAULT_PORT = 9229;
-
-  static auto constexpr listen = [](kj::Network& network,
-                                    kj::StringPtr address,
-                                    InspectorService& inspectorService)
-      -> kj::Promise<void> {
-    auto parsed = co_await network.parseAddress(address, DEFAULT_PORT);
-    auto listener = parsed->listen();
-    KJ_LOG(INFO, "Inspector is listening");
-    co_await inspectorService.listen(kj::mv(listener));
-  };
-
-  KJ_IF_MAYBE(inspector, inspectorOverride) {
-    // Create the special inspector service.
-    auto& inspectorService = *maybeInspectorService.emplace(
-        makeInspectorService(headerTableBuilder));
-
-    // Configure and start the inspector socket.
-    tasks.add(listen(network, *inspector, inspectorService)
-        .exclusiveJoin(forkedDrainWhen.addBranch()));
-  }
-
   // ---------------------------------------------------------------------------
   // Configure services
 

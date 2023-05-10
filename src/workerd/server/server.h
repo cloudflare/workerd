@@ -74,6 +74,8 @@ public:
   struct Ephemeral {};
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
+  class InspectorService;
+
 private:
   kj::Filesystem& fs;
   kj::Timer& timer;
@@ -174,11 +176,6 @@ private:
   class WorkerService;
   class WorkerEntrypointService;
   class HttpListener;
-
-  class InspectorService;
-
-  kj::Maybe<kj::Own<InspectorService>> maybeInspectorService;
-  kj::Own<InspectorService> makeInspectorService(kj::HttpHeaderTable::Builder& headerTableBuilder);
 
   void startServices(jsg::V8System& v8System, config::Config::Reader config,
                      kj::HttpHeaderTable::Builder& headerTableBuilder,

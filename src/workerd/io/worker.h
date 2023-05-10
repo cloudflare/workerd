@@ -451,7 +451,6 @@ private:
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
 
   friend class Worker;
-  friend class IsolateChannelImpl;
 };
 
 class Worker::ApiIsolate {
