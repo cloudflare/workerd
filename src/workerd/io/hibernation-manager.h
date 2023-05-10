@@ -176,7 +176,7 @@ private:
   // Allows the HibernatableWebSocket event handler that is currently running to access the
   // HibernatableWebSocket that it needs to execute.
 
-  const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 64;
+  const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
   // The maximum number of Hibernatable WebSocket connections a single HibernationManagerImpl
   // instance can manage.
 
