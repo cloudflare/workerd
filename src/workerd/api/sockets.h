@@ -41,7 +41,7 @@ public:
       jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
       bool isSecureSocket, kj::String domain)
-      : connectionStream(kj::mv(connectionStream)),
+      : connectionStream(IoContext::current().addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
         closedPromise(kj::mv(closeFulfiller.promise)),
@@ -51,7 +51,7 @@ public:
               closeFulfiller.resolver.resolve();
             })),
         options(kj::mv(options)),
-        tlsStarter(kj::mv(tlsStarter)),
+        tlsStarter(IoContext::current().addObject(kj::mv(tlsStarter))),
         isSecureSocket(isSecureSocket),
         domain(kj::mv(domain)) { };
 
@@ -85,7 +85,7 @@ public:
   }
 
 private:
-  kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
+  IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
   jsg::PromiseResolverPair<void> closeFulfiller;
@@ -93,7 +93,7 @@ private:
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   jsg::Promise<void> writeDisconnectedPromise;
   jsg::Optional<SocketOptions> options;
-  kj::Own<kj::TlsStarterCallback> tlsStarter;
+  IoOwn<kj::TlsStarterCallback> tlsStarter;
   // Callback used to upgrade the existing connection to a secure one.
   bool isSecureSocket;
   // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
