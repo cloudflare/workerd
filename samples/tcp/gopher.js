@@ -1,6 +1,3 @@
-// WARNING: The TCP Sockets API in workerd is still in development, the following sample is likely
-// to change.
-//
 // This is an ESM module implementing a simple Gopher client. Gopher is an old alternative to HTTP,
 // it is also a simple protocol which makes it ideal for demoing TCP sockets in workerd.
 //
@@ -32,20 +29,13 @@ export default {
 
       // The Gopher server should now return a response to us and close the connection.
       // So start reading from the socket.
-      const reader = socket.readable.getReader();
       const decoder = new TextDecoder();
 
       let gopherResponse = "";
-      while (true) {
-        const res = await reader.read();
-        if (res.done) {
-          console.log("Stream done, socket connection has been closed.");
-          // TODO(soon): Half-open connections:
-          // see https://github.com/cloudflare/workerd/pull/162#discussion_r1020483277.
-          break;
-        }
-        gopherResponse += decoder.decode(res.value);
+      for await (const chunk of socket.readable) {
+        gopherResponse += decoder.decode(chunk, { stream: true });
       }
+      gopherResponse += decoder.decode();
 
       console.log("Read ", gopherResponse.length, " from Gopher server");
 
