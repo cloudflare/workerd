@@ -103,14 +103,53 @@ private:
     bool committed = false;
   };
 
-  kj::OneOf<NoTxn, ImplicitTxn*> currentTxn = NoTxn();
+  class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
+  public:
+    ExplicitTxn(ActorSqlite& actorSqlite);
+    ~ExplicitTxn() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(ExplicitTxn);
+
+    kj::Maybe<kj::Promise<void>> commit() override;
+    kj::Promise<void> rollback() override;
+    // Implements ActorCacheInterface::Transaction.
+
+    kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
+        Key key, ReadOptions options) override;
+    kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(
+        kj::Array<Key> keys, ReadOptions options) override;
+    kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> getAlarm(
+        ReadOptions options) override;
+    kj::OneOf<GetResultList, kj::Promise<GetResultList>> list(
+        Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
+    kj::OneOf<GetResultList, kj::Promise<GetResultList>> listReverse(
+        Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) override;
+    kj::Maybe<kj::Promise<void>> put(Key key, Value value, WriteOptions options) override;
+    kj::Maybe<kj::Promise<void>> put(kj::Array<KeyValuePair> pairs, WriteOptions options) override;
+    kj::OneOf<bool, kj::Promise<bool>> delete_(Key key, WriteOptions options) override;
+    kj::OneOf<uint, kj::Promise<uint>> delete_(kj::Array<Key> keys, WriteOptions options) override;
+    kj::Maybe<kj::Promise<void>> setAlarm(
+        kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) override;
+    // Implements ActorCacheOps. These will all forward to the ActorSqlite instance.
+
+  private:
+    ActorSqlite& actorSqlite;
+    kj::Maybe<kj::Own<ExplicitTxn>> parent;
+    uint depth = 0;
+    bool hasChild = false;
+    bool committed = false;
+
+    void rollbackImpl();
+  };
+
+  kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
   // When set to NoTxn, there is no transaction outstanding.
   //
   // When set to `ImplicitTxn*`, an implicit transaction is currently open, owned by `commitTasks`.
   // If there is a need to commit this early, e.g. to start an explicit transaction, that can be
   // done through this reference.
   //
-  // TODO(now): If there is an explicit transaction, it'll be here too.
+  // When set to `ExplicitTxn*`, an explicit transaction is currently open, so no implicit
+  // transactions should be used in the meantime.
 
   kj::TaskSet commitTasks;
 
