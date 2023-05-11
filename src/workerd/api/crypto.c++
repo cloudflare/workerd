@@ -281,6 +281,15 @@ kj::Array<kj::StringPtr> CryptoKey::getUsages() const {
 }
 CryptoKeyUsageSet CryptoKey::getUsageSet() const { return impl->getUsages(); }
 
+bool CryptoKey::operator==(const CryptoKey& other) const {
+  // We check this first because we don't want any comparison to happen if
+  // either key is not extractable, even if they are the same object.
+  if (!getExtractable() || !other.getExtractable()) {
+    return false;
+  }
+  return this == &other || (getType() == other.getType() && impl->equals(*other.impl));
+}
+
 jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(
     jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,

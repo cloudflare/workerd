@@ -191,6 +191,9 @@ public:
   virtual AlgorithmVariant getAlgorithm() const = 0;
   virtual kj::StringPtr getType() const { return "secret"_kj; }
 
+  virtual bool equals(const Impl& other) const = 0;
+  virtual bool equals(const kj::Array<kj::byte>& other) const;
+
 private:
   const bool extractable;
   const CryptoKeyUsageSet usages;

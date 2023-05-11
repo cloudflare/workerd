@@ -10,7 +10,7 @@ kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl:
 }
 
 bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
-  KJ_UNIMPLEMENTED("not implemented");
+  return *key == *otherKey;
 }
 
 CryptoImpl::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
