@@ -407,6 +407,57 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   return kj::mv(signal);
 }
 
+jsg::Ref<AbortSignal> AbortSignal::any(
+    jsg::Lock& js,
+    kj::Array<jsg::Ref<AbortSignal>> signals,
+    const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
+  // If nothing was passed in, we can just return a signal that never aborts.
+  if (signals.size() == 0) {
+    return jsg::alloc<AbortSignal>(nullptr, nullptr, AbortSignal::Flag::NEVER_ABORTS);
+  }
+
+  // Let's check to see if any of the signals are already aborted. If it is, we can
+  // optimize here by skipping the event handler registration.
+  for (auto& sig : signals) {
+    if (sig->getAborted()) {
+      return AbortSignal::abort(js, sig->getReason(js));
+    }
+  }
+
+  // Otherwise we need to create a new signal and register event handlers on all
+  // of the signals that were passed in.
+  auto signal = jsg::alloc<AbortSignal>();
+  for (auto& sig : signals) {
+    // This is a bit of a hack. We want to call addEventListener, but that requires a
+    // jsg::Identified<EventTarget::Handler>, which we can't create directly yet.
+    // So we create a jsg::Function, wrap that in a v8::Function, then convert that into
+    // the jsg::Identified<EventTarget::Handler>, and voila, we have what we need.
+    auto fn = js.wrapSimpleFunction(js.v8Context(),
+        [&signal = *signal, &self = *sig](jsg::Lock& js, auto&) {
+      // Note that we are not capturing any strong references here to either signal
+      // or sig. This is because we are capturing a strong reference to the signal
+      // when we add the event below. This ensures that we do not have an unbreakable
+      // circular reference. The returned signal will not have any strong references
+      // to any of the signals that are passed in, but each of the signals passed in
+      // will have a strong reference to the new signal.
+      signal.triggerAbort(js, self.getReason(js));
+    });
+    jsg::Identified<EventTarget::Handler> identified = {
+      .identity = { js.v8Isolate, fn },
+      .unwrapped = JSG_REQUIRE_NONNULL(handler.tryUnwrap(js, fn.As<v8::Value>()), TypeError,
+          "Unable to create AbortSignal.any handler")
+    };
+
+    sig->addEventListener(js, kj::str("abort"), kj::mv(identified), AddEventListenerOptions {
+      // Once the abort is triggered, this handler should remove itself.
+      .once = true,
+      // When the signal is triggered, we'll use it to cancel the other registered signals.
+      .signal = signal.addRef()
+    });
+  }
+  return signal;
+}
+
 void AbortSignal::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(reason);
 }

@@ -506,10 +506,16 @@ public:
 
   void triggerAbort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
 
+  static jsg::Ref<AbortSignal> any(
+      jsg::Lock& js,
+      kj::Array<jsg::Ref<AbortSignal>> signals,
+      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
+
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);
     JSG_STATIC_METHOD(abort);
     JSG_STATIC_METHOD(timeout);
+    JSG_STATIC_METHOD(any);
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(aborted, getAborted);
       JSG_READONLY_PROTOTYPE_PROPERTY(reason, getReason);
