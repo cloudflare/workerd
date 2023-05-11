@@ -2538,8 +2538,16 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
     tasks.add(listener
-        .then([this, &service, rewriter = kj::mv(rewriter), physicalProtocol]
+        .then([this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
               (kj::Own<kj::ConnectionReceiver> listener) mutable {
+      KJ_IF_MAYBE(stream, controlOverride) {
+        auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
+        try {
+          (*stream)->write(message.begin(), message.size());
+        } catch (kj::Exception& e) {
+          KJ_LOG(ERROR, e);
+        }
+      }
       return listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
     }).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
