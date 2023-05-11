@@ -1159,6 +1159,7 @@ public:
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Maybe<Service&> cache;
     kj::Maybe<kj::Own<SqliteDatabase::Vfs>> actorStorage;
+    AlarmScheduler& alarmScheduler;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
 
@@ -1207,6 +1208,10 @@ public:
     }
   }
 
+  kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>>& getActorNamespaces() {
+    return actorNamespaces;
+  }
+
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata) override {
     return startRequest(kj::mv(metadata), nullptr);
@@ -1247,6 +1252,23 @@ public:
 
     kj::Own<WorkerInterface> getActor(Worker::Actor::Id id,
         IoChannelFactory::SubrequestMetadata metadata) {
+      kj::String idStr;
+      KJ_SWITCH_ONEOF(id) {
+        KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
+          KJ_REQUIRE(config.is<Durable>());
+          idStr = obj->toString();
+        }
+        KJ_CASE_ONEOF(str, kj::String) {
+          KJ_REQUIRE(config.is<Ephemeral>());
+          idStr = kj::str(str);
+        }
+      }
+
+      return getActor(kj::mv(idStr), kj::mv(metadata));
+    }
+
+    kj::Own<WorkerInterface> getActor(kj::String id,
+        IoChannelFactory::SubrequestMetadata metadata) {
       auto promise = getActorImpl(kj::mv(id))
           .then([this, metadata = kj::mv(metadata)](kj::Own<Worker::Actor> actor) mutable {
         return service.startRequest(kj::mv(metadata), className, kj::mv(actor));
@@ -1272,11 +1294,13 @@ public:
     }
 
     class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
+      // Implements actor loopback, which is used by websocket hibernation to deliver events to the
+      // actor from the websocket's read loop.
     public:
-      Loopback(ActorNamespace& ns, Worker::Actor::Id id) : ns(ns), id(kj::mv(id)) {}
+      Loopback(ActorNamespace& ns, kj::String id) : ns(ns), id(kj::mv(id)) {}
 
       kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
-        return ns.getActor(Worker::Actor::cloneId(id), kj::mv(metadata));
+        return ns.getActor(kj::str(id), kj::mv(metadata));
       }
 
       kj::Own<Worker::Actor::Loopback> addRef() {
@@ -1285,10 +1309,45 @@ public:
 
     private:
       ActorNamespace& ns;
-      Worker::Actor::Id id;
+      kj::String id;
     };
 
-    kj::Promise<kj::Own<Worker::Actor>> getActorImpl(Worker::Actor::Id id) {
+    class ActorSqliteHooks final : public ActorSqlite::Hooks {
+    public:
+      ActorSqliteHooks(AlarmScheduler& alarmScheduler, ActorKey actor)
+          : alarmScheduler(alarmScheduler), actor(actor) {}
+
+      kj::Promise<kj::Maybe<kj::Date>> getAlarm() override {
+        return alarmScheduler.getAlarm(actor);
+      }
+
+      kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime) override {
+        KJ_IF_MAYBE(scheduledTime, newAlarmTime) {
+          alarmScheduler.setAlarm(actor, *scheduledTime);
+        } else {
+          alarmScheduler.deleteAlarm(actor);
+        }
+        return kj::READY_NOW;
+      }
+
+      kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date, bool) override {
+        // No-op -- armAlarmHandler() is normally used to schedule a delete after the alarm runs.
+        // But since alarm read/write operations happen on the same thread as the scheduler in
+        // workerd, we can just handle the delete in the scheduler instead.
+        //
+        // We return this weird kj::Own<void> to `this` since just doing kj::Own<void>() creates an
+        // empty maybe.
+        return kj::Own<void>(this, kj::NullDisposer::instance);
+      }
+
+      void cancelDeferredAlarmDeletion() override {}
+
+    private:
+      AlarmScheduler& alarmScheduler;
+      ActorKey actor;
+    };
+
+    kj::Promise<kj::Own<Worker::Actor>> getActorImpl(kj::String id) {
       // `getActor()` is often called with the calling isolate's lock held. We need to drop that
       // lock and take a lock on the target isolate before constructing the actor. Even if these
       // are the same isolate (as is commonly the case), we really don't want to do this stuff
@@ -1296,19 +1355,7 @@ public:
       return service.worker->takeAsyncLockWithoutRequest(nullptr).then(
           [this, id = kj::mv(id)]
           (Worker::AsyncLock asyncLock) mutable -> kj::Own<Worker::Actor> {
-        kj::String idStr;
-        KJ_SWITCH_ONEOF(id) {
-          KJ_CASE_ONEOF(obj, kj::Own<ActorIdFactory::ActorId>) {
-            KJ_REQUIRE(config.is<Durable>());
-            idStr = obj->toString();
-          }
-          KJ_CASE_ONEOF(str, kj::String) {
-            KJ_REQUIRE(config.is<Ephemeral>());
-            idStr = kj::str(str);
-          }
-        }
-
-        auto actor = kj::addRef(*actors.findOrCreate(idStr, [&]() mutable {
+        auto actor = kj::addRef(*actors.findOrCreate(id, [&]() mutable {
           auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
 
           auto makeActorCache =
@@ -1317,11 +1364,16 @@ public:
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_MAYBE(as, channels.actorStorage) {
+                auto sqliteHooks = kj::heap<ActorSqliteHooks>(channels.alarmScheduler, ActorKey{
+                  .uniqueKey = d.uniqueKey, .actorId = id
+                });
+
                 auto db = kj::heap<SqliteDatabase>(**as,
-                    kj::Path({d.uniqueKey, kj::str(idStr, ".sqlite")}),
+                    kj::Path({d.uniqueKey, kj::str(id, ".sqlite")}),
                     kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
                 return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-                    []() -> kj::Promise<void> { return kj::READY_NOW; });
+                    []() -> kj::Promise<void> { return kj::READY_NOW; },
+                    *sqliteHooks).attach(kj::mv(sqliteHooks));
               } else {
                 // Create an ActorCache backed by a fake, empty storage. Elsewhere, we configure
                 // ActorCache never to flush, so this effectively creates in-memory storage.
@@ -1340,10 +1392,10 @@ public:
 
           TimerChannel& timerChannel = service;
 
-          auto loopback = kj::refcounted<Loopback>(*this, Worker::Actor::cloneId(id));
+          auto loopback = kj::refcounted<Loopback>(*this, kj::str(id));
           Worker::Lock lock(*service.worker, asyncLock);
           auto newActor = kj::refcounted<Worker::Actor>(
-              *service.worker, nullptr, kj::mv(id), true, kj::mv(makeActorCache),
+              *service.worker, nullptr, kj::str(id), true, kj::mv(makeActorCache),
               className, kj::mv(makeStorage), lock, kj::mv(loopback),
               timerChannel, kj::refcounted<ActorObserver>(), nullptr, nullptr);
 
@@ -1351,14 +1403,14 @@ public:
           // next time.
           onBrokenTasks.add(newActor->onBroken()
               .catch_([](kj::Exception&&) {})
-              .then([this, idStr = idStr.asPtr(), &actor = *newActor]() {
-            actors.erase(idStr);
+              .then([this, id = id.asPtr(), &actor = *newActor]() {
+            actors.erase(id);
           }));
 
           // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
           //   a minute of inactivity...
           return kj::HashMap<kj::String, kj::Own<Worker::Actor>>::Entry {
-            kj::mv(idStr), kj::mv(newActor)
+            kj::mv(id), kj::mv(newActor)
           };
         }));
 
@@ -1987,7 +2039,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto linkCallback =
       [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
        actorChannels = kj::mv(actorChannels)](WorkerService& workerService) mutable {
-    WorkerService::LinkedIoChannels result;
+    WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
     auto services = kj::heapArrayBuilder<Service*>(subrequestChannels.size() +
               IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT);
@@ -2047,6 +2099,18 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       } else {
         reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
             "to a service \"", diskName, "\", but no such service is defined."));
+      }
+    }
+
+    kj::HashMap<kj::StringPtr, WorkerService::ActorNamespace&> durableNamespacesByUniqueKey;
+    for(auto& [className, ns] : workerService.getActorNamespaces()) {
+      KJ_IF_MAYBE(config, ns->getConfig().tryGet<Server::Durable>()) {
+        auto& actorNs = ns; // clangd gets confused trying to use ns directly in the capture below??
+
+        alarmScheduler->registerNamespace(config->uniqueKey,
+            [&actorNs](kj::String id) -> kj::Own<WorkerInterface> {
+          return actorNs->getActor(kj::mv(id), IoChannelFactory::SubrequestMetadata{});
+        });
       }
     }
 
@@ -2332,6 +2396,17 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
   return listenPromise.exclusiveJoin(kj::mv(fatalPromise)).attach(kj::mv(ownHeaderTable));
 }
 
+void Server::startAlarmScheduler(config::Config::Reader config) {
+  auto& clock = kj::systemPreciseCalendarClock();
+  auto dir = kj::newInMemoryDirectory(clock);
+  auto vfs = kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
+
+  // TODO(someday): support persistent storage for alarms
+
+  alarmScheduler = kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"alarms.sqlite"}))
+      .attach(kj::mv(vfs));
+}
+
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
                            kj::HttpHeaderTable::Builder& headerTableBuilder,
                            kj::ForkedPromise<void>& forkedDrainWhen) {
@@ -2450,6 +2525,9 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
       kj::mv(service)
     };
   });
+
+  // Start the alarm scheduler before linking services
+  startAlarmScheduler(config);
 
   // Third pass: Cross-link services.
   for (auto& service: services) {

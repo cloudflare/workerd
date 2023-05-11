@@ -15,7 +15,7 @@ class SqliteKv {
   // The table is named `_cf_KV`. The naming is designed so that if the application is allowed to
   // perform direct SQL queries, we can block it from accessing any table prefixed with `_cf_`.
   // (Ideally this class would allow configuring the table name, but this would require a somewhat
-  // obnoxious about of string allocation.)
+  // obnoxious amount of string allocation.)
 
 public:
   explicit SqliteKv(SqliteDatabase& db): SqliteKv(ensureInitialized(db), true) {}

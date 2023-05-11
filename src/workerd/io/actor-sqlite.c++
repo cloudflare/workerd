@@ -10,9 +10,10 @@
 namespace workerd {
 
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
-                         kj::Function<kj::Promise<void>()> commitCallback)
+                         kj::Function<kj::Promise<void>()> commitCallback,
+                         Hooks& hooks)
     : db(kj::mv(dbParam)), outputGate(outputGate), commitCallback(kj::mv(commitCallback)),
-      kv(*db), commitTasks(*this) {
+      hooks(hooks), kv(*db), commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
 }
 
@@ -104,8 +105,7 @@ kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ge
     ReadOptions options) {
   requireNotBroken();
 
-  // TODO(sqlite): Implement alarms for sqlite storage.
-  JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
+  return hooks.getAlarm();
 }
 
 kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
@@ -173,8 +173,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
 
-  // TODO(sqlite): Implement alarms for sqlite storage.
-  JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
+  return hooks.setAlarm(newAlarmTime);
 }
 
 kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
@@ -236,11 +235,11 @@ void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
 }
 
 kj::Maybe<kj::Own<void>> ActorSqlite::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+  return hooks.armAlarmHandler(scheduledTime, noCache);
 }
 
 void ActorSqlite::cancelDeferredAlarmDeletion() {
-  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+  hooks.cancelDeferredAlarmDeletion();
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
@@ -251,6 +250,24 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
   //   implemented `allowUnconfirmed` yet.
   return outputGate.wait();
+}
+
+ActorSqlite::Hooks ActorSqlite::Hooks::DEFAULT = ActorSqlite::Hooks{};
+
+kj::Maybe<kj::Own<void>> ActorSqlite::Hooks::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+void ActorSqlite::Hooks::cancelDeferredAlarmDeletion() {
+  JSG_FAIL_REQUIRE(Error, "alarms are not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::Hooks::getAlarm() {
+  JSG_FAIL_REQUIRE(Error, "getAlarm() is not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::Promise<void> ActorSqlite::Hooks::setAlarm(kj::Maybe<kj::Date>) {
+  JSG_FAIL_REQUIRE(Error, "setAlarm() is not yet implemented for SQLite-backed Durable Objects");
 }
 
 }  // namespace workerd
