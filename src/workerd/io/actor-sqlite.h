@@ -45,7 +45,7 @@ public:
   // the returned promise. This can be used e.g. when the database needs to be replicated to other
   // machines before being considered durable.
 
-  bool isCommitScheduled() { return commitScheduled; }
+  bool isCommitScheduled() { return !currentTxn.is<NoTxn>(); }
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return *db; }
 
@@ -87,7 +87,31 @@ private:
 
   kj::Maybe<kj::Exception> broken;
 
-  bool commitScheduled = false;
+  struct NoTxn {};
+
+  class ImplicitTxn {
+  public:
+    explicit ImplicitTxn(ActorSqlite& parent);
+    ~ImplicitTxn() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(ImplicitTxn);
+
+    void commit();
+
+  private:
+    ActorSqlite& parent;
+
+    bool committed = false;
+  };
+
+  kj::OneOf<NoTxn, ImplicitTxn*> currentTxn = NoTxn();
+  // When set to NoTxn, there is no transaction outstanding.
+  //
+  // When set to `ImplicitTxn*`, an implicit transaction is currently open, owned by `commitTasks`.
+  // If there is a need to commit this early, e.g. to start an explicit transaction, that can be
+  // done through this reference.
+  //
+  // TODO(now): If there is an explicit transaction, it'll be here too.
+
   kj::TaskSet commitTasks;
 
   void onWrite();
