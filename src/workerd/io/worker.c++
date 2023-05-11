@@ -10,6 +10,7 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
+#include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
@@ -859,14 +860,16 @@ struct Worker::Script::Impl {
         auto& worker = ioContext.getWorker();
 
         return ioContext.awaitIo(
-            kj::evalLater([&worker, handler = kj::mv(handler)]() mutable {
+            kj::evalLater([&worker, handler = kj::mv(handler),
+                           asyncContext = jsg::AsyncContextFrame::currentRef(js)]() mutable {
           return worker.takeAsyncLockWithoutRequest(nullptr)
-              .then([&worker, handler = kj::mv(handler)]
+              .then([&worker, handler = kj::mv(handler), asyncContext = kj::mv(asyncContext)]
                     (Worker::AsyncLock asyncLock) mutable -> DynamicImportResult {
             Worker::Lock lock(worker, asyncLock);
             auto isolate = lock.getIsolate();
             v8::HandleScope scope(isolate);
             v8::Context::Scope contextScope(lock.getContext());
+            jsg::AsyncContextFrame::Scope asyncContextScope(lock, asyncContext);
 
             auto& workerIsolate = worker.getIsolate();
 
