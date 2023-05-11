@@ -103,6 +103,13 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
+  if (parent == nullptr) {
+    // We committed the root transaction, so it's time to signal any replication layer and lock
+    // the output gate in the meantime.
+    actorSqlite.commitTasks.add(
+        actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+  }
+
   // No backpressure for SQLite.
   return nullptr;
 }
