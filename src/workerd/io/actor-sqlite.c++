@@ -17,25 +17,46 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
 }
 
-void ActorSqlite::onWrite() {
-  if (!commitScheduled) {
-    beginTxn.run();
-    commitScheduled = true;
+ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent)
+    : parent(parent) {
+  KJ_REQUIRE(parent.currentTxn.is<NoTxn>());
+  parent.beginTxn.run();
+  parent.currentTxn = this;
+}
+ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
+  KJ_IF_MAYBE(c, parent.currentTxn.tryGet<ImplicitTxn*>()) {
+    if (*c == this) {
+      parent.currentTxn.init<NoTxn>();
+    }
+  }
+  if (!committed && parent.broken == nullptr) {
+    // Failed to commit, so roll back.
+    //
+    // This should only happen in cases of catastrophic error. Since this is rarely actually
+    // executed, we don't prepare a statement for it.
+    parent.db->run("ROLLBACK TRANSACTION");
+  }
+}
 
-    auto deferredRollback = kj::defer([this]() {
-      // Since this is rarely actually executed, we don't prepare a statement for it.
-      db->run("ROLLBACK TRANSACTION");
-    });
+void ActorSqlite::ImplicitTxn::commit() {
+  // Ignore redundant commit()s.
+  if (!committed) {
+    parent.commitTxn.run();
+    committed = true;
+  }
+}
+
+void ActorSqlite::onWrite() {
+  if (currentTxn.is<NoTxn>()) {
+    auto txn = kj::heap<ImplicitTxn>(*this);
 
     commitTasks.add(outputGate.lockWhile(kj::evalLater(
-        [this, deferredRollback = kj::mv(deferredRollback)]() mutable -> kj::Promise<void> {
+        [this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
-      deferredRollback.cancel();
-
       try {
-        commitTxn.run();
+        txn->commit();
       } catch (...) {
         // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
         // instead of whatever SQLite threw.
@@ -47,9 +68,9 @@ void ActorSqlite::onWrite() {
 
       // The callback is only expected to commit writes up until this point. Any new writes that
       // occur while the callback is in progress are NOT included, therefore require a new commit
-      // to be scheduled. So, we should set `commitScheduled = false` now, rather than after
-      // the callback.
-      commitScheduled = false;
+      // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+      // rather than after the callback.
+      { auto drop = kj::mv(txn); }
 
       return commitCallback();
     })));
