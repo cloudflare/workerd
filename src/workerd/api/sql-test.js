@@ -13,7 +13,7 @@ function requireException(callback, expectStr) {
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
 }
 
-async function test(sql) {
+async function test(sql, storage) {
   // Test numeric results
   const resultNumber = [...sql.exec("SELECT 123")];
   assert.equal(resultNumber.length, 1);
@@ -322,6 +322,63 @@ async function test(sql) {
   assert.equal(sql.voluntarySizeLimit, 1073741823 * 4096);
   sql.voluntarySizeLimit = 65536;
   assert.equal(sql.voluntarySizeLimit, 65536);
+
+  storage.put("txnTest", 0);
+
+  // Try a transaction while no implicit transaction is open.
+  await scheduler.wait(1);  // finish implicit txn
+  let txnResult = await storage.transaction(async () => {
+    storage.put("txnTest", 1);
+    assert.equal(await storage.get("txnTest"), 1);
+    return "foo";
+  });
+  assert.equal(await storage.get("txnTest"), 1);
+  assert.equal(txnResult, "foo");
+
+  // Try a transaction while an implicit transaction is open first.
+  storage.put("txnTest", 2);
+  await storage.transaction(async () => {
+    storage.put("txnTest", 3);
+    assert.equal(await storage.get("txnTest"), 3);
+  });
+  assert.equal(await storage.get("txnTest"), 3);
+
+
+  // Try a transaction that is explicitly rolled back.
+  await storage.transaction(async txn => {
+    storage.put("txnTest", 4);
+    assert.equal(await storage.get("txnTest"), 4);
+    txn.rollback();
+  });
+  assert.equal(await storage.get("txnTest"), 3);
+
+  // Try a transaction that is implicitly rolled back by throwing an exception.
+  try {
+    await storage.transaction(async txn => {
+      storage.put("txnTest", 5);
+      assert.equal(await storage.get("txnTest"), 5);
+      throw new Error("txn failure");
+    });
+    throw new Error("expected errror");
+  } catch (err) {
+    assert.equal(err.message, "txn failure");
+  }
+  assert.equal(await storage.get("txnTest"), 3);
+
+  // Try a nested transaction.
+  await storage.transaction(async txn => {
+    storage.put("txnTest", 6);
+    assert.equal(await storage.get("txnTest"), 6);
+    await storage.transaction(async txn2 => {
+      storage.put("txnTest", 7);
+      assert.equal(await storage.get("txnTest"), 7);
+      // Let's even do an await in here for good measure.
+      await scheduler.wait(1);
+    });
+    assert.equal(await storage.get("txnTest"), 7);
+    txn.rollback();
+  });
+  assert.equal(await storage.get("txnTest"), 3);
 }
 
 export class DurableObjectExample {
@@ -331,7 +388,7 @@ export class DurableObjectExample {
 
   async fetch(req) {
     if (req.url.endsWith("/sql-test")) {
-      await test(this.state.storage.sql);
+      await test(this.state.storage.sql, this.state.storage);
       return new Response();
     } else if (req.url.endsWith("/increment")) {
       let val = (await this.state.storage.get("counter")) || 0;
