@@ -5,11 +5,6 @@ const config :Workerd.Config = (
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
   ],
-  alarmScheduler = (
-    alarmStorage = (
-      inMemory = void
-    )
-  )
 );
 
 const mainWorker :Workerd.Worker = (

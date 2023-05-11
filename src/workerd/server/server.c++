@@ -2397,38 +2397,11 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
 }
 
 void Server::startAlarmScheduler(config::Config::Reader config) {
-  kj::Own<SqliteDatabase::Vfs> vfs;
   auto& clock = kj::systemPreciseCalendarClock();
+  auto dir = kj::newInMemoryDirectory(clock);
+  auto vfs = kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
 
-  auto makeInMemoryVfs = [&]() {
-    auto dir = kj::newInMemoryDirectory(clock);
-    return kj::heap<SqliteDatabase::Vfs>(*dir).attach(kj::mv(dir));
-  };
-
-  auto alarmConf = config.getAlarmScheduler().getAlarmStorage();
-  if (alarmConf.isLocalDisk()) {
-    kj::StringPtr diskName = alarmConf.getLocalDisk();
-    KJ_IF_MAYBE(svc, this->services.find(alarmConf.getLocalDisk())) {
-      auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc->get());
-      if (diskSvc == nullptr) {
-        reportConfigError(kj::str("alarmScheduler.alarmStorage config refers "
-            "to the service \"", diskName, "\", but that service is not a local disk service."));
-        vfs = makeInMemoryVfs();
-      } else KJ_IF_MAYBE(dir, diskSvc->getWritable()) {
-        vfs = kj::heap<SqliteDatabase::Vfs>(*dir);
-      } else {
-        reportConfigError(kj::str("alarmScheduler.alarmStorage config refers "
-            "to the disk service \"", diskName, "\", but that service is defined read-only."));
-        vfs = makeInMemoryVfs();
-      }
-    } else {
-      reportConfigError(kj::str("alarmScheduler.alarmStorage config refers "
-          "to a service \"", diskName, "\", but no such service is defined."));
-      vfs = makeInMemoryVfs();
-    }
-  } else {
-    vfs = makeInMemoryVfs();
-  }
+  // TODO(someday): support persistent storage for alarms
 
   alarmScheduler = kj::heap<AlarmScheduler>(clock, timer, *vfs, kj::Path({"alarms.sqlite"}))
       .attach(kj::mv(vfs));

@@ -76,34 +76,6 @@ struct Config {
   extensions @3 :List(Extension);
   # Extensions provide capabilities to all workers. Extensions are usually prepared separately
   # and are late-linked with the app using this config field.
-
-  alarmScheduler @4 :AlarmConfig;
-  # Configuration for the Durable Objects alarm scheduler. Must be configured in order for alarms
-  # to work.
-}
-
-# ========================================================================================
-# Alarm Scheduler Configuration
-
-struct AlarmConfig {
-  alarmStorage :union {
-    # Specifies where scheduled alarms are to be stored.
-
-    inMemory @0 :Void;
-    # Default. The alarm scheduler stores alarms in-memory only. All stored data will persist for the
-    # lifetime of the process, but will be lost upon process exit.
-
-    localDisk @1 :Text;
-    # Alarm scheduler data will be stored in a file on local disk. This field is the name of
-    # a DiskDirectory service, which should specify the directory the alarm files
-    # should be located in.
-    #
-    # TODO(now) Is naming scheme below copypasta?
-    # Within the directory, files are created with the naming scheme `alarms.<ext>`,
-    # where `.<ext>` may be any of a number of different extensions depending on the storage mode.
-    # (Currently, the main storage is a file with the extension `.sqlite`, and in certain situations
-    # extra files with the extensions `.sqlite-wal`, and `.sqlite-shm` may also be present.)
-  }
 }
 
 # ========================================================================================
