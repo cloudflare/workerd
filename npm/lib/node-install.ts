@@ -26,23 +26,36 @@ let isToPathJS = true;
 
 function validateBinaryVersion(...command: string[]): void {
   command.push("--version");
-  const stdout = child_process
-    .execFileSync(command.shift()!, command, {
-      // Without this, this install script strangely crashes with the error
-      // "EACCES: permission denied, write" but only on Ubuntu Linux when node is
-      // installed from the Snap Store. This is not a problem when you download
-      // the official version of node. The problem appears to be that stderr
-      // (i.e. file descriptor 2) isn't writable?
-      //
-      // More info:
-      // - https://snapcraft.io/ (what the Snap Store is)
-      // - https://nodejs.org/dist/ (download the official version of node)
-      // - https://github.com/evanw/esbuild/issues/1711#issuecomment-1027554035
-      //
-      stdio: "pipe",
-    })
-    .toString()
-    .trim();
+  let stdout: string;
+  try {
+    stdout = child_process
+      .execFileSync(command.shift()!, command, {
+        // Without this, this install script strangely crashes with the error
+        // "EACCES: permission denied, write" but only on Ubuntu Linux when node is
+        // installed from the Snap Store. This is not a problem when you download
+        // the official version of node. The problem appears to be that stderr
+        // (i.e. file descriptor 2) isn't writable?
+        //
+        // More info:
+        // - https://snapcraft.io/ (what the Snap Store is)
+        // - https://nodejs.org/dist/ (download the official version of node)
+        // - https://github.com/evanw/esbuild/issues/1711#issuecomment-1027554035
+        //
+        stdio: [/* stdin */ "pipe", /* stdout */ "pipe", /* stderr */ "inherit"],
+      })
+      .toString()
+      .trim();
+  } catch (e) {
+    let msg = `[workerd] Failed to validate workerd binary
+
+Local development will not work. This usually means you're on an unsupported
+operating system, or missing some shared libraries.`;
+    if (process.platform === "linux") {
+      msg += " On Debian-based systems,\nmake sure you've installed the \`libc++1\` package."
+    }
+    console.error(msg);
+    return;
+  }
   if (stdout !== `workerd ${LATEST_COMPATIBILITY_DATE}`) {
     throw new Error(
       `Expected ${JSON.stringify(
