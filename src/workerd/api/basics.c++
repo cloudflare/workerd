@@ -419,10 +419,12 @@ jsg::Ref<AbortSignal> AbortSignal::any(
   // Let's check to see if any of the signals are already aborted. If it is, we can
   // optimize here by skipping the event handler registration.
   for (auto& sig : signals) {
-    if (sig->getAborted()) return AbortSignal::abort(js, sig->getReason(js));
+    if (sig->getAborted()) {
+      return AbortSignal::abort(js, sig->getReason(js));
+    }
   }
 
-  // Otherwise we need to create new new signal and register event handlers on all
+  // Otherwise we need to create a new signal and register event handlers on all
   // of the signals that were passed in.
   auto signal = jsg::alloc<AbortSignal>();
   for (auto& sig : signals) {
