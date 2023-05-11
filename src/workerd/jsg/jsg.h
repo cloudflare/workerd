@@ -199,6 +199,14 @@ private:
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
 // JavaScript on instances of the resource type.
 
+#define JSG_METHOD_NO_SIG(name) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerMethodNoSig<NAME, decltype(&Self::name), &Self::name>(); \
+  } while (false)
+// Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
+// JavaScript on instances of the resource type.
+
 #define JSG_METHOD_NAMED(name, method) \
   do { \
     static const char NAME[] = #name; \
@@ -1351,7 +1359,7 @@ public:
   T& operator*() { return *object; }
   T* operator->() { return object.get(); }
 
-  v8::Local<v8::Context> getHandle(v8::Isolate* isolate) {
+  v8::Local<v8::Context> getHandle(v8::Isolate* isolate) const {
     return handle.Get(isolate);
   }
 

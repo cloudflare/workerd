@@ -43,6 +43,8 @@ namespace api {
 class IoContext;
 class InputGate;
 class OutputGate;
+struct WasmExports;
+struct FreestandingWasmContext;
 
 typedef jsg::Constructor<api::ExportedHandler(
       jsg::Ref<api::DurableObjectState> durableObject, jsg::Value env)>
@@ -208,7 +210,11 @@ public:
         compileModules;
     // Callback which will construct the module registry and load all the modules into it.
   };
-  using Source = kj::OneOf<ScriptSource, ModulesSource>;
+  struct FreestandingWasmSource {
+    kj::Function<v8::Local<v8::WasmModuleObject>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
+        compileModule;
+  };
+  using Source = kj::OneOf<ScriptSource, ModulesSource, FreestandingWasmSource>;
 
 private:
   kj::Own<const Isolate> isolate;
@@ -483,9 +489,19 @@ public:
   virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
   // Create the context (global scope) object.
 
+  virtual jsg::JsContext<FreestandingWasmContext> newFreestandingWasmContext(jsg::Lock& lock) const = 0;
+
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
   // Given a module's export namespace, return all the top-level exports.
+
+  virtual WasmExports unwrapFreestandingWasmExports(
+      jsg::Lock& lock, v8::Local<v8::Value> moduleExports
+  ) const = 0;
+
+  virtual v8::Local<v8::Value> wrapFreestandingWasmContext(
+    jsg::Lock& lock, jsg::Ref<FreestandingWasmContext>&& imports
+  ) const = 0;
 
   struct ErrorInterface {
     // Convenience struct for accessing typical Error properties.
@@ -578,6 +594,9 @@ public:
 
   kj::Maybe<api::ExportedHandler&> getExportedHandler(
       kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
+
+  kj::Maybe<FreestandingWasmContext&> getFreestandingWasmContext();
+
   // Get the ExportedHandler exported under the given name. `entrypointName` may be null to get the
   // default handler. Returns null if this is not a modules-syntax worker (but `entrypointName`
   // must be null in that case).

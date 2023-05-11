@@ -3,11 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "worker-entrypoint.h"
+#include "src/workerd/io/wasm.h"
+
 #include <capnp/message.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/io/wasm.h>
 
 namespace workerd {
 
@@ -162,6 +165,14 @@ kj::Promise<void> WorkerEntrypoint::request(
       (Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
+    KJ_IF_MAYBE(wasmContext, lock.getFreestandingWasmContext()) {
+      return api::addNoopDeferredProxy(wasmContext->request(
+          lock,
+          url,
+          headers,
+          wrappedResponse));
+    }
+
     return lock.getGlobalScope().request(
         method, url, headers, requestBody, wrappedResponse,
         cfBlobJson, lock, lock.getExportedHandler(entrypointName, context.getActor()));
@@ -205,6 +216,7 @@ kj::Promise<void> WorkerEntrypoint::request(
   })).catch_([this,wrappedResponse = kj::mv(wrappedResponse),isActor,
               method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
              (kj::Exception&& exception) mutable -> kj::Promise<void> {
+KJ_DBG("=============>", exception);
     // Don't return errors to end user.
 
     auto isInternalException = !jsg::isTunneledException(exception.getDescription())

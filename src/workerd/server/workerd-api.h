@@ -20,8 +20,17 @@ public:
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
   jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const override;
+
+  jsg::JsContext<FreestandingWasmContext> newFreestandingWasmContext(jsg::Lock& lock) const override;
+
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
+  WasmExports unwrapFreestandingWasmExports(
+      jsg::Lock& lock, v8::Local<v8::Value> moduleExports) const override;
+  v8::Local<v8::Value> wrapFreestandingWasmContext(
+    jsg::Lock& lock, jsg::Ref<FreestandingWasmContext>&& imports
+  ) const override;
+
   const jsg::TypeHandler<ErrorInterface>&
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
@@ -162,6 +171,8 @@ private:
       jsg::Lock& lock, config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       capnp::List<config::Extension>::Reader extensions) const;
+  v8::Local<v8::WasmModuleObject> compileFreestandingWasm(jsg::Lock& lock, kj::ArrayPtr<const kj::byte> code) const;
+
 };
 
 }  // namespace workerd::server

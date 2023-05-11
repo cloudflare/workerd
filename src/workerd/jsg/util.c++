@@ -417,6 +417,7 @@ static kj::String unimplementedErrorMessage(TypeErrorContext c) {
 }
 
 void throwTypeError(v8::Isolate* isolate, kj::StringPtr message) {
+  KJ_FAIL_REQUIRE("!!!");
   isolate->ThrowException(v8::Exception::TypeError(v8Str(isolate, message)));
   throw JsExceptionThrown();
 }

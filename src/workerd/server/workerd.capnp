@@ -254,6 +254,8 @@ struct Worker {
       # (a) allows for importing Node.js-compat built-ins without the node: specifier-prefix
       # (b) exposes the subset of common Node.js globals such as process, Buffer, etc that
       #     we implement in the workerd runtime.
+
+      freestandingWasm @8 :Data;
     }
   }
 

@@ -6,6 +6,12 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
+#include "src/workerd/api/global-scope.h"
+#include "src/workerd/io/wasm.h"
+#include "src/workerd/jsg/jsg.h"
+#include "src/workerd/jsg/modules.h"
+#include "src/workerd/jsg/string.h"
+#include "src/workerd/jsg/util.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/global-scope.h>
@@ -26,6 +32,7 @@
 #include <map>
 #include <time.h>
 #include <numeric>
+#include <workerd/io/wasm.h>
 
 #if _WIN32
 #include <kj/win32-api-version.h>
@@ -502,7 +509,9 @@ void Worker::WarnAboutIsolateLockScope::release() {
 }
 
 struct Worker::Impl {
-  kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
+  kj::Maybe<kj::OneOf<
+      jsg::JsContext<api::ServiceWorkerGlobalScope>,
+      jsg::JsContext<FreestandingWasmContext>>> context;
 
   kj::Maybe<jsg::Value> env;
   // The environment blob to pass to handlers.
@@ -592,7 +601,14 @@ struct Worker::Isolate::Impl {
       auto workersToDestroy = impl.workerDestructionQueue.lockExclusive()->pop();
       for (auto& workerImpl: workersToDestroy.asArrayPtr()) {
         KJ_IF_MAYBE(c, workerImpl->context) {
-          disposeContext(kj::mv(*c));
+          KJ_SWITCH_ONEOF(*c) {
+            KJ_CASE_ONEOF(globalScope, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+              disposeContext(kj::mv(globalScope));
+            }
+            KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+              disposeContext(kj::mv(wasmContext));
+            }
+          }
         }
         workerImpl = nullptr;
       }
@@ -654,6 +670,15 @@ struct Worker::Isolate::Impl {
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
       v8::HandleScope handleScope(lock->v8Isolate);
       context->clear();
+      KJ_IF_MAYBE(i, impl.inspector) {
+        i->get()->contextDestroyed(context.getHandle(lock->v8Isolate));
+      }
+      { auto drop = kj::mv(context); }
+      lock->v8Isolate->ContextDisposedNotification(false);
+    }
+
+    void disposeContext(jsg::JsContext<FreestandingWasmContext> context) {
+      v8::HandleScope handleScope(lock->v8Isolate);
       KJ_IF_MAYBE(i, impl.inspector) {
         i->get()->contextDestroyed(context.getHandle(lock->v8Isolate));
       }
@@ -827,12 +852,18 @@ static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
 
 } // anonymous namespace
 
+struct FreestandingWasmModule {
+  v8::Global<v8::WasmModuleObject> module;
+};
+
 struct Worker::Script::Impl {
-  kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
+  kj::OneOf<jsg::NonModuleScript, kj::Path, FreestandingWasmModule> unboundScriptOrMainModule;
 
   kj::Array<CompiledGlobal> globals;
 
-  kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> moduleContext;
+  kj::Maybe<
+   kj::OneOf<jsg::JsContext<api::ServiceWorkerGlobalScope>, jsg::JsContext<FreestandingWasmContext>>
+  > moduleContext;
 
   kj::Maybe<kj::Exception> permanentException;
   // If set, then any attempt to use this script shall throw this exception.
@@ -1078,7 +1109,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
   KJ_ON_SCOPE_FAILURE({
     auto implToDestroy = kj::mv(impl);
     KJ_IF_MAYBE(c, implToDestroy->moduleContext) {
-      recordedLock.disposeContext(kj::mv(*c));
+      KJ_SWITCH_ONEOF(*c) {
+        KJ_CASE_ONEOF(scriptContext, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+          recordedLock.disposeContext(kj::mv(scriptContext));
+        }
+        KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+          recordedLock.disposeContext(kj::mv(wasmContext));
+        }
+      }
     }
   });
 
@@ -1089,18 +1127,28 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
   }
 
   v8::Local<v8::Context> context;
-  if (source.is<ModulesSource>()) {
-    // Modules can't be compiled for multiple contexts. We need to create the real context now.
-    auto& mContext = impl->moduleContext.emplace(isolate->apiIsolate->newContext(lock));
-    mContext->enableWarningOnSpecialEvents();
-    context = mContext.getHandle(lock.v8Isolate);
-    recordedLock.setupContext(context);
-  } else {
-    // Although we're going to compile a script independent of context, V8 requires that there be
-    // an active context, otherwise it will segfault, I guess. So we create a dummy context.
-    // (Undocumented, as ususual.)
-    context = v8::Context::New(
-        lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
+
+  KJ_SWITCH_ONEOF(source) {
+    KJ_CASE_ONEOF(modulesSource, ModulesSource) {
+      // Modules can't be compiled for multiple contexts. We need to create the real context now.
+      auto mContext = isolate->apiIsolate->newContext(lock);
+      mContext->enableWarningOnSpecialEvents();
+      context = mContext.getHandle(lock.v8Isolate);
+      recordedLock.setupContext(context);
+      impl->moduleContext.emplace(kj::mv(mContext));
+    }
+    KJ_CASE_ONEOF(wasm, FreestandingWasmSource) {
+      auto mContext = isolate->apiIsolate->newFreestandingWasmContext(lock);
+      context = mContext.getHandle(lock.v8Isolate);
+      impl->moduleContext.emplace(kj::mv(mContext));
+    }
+    KJ_CASE_ONEOF(scriptSource, ScriptSource) {
+      // Although we're going to compile a script independent of context, V8 requires that there be
+      // an active context, otherwise it will segfault, I guess. So we create a dummy context.
+      // (Undocumented, as ususual.)
+      context = v8::Context::New(
+          lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
+    }
   }
 
   v8::Context::Scope context_scope(context);
@@ -1165,6 +1213,12 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
           impl->unboundScriptOrMainModule = kj::Path::parse(modules.mainModule);
           break;
         }
+
+        KJ_CASE_ONEOF(wasm, FreestandingWasmSource) {
+          v8::Global<v8::WasmModuleObject> module(lock.v8Isolate, wasm.compileModule( lock, *isolate->apiIsolate ));
+          impl->unboundScriptOrMainModule = FreestandingWasmModule{ kj::mv(module) };
+          break;
+        }
       }
 
       parseMetrics->done();
@@ -1216,7 +1270,14 @@ Worker::Script::~Script() noexcept(false) {
   jsg::V8StackScope stackScope;
   Isolate::Impl::Lock recordedLock(*isolate, Worker::Lock::TakeSynchronously(nullptr), stackScope);
   KJ_IF_MAYBE(c, impl->moduleContext) {
-    recordedLock.disposeContext(kj::mv(*c));
+    KJ_SWITCH_ONEOF(*c) {
+      KJ_CASE_ONEOF(scriptContext, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+        recordedLock.disposeContext(kj::mv(scriptContext));
+      }
+      KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+        recordedLock.disposeContext(kj::mv(wasmContext));
+      }
+    }
   }
   impl = nullptr;
 }
@@ -1273,7 +1334,14 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   KJ_ON_SCOPE_FAILURE({
     auto implToDestroy = kj::mv(impl);
     KJ_IF_MAYBE(c, implToDestroy->context) {
-      recordedLock.disposeContext(kj::mv(*c));
+    KJ_SWITCH_ONEOF(*c) {
+      KJ_CASE_ONEOF(globalScope, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+        recordedLock.disposeContext(kj::mv(globalScope));
+      }
+      KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+        recordedLock.disposeContext(kj::mv(wasmContext));
+      }
+    }
     }
   });
 
@@ -1296,15 +1364,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
   v8::Local<v8::Context> context;
   KJ_IF_MAYBE(c, script->impl->moduleContext) {
-    // Use the shared context from the script.
-    // const_cast OK because guarded by `lock`.
-    context = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(c)
-        ->getHandle(lock.v8Isolate);
+    KJ_SWITCH_ONEOF(*c) {
+      KJ_CASE_ONEOF(scriptContext, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+        // Use the shared context from the script.
+        // const_cast OK because guarded by `lock`.
+        context = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>&>(scriptContext).getHandle(lock.v8Isolate);
+      }
+      KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+        // Use the shared context from the script.
+        // const_cast OK because guarded by `lock`.
+        context = const_cast<jsg::JsContext<FreestandingWasmContext>&>(wasmContext).getHandle(lock.v8Isolate);
+      }
+    }
     currentSpan.setTag("module_context", true);
   } else {
     // Create a new context.
     context = this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock))
-        .getHandle(lock.v8Isolate);
+        .get<jsg::JsContext<api::ServiceWorkerGlobalScope>>().getHandle(lock.v8Isolate);
     recordedLock.setupContext(context);
   }
 
@@ -1362,61 +1438,92 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           // const_cast OK because we hold the lock.
           auto& registry = KJ_ASSERT_NONNULL(const_cast<Script&>(*script).impl->getModuleRegistry());
           KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
-            JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
-                        "Main module must be an ES module.");
-            auto module = entry->module.getHandle(lock);
+            KJ_IF_MAYBE(synthetic, entry->maybeSynthetic) {
+              JSG_REQUIRE(false, TypeError, "Main module must be an ES module.");
+            } else {
+              auto module = entry->module.getHandle(lock);
 
-            {
-              auto limitScope = script->isolate->getLimitEnforcer()
-                  .enterStartupJs(lock, maybeLimitError);
+              {
+                auto limitScope = script->isolate->getLimitEnforcer()
+                    .enterStartupJs(lock, maybeLimitError);
 
-              jsg::instantiateModule(lock, module);
-            }
+                jsg::instantiateModule(lock, module);
+              }
 
-            if (maybeLimitError != nullptr) {
-              // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-              // thrown an exception.
-              throw jsg::JsExceptionThrown();
-            }
+              if (maybeLimitError != nullptr) {
+                // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+                // thrown an exception.
+                throw jsg::JsExceptionThrown();
+              }
 
-            v8::Local<v8::Value> ns = module->GetModuleNamespace();
+              v8::Local<v8::Value> ns = module->GetModuleNamespace();
 
-            {
-              // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
-              // module, even if subsequent calls pass a different context. Verify that we didn't
-              // switch contexts.
-              auto creationContext = jsg::check(ns.As<v8::Object>()->GetCreationContext());
-              KJ_ASSERT(creationContext == context,
-                  "module was originally instantiated in a different context");
-            }
+              {
+                // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
+                // module, even if subsequent calls pass a different context. Verify that we didn't
+                // switch contexts.
+                auto creationContext = jsg::check(ns.As<v8::Object>()->GetCreationContext());
+                KJ_ASSERT(creationContext == context,
+                    "module was originally instantiated in a different context");
+              }
 
-            impl->env = jsg::Value(lock.v8Isolate, bindingsScope);
+              impl->env = jsg::Value(lock.v8Isolate, bindingsScope);
 
-            auto handlers = script->isolate->apiIsolate->unwrapExports(lock, ns);
+              auto handlers = script->isolate->apiIsolate->unwrapExports(lock, ns);
 
-            for (auto& handler: handlers.fields) {
-              KJ_SWITCH_ONEOF(handler.value) {
-                KJ_CASE_ONEOF(obj, api::ExportedHandler) {
-                  obj.env = jsg::Value(lock.v8Isolate, bindingsScope);
-                  obj.ctx = jsg::alloc<api::ExecutionContext>();
+              for (auto& handler: handlers.fields) {
+                KJ_SWITCH_ONEOF(handler.value) {
+                  KJ_CASE_ONEOF(obj, api::ExportedHandler) {
+                    obj.env = jsg::Value(lock.v8Isolate, bindingsScope);
+                    obj.ctx = jsg::alloc<api::ExecutionContext>();
 
-                  if (handler.name == "default") {
-                    // The default export is given the string name "default". I guess that means that
-                    // you can't actually name an export "default"? Anyway, this is our default
-                    // handler.
-                    impl->defaultHandler = kj::mv(obj);
-                  } else {
-                    impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                    if (handler.name == "default") {
+                      // The default export is given the string name "default". I guess that means that
+                      // you can't actually name an export "default"? Anyway, this is our default
+                      // handler.
+                      impl->defaultHandler = kj::mv(obj);
+                    } else {
+                      impl->namedHandlers.insert(kj::mv(handler.name), kj::mv(obj));
+                    }
                   }
-                }
-                KJ_CASE_ONEOF(cls, DurableObjectConstructor) {
-                  impl->actorClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                  KJ_CASE_ONEOF(cls, DurableObjectConstructor) {
+                    impl->actorClasses.insert(kj::mv(handler.name), kj::mv(cls));
+                  }
                 }
               }
             }
           } else {
             JSG_FAIL_REQUIRE(TypeError, "Main module name is not present in bundle.");
           }
+        }
+        KJ_CASE_ONEOF(freestandingWasmModule, FreestandingWasmModule) {
+          auto module = freestandingWasmModule.module.Get(lock.v8Isolate);
+
+          auto& moduleContext  = KJ_REQUIRE_NONNULL(script->impl->moduleContext);
+          KJ_ASSERT(moduleContext.is<jsg::JsContext<FreestandingWasmContext>>());
+          // todo: const_cast
+          auto& wasmContext = const_cast<jsg::JsContext<FreestandingWasmContext>&>(moduleContext.get<jsg::JsContext<FreestandingWasmContext>>());
+          auto global = wasmContext.getHandle(lock.v8Isolate)->Global();
+
+          // obtain exports
+          // https://stackoverflow.com/questions/53925972/call-webassembly-from-embedded-v8-without-js
+
+          auto webAssembly = context->Global()
+              ->Get(context, jsg::v8StrIntern(lock.v8Isolate,"WebAssembly"))
+              .ToLocalChecked().As<v8::Object>();
+          auto webAssemblyInstance = webAssembly->Get(context, jsg::v8StrIntern(lock.v8Isolate,"Instance"))
+              .ToLocalChecked().As<v8::Object>();
+
+          auto importObject = v8::Object::New(lock.v8Isolate);
+          jsg::check(importObject->Set(context, lock.wrapString("env"_kj), global));
+
+          using argsType = v8::Local<v8::Value>[];
+          auto instance = jsg::check(webAssemblyInstance->CallAsConstructor(context, 2, argsType{module, importObject})).As<v8::Object>();
+
+          auto moduleExports = jsg::check(instance->Get(context, jsg::v8StrIntern(lock.v8Isolate,"exports"))).As<v8::Object>();
+          KJ_ASSERT(moduleExports->IsObject());
+          auto exports = script->isolate->getApiIsolate().unwrapFreestandingWasmExports(lock, moduleExports);
+          wasmContext->exports = kj::mv(exports);
         }
       }
 
@@ -1598,12 +1705,30 @@ v8::Isolate* Worker::Lock::getIsolate() {
 
 v8::Local<v8::Context> Worker::Lock::getContext() {
   KJ_IF_MAYBE(c, worker.impl->context) {
-    return c->getHandle(impl->inner.v8Isolate);
+    return c->get<jsg::JsContext<api::ServiceWorkerGlobalScope>>().getHandle(impl->inner.v8Isolate);
   } else KJ_IF_MAYBE(c, const_cast<Script&>(*worker.script).impl->moduleContext) {
-    return c->getHandle(impl->inner.v8Isolate);
+    KJ_SWITCH_ONEOF(*c) {
+      KJ_CASE_ONEOF(scriptContext, jsg::JsContext<api::ServiceWorkerGlobalScope>) {
+        return scriptContext.getHandle(impl->inner.v8Isolate);
+      }
+      KJ_CASE_ONEOF(wasmContext, jsg::JsContext<FreestandingWasmContext>) {
+        return wasmContext.getHandle(impl->inner.v8Isolate);
+      }
+    }
   } else {
     KJ_UNREACHABLE;
   }
+}
+
+kj::Maybe<FreestandingWasmContext&> Worker::Lock::getFreestandingWasmContext() {
+  KJ_IF_MAYBE(context, worker.script->impl->moduleContext) {
+    if (context->is<jsg::JsContext<FreestandingWasmContext>>()) {
+      // todo: const cast
+      auto& wasmContext = const_cast<jsg::JsContext<FreestandingWasmContext>&>(context->get<jsg::JsContext<FreestandingWasmContext>>());
+      return *wasmContext;
+    }
+  }
+  return nullptr;
 }
 
 kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
@@ -1699,8 +1824,10 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
     sendExceptionToInspector(*i->get(), context, source, exception, message);
   }
 
+  auto stack = exception.As<v8::Object>()->Get(getContext(), jsg::v8Str(getIsolate(), "stack"_kj)).ToLocalChecked();
+
   // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
-  KJ_LOG(INFO, "uncaught exception", source, exception);
+  KJ_LOG(INFO, "uncaught exception", source, exception, stack);
 }
 
 void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
@@ -1722,7 +1849,10 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
   ignoredHandlers.insert("rejectionhandled"_kj);
 
   KJ_IF_MAYBE(c, worker.impl->context) {
-    auto handlerNames = (*c)->getHandlerNames();
+    if (c->is<jsg::JsContext<FreestandingWasmContext>>()) {
+      KJ_FAIL_REQUIRE("SHOULD NOT HAPPEN");
+    }
+    auto handlerNames = c->get<jsg::JsContext<api::ServiceWorkerGlobalScope>>()->getHandlerNames();
     bool foundAny = false;
     for (auto& name: handlerNames) {
       if (!ignoredHandlers.contains(name)) {

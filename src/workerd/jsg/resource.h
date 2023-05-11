@@ -439,7 +439,7 @@ struct GetterCallback;
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
           if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
-            throwTypeError(isolate, "Illegal invocation"); \
+            throwTypeError(isolate, "1 Illegal invocation"); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
           return wrapper.wrap(context, obj, (self.*method)( \
@@ -465,7 +465,7 @@ struct GetterCallback;
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
           if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
-            throwTypeError(isolate, "Illegal invocation"); \
+            throwTypeError(isolate, "2 Illegal invocation"); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
           return wrapper.wrap(context, obj, (self.*method)(Lock::from(isolate), \
@@ -492,7 +492,7 @@ struct GetterCallback;
           auto& wrapper = TypeWrapper::from(isolate); \
           /* V8 no longer supports AccessorSignature, so we must manually verify `this`'s type. */\
           if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) { \
-            throwTypeError(isolate, "Illegal invocation"); \
+            throwTypeError(isolate, "3 Illegal invocation"); \
           } \
           auto& self = extractInternalPointer<T, isContext>(context, obj); \
           return wrapper.wrap(context, obj, (self.*method)(info, \
@@ -533,7 +533,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
-        throwTypeError(isolate, "Illegal invocation");
+        throwTypeError(isolate, "4 Illegal invocation");
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       (self.*method)(wrapper.template unwrap<Arg>(context, value,
@@ -557,7 +557,7 @@ struct SetterCallback<TypeWrapper, methodName,
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
-        throwTypeError(isolate, "Illegal invocation");
+        throwTypeError(isolate, "5 Illegal invocation");
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       (self.*method)(Lock::from(isolate), wrapper.template unwrap<Arg>(context, value,
@@ -582,7 +582,7 @@ struct SetterCallback<TypeWrapper, methodName,
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
       if (!isContext && !wrapper.template getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
-        throwTypeError(isolate, "Illegal invocation");
+        throwTypeError(isolate, "*6 Illegal invocation");
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
       (self.*method)(info, wrapper.template unwrap<Arg>(context, value,
@@ -711,6 +711,14 @@ struct ResourceTypeBuilder {
         &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
                         ArgumentIndexes<Method>>::callback,
         v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
+  }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerMethodNoSig() {
+    prototype->Set(isolate, name, v8::FunctionTemplate::New(isolate,
+        &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
+                        ArgumentIndexes<Method>>::callback,
+        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow));
   }
 
   template<const char* name, typename Method, Method method>

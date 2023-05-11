@@ -22,6 +22,7 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
+#include <workerd/io/wasm.h>
 #include <workerd/util/thread-scopes.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
@@ -72,6 +73,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_WEBSOCKET_ISOLATE_TYPES,
   EW_SQL_ISOLATE_TYPES,
   EW_NODE_ISOLATE_TYPES,
+  EW_WASM_ISOLATE_TYPES,
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -79,7 +81,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   jsg::CommonJsModuleObject,
   jsg::CommonJsModuleContext,
   jsg::NodeJsModuleObject,
-  jsg::NodeJsModuleContext);
+  jsg::NodeJsModuleContext
+);
 
 struct WorkerdApiIsolate::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
@@ -157,11 +160,30 @@ jsg::JsContext<api::ServiceWorkerGlobalScope>
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .newContext<api::ServiceWorkerGlobalScope>(lock.v8Isolate);
 }
+
+jsg::JsContext<FreestandingWasmContext>
+    WorkerdApiIsolate::newFreestandingWasmContext(jsg::Lock& lock) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .newContext<FreestandingWasmContext>(lock.v8Isolate);
+}
+
 jsg::Dict<NamedExport> WorkerdApiIsolate::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
 }
+WasmExports WorkerdApiIsolate::unwrapFreestandingWasmExports(
+    jsg::Lock& lock, v8::Local<v8::Value> moduleExports) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .unwrap<WasmExports>(lock.v8Context(), moduleExports);
+}
+
+v8::Local<v8::Value> WorkerdApiIsolate::wrapFreestandingWasmContext(
+  jsg::Lock& lock, jsg::Ref<FreestandingWasmContext>&& imports
+) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).wrap(lock.v8Context(), kj::mv(imports));
+}
+
 const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
     WorkerdApiIsolate::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
@@ -194,7 +216,14 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
         errorReporter.addError(kj::str("Modules list cannot be empty."));
         goto invalid;
       }
-
+      if (modules[0].isFreestandingWasm()) {
+        return Worker::Script::FreestandingWasmSource {
+          .compileModule = [modules](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
+            auto source = modules[0].getFreestandingWasm().asBytes();
+            return kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileFreestandingWasm(lock, source);
+          }
+        };
+      }
       return Worker::Script::ModulesSource {
         modules[0].getName(),
         [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
@@ -258,6 +287,12 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   }
 
   return compiledGlobals.finish();
+}
+
+v8::Local<v8::WasmModuleObject> WorkerdApiIsolate::compileFreestandingWasm(
+      jsg::Lock& lock,
+      kj::ArrayPtr<const kj::byte> code) const {
+  return Impl::compileWasmGlobal(kj::downcast<JsgWorkerdIsolate::Lock>(lock), code, NoopCompilationObserver());
 }
 
 kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
@@ -358,6 +393,10 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
                     module.getName(),
                     module.getNodeJsCompatModule())));
         break;
+      }
+      case config::Worker::Module::FREESTANDING_WASM: {
+KJ_FAIL_REQUIRE("SHOULD NOT BE HERE")
+;
       }
       default: {
         KJ_UNREACHABLE;
