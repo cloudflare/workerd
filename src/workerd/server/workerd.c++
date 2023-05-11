@@ -611,6 +611,9 @@ public:
         .addOptionWithArg({'S', "socket-fd"}, CLI_METHOD(overrideSocketFd), "<name>=<fd>",
                           "Override the socket named <name> to listen on the already-open socket "
                           "descriptor <fd> instead of the address specified in the config file.")
+        .addOptionWithArg({"control-fd"}, CLI_METHOD(enableControl), "<fd>",
+                          "Enable sending of control messages on descriptor <fd>. Currently this "
+                          "only reports the port each socket is listening on when ready.")
         .callAfterParsing(CLI_METHOD(serve))
         .build();
   }
@@ -769,6 +772,12 @@ public:
 
   void enableInspector(kj::StringPtr param) {
     server.enableInspector(kj::str(param));
+  }
+
+  void enableControl(kj::StringPtr param) {
+    int fd = KJ_UNWRAP_OR(param.tryParseAs<uint>(),
+        CLI_ERROR("Output value must be a file descriptor (non-negative integer)."));
+    server.enableControl(fd);
   }
 
   void watch() {

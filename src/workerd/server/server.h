@@ -53,6 +53,9 @@ public:
   void enableInspector(kj::String addr) {
     inspectorOverride = kj::mv(addr);
   }
+  void enableControl(uint fd) {
+    controlOverride = kj::heap<kj::FdOutputStream>(fd);
+  }
 
   kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
                         kj::Promise<void> drainWhen = kj::NEVER_DONE);
@@ -89,6 +92,7 @@ private:
   // code that parses strings from the config file.
 
   kj::Maybe<kj::String> inspectorOverride;
+  kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
 
   struct GlobalContext;
   kj::Own<GlobalContext> globalContext;
