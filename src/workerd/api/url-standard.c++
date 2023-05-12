@@ -1943,7 +1943,16 @@ void URLSearchParams::append(jsg::UsvString name, jsg::UsvString value) {
   update();
 }
 
-void URLSearchParams::delete_(jsg::UsvString name) {
+void URLSearchParams::delete_(jsg::UsvString name, jsg::Optional<jsg::Value> value) {
+  KJ_IF_MAYBE(v, value) {
+    // The WHATWG recently added new arguments to the delete() and has() methods.
+    // We need to determine if adding those will break anyone if they are added
+    // without a compat flag. For now, we're just logging so we can know for sure.
+    // If we get this warning even once in production we'll have to introduce the
+    // new arguments behind a compat flag.
+    // https://github.com/whatwg/url/pull/735
+    LOG_WARNING_ONCE("URLSearchParams.prototype.delete() called with a second argument.");
+  }
   auto pivot = std::remove_if(list.begin(), list.end(),
                               [&name](auto& kv) { return kv.name == name; });
   list.truncate(pivot - list.begin());
@@ -1965,7 +1974,16 @@ kj::Array<jsg::UsvStringPtr> URLSearchParams::getAll(jsg::UsvString name) {
   return result.releaseAsArray();
 }
 
-bool URLSearchParams::has(jsg::UsvString name) {
+bool URLSearchParams::has(jsg::UsvString name, jsg::Optional<jsg::Value> value) {
+  KJ_IF_MAYBE(v, value) {
+    // The WHATWG recently added new arguments to the delete() and has() methods.
+    // We need to determine if adding those will break anyone if they are added
+    // without a compat flag. For now, we're just logging so we can know for sure.
+    // If we get this warning even once in production we'll have to introduce the
+    // new arguments behind a compat flag.
+    // https://github.com/whatwg/url/pull/735
+    LOG_WARNING_ONCE("URLSearchParams.prototype.has() called with a second argument.");
+  }
   for (auto& entry : list) {
     if (entry.name == name) return true;
   }
