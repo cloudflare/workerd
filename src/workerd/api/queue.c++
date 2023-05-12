@@ -147,7 +147,7 @@ QueueMessage::QueueMessage(
     v8::Isolate* isolate, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
-      body(isolate, jsg::Deserializer(isolate, kj::mv(message.body)).readValue()),
+      body(isolate, jsg::Deserializer(isolate, message.body.asPtr()).readValue()),
       result(result) {}
 
 jsg::Value QueueMessage::getBody(jsg::Lock& js) {
