@@ -123,28 +123,23 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_MAYBE(error, maybeError) {
     webSocketForEventHandler = hib;
-    if (!hib.hasDispatchedClose &&
-        (error->getType() == kj::Exception::Type::DISCONNECTED)) {
+    kj::Maybe<api::HibernatableSocketParams> params;
+    if (!hib.hasDispatchedClose && (error->getType() == kj::Exception::Type::DISCONNECTED)) {
       // If premature disconnect/cancel, dispatch a close event if we haven't already.
-      auto params = api::HibernatableSocketParams(
+      hib.hasDispatchedClose = true;
+      params = api::HibernatableSocketParams(
           1006,
           kj::str("WebSocket disconnected without sending Close frame."),
           false);
-      // Dispatch the close event.
-      auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
-      event = workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
-          hibernationEventType, readLoopTasks, kj::mv(params), *this))
-          .then([&](auto _) { hib.hasDispatchedClose = true; }).attach(kj::mv(workerInterface));
     } else {
       // Otherwise, we need to dispatch an error event!
-      auto params = api::HibernatableSocketParams(kj::mv(*error));
-
-      // Dispatch the error event.
-      auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
-      event = workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
-          hibernationEventType, readLoopTasks, kj::mv(params), *this)).ignoreResult()
-              .attach(kj::mv(workerInterface));
+      params = api::HibernatableSocketParams(kj::mv(*error));
     }
+    // Dispatch the event.
+    auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
+    event = workerInterface->customEvent(kj::heap<api::HibernatableWebSocketCustomEventImpl>(
+        hibernationEventType, readLoopTasks, kj::mv(KJ_REQUIRE_NONNULL(params)), *this))
+            .ignoreResult().attach(kj::mv(workerInterface));
   }
 
   // Returning the event promise will store it in readLoopTasks.
@@ -178,6 +173,9 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
       }
       KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
         maybeParams.emplace(close.code, kj::mv(close.reason), true);
+        // We'll dispatch the close event, so let's mark our websocket as having done so to
+        // prevent a situation where we dispatch it twice.
+        hib.hasDispatchedClose = true;
       }
     }
 
@@ -189,9 +187,6 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
         kj::heap<api::HibernatableWebSocketCustomEventImpl>(
             hibernationEventType, readLoopTasks, kj::mv(params), *this));
     if (isClose) {
-      // We've dispatched the close event, so let's mark our websocket as having done so to
-      // prevent a situation where we dispatch it twice.
-      hib.hasDispatchedClose = true;
       co_return;
     }
   }
