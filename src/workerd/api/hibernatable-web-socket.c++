@@ -75,7 +75,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     outcome = EventOutcome::EXCEPTION;
   }
 
-  waitUntilTasks.add(incomingRequest->drain());
+  waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
 
   co_return Result {
     .outcome = outcome,
