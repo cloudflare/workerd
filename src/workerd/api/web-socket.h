@@ -293,11 +293,18 @@ public:
   void initiateHibernatableRelease(jsg::Lock& js, HibernatableReleaseState releaseState) {
     // Called when a Hibernatable WebSocket wants to dispatch a close/error event, this modifies
     // our `Accepted` state to prepare the state to transition to `Released`.
-    auto& state = KJ_REQUIRE_NONNULL(farNative->state.tryGet<Accepted>());
-    KJ_REQUIRE(state.isHibernatable(),
-        "tried to initiate hibernatable release but websocket wasn't hibernatable");
-    state.ws.initiateHibernatableRelease(js, releaseState);
-    farNative->closedIncoming = true;
+    //
+    // TODO(soon): We probably want this to be an assert, since this is meant to be called once
+    // at the end of a websocket connection and if it doesn't run then it's likely that no close
+    // or error event will get dispatched.
+    KJ_IF_MAYBE(state, farNative->state.tryGet<Accepted>()) {
+      KJ_REQUIRE(state->isHibernatable(),
+          "tried to initiate hibernatable release but websocket wasn't hibernatable");
+      state->ws.initiateHibernatableRelease(js, releaseState);
+      farNative->closedIncoming = true;
+    } else {
+      KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
+    }
   }
 
   inline bool awaitingHibernatableError() {
