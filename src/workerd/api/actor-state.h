@@ -245,6 +245,7 @@ protected:
 
 private:
   IoPtr<ActorCacheInterface> cache;
+  uint transactionSyncDepth = 0;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {

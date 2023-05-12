@@ -381,7 +381,7 @@ async function test(storage) {
   });
   assert.equal(await storage.get("txnTest"), 3);
 
-  // Test savepoints, success
+  // Test transactionSync, success
   {
     await scheduler.wait(1);
     const result = storage.transactionSync(() => {
@@ -397,7 +397,7 @@ async function test(storage) {
     assert.equal(results.length, 1)
   }
 
-  // Test savepoints, failure
+  // Test transactionSync, failure
   {
     await scheduler.wait(1);
 
@@ -410,6 +410,31 @@ async function test(storage) {
       SELECT * FROM sqlite_master WHERE tbl_name = 'should_be_rolled_back'
     `))
     assert.equal(results.length, 0)
+  }
+
+  // Test transactionSync, nested
+  {
+    sql.exec("CREATE TABLE txnTest (i INTEGER)");
+    sql.exec("INSERT INTO txnTest VALUES (1)");
+
+    let setI = sql.prepare("UPDATE txnTest SET i = ?");
+    let getIStmt = sql.prepare("SELECT i FROM txnTest");
+    let getI = () => [...getIStmt()][0].i;
+
+    assert.equal(getI(), 1);
+    storage.transactionSync(() => {
+      setI(2);
+      assert.equal(getI(), 2);
+
+      requireException(() => storage.transactionSync(() => {
+        setI(3);
+        assert.equal(getI(), 3);
+        throw new Error("foo");
+      }), "Error: foo");
+
+      assert.equal(getI(), 2);
+    });
+    assert.equal(getI(), 2);
   }
 }
 
