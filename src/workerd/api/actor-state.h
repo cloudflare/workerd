@@ -194,6 +194,8 @@ public:
       jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> closure,
       jsg::Optional<TransactionOptions> options);
 
+  jsg::Value transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback);
+
   jsg::Promise<void> deleteAll(jsg::Lock& js, jsg::Optional<PutOptions> options);
 
   jsg::Promise<void> sync(jsg::Lock& js);
@@ -211,8 +213,10 @@ public:
     JSG_METHOD(setAlarm);
     JSG_METHOD(deleteAlarm);
     JSG_METHOD(sync);
+
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+      JSG_METHOD(transactionSync);
     }
 
     JSG_TS_OVERRIDE({
@@ -228,6 +232,7 @@ public:
       delete(keys: string[], options?: DurableObjectPutOptions): Promise<number>;
 
       transaction<T>(closure: (txn: DurableObjectTransaction) => Promise<T>): Promise<T>;
+      transactionSync<T>(closure: () => T): T;
     });
   }
 
@@ -240,6 +245,7 @@ protected:
 
 private:
   IoPtr<ActorCacheInterface> cache;
+  uint transactionSyncDepth = 0;
 };
 
 class DurableObjectTransaction final: public jsg::Object, public DurableObjectStorageOperations {

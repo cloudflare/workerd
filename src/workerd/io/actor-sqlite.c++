@@ -17,25 +17,131 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
 }
 
-void ActorSqlite::onWrite() {
-  if (!commitScheduled) {
-    beginTxn.run();
-    commitScheduled = true;
+ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent)
+    : parent(parent) {
+  KJ_REQUIRE(parent.currentTxn.is<NoTxn>());
+  parent.beginTxn.run();
+  parent.currentTxn = this;
+}
+ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
+  KJ_IF_MAYBE(c, parent.currentTxn.tryGet<ImplicitTxn*>()) {
+    if (*c == this) {
+      parent.currentTxn.init<NoTxn>();
+    }
+  }
+  if (!committed && parent.broken == nullptr) {
+    // Failed to commit, so roll back.
+    //
+    // This should only happen in cases of catastrophic error. Since this is rarely actually
+    // executed, we don't prepare a statement for it.
+    parent.db->run("ROLLBACK TRANSACTION");
+  }
+}
 
-    auto deferredRollback = kj::defer([this]() {
-      // Since this is rarely actually executed, we don't prepare a statement for it.
-      db->run("ROLLBACK TRANSACTION");
-    });
+void ActorSqlite::ImplicitTxn::commit() {
+  // Ignore redundant commit()s.
+  if (!committed) {
+    parent.commitTxn.run();
+    committed = true;
+  }
+}
+
+ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite)
+    : actorSqlite(actorSqlite) {
+  KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
+    KJ_CASE_ONEOF(_, NoTxn) {}
+    KJ_CASE_ONEOF(implicit, ImplicitTxn*) {
+      // An implicit transaction is open, commit it now because it would be weird if writes
+      // performed before the explicit transaction started were postponed until the transaction
+      // completes. Note that this isn't violating any atomicity guarantees because the transaction
+      // API is async, and atomicity is only guaranteed over synchronous code.
+      implicit->commit();
+    }
+    KJ_CASE_ONEOF(exp, ExplicitTxn*) {
+      KJ_REQUIRE(!exp->hasChild,
+          "critical section should have blocked creation of more than one child at a time");
+      parent = kj::addRef(*exp);
+      exp->hasChild = true;
+      depth = exp->depth + 1;
+    }
+  }
+  actorSqlite.currentTxn = this;
+
+  // To support nested transactions, we assign each savepoint a name based on its nesting depth.
+  // Unfortunately this means we cannot prepare the statement, unless we prepare a series of
+  // statements for each depth. (Actually, it could be reasonable to prepare statements for
+  // depth 0 specifically, but I'm not going to try it for now.)
+  actorSqlite.db->run(SqliteDatabase::TRUSTED,
+      kj::str("SAVEPOINT _cf_savepoint_", depth));
+}
+ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
+  [&]() noexcept {
+    // We'd better crash if any of this state update fails, otherwise dangling pointers.
+
+    KJ_ASSERT(!hasChild);
+    auto cur = KJ_ASSERT_NONNULL(actorSqlite.currentTxn.tryGet<ExplicitTxn*>());
+    KJ_ASSERT(cur == this);
+    KJ_IF_MAYBE(p, parent) {
+      p->get()->hasChild = false;
+      actorSqlite.currentTxn = p->get();
+    } else {
+      actorSqlite.currentTxn.init<NoTxn>();
+    }
+  }();
+
+  if (!committed) {
+    // Assume rollback if not committed.
+    rollbackImpl();
+  }
+}
+
+kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
+  KJ_REQUIRE(!hasChild, "critical sections should have prevented committing transaction while "
+      "nested txn is outstanding");
+
+  actorSqlite.db->run(SqliteDatabase::TRUSTED,
+      kj::str("RELEASE _cf_savepoint_", depth));
+  committed = true;
+
+  if (parent == nullptr) {
+    // We committed the root transaction, so it's time to signal any replication layer and lock
+    // the output gate in the meantime.
+    actorSqlite.commitTasks.add(
+        actorSqlite.outputGate.lockWhile(actorSqlite.commitCallback()));
+  }
+
+  // No backpressure for SQLite.
+  return nullptr;
+}
+
+kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
+  JSG_REQUIRE(!hasChild, Error,
+      "Cannot roll back an outer transaction while a nested transaction is still running.");
+  if (!committed) {
+    rollbackImpl();
+    committed = true;
+  }
+  return kj::READY_NOW;
+}
+
+void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
+  actorSqlite.db->run(SqliteDatabase::TRUSTED,
+      kj::str("ROLLBACK TO _cf_savepoint_", depth));
+  actorSqlite.db->run(SqliteDatabase::TRUSTED,
+      kj::str("RELEASE _cf_savepoint_", depth));
+}
+
+void ActorSqlite::onWrite() {
+  if (currentTxn.is<NoTxn>()) {
+    auto txn = kj::heap<ImplicitTxn>(*this);
 
     commitTasks.add(outputGate.lockWhile(kj::evalLater(
-        [this, deferredRollback = kj::mv(deferredRollback)]() mutable -> kj::Promise<void> {
+        [this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
-      deferredRollback.cancel();
-
       try {
-        commitTxn.run();
+        txn->commit();
       } catch (...) {
         // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
         // instead of whatever SQLite threw.
@@ -47,9 +153,9 @@ void ActorSqlite::onWrite() {
 
       // The callback is only expected to commit writes up until this point. Any new writes that
       // occur while the callback is in progress are NOT included, therefore require a new commit
-      // to be scheduled. So, we should set `commitScheduled = false` now, rather than after
-      // the callback.
-      commitScheduled = false;
+      // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+      // rather than after the callback.
+      { auto drop = kj::mv(txn); }
 
       return commitCallback();
     })));
@@ -179,8 +285,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
 kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
   requireNotBroken();
 
-  // TODO(sqlite): Implement transactions.
-  JSG_FAIL_REQUIRE(Error, "transaction() not yet implemented for SQLite-backed storage");
+  return kj::refcounted<ExplicitTxn>(*this);
 }
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
@@ -268,6 +373,49 @@ kj::Promise<kj::Maybe<kj::Date>> ActorSqlite::Hooks::getAlarm() {
 
 kj::Promise<void> ActorSqlite::Hooks::setAlarm(kj::Maybe<kj::Date>) {
   JSG_FAIL_REQUIRE(Error, "setAlarm() is not yet implemented for SQLite-backed Durable Objects");
+}
+
+kj::OneOf<kj::Maybe<ActorCacheOps::Value>, kj::Promise<kj::Maybe<ActorCacheOps::Value>>>
+    ActorSqlite::ExplicitTxn::get(Key key, ReadOptions options) {
+  return actorSqlite.get(kj::mv(key), options);
+}
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
+    ActorSqlite::ExplicitTxn::get(kj::Array<Key> keys, ReadOptions options) {
+  return actorSqlite.get(kj::mv(keys), options);
+}
+kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorSqlite::ExplicitTxn::getAlarm(
+    ReadOptions options) {
+  return actorSqlite.getAlarm(options);
+}
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
+    ActorSqlite::ExplicitTxn::list(
+        Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+  return actorSqlite.list(kj::mv(begin), kj::mv(end), limit, options);
+}
+kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList>>
+    ActorSqlite::ExplicitTxn::listReverse(
+        Key begin, kj::Maybe<Key> end, kj::Maybe<uint> limit, ReadOptions options) {
+  return actorSqlite.listReverse(kj::mv(begin), kj::mv(end), limit, options);
+}
+kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
+    Key key, Value value, WriteOptions options) {
+  return actorSqlite.put(kj::mv(key), kj::mv(value), options);
+}
+kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
+    kj::Array<KeyValuePair> pairs, WriteOptions options) {
+  return actorSqlite.put(kj::mv(pairs), options);
+}
+kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::ExplicitTxn::delete_(
+    Key key, WriteOptions options) {
+  return actorSqlite.delete_(kj::mv(key), options);
+}
+kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::ExplicitTxn::delete_(
+    kj::Array<Key> keys, WriteOptions options) {
+  return actorSqlite.delete_(kj::mv(keys), options);
+}
+kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::setAlarm(
+    kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
+  return actorSqlite.setAlarm(newAlarmTime, options);
 }
 
 }  // namespace workerd

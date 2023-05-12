@@ -582,8 +582,6 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
     jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> callback,
     jsg::Optional<TransactionOptions> options) {
   auto& context = IoContext::current();
-  auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(
-        cache->startTransaction()));
 
   struct TxnResult {
     jsg::Value value;
@@ -591,8 +589,17 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
   };
 
   return context.blockConcurrencyWhile(js,
-      [callback = kj::mv(callback), txn = kj::mv(txn)]
+      [callback = kj::mv(callback), &context, &cache = *cache]
       (jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
+    // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
+    // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
+    // blockConcurrencyWhile block before that point so we don't accidentally catch some other
+    // asynchronous event in our transaction.
+    //
+    // For the ActorCache-based implementation, it doesn't matter when we call `startTransaction()`
+    // as the method merely allocates an object and returns it with no side effects.
+    auto txn = jsg::alloc<DurableObjectTransaction>(context.addObject(cache.startTransaction()));
+
     return js.resolvedPromise(txn.addRef())
         .then(js, kj::mv(callback))
         .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::Value value) mutable {
@@ -620,6 +627,28 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
       return kj::mv(result.value);
     }
   });
+}
+
+jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) {
+  KJ_IF_MAYBE(sqlite, cache->getSqliteDatabase()) {
+    // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
+    sqlite->notifyWrite();
+
+    uint depth = transactionSyncDepth++;
+    KJ_DEFER(--transactionSyncDepth);
+
+    sqlite->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+    return js.tryCatch([&]() {
+      auto result = callback(js);
+      sqlite->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      return kj::mv(result);
+    }, [&](jsg::Value exception) -> jsg::Value {
+      sqlite->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+      js.throwException(kj::mv(exception));
+    });
+  } else {
+    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+  }
 }
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {

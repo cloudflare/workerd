@@ -75,6 +75,16 @@ public:
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
 
+  void notifyWrite();
+  // Invoke the onWrite() callback.
+  //
+  // This is useful when the caller is about to execute a statement which SQLite considers
+  // read-only, but needs to be considered a write for our purposes. In particular, we use the
+  // onWrite callback to start automatic transactions, and we use the SAVEPOINT statement to
+  // implement explicit transactions. For synchronous transactions, the explicit transaction needs
+  // to be nested inside the automatic transaction, so we need to force an auto-transaction to
+  // start before the SAVEPOINT.
+
 private:
   sqlite3* db;
 
