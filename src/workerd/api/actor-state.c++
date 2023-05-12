@@ -634,13 +634,13 @@ jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<js
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite->notifyWrite();
     // TODO(sqlite) allow nested savepoints, using a new savepoint name for each depth
-    sqlite->prepare("SAVEPOINT _cf_savepoint;").run();
+    sqlite->run("SAVEPOINT _cf_savepoint;");
     return js.tryCatch([&]() {
       auto result = callback(js);
-      sqlite->prepare("RELEASE _cf_savepoint;").run();
+      sqlite->run("RELEASE _cf_savepoint;");
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::Value {
-      sqlite->prepare("ROLLBACK TO _cf_savepoint;").run();
+      sqlite->run("ROLLBACK TO _cf_savepoint;");
       js.throwException(kj::mv(exception));
     });
   } else {
