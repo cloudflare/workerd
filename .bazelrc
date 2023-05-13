@@ -1,9 +1,8 @@
 common --enable_platform_specific_config
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
-# TODO(cleanup): Can we disable warnings altogether from our dependencies, without disabling them
-#   for workerd?
-build --cxxopt='-Wno-ambiguous-reversed-operator' --host_cxxopt='-Wno-ambiguous-reversed-operator'
+build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
+build --host_per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
 
 # Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
 # https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
@@ -52,6 +51,9 @@ build:unix --action_env=CXX=clang++
 # Warning options.
 build:unix --cxxopt='-Wall' --host_cxxopt='-Wall'
 build:unix --cxxopt='-Wextra' --host_cxxopt='-Wextra'
+build:unix --cxxopt='-Wunused-function' --host_cxxopt='-Wunused-function'
+build:unix --cxxopt='-Wunused-lambda-capture' --host_cxxopt='-Wunused-lambda-capture'
+build:unix --cxxopt='-Wunused-variable' --host_cxxopt='-Wunused-variable'
 build:unix --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
 build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
