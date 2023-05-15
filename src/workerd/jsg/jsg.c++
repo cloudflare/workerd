@@ -77,6 +77,41 @@ void Data::destroy() {
   }
 }
 
+void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept {
+  // Implement move constructor when the source of the move has previously been visited for
+  // garbage collection.
+  //
+  // This method is `noexcept` because if an exception is thrown below we're probably going to
+  // segfault later.
+
+  // We must hold a lock to move from a GC-reachable reference. (But we don't generally need a lock
+  // for moving from non-GC-reachable refs.)
+  KJ_ASSERT(v8::Locker::IsLocked(isolate));
+
+  // Verify the handle was not garbage-collected by trying to read it. The intention is for this
+  // to crash if the handle was GC'd before being moved away.
+  {
+    v8::HandleScope scope(isolate);
+    auto local = handle.Get(isolate);
+    if (local->IsValue()) {
+      local.As<v8::Value>()->IsArrayBufferView();
+    }
+  }
+
+  // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
+  // So, we need to make the handle strong.
+  handle.ClearWeak();
+
+  // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
+  // does nothing, because it doesn't know if the reference is even still valid, since it
+  // could be called during GC sweep time. But here, we know that `other` is definitely still
+  // valid, because we wouldn't be moving from an unreachable object. So we should Reset() the
+  // `TracedReference` so that V8 knows it's gone, which might make minor GCs more effective.
+  otherTracedRef.Reset();
+
+  other.tracedHandle = nullptr;
+}
+
 Lock::Lock(v8::Isolate* v8Isolate)
     : v8Isolate(v8Isolate), locker(v8Isolate), scope(v8Isolate),
       previousData(v8Isolate->GetData(2)),
