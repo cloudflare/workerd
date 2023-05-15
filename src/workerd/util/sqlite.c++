@@ -348,6 +348,14 @@ void SqliteDatabase::notifyWrite() {
   }
 }
 
+kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
+  KJ_IF_MAYBE(s, currentStatement) {
+    return sqlite3_normalized_sql(s);
+  } else {
+    return "(no statement is running)";
+  }
+}
+
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
   // Set up the regulator that will be used for authorizer callbacks while preparing this
@@ -784,8 +792,12 @@ void SqliteDatabase::Query::bind(uint i, decltype(nullptr)) {
 }
 
 void SqliteDatabase::Query::nextRow() {
+  KJ_ASSERT(db.currentStatement == nullptr, "recursive nextRow()?");
+  KJ_DEFER(db.currentStatement = nullptr);
+  db.currentStatement = *statement;
+
   // The statement could be "re-prepared" during sqlite3_step, so we must set up the regulator.
-  KJ_ASSERT(db.currentRegulator == nullptr, "recursive nextRow()?");
+  KJ_ASSERT(db.currentRegulator == nullptr, "nextRow() during prepare()?");
   KJ_DEFER(db.currentRegulator = nullptr);
   db.currentRegulator = regulator;
 
