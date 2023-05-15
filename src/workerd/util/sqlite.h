@@ -85,11 +85,19 @@ public:
   // to be nested inside the automatic transaction, so we need to force an auto-transaction to
   // start before the SAVEPOINT.
 
+  kj::StringPtr getCurrentQueryForDebug();
+  // Get the currently-executing SQL query for debug purposes. The query is normalized to hide
+  // any literal values that might contain sensitive information. This is intended to be safe for
+  // debug logs.
+
 private:
   sqlite3* db;
 
   kj::Maybe<Regulator&> currentRegulator;
   // Set while a query is compiling.
+
+  kj::Maybe<sqlite3_stmt&> currentStatement;
+  // Set while a statement is executing.
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
 
