@@ -615,18 +615,7 @@ public:
   }
   Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
     KJ_IF_MAYBE(t, other.tracedHandle) {
-      // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
-      // So, we need to make the handle strong.
-      handle.ClearWeak();
-
-      // Presumably, `other` is about to be destroyed. The destructor of `TracedReference`, though,
-      // does nothing, because it doesn't know if the reference is even still valid, since it
-      // could be called during GC sweep time. But here, we know that `other` is definitely still
-      // valid, because we wouldn't be moving from an unreachable object. So we should Reset() the
-      // `TracedReference` so that V8 knows it's gone, which might make minor GCs more effective.
-      t->Reset();
-
-      other.tracedHandle = nullptr;
+      moveFromTraced(other, *t);
     }
     other.isolate = nullptr;
     assertInvariant();
@@ -689,6 +678,10 @@ private:
     // invoked a lot and want them to be as optimizable as possible.
     KJ_IASSERT(isolate != nullptr || handle.IsEmpty());
   }
+
+  void moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTracedRef) noexcept;
+  // Implement move constructor when the source of the move has previously been visited for
+  // garbage collection.
 };
 
 template <typename T>
