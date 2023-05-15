@@ -5,6 +5,7 @@
 #include "sqlite.h"
 #include <kj/debug.h>
 #include <kj/refcount.h>
+#include <workerd/util/sentry.h>
 
 #if _WIN32
 #include <kj/win32-api-version.h>
@@ -1171,7 +1172,7 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
 #define WRAP_METHOD(errorCode, block) \
   auto& self KJ_UNUSED = *static_cast<FileImpl*>(file); \
   try block catch (kj::Exception& e) { \
-    KJ_LOG(ERROR, "SQLite VFS I/O error", e); \
+    LOG_EXCEPTION("sqliteVfsError", e); \
     return errorCode; \
   }
 

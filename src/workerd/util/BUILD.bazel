@@ -44,6 +44,7 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj:kj-async",
         "@sqlite3",
+        "//src/workerd/util:sentry",
     ],
 )
 
