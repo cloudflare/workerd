@@ -139,6 +139,8 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   auto& ioContext = IoContext::current();
 
+  JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
+
   auto jsRequest = Request::constructor(js, kj::str(addressStr), nullptr);
   kj::Own<WorkerInterface> client = fetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kj);
