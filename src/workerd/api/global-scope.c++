@@ -95,7 +95,6 @@ void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) 
   static constexpr auto DEFAULT_BM = R"DATA({
     "corporateProxy": false,
     "verifiedBot": false,
-    "ja3Hash": "25b4882c2bcb50cd6b469ff28c596742",
     "jsDetection": { "passed": false },
     "staticResource": false,
     "detectionIds": {},
