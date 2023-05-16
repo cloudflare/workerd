@@ -15,7 +15,7 @@ const helloWorldExample :Workerd.Config = (
   # worker service. The configuration details for the worker are defined below.
   services = [ (name = "main", worker = .helloWorld) ],
 
-  # Every configuration defines the one or more sockets on which the server will listene.
+  # Each configuration defines the sockets on which the server will listen.
   # Here, we create a single socket that will listen on localhost port 8080, and will
   # dispatch to the "main" service that we defined above.
   sockets = [ ( name = "http", address = "*:8080", http = (), service = "main" ) ]
