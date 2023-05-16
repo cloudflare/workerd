@@ -31,5 +31,5 @@ interface DispatchNamespace {
   * @returns A Fetcher object that allows you to send requests to the Worker script.
   * @throws If the Worker script does not exist in this dispatch namespace, an error will be thrown.
   */
-  get(name: string, args?: {[key: string]: any}, options?: DynamicDisptachOptions ): Fetcher;
+  get(name: string, args?: {[key: string]: any}, options?: DynamicDispatchOptions ): Fetcher;
 }
