@@ -51,6 +51,10 @@ import {
   kMaxLength
 } from 'node-internal:internal_buffer';
 
+import {
+  arrayBufferToUnsignedBigInt,
+} from 'node-internal:crypto_util';
+
 export type RandomBytesCallback = (err: any|null, buffer: Uint8Array) => void;
 export function randomBytes(size: number, callback: RandomBytesCallback): void;
 export function randomBytes(size: number): Uint8Array;
@@ -359,32 +363,6 @@ export function generatePrime(size: number,
       rej(err);
     }
   }).then((val) => callback!(null, val), (err) => callback!(err));
-}
-
-/**
- * 48 is the ASCII code for '0', 97 is the ASCII code for 'a'.
- * @param {number} number An integer between 0 and 15.
- * @returns {number} corresponding to the ASCII code of the hex representation
- *                   of the parameter.
- */
-const numberToHexCharCode = (number : number) => (number < 10 ? 48 : 87) + number;
-
-/**
- * @param {ArrayBuffer} buf An ArrayBuffer.
- * @return {bigint}
- */
-function arrayBufferToUnsignedBigInt(buf: ArrayBuffer) {
-  const length = buf.byteLength;
-  const chars = Array(length * 2);
-  const view = new DataView(buf);
-
-  for (let i = 0; i < length; i++) {
-    const val = view.getUint8(i);
-    chars[2 * i] = numberToHexCharCode(val >> 4);
-    chars[2 * i + 1] = numberToHexCharCode(val & 0xf);
-  }
-
-  return BigInt(`0x${String.fromCharCode.apply(null, chars)}`);
 }
 
 function unsignedBigIntToBuffer(bigint: bigint, name: string) {

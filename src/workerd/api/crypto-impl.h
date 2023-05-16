@@ -186,6 +186,12 @@ public:
 
   virtual kj::StringPtr getAlgorithmName() const = 0;
 
+  virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError,
+        "The getAsymmetricKeyDetail operation is not implemented for \"", getAlgorithmName(),
+        "\".");
+  }
+
   // JS API implementation
 
   virtual AlgorithmVariant getAlgorithm() const = 0;

@@ -195,6 +195,27 @@ public:
     JSG_STRUCT(name, hash, namedCurve, length);
   };
 
+  struct AsymmetricKeyDetails {
+    // Used as part of the Node.js crypto implementation of KeyObject.
+    // Defined here instead of api/node/crypto.h because it it is needed
+    // by CryptoKey::Impl to provide the actual implementation.
+    jsg::Optional<uint32_t> modulusLength;
+    jsg::Optional<kj::Array<kj::byte>> publicExponent;
+    jsg::Optional<kj::String> hashAlgorithm;
+    jsg::Optional<kj::String> mgf1HashAlgorithm;
+    jsg::Optional<double> saltLength;
+    jsg::Optional<uint32_t> divisorLength;
+    jsg::Optional<kj::String> namedCurve;
+    JSG_STRUCT(modulusLength,
+                publicExponent,
+                hashAlgorithm,
+                mgf1HashAlgorithm,
+                saltLength,
+                divisorLength,
+                namedCurve);
+  };
+  AsymmetricKeyDetails getAsymmetricKeyDetails() const;
+
   ~CryptoKey() noexcept(false);
 
   kj::StringPtr getAlgorithmName() const;
@@ -683,6 +704,7 @@ private:
   api::CryptoKey::RsaKeyAlgorithm,                    \
   api::CryptoKey::EllipticKeyAlgorithm,               \
   api::CryptoKey::ArbitraryKeyAlgorithm,              \
+  api::CryptoKey::AsymmetricKeyDetails,               \
   api::DigestStream
 
 }  // namespace workerd::api

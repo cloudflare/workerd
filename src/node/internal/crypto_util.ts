@@ -64,3 +64,29 @@ export function getArrayBufferOrView(buffer: Buffer | ArrayBuffer | ArrayBufferV
   }
   return buffer;
 }
+
+/**
+ * 48 is the ASCII code for '0', 97 is the ASCII code for 'a'.
+ * @param {number} number An integer between 0 and 15.
+ * @returns {number} corresponding to the ASCII code of the hex representation
+ *                   of the parameter.
+ */
+export const numberToHexCharCode = (number: number): number => (number < 10 ? 48 : 87) + number;
+
+/**
+ * @param {ArrayBuffer} buf An ArrayBuffer.
+ * @return {bigint}
+ */
+export function arrayBufferToUnsignedBigInt(buf: ArrayBuffer): bigint {
+  const length = buf.byteLength;
+  const chars = Array<number>(length * 2);
+  const view = new DataView(buf);
+
+  for (let i = 0; i < length; i++) {
+    const val = view.getUint8(i);
+    chars[2 * i] = numberToHexCharCode(val >> 4);
+    chars[2 * i + 1] = numberToHexCharCode(val & 0xf);
+  }
+
+  return BigInt(`0x${String.fromCharCode.apply(null, chars)}`);
+}

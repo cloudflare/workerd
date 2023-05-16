@@ -51,6 +51,10 @@ import {
 } from 'node-internal:crypto';
 
 import {
+  arrayBufferToUnsignedBigInt,
+} from 'node-internal:crypto_util';
+
+import {
   isAnyArrayBuffer,
   isArrayBuffer,
   isSharedArrayBuffer,
@@ -156,7 +160,11 @@ export abstract class KeyObject {
 
 abstract class AsymmetricKeyObject extends KeyObject {
   get asymmetricKeyDetails() : AsymmetricKeyDetails {
-    return cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
+    let detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
+    if (isArrayBuffer(detail.publicExponent)) {
+      detail.publicExponent = arrayBufferToUnsignedBigInt(detail.publicExponent as any);
+    }
+    return detail;
   }
 
   get asymmetricKeyType() : AsymmetricKeyType {

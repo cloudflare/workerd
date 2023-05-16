@@ -26,23 +26,6 @@ public:
     JSG_STRUCT(type, format, cipher, passphrase);
   };
 
-  struct AsymmetricKeyDetails {
-    jsg::Optional<uint32_t> modulusLength;
-    jsg::Optional<uint64_t> publicExponent;
-    jsg::Optional<kj::String> hashAlgorithm;
-    jsg::Optional<kj::String> mgf1HashAlgorithm;
-    jsg::Optional<uint32_t> saltLength;
-    jsg::Optional<uint32_t> divisorLength;
-    jsg::Optional<kj::String> namedCurve;
-    JSG_STRUCT(modulusLength,
-               publicExponent,
-               hashAlgorithm,
-               mgf1HashAlgorithm,
-               saltLength,
-               divisorLength,
-               namedCurve);
-  };
-
   struct GenerateKeyPairOptions {
     jsg::Optional<uint32_t> modulusLength;
     jsg::Optional<uint64_t> publicExponent;
@@ -95,7 +78,7 @@ public:
 
   bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
 
-  AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
 
   CryptoKeyPair generateKeyPair(jsg::Lock& js, kj::String type, GenerateKeyPairOptions options);
@@ -125,7 +108,6 @@ public:
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                   \
     api::node::CryptoImpl,                             \
     api::node::CryptoImpl::KeyExportOptions,           \
-    api::node::CryptoImpl::AsymmetricKeyDetails,       \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
     api::node::CryptoImpl::CreateAsymmetricKeyOptions
 }  // namespace workerd::api::node

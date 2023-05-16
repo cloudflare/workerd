@@ -421,6 +421,73 @@ private:
         "\" in \"raw\" format.");
   }
 
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+    // Adapted from the Node.js implementation of GetRsaKeyDetail
+    const BIGNUM* e;  // Public Exponent
+    const BIGNUM* n;  // Modulus
+
+    int type = EVP_PKEY_id(getEvpPkey());
+    KJ_REQUIRE(type == EVP_PKEY_RSA || type == EVP_PKEY_RSA_PSS);
+
+    const RSA* rsa = EVP_PKEY_get0_RSA(getEvpPkey());
+    KJ_ASSERT(rsa != nullptr);
+    RSA_get0_key(rsa, &n, &e, nullptr);
+
+    CryptoKey::AsymmetricKeyDetails details;
+    details.modulusLength = BN_num_bits(n);
+
+    auto public_exponent = kj::heapArray<kj::byte>(BN_num_bytes(e));
+    KJ_ASSERT(BN_bn2binpad(e, static_cast<unsigned char*>(public_exponent.begin()),
+                           public_exponent.size()) == public_exponent.size());
+    details.publicExponent = kj::mv(public_exponent);
+
+    // TODO(soon): Does BoringSSL not support retrieving RSA_PSS params?
+    // if (type == EVP_PKEY_RSA_PSS) {
+    //   // Due to the way ASN.1 encoding works, default values are omitted when
+    //   // encoding the data structure. However, there are also RSA-PSS keys for
+    //   // which no parameters are set. In that case, the ASN.1 RSASSA-PSS-params
+    //   // sequence will be missing entirely and RSA_get0_pss_params will return
+    //   // nullptr. If parameters are present but all parameters are set to their
+    //   // default values, an empty sequence will be stored in the ASN.1 structure.
+    //   // In that case, RSA_get0_pss_params does not return nullptr but all fields
+    //   // of the returned RSA_PSS_PARAMS will be set to nullptr.
+
+    //   const RSA_PSS_PARAMS* params = RSA_get0_pss_params(rsa);
+    //   if (params != nullptr) {
+    //     int hash_nid = NID_sha1;
+    //     int mgf_nid = NID_mgf1;
+    //     int mgf1_hash_nid = NID_sha1;
+    //     int64_t salt_length = 20;
+
+    //     if (params->hashAlgorithm != nullptr) {
+    //       hash_nid = OBJ_obj2nid(params->hashAlgorithm->algorithm);
+    //     }
+    //     details.hashAlgorithm = kj::str(OBJ_nid2ln(hash_nid));
+
+    //     if (params->maskGenAlgorithm != nullptr) {
+    //       mgf_nid = OBJ_obj2nid(params->maskGenAlgorithm->algorithm);
+    //       if (mgf_nid == NID_mgf1) {
+    //         mgf1_hash_nid = OBJ_obj2nid(params->maskHash->algorithm);
+    //       }
+    //     }
+
+    //     // If, for some reason, the MGF is not MGF1, then the MGF1 hash function
+    //     // is intentionally not added to the object.
+    //     if (mgf_nid == NID_mgf1) {
+    //       details.mgf1HashAlgorithm = kj::str(OBJ_nid2ln(mgf1_hash_nid));
+    //     }
+
+    //     if (params->saltLength != nullptr) {
+    //       JSG_REQUIRE(ASN1_INTEGER_get_int64(&salt_length, params->saltLength) == 1,
+    //                   Error, "Unable to get salt length from RSA-PSS parameters");
+    //     }
+    //     details.saltLength = static_cast<double>(salt_length);
+    //   }
+    // }
+
+    return kj::mv(details);
+  }
+
   virtual kj::String jwkHashAlgorithmName() const = 0;
 };
 
@@ -1387,6 +1454,20 @@ private:
     return kj::Array<kj::byte>(raw, raw_len, SslArrayDisposer::INSTANCE);
   }
 
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+    // Adapted from Node.js' GetEcKeyDetail
+    KJ_REQUIRE(EVP_PKEY_id(getEvpPkey()) == EVP_PKEY_EC);
+    const EC_KEY* ec = EVP_PKEY_get0_EC_KEY(getEvpPkey());
+    KJ_ASSERT(ec != nullptr);
+
+    const EC_GROUP* group = EC_KEY_get0_group(ec);
+    int nid = EC_GROUP_get_curve_name(group);
+
+    return CryptoKey::AsymmetricKeyDetails {
+      .namedCurve = kj::str(OBJ_nid2sn(nid))
+    };
+  }
+
   CryptoKey::EllipticKeyAlgorithm keyAlgorithm;
   uint rsSize;
 };
@@ -1870,6 +1951,11 @@ public:
     uint8_t mask = ~((1 << numBitsToMaskOff) - 1);
     sharedSecret.back() &= mask;
     return sharedSecret.releaseAsArray();
+  }
+
+  CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const override {
+    // Node.js implementation for EdDsa keys currently does not provide any detail
+    return CryptoKey::AsymmetricKeyDetails {};
   }
 
 private:
