@@ -1644,7 +1644,8 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
     Worker::ValidationErrorReporter& errorReporter,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
-    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs) {
+    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
+    kj::Maybe<api::HostInterface&> hostInterface) {
   // creates binding object or returns null and reports an error
   using Global = WorkerdApiIsolate::Global;
   kj::StringPtr bindingName = binding.getName();
@@ -1873,12 +1874,19 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
     }
 
+    case config::Worker::Binding::WORKERD: {
+      KJ_IF_MAYBE(h, hostInterface) {
+        return makeGlobal(Global::WorkerdBinding { .host = *h });
+      }
+      return nullptr;
+    }
+
     case config::Worker::Binding::WRAPPED: {
       auto wrapped = binding.getWrapped();
       kj::Vector<Global> innerGlobals;
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_MAYBE(global, createBinding(workerName, conf, innerBinding,
-            errorReporter, subrequestChannels, actorChannels, actorConfigs)) {
+            errorReporter, subrequestChannels, actorChannels, actorConfigs, hostInterface)) {
           innerGlobals.add(kj::mv(*global));
         } else {
           // we've already communicated the error
@@ -2014,7 +2022,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_MAYBE(global, createBinding(name, conf, binding, errorReporter,
-                                     subrequestChannels, actorChannels, actorConfigs)) {
+                                     subrequestChannels, actorChannels, actorConfigs, this)) {
       globals.add(kj::mv(*global));
     }
   }
@@ -2815,6 +2823,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   }
 
   co_return passCount > 0 && failCount == 0;
+}
+
+kj::StringPtr Server::version()  {
+  return "42"_kj;
 }
 
 }  // namespace workerd::server

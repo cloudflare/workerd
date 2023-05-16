@@ -8,6 +8,7 @@
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/async-io.h>
+#include <workerd/api/workerd.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -25,7 +26,7 @@ namespace workerd::server {
 
 using kj::uint;
 
-class Server: private kj::TaskSet::ErrorHandler {
+class Server: public workerd::api::HostInterface, private kj::TaskSet::ErrorHandler {
   // Implements the single-tenant Workers Runtime server / CLI.
   //
   // The purpose of this class is to implement the core logic independently of the CLI itself,
@@ -71,6 +72,8 @@ public:
   // service and entrypoint names.
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
+
+  kj::StringPtr version() override;
 
   struct Durable { kj::String uniqueKey; };
   struct Ephemeral {};

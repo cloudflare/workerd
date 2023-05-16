@@ -20,6 +20,7 @@
 #include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/workerd.h>
 #include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
@@ -61,6 +62,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_SOCKETS_ISOLATE_TYPES,
   EW_KV_ISOLATE_TYPES,
   EW_QUEUE_ISOLATE_TYPES,
+  EW_WORKERD_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES,
   EW_R2_PUBLIC_BETA_ISOLATE_TYPES,
   EW_SCHEDULED_ISOLATE_TYPES,
@@ -575,6 +577,10 @@ static v8::Local<v8::Value> createBindingValue(
           kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
+    KJ_CASE_ONEOF(wd, Global::WorkerdBinding) {
+      value = lock.wrap(context, jsg::alloc<api::Workerd>(wd.host));
+    }
+
     KJ_CASE_ONEOF(text, kj::String) {
       value = lock.wrap(context, kj::mv(text));
     }
@@ -670,6 +676,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(queueBinding, Global::QueueBinding) {
       result.value = queueBinding.clone();
+    }
+    KJ_CASE_ONEOF(workerdBinding, Global::WorkerdBinding) {
+      result.value = workerdBinding.clone();
     }
     KJ_CASE_ONEOF(key, Global::CryptoKey) {
       result.value = key.clone();
