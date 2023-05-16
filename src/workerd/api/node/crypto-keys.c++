@@ -1,6 +1,7 @@
 #include "crypto.h"
 #include <workerd/api/crypto-impl.h>
 #include <openssl/crypto.h>
+#include <map>
 
 namespace workerd::api::node {
 
@@ -71,7 +72,23 @@ CryptoImpl::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
 }
 
 kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
-  KJ_UNIMPLEMENTED("not implemented");
+  static std::map<kj::StringPtr, kj::StringPtr> mapping{
+    {"RSASSA-PKCS1-v1_5", "rsa"},
+    {"RSA-PSS", "rsa"},
+    {"RSA-OAEP", "rsa"},
+    {"ECDSA", "ec"},
+    {"Ed25519", "ed25519"},
+    {"NODE-ED25519", "ed25519"},
+    {"ECDH", "ecdh"},
+    {"X25519", "x25519"},
+  };
+  JSG_REQUIRE(key->getType() != "secret"_kj, TypeError,
+      "Secret key does not have an asymmetric type");
+  auto found = mapping.find(key->getAlgorithmName());
+  if (found != mapping.end()) {
+    return found->second;
+  }
+  return key->getAlgorithmName();
 }
 
 CryptoKeyPair CryptoImpl::generateKeyPair(

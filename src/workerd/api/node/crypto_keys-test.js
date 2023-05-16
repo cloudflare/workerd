@@ -150,6 +150,9 @@ export const asymmetric_key_equals_test = {
     const rsa_ko = KeyObject.from(rsa);
     const rsa2_ko = KeyObject.from(rsa2);
 
+    strictEqual(jwk1_ko.asymmetricKeyType, 'ec');
+    strictEqual(rsa_ko.asymmetricKeyType, 'rsa');
+
     ok(jwk1_ko.equals(jwk1_ko));
     ok(jwk1_ko.equals(jwk2_ko));
     ok(!rsa_ko.equals(jwk1_ko));
