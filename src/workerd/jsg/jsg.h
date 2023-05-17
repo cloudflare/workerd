@@ -628,9 +628,7 @@ public:
       handle = kj::mv(other.handle);
       other.isolate = nullptr;
       KJ_IF_MAYBE(t, other.tracedHandle) {
-        handle.ClearWeak();
-        t->Reset();
-        other.tracedHandle = nullptr;
+        moveFromTraced(other, *t);
       }
     }
     assertInvariant();
