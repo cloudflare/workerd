@@ -126,21 +126,31 @@ export abstract class KeyObject {
     if (opts.format !== undefined) validateString(opts.format, 'options.format');
     if (opts.type !== undefined) validateString(opts.type, 'options.type');
     if (this.type === 'private') {
-      if (opts.cipher !== undefined) validateString(opts.cipher, 'options.cipher');
-      if (typeof opts.passphrase === 'string') {
-        opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
+      if (opts.cipher !== undefined) {
+        validateString(opts.cipher, 'options.cipher');
+        // We only pay attention to passphrase if cipher is specified.
+        if (typeof opts.passphrase === 'string') {
+          opts.passphrase = Buffer.from(opts.passphrase, opts.encoding);
+        }
+        if (!isUint8Array(opts.passphrase)) {
+          throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
+            'string', 'Uint8Array'
+          ], opts.passphrase);
+        }
+      } else {
+        opts.passphrase = undefined;
       }
-      if (!isUint8Array(opts.passphrase)) {
-        throw new ERR_INVALID_ARG_TYPE('options.passphrase', [
-          'string', 'Uint8Array'
-        ], opts.passphrase);
-      }
+    } else {
+      opts.passphrase = undefined;
+      opts.cipher = undefined;
     }
 
     const ret = cryptoImpl.exportKey(this[kHandle], options as InnerExportOptions);
     if (typeof ret === 'string') return ret;
     if (isUint8Array(ret)) {
       return Buffer.from((ret as Uint8Array).buffer, ret.byteOffset, ret.byteLength) as KeyExportResult;
+    } else if (isArrayBuffer(ret)) {
+      return Buffer.from(ret as ArrayBuffer, 0, (ret as ArrayBuffer).byteLength);
     }
     return ret;
   }
