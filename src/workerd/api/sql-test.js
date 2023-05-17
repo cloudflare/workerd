@@ -320,6 +320,10 @@ async function test(storage) {
 
   // Test database size interface.
   assert.equal(sql.databaseSize, 36864);
+  sql.exec(`CREATE TABLE should_make_one_more_page(VALUE text);`)
+  assert.equal(sql.databaseSize, 36864 + 4096);
+  sql.exec(`DROP TABLE should_make_one_more_page;`)
+  assert.equal(sql.databaseSize, 36864);
 
   storage.put("txnTest", 0);
 

@@ -23,7 +23,10 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String qu
 }
 
 double SqlStorage::getDatabaseSize() {
-  int64_t pages = execMemoized(pragmaPageCount, "PRAGMA page_count;").getInt64(0);
+  int64_t pages = execMemoized(
+      pragmaPageCount,
+      "select (select * from pragma_page_count) - (select * from pragma_freelist_count);"
+  ).getInt64(0);
   return pages * getPageSize();
 }
 
