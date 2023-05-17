@@ -184,6 +184,23 @@ public:
         "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
   }
 
+  virtual kj::Array<kj::byte> exportKeyExt(
+      kj::StringPtr format,
+      kj::StringPtr type,
+      jsg::Optional<kj::String> cipher = nullptr,
+      jsg::Optional<kj::Array<kj::byte>> passphrase = nullptr) const {
+    // The exportKeyExt variant is used by the Node.js crypto module. It allows the caller to
+    // specify a broader range of export formats and types that are not supported by Web
+    // Crypto. For instance, Web Crypto limits the export of public keys to only the spki or
+    // jwk formats, while Node.js allows pkcs1 or spki formatted as either pem, der, or jwk.
+    // For private keys, Node.js allows optionally encrypting the private key using a given
+    // cipher and passphrase.
+    // Rather than modify the existing exportKey API, we add this new variant to support the
+    // Node.js implementation without risking breaking the Web Crypto impl.
+    JSG_FAIL_REQUIRE(DOMNotSupportedError,
+        "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
+  }
+
   virtual kj::StringPtr getAlgorithmName() const = 0;
 
   virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const {
@@ -267,12 +284,13 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
 #define BIGNUM_new BN_new
 #define BIGNUM_free BN_free
 // BIGNUM obnoxiously doesn't follow the naming convention...
-#define BIO_new BIO_new_mem_buf
-#define BIO_free BIO_free_all
-// Neither does BIO...
 
-#define OSSL_BIO(buf, ...) OSSL_NEW(BIO, buf.begin(), buf.size())
-// Wrap a kj::Array<kj::byte> (or kj::ArrayPtr) with an openssl BIO
+#define OSSL_BIO_MEM() \
+  ({ \
+    BIO* result = BIO_new(BIO_s_mem()); \
+    JSG_REQUIRE(result != nullptr, InternalDOMOperationError, "Error allocating crypto"); \
+    kj::Own<BIO>(result, workerd::api::SslDisposer<BIO, &BIO_free_all>::INSTANCE); \
+  })
 
 // Adopted from Node.js' crypto implementation. the MarkPopErrorOnReturn
 // and ClearErrorOnReturn mechanisms make working with the openssl error

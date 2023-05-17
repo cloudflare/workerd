@@ -13,6 +13,9 @@
 #include "util.h"
 
 namespace workerd::api {
+namespace node {
+class CryptoImpl;
+}
 namespace {
 class EdDsaKeyBase;
 class EllipticKey;
@@ -259,6 +262,7 @@ private:
   friend class SubtleCrypto;
   friend class EllipticKey;
   friend class EdDsaKeyBase;
+  friend class node::CryptoImpl;
 };
 
 struct CryptoKeyPair {

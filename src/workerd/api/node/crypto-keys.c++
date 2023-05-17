@@ -59,7 +59,30 @@ kj::OneOf<kj::String, kj::Array<kj::byte>, SubtleCrypto::JsonWebKey> CryptoImpl:
     jsg::Lock& js,
     jsg::Ref<CryptoKey> key,
     jsg::Optional<KeyExportOptions> options) {
-  KJ_UNIMPLEMENTED("not implemented");
+  JSG_REQUIRE(key->getExtractable(), TypeError, "Unable to export non-extractable key");
+  auto& opts = JSG_REQUIRE_NONNULL(options, TypeError, "Options must be an object");
+
+  kj::StringPtr format = JSG_REQUIRE_NONNULL(opts.format, TypeError, "Missing format option");
+  if (format == "jwk"_kj) {
+    // When format is jwk, all other options are ignored.
+    return key->impl->exportKey(format);
+  }
+
+  if (key->getType() == "secret"_kj) {
+    // For secret keys, we only pay attention to the format option, which will be
+    // one of either "buffer" or "jwk". The "buffer" option correlates to the "raw"
+    // format in Web Crypto. The "jwk" option is handled above.
+    JSG_REQUIRE(format == "buffer"_kj, TypeError, "Invalid format for secret key export: ", format);
+    return key->impl->exportKey("raw"_kj);
+  }
+
+  kj::StringPtr type = JSG_REQUIRE_NONNULL(opts.type, TypeError, "Missing type option");
+  auto data = key->impl->exportKeyExt(format, type, kj::mv(opts.cipher), kj::mv(opts.passphrase));
+  if (format == "pem"_kj) {
+    // TODO(perf): As a later performance optimization, change this so that it doesn't copy.
+    return kj::str(data.asChars());
+  }
+  return kj::mv(data);
 }
 
 bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey) {
