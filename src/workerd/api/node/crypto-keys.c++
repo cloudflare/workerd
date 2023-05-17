@@ -66,9 +66,10 @@ bool CryptoImpl::equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoK
   return *key == *otherKey;
 }
 
-CryptoImpl::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
+CryptoKey::AsymmetricKeyDetails CryptoImpl::getAsymmetricKeyDetail(
     jsg::Lock& js, jsg::Ref<CryptoKey> key) {
-  KJ_UNIMPLEMENTED("not implemented");
+  JSG_REQUIRE(key->getType() != "secret"_kj, Error, "Secret keys do not have asymmetric details");
+  return key->getAsymmetricKeyDetails();
 }
 
 kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key) {

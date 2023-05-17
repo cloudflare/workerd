@@ -290,6 +290,10 @@ bool CryptoKey::operator==(const CryptoKey& other) const {
   return this == &other || (getType() == other.getType() && impl->equals(*other.impl));
 }
 
+CryptoKey::AsymmetricKeyDetails CryptoKey::getAsymmetricKeyDetails() const {
+  return impl->getAsymmetricKeyDetail();
+}
+
 jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::encrypt(
     jsg::Lock& js,
     kj::OneOf<kj::String, EncryptAlgorithm> algorithmParam,

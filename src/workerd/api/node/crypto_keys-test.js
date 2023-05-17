@@ -152,6 +152,9 @@ export const asymmetric_key_equals_test = {
 
     strictEqual(jwk1_ko.asymmetricKeyType, 'ec');
     strictEqual(rsa_ko.asymmetricKeyType, 'rsa');
+    strictEqual(rsa_ko.asymmetricKeyDetails.modulusLength, 2048);
+    strictEqual(rsa_ko.asymmetricKeyDetails.publicExponent, 65537n);
+    strictEqual(jwk1_ko.asymmetricKeyDetails.namedCurve, 'secp384r1');
 
     ok(jwk1_ko.equals(jwk1_ko));
     ok(jwk1_ko.equals(jwk2_ko));
