@@ -29,15 +29,11 @@ public:
 
   double getDatabaseSize();
 
-  double getVoluntarySizeLimit();
-  void setVoluntarySizeLimit(int64_t value);
-
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
-    JSG_PROTOTYPE_PROPERTY(voluntarySizeLimit, getVoluntarySizeLimit, setVoluntarySizeLimit);
 
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);

@@ -23,24 +23,11 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, kj::String qu
 }
 
 double SqlStorage::getDatabaseSize() {
-  int64_t pages = execMemoized(pragmaPageCount, "PRAGMA page_count;").getInt64(0);
+  int64_t pages = execMemoized(
+      pragmaPageCount,
+      "select (select * from pragma_page_count) - (select * from pragma_freelist_count);"
+  ).getInt64(0);
   return pages * getPageSize();
-}
-
-double SqlStorage::getVoluntarySizeLimit() {
-  int64_t pages = execMemoized(pragmaGetMaxPageCount, "PRAGMA max_page_count;").getInt64(0);
-  return pages * getPageSize();
-}
-
-void SqlStorage::setVoluntarySizeLimit(int64_t value) {
-  JSG_REQUIRE(value > 0, TypeError, "Size limit must be a positive integer.");
-
-  uint64_t pages = value / getPageSize();
-
-  // Annoyingly, pragmas cannot be parameterized. Apparently there's an alternate syntax where
-  // they can be but I couldn't figure it out. So whatever. `pages` is just an integer so no
-  // injection is possible here.
-  sqlite->run(SqliteDatabase::TRUSTED, kj::str("PRAGMA max_page_count = ", pages, ";"));
 }
 
 bool SqlStorage::isAllowedName(kj::StringPtr name) {
