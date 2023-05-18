@@ -699,7 +699,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
           KJ_FAIL_ASSERT("Unexpected native web socket state", native.state);
         }
       }
-    }, [this](jsg::Lock& js, jsg::Value&& exception) mutable {
+    }, [this, thisHandle = JSG_THIS](jsg::Lock& js, jsg::Value&& exception) mutable {
       if (awaitingHibernatableRelease()) {
         // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
         tryReleaseNative(js);

@@ -22,7 +22,7 @@ public:
         hibernationEventType(hibernationEventType),
         onDisconnect(DisconnectHandler{}),
         readLoopTasks(onDisconnect) {}
-  ~HibernationManagerImpl();
+  ~HibernationManagerImpl() noexcept(false);
 
   void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) override;
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags
@@ -73,7 +73,7 @@ private:
           ws(activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable()),
           manager(manager) {}
 
-    ~HibernatableWebSocket() {
+    ~HibernatableWebSocket() noexcept(false) {
       // We expect this dtor to be called when we're removing a HibernatableWebSocket
       // from our `allWs` collection in the HibernationManager.
 

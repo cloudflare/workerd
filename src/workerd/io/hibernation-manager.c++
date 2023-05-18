@@ -7,7 +7,7 @@
 
 namespace workerd {
 
-HibernationManagerImpl::~HibernationManagerImpl() {
+HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();

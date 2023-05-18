@@ -556,18 +556,18 @@ private:
       return ws.getIfNotHibernatable() == nullptr;
     }
 
+    kj::Promise<void> createAbortTask(Native& native, IoContext& context);
+    kj::Promise<void> whenAbortedTask = nullptr;
+    // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
+
+    kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
+
     kj::Canceler canceler;
     // This canceler wraps the pump loop as a precaution to make sure we can't exit the Accepted
     // state with a pump task still happening asychronously. In practice the canceler should usually
     // be empty when destroyed because we do not leave the Accepted state if we're still pumping.
     // Even in the case of IoContext premature cancellation, the pump task should be canceled
     // by the IoContext before the Canceler is destroyed.
-
-    kj::Promise<void> createAbortTask(Native& native, IoContext& context);
-    kj::Promise<void> whenAbortedTask = nullptr;
-    // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
-
-    kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
   };
 
   struct Released {};
