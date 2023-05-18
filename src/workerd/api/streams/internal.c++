@@ -290,12 +290,14 @@ public:
     // isolate.
     if (!wasRead) {
       auto msg =
-          "Your worker called response.clone(), but did not read the body of both clones. "
-          "This is wasteful, as it forces the system to buffer the entire response body in memory, "
-          "rather than streaming it through. This may cause your worker to be unexpectedly "
+          "Your worker created multiple branches of a single stream (for instance, by calling "
+          "`response.clone()` or `request.clone()`) but did not read the body of both branches. "
+          "This is wasteful, as it forces the system to buffer the entire stream of data in "
+          "memory, rather than streaming it through. This may cause your worker to be unexpectedly "
           "terminated for going over the memory limit. If you only meant to copy the "
-          "response headers and metadata (e.g. in order to be able to modify them), "
-          "use `new Response(response.body, response)` instead.";
+          "request or response headers and metadata (e.g. in order to be able to modify them), "
+          "use the appropriate constructors instead (for instance, `new Response(response.body, "
+          "response)`, `new Request(request)`, etc).";
       // If possible, give a warning pointing to the line number.
       if (IoContext::hasCurrent()) {
         // We're currently in a JavaScript execution context, which means the object must be being
