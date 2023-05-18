@@ -373,7 +373,7 @@ WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, Io
 }
 
 WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& context)
-    : ws(wsParam),
+    : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
   KJ_IF_MAYBE(a, context.getActor()) {
     auto& metrics = a->getMetrics();

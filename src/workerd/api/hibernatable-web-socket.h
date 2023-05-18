@@ -22,6 +22,23 @@ public:
 
   static jsg::Ref<HibernatableWebSocketEvent> constructor(kj::String type) = delete;
 
+  struct ItemsForRelease {
+    // When we call a close or error event, we need to move the owned websocket back into the
+    // api::WebSocket to extend its lifetime. The way we obtain the websocket from the
+    // HibernationManager is somewhat fragile, so it's better if we group the reference and owned
+    // websocket together.
+    jsg::Ref<WebSocket> webSocketRef;
+    kj::Own<kj::WebSocket> ownedWebSocket;
+
+    explicit ItemsForRelease(jsg::Ref<WebSocket> ref, kj::Own<kj::WebSocket> owned)
+        : webSocketRef(kj::mv(ref)), ownedWebSocket(kj::mv(owned)) {}
+  };
+
+  ItemsForRelease prepareForRelease(jsg::Lock& lock);
+  // Only call this once (when transferring ownership of the websocket back to the api::WebSocket).
+  // Gets a reference to the api::WebSocket, and moves the owned kj::WebSocket out of the
+  // HibernatableWebSocket whose event we are currently delivering.
+
   jsg::Ref<WebSocket> getWebSocket(jsg::Lock& lock);
 
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {
