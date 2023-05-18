@@ -289,8 +289,7 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // been flushed.
   return writable->getController().close(js).catch_(js,
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value&& exc) {
-    ref->closeFulfiller.resolver.reject(js,
-        KJ_EXCEPTION(FAILED, kj::str(exc.getHandle(js.v8Isolate))));
+    ref->closeFulfiller.resolver.reject(js, exc.getHandle(js.v8Isolate));
   })).then(js, JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
     ref->closeFulfiller.resolver.resolve();
   }));
