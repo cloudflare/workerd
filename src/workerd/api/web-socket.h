@@ -290,7 +290,9 @@ public:
     ERROR
   };
 
-  void initiateHibernatableRelease(jsg::Lock& js, HibernatableReleaseState releaseState) {
+  void initiateHibernatableRelease(jsg::Lock& js,
+      kj::Own<kj::WebSocket> ws,
+      HibernatableReleaseState releaseState) {
     // Called when a Hibernatable WebSocket wants to dispatch a close/error event, this modifies
     // our `Accepted` state to prepare the state to transition to `Released`.
     //
@@ -300,7 +302,7 @@ public:
     KJ_IF_MAYBE(state, farNative->state.tryGet<Accepted>()) {
       KJ_REQUIRE(state->isHibernatable(),
           "tried to initiate hibernatable release but websocket wasn't hibernatable");
-      state->ws.initiateHibernatableRelease(js, releaseState);
+      state->ws.initiateHibernatableRelease(js, kj::mv(ws), releaseState);
       farNative->closedIncoming = true;
     } else {
       KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
@@ -456,6 +458,11 @@ private:
       // A `Hibernatable` WebSocket shares a sub-set of behavior that's already implemented for an
       // `Accepted` WebSocket, so we can think of it a sub-state.
       kj::WebSocket& ws;
+      kj::Maybe<kj::Own<void>> attachedForClose;
+      // If we have initiated a hibernatable error/close event, we need to take back ownership of
+      // the kj::WebSocket so any final queued messages will deliver. We store this owned websocket
+      // in `attachedForClose`. Since the `ws` reference is still valid, we prevent usage of
+      // `attachedForClose` directly in favor of using continuing to use `ws` directly.
       HibernatableReleaseState releaseState = HibernatableReleaseState::NONE;
       // We can't move the state to Released after the Hibernatable Close/Error event runs, since
       // we don't have a request on the thread by the time the event completes.
@@ -514,10 +521,15 @@ private:
         return inner.tryGet<Hibernatable>();
       }
 
-      void initiateHibernatableRelease(jsg::Lock& js, HibernatableReleaseState state) {
+      void initiateHibernatableRelease(jsg::Lock& js,
+          kj::Own<kj::WebSocket> ws,
+          HibernatableReleaseState state) {
         // Transitions our Hibernatable websocket to a "Releasing" state.
         // The websocket will transition to `Released` when convenient.
-        KJ_REQUIRE_NONNULL(getIfHibernatable()).releaseState = state;
+        auto& hibernatable = KJ_REQUIRE_NONNULL(getIfHibernatable());
+        hibernatable.releaseState = state;
+        // Note that we move the owned kj::WebSocket here.
+        hibernatable.attachedForClose = kj::mv(ws);
       }
 
       bool isAwaitingRelease() {
@@ -544,18 +556,18 @@ private:
       return ws.getIfNotHibernatable() == nullptr;
     }
 
+    kj::Promise<void> createAbortTask(Native& native, IoContext& context);
+    kj::Promise<void> whenAbortedTask = nullptr;
+    // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
+
+    kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
+
     kj::Canceler canceler;
     // This canceler wraps the pump loop as a precaution to make sure we can't exit the Accepted
     // state with a pump task still happening asychronously. In practice the canceler should usually
     // be empty when destroyed because we do not leave the Accepted state if we're still pumping.
     // Even in the case of IoContext premature cancellation, the pump task should be canceled
     // by the IoContext before the Canceler is destroyed.
-
-    kj::Promise<void> createAbortTask(Native& native, IoContext& context);
-    kj::Promise<void> whenAbortedTask = nullptr;
-    // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
-
-    kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
   };
 
   struct Released {};

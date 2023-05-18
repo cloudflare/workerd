@@ -7,7 +7,7 @@
 
 namespace workerd {
 
-HibernationManagerImpl::~HibernationManagerImpl() {
+HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
@@ -156,7 +156,7 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
 
 kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
-  auto& ws = *hib.ws;
+  auto& ws = *KJ_REQUIRE_NONNULL(hib.ws);
   while (true) {
     kj::WebSocket::Message message = co_await ws.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.

@@ -22,7 +22,7 @@ public:
         hibernationEventType(hibernationEventType),
         onDisconnect(DisconnectHandler{}),
         readLoopTasks(onDisconnect) {}
-  ~HibernationManagerImpl();
+  ~HibernationManagerImpl() noexcept(false);
 
   void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) override;
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags
@@ -39,7 +39,7 @@ public:
   // Hibernates all the websockets held by the HibernationManager.
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
 
-  friend jsg::Ref<api::WebSocket> api::HibernatableWebSocketEvent::getWebSocket(jsg::Lock& lock);
+  friend class api::HibernatableWebSocketEvent;
 
 private:
   class HibernatableWebSocket;
@@ -73,7 +73,7 @@ private:
           ws(activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable()),
           manager(manager) {}
 
-    ~HibernatableWebSocket() {
+    ~HibernatableWebSocket() noexcept(false) {
       // We expect this dtor to be called when we're removing a HibernatableWebSocket
       // from our `allWs` collection in the HibernationManager.
 
@@ -100,7 +100,7 @@ private:
       // to the api::WebSocket.
       KJ_IF_MAYBE(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
-            api::WebSocket::hibernatableFromNative(js, *ws, kj::mv(*package)));
+            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(*package)));
       }
       return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
     }
@@ -116,7 +116,11 @@ private:
     kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage;
     // If active, we have an api::WebSocket reference, otherwise, we're hibernating, so we retain
     // the websocket's properties in a HibernationPackage until it's time to wake up.
-    kj::Own<kj::WebSocket> ws;
+    kj::Maybe<kj::Own<kj::WebSocket>> ws;
+    // This is an owned websocket that we extract from the api::WebSocket after accepting as
+    // hibernatable. It becomes null once we dispatch a close or error event because we want its
+    // lifetime to be managed by IoContext's DeleteQueue. This helps prevent a situation where the
+    // HibernationManager drops the websocket before all queued messages have sent.
     HibernationManagerImpl& manager;
     // TODO(someday): We (currently) only use the HibernationManagerImpl reference to refer to
     // `tagToWs` when running the dtor for `HibernatableWebSocket`. This feels a bit excessive,

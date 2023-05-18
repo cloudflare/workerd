@@ -12,10 +12,22 @@ namespace workerd::api {
 HibernatableWebSocketEvent::HibernatableWebSocketEvent()
     : ExtendableEvent("webSocketMessage") {};
 
+HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareForRelease(
+    jsg::Lock &lock) {
+  auto& actor = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+  auto& manager = kj::downcast<HibernationManagerImpl>(
+      KJ_REQUIRE_NONNULL(actor.getHibernationManager()));
+  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(manager.webSocketForEventHandler);
+
+  // `getWebSocket()` requires `HibernatableWebSocket::ws` be non-null, so it must be called first.
+  // The explicit ctor makes it less likely we accidentally move the owned websocket first.
+  return ItemsForRelease(getWebSocket(lock), kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.ws)));
+}
+
 jsg::Ref<WebSocket> HibernatableWebSocketEvent::getWebSocket(jsg::Lock& lock) {
-  auto& manager = static_cast<HibernationManagerImpl&>(
-      KJ_REQUIRE_NONNULL(
-          KJ_REQUIRE_NONNULL(IoContext::current().getActor()).getHibernationManager()));
+  auto& actor = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+  auto& manager = kj::downcast<HibernationManagerImpl>(
+      KJ_REQUIRE_NONNULL(actor.getHibernationManager()));
   auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(manager.webSocketForEventHandler);
   return hibernatableWebSocket.getActiveOrUnhibernate(lock);
 }

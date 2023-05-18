@@ -527,8 +527,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(handler, h->webSocketClose) {
-      auto websocket = event->getWebSocket(lock);
-      websocket->initiateHibernatableRelease(lock, api::WebSocket::HibernatableReleaseState::CLOSE);
+      // We won't be dispatching any further events because we've received a close, so we return the
+      // owned websocket back to the api::WebSocket.
+      auto releasePackage = event->prepareForRelease(lock);
+      auto& websocket = releasePackage.webSocketRef;
+      websocket->initiateHibernatableRelease(lock,
+          kj::mv(releasePackage.ownedWebSocket), api::WebSocket::HibernatableReleaseState::CLOSE);
       auto promise = (*handler)(lock, kj::mv(websocket), close.code, kj::mv(close.reason),
                                 close.wasClean);
       event->waitUntil(kj::mv(promise));
@@ -545,8 +549,12 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(handler, h->webSocketError) {
-      auto websocket = event->getWebSocket(lock);
-      websocket->initiateHibernatableRelease(lock, WebSocket::HibernatableReleaseState::ERROR);
+      // We won't be dispatching any further events because we've encountered an error, so we return
+      // the owned websocket back to the api::WebSocket.
+      auto releasePackage = event->prepareForRelease(lock);
+      auto& websocket = releasePackage.webSocketRef;
+      websocket->initiateHibernatableRelease(lock,
+          kj::mv(releasePackage.ownedWebSocket), WebSocket::HibernatableReleaseState::ERROR);
       jsg::Lock& js(lock);
       auto promise = (*handler)(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e)));
       event->waitUntil(kj::mv(promise));

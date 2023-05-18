@@ -373,7 +373,7 @@ WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, Io
 }
 
 WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& context)
-    : ws(wsParam),
+    : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
   KJ_IF_MAYBE(a, context.getActor()) {
     auto& metrics = a->getMetrics();
@@ -699,7 +699,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
           KJ_FAIL_ASSERT("Unexpected native web socket state", native.state);
         }
       }
-    }, [this](jsg::Lock& js, jsg::Value&& exception) mutable {
+    }, [this, thisHandle = JSG_THIS](jsg::Lock& js, jsg::Value&& exception) mutable {
       if (awaitingHibernatableRelease()) {
         // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
         tryReleaseNative(js);
