@@ -9,7 +9,7 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/jsg.h>
+#include <workerd/server/workerd.capnp.h>
 
 namespace workerd::api {
 
@@ -19,7 +19,7 @@ class HostInterface {
 
 public:
   virtual ~HostInterface() noexcept(false) {};
-  virtual kj::StringPtr version() = 0;
+  virtual kj::Promise<kj::String> runWorker(server::config::Config::Reader conf) = 0;
 
 };
 
@@ -32,10 +32,10 @@ public:
   Workerd(HostInterface& host)
     : host(host) {}
 
-  kj::StringPtr getVersion() { return host.version(); }
+  kj::Promise<kj::String> runWorker(kj::String configJson);
 
   JSG_RESOURCE_TYPE(Workerd) {
-    JSG_READONLY_INSTANCE_PROPERTY(version, getVersion);
+    JSG_METHOD(runWorker);
     /* JSG_METHOD(send); */
     /* JSG_METHOD(sendBatch); */
 

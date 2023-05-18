@@ -73,7 +73,7 @@ public:
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
 
-  kj::StringPtr version() override;
+  kj::Promise<kj::String> runWorker(config::Config::Reader conf) override;
 
   struct Durable { kj::String uniqueKey; };
   struct Ephemeral {};
@@ -187,7 +187,8 @@ private:
 
   void startServices(jsg::V8System& v8System, config::Config::Reader config,
                      kj::HttpHeaderTable::Builder& headerTableBuilder,
-                     kj::ForkedPromise<void>& forkedDrainWhen);
+                     kj::ForkedPromise<void>& forkedDrainWhen,
+                     kj::Function<void(kj::String)> reportConfigError);
 
   void startAlarmScheduler(config::Config::Reader config);
   // Must be called after startServices!

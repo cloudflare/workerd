@@ -2392,7 +2392,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     }
   }).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen, kj::mv(reportConfigError));
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
 
@@ -2417,7 +2417,8 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
 
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
                            kj::HttpHeaderTable::Builder& headerTableBuilder,
-                           kj::ForkedPromise<void>& forkedDrainWhen) {
+                           kj::ForkedPromise<void>& forkedDrainWhen,
+                           kj::Function<void(kj::String)> reportConfigError) {
   // ---------------------------------------------------------------------------
   // Configure inspector.
 
@@ -2538,8 +2539,11 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
   startAlarmScheduler(config);
 
   // Third pass: Cross-link services.
-  for (auto& service: services) {
-    service.value->link();
+  for (auto serviceConf: config.getServices()) {
+    kj::StringPtr name = serviceConf.getName();
+    KJ_IF_MAYBE(service, services.find(name)) {
+      (*service)->link();
+    }
   }
 }
 
@@ -2772,7 +2776,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
 
   auto forkedDrainWhen = kj::Promise<void>(kj::READY_NOW).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen, [](auto){});
 
   auto ownHeaderTable = headerTableBuilder.build();
 
@@ -2825,8 +2829,14 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   co_return passCount > 0 && failCount == 0;
 }
 
-kj::StringPtr Server::version()  {
-  return "42"_kj;
+kj::Promise<kj::String> Server::runWorker(config::Config::Reader config)  {
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  auto forkedDrainWhen = kj::ForkedPromise<void>(nullptr); // TODO: what to put here?
+  startServices(globalContext->v8System, config, headerTableBuilder, forkedDrainWhen,
+      [](auto){
+      // TODO: shut the whole thing down. reject the promise
+    });
+  return kj::Promise<kj::String>(kj::str("it's done"));
 }
 
 }  // namespace workerd::server
