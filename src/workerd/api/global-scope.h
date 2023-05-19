@@ -285,16 +285,19 @@ public:
 
   void sendHibernatableWebSocketMessage(
       kj::OneOf<kj::String, kj::Array<byte>> message,
+      kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketClose(
       HibernatableSocketParams::Close close,
+      kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
   void sendHibernatableWebSocketError(
       kj::Exception e,
+      kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 

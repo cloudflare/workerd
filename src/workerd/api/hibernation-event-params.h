@@ -32,13 +32,16 @@ namespace workerd::api {
     };
 
     kj::OneOf<Text, Data, Close, Error> eventType;
+    kj::String websocketId;
 
-    explicit HibernatableSocketParams(kj::String message): eventType(Text { kj::mv(message) }) {}
-    explicit HibernatableSocketParams(kj::Array<kj::byte> message)
-        : eventType(Data { kj::mv(message) }) {}
-    explicit HibernatableSocketParams(int code, kj::String reason, bool wasClean)
-        : eventType(Close { code, kj::mv(reason), wasClean }) {}
-    explicit HibernatableSocketParams(kj::Exception e): eventType(Error { kj::mv(e) }) {}
+    explicit HibernatableSocketParams(kj::String message, kj::String id)
+        : eventType(Text { kj::mv(message) }), websocketId(kj::mv(id)) {}
+    explicit HibernatableSocketParams(kj::Array<kj::byte> message, kj::String id)
+        : eventType(Data { kj::mv(message) }), websocketId(kj::mv(id)) {}
+    explicit HibernatableSocketParams(int code, kj::String reason, bool wasClean, kj::String id)
+        : eventType(Close { code, kj::mv(reason), wasClean }), websocketId(kj::mv(id)) {}
+    explicit HibernatableSocketParams(kj::Exception e, kj::String id)
+        : eventType(Error { kj::mv(e) }), websocketId(kj::mv(id)) {}
 
     HibernatableSocketParams(HibernatableSocketParams&& other) = default;
 
