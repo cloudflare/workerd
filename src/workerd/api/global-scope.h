@@ -24,6 +24,7 @@
 #include "sockets.h"
 #include "streams.h"
 #include "streams/standard.h"
+#include "web-worker.h"
 
 namespace workerd::api {
 
@@ -480,6 +481,10 @@ public:
     JSG_NESTED_TYPE(Crypto);
     JSG_NESTED_TYPE(SubtleCrypto);
     JSG_NESTED_TYPE(CryptoKey);
+
+    if (flags.getWebWorkers()) {
+      JSG_NESTED_TYPE_NAMED(WebWorker, Worker);
+    }
 
     JSG_NESTED_TYPE(CacheStorage);
     JSG_NESTED_TYPE(Cache);

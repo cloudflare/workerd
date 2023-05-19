@@ -31,7 +31,5 @@ const helloWorld :Workerd.Worker = (
     (name = "worker", esModule = embed "worker.js")
   ],
   compatibilityDate = "2023-02-28",
-  bindings = [
-    (name = "workerd", workerd = void),
-  ],
+  compatibilityFlags = ["web_workers"],
 );

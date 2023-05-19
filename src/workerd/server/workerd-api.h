@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/workerd.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
@@ -126,13 +125,6 @@ public:
         return *this;
       }
     };
-    struct WorkerdBinding {
-      workerd::api::HostInterface& host;
-
-      WorkerdBinding clone() const {
-        return *this;
-      }
-    };
     struct Wrapped {
       // data carrier for configured WrappedBinding
       kj::String moduleName;
@@ -149,8 +141,7 @@ public:
     };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, QueueBinding, WorkerdBinding, kj::String, kj::Array<byte>,
-              Wrapped> value;
+              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped> value;
 
     Global clone() const;
   };

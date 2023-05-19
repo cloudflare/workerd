@@ -297,4 +297,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # This one operates a bit backwards. With the flag *enabled* no default cfBotManagement
   # data will be included. The the flag *disable*, default cfBotManagement data will be
   # included in the request.cf if the field is not present.
+
+  webWorkers @30 :Bool
+      $compatEnableFlag("web_workers")
+      $experimental;
+  # Provide the `Worker` global to the worker with this compatibility flag.
 }

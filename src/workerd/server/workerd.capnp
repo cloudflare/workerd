@@ -345,9 +345,6 @@ struct Worker {
       # namespace will be converted into HTTP requests targetting the given
       # service name.
 
-      workerd @16 :Void;
-      # A binding to workerd itself.
-
       # TODO(someday): dispatch, analyticsEngine, other new features
     }
 

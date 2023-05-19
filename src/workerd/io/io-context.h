@@ -730,14 +730,16 @@ public:
 
   static constexpr uint NULL_CLIENT_CHANNEL = 0;
   static constexpr uint NEXT_CLIENT_CHANNEL = 1;
-  // Subrequest channel numbers for the two special channels.
+  static constexpr uint SELF_CLIENT_CHANNEL = 2;
+  // Subrequest channel numbers for the three special channels.
   // NULL = The channel used by global fetch() when the Request has no fetcher attached.
   // NEXT = DEPRECATED: The fetcher attached to Requests delivered by a FetchEvent, so that we can
   //     detect when an incoming request is passed through to `fetch()` (perhaps with rewrites)
   //     and treat that case differently. In practice this has proven too confusing, so we don't
   //     plan to treat NEXT and NULL differently going forward.
+  // SELF = The channel used by web workers to communicate with the host.
 
-  static constexpr uint SPECIAL_SUBREQUEST_CHANNEL_COUNT = 2;
+  static constexpr uint SPECIAL_SUBREQUEST_CHANNEL_COUNT = 3;
   // Number of subrequest channels that have special meaning (and so won't appear in any binding).
 
   struct SubrequestOptions final {

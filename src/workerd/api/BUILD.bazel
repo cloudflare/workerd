@@ -29,6 +29,12 @@ wd_cc_capnp_library(
 )
 
 wd_cc_capnp_library(
+    name = "web-worker-api_capnp",
+    srcs = ["web-worker-api.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
     name = "analytics-engine_capnp",
     srcs = ["analytics-engine.capnp"],
     visibility = ["//visibility:public"],

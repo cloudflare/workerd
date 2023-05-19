@@ -8,7 +8,6 @@
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/async-io.h>
-#include <workerd/api/workerd.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -26,7 +25,7 @@ namespace workerd::server {
 
 using kj::uint;
 
-class Server: public workerd::api::HostInterface, private kj::TaskSet::ErrorHandler {
+class Server: private kj::TaskSet::ErrorHandler {
   // Implements the single-tenant Workers Runtime server / CLI.
   //
   // The purpose of this class is to implement the core logic independently of the CLI itself,
@@ -72,8 +71,6 @@ public:
   // service and entrypoint names.
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
-
-  kj::Promise<kj::String> runWorker(config::Config::Reader conf) override;
 
   struct Durable { kj::String uniqueKey; };
   struct Ephemeral {};
@@ -180,6 +177,7 @@ private:
   class WorkerEntrypointService;
   class HttpListener;
 
+  class WebWorkerService;
   class InspectorService;
 
   kj::Maybe<kj::Own<InspectorService>> maybeInspectorService;
@@ -187,8 +185,7 @@ private:
 
   void startServices(jsg::V8System& v8System, config::Config::Reader config,
                      kj::HttpHeaderTable::Builder& headerTableBuilder,
-                     kj::ForkedPromise<void>& forkedDrainWhen,
-                     kj::Function<void(kj::String)> reportConfigError);
+                     kj::ForkedPromise<void>& forkedDrainWhen);
 
   void startAlarmScheduler(config::Config::Reader config);
   // Must be called after startServices!

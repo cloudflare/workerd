@@ -9,6 +9,7 @@
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
 #include <kj/map.h>
+#include <capnp/compat/json.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
@@ -712,6 +713,60 @@ private:
 
   [[noreturn]] void throwUnsupported() {
     JSG_FAIL_REQUIRE(Error, "External HTTP servers don't support this event type.");
+  }
+};
+
+class Server::WebWorkerService final: public Service, private WorkerInterface {
+  // Service used when the service is configured as network service.
+
+public:
+  WebWorkerService(Server& server): server(server) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    return { this, kj::NullDisposer::instance };
+  }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return handlerName == "fetch"_kj;
+  }
+
+private:
+  Server& server;
+
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+    return requestBody.readAllText().then([this](auto body) {
+        capnp::MallocMessageBuilder confArena;
+        capnp::JsonCodec json;
+        json.handleByAnnotation<server::config::Worker>();
+        auto conf = confArena.initRoot<server::config::Worker>();
+        json.decode(body, conf);
+        KJ_DBG("makig worker");
+        server.makeWorker("worker"_kj, conf, {});
+        return;
+    });
+  }
+
+  kj::Promise<void> connect(
+      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+      ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+    throwUnsupported();
+  }
+
+  void prewarm(kj::StringPtr url) override {}
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    throwUnsupported();
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
+    throwUnsupported();
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    throwUnsupported();
+  }
+
+  [[noreturn]] void throwUnsupported() {
+    JSG_FAIL_REQUIRE(Error, "WebWorker services don't support this event type.");
   }
 };
 
@@ -1644,8 +1699,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
     Worker::ValidationErrorReporter& errorReporter,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
-    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
-    kj::Maybe<api::HostInterface&> hostInterface) {
+    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs) {
   // creates binding object or returns null and reports an error
   using Global = WorkerdApiIsolate::Global;
   kj::StringPtr bindingName = binding.getName();
@@ -1874,19 +1928,12 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
     }
 
-    case config::Worker::Binding::WORKERD: {
-      KJ_IF_MAYBE(h, hostInterface) {
-        return makeGlobal(Global::WorkerdBinding { .host = *h });
-      }
-      return nullptr;
-    }
-
     case config::Worker::Binding::WRAPPED: {
       auto wrapped = binding.getWrapped();
       kj::Vector<Global> innerGlobals;
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_MAYBE(global, createBinding(workerName, conf, innerBinding,
-            errorReporter, subrequestChannels, actorChannels, actorConfigs, hostInterface)) {
+            errorReporter, subrequestChannels, actorChannels, actorConfigs)) {
           innerGlobals.add(kj::mv(*global));
         } else {
           // we've already communicated the error
@@ -2022,7 +2069,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_MAYBE(global, createBinding(name, conf, binding, errorReporter,
-                                     subrequestChannels, actorChannels, actorConfigs, this)) {
+                                     subrequestChannels, actorChannels, actorConfigs)) {
       globals.add(kj::mv(*global));
     }
   }
@@ -2046,7 +2093,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   auto linkCallback =
       [this, name, conf, subrequestChannels = kj::mv(subrequestChannels),
-       actorChannels = kj::mv(actorChannels)](WorkerService& workerService) mutable {
+       actorChannels = kj::mv(actorChannels),
+       featureFlags](WorkerService& workerService) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
     auto services = kj::heapArrayBuilder<Service*>(subrequestChannels.size() +
@@ -2057,9 +2105,18 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
     // legacy artifact that no one should be depending on.)
-    static_assert(IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT == 2);
+    static_assert(IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT == 3);
     services.add(&globalService);
     services.add(&globalService);
+    kj::Function<Service*()> getWebWorkerService = ([&]() -> Service* {
+      if (featureFlags.getWebWorkers()) {
+        KJ_IF_MAYBE(wwsvc, this->services.find("web-worker"_kj)) {
+          return *wwsvc;
+        }
+      }
+      return makeInvalidConfigService();
+    });
+    services.add(getWebWorkerService());
 
     for (auto& channel: subrequestChannels) {
       services.add(&lookupService(channel.designator, kj::mv(channel.errorContext)));
@@ -2392,7 +2449,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
     }
   }).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen, kj::mv(reportConfigError));
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
 
@@ -2417,8 +2474,7 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
 
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
                            kj::HttpHeaderTable::Builder& headerTableBuilder,
-                           kj::ForkedPromise<void>& forkedDrainWhen,
-                           kj::Function<void(kj::String)> reportConfigError) {
+                           kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure inspector.
 
@@ -2515,6 +2571,15 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
     });
   }
 
+  // Make the "web-workers" service if it's required and not there already.
+  services.findOrCreate("web-worker"_kj, [&]() {
+    auto service = kj::heap<WebWorkerService>(*this);
+    return decltype(services)::Entry {
+      kj::str("web-worker"_kj),
+      kj::mv(service)
+    };
+  });
+
   // Make the default "internet" service if it's not there already.
   services.findOrCreate("internet"_kj, [&]() {
     auto publicNetwork = network.restrictPeers({"public"_kj});
@@ -2539,11 +2604,8 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
   startAlarmScheduler(config);
 
   // Third pass: Cross-link services.
-  for (auto serviceConf: config.getServices()) {
-    kj::StringPtr name = serviceConf.getName();
-    KJ_IF_MAYBE(service, services.find(name)) {
-      (*service)->link();
-    }
+  for (auto& service: services) {
+    service.value->link();
   }
 }
 
@@ -2776,7 +2838,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
 
   auto forkedDrainWhen = kj::Promise<void>(kj::READY_NOW).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen, [](auto){});
+  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto ownHeaderTable = headerTableBuilder.build();
 
@@ -2827,16 +2889,6 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System, config::Config::Reader c
   }
 
   co_return passCount > 0 && failCount == 0;
-}
-
-kj::Promise<kj::String> Server::runWorker(config::Config::Reader config)  {
-  kj::HttpHeaderTable::Builder headerTableBuilder;
-  auto forkedDrainWhen = kj::ForkedPromise<void>(nullptr); // TODO: what to put here?
-  startServices(globalContext->v8System, config, headerTableBuilder, forkedDrainWhen,
-      [](auto){
-      // TODO: shut the whole thing down. reject the promise
-    });
-  return kj::Promise<kj::String>(kj::str("it's done"));
 }
 
 }  // namespace workerd::server
