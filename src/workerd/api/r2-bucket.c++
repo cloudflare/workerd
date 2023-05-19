@@ -189,6 +189,8 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(kj::StringPtr action, R2Result
   return parseObjectMetadata<T>(responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
+namespace {
+
 void addEtagsToBuilder(capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
   R2Bucket::Etag* currentEtag = etagArray.begin();
   for (unsigned int i = 0; i < etagArray.size(); i++) {
@@ -206,6 +208,8 @@ void addEtagsToBuilder(capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPt
     currentEtag = std::next(currentEtag);
   }
 }
+
+} // namespace
 
 template <typename Builder, typename Options>
 void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
@@ -826,6 +830,8 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
   });
 }
 
+namespace {
+
 kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
   kj::StringPtr condHeader,
   kj::Vector<R2Bucket::Etag> etagAccumulator = kj::Vector<R2Bucket::Etag>(),
@@ -907,6 +913,15 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
   }
 }
 
+kj::Array<R2Bucket::Etag> buildSingleStrongEtagArray(kj::StringPtr etagValue) {
+  struct R2Bucket::StrongEtag etag = {.value = kj::str(etagValue)};
+  kj::ArrayBuilder<R2Bucket::Etag> etagArrayBuilder = kj::heapArrayBuilder<R2Bucket::Etag>(1);
+  etagArrayBuilder.add(kj::mv(etag));
+  return etagArrayBuilder.finish();
+}
+
+} // namespace
+
 R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
   KJ_IF_MAYBE(e, h.get(jsg::ByteString(kj::str("if-match")))) {
@@ -923,13 +938,6 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     auto date = parseDate(js, *d);
     uploadedBefore = date;
   }
-}
-
-kj::Array<R2Bucket::Etag> buildSingleStrongEtagArray(kj::StringPtr etagValue) {
-  struct R2Bucket::StrongEtag etag = {.value = kj::str(etagValue)};
-  kj::ArrayBuilder<R2Bucket::Etag> etagArrayBuilder = kj::heapArrayBuilder<R2Bucket::Etag>(1);
-  etagArrayBuilder.add(kj::mv(etag));
-  return etagArrayBuilder.finish();
 }
 
 R2Bucket::UnwrappedConditional::UnwrappedConditional(const Conditional& c)

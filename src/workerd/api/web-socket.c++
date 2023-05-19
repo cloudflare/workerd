@@ -122,6 +122,8 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
   // whichever comes first.
 }
 
+namespace {
+
 // See item 10 of https://datatracker.ietf.org/doc/html/rfc6455#section-4.1
 bool validProtoToken(const kj::StringPtr protocol) {
   if (kj::size(protocol) == 0) {
@@ -159,6 +161,8 @@ bool validProtoToken(const kj::StringPtr protocol) {
   }
   return true;
 }
+
+} // namespace
 
 jsg::Ref<WebSocket> WebSocket::constructor(
     jsg::Lock& js,
@@ -711,6 +715,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
 }
 
 namespace {
+
 size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
   // This does not count the extra data of the RPC frame or the savings from any compression.
   // We're incentivizing customers to use reasonably sized messages, not trying to get an exact
@@ -733,7 +738,8 @@ size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
 
   KJ_UNREACHABLE;
 }
-}
+
+} // namespace
 
 kj::Promise<void> WebSocket::pump(
     IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native) {

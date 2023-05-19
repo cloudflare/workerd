@@ -103,6 +103,9 @@ namespace workerd::jsg {
     }                                                                                              \
   } while (0)
 
+kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
+// Given a KJ exception's description, strips any leading "remote exception: " prefixes.
+
 bool isTunneledException(kj::StringPtr internalMessage);
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
 // be converted back to JavaScript via makeInternalError().

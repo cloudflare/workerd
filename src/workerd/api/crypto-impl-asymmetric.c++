@@ -791,6 +791,8 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
   return asUnsigned;
 }
 
+namespace {
+
 void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
     bool warnImport = false) {
   // The W3C standard itself doesn't describe any parameter validation but the conformance tests
@@ -833,6 +835,8 @@ void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
         "got a number larger than 2^32.");
   }
 }
+
+} // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
     kj::StringPtr normalizedName,

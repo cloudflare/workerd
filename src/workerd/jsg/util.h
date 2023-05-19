@@ -125,9 +125,6 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
 //
 // Equivalent to throwing the exception returned by `createTunneledException(exception)`.
 
-kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
-// Given a KJ exception's description, strips any leading "remote exception: " prefixes.
-
 template <typename T>
 v8::Local<T> check(v8::MaybeLocal<T> maybe) {
   // V8 usually returns a MaybeLocal to mean that the function can throw a JavaScript exception.

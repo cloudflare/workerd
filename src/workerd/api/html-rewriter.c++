@@ -396,6 +396,8 @@ Rewriter::Rewriter(
       ioContext(IoContext::current()),
       maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
+namespace {
+
 // The stack size floor enforced by kj. We could go lower,
 // but it'd always be increased to this anyway.
 const size_t FIBER_STACK_SIZE = 1024 * 64;
@@ -404,6 +406,8 @@ const kj::FiberPool& getFiberPool() {
   const static kj::FiberPool FIBER_POOL(FIBER_STACK_SIZE);
   return FIBER_POOL;
 }
+
+} // namespace
 
 kj::Promise<void> Rewriter::write(const void* buffer, size_t size) {
   KJ_ASSERT(maybeWaitScope == nullptr);

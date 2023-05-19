@@ -10,6 +10,7 @@
 
 namespace workerd::api {
 
+namespace {
 
 bool isValidHost(kj::StringPtr host) {
   // This function performs some basic length and characters checks, it does not guarantee that
@@ -101,6 +102,8 @@ jsg::Ref<Socket> setupSocket(
   }
   return result;
 }
+
+} // namespace
 
 jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
