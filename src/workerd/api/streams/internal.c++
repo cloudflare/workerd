@@ -1237,8 +1237,8 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     using Request = kj::Decay<decltype(request)>;
 
     return [this, &request]() -> decltype(auto) {
-      if constexpr (kj::isSameType<Request, Write>()) {
-        // Write requests can have any number of requests backed up after them.
+      if constexpr (kj::isSameType<Request, Write>() || kj::isSameType<Request, Flush>()) {
+        // Write and flush requests can have any number of requests backed up after them.
         KJ_ASSERT(!queue.empty());
       } else {
         // Pipe and Close requests are always the last one in the queue.
