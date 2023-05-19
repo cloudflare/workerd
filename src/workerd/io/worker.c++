@@ -1619,10 +1619,12 @@ kj::Maybe<api::ExportedHandler&> Worker::Lock::getExportedHandler(
       return *h;
     } else {
       if (worker.impl->actorClasses.find(*n) != nullptr) {
-        KJ_FAIL_ASSERT("worker is not an actor but class name was requested", *n);
+        LOG_ERROR_PERIODICALLY("worker is not an actor but class name was requested", *n);
       } else {
-        KJ_FAIL_ASSERT("worker has no such named entrypoint", *n);
+        LOG_ERROR_PERIODICALLY("worker has no such named entrypoint", *n);
       }
+
+      KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
     }
   } else {
     return worker.impl->defaultHandler;
