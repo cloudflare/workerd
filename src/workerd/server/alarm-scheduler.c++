@@ -11,6 +11,8 @@ int AlarmScheduler::maxJitterMsForDelay(kj::Duration delay) {
   return std::floor(RETRY_JITTER_FACTOR * delayMs);
 }
 
+namespace {
+
 std::default_random_engine makeSeededRandomEngine() {
   // Using the time as a seed here is fine, we just want to have some randomness for retry jitter
   auto time = kj::systemPreciseMonotonicClock().now();
@@ -19,6 +21,8 @@ std::default_random_engine makeSeededRandomEngine() {
   std::default_random_engine engine(seed);
   return engine;
 }
+
+} // namespace
 
 AlarmScheduler::AlarmScheduler(
     const kj::Clock& clock,

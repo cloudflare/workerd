@@ -336,7 +336,11 @@ bool OutputGate::isBroken() {
   return brokenState.is<kj::Exception>();
 }
 
+namespace {
+
 void END_OUTPUT_LOCK_CANCELATION_STACK_START_WAITER_STACK() {}
+
+} // namespace
 
 kj::Exception OutputGate::makeUnfulfilledException() {
   return kj::getDestructionReason(

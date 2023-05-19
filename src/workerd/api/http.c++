@@ -1823,6 +1823,8 @@ jsg::Ref<Response> makeHttpResponse(
         nullptr, kj::mv(responseBody), flags, kj::mv(urlList), kj::mv(webSocket));
 }
 
+namespace {
+
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
@@ -1866,6 +1868,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
                                  featureFlags);
   });
 }
+
+} // namespace
 
 jsg::Promise<jsg::Ref<Response>> fetchImpl(
     jsg::Lock& js,

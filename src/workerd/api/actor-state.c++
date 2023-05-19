@@ -118,23 +118,6 @@ ActorObserver& currentActorMetrics() {
   return IoContext::current().getActorOrThrow().getMetrics();
 }
 
-}  // namespace
-
-jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
-    kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<GetOptions> maybeOptions,
-    v8::Isolate* isolate) {
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
-  KJ_SWITCH_ONEOF(keys) {
-    KJ_CASE_ONEOF(s, kj::String) {
-      return getOne(kj::mv(s), options, isolate);
-    }
-    KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return getMultiple(kj::mv(a), options, isolate);
-    }
-  }
-  KJ_UNREACHABLE
-}
-
 jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCacheOps::GetResultList value, bool completelyCached) {
   v8::HandleScope scope(isolate);
   auto context = isolate->GetCurrentContext();
@@ -208,6 +191,23 @@ kj::Function<jsg::Value(v8::Isolate*, ActorCacheOps::GetResultList)> getMultiple
 
     return jsg::Value(isolate, map);
   };
+}
+
+}  // namespace
+
+jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
+    kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<GetOptions> maybeOptions,
+    v8::Isolate* isolate) {
+  auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
+  KJ_SWITCH_ONEOF(keys) {
+    KJ_CASE_ONEOF(s, kj::String) {
+      return getOne(kj::mv(s), options, isolate);
+    }
+    KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
+      return getMultiple(kj::mv(a), options, isolate);
+    }
+  }
+  KJ_UNREACHABLE
 }
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
