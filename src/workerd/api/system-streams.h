@@ -8,6 +8,7 @@
 
 #include "streams.h"
 #include "http.h"
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -41,6 +42,7 @@ SystemMultiStream newSystemMultiStream(
 // A combo ReadableStreamSource and WritableStreamSink.
 
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
+                                  CompatibilityFlags::Reader flags,
                                   Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
 // Get the Content-Encoding header from an HttpHeaders object as a StreamEncoding enum. Unsupported
 // encodings return IDENTITY.

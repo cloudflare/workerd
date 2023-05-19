@@ -174,6 +174,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
   kj::Maybe<jsg::V8Ref<v8::Object>> cf;
 
+  auto flags = lock.getWorker().getIsolate().getApiIsolate().getFeatureFlags();
   KJ_IF_MAYBE(c, cfBlobJson) {
     auto jsonString = jsg::v8Str(isolate, *c);
     auto context = isolate->GetCurrentContext();
@@ -181,11 +182,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
     KJ_ASSERT(handle->IsObject());
 
-    if (!lock.getWorker()
-             .getIsolate()
-             .getApiIsolate()
-             .getFeatureFlags()
-             .getNoCfBotManagementDefault()) {
+    if (!flags.getNoCfBotManagementDefault()) {
       handleDefaultBotManagement(isolate, handle.As<v8::Object>());
     }
 
@@ -304,7 +301,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     return ioContext.awaitJs(promise->then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers]
+             canceled = kj::addRef(*canceled), &headers, flags]
             (jsg::Lock& js, jsg::Ref<Response> innerResponse)
             -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
@@ -314,7 +311,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
       } else {
         return context.addObject(kj::heap(innerResponse->send(
-            js, response, { .allowWebSocket = allowWebSocket }, headers)));
+            js, response, { .allowWebSocket = allowWebSocket }, headers,
+            flags)));
       }
     }))).attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
         .then([ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)]

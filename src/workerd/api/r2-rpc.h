@@ -79,7 +79,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(
     kj::Own<kj::HttpClient> client,
     kj::String metadataPayload,
     kj::ArrayPtr<kj::StringPtr> path,
-    kj::Maybe<kj::StringPtr> jwt);
+    kj::Maybe<kj::StringPtr> jwt, CompatibilityFlags::Reader flags);
 
 kj::Promise<R2Result> doR2HTTPPutRequest(
     jsg::Lock& js,

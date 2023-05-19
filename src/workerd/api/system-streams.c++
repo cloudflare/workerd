@@ -118,6 +118,7 @@ kj::Maybe<ReadableStreamSource::Tee> EncodedAsyncInputStream::tryTee(uint64_t li
 }
 
 void EncodedAsyncInputStream::ensureIdentityEncoding() {
+  // Decompression gets added to the stream here if needed based on the content encoding.
   if (encoding == StreamEncoding::GZIP) {
     inner = kj::heap<kj::GzipAsyncInputStream>(*inner).attach(kj::mv(inner));
     encoding = StreamEncoding::IDENTITY;
@@ -280,6 +281,7 @@ void EncodedAsyncOutputStream::abort(kj::Exception reason) {
 }
 
 void EncodedAsyncOutputStream::ensureIdentityEncoding() {
+  // Compression gets added to the stream here if needed based on the content encoding.
   KJ_DASSERT(!inner.is<Ended>(), "the EncodedAsyncOutputStream has been ended or aborted");
   if (encoding == StreamEncoding::GZIP) {
     // This is safe because only a kj::AsyncOutputStream can have non-identity encoding.
@@ -341,6 +343,7 @@ SystemMultiStream newSystemMultiStream(
 }
 
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
+                                  CompatibilityFlags::Reader flags,
                                   Response::BodyEncoding bodyEncoding) {
   if (bodyEncoding == Response::BodyEncoding::MANUAL) {
     return StreamEncoding::IDENTITY;
@@ -348,7 +351,7 @@ StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& hea
   KJ_IF_MAYBE(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
     if (*encodingStr == "gzip") {
       return StreamEncoding::GZIP;
-    } else if (*encodingStr == "br") {
+    } else if (flags.getBrotliContentEncoding() && *encodingStr == "br") {
       return StreamEncoding::BROTLI;
     }
   }

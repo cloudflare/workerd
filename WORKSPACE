@@ -35,10 +35,10 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "35221b010ce1d47bca41e9cc925fffc4cd628d5a79ab7c91002763133714626c",
-    strip_prefix = "capnproto-capnproto-1a314a8/c++",
+    sha256 = "dfca9b050b0e3b381c39f44a998cbb6885b36ab650bc041b6ade55b11473e0d4",
+    strip_prefix = "capnproto-capnproto-6e26d26/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/1a314a8d667f8c80efd6219ddf91d5a06d315cd9"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/6e26d260d1d91e0465ca12bbb5230a1dfa28f00d"],
 )
 
 # Fetch brotli via capnproto. While workerd does not use brotli directly, this is required to work
