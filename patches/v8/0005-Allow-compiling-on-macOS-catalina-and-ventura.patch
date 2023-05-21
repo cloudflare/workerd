@@ -1,15 +1,18 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 0c58281eb7ded742fba5d939d11b699cb3391832 Mon Sep 17 00:00:00 2001
 From: Dhi Aurrahman <dio@rockybars.com>
 Date: Thu, 27 Oct 2022 12:45:05 +0700
 Subject: Allow compiling on macOS catalina and ventura
 
 Signed-off-by: Dhi Aurrahman <dio@rockybars.com>
+---
+ bazel/defs.bzl | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 8c3e3b9d1d9a37679a36c61c1fc03342d7f25587..8053fa95df82eee6c3b2286e56e68129ec3c876f 100644
+index 9024b1e14f..459979f163 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -151,6 +151,18 @@ def _default_args():
+@@ -156,6 +156,18 @@ def _default_args():
                  "-fno-integrated-as",
              ],
              "//conditions:default": [],
@@ -25,6 +28,6 @@ index 8c3e3b9d1d9a37679a36c61c1fc03342d7f25587..8053fa95df82eee6c3b2286e56e68129
 +                "-Wno-deprecated-declarations",
 +            ],
 +            "//conditions:default": [],
-         }),
-         cxxopts = select({
-             "//third_party/v8/HEAD/google3/config:is_opt": [
+         }) +  select({
+             "@v8//bazel/config:is_opt_android": [
+                 "-fvisibility=hidden",
