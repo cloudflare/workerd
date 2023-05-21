@@ -263,8 +263,8 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "96fed67922e5f54a027aed80259e5083769e33e2",
-    shallow_since = "1679318470 +0000",
+    commit = "4fdc770d9949df2a12d3eb1c7dcdd46425200edf",
+    shallow_since = "1684750317 +0000",
     patch_args = [ "-p1" ],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -274,15 +274,15 @@ git_repository(
         "//:patches/v8/0005-Allow-compiling-on-macOS-catalina-and-ventura.patch",
         "//:patches/v8/0006-Fix-v8-code_generator-imports.patch",
         "//:patches/v8/0007-Allow-Windows-builds-under-Bazel.patch",
-        "//:patches/v8/0008-Disable-bazel-whole-archive.patch",
+        "//:patches/v8/0008-Disable-bazel-whole-archive-build.patch",
     ],
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "c6b68522318204f795a8f04caebf6c0beb679cc4",
-    shallow_since = "1676561136 +0000",
+    commit = "d8daa943f64cd5dd2a55e9baf2e655ab4bfa5ae9",
+    shallow_since = "1680552685 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
     patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ],
     patch_cmds_win = [ "Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item" ],
