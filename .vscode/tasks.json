@@ -59,7 +59,7 @@
       "label": "Bazel build workerd (fastbuild)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "--config", "fastbuild", "//src/workerd/server:workerd"],
+      "args": ["build", "-c", "fastbuild", "//src/workerd/server:workerd"],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -84,6 +84,42 @@
         "isDefault": false
       },
       "problemMatcher": "$gcc",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel clean",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["clean"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel clean --expunge",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["clean", "--expunge"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
       "presentation": {
         "echo": true,
         "reveal": "always",

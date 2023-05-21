@@ -29,6 +29,8 @@ The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks
 * Bazel build workerd (fastbuild)
 * Bazel build workerd (opt)
 * Bazel build all (dbg)
+* Bazel clean
+* Bazel clean --expunge
 * Bazel run all tests
 * Generate compile_commands.json
 * Generate rust-project.json
