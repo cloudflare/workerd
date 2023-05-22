@@ -7,6 +7,51 @@ namespace workerd::api::node {
 
 class CryptoImpl final: public jsg::Object {
 public:
+  // DH
+  class DiffieHellmanHandle final: public jsg::Object {
+    public:
+      DiffieHellmanHandle(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey,
+                          kj::OneOf<kj::Array<kj::byte>, int>& generator);
+      DiffieHellmanHandle(kj::String& name);
+
+      static jsg::Ref<DiffieHellmanHandle> constructor(jsg::Lock& js,
+                                            kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
+                                            kj::OneOf<kj::Array<kj::byte>, int> generator);
+
+      void setPrivateKey(kj::Array<kj::byte> key);
+      void setPublicKey(kj::Array<kj::byte> key);
+      kj::Array<kj::byte> getPublicKey();
+      kj::Array<kj::byte> getPrivateKey();
+      kj::Array<kj::byte> getGenerator();
+      kj::Array<kj::byte> getPrime();
+      kj::Array<kj::byte> computeSecret(kj::Array<kj::byte> key);
+      kj::Array<kj::byte> generateKeys();
+      int getVerifyError();
+
+      JSG_RESOURCE_TYPE(DiffieHellmanHandle) {
+        JSG_METHOD(setPublicKey);
+        JSG_METHOD(setPrivateKey);
+        JSG_METHOD(getPublicKey);
+        JSG_METHOD(getPrivateKey);
+        JSG_METHOD(getGenerator);
+        JSG_METHOD(getPrime);
+        JSG_METHOD(computeSecret);
+        JSG_METHOD(generateKeys);
+        JSG_METHOD(getVerifyError);
+      };
+
+    private:
+      kj::Own<DH> dh;
+      int verifyError;
+
+      bool VerifyContext();
+      bool Init(kj::OneOf<kj::Array<kj::byte>, int>& sizeOrKey, kj::OneOf<kj::Array<kj::byte>,
+                int>& generator);
+      bool InitGroup(kj::String& name);
+  };
+
+  jsg::Ref<CryptoImpl::DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
+
   // Primes
   kj::Array<kj::byte> randomPrime(uint32_t size, bool safe,
       jsg::Optional<kj::Array<kj::byte>> add, jsg::Optional<kj::Array<kj::byte>> rem);
@@ -88,6 +133,9 @@ public:
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
 
   JSG_RESOURCE_TYPE(CryptoImpl) {
+    // DH
+    JSG_NESTED_TYPE(DiffieHellmanHandle);
+    JSG_METHOD(DiffieHellmanGroupHandle);
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);
@@ -107,7 +155,9 @@ public:
 
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                   \
     api::node::CryptoImpl,                             \
+    api::node::CryptoImpl::DiffieHellmanHandle,        \
     api::node::CryptoImpl::KeyExportOptions,           \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
     api::node::CryptoImpl::CreateAsymmetricKeyOptions
 }  // namespace workerd::api::node
+

@@ -20,6 +20,14 @@ export const timingSafeEqual = (crypto as any).timingSafeEqual;
 export const webcrypto = crypto;
 
 import {
+  DiffieHellman,
+  DiffieHellmanGroup,
+  createDiffieHellman,
+  createDiffieHellmanGroup,
+  getDiffieHellman,
+} from 'node-internal:crypto_dh';
+
+import {
   randomBytes,
   randomFillSync,
   randomFill,
@@ -55,6 +63,12 @@ import {
 } from 'node-internal:crypto_keys';
 
 export {
+  // DH
+  DiffieHellman,
+  DiffieHellmanGroup,
+  createDiffieHellman,
+  createDiffieHellmanGroup,
+  getDiffieHellman,
   // Random
   randomBytes,
   randomFillSync,
@@ -112,6 +126,12 @@ export const fips = true;
 export function getFips() { return fips; }
 
 export default {
+  // DH
+  DiffieHellman,
+  DiffieHellmanGroup,
+  createDiffieHellman,
+  createDiffieHellmanGroup,
+  getDiffieHellman,
   // Keys,
   KeyObject,
   PublicKeyObject,
@@ -156,8 +176,8 @@ export default {
 //   * [ ] crypto.Certificate
 //   * [ ] crypto.Cipher
 //   * [ ] crypto.Decipher
-//   * [ ] crypto.DiffieHellman
-//   * [ ] crypto.DiffieHellmanGroup
+//   * [x] crypto.DiffieHellman
+//   * [x] crypto.DiffieHellmanGroup
 //   * [ ] crypto.ECDH
 //   * [ ] crypto.Hash
 //   * [ ] crypto.Hmac
@@ -182,12 +202,12 @@ export default {
 //   * [ ] crypto.publicDecrypt(key, buffer)
 //   * [ ] crypto.publicEncrypt(key, buffer)
 // * DiffieHellman
-//   * [ ] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
-//   * [ ] crypto.createDiffieHellman(primeLength[, generator])
-//   * [ ] crypto.createDiffieHellmanGroup(name)
+//   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
+//   * [x] crypto.createDiffieHellman(primeLength[, generator])
+//   * [x] crypto.createDiffieHellmanGroup(name)
 //   * [ ] crypto.createECDH(curveName)
 //   * [ ] crypto.diffieHellman(options)
-//   * [ ] crypto.getDiffieHellman(groupName)
+//   * [x] crypto.getDiffieHellman(groupName)
 // * Hash
 //   * [ ] crypto.createHash(algorithm[, options])
 //   * [ ] crypto.createHmac(algorithm, key[, options])

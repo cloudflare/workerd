@@ -7,11 +7,13 @@ import {
 
 // random
 export function checkPrimeSync(candidate: ArrayBufferView, num_checks: number): boolean;
-export function randomPrime(size: number, safe: boolean, add?: ArrayBufferView|undefined, rem?: ArrayBufferView|undefined): ArrayBuffer;
+export function randomPrime(size: number, safe: boolean, add?: ArrayBufferView|undefined,
+                            rem?: ArrayBufferView|undefined): ArrayBuffer;
 
 // pbkdf2
 export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
-export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number, digest: string): ArrayBuffer;
+export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
+                         digest: string): ArrayBuffer;
 
 // Keys
 export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExportResult;
@@ -194,3 +196,22 @@ export interface GenerateKeyPairOptions {
   publicKeyEncoding?: PublicKeyExportOptions;
   privateKeyEncoding?: PrivateKeyExportOptions;
 }
+
+// DiffieHellman
+export class DiffieHellmanHandle {
+  public constructor(sizeOrKey: number | ArrayBuffer | ArrayBufferView,
+                     generator: number | ArrayBuffer | ArrayBufferView);
+  public setPublicKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
+  public setPrivateKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
+  public getPublicKey(): ArrayBuffer;
+  public getPrivateKey(): ArrayBuffer;
+  public getGenerator(): ArrayBuffer;
+  public getPrime(): ArrayBuffer;
+
+  public computeSecret(key: ArrayBuffer|ArrayBufferView): ArrayBuffer;
+  public generateKeys(): ArrayBuffer;
+
+  public getVerifyError(): number;
+}
+
+export function DiffieHellmanGroupHandle(name: string): DiffieHellmanHandle;

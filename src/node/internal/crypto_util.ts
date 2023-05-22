@@ -39,7 +39,9 @@ import {
 
 import {
     ERR_INVALID_ARG_TYPE,
-  } from 'node-internal:internal_errors';
+} from 'node-internal:internal_errors';
+
+export const kHandle = Symbol('kHandle');
 
 export function getArrayBufferOrView(buffer: Buffer | ArrayBuffer | ArrayBufferView | string, name: string, encoding?: string): Buffer | ArrayBuffer | ArrayBufferView {
   if (isAnyArrayBuffer(buffer))
@@ -89,4 +91,16 @@ export function arrayBufferToUnsignedBigInt(buf: ArrayBuffer): bigint {
   }
 
   return BigInt(`0x${String.fromCharCode.apply(null, chars)}`);
+}
+
+// This is here because many functions accepted binary strings without
+// any explicit encoding in older versions of node, and we don't want
+// to break them unnecessarily.
+export function toBuf(val: string | ArrayBuffer | Buffer | ArrayBufferView, encoding: string): string | ArrayBuffer | Buffer | ArrayBufferView {
+  if (typeof val === 'string') {
+    if (encoding === 'buffer')
+      encoding = 'utf8';
+    return Buffer.from(val, encoding);
+  }
+  return val;
 }

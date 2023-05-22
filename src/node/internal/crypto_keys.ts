@@ -52,6 +52,7 @@ import {
 
 import {
   arrayBufferToUnsignedBigInt,
+  kHandle,
 } from 'node-internal:crypto_util';
 
 import {
@@ -75,8 +76,6 @@ import {
   validateString,
   validateUint32,
 } from 'node-internal:validators';
-
-const kHandle = Symbol('kHandle');
 
 // In Node.js, the definition of KeyObject is a bit complicated because
 // KeyObject instances in Node.js can be transfered via postMessage() and
