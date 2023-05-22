@@ -176,9 +176,14 @@ private:
   uint16_t hibernationEventType;
   // Passed to HibernatableWebSocket custom event as the typeId.
 
-  kj::Maybe<HibernatableWebSocket&> webSocketForEventHandler;
-  // Allows the HibernatableWebSocket event handler that is currently running to access the
-  // HibernatableWebSocket that it needs to execute.
+  kj::HashMap<kj::String, HibernatableWebSocket*> webSocketsForEventHandler;
+  // A map of { ID -> HibernatableWebSocket } that allows the event handler that is currently
+  // running to access the HibernatableWebSocket that it needs to execute.
+  //
+  // Dispatching events tends to result in races when events are received on different websockets
+  // around the same time. Suppose there are two websockets that disconnect at the same time.
+  // It is possible that both of them will be added to the map (i.e. their `receive()`
+  // will throw) before the first event is dispatched and manages to obtain its associated websocket.
 
   const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
   // The maximum number of Hibernatable WebSocket connections a single HibernationManagerImpl

@@ -12,24 +12,47 @@ namespace workerd::api {
 HibernatableWebSocketEvent::HibernatableWebSocketEvent()
     : ExtendableEvent("webSocketMessage") {};
 
-HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareForRelease(
-    jsg::Lock &lock) {
+Worker::Actor::HibernationManager& HibernatableWebSocketEvent::getHibernationManager(
+    jsg::Lock& lock) {
   auto& actor = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
-  auto& manager = kj::downcast<HibernationManagerImpl>(
-      KJ_REQUIRE_NONNULL(actor.getHibernationManager()));
-  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(manager.webSocketForEventHandler);
-
-  // `getWebSocket()` requires `HibernatableWebSocket::ws` be non-null, so it must be called first.
-  // The explicit ctor makes it less likely we accidentally move the owned websocket first.
-  return ItemsForRelease(getWebSocket(lock), kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.ws)));
+  return KJ_REQUIRE_NONNULL(actor.getHibernationManager());
 }
 
-jsg::Ref<WebSocket> HibernatableWebSocketEvent::getWebSocket(jsg::Lock& lock) {
-  auto& actor = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
-  auto& manager = kj::downcast<HibernationManagerImpl>(
-      KJ_REQUIRE_NONNULL(actor.getHibernationManager()));
-  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(manager.webSocketForEventHandler);
-  return hibernatableWebSocket.getActiveOrUnhibernate(lock);
+HibernatableWebSocketEvent::ItemsForRelease HibernatableWebSocketEvent::prepareForRelease(
+    jsg::Lock &lock, kj::StringPtr websocketId) {
+  auto& manager = kj::downcast<HibernationManagerImpl>(getHibernationManager(lock));
+  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(
+      manager.webSocketsForEventHandler.findEntry(websocketId));
+
+  // Note that we don't call `claimWebSocket()` to get this, since we would lose our reference to
+  // the HibernatableWebSocket (it removes it from `webSocketsForEventHandler`).
+  auto websocketRef = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
+  auto ownedWebSocket = kj::mv(KJ_REQUIRE_NONNULL(hibernatableWebSocket.value->ws));
+
+  // Now that we've obtained the websocket for the event, let's free up the slots we had allocated.
+  manager.webSocketsForEventHandler.erase(hibernatableWebSocket);
+
+  return ItemsForRelease(kj::mv(websocketRef), kj::mv(ownedWebSocket));
+}
+
+jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(jsg::Lock& lock,
+    kj::StringPtr websocketId) {
+  // Should only be called once per event since it removes the HibernatableWebSocket from the
+  // webSocketsForEventHandler collection.
+  auto& manager = kj::downcast<HibernationManagerImpl>(getHibernationManager(lock));
+
+  // Grab it from our collection.
+  auto& hibernatableWebSocket = KJ_REQUIRE_NONNULL(
+      manager.webSocketsForEventHandler.findEntry(websocketId));
+
+  // Get the reference.
+  auto websocket = hibernatableWebSocket.value->getActiveOrUnhibernate(lock);
+
+  // Now that we've obtained the websocket, we need to remove the entry from the map and make the
+  // key available again.
+  manager.webSocketsForEventHandler.erase(hibernatableWebSocket);
+
+  return kj::mv(websocket);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(
@@ -55,24 +78,28 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
               kj::mv(text.message),
+              kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
           return lock.getGlobalScope().sendHibernatableWebSocketMessage(
               kj::mv(data.message),
+              kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
           return lock.getGlobalScope().sendHibernatableWebSocketClose(
               kj::mv(close),
+              kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
         }
         KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
           return lock.getGlobalScope().sendHibernatableWebSocketError(
               kj::mv(e.error),
+              kj::mv(eventParameters.websocketId),
               lock,
               lock.getExportedHandler(entrypointName, context.getActor()));
         }
@@ -127,6 +154,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
       }
       KJ_UNREACHABLE;
     }
+    message.setWebsocketId(kj::mv(eventParameters.websocketId));
   }
 
   return req.send().then([](auto resp) {

@@ -4,6 +4,7 @@
 
 #include "io-context.h"
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/util/uuid.h>
 
 namespace workerd {
 
@@ -122,7 +123,9 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
     HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError) {
   kj::Maybe<kj::Promise<void>> event;
   KJ_IF_MAYBE(error, maybeError) {
-    webSocketForEventHandler = hib;
+
+    auto websocketId = randomUUID(nullptr);
+    webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
     kj::Maybe<api::HibernatableSocketParams> params;
     if (!hib.hasDispatchedClose && (error->getType() == kj::Exception::Type::DISCONNECTED)) {
       // If premature disconnect/cancel, dispatch a close event if we haven't already.
@@ -130,10 +133,11 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
       params = api::HibernatableSocketParams(
           1006,
           kj::str("WebSocket disconnected without sending Close frame."),
-          false);
+          false,
+          kj::mv(websocketId));
     } else {
       // Otherwise, we need to dispatch an error event!
-      params = api::HibernatableSocketParams(kj::mv(*error));
+      params = api::HibernatableSocketParams(kj::mv(*error), kj::mv(websocketId));
     }
     // Dispatch the event.
     auto workerInterface = loopback->getWorker(IoChannelFactory::SubrequestMetadata{});
@@ -160,19 +164,20 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
   while (true) {
     kj::WebSocket::Message message = co_await ws.receive();
     // Note that errors are handled by the callee of `readLoop`, since we throw from `receive()`.
-    webSocketForEventHandler = hib;
+    auto websocketId = randomUUID(nullptr);
+    webSocketsForEventHandler.insert(kj::str(websocketId), &hib);
 
     // Build the event params depending on what type of message we got.
     kj::Maybe<api::HibernatableSocketParams> maybeParams;
     KJ_SWITCH_ONEOF(message) {
       KJ_CASE_ONEOF(text, kj::String) {
-        maybeParams.emplace(kj::mv(text));
+        maybeParams.emplace(kj::mv(text), kj::mv(websocketId));
       }
       KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
-        maybeParams.emplace(kj::mv(data));
+        maybeParams.emplace(kj::mv(data), kj::mv(websocketId));
       }
       KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
-        maybeParams.emplace(close.code, kj::mv(close.reason), true);
+        maybeParams.emplace(close.code, kj::mv(close.reason), true, kj::mv(websocketId));
         // We'll dispatch the close event, so let's mark our websocket as having done so to
         // prevent a situation where we dispatch it twice.
         hib.hasDispatchedClose = true;

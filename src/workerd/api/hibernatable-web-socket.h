@@ -34,16 +34,19 @@ public:
         : webSocketRef(kj::mv(ref)), ownedWebSocket(kj::mv(owned)) {}
   };
 
-  ItemsForRelease prepareForRelease(jsg::Lock& lock);
+  ItemsForRelease prepareForRelease(jsg::Lock& lock, kj::StringPtr websocketId);
   // Only call this once (when transferring ownership of the websocket back to the api::WebSocket).
   // Gets a reference to the api::WebSocket, and moves the owned kj::WebSocket out of the
   // HibernatableWebSocket whose event we are currently delivering.
 
-  jsg::Ref<WebSocket> getWebSocket(jsg::Lock& lock);
+  jsg::Ref<WebSocket> claimWebSocket(jsg::Lock& lock, kj::StringPtr websocketId);
+  // Should only be called once per event, see definition for details.
 
   JSG_RESOURCE_TYPE(HibernatableWebSocketEvent) {
     JSG_INHERIT(ExtendableEvent);
   }
+private:
+  Worker::Actor::HibernationManager& getHibernationManager(jsg::Lock& lock);
 };
 
 class HibernatableWebSocketCustomEventImpl final: public WorkerInterface::CustomEvent,
@@ -82,25 +85,31 @@ private:
     // HibernatableSocketParams first.
     KJ_IF_MAYBE(p, params.tryGet<kj::Own<HibernationReader>>()) {
       kj::Maybe<HibernatableSocketParams> eventParameters;
+      auto websocketId = kj::str((*p)->getMessage().getWebsocketId());
       auto payload = (*p)->getMessage().getPayload();
       switch(payload.which()) {
         case rpc::HibernatableWebSocketEventMessage::Payload::TEXT: {
-          eventParameters.emplace(kj::str(payload.getText()));
+          eventParameters.emplace(kj::str(payload.getText()), kj::mv(websocketId));
           break;
         }
         case rpc::HibernatableWebSocketEventMessage::Payload::DATA: {
           kj::Array<byte> b = kj::heapArray(payload.getData().asBytes());
-          eventParameters.emplace(kj::mv(b));
+          eventParameters.emplace(kj::mv(b), kj::mv(websocketId));
           break;
         }
         case rpc::HibernatableWebSocketEventMessage::Payload::CLOSE: {
           auto close = payload.getClose();
           eventParameters.emplace(
-              close.getCode(), kj::str(close.getReason()), close.getWasClean());
+              close.getCode(),
+              kj::str(close.getReason()),
+              close.getWasClean(),
+              kj::mv(websocketId));
           break;
         }
         case rpc::HibernatableWebSocketEventMessage::Payload::ERROR: {
-          eventParameters.emplace(KJ_EXCEPTION(FAILED, kj::str(payload.getError())));
+          eventParameters.emplace(
+              KJ_EXCEPTION(FAILED, kj::str(payload.getError())),
+              kj::mv(websocketId));
           break;
         }
       }
