@@ -161,6 +161,19 @@ export const asymmetric_key_equals_test = {
     ok(!rsa_ko.equals(jwk1_ko));
     ok(!jwk1_ko.equals(rsa_ko));
     ok(!rsa_ko.equals(rsa2_ko));
+
+    jwk1_ko.export({
+      type: "pkcs8",
+      format: "der",
+      cipher: "aes-128-cbc",
+      passphrase: Buffer.alloc(0)
+    });
+    jwk1_ko.export({
+      type: "pkcs8",
+      format: "der",
+      cipher: "aes-128-cbc",
+      passphrase: ''
+    });
   }
 };
 

@@ -4,6 +4,7 @@
 
 #include "crypto-impl.h"
 #include <openssl/rsa.h>
+#include <openssl/pem.h>
 #include <openssl/ec_key.h>
 #include <openssl/bn.h>
 #include <openssl/x509.h>
@@ -16,6 +17,8 @@
 
 namespace workerd::api {
 namespace {
+
+static char EMPTY_PASSPHRASE[] = "";
 
 class AsymmetricKey: public CryptoKey::Impl {
 public:
@@ -92,6 +95,150 @@ public:
     }
 
     return kj::heapArray(der, derLen);
+  }
+
+  virtual kj::Array<kj::byte> exportKeyExt(
+      kj::StringPtr format,
+      kj::StringPtr type,
+      jsg::Optional<kj::String> cipher = nullptr,
+      jsg::Optional<kj::Array<kj::byte>> passphrase = nullptr) const override final {
+    KJ_REQUIRE(isExtractable(), "Key is not extractable.");
+    MarkPopErrorOnReturn mark_pop_error_on_return;
+    KJ_REQUIRE(format != "jwk", "jwk export not supported for exportKeyExt");
+    auto pkey = getEvpPkey();
+    auto bio = OSSL_BIO_MEM();
+
+    struct EncDetail {
+      char* pass = &EMPTY_PASSPHRASE[0];
+      size_t pass_len = 0;
+      const EVP_CIPHER* cipher = nullptr;
+    };
+
+    const auto getEncDetail = [&] {
+      EncDetail detail;
+      KJ_IF_MAYBE(pw, passphrase) {
+        detail.pass = reinterpret_cast<char*>(pw->begin());
+        detail.pass_len = pw->size();
+      }
+      KJ_IF_MAYBE(ciph, cipher) {
+        detail.cipher = EVP_get_cipherbyname(ciph->cStr());
+        JSG_REQUIRE(detail.cipher != nullptr, TypeError, "Unknown cipher ", *ciph);
+        KJ_REQUIRE(detail.pass != nullptr);
+      }
+      return detail;
+    };
+
+    const auto fromBio = [&](kj::StringPtr format) {
+      BUF_MEM* bptr;
+      BIO_get_mem_ptr(bio.get(), &bptr);
+      auto result = kj::heapArray<kj::byte>(bptr->length);
+      memcpy(result.begin(), bptr->data, bptr->length);
+      return kj::mv(result);
+    };
+
+    if (getType() == "public"_kj) {
+      // Here we only care about the format and the type.
+      if (type == "pkcs1"_kj) {
+        // PKCS#1 is only for RSA keys.
+        JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_RSA, TypeError,
+            "The pkcs1 type is only valid for RSA keys.");
+        auto rsa = EVP_PKEY_get1_RSA(pkey);
+        KJ_DEFER(RSA_free(rsa));
+        if (format == "pem"_kj) {
+          if (PEM_write_bio_RSAPublicKey(bio.get(), rsa) == 1) {
+            return fromBio(format);
+          }
+        } else if (format == "der"_kj) {
+          if (i2d_RSAPublicKey_bio(bio.get(), rsa) == 1) {
+            return fromBio(format);
+          }
+        }
+      } else if (type == "spki"_kj) {
+        if (format == "pem"_kj) {
+          if (PEM_write_bio_PUBKEY(bio.get(), pkey) == 1) {
+            return fromBio(format);
+          }
+        } else if (format == "der"_kj) {
+          if (i2d_PUBKEY_bio(bio.get(), pkey) == 1) {
+            return fromBio(format);
+          }
+        }
+      }
+      JSG_FAIL_REQUIRE(TypeError, "Failed to encode public key");
+    }
+
+    // Otherwise it's a private key.
+    KJ_REQUIRE(getType() == "private"_kj);
+
+    if (type == "pkcs1"_kj) {
+      // PKCS#1 is only for RSA keys.
+      JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_RSA, TypeError,
+          "The pkcs1 type is only valid for RSA keys.");
+      auto rsa = EVP_PKEY_get1_RSA(pkey);
+      KJ_DEFER(RSA_free(rsa));
+      if (format == "pem"_kj) {
+        auto enc = getEncDetail();
+        if (PEM_write_bio_RSAPrivateKey(
+                bio.get(),
+                rsa,
+                enc.cipher,
+                reinterpret_cast<unsigned char*>(enc.pass),
+                enc.pass_len,
+                nullptr, nullptr) == 1) {
+          return fromBio(format);
+        }
+      } else if (format == "der"_kj) {
+        // The cipher and passphrase are ignored for DER with PKCS#1.
+        if (i2d_RSAPrivateKey_bio(bio.get(), rsa) == 1) {
+          return fromBio(format);
+        }
+      }
+    } else if (type == "pkcs8"_kj) {
+      auto enc = getEncDetail();
+      if (format == "pem"_kj) {
+        if (PEM_write_bio_PKCS8PrivateKey(
+                bio.get(), pkey,
+                enc.cipher,
+                enc.pass,
+                enc.pass_len,
+                nullptr, nullptr) == 1) {
+          return fromBio(format);
+        }
+      } else if (format == "der"_kj) {
+        if (i2d_PKCS8PrivateKey_bio(
+                bio.get(), pkey,
+                enc.cipher,
+                enc.pass,
+                enc.pass_len,
+                nullptr, nullptr) == 1) {
+          return fromBio(format);
+        }
+      }
+    } else if (type == "sec1"_kj) {
+      // SEC1 is only used for EC keys.
+      JSG_REQUIRE(EVP_PKEY_id(pkey) == EVP_PKEY_EC, TypeError,
+          "The sec1 type is only valid for EC keys.");
+      auto ec = EVP_PKEY_get1_EC_KEY(pkey);
+      KJ_DEFER(EC_KEY_free(ec));
+      if (format == "pem"_kj) {
+        auto enc = getEncDetail();
+        if (PEM_write_bio_ECPrivateKey(
+                  bio.get(), ec,
+                  enc.cipher,
+                  reinterpret_cast<unsigned char*>(enc.pass),
+                  enc.pass_len,
+                  nullptr, nullptr) == 1) {
+          return fromBio(format);
+        }
+      } else if (format == "der"_kj) {
+        // The cipher and passphrase are ignored for DER with SEC1
+        if (i2d_ECPrivateKey_bio(bio.get(), ec) == 1) {
+          return fromBio(format);
+        }
+      }
+    }
+
+    JSG_FAIL_REQUIRE(TypeError, "Failed to encode private key");
   }
 
   kj::Array<kj::byte> sign(
