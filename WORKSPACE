@@ -179,8 +179,8 @@ http_file(
 
 git_repository(
     name = "rules_rust",
-    commit = "f12df9170f1d3e32e4750910e31ee26f1e899e94",
-    remote = "git@github.com:xortive/rules_rust.git"
+    commit = "3dedab2cfa9e6c6670ee00fd2d619f69b24cfc97",
+    remote = "git@github.com:freeformstu/rules_rust.git"
 )
 
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
@@ -371,8 +371,7 @@ hedron_compile_commands_setup()
 
 local_repository(
     name = "chromium_repo",
-    path = "../../Code/chromium-toolchain",
-
+    path = "../chromium-toolchain",
 )
 
 load("@chromium_repo//deps:repositories.bzl", "toolchain_deps_repositories")
