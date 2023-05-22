@@ -137,14 +137,27 @@ public:
     // All type aliases get inlined when exporting RTTI, but this type alias is included by
     // the official TypeScript types, so users might be depending on it.
 
-    JSG_TS_OVERRIDE({
-      constructor(init?: HeadersInit);
+    if (flags.getHttpHeadersGetSetCookie()) {
+      JSG_TS_OVERRIDE({
+        constructor(init?: HeadersInit);
 
-      entries(): IterableIterator<[key: string, value: string]>;
-      [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 
-      forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
-    });
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
+
+        getSetCookie(): string[];
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        constructor(init?: HeadersInit);
+
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
+      });
+    }
   }
 
 private:
