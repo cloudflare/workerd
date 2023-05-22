@@ -197,16 +197,20 @@ SqlStorage::Statement::Statement(SqliteDatabase::Statement&& statement)
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(data, kj::Array<const byte>) {
-        return data.asPtr();
+    KJ_IF_MAYBE(v, value) {
+      KJ_SWITCH_ONEOF(*v) {
+        KJ_CASE_ONEOF(data, kj::Array<const byte>) {
+          return data.asPtr();
+        }
+        KJ_CASE_ONEOF(text, kj::String) {
+          return text.asPtr();
+        }
+        KJ_CASE_ONEOF(d, double) {
+          return d;
+        }
       }
-      KJ_CASE_ONEOF(text, kj::String) {
-        return text.asPtr();
-      }
-      KJ_CASE_ONEOF(d, double) {
-        return d;
-      }
+    } else {
+      return nullptr;
     }
     KJ_UNREACHABLE;
   };

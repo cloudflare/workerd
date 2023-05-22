@@ -18,7 +18,7 @@ public:
   SqlStorage(SqliteDatabase& sqlite, jsg::Ref<DurableObjectStorage> storage);
   ~SqlStorage();
 
-  using BindingValue = kj::OneOf<kj::Array<const byte>, kj::String, double>;
+  using BindingValue = kj::Maybe<kj::OneOf<kj::Array<const byte>, kj::String, double>>;
 
   class Cursor;
   class Statement;
