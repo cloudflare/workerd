@@ -29,6 +29,7 @@ wd_cc_library(
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
+        "@workerd//:icudata-embed",
     ],
 )
 
