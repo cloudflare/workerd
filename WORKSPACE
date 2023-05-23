@@ -275,6 +275,7 @@ git_repository(
         "//:patches/v8/0006-Fix-v8-code_generator-imports.patch",
         "//:patches/v8/0007-Allow-Windows-builds-under-Bazel.patch",
         "//:patches/v8/0008-Disable-bazel-whole-archive-build.patch",
+        "//:patches/v8/0009-Make-v8-Locker-automatically-call-isolate-Enter.patch",
     ],
 )
 

@@ -353,7 +353,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Delete all wrappers.
   V8StackScope stackScope;
   v8::Locker lock(ptr);
-  v8::Isolate::Scope scope(ptr);
 
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();
