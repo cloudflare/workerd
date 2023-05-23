@@ -4,7 +4,9 @@ const config :Workerd.Config = (
   services = [
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
-  ]
+  ],
+
+  v8Flags = [ "--expose-gc" ],
 );
 
 const mainWorker :Workerd.Worker = (

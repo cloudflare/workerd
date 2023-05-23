@@ -227,10 +227,12 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingVa
       c->state = nullptr;
     }
     c->selfRef = nullptr;
+    c->statement = nullptr;
     currentCursor = nullptr;
   }
 
   auto result = jsg::alloc<Cursor>(cachedColumnNames, statementRef, kj::mv(bindings));
+  result->statement = JSG_THIS;
 
   result->selfRef = currentCursor;
   currentCursor = *result;

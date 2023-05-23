@@ -158,8 +158,15 @@ private:
   // destruction. Used by Statement to invalidate past cursors when the statement is
   // executed again.
 
+  kj::Maybe<jsg::Ref<Statement>> statement;
+  // If this cursor was created from a prepared statement, this keeps the statement object alive.
+
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(statement);
+  }
 
   static kj::Array<const SqliteDatabase::Query::ValuePtr> mapBindings(
       kj::ArrayPtr<BindingValue> values);

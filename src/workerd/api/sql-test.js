@@ -437,6 +437,22 @@ async function test(storage) {
     });
     assert.equal(getI(), 2);
   }
+
+  await scheduler.wait(1);
+
+  // Test for bug where a cursor constructed from a prepared statement didn't have a strong ref
+  // to the statement object.
+  {
+    sql.exec("CREATE TABLE iteratorTest (i INTEGER)");
+    sql.exec("INSERT INTO iteratorTest VALUES (0), (1)");
+
+    let q = sql.prepare("SELECT * FROM iteratorTest")();
+    let i = 0;
+    for (let row of q) {
+      assert.equal(row.i, i++);
+      gc();
+    }
+  }
 }
 
 export class DurableObjectExample {
