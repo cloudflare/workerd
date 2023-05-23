@@ -113,7 +113,7 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
 }
 
 Lock::Lock(v8::Isolate* v8Isolate)
-    : v8Isolate(v8Isolate), locker(v8Isolate), scope(v8Isolate),
+    : v8Isolate(v8Isolate), locker(v8Isolate),
       previousData(v8Isolate->GetData(2)),
       warningsLogged(IsolateBase::from(v8Isolate).areWarningsLogged()) {
   if (previousData != nullptr) {

@@ -76,7 +76,7 @@ V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr
 V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
     : V8System(userPlatform(platformParam), flags) {}
 V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platform(kj::mv(platformParam)) {
+    : platformInner(kj::mv(platformParam)), platformWrapper(*platformInner) {
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -128,9 +128,9 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::InitializeICUDefaultLocation(nullptr);
 #endif
 
-  v8::V8::InitializePlatform(platform.get());
+  v8::V8::InitializePlatform(&platformWrapper);
   v8::V8::Initialize();
-  cppgc::InitializeProcess(platform->GetPageAllocator());
+  cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
   v8Initialized = true;
 }
 
@@ -282,7 +282,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
   // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
   // V8 wants a non-const pointer here, but the object is in fact thread-safe.
-  cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
+  cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
   ptr->AttachCppHeap(cppgcHeap.get());
   ptr->SetEmbedderRootsHandler(&heapTracer);
 
@@ -323,6 +323,9 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
   // Create opaqueTemplate
   {
+    // We don't need a v8::Locker here since there's no way another thread could be using the
+    // isolate yet, but we do need v8::Isolate::Scope.
+    v8::Isolate::Scope isolateScope(ptr);
     v8::HandleScope scope(ptr);
     auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
     opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
@@ -350,7 +353,6 @@ void IsolateBase::dropWrappers(kj::Own<void> typeWrapperInstance) {
   // Delete all wrappers.
   V8StackScope stackScope;
   v8::Locker lock(ptr);
-  v8::Isolate::Scope scope(ptr);
 
   // Make sure everything in the deferred destruction queue is dropped.
   clearDestructionQueue();

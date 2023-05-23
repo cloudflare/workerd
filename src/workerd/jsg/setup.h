@@ -8,6 +8,7 @@
 #include "jsg.h"
 #include "async-context.h"
 #include "type-wrapper.h"
+#include "v8-platform-wrapper.h"
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
@@ -54,7 +55,8 @@ public:
   static void setFatalErrorCallback(FatalErrorCallback* callback);
 
 private:
-  kj::Own<v8::Platform> platform;
+  kj::Own<v8::Platform> platformInner;
+  V8PlatformWrapper platformWrapper;
   friend class IsolateBase;
 
   explicit V8System(kj::Own<v8::Platform>, kj::ArrayPtr<const kj::StringPtr>);

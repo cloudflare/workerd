@@ -2588,7 +2588,15 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
-      return timerChannel.afterLimitTimeout(10 * kj::SECONDS)
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+      // Give more time under ASAN.
+      //
+      // TODO(cleanup): Should this be configurable?
+      auto timeout = 20 * kj::SECONDS;
+#else
+      auto timeout = 10 * kj::SECONDS;
+#endif
+      return timerChannel.afterLimitTimeout(timeout)
           .then([]() -> kj::Promise<void> {
         return KJ_EXCEPTION(FAILED,
             "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "

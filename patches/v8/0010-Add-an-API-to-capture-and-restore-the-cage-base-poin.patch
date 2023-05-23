@@ -1,0 +1,113 @@
+From 7f2c3441a5c4f93e49a7bff99d8e1386cee1a591 Mon Sep 17 00:00:00 2001
+From: Kenton Varda <kenton@cloudflare.com>
+Date: Tue, 23 May 2023 09:24:11 -0500
+Subject: [PATCH 10/10] Add an API to capture and restore the cage base
+ pointers.
+
+This will be used in workerd to ensure that the cage pointers propagate to background thread tasks/jobs correctly.
+
+This is not the right solution. Instead, each background task/job implementation should be updated to propagate the pointers itself. However, that seems to require searching all of V8 for such implementations, with a potential crash if one is missed. Under the current time pressure I'd rather take the catch-all approach.
+---
+ include/v8-locker.h        | 30 ++++++++++++++++++++++++++++++
+ src/execution/v8threads.cc | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+)
+
+diff --git a/include/v8-locker.h b/include/v8-locker.h
+index 22b7a8767a..fee48faffe 100644
+--- a/include/v8-locker.h
++++ b/include/v8-locker.h
+@@ -6,6 +6,7 @@
+ #define INCLUDE_V8_LOCKER_H_
+ 
+ #include "v8config.h"  // NOLINT(build/include_directory)
++#include "v8-internal.h"
+ 
+ namespace v8 {
+ 
+@@ -133,6 +134,35 @@ class V8_EXPORT Locker {
+   internal::Isolate* isolate_;
+ };
+ 
++/**
++ * Captures the thread-local pointer cage base pointers, so that they can be
++ * applied in a different thread.
++ */
++class PointerCageContext {
++ public:
++  // Get the current thread's context.
++  static PointerCageContext GetCurrent();
++
++  class Scope;
++
++ private:
++  internal::Address cage;
++  internal::Address code_cage;
++
++  void Apply() const;
++};
++
++class PointerCageContext::Scope {
++ public:
++  // Apply the given context to the current thread. Restores the previous
++  // context on destruction. This should always be allocated on the stack.
++  explicit Scope(const PointerCageContext& ctx): saved(GetCurrent()) { ctx.Apply(); }
++  ~Scope() { saved.Apply(); }
++
++ private:
++  PointerCageContext saved;
++};
++
+ }  // namespace v8
+ 
+ #endif  // INCLUDE_V8_LOCKER_H_
+diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
+index fb525314d9..231eb53a7b 100644
+--- a/src/execution/v8threads.cc
++++ b/src/execution/v8threads.cc
+@@ -6,6 +6,7 @@
+ 
+ #include "include/v8-locker.h"
+ #include "src/api/api.h"
++#include "src/common/ptr-compr.h"
+ #include "src/debug/debug.h"
+ #include "src/execution/execution.h"
+ #include "src/execution/isolate-inl.h"
+@@ -318,4 +319,35 @@ void ThreadManager::IterateArchivedThreads(ThreadVisitor* v) {
+ ThreadId ThreadManager::CurrentId() { return ThreadId::Current(); }
+ 
+ }  // namespace internal
++
++PointerCageContext PointerCageContext::GetCurrent() {
++  PointerCageContext result;
++#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++  result.cage = i::V8HeapCompressionScheme::base();
++#ifdef V8_EXTERNAL_CODE_SPACE
++  result.code_cage = i::ExternalCodeCompressionScheme::base();
++#else
++  result.code_cage = 0;
++#endif  // V8_EXTERNAL_CODE_SPACE
++#else
++  result.cage = 0;
++  result.code_cage = 0;
++#endif  // V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++  return result;
++}
++
++void PointerCageContext::Apply() const {
++#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++  i::V8HeapCompressionScheme::InitBase(cage);
++#ifdef V8_EXTERNAL_CODE_SPACE
++  i::ExternalCodeCompressionScheme::InitBase(code_cage);
++#else
++  // Since V8_EXTERNAL_CODE_SPACE is not necessarily defined by the embedder, we always make space
++  // for the code cage in this object but only use it when needed. When not needed, silence the
++  // warning with this line.
++  (void)code_cage;
++#endif  // V8_EXTERNAL_CODE_SPACE
++#endif  // V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
++}
++
+ }  // namespace v8
+-- 
+2.30.2
+
