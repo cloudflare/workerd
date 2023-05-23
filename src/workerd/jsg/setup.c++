@@ -76,7 +76,7 @@ V8System::V8System(v8::Platform& platformParam): V8System(platformParam, nullptr
 V8System::V8System(v8::Platform& platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
     : V8System(userPlatform(platformParam), flags) {}
 V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::StringPtr> flags)
-    : platform(kj::mv(platformParam)) {
+    : platformInner(kj::mv(platformParam)), platformWrapper(*platformInner) {
 #if V8_HAS_STACK_START_MARKER
   v8::StackStartMarker::EnableForProcess();
 #endif
@@ -128,9 +128,9 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   v8::V8::InitializeICUDefaultLocation(nullptr);
 #endif
 
-  v8::V8::InitializePlatform(platform.get());
+  v8::V8::InitializePlatform(&platformWrapper);
   v8::V8::Initialize();
-  cppgc::InitializeProcess(platform->GetPageAllocator());
+  cppgc::InitializeProcess(platformWrapper.GetPageAllocator());
   v8Initialized = true;
 }
 
@@ -282,7 +282,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
   // const_cast here because V8's `Platform` interface doesn't use constness for thread-safety and
   // V8 wants a non-const pointer here, but the object is in fact thread-safe.
-  cppgcHeap = v8::CppHeap::Create(const_cast<v8::Platform*>(system.platform.get()), params);
+  cppgcHeap = v8::CppHeap::Create(const_cast<V8PlatformWrapper*>(&system.platformWrapper), params);
   ptr->AttachCppHeap(cppgcHeap.get());
   ptr->SetEmbedderRootsHandler(&heapTracer);
 
