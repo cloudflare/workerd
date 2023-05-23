@@ -323,6 +323,9 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
 
   // Create opaqueTemplate
   {
+    // We don't need a v8::Locker here since there's no way another thread could be using the
+    // isolate yet, but we do need v8::Isolate::Scope.
+    v8::Isolate::Scope isolateScope(ptr);
     v8::HandleScope scope(ptr);
     auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
     opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
