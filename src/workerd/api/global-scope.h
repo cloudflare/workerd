@@ -208,6 +208,7 @@ struct ExportedHandler {
     type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
   );
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown, CfHostMetadata = unknown> {
+    email?: EmailExportedHandler<Env>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
     tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
