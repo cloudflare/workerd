@@ -92,7 +92,9 @@ kj::Array<uint32_t> writeFromV8String(v8::Isolate *isolate, v8::Local<v8::Value>
 
 kj::Array<uint32_t> copyUsvString(kj::ArrayPtr<uint32_t> other) {
   auto dest = kj::heapArray<uint32_t>(other.size());
-  memcpy(dest.begin(), other.begin(), other.size() * sizeof(uint32_t));
+  if (other.size() > 0) {
+    memcpy(dest.begin(), other.begin(), other.size() * sizeof(uint32_t));
+  }
   return kj::mv(dest);
 }
 
