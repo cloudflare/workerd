@@ -2835,6 +2835,11 @@ public:
     state.template get<Readable>()->setOwner(addWeakRef());
   }
 
+  ~PumpToReader() noexcept(false) {
+    // Ensure that if a write promise is pending it is proactively canceled.
+    canceler.cancel("PumpToReader was destroyed");
+  }
+
   void doClose() override {
     if (!isErroredOrClosed()) {
       state.template init<StreamStates::Closed>();
@@ -2885,6 +2890,7 @@ private:
   IoContext& ioContext;
   kj::OneOf<Readable, Pumping, StreamStates::Closed, kj::Exception> state;
   kj::Own<WritableStreamSink> sink;
+  kj::Canceler canceler;
   bool end;
 
   bool isErroredOrClosed() {
@@ -3028,7 +3034,13 @@ private:
                   // we're in the correct IoContext...)
                   auto promise = reader->sink->write(bytes.begin(), bytes.size())
                       .attach(kj::mv(bytes));
-                  return ioContext.awaitIo(js, kj::mv(promise),
+                  // Wrap the write promise in a canceler that will be triggered when the
+                  // PumpToReader is dropped. While the write promise is pending, it is
+                  // possible for the promise that is holding the PumpToReader to be
+                  // dropped causing the hold on the sink to be released. If that is
+                  // released while the write is still pending we can end up with an
+                  // error further up the destruct chain.
+                  return ioContext.awaitIo(js, reader->canceler.wrap(kj::mv(promise)),
                       [](jsg::Lock& js) -> kj::Maybe<jsg::Value> {
                     // The write completed successfully.
                     return kj::Maybe<jsg::Value>(nullptr);
