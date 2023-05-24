@@ -32,9 +32,9 @@ async function test(storage) {
   assert.equal(resultStr[0]["'hello'"], "hello");
 
   // Test blob results
-  const resultBlob = [...sql.exec("SELECT x'ff'")];
+  const resultBlob = [...sql.exec("SELECT x'ff' as blob")];
   assert.equal(resultBlob.length, 1);
-  const blob = new Uint8Array(resultBlob[0]["x'ff'"]);
+  const blob = new Uint8Array(resultBlob[0].blob);
   assert.equal(blob.length, 1);
   assert.equal(blob[0], 255);
 
@@ -452,6 +452,24 @@ async function test(storage) {
       assert.equal(row.i, i++);
       gc();
     }
+  }
+
+  {
+    // Test binding blobs & nulls
+    sql.exec(`CREATE TABLE test_blob (id INTEGER PRIMARY KEY, data BLOB);`)
+    sql.prepare(
+      `INSERT INTO test_blob(data) VALUES(?),(ZEROBLOB(10)),(null),(?);`
+    )(
+      crypto.getRandomValues(new Uint8Array(12)), null
+    )
+    const results = Array.from(sql.exec(`SELECT * FROM test_blob`))
+    assert.equal(results.length, 4)
+    assert.equal(results[0].data instanceof ArrayBuffer, true)
+    assert.equal(results[0].data.byteLength, 12)
+    assert.equal(results[1].data instanceof ArrayBuffer, true)
+    assert.equal(results[1].data.byteLength, 10)
+    assert.equal(results[2].data, null)
+    assert.equal(results[3].data, null)
   }
 }
 
