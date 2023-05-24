@@ -20,3 +20,13 @@ pnpm exec bazelisk build --disk_cache=./.bazel-cache -c opt //src/workerd/server
 cp bazel-bin/src/workerd/server/workerd ./workerd-darwin-arm64
 
 docker buildx build --platform linux/arm64 -f Dockerfile.release -t workerd:$TAG_NAME --target=artifact --output type=local,dest=$(pwd) .
+
+chmod +x workerd*
+
+mv workerd-darwin-arm64 workerd
+gzip -9N workerd
+mv workerd.gz workerd-darwin-arm64.gz
+
+mv workerd-linux-arm64 workerd
+gzip -9N workerd
+mv workerd.gz workerd-linux-arm64.gz
