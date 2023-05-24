@@ -1,8 +1,7 @@
-From 7f2c3441a5c4f93e49a7bff99d8e1386cee1a591 Mon Sep 17 00:00:00 2001
+From 51c0a45bc7f3a27912c6a548602d35d3aad88001 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:24:11 -0500
-Subject: [PATCH 10/10] Add an API to capture and restore the cage base
- pointers.
+Subject: Add an API to capture and restore the cage base pointers.
 
 This will be used in workerd to ensure that the cage pointers propagate to background thread tasks/jobs correctly.
 
@@ -13,7 +12,7 @@ This is not the right solution. Instead, each background task/job implementation
  2 files changed, 62 insertions(+)
 
 diff --git a/include/v8-locker.h b/include/v8-locker.h
-index 22b7a8767a..fee48faffe 100644
+index 22b7a8767a83a702a2601bdfd4c0f71206df0ad5..fee48faffe82400595dca17197c5bbee680a6137 100644
 --- a/include/v8-locker.h
 +++ b/include/v8-locker.h
 @@ -6,6 +6,7 @@
@@ -61,7 +60,7 @@ index 22b7a8767a..fee48faffe 100644
  
  #endif  // INCLUDE_V8_LOCKER_H_
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
-index fb525314d9..231eb53a7b 100644
+index fb525314d9fb6dca143dbe45bfd6dbf53af132c8..231eb53a7bd8c5545009580b712e22b084cabc65 100644
 --- a/src/execution/v8threads.cc
 +++ b/src/execution/v8threads.cc
 @@ -6,6 +6,7 @@
@@ -108,6 +107,3 @@ index fb525314d9..231eb53a7b 100644
 +}
 +
  }  // namespace v8
--- 
-2.30.2
-

@@ -1,7 +1,7 @@
-From 38b40b1827ed6dc38dd9acd0e1de531b3b536c6a Mon Sep 17 00:00:00 2001
+From eb0c3315565b32732df70e60cabfe360b602fc79 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Tue, 23 May 2023 09:18:57 -0500
-Subject: [PATCH 09/10] Make v8::Locker automatically call isolate->Enter().
+Subject: Make v8::Locker automatically call isolate->Enter().
 
 This makes it no longer necessary to create a v8::Isolate::Scope after taking the lock.
 
@@ -13,7 +13,7 @@ This is a major change in API semantics, however, which makes it unlikely to be 
  1 file changed, 2 insertions(+)
 
 diff --git a/src/execution/v8threads.cc b/src/execution/v8threads.cc
-index be4f4a7f20..fb525314d9 100644
+index be4f4a7f209e3e8d784d8ab57d0ef77a58df8790..fb525314d9fb6dca143dbe45bfd6dbf53af132c8 100644
 --- a/src/execution/v8threads.cc
 +++ b/src/execution/v8threads.cc
 @@ -40,6 +40,7 @@ void Locker::Initialize(v8::Isolate* isolate) {
@@ -32,6 +32,3 @@ index be4f4a7f20..fb525314d9 100644
      isolate_->thread_manager()->Unlock();
    }
  }
--- 
-2.30.2
-
