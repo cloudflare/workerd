@@ -472,11 +472,9 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
     bool end) {
   JSG_REQUIRE(IoContext::hasCurrent(), Error,
       "Unable to consume this ReadableStream outside of a request");
-  return kj::evalNow([&]() -> kj::Promise<DeferredProxy<void>> {
-    JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
-    JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
-    return getController().pumpTo(js, kj::mv(sink), end);
-  });
+  JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
+  JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
+  return getController().pumpTo(js, kj::mv(sink), end);
 }
 
 jsg::Ref<ReadableStream> ReadableStream::constructor(
