@@ -33,12 +33,10 @@ public:
 
   R2Admin(FeatureFlags featureFlags,
           uint subrequestChannel,
-          kj::String account,
           kj::String jwt,
           friend_tag_t)
       : featureFlags(featureFlags),
         subrequestChannel(subrequestChannel),
-        adminAccount(kj::mv(account)),
         jwt(kj::mv(jwt)) {}
   // This constructor is intended to be used by the R2CrossAccount binding, which has access to the
   // friend_tag
@@ -100,7 +98,6 @@ public:
 private:
   R2Bucket::FeatureFlags featureFlags;
   uint subrequestChannel;
-  kj::Maybe<kj::String> adminAccount;
   kj::Maybe<kj::String> jwt;
 
   friend class edgeworker::api::R2CrossAccount;

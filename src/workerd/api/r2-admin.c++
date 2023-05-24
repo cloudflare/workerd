@@ -12,10 +12,9 @@
 
 namespace workerd::api::public_beta {
 jsg::Ref<R2Bucket> R2Admin::get(jsg::Lock& js, kj::String bucketName) {
-  KJ_IF_MAYBE(a, adminAccount) {
-    auto& j = KJ_ASSERT_NONNULL(jwt, "adminAccount without corresponding jwt");
+  KJ_IF_MAYBE(j, jwt) {
     return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(bucketName),
-                                kj::str(*a), kj::str(j), R2Bucket::friend_tag_t{});
+                                kj::str(*j), R2Bucket::friend_tag_t{});
   }
   return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(bucketName), R2Bucket::friend_tag_t{});
 }
@@ -36,10 +35,8 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   createBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  kj::StringPtr components[2];
-  auto path = fillR2Path(components, adminAccount, nullptr);
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
-                                    kj::mv(requestJson), path, jwt);
+                                    kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType]
@@ -76,9 +73,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
   }
 
   auto requestJson = json.encode(requestBuilder);
-  kj::StringPtr components[2];
-  auto path = fillR2Path(components, adminAccount, nullptr);
-  auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
+  auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(js, kj::mv(promise),
       [this, &retrievedBucketType, &errorType](jsg::Lock& js, R2Result r2Result) mutable {
@@ -131,10 +126,8 @@ jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
   deleteBucketBuilder.setBucket(name);
 
   auto requestJson = json.encode(requestBuilder);
-  kj::StringPtr components[2];
-  auto path = fillR2Path(components, adminAccount, nullptr);
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
-                                    kj::mv(requestJson), path, jwt);
+                                    kj::mv(requestJson), nullptr, jwt);
 
   return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) mutable {
     r2Result.throwIfError("deleteBucket", errorType);

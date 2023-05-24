@@ -328,8 +328,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(
     headBuilder.setObject(name);
 
     auto requestJson = json.encode(requestBuilder);
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) {
@@ -364,8 +364,8 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
       initGetOptions(js, getBuilder, *o);
     }
     auto requestJson = json.encode(requestBuilder);
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise), [&context, &errorType](R2Result r2Result)
@@ -554,8 +554,8 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
     auto requestJson = json.encode(requestBuilder);
 
     cancelReader.cancel();
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
                                       kj::mv(requestJson), path, jwt);
 
@@ -640,8 +640,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     }
 
     auto requestJson = json.encode(requestBuilder);
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
                                       path, jwt);
 
@@ -694,8 +694,8 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Ar
 
     auto requestJson = json.encode(requestBuilder);
 
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
                                       path, jwt);
 
@@ -795,8 +795,8 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
 
     auto requestJson = json.encode(requestBuilder);
 
-    kj::StringPtr components[2];
-    auto path = fillR2Path(components, adminAccount, adminBucket);
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(kj::mv(promise),
@@ -1100,12 +1100,9 @@ kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
     return parseObjectMetadata<R2Bucket::HeadResult>(action, r2Result, errorType);
 }
 
-kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[2], const kj::Maybe<kj::String>& account, const kj::Maybe<kj::String>& bucket) {
+kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket) {
   int numComponents = 0;
 
-  KJ_IF_MAYBE(a, account) {
-    pathStorage[numComponents++] = *a;
-  }
   KJ_IF_MAYBE(b, bucket) {
     pathStorage[numComponents++] = *b;
   }

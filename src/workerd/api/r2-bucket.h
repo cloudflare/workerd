@@ -15,7 +15,7 @@
 namespace workerd::api::public_beta {
 
 kj::Array<kj::byte> cloneByteArray(const kj::Array<kj::byte>& arr);
-kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[2], const kj::Maybe<kj::String>& admin, const kj::Maybe<kj::String>& bucket);
+kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[1], const kj::Maybe<kj::String>& bucket);
 
 class R2MultipartUpload;
 
@@ -40,8 +40,8 @@ public:
   explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, friend_tag_t)
       : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)) {}
 
-  explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String account, kj::String jwt, friend_tag_t)
-      : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)), adminAccount(kj::mv(account)), jwt(kj::mv(jwt)) {}
+  explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
+      : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)), jwt(kj::mv(jwt)) {}
 
   struct Range {
     jsg::Optional<double> offset;
@@ -407,7 +407,6 @@ private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;
-  kj::Maybe<kj::String> adminAccount;
   kj::Maybe<kj::String> jwt;
 
   friend class R2Admin;
