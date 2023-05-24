@@ -163,7 +163,12 @@ void ValueQueue::handleRead(
     ReadRequest request) {
   // If there are no pending read requests and there is data in the buffer,
   // we will try to fulfill the read request immediately.
-  if (state.readRequests.empty() && state.queueTotalSize > 0) {
+  if (state.queueTotalSize > 0 && state.buffer.empty()) {
+    // Is our queue accounting correct?
+    LOG_WARNING_ONCE("ValueQueue::handleRead encountered a queueTotalSize > 0 "
+                     "with an empty buffer. This should not happen.", state.queueTotalSize);
+  }
+  if (state.readRequests.empty() && !state.buffer.empty()) {
     auto& entry = state.buffer.front();
 
     KJ_SWITCH_ONEOF(entry) {
@@ -178,13 +183,16 @@ void ValueQueue::handleRead(
         KJ_LOG(ERROR, "ValueQueue::handleRead encountered a close sentinel in the queue "
                         "with queueTotalSize > 0. This should not happen.", state.queueTotalSize);
         request.resolveAsDone(js);
+        return;
       }
       KJ_CASE_ONEOF(entry, QueueEntry) {
         request.resolve(js, entry.entry->getValue(js));
         state.queueTotalSize -= entry.entry->getSize();
         state.buffer.pop_front();
+        return;
       }
     }
+    KJ_UNREACHABLE;
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
     // Otherwise, if state.queueTotalSize is zero and isClosing() is true there won't be any
     // more data coming. Just resolve the read as done and move on.
