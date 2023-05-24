@@ -1802,9 +1802,18 @@ public:
       try {
         return func();
       } catch (JsExceptionThrown&) {
-        if (!tryCatch.CanContinue()) {
+        // If tryCatch.HasCaught() is false, it typically means that JsExceptionThrown
+        // was thrown without an exception actually being scheduled on the isolate.
+        // This may happen in particular when the JsExceptionThrows was the result of
+        // TerminateException() but V8 has since cleared the terminate flag because all
+        // JavaScript call frames have been unwound. Hence, we want to treat this the
+        // same as if `CanContinue()` returned false.
+        // TODO(cleanup): Do more investigation, maybe explicitly check for the termination
+        // flag or arrange to maintain our own separate termination flag to avoid confusion.
+        if (!tryCatch.CanContinue() || !tryCatch.HasCaught()) {
           throw;
         }
+
         error = Value(v8Isolate, tryCatch.Exception());
       } catch (kj::Exception& e) {
         error = exceptionToJs(kj::mv(e));
