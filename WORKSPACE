@@ -183,13 +183,23 @@ git_repository(
     remote = "https://github.com/bazelbuild/rules_rust.git"
 )
 
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
+load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains", "rust_repository_set")
 
 rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2018",
 )
+
+# https://github.com/bazelbuild/rules_rust/issues/276#issuecomment-896333643
+rust_repository_set(
+    name = "rust_mac_x64_cross_arm64",
+    exec_triple = "x86_64-apple-darwin",
+    extra_target_triples = ["aarch64-apple-darwin"],
+    edition = "2018",
+    version = "1.69.0",
+)
+# TODO: add Linux arm64 repository
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
 

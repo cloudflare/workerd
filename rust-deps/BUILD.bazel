@@ -196,22 +196,10 @@ rust_static_library(
         "WORKERD_VERSION": "{WORKERD_VERSION}"
     },
     visibility = ["//visibility:public"],
-    deps = select({
-        # On Windows, CXX is broken under Bazel (https://github.com/dtolnay/cxx/pull/125).
-        # Luckily, util.rs and addr2line.rs are only used in the internal build which just targets
-        # Linux, so we can safely disable compilation of any CXX-using code.
-        "@platforms//os:windows": ["@crates_vendor//:lolhtml"],
-        "//conditions:default": [
-            ":addr2line",
-            ":util",
-            "@crates_vendor//:addr2line",
-            "@crates_vendor//:anyhow",
-            "@crates_vendor//:backtrace",
-            "@crates_vendor//:cxx",
-            "@crates_vendor//:libc",
-            "@crates_vendor//:lolhtml",
-            "@crates_vendor//:object",
-            "@crates_vendor//:typed-arena",
-        ]
-    }),
+    # CXX is broken under Bazel on Windows (https://github.com/dtolnay/cxx/pull/125), and it makes
+    # using the hermetic toolchain tricky.
+    # Luckily, util.rs and addr2line.rs are only used in the internal build which just targets
+    # Linux, so we can safely disable compilation of any CXX-using code.
+    # TODO(someday): see if we can get this working, for in-process symbolization
+    deps = ["@crates_vendor//:lolhtml"],
 )
