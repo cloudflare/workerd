@@ -598,6 +598,7 @@ public:
     // calculated by the size algorithm function provided in the stream constructor.
   public:
     explicit Entry(jsg::Value value, size_t size);
+    KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
     jsg::Value getValue(jsg::Lock& js);
 

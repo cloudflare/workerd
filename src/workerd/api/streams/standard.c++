@@ -3016,8 +3016,14 @@ private:
         }), [](auto& js, jsg::Value exception) mutable -> Result {
           return kj::mv(exception);
         }).then(js, ioContext.addFunctor(
-            [readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)]
-            (jsg::Lock& js, Result result) mutable {
+            // Note that readable is a gc visitable type. It holds a queue of gc
+            // visitable types. Wrapping in a visitable lambda ensures that if
+            // readable has already been gc visited, it will continue to be reachable
+            // once it is passed off to the read loop here.
+            JSG_VISITABLE_LAMBDA(
+                (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
+                (readable),
+                (jsg::Lock& js, Result result) mutable {
           KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
             // Oh good, if we got here it means we're in the right IoContext and
             // the PumpToReader is still alive. Let's process the result.
@@ -3045,8 +3051,10 @@ private:
                   // The write failed.
                   return kj::mv(exception);
                 }).then(js, ioContext.addFunctor(
-                    [readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)]
-                    (jsg::Lock& js, kj::Maybe<jsg::Value> maybeException) mutable {
+                    JSG_VISITABLE_LAMBDA(
+                      (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
+                      (readable),
+                      (jsg::Lock& js, kj::Maybe<jsg::Value> maybeException) mutable {
                   KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
                     auto& ioContext = reader->ioContext;
                     ioContext.requireCurrentOrThrowJs();
@@ -3063,7 +3071,7 @@ private:
                       return ex.getHandle(js);
                     }));
                   }
-                }));
+                })));
               }
               KJ_CASE_ONEOF(pumping, Pumping) {
                 // If we got here, a zero-length buffer was provided by the read and we're
@@ -3103,7 +3111,7 @@ private:
             }
           }
           KJ_UNREACHABLE;
-        }));
+        })));
       }
     }
     KJ_UNREACHABLE;
