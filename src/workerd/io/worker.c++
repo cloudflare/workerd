@@ -26,6 +26,7 @@
 #include <map>
 #include <time.h>
 #include <numeric>
+#include <queue>
 
 #if _WIN32
 #include <kj/win32-api-version.h>
@@ -545,6 +546,69 @@ struct Worker::Isolate::Impl {
   // attempt. This allows watchdogs to see evidence of forward progress in other threads, even if
   // their own thread has blocked waiting for the lock for a long time.
 
+  struct BreakpointState {
+    // The breakpoint state is a mutex-guarded structure used to implement breakpoint debugging
+    // through the inspector protocol. This is used only when the inspector is enabled. The
+    // BreakpointState manages communications between two threads:
+    // - The execution thread: A normal request-handling thread which is executing JavaScript code
+    //   and has encountered a breakpoint.
+    // - The inspector connection thread: The thread which is handling the connection with the
+    //   inspector client. This is always a separate thread. In workerd, there is a dedicated
+    //   thread that handles all inspector client connections. In the edge runtime, each incoming
+    //   connection is handled on its own thread, and hence an inspector connection will have a
+    //   dedicated thread for this reason.
+    //
+    // Normally -- i.e., when no breakpoints are used -- the inspector connection thread can handle
+    // inspector requests by directly locking the isolate and delivering inspector messages to it.
+    // When a breakpoint is hit, though, life gets more complicated: the execution thread which hit
+    // the breakpoint cannot release the isolate lock, and so the inspector thread cannot take the
+    // lock. To solve this:
+    // - When the inspector is enabled, any thread that intends to lock the isolate must lock the
+    //   breakpoint state first.
+    // - When an execution thread hits a breakpoint, it uses a conditional mutex wait to unlock the
+    //   breakpoint state while waiting for instructions from the inspector connection thread.
+    // - When the inspector connection thread locks the breakpoint state but discovers that a
+    //   breakpoint is currently active, it does NOT attempt to take the isolate lock, but instead
+    //   uses the breakpoint state to forward messages to the execution thread, which in turn
+    //   delivers them to the V8 inspector.
+
+    bool atBreakpoint = false;
+    // If true, some other thread is currently paused at a breakpoint. In this case, the other
+    // thread is holding the isolate lock, so the inspector connection thread cannot take the lock.
+    // The inspector connection thread can intsead send and receive messages by proxy using the
+    // two queues below.
+
+    std::queue<kj::String> incomingMessages;
+    // While stopped at a breakpoint, the execution thread will wait for messages to arrive on this
+    // queue (using a conditional lock wait). Any such messages will be delivered to the inspector
+    // session.
+
+    std::queue<kj::String> outgoingMessages;
+    // While stopped at a breakpoint, if the isolate produces any outgoing inspector messages,
+    // those will be added to this queue, and `inspectorConnectionWakeupFulfiller->fulfill()` will
+    // be called to wake up the inspector connection thread.
+
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> wakeConnectionThread;
+    // While an inspector client is currently connected, this is non-null.
+    //
+    // When null, no inspector client is connected, and therefore breakpoints must not be honored.
+    // An execution thread which hits a breakpoint but discovers `wakeConnectionThread` to be null
+    // must ignore the breakpoint. If an execution thread stops at a breakpoint while
+    // `wakeConnectionThread` is non-null, but `wakeConnectionThread` becomes null while waiting
+    // at the breakpoint, then the breakpoint must be canceled and execution should continue.
+    // (So, the conditional mutex lock performed by the execution thread must check for nullness
+    // of this value as part of its wake condition.)
+    //
+    // When this is non-null, the value is a cross-thread fulfiller (created with
+    // `kj::newPromiseAndCrossThreadFulfiller()`). Fulfilling it will wake up the inspector
+    // connection thread, which will then send out any messages queued in `outgoingMessages`, and
+    // then create a new wake fulfiller. Hence, whenever the execution thread queues a message
+    // to `outgoingMessages`, it must fulfill the fulfiller to wake the connection thread.
+  };
+
+  kj::Maybe<kj::MutexGuarded<BreakpointState>> breakpointState;
+  // This is non-null iff `inspector` is non-null.
+
   class Lock {
     // Wrapper around JsgWorkerIsolate::Lock and various RAII objects which help us report metrics,
     // measure instantaneous load, avoid spurious watchdog kills, and defer context destruction.
@@ -554,6 +618,25 @@ struct Worker::Isolate::Impl {
   public:
     explicit Lock(const Worker::Isolate& isolate, Worker::LockType lockType,
                   jsg::V8StackScope& stackScope)
+        : Lock(isolate, lockType, stackScope,
+               isolate.impl->breakpointState.map(
+                   [](auto& state) { return state.lockExclusive(); })) {}
+    // Normal (non-inspector) callers use this constructor to take a lock.
+
+    explicit Lock(const Worker::Isolate& isolate, jsg::V8StackScope& stackScope,
+                  kj::Locked<BreakpointState> breakpointLock)
+        : Lock(isolate, Worker::Lock::TakeSynchronously(nullptr), stackScope,
+               kj::mv(breakpointLock)) {}
+    // Inspector connection threads use thi overload to construct a lock. The `breakpointLock` must
+    // be taken first, and if it shows that a breakpoint is currently active, the inspector thread
+    // must avoid taking an isolate lock and instead use the breakpoint state to communicate
+    // messages back to the execution thread.
+
+    // TODO(cleanup): Move this constructor overload into the private section. Leaving here for now
+    //   to keep the diff readable.
+    explicit Lock(const Worker::Isolate& isolate, Worker::LockType lockType,
+                  jsg::V8StackScope& stackScope,
+                  kj::Maybe<kj::Locked<BreakpointState>> breakpointLock)
         : impl(*isolate.impl),
           metrics([&isolate, &lockType]()
               -> kj::Maybe<kj::Own<IsolateObserver::LockTiming>> {
@@ -574,6 +657,7 @@ struct Worker::Isolate::Impl {
           progressCounter(impl.lockSuccessCount),
           oldCurrentApiIsolate(currentApiIsolate),
           limitEnforcer(isolate.getLimitEnforcer()),
+          breakpointLock(kj::mv(breakpointLock)),
           lock(isolate.apiIsolate->lock(stackScope)) {
       if (warnAboutIsolateLockScopeCount > 0) {
         KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
@@ -683,6 +767,9 @@ struct Worker::Isolate::Impl {
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
 
   public:
+    kj::Maybe<kj::Locked<BreakpointState>> breakpointLock;
+    // Iff impl.breakpointState is non-null, this is a lock on it.
+
     kj::Own<jsg::Lock> lock;
   };
 
@@ -1988,6 +2075,12 @@ public:
   // In preview sessions, synchronous locks are not an issue. We declare an alternate spelling of
   // the type so that all the individual locks below don't turn up in a search for synchronous
   // locks.
+  //
+  // TODO(now): Change every place that uses this to instead use the Lock constructor overlead
+  //   that takes a `breakpointLock`. (The `InspectorLock` alias can then be removed since the
+  //   new constructor overload already assumes `TakeSynchronously`.) Of course, all these places
+  //   will have to figure out what to do in the case that a breakpoint is active, in which case
+  //   they cannot take an isolate lock at all.
 
   ~InspectorChannelImpl() noexcept try {
     KJ_DEFER(outgoingQueueNotifier->clear());
