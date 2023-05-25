@@ -53,6 +53,7 @@ struct Trace @0x8e8d911203762d34 {
     custom @13 :CustomEventInfo;
     email @16 :EmailEventInfo;
     trace @18 :TraceEventInfo;
+    hibernatableWebSocket @20 :HibernatableWebSocketEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -92,6 +93,17 @@ struct Trace @0x8e8d911203762d34 {
     }
 
     traces @0 :List(TraceItem);
+  }
+
+  struct HibernatableWebSocketEventInfo {
+    type :union {
+      message @0 :Void;
+      close :group {
+        code @1 :UInt16;
+        wasClean @2 :Bool;
+      }
+      error @3 :Void;
+    }
   }
 
   struct CustomEventInfo {}

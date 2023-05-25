@@ -167,6 +167,51 @@ void Trace::DiagnosticChannelEvent::copyTo(
   builder.setMessage(message);
 }
 
+Trace::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(Type type)
+    : type(type) {}
+
+Trace::HibernatableWebSocketEventInfo::HibernatableWebSocketEventInfo(
+    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader)
+    : type(readFrom(reader)) {}
+
+void Trace::HibernatableWebSocketEventInfo::copyTo(
+    rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) {
+  auto typeBuilder = builder.initType();
+  KJ_SWITCH_ONEOF(type) {
+    KJ_CASE_ONEOF(_, Message) {
+      typeBuilder.setMessage();
+    }
+    KJ_CASE_ONEOF(close, Close) {
+      auto closeBuilder = typeBuilder.initClose();
+      closeBuilder.setCode(close.code);
+      closeBuilder.setWasClean(close.wasClean);
+    }
+    KJ_CASE_ONEOF(_, Error) {
+      typeBuilder.setError();
+    }
+  }
+}
+
+Trace::HibernatableWebSocketEventInfo::Type Trace::HibernatableWebSocketEventInfo::readFrom(
+    rpc::Trace::HibernatableWebSocketEventInfo::Reader reader) {
+  auto type = reader.getType();
+  switch(type.which()) {
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::MESSAGE: {
+      return Message{};
+    }
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::CLOSE: {
+      auto close = type.getClose();
+      return Close {
+        .code = close.getCode(),
+        .wasClean = close.getWasClean(),
+      };
+    }
+    case rpc::Trace::HibernatableWebSocketEventInfo::Type::ERROR: {
+      return Error{};
+    }
+  }
+}
+
 Trace::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode)
     : statusCode(statusCode) {}
 
@@ -262,6 +307,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto traceBuilder = eventInfoBuilder.initTrace();
         trace.copyTo(traceBuilder);
       }
+      KJ_CASE_ONEOF(hibWs, HibernatableWebSocketEventInfo) {
+        auto hibWsBuilder = eventInfoBuilder.initHibernatableWebSocket();
+        hibWs.copyTo(hibWsBuilder);
+      }
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -346,6 +395,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::TRACE:
         eventInfo = TraceEventInfo(e.getTrace());
+        break;
+      case rpc::Trace::EventInfo::Which::HIBERNATABLE_WEB_SOCKET:
+        eventInfo = HibernatableWebSocketEventInfo(e.getHibernatableWebSocket());
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
         eventInfo = CustomEventInfo(e.getCustom());
@@ -563,6 +615,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::TraceEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::HibernatableWebSocketEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;
