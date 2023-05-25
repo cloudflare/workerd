@@ -197,9 +197,15 @@ rust_repository_set(
     exec_triple = "x86_64-apple-darwin",
     extra_target_triples = ["aarch64-apple-darwin"],
     edition = "2018",
-    version = "1.69.0",
+    versions = ["1.69.0"],
 )
-# TODO: add Linux arm64 repository
+rust_repository_set(
+    name = "rust_linux_x64_cross_arm64",
+    exec_triple = "x86_64-unknown-linux-gnu",
+    extra_target_triples = ["aarch64-unknown-linux-gnu"],
+    edition = "2018",
+    versions = ["1.69.0"],
+)
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
 
