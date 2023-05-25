@@ -26,6 +26,27 @@ async function test(storage) {
   assert.equal(resultNumberRaw[0].length, 1);
   assert.equal(resultNumberRaw[0][0], 123);
 
+  // Test raw results with multiple tables
+  sql.exec(`
+  CREATE TABLE users (id INTEGER, name TEXT);
+  CREATE TABLE articles (id INTEGER, name TEXT, user_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(id));
+  INSERT INTO users VALUES (1, 'Alice');
+  INSERT INTO users VALUES (2, 'Bob');
+  INSERT INTO articles VALUES (1, 'Hello World', 1);
+  INSERT INTO articles VALUES (2, 'Goodbye World', 2);`);
+  {
+    let result = [...sql.exec(`
+    SELECT articles.name, users.name
+    FROM articles
+    INNER JOIN users
+      ON articles.user_id = users.id`).raw()];
+    assert.equal(result.length, 2);
+    assert.equal(result[0][0], "Hello World");
+    assert.equal(result[0][1], "Alice");
+    assert.equal(result[1][0], "Goodbye World");
+    assert.equal(result[1][1], "Bob");
+  }
+
   // Test string results
   const resultStr = [...sql.exec("SELECT 'hello'")];
   assert.equal(resultStr.length, 1);
