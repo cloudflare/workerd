@@ -1,0 +1,1665 @@
+From 2aeaa8a61ea5422340eeb40a741f8fe0af1f02b1 Mon Sep 17 00:00:00 2001
+From: Stephen Roettger <sroettger@google.com>
+Date: Wed, 3 May 2023 13:34:28 +0200
+Subject: Cherry pick to fix mksnapshot on OS X ARM
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This broke in ca9faf8024ec138abb9c7c1c7d6bb8dd1af1de28 and affects all 11.4
+releases to do date. There is a V8 bug requesting an 11.4
+fix (https://bugs.chromium.org/p/v8/issues/detail?id=14023).
+
+Bug: EW-7428
+
+---
+Reland "Cleanup memory modification scopes"
+
+This is a reland of commit 4aa3bc4649c26ee0d9ce228635bbe9370aabbcc4
+
+Fix: mark the thread_local variable as V8_EXPORT_PRIVATE.
+We had trouble in the past with exported thread_locals on some platforms, but this code is Mac+Linux only and fixed the build issue in my local tests.
+
+Original change's description:
+> Cleanup memory modification scopes
+>
+> In preparation for the pkey-tagged CodeSpace, I cleaned up the
+> write permission scopes and moved the usage closer to the actual writes.
+>
+> Doing the switching more often like this will be very expensive with
+> mprotect-based permission switching. Though this is fine since it's not
+> used in release builds anymore.
+> I kept the functionality in behind a flag so that it can be used for
+> development/testing/debugging on machines that don't have pkey support.
+>
+> After this change, there are three scopes to be used in code:
+> * CodePageHeaderModificationScope:
+>     This scope is only used on Apple Silicon since MAP_JIT applies to
+>     the CodeSpace page headers.
+> * CodePageMemoryModificationScope:
+>     The main scope for writes to CodeSpace memory.
+> * wasm::CodeSpaceWriteScope:
+>     For Wasm memory.
+>
+> Additional change:
+> I made the LockGuard movable so that I can return it in MemoryChunk::SetCodeModificationPermissions (mprotect code only)
+>
+> Change-Id: Ie61f9b086455cae047cb5836d883d69d4c7640c9
+> Bug: v8:13784
+> Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/4461972
+> Reviewed-by: Andreas Haas <ahaas@chromium.org>
+> Reviewed-by: Leszek Swirski <leszeks@chromium.org>
+> Reviewed-by: Igor Sheludko <ishell@chromium.org>
+> Reviewed-by: Omer Katz <omerkatz@chromium.org>
+> Commit-Queue: Stephen Röttger <sroettger@google.com>
+> Cr-Commit-Position: refs/heads/main@{#87378}
+
+Bug: v8:13784
+Change-Id: Ie8dfa72c88e35a98896054e1f7d347ddd72852b8
+Reviewed-on: https://chromium-review.googlesource.com/c/v8/v8/+/4502762
+Reviewed-by: Andreas Haas <ahaas@chromium.org>
+Reviewed-by: Igor Sheludko <ishell@chromium.org>
+Reviewed-by: Omer Katz <omerkatz@chromium.org>
+Commit-Queue: Stephen Röttger <sroettger@google.com>
+Cr-Commit-Position: refs/heads/main@{#87400}
+---
+ src/base/platform/mutex.h                     |  15 +-
+ src/baseline/baseline-batch-compiler.cc       |   5 -
+ src/builtins/setup-builtins-internal.cc       |   4 +-
+ src/codegen/compiler.cc                       |   1 -
+ src/common/code-memory-access.h               |  36 ++++-
+ src/execution/arm/simulator-arm.cc            |   3 +-
+ src/execution/isolate.cc                      |   2 -
+ src/heap/concurrent-allocator.cc              |  16 +--
+ src/heap/factory-base.cc                      |   3 +
+ src/heap/factory.cc                           |  52 ++++---
+ src/heap/free-list.cc                         |  13 +-
+ src/heap/heap-allocator-inl.h                 |   9 +-
+ src/heap/heap-inl.h                           | 102 ++------------
+ src/heap/heap.cc                              |  53 ++-----
+ src/heap/heap.h                               |  71 +---------
+ src/heap/large-spaces.cc                      |   2 +
+ src/heap/local-heap-inl.h                     |   5 +-
+ src/heap/local-heap.cc                        |   3 -
+ src/heap/local-heap.h                         |   3 -
+ src/heap/mark-compact.cc                      |  21 +--
+ src/heap/marking-barrier.cc                   |   5 -
+ src/heap/memory-allocator.cc                  |   4 +-
+ src/heap/memory-chunk-layout.h                |   1 -
+ src/heap/memory-chunk.cc                      |  62 ++++-----
+ src/heap/memory-chunk.h                       |  19 +--
+ src/heap/paged-spaces.cc                      |  62 ++-------
+ src/heap/paged-spaces.h                       |   1 -
+ src/heap/remembered-set.h                     |   2 +
+ src/heap/spaces.cc                            |   5 -
+ src/heap/sweeper.cc                           |   6 +-
+ src/objects/code.cc                           |   9 +-
+ src/wasm/module-compiler.cc                   |   3 -
+ test/cctest/heap/heap-utils.cc                |   1 -
+ test/cctest/heap/test-alloc.cc                |   1 -
+ .../cctest/heap/test-concurrent-allocation.cc |   2 +-
+ test/cctest/heap/test-heap.cc                 |   6 -
+ test/cctest/test-heap-profiler.cc             |   2 +
+ test/unittests/heap/heap-utils.cc             |   1 -
+ tools/v8heapconst.py                          | 131 +++++++++---------
+ 39 files changed, 266 insertions(+), 476 deletions(-)
+
+diff --git a/src/base/platform/mutex.h b/src/base/platform/mutex.h
+index a6b71b864f2960073ca897992ff0a6a6b6c0e46c..15cf0cd5d5989ce82769c67ec75e41510806ea50 100644
+--- a/src/base/platform/mutex.h
++++ b/src/base/platform/mutex.h
+@@ -308,22 +308,25 @@ template <typename Mutex, NullBehavior Behavior = NullBehavior::kRequireNotNull>
+ class V8_NODISCARD LockGuard final {
+  public:
+   explicit LockGuard(Mutex* mutex) : mutex_(mutex) {
++    DCHECK_IMPLIES(Behavior == NullBehavior::kRequireNotNull,
++                   mutex_ != nullptr);
+     if (has_mutex()) mutex_->Lock();
+   }
+   LockGuard(const LockGuard&) = delete;
+   LockGuard& operator=(const LockGuard&) = delete;
++  LockGuard(LockGuard&& other) V8_NOEXCEPT : mutex_(other.mutex_) {
++    DCHECK_IMPLIES(Behavior == NullBehavior::kRequireNotNull,
++                   mutex_ != nullptr);
++    other.mutex_ = nullptr;
++  }
+   ~LockGuard() {
+     if (has_mutex()) mutex_->Unlock();
+   }
+ 
+  private:
+-  Mutex* const mutex_;
++  Mutex* mutex_;
+ 
+-  bool V8_INLINE has_mutex() const {
+-    DCHECK_IMPLIES(Behavior == NullBehavior::kRequireNotNull,
+-                   mutex_ != nullptr);
+-    return Behavior == NullBehavior::kRequireNotNull || mutex_ != nullptr;
+-  }
++  bool V8_INLINE has_mutex() const { return mutex_ != nullptr; }
+ };
+ 
+ using MutexGuard = LockGuard<Mutex>;
+diff --git a/src/baseline/baseline-batch-compiler.cc b/src/baseline/baseline-batch-compiler.cc
+index 0ee2e2de325d73e5ee5d061ef0fcc4fc06899e1e..222360be6a910657d57f5153859f4e0e4de188d8 100644
+--- a/src/baseline/baseline-batch-compiler.cc
++++ b/src/baseline/baseline-batch-compiler.cc
+@@ -168,10 +168,6 @@ class ConcurrentBaselineCompiler {
+       UnparkedScope unparked_scope(&local_isolate);
+       LocalHandleScope handle_scope(&local_isolate);
+ 
+-      // Since we're going to compile an entire batch, this guarantees that
+-      // we only switch back the memory chunks to RX at the end.
+-      CodePageCollectionMemoryModificationScope batch_alloc(isolate_->heap());
+-
+       while (!incoming_queue_->IsEmpty() && !delegate->ShouldYield()) {
+         std::unique_ptr<BaselineBatchCompilerJob> job;
+         if (!incoming_queue_->Dequeue(&job)) break;
+@@ -316,7 +312,6 @@ void BaselineBatchCompiler::EnsureQueueCapacity() {
+ }
+ 
+ void BaselineBatchCompiler::CompileBatch(Handle<JSFunction> function) {
+-  CodePageCollectionMemoryModificationScope batch_allocation(isolate_->heap());
+   {
+     IsCompiledScope is_compiled_scope(
+         function->shared().is_compiled_scope(isolate_));
+diff --git a/src/builtins/setup-builtins-internal.cc b/src/builtins/setup-builtins-internal.cc
+index 68a364ab118e577939188a17384d91cc86385061..3dc08bf40cd6c8d5dc662ba0babd44b6072470a6 100644
+--- a/src/builtins/setup-builtins-internal.cc
++++ b/src/builtins/setup-builtins-internal.cc
+@@ -223,7 +223,6 @@ void SetupIsolateDelegate::ReplacePlaceholders(Isolate* isolate) {
+   // Replace references from all builtin code objects to placeholders.
+   Builtins* builtins = isolate->builtins();
+   DisallowGarbageCollection no_gc;
+-  CodePageCollectionMemoryModificationScope modification_scope(isolate->heap());
+   static const int kRelocMask =
+       RelocInfo::ModeMask(RelocInfo::CODE_TARGET) |
+       RelocInfo::ModeMask(RelocInfo::FULL_EMBEDDED_OBJECT) |
+@@ -234,8 +233,7 @@ void SetupIsolateDelegate::ReplacePlaceholders(Isolate* isolate) {
+        ++builtin) {
+     Code code = builtins->code(builtin);
+     InstructionStream istream = code.instruction_stream();
+-    isolate->heap()->UnprotectAndRegisterMemoryChunk(
+-        code, UnprotectMemoryOrigin::kMainThread);
++    CodePageMemoryModificationScope code_modification_scope(istream);
+     bool flush_icache = false;
+     for (RelocIterator it(code, kRelocMask); !it.done(); it.next()) {
+       RelocInfo* rinfo = it.rinfo();
+diff --git a/src/codegen/compiler.cc b/src/codegen/compiler.cc
+index 8ab64b4c002173a3cfc943b320b0f8ff84975ac4..90b291a687fccca9f234425febd354d1e6d4e63b 100644
+--- a/src/codegen/compiler.cc
++++ b/src/codegen/compiler.cc
+@@ -1436,7 +1436,6 @@ void FinalizeUnoptimizedScriptCompilation(
+ void CompileAllWithBaseline(Isolate* isolate,
+                             const FinalizeUnoptimizedCompilationDataList&
+                                 finalize_unoptimized_compilation_data_list) {
+-  CodePageCollectionMemoryModificationScope code_allocation(isolate->heap());
+   for (const auto& finalize_data : finalize_unoptimized_compilation_data_list) {
+     Handle<SharedFunctionInfo> shared_info = finalize_data.function_handle();
+     IsCompiledScope is_compiled_scope(*shared_info, isolate);
+diff --git a/src/common/code-memory-access.h b/src/common/code-memory-access.h
+index 253cb720fe67f11a36ff86f0bc9f62d5b73fdd83..80d5e20b1c7cd3a0f52519f5abfad575d1d77875 100644
+--- a/src/common/code-memory-access.h
++++ b/src/common/code-memory-access.h
+@@ -11,9 +11,29 @@
+ namespace v8 {
+ namespace internal {
+ 
+-class CodePageCollectionMemoryModificationScope;
++// We protect writes to executable memory in some configurations and whenever
++// we write to it, we need to explicitely allow it first.
++//
++// For this purposed, there are a few scope objects with different semantics:
++//
++// - CodePageHeaderModificationScope:
++//     Used when we write to the page header of CodeSpace pages. Only needed on
++//     Apple Silicon where we can't have RW- pages in the RWX space.
++// - CodePageMemoryModificationScope:
++//     Allows access to the allocation area of the CodeSpace pages.
++// - CodePageMemoryModificationScopeForPerf:
++//     A scope to mark places where we switch permissions more broadly for
++//     performance reasons.
++// - wasm::CodeSpaceWriteScope:
++//     Allows access to Wasm code
++//
++// - RwxMemoryWriteScope:
++//     A scope that uses per-thread permissions to allow access. Should not be
++//     used directly, but rather is the implementation of one of the above.
++// - RwxMemoryWriteScopeForTesting:
++//     Same, but for use in testing.
++
+ class CodePageMemoryModificationScope;
+-class CodeSpaceMemoryModificationScope;
+ class RwxMemoryWriteScopeForTesting;
+ namespace wasm {
+ class CodeSpaceWriteScope;
+@@ -79,9 +99,7 @@ class V8_NODISCARD RwxMemoryWriteScope {
+ #endif  // V8_HAS_PKU_JIT_WRITE_PROTECT
+ 
+  private:
+-  friend class CodePageCollectionMemoryModificationScope;
+   friend class CodePageMemoryModificationScope;
+-  friend class CodeSpaceMemoryModificationScope;
+   friend class RwxMemoryWriteScopeForTesting;
+   friend class wasm::CodeSpaceWriteScope;
+ 
+@@ -93,7 +111,7 @@ class V8_NODISCARD RwxMemoryWriteScope {
+ 
+ #if V8_HAS_PTHREAD_JIT_WRITE_PROTECT || V8_HAS_PKU_JIT_WRITE_PROTECT
+   // This counter is used for supporting scope reentrance.
+-  static thread_local int code_space_write_nesting_level_;
++  V8_EXPORT_PRIVATE static thread_local int code_space_write_nesting_level_;
+ #endif  // V8_HAS_PTHREAD_JIT_WRITE_PROTECT || V8_HAS_PKU_JIT_WRITE_PROTECT
+ 
+ #if V8_HAS_PKU_JIT_WRITE_PROTECT
+@@ -126,6 +144,14 @@ class V8_NODISCARD NopRwxMemoryWriteScope final {
+   }
+ };
+ 
++#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
++using CodePageMemoryModificationScopeForPerf = RwxMemoryWriteScope;
++#else
++// Without per-thread write permissions, we only use permission switching for
++// debugging and the perf impact of this doesn't matter.
++using CodePageMemoryModificationScopeForPerf = NopRwxMemoryWriteScope;
++#endif
++
+ // Sometimes we need to call a function which will / might spawn a new thread,
+ // like {JobHandle::NotifyConcurrencyIncrease}, while holding a
+ // {RwxMemoryWriteScope}. This is problematic since the new thread will inherit
+diff --git a/src/execution/arm/simulator-arm.cc b/src/execution/arm/simulator-arm.cc
+index 1c67a84a0a261ed9b020cb149af3c5540580a493..0a6d335513e9d22b1928834740c789a17e4556aa 100644
+--- a/src/execution/arm/simulator-arm.cc
++++ b/src/execution/arm/simulator-arm.cc
+@@ -159,7 +159,8 @@ namespace {
+ // (simulator) builds.
+ void SetInstructionBitsInCodeSpace(Instruction* instr, Instr value,
+                                    Heap* heap) {
+-  CodeSpaceMemoryModificationScope scope(heap);
++  CodePageMemoryModificationScope scope(
++      MemoryChunk::FromAddress(reinterpret_cast<Address>(instr)));
+   instr->SetInstructionBits(value);
+ }
+ }  // namespace
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index e6514136101ecbe430693d423d1b92c683e6eb15..f4e77acd67f473005e0d75dac53669e54d53dc90 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -4506,8 +4506,6 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+ 
+   // If we are deserializing, read the state into the now-empty heap.
+   {
+-    CodePageCollectionMemoryModificationScope modification_scope(heap());
+-
+     if (create_heap_objects) {
+       read_only_heap_->OnCreateHeapObjectsComplete(this);
+     } else {
+diff --git a/src/heap/concurrent-allocator.cc b/src/heap/concurrent-allocator.cc
+index 87605134d3aaa64c2ec88b7a4d5be761f6556be8..f858ac0d8a18d11dbdc787af09fe198b0d661606 100644
+--- a/src/heap/concurrent-allocator.cc
++++ b/src/heap/concurrent-allocator.cc
+@@ -89,13 +89,11 @@ ConcurrentAllocator::ConcurrentAllocator(LocalHeap* local_heap,
+ }
+ 
+ void ConcurrentAllocator::FreeLinearAllocationArea() {
+-  // The code page of the linear allocation area needs to be unprotected
+-  // because we are going to write a filler into that memory area below.
+-  base::Optional<CodePageMemoryModificationScope> optional_scope;
+-  if (IsLabValid() && space_->identity() == CODE_SPACE) {
+-    optional_scope.emplace(MemoryChunk::FromAddress(lab_.top()));
+-  }
+   if (lab_.top() != lab_.limit() && IsBlackAllocationEnabled()) {
++    base::Optional<CodePageHeaderModificationScope> optional_scope;
++    if (space_->identity() == CODE_SPACE) {
++      optional_scope.emplace("Clears marking bitmap in the page header.");
++    }
+     Page::FromAddress(lab_.top())
+         ->DestroyBlackAreaBackground(lab_.top(), lab_.limit());
+   }
+@@ -105,12 +103,6 @@ void ConcurrentAllocator::FreeLinearAllocationArea() {
+ }
+ 
+ void ConcurrentAllocator::MakeLinearAllocationAreaIterable() {
+-  // The code page of the linear allocation area needs to be unprotected
+-  // because we are going to write a filler into that memory area below.
+-  base::Optional<CodePageMemoryModificationScope> optional_scope;
+-  if (IsLabValid() && space_->identity() == CODE_SPACE) {
+-    optional_scope.emplace(MemoryChunk::FromAddress(lab_.top()));
+-  }
+   MakeLabIterable();
+ }
+ 
+diff --git a/src/heap/factory-base.cc b/src/heap/factory-base.cc
+index 6a4f1f0a4cc5229e4621404c097a58c2a8a432aa..c39213bc5435be31aeddd4445fba11172c6e78de 100644
+--- a/src/heap/factory-base.cc
++++ b/src/heap/factory-base.cc
+@@ -108,6 +108,9 @@ Handle<Code> FactoryBase<Impl>::NewCode(const NewCodeOptions& options) {
+ 
+   Handle<InstructionStream> istream;
+   if (options.instruction_stream.ToHandle(&istream)) {
++    CodePageHeaderModificationScope header_modification_scope(
++        "Setting the instruction_stream can trigger a write to the marking "
++        "bitmap.");
+     DCHECK_EQ(options.instruction_start, kNullAddress);
+     code.SetInstructionStreamAndInstructionStart(isolate_for_sandbox, *istream);
+   } else {
+diff --git a/src/heap/factory.cc b/src/heap/factory.cc
+index a884f2ff16801db5e03710652d26de3fd4434480..bf33afa7b2467fdc4687c95faa6737beb3f08959 100644
+--- a/src/heap/factory.cc
++++ b/src/heap/factory.cc
+@@ -133,6 +133,10 @@ MaybeHandle<Code> Factory::CodeBuilder::BuildInternal(
+   Handle<ByteArray> reloc_info =
+       NewByteArray(code_desc_.reloc_size, AllocationType::kOld);
+ 
++  CodePageMemoryModificationScopeForPerf memory_write_scope(
++      "Temporary performance optimization to prevent frequent permission "
++      "switching.");
++
+   // Basic block profiling data for builtins is stored in the JS heap rather
+   // than in separately-allocated C++ objects. Allocate that data now if
+   // appropriate.
+@@ -152,7 +156,6 @@ MaybeHandle<Code> Factory::CodeBuilder::BuildInternal(
+   Handle<Code> code;
+   {
+     static_assert(InstructionStream::kOnHeapBodyIsContiguous);
+-    CodePageCollectionMemoryModificationScope code_allocation(isolate_->heap());
+ 
+     Handle<InstructionStream> istream;
+     if (!NewInstructionStream(retry_allocation_or_fail).ToHandle(&istream)) {
+@@ -162,7 +165,7 @@ MaybeHandle<Code> Factory::CodeBuilder::BuildInternal(
+     {
+       DisallowGarbageCollection no_gc;
+       InstructionStream raw_istream = *istream;
+-
++      CodePageMemoryModificationScope memory_modification_scope(raw_istream);
+       raw_istream.set_body_size(code_desc_.instruction_size() +
+                                 code_desc_.metadata_size());
+       raw_istream.initialize_code_to_smi_zero(kReleaseStore);
+@@ -221,18 +224,22 @@ MaybeHandle<Code> Factory::CodeBuilder::BuildInternal(
+                 handle(on_heap_profiler_data->counts(), isolate_));
+       }
+ 
+-      // Migrate generated code.
+-      // The generated code can contain embedded objects (typically from
+-      // handles) in a pointer-to-tagged-value format (i.e. with indirection
+-      // like a handle) that are dereferenced during the copy to point directly
+-      // to the actual heap objects. These pointers can include references to
+-      // the code object itself, through the self_reference parameter.
+-      code->CopyFromNoFlush(*reloc_info, isolate_->heap(), code_desc_);
+-
+-      // Now that the InstructionStream's body is fully initialized and
+-      // relocated, publish its code pointer, effectively enabling RelocInfo
+-      // iteration. See InstructionStream::BodyDescriptor::IterateBody.
+-      raw_istream.set_code(*code, kReleaseStore);
++      {
++        CodePageMemoryModificationScope memory_modification_scope(raw_istream);
++        // Migrate generated code.
++        // The generated code can contain embedded objects (typically from
++        // handles) in a pointer-to-tagged-value format (i.e. with indirection
++        // like a handle) that are dereferenced during the copy to point
++        // directly to the actual heap objects. These pointers can include
++        // references to the code object itself, through the self_reference
++        // parameter.
++        code->CopyFromNoFlush(*reloc_info, isolate_->heap(), code_desc_);
++
++        // Now that the InstructionStream's body is fully initialized and
++        // relocated, publish its code pointer, effectively enabling RelocInfo
++        // iteration. See InstructionStream::BodyDescriptor::IterateBody.
++        raw_istream.set_code(*code, kReleaseStore);
++      }
+ 
+ #ifdef VERIFY_HEAP
+       if (v8_flags.verify_heap) {
+@@ -288,8 +295,12 @@ MaybeHandle<InstructionStream> Factory::CodeBuilder::AllocateInstructionStream(
+   // The code object has not been fully initialized yet.  We rely on the
+   // fact that no allocation will happen from this point on.
+   DisallowGarbageCollection no_gc;
+-  result.set_map_after_allocation(
+-      *isolate_->factory()->instruction_stream_map(), SKIP_WRITE_BARRIER);
++  {
++    CodePageMemoryModificationScope memory_modification_scope(
++        BasicMemoryChunk::FromHeapObject(result));
++    result.set_map_after_allocation(
++        *isolate_->factory()->instruction_stream_map(), SKIP_WRITE_BARRIER);
++  }
+   Handle<InstructionStream> istream =
+       handle(InstructionStream::cast(result), isolate_);
+   DCHECK(IsAligned(istream->instruction_start(), kCodeAlignment));
+@@ -313,8 +324,13 @@ Factory::CodeBuilder::AllocateConcurrentSparkplugInstructionStream(
+   // The code object has not been fully initialized yet.  We rely on the
+   // fact that no allocation will happen from this point on.
+   DisallowGarbageCollection no_gc;
+-  result.set_map_after_allocation(
+-      *local_isolate_->factory()->instruction_stream_map(), SKIP_WRITE_BARRIER);
++  {
++    CodePageMemoryModificationScope memory_modification_scope(
++        BasicMemoryChunk::FromHeapObject(result));
++    result.set_map_after_allocation(
++        *local_isolate_->factory()->instruction_stream_map(),
++        SKIP_WRITE_BARRIER);
++  }
+   Handle<InstructionStream> istream =
+       handle(InstructionStream::cast(result), local_isolate_);
+   DCHECK(IsAligned(istream->instruction_start(), kCodeAlignment));
+diff --git a/src/heap/free-list.cc b/src/heap/free-list.cc
+index 72f9d07521523873c41a90eb98e2b907df75c484..86ad1379a3c0ae0da1a800e7710c1efaea4a0675 100644
+--- a/src/heap/free-list.cc
++++ b/src/heap/free-list.cc
+@@ -56,11 +56,8 @@ FreeSpace FreeListCategory::SearchForNodeInList(size_t minimum_size,
+         set_top(cur_node.next());
+       }
+       if (!prev_non_evac_node.is_null()) {
+-        MemoryChunk* chunk = MemoryChunk::FromHeapObject(prev_non_evac_node);
+-        if (chunk->owner_identity() == CODE_SPACE) {
+-          chunk->heap()->UnprotectAndRegisterMemoryChunk(
+-              chunk, UnprotectMemoryOrigin::kMaybeOffMainThread);
+-        }
++        CodePageMemoryModificationScope code_modification_scope(
++            BasicMemoryChunk::FromHeapObject(prev_non_evac_node));
+         prev_non_evac_node.set_next(cur_node.next());
+       }
+       *node_size = size;
+@@ -75,7 +72,11 @@ FreeSpace FreeListCategory::SearchForNodeInList(size_t minimum_size,
+ void FreeListCategory::Free(Address start, size_t size_in_bytes, FreeMode mode,
+                             FreeList* owner) {
+   FreeSpace free_space = FreeSpace::cast(HeapObject::FromAddress(start));
+-  free_space.set_next(top());
++  {
++    CodePageMemoryModificationScope memory_modification_scope(
++        BasicMemoryChunk::FromAddress(start));
++    free_space.set_next(top());
++  }
+   set_top(free_space);
+   available_ += size_in_bytes;
+   if (mode == kLinkCategory) {
+diff --git a/src/heap/heap-allocator-inl.h b/src/heap/heap-allocator-inl.h
+index ad49b902a2dcf0508b447babf1e01711164e9e67..767a14cdde9e1f5bd9db109585ae21fec5598c03 100644
+--- a/src/heap/heap-allocator-inl.h
++++ b/src/heap/heap-allocator-inl.h
+@@ -105,12 +105,15 @@ V8_WARN_UNUSED_RESULT V8_INLINE AllocationResult HeapAllocator::AllocateRaw(
+           allocation =
+               old_space()->AllocateRaw(size_in_bytes, alignment, origin);
+           break;
+-        case AllocationType::kCode:
++        case AllocationType::kCode: {
+           DCHECK_EQ(alignment, AllocationAlignment::kTaggedAligned);
+           DCHECK(AllowCodeAllocation::IsAllowed());
++          CodePageHeaderModificationScope header_modification_scope(
++              "Code allocation needs header access.");
+           allocation = code_space()->AllocateRaw(
+               size_in_bytes, AllocationAlignment::kTaggedAligned);
+           break;
++        }
+         case AllocationType::kReadOnly:
+           DCHECK(read_only_space()->writable());
+           DCHECK_EQ(AllocationOrigin::kRuntime, origin);
+@@ -127,10 +130,6 @@ V8_WARN_UNUSED_RESULT V8_INLINE AllocationResult HeapAllocator::AllocateRaw(
+ 
+   if (allocation.To(&object)) {
+     if (AllocationType::kCode == type && !V8_ENABLE_THIRD_PARTY_HEAP_BOOL) {
+-      // Unprotect the memory chunk of the object if it was not unprotected
+-      // already.
+-      heap_->UnprotectAndRegisterMemoryChunk(
+-          object, UnprotectMemoryOrigin::kMainThread);
+       heap_->ZapCodeObject(object.address(), size_in_bytes);
+       if (!large_object) {
+         MemoryChunk::FromHeapObject(object)
+diff --git a/src/heap/heap-inl.h b/src/heap/heap-inl.h
+index 28ca220af12fa6540461049f147b57f0ca38bacb..8bbff41442610485e92f06ab194bdbfcd6f8bb55 100644
+--- a/src/heap/heap-inl.h
++++ b/src/heap/heap-inl.h
+@@ -533,89 +533,10 @@ AlwaysAllocateScope::~AlwaysAllocateScope() {
+ AlwaysAllocateScopeForTesting::AlwaysAllocateScopeForTesting(Heap* heap)
+     : scope_(heap) {}
+ 
+-CodeSpaceMemoryModificationScope::CodeSpaceMemoryModificationScope(Heap* heap)
+-    :
+-#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-      rwx_write_scope_("A part of CodeSpaceMemoryModificationScope"),
+-#endif
+-      heap_(heap) {
+-  DCHECK_EQ(ThreadId::Current(), heap_->isolate()->thread_id());
+-  heap_->safepoint()->AssertActive();
+-  if (heap_->write_protect_code_memory()) {
+-    heap_->increment_code_space_memory_modification_scope_depth();
+-    heap_->code_space()->SetCodeModificationPermissions();
+-    LargePage* page = heap_->code_lo_space()->first_page();
+-    while (page != nullptr) {
+-      DCHECK(page->IsFlagSet(MemoryChunk::IS_EXECUTABLE));
+-      DCHECK(heap_->memory_allocator()->IsMemoryChunkExecutable(page));
+-      page->SetCodeModificationPermissions();
+-      page = page->next_page();
+-    }
+-  }
+-}
+-
+-void Heap::IncrementCodePageCollectionMemoryModificationScopeDepth() {
+-  LocalHeap* local_heap = isolate()->CurrentLocalHeap();
+-  local_heap->code_page_collection_memory_modification_scope_depth_++;
+-
+-#if DEBUG
+-  // Maximum number of nested scopes.
+-  static constexpr int kMaxCodePageCollectionMemoryModificationScopeDepth = 2;
+-  DCHECK_LE(local_heap->code_page_collection_memory_modification_scope_depth_,
+-            kMaxCodePageCollectionMemoryModificationScopeDepth);
+-#endif
+-}
+-
+-bool Heap::DecrementCodePageCollectionMemoryModificationScopeDepth() {
+-  LocalHeap* local_heap = isolate()->CurrentLocalHeap();
+-  local_heap->code_page_collection_memory_modification_scope_depth_--;
+-  return local_heap->code_page_collection_memory_modification_scope_depth_ == 0;
+-}
+-
+-uintptr_t Heap::code_page_collection_memory_modification_scope_depth() {
+-  LocalHeap* local_heap = isolate()->CurrentLocalHeap();
+-  return local_heap->code_page_collection_memory_modification_scope_depth_;
+-}
+-
+ PagedNewSpace* Heap::paged_new_space() const {
+   return PagedNewSpace::From(new_space());
+ }
+ 
+-CodeSpaceMemoryModificationScope::~CodeSpaceMemoryModificationScope() {
+-  if (heap_->write_protect_code_memory()) {
+-    heap_->decrement_code_space_memory_modification_scope_depth();
+-    heap_->code_space()->SetDefaultCodePermissions();
+-    LargePage* page = heap_->code_lo_space()->first_page();
+-    while (page != nullptr) {
+-      DCHECK(page->IsFlagSet(MemoryChunk::IS_EXECUTABLE));
+-      DCHECK(heap_->memory_allocator()->IsMemoryChunkExecutable(page));
+-      page->SetDefaultCodePermissions();
+-      page = page->next_page();
+-    }
+-  }
+-}
+-
+-CodePageCollectionMemoryModificationScope::
+-    CodePageCollectionMemoryModificationScope(Heap* heap)
+-    :
+-#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-      rwx_write_scope_("A part of CodePageCollectionMemoryModificationScope"),
+-#endif
+-      heap_(heap) {
+-  if (heap_->write_protect_code_memory()) {
+-    heap_->IncrementCodePageCollectionMemoryModificationScopeDepth();
+-  }
+-}
+-
+-CodePageCollectionMemoryModificationScope::
+-    ~CodePageCollectionMemoryModificationScope() {
+-  if (heap_->write_protect_code_memory()) {
+-    if (heap_->DecrementCodePageCollectionMemoryModificationScopeDepth()) {
+-      heap_->ProtectUnprotectedMemoryChunks();
+-    }
+-  }
+-}
+-
+ #ifdef V8_ENABLE_THIRD_PARTY_HEAP
+ CodePageMemoryModificationScope::CodePageMemoryModificationScope(
+     InstructionStream code)
+@@ -632,26 +553,33 @@ CodePageMemoryModificationScope::CodePageMemoryModificationScope(
+     : CodePageMemoryModificationScope(BasicMemoryChunk::FromHeapObject(code)) {}
+ #endif
+ 
++#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
++CodePageMemoryModificationScope::CodePageMemoryModificationScope(
++    BasicMemoryChunk* chunk) {
++  if (chunk->IsFlagSet(BasicMemoryChunk::IS_EXECUTABLE)) {
++    rwx_write_scope_.emplace("A part of CodePageMemoryModificationScope");
++  }
++}
++#else
+ CodePageMemoryModificationScope::CodePageMemoryModificationScope(
+     BasicMemoryChunk* chunk)
+-    :
+-#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-      rwx_write_scope_("A part of CodePageMemoryModificationScope"),
+-#endif
+-      chunk_(chunk),
+-      scope_active_(chunk_->heap()->write_protect_code_memory() &&
+-                    chunk_->IsFlagSet(MemoryChunk::IS_EXECUTABLE)) {
++    : chunk_(chunk),
++      scope_active_(chunk_->IsFlagSet(BasicMemoryChunk::IS_EXECUTABLE) &&
++                    chunk_->heap()->write_protect_code_memory()) {
+   if (scope_active_) {
+     DCHECK(chunk_->owner()->identity() == CODE_SPACE ||
+            (chunk_->owner()->identity() == CODE_LO_SPACE));
+-    MemoryChunk::cast(chunk_)->SetCodeModificationPermissions();
++    guard_.emplace(MemoryChunk::cast(chunk_)->SetCodeModificationPermissions());
+   }
+ }
++#endif
+ 
+ CodePageMemoryModificationScope::~CodePageMemoryModificationScope() {
++#if !V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT && !V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+   if (scope_active_) {
+     MemoryChunk::cast(chunk_)->SetDefaultCodePermissions();
+   }
++#endif
+ }
+ 
+ IgnoreLocalGCRequests::IgnoreLocalGCRequests(Heap* heap) : heap_(heap) {
+diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+index 190e7c448dd1a6624f7c7403263ee5bab3a4e624..97745a4a9c78bd7bf1327e9267054df2efa3290f 100644
+--- a/src/heap/heap.cc
++++ b/src/heap/heap.cc
+@@ -127,13 +127,6 @@
+ namespace v8 {
+ namespace internal {
+ 
+-CodePageCollectionMemoryModificationScopeForTesting::
+-    CodePageCollectionMemoryModificationScopeForTesting(Heap* heap)
+-    : CodePageCollectionMemoryModificationScope(heap) {}
+-
+-CodePageCollectionMemoryModificationScopeForTesting::
+-    ~CodePageCollectionMemoryModificationScopeForTesting() = default;
+-
+ #ifdef V8_ENABLE_THIRD_PARTY_HEAP
+ Isolate* Heap::GetIsolateFromWritableObject(HeapObject object) {
+   return reinterpret_cast<Isolate*>(
+@@ -2575,7 +2568,8 @@ void Heap::MarkCompact() {
+   SetGCState(MARK_COMPACT);
+ 
+   PROFILE(isolate_, CodeMovingGCEvent());
+-  CodeSpaceMemoryModificationScope code_modification(this);
++  CodePageHeaderModificationScope code_modification(
++      "MarkCompact needs to access the marking bitmap in the page header");
+ 
+   UpdateOldGenerationAllocationCounter();
+   uint64_t size_of_objects_before_gc = SizeOfObjects();
+@@ -2681,42 +2675,6 @@ void Heap::Scavenge() {
+   SetGCState(NOT_IN_GC);
+ }
+ 
+-void Heap::UnprotectAndRegisterMemoryChunk(MemoryChunk* chunk,
+-                                           UnprotectMemoryOrigin origin) {
+-  if (!write_protect_code_memory()) return;
+-
+-  // No need to register any unprotected chunks during a GC. This also avoids
+-  // the use of CurrentLocalHeap() on GC workers, which don't have a LocalHeap.
+-  if (code_space_memory_modification_scope_depth_ > 0) return;
+-
+-  LocalHeap* local_heap = isolate()->CurrentLocalHeap();
+-  DCHECK_GT(local_heap->code_page_collection_memory_modification_scope_depth_,
+-            0);
+-  if (local_heap->unprotected_memory_chunks_.insert(chunk).second) {
+-    chunk->SetCodeModificationPermissions();
+-  }
+-}
+-
+-void Heap::UnregisterUnprotectedMemoryChunk(MemoryChunk* chunk) {
+-  safepoint()->IterateLocalHeaps([chunk](LocalHeap* local_heap) {
+-    local_heap->unprotected_memory_chunks_.erase(chunk);
+-  });
+-}
+-
+-void Heap::UnprotectAndRegisterMemoryChunk(HeapObject object,
+-                                           UnprotectMemoryOrigin origin) {
+-  UnprotectAndRegisterMemoryChunk(MemoryChunk::FromHeapObject(object), origin);
+-}
+-
+-void Heap::ProtectUnprotectedMemoryChunks() {
+-  LocalHeap* local_heap = isolate()->CurrentLocalHeap();
+-  for (MemoryChunk* chunk : local_heap->unprotected_memory_chunks_) {
+-    DCHECK(memory_allocator()->IsMemoryChunkExecutable(chunk));
+-    chunk->SetDefaultCodePermissions();
+-  }
+-  local_heap->unprotected_memory_chunks_.clear();
+-}
+-
+ bool Heap::ExternalStringTable::Contains(String string) {
+   for (size_t i = 0; i < young_strings_.size(); ++i) {
+     if (young_strings_[i] == string) return true;
+@@ -3177,6 +3135,10 @@ void CreateFillerObjectAtImpl(Heap* heap, Address addr, int size,
+                  IsAligned(addr, kObjectAlignment8GbHeap));
+   DCHECK_IMPLIES(V8_COMPRESS_POINTERS_8GB_BOOL,
+                  IsAligned(size, kObjectAlignment8GbHeap));
++
++  CodePageMemoryModificationScope memory_modification_scope(
++      BasicMemoryChunk::FromAddress(addr));
++
+   // TODO(v8:13070): Filler sizes are irrelevant for 8GB+ heaps. Adding them
+   // should be avoided in this mode.
+   HeapObject filler = HeapObject::FromAddress(addr);
+@@ -4539,6 +4501,8 @@ void Heap::VerifyCommittedPhysicalMemory() {
+ 
+ void Heap::ZapCodeObject(Address start_address, int size_in_bytes) {
+ #ifdef DEBUG
++  CodePageMemoryModificationScope code_modification_scope(
++      BasicMemoryChunk::FromAddress(start_address));
+   DCHECK(IsAligned(start_address, kIntSize));
+   for (int i = 0; i < size_in_bytes / kIntSize; i++) {
+     Memory<int>(start_address + i * kIntSize) = kCodeZapValue;
+@@ -5910,7 +5874,6 @@ void Heap::TearDown() {
+   // Assert that there are no background threads left and no executable memory
+   // chunks are unprotected.
+   safepoint()->AssertMainThreadIsOnlyThread();
+-  DCHECK(main_thread_local_heap()->unprotected_memory_chunks_.empty());
+ 
+   DCHECK(concurrent_marking()->IsStopped());
+ 
+diff --git a/src/heap/heap.h b/src/heap/heap.h
+index 9f74800f71045e8fb649f7ac22262990acf75354..3f43087406e99b3a486a40fdd4ef01dec33ee344 100644
+--- a/src/heap/heap.h
++++ b/src/heap/heap.h
+@@ -666,29 +666,6 @@ class Heap {
+     return write_protect_code_memory_;
+   }
+ 
+-  uintptr_t code_space_memory_modification_scope_depth() {
+-    return code_space_memory_modification_scope_depth_;
+-  }
+-
+-  void increment_code_space_memory_modification_scope_depth() {
+-    code_space_memory_modification_scope_depth_++;
+-  }
+-
+-  void decrement_code_space_memory_modification_scope_depth() {
+-    code_space_memory_modification_scope_depth_--;
+-  }
+-
+-  void UnprotectAndRegisterMemoryChunk(MemoryChunk* chunk,
+-                                       UnprotectMemoryOrigin origin);
+-  V8_EXPORT_PRIVATE void UnprotectAndRegisterMemoryChunk(
+-      HeapObject object, UnprotectMemoryOrigin origin);
+-  void UnregisterUnprotectedMemoryChunk(MemoryChunk* chunk);
+-  V8_EXPORT_PRIVATE void ProtectUnprotectedMemoryChunks();
+-
+-  inline void IncrementCodePageCollectionMemoryModificationScopeDepth();
+-  inline bool DecrementCodePageCollectionMemoryModificationScopeDepth();
+-  inline uintptr_t code_page_collection_memory_modification_scope_depth();
+-
+   inline HeapState gc_state() const {
+     return gc_state_.load(std::memory_order_relaxed);
+   }
+@@ -2214,9 +2191,6 @@ class Heap {
+   // race-free copy of the {v8_flags.write_protect_code_memory} flag.
+   bool write_protect_code_memory_ = false;
+ 
+-  // Holds the number of open CodeSpaceMemoryModificationScopes.
+-  uintptr_t code_space_memory_modification_scope_depth_ = 0;
+-
+   std::atomic<HeapState> gc_state_{NOT_IN_GC};
+ 
+   // Returns the amount of external memory registered since last global gc.
+@@ -2569,45 +2543,6 @@ class V8_NODISCARD AlwaysAllocateScopeForTesting {
+   AlwaysAllocateScope scope_;
+ };
+ 
+-// The CodeSpaceMemoryModificationScope can only be used by the main thread.
+-class V8_NODISCARD CodeSpaceMemoryModificationScope {
+- public:
+-  explicit inline CodeSpaceMemoryModificationScope(Heap* heap);
+-  inline ~CodeSpaceMemoryModificationScope();
+-
+- private:
+-#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-  V8_NO_UNIQUE_ADDRESS RwxMemoryWriteScope rwx_write_scope_;
+-#endif
+-  Heap* heap_;
+-};
+-
+-// The CodePageCollectionMemoryModificationScope can be used by any thread. It
+-// will not be enabled if a CodeSpaceMemoryModificationScope is already active.
+-class V8_NODISCARD CodePageCollectionMemoryModificationScope {
+- public:
+-  explicit inline CodePageCollectionMemoryModificationScope(Heap* heap);
+-  inline ~CodePageCollectionMemoryModificationScope();
+-
+- private:
+-#if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-  V8_NO_UNIQUE_ADDRESS RwxMemoryWriteScope rwx_write_scope_;
+-#endif
+-  Heap* heap_;
+-};
+-
+-// Same as the CodePageCollectionMemoryModificationScope but without inlining
+-// the code. This is a workaround for component build issue (crbug/1316800),
+-// when a thread_local value can't be properly exported.
+-class V8_EXPORT_PRIVATE V8_NODISCARD
+-    CodePageCollectionMemoryModificationScopeForTesting
+-    : public CodePageCollectionMemoryModificationScope {
+- public:
+-  V8_NOINLINE explicit CodePageCollectionMemoryModificationScopeForTesting(
+-      Heap* heap);
+-  V8_NOINLINE ~CodePageCollectionMemoryModificationScopeForTesting();
+-};
+-
+ // The CodePageHeaderModificationScope enables write access to Code
+ // space page headers. On most of the configurations it's a no-op because
+ // Code space page headers are configured as writable and
+@@ -2641,10 +2576,12 @@ class V8_NODISCARD CodePageMemoryModificationScope {
+ 
+  private:
+ #if V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT || V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+-  V8_NO_UNIQUE_ADDRESS RwxMemoryWriteScope rwx_write_scope_;
+-#endif
++  base::Optional<RwxMemoryWriteScope> rwx_write_scope_;
++#else
+   BasicMemoryChunk* chunk_;
+   bool scope_active_;
++  base::Optional<base::MutexGuard> guard_;
++#endif
+ 
+   // Disallow any GCs inside this scope, as a relocation of the underlying
+   // object would change the {MemoryChunk} that this scope targets.
+diff --git a/src/heap/large-spaces.cc b/src/heap/large-spaces.cc
+index e6109dbbf3477dddb25f573e42d920b04e0e714f..b82b9f7cf312094fc39b78ff2b4dca78a54a31f3 100644
+--- a/src/heap/large-spaces.cc
++++ b/src/heap/large-spaces.cc
+@@ -534,6 +534,8 @@ CodeLargeObjectSpace::CodeLargeObjectSpace(Heap* heap)
+ 
+ AllocationResult CodeLargeObjectSpace::AllocateRaw(int object_size) {
+   DCHECK(!v8_flags.enable_third_party_heap);
++  CodePageHeaderModificationScope header_modification_scope(
++      "Code allocation needs header access.");
+   return OldLargeObjectSpace::AllocateRaw(object_size, EXECUTABLE);
+ }
+ 
+diff --git a/src/heap/local-heap-inl.h b/src/heap/local-heap-inl.h
+index 401b7a4903ba2aa26bcd1cef4684c0725e388edf..d909af710c921a730d1a0e406e6ef45e6147a38e 100644
+--- a/src/heap/local-heap-inl.h
++++ b/src/heap/local-heap-inl.h
+@@ -37,6 +37,9 @@ AllocationResult LocalHeap::AllocateRaw(int size_in_bytes, AllocationType type,
+   bool large_object = size_in_bytes > heap_->MaxRegularHeapObjectSize(type);
+ 
+   if (type == AllocationType::kCode) {
++    CodePageHeaderModificationScope header_modification_scope(
++        "Code allocation needs header access.");
++
+     AllocationResult alloc;
+     if (large_object) {
+       alloc =
+@@ -47,8 +50,6 @@ AllocationResult LocalHeap::AllocateRaw(int size_in_bytes, AllocationType type,
+     }
+     HeapObject object;
+     if (alloc.To(&object) && !V8_ENABLE_THIRD_PARTY_HEAP_BOOL) {
+-      heap()->UnprotectAndRegisterMemoryChunk(
+-          object, UnprotectMemoryOrigin::kMaybeOffMainThread);
+       heap()->ZapCodeObject(object.address(), size_in_bytes);
+     }
+     return alloc;
+diff --git a/src/heap/local-heap.cc b/src/heap/local-heap.cc
+index b39fbe33d35aa87e7128480ff1df5b85867bc06e..d7d9a83688d6d2e156dc1cdea5841edcfe4cda1f 100644
+--- a/src/heap/local-heap.cc
++++ b/src/heap/local-heap.cc
+@@ -91,9 +91,6 @@ LocalHeap::~LocalHeap() {
+     FreeSharedLinearAllocationArea();
+ 
+     if (!is_main_thread()) {
+-      CodePageHeaderModificationScope rwx_write_scope(
+-          "Publishing of marking barrier results for Code space pages requires "
+-          "write access to Code page headers");
+       marking_barrier_->PublishIfNeeded();
+       marking_barrier_->PublishSharedIfNeeded();
+       MarkingBarrier* overwritten =
+diff --git a/src/heap/local-heap.h b/src/heap/local-heap.h
+index afeaf19baacab7cd28f54369b317d338ae4baaa7..7d19c481e72bd1c4b8e2901baf8f29244e09fec7 100644
+--- a/src/heap/local-heap.h
++++ b/src/heap/local-heap.h
+@@ -328,9 +328,6 @@ class V8_EXPORT_PRIVATE LocalHeap {
+   LocalHeap* prev_;
+   LocalHeap* next_;
+ 
+-  std::unordered_set<MemoryChunk*> unprotected_memory_chunks_;
+-  uintptr_t code_page_collection_memory_modification_scope_depth_{0};
+-
+   std::unique_ptr<LocalHandles> handles_;
+   std::unique_ptr<PersistentHandles> persistent_handles_;
+   std::unique_ptr<MarkingBarrier> marking_barrier_;
+diff --git a/src/heap/mark-compact.cc b/src/heap/mark-compact.cc
+index 27ef0618f01823134b67c36479081784cb941fd5..0ab1b48732802c46df510cccbdcfd769a4eb583e 100644
+--- a/src/heap/mark-compact.cc
++++ b/src/heap/mark-compact.cc
+@@ -1718,9 +1718,13 @@ class EvacuateVisitorBase : public HeapObjectVisitor {
+       dst.IterateFast(dst.map(cage_base), size, base->record_visitor_);
+     } else if (dest == CODE_SPACE) {
+       DCHECK_CODEOBJECT_SIZE(size, base->heap_->code_space());
+-      base->heap_->CopyBlock(dst_addr, src_addr, size);
+-      InstructionStream istream = InstructionStream::cast(dst);
+-      istream.Relocate(dst_addr - src_addr);
++      {
++        CodePageMemoryModificationScope memory_modification_scope(
++            BasicMemoryChunk::FromAddress(dst_addr));
++        base->heap_->CopyBlock(dst_addr, src_addr, size);
++        InstructionStream istream = InstructionStream::cast(dst);
++        istream.Relocate(dst_addr - src_addr);
++      }
+       if (mode != MigrationMode::kFast) {
+         base->ExecuteMigrationObservers(dest, src, dst, size);
+       }
+@@ -1735,6 +1739,10 @@ class EvacuateVisitorBase : public HeapObjectVisitor {
+         base->ExecuteMigrationObservers(dest, src, dst, size);
+       }
+     }
++    base::Optional<CodePageMemoryModificationScope> memory_modification_scope;
++    if (dest == CODE_SPACE) {
++      memory_modification_scope.emplace(InstructionStream::cast(src));
++    }
+     src.set_map_word_forwarded(dst, kRelaxedStore);
+   }
+ 
+@@ -4303,10 +4311,9 @@ bool Evacuator::RawEvacuatePage(MemoryChunk* chunk, intptr_t* live_bytes) {
+           marking_state->live_bytes(chunk));
+       break;
+     case kObjectsOldToOld: {
+-      RwxMemoryWriteScope rwx_write_scope(
++      CodePageHeaderModificationScope rwx_write_scope(
+           "Evacuation of objects in Code space requires write "
+-          "access for the "
+-          "current worker thread.");
++          "access for the current worker thread.");
+ #if DEBUG
+       old_space_visitor_.SetUpAbortEvacuationAtAddress(chunk);
+ #endif  // DEBUG
+@@ -5906,8 +5913,6 @@ void YoungGenerationMarkingTask::PublishMarkingWorklist() {
+ void YoungGenerationMarkingTask::Finalize() { visitor_.Finalize(); }
+ 
+ void PageMarkingItem::Process(YoungGenerationMarkingTask* task) {
+-  base::MutexGuard guard(chunk_->mutex());
+-  CodePageMemoryModificationScope memory_modification_scope(chunk_);
+   if (slots_type_ == SlotsType::kRegularSlots) {
+     MarkUntypedPointers(task);
+   } else {
+diff --git a/src/heap/marking-barrier.cc b/src/heap/marking-barrier.cc
+index 64e4fc4a5637db257413fe8bbe1f3910cb51c87a..f103ef267d19040b7ce5dabe7c05b6278b92a4cc 100644
+--- a/src/heap/marking-barrier.cc
++++ b/src/heap/marking-barrier.cc
+@@ -354,11 +354,6 @@ void MarkingBarrier::PublishAll(Heap* heap) {
+ void MarkingBarrier::PublishIfNeeded() {
+   if (is_activated_) {
+     current_worklist_->Publish();
+-    base::Optional<CodePageHeaderModificationScope> optional_rwx_write_scope;
+-    if (!typed_slots_map_.empty()) {
+-      optional_rwx_write_scope.emplace(
+-          "Merging typed slots may require allocating a new typed slot set.");
+-    }
+     for (auto& it : typed_slots_map_) {
+       MemoryChunk* memory_chunk = it.first;
+       // Access to TypeSlots need to be protected, since LocalHeaps might
+diff --git a/src/heap/memory-allocator.cc b/src/heap/memory-allocator.cc
+index 4bee04f79a8f254032c517960f926061c3cae12a..190b6c4b3bc1029556af2cfc40d9ae85c666c5d2 100644
+--- a/src/heap/memory-allocator.cc
++++ b/src/heap/memory-allocator.cc
+@@ -385,7 +385,7 @@ MemoryAllocator::AllocateUninitializedChunkAt(BaseSpace* space,
+       // first.
+       ZapBlock(base, MemoryChunkLayout::CodePageGuardStartOffset(), kZapValue);
+       // Now zap object area.
+-      ZapBlock(base + MemoryChunkLayout::ObjectStartOffsetInCodePage(),
++      ZapBlock(base + MemoryChunkLayout::ObjectPageOffsetInCodePage(),
+                area_size, kZapValue);
+     } else {
+       DCHECK_EQ(executable, NOT_EXECUTABLE);
+@@ -466,8 +466,6 @@ void MemoryAllocator::UnregisterBasicMemoryChunk(BasicMemoryChunk* chunk,
+ #ifdef DEBUG
+     UnregisterExecutableMemoryChunk(static_cast<MemoryChunk*>(chunk));
+ #endif  // DEBUG
+-    chunk->heap()->UnregisterUnprotectedMemoryChunk(
+-        static_cast<MemoryChunk*>(chunk));
+   }
+   chunk->SetFlag(MemoryChunk::UNREGISTERED);
+ }
+diff --git a/src/heap/memory-chunk-layout.h b/src/heap/memory-chunk-layout.h
+index 3285c2fef4ce96acf92e040541cecaf9fab4751a..8b86965e782c9b8a5f0a30f1103bcc5666a8b9a0 100644
+--- a/src/heap/memory-chunk-layout.h
++++ b/src/heap/memory-chunk-layout.h
+@@ -62,7 +62,6 @@ class V8_EXPORT_PRIVATE MemoryChunkLayout {
+     FIELD(base::SharedMutex*, SharedMutex),
+     FIELD(base::Mutex*, PageProtectionChangeMutex),
+     FIELD(std::atomic<intptr_t>, ConcurrentSweeping),
+-    FIELD(uintptr_t, WriteUnprotectCounter),
+     FIELD(std::atomic<size_t>[kNumTypes], ExternalBackingStoreBytes),
+     FIELD(heap::ListNode<MemoryChunk>, ListNode),
+     FIELD(FreeListCategory**, Categories),
+diff --git a/src/heap/memory-chunk.cc b/src/heap/memory-chunk.cc
+index ff9410ce6c9019e3a500f494df7060e1b3f5241d..d1e7eaca4f8ed72c4acee300daa61fe56d879563 100644
+--- a/src/heap/memory-chunk.cc
++++ b/src/heap/memory-chunk.cc
+@@ -51,24 +51,13 @@ void MemoryChunk::DecrementWriteUnprotectCounterAndMaybeSetPermissions(
+          permission == PageAllocator::kReadExecute);
+   DCHECK(IsFlagSet(MemoryChunk::IS_EXECUTABLE));
+   DCHECK(owner_identity() == CODE_SPACE || owner_identity() == CODE_LO_SPACE);
+-  // Decrementing the write_unprotect_counter_ and changing the page
+-  // protection mode has to be atomic.
+-  base::MutexGuard guard(page_protection_change_mutex_);
+-  if (write_unprotect_counter_ == 0) {
+-    // This is a corner case that may happen when we have a
+-    // CodeSpaceMemoryModificationScope open and this page was newly
+-    // added.
+-    return;
+-  }
+-  write_unprotect_counter_--;
+-  if (write_unprotect_counter_ == 0) {
+-    Address protect_start =
+-        address() + MemoryChunkLayout::ObjectStartOffsetInCodePage();
+-    size_t page_size = MemoryAllocator::GetCommitPageSize();
+-    DCHECK(IsAligned(protect_start, page_size));
+-    size_t protect_size = RoundUp(area_size(), page_size);
+-    CHECK(reservation_.SetPermissions(protect_start, protect_size, permission));
+-  }
++  page_protection_change_mutex_->AssertHeld();
++  Address protect_start =
++      address() + MemoryChunkLayout::ObjectPageOffsetInCodePage();
++  size_t page_size = MemoryAllocator::GetCommitPageSize();
++  DCHECK(IsAligned(protect_start, page_size));
++  size_t protect_size = RoundUp(area_size(), page_size);
++  CHECK(reservation_.SetPermissions(protect_start, protect_size, permission));
+ }
+ 
+ void MemoryChunk::SetReadable() {
+@@ -81,27 +70,27 @@ void MemoryChunk::SetReadAndExecutable() {
+       PageAllocator::kReadExecute);
+ }
+ 
+-void MemoryChunk::SetCodeModificationPermissions() {
++base::MutexGuard MemoryChunk::SetCodeModificationPermissions() {
+   DCHECK(!V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT);
+   DCHECK(IsFlagSet(MemoryChunk::IS_EXECUTABLE));
+   DCHECK(owner_identity() == CODE_SPACE || owner_identity() == CODE_LO_SPACE);
+   // Incrementing the write_unprotect_counter_ and changing the page
+   // protection mode has to be atomic.
+   base::MutexGuard guard(page_protection_change_mutex_);
+-  write_unprotect_counter_++;
+-  if (write_unprotect_counter_ == 1) {
+-    Address unprotect_start =
+-        address() + MemoryChunkLayout::ObjectStartOffsetInCodePage();
+-    size_t page_size = MemoryAllocator::GetCommitPageSize();
+-    DCHECK(IsAligned(unprotect_start, page_size));
+-    size_t unprotect_size = RoundUp(area_size(), page_size);
+-    // We may use RWX pages to write code. Some CPUs have optimisations to push
+-    // updates to code to the icache through a fast path, and they may filter
+-    // updates based on the written memory being executable.
+-    CHECK(reservation_.SetPermissions(
+-        unprotect_start, unprotect_size,
+-        MemoryChunk::GetCodeModificationPermission()));
+-  }
++
++  Address unprotect_start =
++      address() + MemoryChunkLayout::ObjectPageOffsetInCodePage();
++  size_t page_size = MemoryAllocator::GetCommitPageSize();
++  DCHECK(IsAligned(unprotect_start, page_size));
++  size_t unprotect_size = RoundUp(area_size(), page_size);
++  // We may use RWX pages to write code. Some CPUs have optimisations to push
++  // updates to code to the icache through a fast path, and they may filter
++  // updates based on the written memory being executable.
++  CHECK(reservation_.SetPermissions(
++      unprotect_start, unprotect_size,
++      MemoryChunk::GetCodeModificationPermission()));
++
++  return guard;
+ }
+ 
+ void MemoryChunk::SetDefaultCodePermissions() {
+@@ -142,8 +131,8 @@ MemoryChunk::MemoryChunk(Heap* heap, BaseSpace* space, size_t chunk_size,
+   if (executable == EXECUTABLE) {
+     SetFlag(IS_EXECUTABLE);
+     if (heap->write_protect_code_memory()) {
+-      write_unprotect_counter_ =
+-          heap->code_space_memory_modification_scope_depth();
++      //      write_unprotect_counter_ =
++      //          heap->code_space_memory_modification_scope_depth();
+     } else if (!V8_HEAP_USE_PTHREAD_JIT_WRITE_PROTECT) {
+       size_t page_size = MemoryAllocator::GetCommitPageSize();
+       // On executable chunks, area_start_ points past padding used for code
+@@ -486,9 +475,6 @@ void MemoryChunk::ValidateOffsets(MemoryChunk* chunk) {
+   DCHECK_EQ(reinterpret_cast<Address>(&chunk->page_protection_change_mutex_) -
+                 chunk->address(),
+             MemoryChunkLayout::kPageProtectionChangeMutexOffset);
+-  DCHECK_EQ(reinterpret_cast<Address>(&chunk->write_unprotect_counter_) -
+-                chunk->address(),
+-            MemoryChunkLayout::kWriteUnprotectCounterOffset);
+   DCHECK_EQ(reinterpret_cast<Address>(&chunk->external_backing_store_bytes_) -
+                 chunk->address(),
+             MemoryChunkLayout::kExternalBackingStoreBytesOffset);
+diff --git a/src/heap/memory-chunk.h b/src/heap/memory-chunk.h
+index 6c4d14ed9e0f6dc2744b258ce78190cf2dbb2d0c..55d2a2925b38671ba45fd858a8f733ba837e0823 100644
+--- a/src/heap/memory-chunk.h
++++ b/src/heap/memory-chunk.h
+@@ -200,7 +200,12 @@ class MemoryChunk : public BasicMemoryChunk {
+   V8_EXPORT_PRIVATE void SetReadable();
+   V8_EXPORT_PRIVATE void SetReadAndExecutable();
+ 
+-  V8_EXPORT_PRIVATE void SetCodeModificationPermissions();
++  // Used by the mprotect version of CodePageMemoryModificationScope to toggle
++  // the writable permission bit of the MemoryChunk.
++  // The returned MutexGuard protects the page from concurrent access. The
++  // caller needs to call SetDefaultCodePermissions before releasing the
++  // MutexGuard.
++  V8_EXPORT_PRIVATE base::MutexGuard SetCodeModificationPermissions();
+   V8_EXPORT_PRIVATE void SetDefaultCodePermissions();
+ 
+   heap::ListNode<MemoryChunk>& list_node() { return list_node_; }
+@@ -286,18 +291,6 @@ class MemoryChunk : public BasicMemoryChunk {
+   std::atomic<ConcurrentSweepingState> concurrent_sweeping_{
+       ConcurrentSweepingState::kDone};
+ 
+-  // This field is only relevant for code pages. It depicts the number of
+-  // times a component requested this page to be read+writeable. The
+-  // counter is decremented when a component resets to read+executable.
+-  // If Value() == 0 => The memory is read and executable.
+-  // If Value() >= 1 => The Memory is read and writable (and maybe executable).
+-  // All executable MemoryChunks are allocated rw based on the assumption that
+-  // they will be used immediately for an allocation. They are initialized
+-  // with the number of open CodeSpaceMemoryModificationScopes. The caller
+-  // that triggers the page allocation is responsible for decrementing the
+-  // counter.
+-  uintptr_t write_unprotect_counter_ = 0;
+-
+   // Tracks off-heap memory used by this memory chunk.
+   std::atomic<size_t> external_backing_store_bytes_[kNumTypes] = {0};
+ 
+diff --git a/src/heap/paged-spaces.cc b/src/heap/paged-spaces.cc
+index 7006eb26aa2399f3c4106f27b7eb2c4174979ff2..6a9d7777faea3505803c5ea74557c22cbb8dbf88 100644
+--- a/src/heap/paged-spaces.cc
++++ b/src/heap/paged-spaces.cc
+@@ -342,6 +342,11 @@ void PagedSpaceBase::ResetFreeList() {
+ }
+ 
+ void PagedSpaceBase::ShrinkImmortalImmovablePages() {
++  base::Optional<CodePageHeaderModificationScope> optional_scope;
++  if (identity() == CODE_SPACE) {
++    optional_scope.emplace(
++        "ShrinkImmortalImmovablePages writes to the page header.");
++  }
+   DCHECK(!heap()->deserialization_complete());
+   BasicMemoryChunk::UpdateHighWaterMark(allocation_info_.top());
+   FreeLinearAllocationArea();
+@@ -409,11 +414,9 @@ void PagedSpaceBase::DecreaseLimit(Address new_limit) {
+   DCHECK_LE(top(), new_limit);
+   DCHECK_GE(old_limit, new_limit);
+   if (new_limit != old_limit) {
+-    base::Optional<CodePageMemoryModificationScope> optional_scope;
+-
++    base::Optional<CodePageHeaderModificationScope> optional_scope;
+     if (identity() == CODE_SPACE) {
+-      MemoryChunk* chunk = MemoryChunk::FromAddress(new_limit);
+-      optional_scope.emplace(chunk);
++      optional_scope.emplace("DecreaseLimit writes to the page header.");
+     }
+ 
+     ConcurrentAllocationMutex guard(this);
+@@ -459,13 +462,6 @@ void PagedSpaceBase::MakeLinearAllocationAreaIterable() {
+   Address current_top = top();
+   Address current_limit = limit();
+   if (current_top != kNullAddress && current_top != current_limit) {
+-    base::Optional<CodePageMemoryModificationScope> optional_scope;
+-
+-    if (identity() == CODE_SPACE) {
+-      MemoryChunk* chunk = MemoryChunk::FromAddress(current_top);
+-      optional_scope.emplace(chunk);
+-    }
+-
+     heap_->CreateFillerObjectAt(current_top,
+                                 static_cast<int>(current_limit - current_top));
+   }
+@@ -476,15 +472,6 @@ size_t PagedSpaceBase::Available() const {
+   return free_list_->Available();
+ }
+ 
+-namespace {
+-
+-UnprotectMemoryOrigin GetUnprotectMemoryOrigin(bool is_compaction_space) {
+-  return is_compaction_space ? UnprotectMemoryOrigin::kMaybeOffMainThread
+-                             : UnprotectMemoryOrigin::kMainThread;
+-}
+-
+-}  // namespace
+-
+ void PagedSpaceBase::FreeLinearAllocationArea() {
+   // Mark the old linear allocation area with a free space map so it can be
+   // skipped when scanning the heap.
+@@ -499,11 +486,10 @@ void PagedSpaceBase::FreeLinearAllocationArea() {
+ 
+   AdvanceAllocationObservers();
+ 
+-  base::Optional<CodePageMemoryModificationScope> optional_scope;
+-
++  base::Optional<CodePageHeaderModificationScope> optional_scope;
+   if (identity() == CODE_SPACE) {
+-    MemoryChunk* chunk = MemoryChunk::FromAddress(allocation_info_.top());
+-    optional_scope.emplace(chunk);
++    optional_scope.emplace(
++        "FreeLinearAllocationArea writes to the page header.");
+   }
+ 
+   if (identity() != NEW_SPACE && current_top != current_limit &&
+@@ -515,14 +501,6 @@ void PagedSpaceBase::FreeLinearAllocationArea() {
+   SetTopAndLimit(kNullAddress, kNullAddress, kNullAddress);
+   DCHECK_GE(current_limit, current_top);
+ 
+-  // The code page of the linear allocation area needs to be unprotected
+-  // because we are going to write a filler into that memory area below.
+-  if (identity() == CODE_SPACE) {
+-    heap()->UnprotectAndRegisterMemoryChunk(
+-        MemoryChunk::FromAddress(current_top),
+-        GetUnprotectMemoryOrigin(is_compaction_space()));
+-  }
+-
+   DCHECK_IMPLIES(current_limit - current_top >= 2 * kTaggedSize,
+                  heap()->marking_state()->IsUnmarked(
+                      HeapObject::FromAddress(current_top)));
+@@ -576,14 +554,6 @@ void PagedSpaceBase::SetReadAndExecutable() {
+   }
+ }
+ 
+-void PagedSpaceBase::SetCodeModificationPermissions() {
+-  DCHECK(identity() == CODE_SPACE);
+-  for (Page* page : *this) {
+-    DCHECK(heap()->memory_allocator()->IsMemoryChunkExecutable(page));
+-    page->SetCodeModificationPermissions();
+-  }
+-}
+-
+ std::unique_ptr<ObjectIterator> PagedSpaceBase::GetObjectIterator(Heap* heap) {
+   return std::unique_ptr<ObjectIterator>(
+       new PagedSpaceObjectIterator(heap, this));
+@@ -630,10 +600,6 @@ bool PagedSpaceBase::TryAllocationFromFreeListMain(size_t size_in_bytes,
+   DCHECK_LE(limit, end);
+   DCHECK_LE(size_in_bytes, limit - start);
+   if (limit != end) {
+-    if (identity() == CODE_SPACE) {
+-      heap()->UnprotectAndRegisterMemoryChunk(
+-          page, GetUnprotectMemoryOrigin(is_compaction_space()));
+-    }
+     if (!SupportsExtendingLAB()) {
+       Free(limit, end - limit, SpaceAccountingMode::kSpaceAccounted);
+       end = limit;
+@@ -681,10 +647,6 @@ PagedSpaceBase::TryAllocationFromFreeListBackground(size_t min_size_in_bytes,
+   DCHECK_LE(limit, end);
+   DCHECK_LE(min_size_in_bytes, limit - start);
+   if (limit != end) {
+-    if (identity() == CODE_SPACE) {
+-      heap()->UnprotectAndRegisterMemoryChunk(
+-          page, UnprotectMemoryOrigin::kMaybeOffMainThread);
+-    }
+     Free(limit, end - limit, SpaceAccountingMode::kSpaceAccounted);
+   }
+   AddRangeToActiveSystemPages(page, start, limit);
+@@ -873,6 +835,10 @@ bool CompactionSpace::RefillLabMain(int size_in_bytes,
+ 
+ bool PagedSpaceBase::TryExpand(int size_in_bytes, AllocationOrigin origin) {
+   DCHECK_NE(NEW_SPACE, identity());
++  base::Optional<CodePageHeaderModificationScope> optional_scope;
++  if (identity() == CODE_SPACE) {
++    optional_scope.emplace("TryExpand writes to the page header.");
++  }
+   Page* page = TryExpandImpl(MemoryAllocator::AllocationMode::kRegular);
+   if (!page) return false;
+   if (!is_compaction_space() && identity() != NEW_SPACE) {
+diff --git a/src/heap/paged-spaces.h b/src/heap/paged-spaces.h
+index 80787cb0c81fd6e6a1aa375897e1cc451af951fa..312575542b3c97623dfa1471f1822174a14b9413 100644
+--- a/src/heap/paged-spaces.h
++++ b/src/heap/paged-spaces.h
+@@ -174,7 +174,6 @@ class V8_EXPORT_PRIVATE PagedSpaceBase
+ 
+   void SetReadable();
+   void SetReadAndExecutable();
+-  void SetCodeModificationPermissions();
+ 
+   void SetDefaultCodePermissions() {
+     if (v8_flags.jitless) {
+diff --git a/src/heap/remembered-set.h b/src/heap/remembered-set.h
+index 5471b0f67f6132c76da2e535e1152a052637304f..675a834daeaad74ad57ff618e04bcc51e052b292 100644
+--- a/src/heap/remembered-set.h
++++ b/src/heap/remembered-set.h
+@@ -242,6 +242,8 @@ class RememberedSet : public AllStatic {
+   static void MergeTyped(MemoryChunk* page, std::unique_ptr<TypedSlots> other) {
+     TypedSlotSet* slot_set = page->typed_slot_set<type>();
+     if (slot_set == nullptr) {
++      CodePageHeaderModificationScope header_modification_scope(
++          "Allocating a typed slot set requires header write permissions.");
+       slot_set = page->AllocateTypedSlotSet<type>();
+     }
+     slot_set->Merge(other.get());
+diff --git a/src/heap/spaces.cc b/src/heap/spaces.cc
+index 84dc5959dad4a94992506b2679e34901b4ca9de1..10d4e152f82f9379d4e33a7a7fc3247b66b7ee03 100644
+--- a/src/heap/spaces.cc
++++ b/src/heap/spaces.cc
+@@ -399,11 +399,6 @@ void SpaceWithLinearArea::InvokeAllocationObservers(
+               allocation_info_.limit());
+ 
+     // Ensure that there is a valid object
+-    if (identity() == CODE_SPACE) {
+-      MemoryChunk* chunk = MemoryChunk::FromAddress(soon_object);
+-      heap()->UnprotectAndRegisterMemoryChunk(
+-          chunk, UnprotectMemoryOrigin::kMainThread);
+-    }
+     heap_->CreateFillerObjectAt(soon_object, static_cast<int>(size_in_bytes));
+ 
+ #if DEBUG
+diff --git a/src/heap/sweeper.cc b/src/heap/sweeper.cc
+index 4e1910f66517c32d99823b3856ba9fc8e224612d..ce223b60e7eea7274de5cac09e9bb0e553f26778 100644
+--- a/src/heap/sweeper.cc
++++ b/src/heap/sweeper.cc
+@@ -229,8 +229,9 @@ int Sweeper::LocalSweeper::ParallelSweepPage(Page* page,
+   // The Scavenger may add already swept pages back.
+   if (page->SweepingDone()) return 0;
+ 
+-  base::Optional<CodePageMemoryModificationScope> code_page_scope;
+-  if (page->owner_identity() == CODE_SPACE) code_page_scope.emplace(page);
++  base::Optional<CodePageHeaderModificationScope> code_page_scope;
++  if (page->owner_identity() == CODE_SPACE)
++    code_page_scope.emplace("SweepPage needs to write page flags.");
+ 
+   int max_freed = 0;
+   {
+@@ -565,6 +566,7 @@ V8_INLINE size_t Sweeper::FreeAndProcessFreedMemory(
+   size_t freed_bytes = 0;
+   size_t size = static_cast<size_t>(free_end - free_start);
+   if (free_space_treatment_mode == FreeSpaceTreatmentMode::kZapFreeSpace) {
++    CodePageMemoryModificationScope memory_modification_scope(page);
+     AtomicZapBlock(free_start, size);
+   }
+   page->heap()->CreateFillerObjectAtSweeper(free_start, static_cast<int>(size));
+diff --git a/src/objects/code.cc b/src/objects/code.cc
+index 5d4ccda4a6ebf26675aeeba410b1aa7a93c4d09e..96e3604cd8e6df69bc027cace0e027012eb3820c 100644
+--- a/src/objects/code.cc
++++ b/src/objects/code.cc
+@@ -34,9 +34,12 @@ void Code::ClearEmbeddedObjects(Heap* heap) {
+   HeapObject undefined = ReadOnlyRoots(heap).undefined_value();
+   InstructionStream istream = unchecked_instruction_stream();
+   int mode_mask = RelocInfo::EmbeddedObjectModeMask();
+-  for (RelocIterator it(*this, mode_mask); !it.done(); it.next()) {
+-    DCHECK(RelocInfo::IsEmbeddedObjectMode(it.rinfo()->rmode()));
+-    it.rinfo()->set_target_object(istream, undefined, SKIP_WRITE_BARRIER);
++  {
++    CodePageMemoryModificationScope memory_modification_scope(istream);
++    for (RelocIterator it(*this, mode_mask); !it.done(); it.next()) {
++      DCHECK(RelocInfo::IsEmbeddedObjectMode(it.rinfo()->rmode()));
++      it.rinfo()->set_target_object(istream, undefined, SKIP_WRITE_BARRIER);
++    }
+   }
+   set_embedded_objects_cleared(true);
+ }
+diff --git a/src/wasm/module-compiler.cc b/src/wasm/module-compiler.cc
+index 1274c870102873b3e4caff7d678cbf471e133fd6..cca22af412357db0fc48352eb44d8ac50e20ac03 100644
+--- a/src/wasm/module-compiler.cc
++++ b/src/wasm/module-compiler.cc
+@@ -18,7 +18,6 @@
+ #include "src/compiler/wasm-compiler.h"
+ #include "src/debug/debug.h"
+ #include "src/handles/global-handles-inl.h"
+-#include "src/heap/heap-inl.h"  // For CodePageCollectionMemoryModificationScope.
+ #include "src/logging/counters-scopes.h"
+ #include "src/logging/metrics.h"
+ #include "src/tracing/trace-event.h"
+@@ -3547,7 +3546,6 @@ void CompilationStateImpl::FinalizeJSToWasmWrappers(Isolate* isolate,
+ 
+   isolate->heap()->EnsureWasmCanonicalRttsSize(module->MaxCanonicalTypeIndex() +
+                                                1);
+-  CodePageCollectionMemoryModificationScope modification_scope(isolate->heap());
+   for (auto& unit : js_to_wasm_wrapper_units_) {
+     DCHECK_EQ(isolate, unit->isolate());
+     // Note: The code is either the compiled signature-specific wrapper or the
+@@ -3960,7 +3958,6 @@ void CompileJsToWasmWrappers(Isolate* isolate, const WasmModule* module) {
+   // optimization we create a code memory modification scope that avoids
+   // changing the page permissions back-and-forth between RWX and RX, because
+   // many such wrapper are allocated in sequence below.
+-  CodePageCollectionMemoryModificationScope modification_scope(isolate->heap());
+   for (auto& pair : compilation_units) {
+     JSToWasmWrapperKey key = pair.first;
+     JSToWasmWrapperCompilationUnit* unit = pair.second.get();
+diff --git a/test/cctest/heap/heap-utils.cc b/test/cctest/heap/heap-utils.cc
+index b2e3538a03c4c66dda40b87c62bdd2a43ec0c4c1..8ccef9017b20ab83c449eb60d71530be4e35ad76 100644
+--- a/test/cctest/heap/heap-utils.cc
++++ b/test/cctest/heap/heap-utils.cc
+@@ -316,7 +316,6 @@ void SimulateFullSpace(v8::internal::PagedSpace* space) {
+   // v8_flags.stress_concurrent_allocation = false;
+   // Background thread allocating concurrently interferes with this function.
+   CHECK(!v8_flags.stress_concurrent_allocation);
+-  CodePageCollectionMemoryModificationScopeForTesting code_scope(space->heap());
+   if (space->heap()->sweeping_in_progress()) {
+     space->heap()->EnsureSweepingCompleted(
+         Heap::SweepingForcedFinalizationMode::kV8Only);
+diff --git a/test/cctest/heap/test-alloc.cc b/test/cctest/heap/test-alloc.cc
+index 4b4f2a6594f10eb455c025ff3bcfc7cb2b216170..243b36b43255712d86660aed620693f5fa6b9244 100644
+--- a/test/cctest/heap/test-alloc.cc
++++ b/test/cctest/heap/test-alloc.cc
+@@ -84,7 +84,6 @@ Handle<Object> HeapTester::TestAllocateAfterFailures() {
+ 
+   // Code space.
+   heap::SimulateFullSpace(heap->code_space());
+-  CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+   size = CcTest::i_isolate()->builtins()->code(Builtin::kIllegal).Size();
+   obj =
+       heap->AllocateRaw(size, AllocationType::kCode, AllocationOrigin::kRuntime)
+diff --git a/test/cctest/heap/test-concurrent-allocation.cc b/test/cctest/heap/test-concurrent-allocation.cc
+index d3b49eed7cb0603a076d6d311b314c9ec4179096..a255066d438cf2600fcd8ebe240828355d214234 100644
+--- a/test/cctest/heap/test-concurrent-allocation.cc
++++ b/test/cctest/heap/test-concurrent-allocation.cc
+@@ -489,6 +489,7 @@ class ConcurrentRecordRelocSlotThread final : public v8::base::Thread {
+     DisallowGarbageCollection no_gc;
+     InstructionStream istream = code_.instruction_stream();
+     int mode_mask = RelocInfo::EmbeddedObjectModeMask();
++    CodePageMemoryModificationScope memory_modification_scope(istream);
+     for (RelocIterator it(code_, mode_mask); !it.done(); it.next()) {
+       DCHECK(RelocInfo::IsEmbeddedObjectMode(it.rinfo()->rmode()));
+       it.rinfo()->set_target_object(istream, value_);
+@@ -517,7 +518,6 @@ UNINITIALIZED_TEST(ConcurrentRecordRelocSlot) {
+   {
+     Code code;
+     HeapObject value;
+-    CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+     {
+       HandleScope handle_scope(i_isolate);
+       i::byte buffer[i::Assembler::kDefaultBufferSize];
+diff --git a/test/cctest/heap/test-heap.cc b/test/cctest/heap/test-heap.cc
+index 944d6c4f538f3396021b4f30f061a01f3dca0a1e..69804a8b125684bbbf54984672bdb6d09575f8f0 100644
+--- a/test/cctest/heap/test-heap.cc
++++ b/test/cctest/heap/test-heap.cc
+@@ -6930,7 +6930,6 @@ TEST(CodeObjectRegistry) {
+ 
+   Isolate* isolate = CcTest::i_isolate();
+   Heap* heap = isolate->heap();
+-  CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+ 
+   Handle<InstructionStream> code1;
+   HandleScope outer_scope(heap->isolate());
+@@ -7074,7 +7073,6 @@ HEAP_TEST(CodeLargeObjectSpace) {
+   TestAllocationTracker allocation_tracker{size_in_bytes};
+   heap->AddHeapObjectAllocationTracker(&allocation_tracker);
+ 
+-  CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+   HeapObject obj;
+   {
+     AllocationResult allocation = heap->AllocateRaw(
+@@ -7108,7 +7106,6 @@ UNINITIALIZED_HEAP_TEST(CodeLargeObjectSpace64k) {
+     TestAllocationTracker allocation_tracker{size_in_bytes};
+     heap->AddHeapObjectAllocationTracker(&allocation_tracker);
+ 
+-    CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+     HeapObject obj;
+     {
+       AllocationResult allocation = heap->AllocateRaw(
+@@ -7130,7 +7127,6 @@ UNINITIALIZED_HEAP_TEST(CodeLargeObjectSpace64k) {
+     TestAllocationTracker allocation_tracker{size_in_bytes};
+     heap->AddHeapObjectAllocationTracker(&allocation_tracker);
+ 
+-    CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+     HeapObject obj;
+     {
+       AllocationResult allocation = heap->AllocateRaw(
+@@ -7223,8 +7219,6 @@ TEST(Regress10900) {
+   CodeDesc desc;
+   masm.GetCode(isolate, &desc);
+   {
+-    CodePageCollectionMemoryModificationScopeForTesting code_scope(
+-        isolate->heap());
+     Handle<Code> code;
+     for (int i = 0; i < 100; i++) {
+       // Generate multiple code pages.
+diff --git a/test/cctest/test-heap-profiler.cc b/test/cctest/test-heap-profiler.cc
+index dedd9bd729abaa51d38c0aeb582ec3e49bc0e04b..0219d9581841683cb1b7522260c00e9b10d4525d 100644
+--- a/test/cctest/test-heap-profiler.cc
++++ b/test/cctest/test-heap-profiler.cc
+@@ -1806,6 +1806,8 @@ TEST(NativeSnapshotObjectIdMoving) {
+   if (i::v8_flags.enable_third_party_heap) return;
+   // Required to allow moving specific objects.
+   i::v8_flags.manual_evacuation_candidates_selection = true;
++  // Concurrent allocation writes page flags in a racy way.
++  i::v8_flags.stress_concurrent_allocation = false;
+ 
+   LocalContext env;
+   v8::Isolate* isolate = env->GetIsolate();
+diff --git a/test/unittests/heap/heap-utils.cc b/test/unittests/heap/heap-utils.cc
+index f3965f108c8d5a896f1b5f0154209b18eabc608d..34259be6caa43aaa868ae54e6fadd393198f0adb 100644
+--- a/test/unittests/heap/heap-utils.cc
++++ b/test/unittests/heap/heap-utils.cc
+@@ -175,7 +175,6 @@ void HeapInternalsBase::SimulateFullSpace(v8::internal::PagedSpace* space) {
+   // Background thread allocating concurrently interferes with this function.
+   CHECK(!v8_flags.stress_concurrent_allocation);
+   Heap* heap = space->heap();
+-  CodePageCollectionMemoryModificationScopeForTesting code_scope(heap);
+   if (heap->sweeping_in_progress()) {
+     heap->EnsureSweepingCompleted(
+         Heap::SweepingForcedFinalizationMode::kV8Only);
+diff --git a/tools/v8heapconst.py b/tools/v8heapconst.py
+index fe7a03e9d9ee61754d0fed65dbb5deabaecf6694..60b3fe60a05e7683b0872b11444d031b52d71258 100644
+--- a/tools/v8heapconst.py
++++ b/tools/v8heapconst.py
+@@ -483,8 +483,8 @@ KNOWN_MAPS = {
+     ("read_only_space", 0x01f71): (268, "WasmContinuationObjectMap"),
+     ("read_only_space", 0x01f99): (270, "WasmNullMap"),
+     ("read_only_space", 0x01fc1): (275, "WeakCellMap"),
+-    ("old_space", 0x043d1): (2124, "ExternalMap"),
+-    ("old_space", 0x043f9): (2128, "JSMessageObjectMap"),
++    ("old_space", 0x04b4d): (2124, "ExternalMap"),
++    ("old_space", 0x04b75): (2128, "JSMessageObjectMap"),
+ }
+ 
+ # List of known V8 objects.
+@@ -541,69 +541,70 @@ KNOWN_OBJECTS = {
+   ("read_only_space", 0x061c9): "NativeScopeInfo",
+   ("read_only_space", 0x061e1): "ShadowRealmScopeInfo",
+   ("read_only_space", 0x0fffd): "WasmNull",
+-  ("old_space", 0x04281): "ArgumentsIteratorAccessor",
+-  ("old_space", 0x04299): "ArrayLengthAccessor",
+-  ("old_space", 0x042b1): "BoundFunctionLengthAccessor",
+-  ("old_space", 0x042c9): "BoundFunctionNameAccessor",
+-  ("old_space", 0x042e1): "ErrorStackAccessor",
+-  ("old_space", 0x042f9): "FunctionArgumentsAccessor",
+-  ("old_space", 0x04311): "FunctionCallerAccessor",
+-  ("old_space", 0x04329): "FunctionNameAccessor",
+-  ("old_space", 0x04341): "FunctionLengthAccessor",
+-  ("old_space", 0x04359): "FunctionPrototypeAccessor",
+-  ("old_space", 0x04371): "StringLengthAccessor",
+-  ("old_space", 0x04389): "ValueUnavailableAccessor",
+-  ("old_space", 0x043a1): "WrappedFunctionLengthAccessor",
+-  ("old_space", 0x043b9): "WrappedFunctionNameAccessor",
+-  ("old_space", 0x043d1): "ExternalMap",
+-  ("old_space", 0x043f9): "JSMessageObjectMap",
+-  ("old_space", 0x04421): "EmptyScript",
+-  ("old_space", 0x04469): "ManyClosuresCell",
+-  ("old_space", 0x04475): "ArrayConstructorProtector",
+-  ("old_space", 0x04489): "NoElementsProtector",
+-  ("old_space", 0x0449d): "MegaDOMProtector",
+-  ("old_space", 0x044b1): "IsConcatSpreadableProtector",
+-  ("old_space", 0x044c5): "ArraySpeciesProtector",
+-  ("old_space", 0x044d9): "TypedArraySpeciesProtector",
+-  ("old_space", 0x044ed): "PromiseSpeciesProtector",
+-  ("old_space", 0x04501): "RegExpSpeciesProtector",
+-  ("old_space", 0x04515): "StringLengthProtector",
+-  ("old_space", 0x04529): "ArrayIteratorProtector",
+-  ("old_space", 0x0453d): "ArrayBufferDetachingProtector",
+-  ("old_space", 0x04551): "PromiseHookProtector",
+-  ("old_space", 0x04565): "PromiseResolveProtector",
+-  ("old_space", 0x04579): "MapIteratorProtector",
+-  ("old_space", 0x0458d): "PromiseThenProtector",
+-  ("old_space", 0x045a1): "SetIteratorProtector",
+-  ("old_space", 0x045b5): "StringIteratorProtector",
+-  ("old_space", 0x045c9): "NumberStringPrototypeNoReplaceProtector",
+-  ("old_space", 0x045dd): "StringSplitCache",
+-  ("old_space", 0x049e5): "RegExpMultipleCache",
+-  ("old_space", 0x04ded): "BuiltinsConstantsTable",
+-  ("old_space", 0x054d9): "AsyncFunctionAwaitRejectSharedFun",
+-  ("old_space", 0x054fd): "AsyncFunctionAwaitResolveSharedFun",
+-  ("old_space", 0x05521): "AsyncGeneratorAwaitRejectSharedFun",
+-  ("old_space", 0x05545): "AsyncGeneratorAwaitResolveSharedFun",
+-  ("old_space", 0x05569): "AsyncGeneratorYieldWithAwaitResolveSharedFun",
+-  ("old_space", 0x0558d): "AsyncGeneratorReturnResolveSharedFun",
+-  ("old_space", 0x055b1): "AsyncGeneratorReturnClosedRejectSharedFun",
+-  ("old_space", 0x055d5): "AsyncGeneratorReturnClosedResolveSharedFun",
+-  ("old_space", 0x055f9): "AsyncIteratorValueUnwrapSharedFun",
+-  ("old_space", 0x0561d): "PromiseAllResolveElementSharedFun",
+-  ("old_space", 0x05641): "PromiseAllSettledResolveElementSharedFun",
+-  ("old_space", 0x05665): "PromiseAllSettledRejectElementSharedFun",
+-  ("old_space", 0x05689): "PromiseAnyRejectElementSharedFun",
+-  ("old_space", 0x056ad): "PromiseCapabilityDefaultRejectSharedFun",
+-  ("old_space", 0x056d1): "PromiseCapabilityDefaultResolveSharedFun",
+-  ("old_space", 0x056f5): "PromiseCatchFinallySharedFun",
+-  ("old_space", 0x05719): "PromiseGetCapabilitiesExecutorSharedFun",
+-  ("old_space", 0x0573d): "PromiseThenFinallySharedFun",
+-  ("old_space", 0x05761): "PromiseThrowerFinallySharedFun",
+-  ("old_space", 0x05785): "PromiseValueThunkFinallySharedFun",
+-  ("old_space", 0x057a9): "ProxyRevokeSharedFun",
+-  ("old_space", 0x057cd): "ShadowRealmImportValueFulfilledSFI",
+-  ("old_space", 0x057f1): "SourceTextModuleExecuteAsyncModuleFulfilledSFI",
+-  ("old_space", 0x05815): "SourceTextModuleExecuteAsyncModuleRejectedSFI",
++  ("old_space", 0x04a15): "ArgumentsIteratorAccessor",
++  ("old_space", 0x04a2d): "ArrayLengthAccessor",
++  ("old_space", 0x04a45): "BoundFunctionLengthAccessor",
++  ("old_space", 0x04a5d): "BoundFunctionNameAccessor",
++  ("old_space", 0x04a75): "FunctionArgumentsAccessor",
++  ("old_space", 0x04a8d): "FunctionCallerAccessor",
++  ("old_space", 0x04aa5): "FunctionNameAccessor",
++  ("old_space", 0x04abd): "FunctionLengthAccessor",
++  ("old_space", 0x04ad5): "FunctionPrototypeAccessor",
++  ("old_space", 0x04aed): "StringLengthAccessor",
++  ("old_space", 0x04b05): "ValueUnavailableAccessor",
++  ("old_space", 0x04b1d): "WrappedFunctionLengthAccessor",
++  ("old_space", 0x04b35): "WrappedFunctionNameAccessor",
++  ("old_space", 0x04b4d): "ExternalMap",
++  ("old_space", 0x04b75): "JSMessageObjectMap",
++  ("old_space", 0x04b9d): "EmptyScript",
++  ("old_space", 0x04be5): "ManyClosuresCell",
++  ("old_space", 0x04bf1): "ArrayConstructorProtector",
++  ("old_space", 0x04c05): "NoElementsProtector",
++  ("old_space", 0x04c19): "MegaDOMProtector",
++  ("old_space", 0x04c2d): "IsConcatSpreadableProtector",
++  ("old_space", 0x04c41): "ArraySpeciesProtector",
++  ("old_space", 0x04c55): "TypedArraySpeciesProtector",
++  ("old_space", 0x04c69): "PromiseSpeciesProtector",
++  ("old_space", 0x04c7d): "RegExpSpeciesProtector",
++  ("old_space", 0x04c91): "StringLengthProtector",
++  ("old_space", 0x04ca5): "ArrayIteratorProtector",
++  ("old_space", 0x04cb9): "ArrayBufferDetachingProtector",
++  ("old_space", 0x04ccd): "PromiseHookProtector",
++  ("old_space", 0x04ce1): "PromiseResolveProtector",
++  ("old_space", 0x04cf5): "MapIteratorProtector",
++  ("old_space", 0x04d09): "PromiseThenProtector",
++  ("old_space", 0x04d1d): "SetIteratorProtector",
++  ("old_space", 0x04d31): "StringIteratorProtector",
++  ("old_space", 0x04d45): "NumberStringPrototypeNoReplaceProtector",
++  ("old_space", 0x04d59): "StringSplitCache",
++  ("old_space", 0x05161): "RegExpMultipleCache",
++  ("old_space", 0x05569): "BuiltinsConstantsTable",
++  ("old_space", 0x05acd): "AsyncFunctionAwaitRejectSharedFun",
++  ("old_space", 0x05af1): "AsyncFunctionAwaitResolveSharedFun",
++  ("old_space", 0x05b15): "AsyncGeneratorAwaitRejectSharedFun",
++  ("old_space", 0x05b39): "AsyncGeneratorAwaitResolveSharedFun",
++  ("old_space", 0x05b5d): "AsyncGeneratorYieldWithAwaitResolveSharedFun",
++  ("old_space", 0x05b81): "AsyncGeneratorReturnResolveSharedFun",
++  ("old_space", 0x05ba5): "AsyncGeneratorReturnClosedRejectSharedFun",
++  ("old_space", 0x05bc9): "AsyncGeneratorReturnClosedResolveSharedFun",
++  ("old_space", 0x05bed): "AsyncIteratorValueUnwrapSharedFun",
++  ("old_space", 0x05c11): "ErrorStackGetterSharedFun",
++  ("old_space", 0x05c59): "ErrorStackSetterSharedFun",
++  ("old_space", 0x05ca1): "PromiseAllResolveElementSharedFun",
++  ("old_space", 0x05cc5): "PromiseAllSettledResolveElementSharedFun",
++  ("old_space", 0x05ce9): "PromiseAllSettledRejectElementSharedFun",
++  ("old_space", 0x05d0d): "PromiseAnyRejectElementSharedFun",
++  ("old_space", 0x05d31): "PromiseCapabilityDefaultRejectSharedFun",
++  ("old_space", 0x05d55): "PromiseCapabilityDefaultResolveSharedFun",
++  ("old_space", 0x05d79): "PromiseCatchFinallySharedFun",
++  ("old_space", 0x05d9d): "PromiseGetCapabilitiesExecutorSharedFun",
++  ("old_space", 0x05dc1): "PromiseThenFinallySharedFun",
++  ("old_space", 0x05de5): "PromiseThrowerFinallySharedFun",
++  ("old_space", 0x05e09): "PromiseValueThunkFinallySharedFun",
++  ("old_space", 0x05e2d): "ProxyRevokeSharedFun",
++  ("old_space", 0x05e51): "ShadowRealmImportValueFulfilledSFI",
++  ("old_space", 0x05e75): "SourceTextModuleExecuteAsyncModuleFulfilledSFI",
++  ("old_space", 0x05e99): "SourceTextModuleExecuteAsyncModuleRejectedSFI",
+ }
+ 
+ # Lower 32 bits of first page addresses for various heap spaces.
