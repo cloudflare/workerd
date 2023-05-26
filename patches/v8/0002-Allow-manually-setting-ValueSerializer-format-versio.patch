@@ -1,4 +1,4 @@
-From 5143eda0e0e81242653d74dec690b239c2c6a578 Mon Sep 17 00:00:00 2001
+From 3700613acf643e5c45ccb66bb9636f48286b4499 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -12,7 +12,7 @@ Refs: https://bitbucket.cfdata.org/projects/MIRRORS/repos/v8/pull-requests/2/ove
  4 files changed, 29 insertions(+), 3 deletions(-)
 
 diff --git a/include/v8-value-serializer.h b/include/v8-value-serializer.h
-index 40ad805c79..596be18ade 100644
+index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347dec6c0c7d 100644
 --- a/include/v8-value-serializer.h
 +++ b/include/v8-value-serializer.h
 @@ -154,6 +154,11 @@ class V8_EXPORT ValueSerializer {
@@ -28,7 +28,7 @@ index 40ad805c79..596be18ade 100644
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 729dc91451..ecddc98f57 100644
+index 729dc91451821dbfb30f86a31099784c2f2e2375..ecddc98f57be97b21decbf37d87a530475525377 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
 @@ -3639,6 +3639,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
@@ -43,7 +43,7 @@ index 729dc91451..ecddc98f57 100644
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 2efca82aaa..c57ff099dc 100644
+index 2efca82aaaa00da30fdab8d66d97275e3b162a51..c57ff099dc750f6872b5de0462718d873e95d53c 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -266,6 +266,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -89,7 +89,7 @@ index 2efca82aaa..c57ff099dc 100644
  }
  
 diff --git a/src/objects/value-serializer.h b/src/objects/value-serializer.h
-index f3d35e9498..d3d839ad10 100644
+index f3d35e9498b664ff02e77da0e5ef3240c3e054b4..d3d839ad108c8ce39437119e0dbae393fad1467a 100644
 --- a/src/objects/value-serializer.h
 +++ b/src/objects/value-serializer.h
 @@ -54,6 +54,11 @@ class ValueSerializer {
