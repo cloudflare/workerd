@@ -174,9 +174,10 @@ async function test(storage) {
       "not authorized to use function: sqlite_version");
 
   // JSON -> operator works
-  let jsonResult =
+  const jsonResult =
       [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
   assert.equal(jsonResult, "[4,5,{\"f\":7}]");
+
 
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
@@ -277,6 +278,29 @@ async function test(storage) {
     assert.equal(result[0].num_columns, 2);
     assert.equal(result[1].tbl_name, 'documents');
     assert.equal(result[1].num_columns, 3);
+  }
+
+  // Similar query using JSON objects
+  {
+    const jsonResult = JSON.parse(Array.from(sql.exec(
+      `SELECT json_group_array(json_object(
+              'type', type,
+              'name', name,
+              'tbl_name', tbl_name,
+              'rootpage', rootpage,
+              'sql', sql,
+              'columns', (SELECT json_group_object(name, type) from pragma_table_info(tbl_name))
+          )) as data
+       FROM sqlite_master
+       WHERE type = "table" AND tbl_name != "_cf_KV";`
+    ))[0].data)
+    assert.equal(jsonResult.length, 8)
+    assert.equal(jsonResult.map(r => r.name).join(','), 'myTable,documents,documents_fts,documents_fts_data,documents_fts_idx,documents_fts_content,documents_fts_docsize,documents_fts_config')
+    assert.equal(jsonResult[0].columns.foo, 'TEXT')
+    assert.equal(jsonResult[0].columns.bar, 'INTEGER')
+    assert.equal(jsonResult[1].columns.id, 'INTEGER')
+    assert.equal(jsonResult[1].columns.title, 'TEXT')
+    assert.equal(jsonResult[1].columns.content, 'TEXT')
   }
 
   // Let the current open transaction commit. We have to do this before playing with the
