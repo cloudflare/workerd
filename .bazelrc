@@ -92,5 +92,11 @@ build:windows --cxxopt='/DWINDOWS_LEAN_AND_MEAN' --host_cxxopt='/DWINDOWS_LEAN_A
 # The `/std:c++14` argument is unused during boringssl compilation and we don't
 # want a warning when compiling each file.
 build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-unused-command-line-argument'
+# This warning is triggered on much of V8's code base, causing the build output to be much bigger
+# than it should be.
+# V8's bazel does disable it for clang-based toolchains, but unfortunately the Windows setup is not
+# being detected as clang...
+# TODO(soon): Integrate this into V8 instead
+build:windows --cxxopt='-Wno-invalid-offsetof' --host_cxxopt='-Wno-invalid-offsetof'
 
 build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True
