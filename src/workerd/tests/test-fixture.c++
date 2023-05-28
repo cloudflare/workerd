@@ -165,7 +165,7 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
 
 };
 
-struct MockErrorReporter final: public Worker::ValidationErrorReporter {
+struct MockErrorReporter final: public ValidationErrorReporter {
   void addError(kj::String error) override {
     KJ_FAIL_REQUIRE("unexpected error", error);
   }

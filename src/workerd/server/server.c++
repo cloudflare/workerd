@@ -1641,7 +1641,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
     kj::StringPtr workerName,
     config::Worker::Reader conf,
     config::Worker::Binding::Reader binding,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs) {
@@ -1903,7 +1903,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     capnp::List<config::Extension>::Reader extensions) {
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
-  struct ErrorReporter: public Worker::ValidationErrorReporter {
+  struct ErrorReporter: public ValidationErrorReporter {
     ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
 
     Server& server;

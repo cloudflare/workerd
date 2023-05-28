@@ -99,7 +99,7 @@ private:
   capnp::HttpOverCapnpFactory httpOverCapnpFactory;
   ThreadContext threadContext;
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
-  kj::Own<Worker::ValidationErrorReporter> errorReporter;
+  kj::Own<ValidationErrorReporter> errorReporter;
   kj::Own<Worker::ApiIsolate> apiIsolate;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;

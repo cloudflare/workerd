@@ -10,7 +10,7 @@
 #include <kj/compat/http.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
-#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
 #include <kj/mutex.h>
@@ -68,12 +68,6 @@ public:
   class Script;
   class Isolate;
   class ApiIsolate;
-
-  class ValidationErrorReporter {
-  public:
-    virtual void addError(kj::String error) = 0;
-    virtual void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) = 0;
-  };
 
   class LockType;
 

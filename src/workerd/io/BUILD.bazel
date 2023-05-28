@@ -7,7 +7,8 @@ wd_cc_library(
     # HACK: Currently, the `io` and `api` packages are interdependent. We fold all the sources
     #   from `api` into `io`. In principle, it should be possible to pull them apart so `api`
     #   depends on `io` but not vice versa.
-    # TODO(cleaunp): Fix this.
+    # TODO(cleanup): Fix this – after cleaning up includes there is now less entanglement, but this
+    # still looks difficult to achieve.
     srcs = glob(
         ["*.c++"],
         exclude = [
@@ -46,14 +47,12 @@ wd_cc_library(
         ":worker-interface",
         "//src/node",
         "//src/workerd/api:analytics-engine_capnp",
-        "//src/workerd/api:r2-api_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:sqlite",
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
-        "@com_cloudflare_lol_html//:lolhtml",
     ],
 )
 

@@ -9,8 +9,8 @@
 // struct is translated to/from a native JS object with the same field names.
 
 #include "util.h"
-#include "value.h"
 #include "web-idl.h"
+#include <kj/tuple.h>
 
 namespace workerd::jsg {
 

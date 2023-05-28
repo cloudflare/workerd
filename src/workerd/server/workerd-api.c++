@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
+#include <workerd/jsg/type-wrapper.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/api/actor.h>
 #include <workerd/api/actor-state.h>
@@ -185,7 +186,7 @@ struct NoopCompilationObserver final : public jsg::CompilationObserver {
 
 Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) {
   switch (conf.which()) {
     case config::Worker::MODULES: {
@@ -232,7 +233,7 @@ invalid:
 
 kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobals(
       jsg::Lock& lockParam, config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter) const {
+      ValidationErrorReporter& errorReporter) const {
   // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
   // at script load time.
 
@@ -262,7 +263,7 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
 
 kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
-    Worker::ValidationErrorReporter& errorReporter,
+    ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);

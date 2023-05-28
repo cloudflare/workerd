@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
+#include <workerd/jsg/resource.h>
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
 #include <algorithm>

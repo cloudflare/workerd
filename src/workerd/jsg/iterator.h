@@ -5,6 +5,8 @@
 #pragma once
 
 #include "jsg.h"
+#include "function.h"
+#include "promise.h"
 #include <concepts>
 #include <deque>
 

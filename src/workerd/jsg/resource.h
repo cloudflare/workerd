@@ -13,7 +13,6 @@
 #include "util.h"
 #include "wrappable.h"
 #include "jsg.h"
-#include <kj/tuple.h>
 #include <kj/debug.h>
 #include <type_traits>
 #include <kj/map.h>

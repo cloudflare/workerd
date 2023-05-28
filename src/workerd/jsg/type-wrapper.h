@@ -7,8 +7,8 @@
 //
 // The TypeWrapper knows how to convert a variety of types between C++ and JavaScript.
 
+#include "iterator.h"
 #include "util.h"
-#include "wrappable.h"
 #include "value.h"
 #include "struct.h"
 #include "resource.h"

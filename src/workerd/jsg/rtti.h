@@ -10,6 +10,7 @@
 // compatibility etc.
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/resource.h>
 #include <workerd/jsg/rtti.capnp.h>
 #include <kj/map.h>
 

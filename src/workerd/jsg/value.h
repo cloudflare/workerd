@@ -9,7 +9,6 @@
 // arrays, buffers, dicts.
 
 #include "util.h"
-#include "wrappable.h"
 #include "jsg.h"
 #include "web-idl.h"
 #include <kj/time.h>

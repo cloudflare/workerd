@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg.h"
+#include "promise.h"
 #include "async-context.h"
 
 namespace workerd::jsg {

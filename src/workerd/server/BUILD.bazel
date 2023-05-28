@@ -75,8 +75,11 @@ wd_cc_library(
         ":workerd_capnp",
         "//src/cloudflare",
         ":alarm-scheduler",
+        "@capnp-cpp//src/kj/compat:kj-tls",
         "@capnp-cpp//src/capnp:capnpc",
         "//src/workerd/io",
+        "//src/workerd/api:html-rewriter",
+        "//src/workerd/api:r2-api",
         "//src/workerd/jsg",
     ],
 )

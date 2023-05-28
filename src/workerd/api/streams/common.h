@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/promise.h>
 #include <workerd/io/io-context.h>
 #include "../basics.h"
 

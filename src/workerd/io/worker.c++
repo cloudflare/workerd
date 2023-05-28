@@ -320,7 +320,7 @@ void reportStartupError(
     const IsolateLimitEnforcer& limitEnforcer,
     kj::Maybe<kj::Exception> maybeLimitError,
     v8::TryCatch& catcher,
-    kj::Maybe<Worker::ValidationErrorReporter&> errorReporter,
+    kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Exception>& permanentException) {
   v8::TryCatch catcher2(lock.v8Isolate);
   kj::Maybe<kj::Exception> maybeLimitError2;

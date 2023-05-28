@@ -54,7 +54,7 @@ namespace {
 
 using namespace jsg;
 
-struct ApiEncoderErrorReporterImpl : public Worker::ValidationErrorReporter {
+struct ApiEncoderErrorReporterImpl : public ValidationErrorReporter {
   void addError(kj::String error) override { errors.add(kj::mv(error)); }
   void addHandler(kj::Maybe<kj::StringPtr> exportName,
                   kj::StringPtr type) override {

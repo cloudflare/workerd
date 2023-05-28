@@ -79,7 +79,7 @@ KJ_TEST("compatibility flag parsing") {
     auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
     auto output = outputOrphan.get();
 
-    struct ErrorReporterImpl: public Worker::ValidationErrorReporter {
+    struct ErrorReporterImpl: public ValidationErrorReporter {
       void addError(kj::String error) override {
         errors.add(kj::mv(error));
       }
@@ -210,7 +210,7 @@ KJ_TEST("encode to flag list for FL") {
     auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
     auto output = outputOrphan.get();
 
-    struct ErrorReporterImpl: public Worker::ValidationErrorReporter {
+    struct ErrorReporterImpl: public ValidationErrorReporter {
       void addError(kj::String error) override {
         errors.add(kj::mv(error));
       }

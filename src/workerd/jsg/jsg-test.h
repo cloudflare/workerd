@@ -5,8 +5,10 @@
 #pragma once
 // Common JSG testing infrastructure
 
+#include "dom-exception.h"
 #include "jsg.h"
 #include "setup.h"
+#include "type-wrapper.h"
 #include <kj/test.h>
 
 namespace workerd::jsg::test {

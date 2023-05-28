@@ -30,7 +30,7 @@
 
 #include <cstring>
 #include <algorithm>
-
+using kj::uint;
 namespace workerd::api::node {
 namespace stringsearch {
 
