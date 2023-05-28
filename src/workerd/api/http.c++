@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "http.h"
+#include "sockets.h"
 #include "system-streams.h"
 #include "util.h"
+#include "queue.h"
 #include <kj/encoding.h>
 #include <kj/compat/url.h>
 #include <kj/memory.h>

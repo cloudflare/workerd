@@ -10,8 +10,6 @@
 
 namespace workerd::api {
 
-using kj::byte;
-
 // =======================================================================================
 // The ReadableStreamInternalController and WritableStreamInternalController provide the
 // internal (original) implementation of the ReadableStream/WritableStream objects and are

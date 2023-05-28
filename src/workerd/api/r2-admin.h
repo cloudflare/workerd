@@ -6,7 +6,6 @@
 
 #include "r2-bucket.h"
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/http.h>
 
 namespace edgeworker::api {
 class R2CrossAccount;

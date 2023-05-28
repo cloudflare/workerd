@@ -6,7 +6,11 @@
 
 #include <kj/encoding.h>
 
+#include <workerd/api/cache.h>
+#include <workerd/api/crypto.h>
+#include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
+#include <workerd/api/trace.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
@@ -716,6 +720,14 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
     (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
+}
+
+jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto() {
+  return jsg::alloc<Crypto>();
+}
+
+jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
+  return jsg::alloc<CacheStorage>();
 }
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(

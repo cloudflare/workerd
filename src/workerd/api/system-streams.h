@@ -8,7 +8,6 @@
 
 #include "streams.h"
 #include "http.h"
-#include "sockets.h"
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {

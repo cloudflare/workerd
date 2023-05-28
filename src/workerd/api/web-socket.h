@@ -10,7 +10,13 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/ser.h>
 
+namespace workerd {
+  class ActorObserver;
+}
+
 namespace workerd::api {
+
+template <typename T> struct DeferredProxy;
 
 class MessageEvent: public Event {
 public:

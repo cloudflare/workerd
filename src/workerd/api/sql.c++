@@ -4,6 +4,7 @@
 
 #include "sql.h"
 #include "actor-state.h"
+#include "workerd/io/io-context.h"
 
 namespace workerd::api {
 

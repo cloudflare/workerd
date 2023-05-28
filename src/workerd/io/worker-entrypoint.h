@@ -5,11 +5,12 @@
 #pragma once
 
 #include "io-context.h"
-#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
+
+class WorkerTracer;
 
 class WorkerEntrypoint final: public WorkerInterface {
   // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
