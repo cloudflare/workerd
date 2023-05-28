@@ -4,9 +4,9 @@
 
 #pragma once
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include "streams.h"
-#include "util.h"
+namespace workerd { namespace api { class ReadableStream; } }
 
 namespace workerd::api {
 

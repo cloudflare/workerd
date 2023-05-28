@@ -6,7 +6,6 @@
 #include <zlib.h>
 #include <deque>
 #include <vector>
-#include <iterator>
 
 namespace workerd::api {
 

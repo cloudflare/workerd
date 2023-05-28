@@ -7,10 +7,8 @@
 
 #include <bit>
 #include <workerd/jsg/jsg.h>
-#include <kj/async.h>
-#include <openssl/err.h>
 #include "streams.h"
-#include "util.h"
+#include <openssl/err.h>
 
 namespace workerd::api {
 namespace node {
