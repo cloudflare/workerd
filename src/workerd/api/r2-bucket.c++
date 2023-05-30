@@ -315,7 +315,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_get"_kj);
+    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_get"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -349,7 +349,7 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_get"_kj);
+    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_get"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -407,7 +407,7 @@ R2Bucket::put(jsg::Lock& js, kj::String name, kj::Maybe<R2PutValue> value,
     });
 
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_put"_kj);
+    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_put"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -586,7 +586,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
   return js.evalNow([&] {
     auto& context = IoContext::current();
     auto client = context.getHttpClient(
-      clientIndex, true, nullptr, "r2_createMultipartUpload"_kj);
+      clientIndex, true, nullptr, "r2_createMultipartUpload"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -673,7 +673,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Ar
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_delete"_kj);
+    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_delete"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -717,7 +717,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_list"_kj);
+    auto client = context.getHttpClient(clientIndex, true, nullptr, "r2_list"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

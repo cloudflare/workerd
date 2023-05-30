@@ -151,7 +151,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   auto jsRequest = Request::constructor(js, kj::str(addressStr), nullptr);
   kj::Own<WorkerInterface> client = fetcher->getClient(
-      ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kj);
+      ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kjc);
 
   // Set up the connection.
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());

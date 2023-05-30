@@ -86,7 +86,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
     }
 
     auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
-                                    "cache_match"_kj);
+                                    "cache_match"_kjc);
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     requestHeaders.set(context.getHeaderIds().cacheControl, "only-if-cached");
@@ -316,7 +316,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
 
       // Make the PUT request to cache.
       auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
-                                      "cache_put"_kj);
+                                      "cache_put"_kjc);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);
       auto nativeRequest = httpClient->request(
@@ -467,7 +467,7 @@ jsg::Promise<bool> Cache::delete_(
     // Make the PURGE request to cache.
 
     auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
-                                    "cache_delete"_kj);
+                                    "cache_delete"_kjc);
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     // HACK: The cache doesn't permit PURGE requests from the outside world. It does this by
@@ -500,8 +500,8 @@ jsg::Promise<bool> Cache::delete_(
 
 kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
                                              kj::Maybe<kj::String> cfBlobJson,
-                                             kj::StringPtr operationName) {
-  auto span = context.makeTraceSpan(operationName);
+                                             kj::ConstString operationName) {
+  auto span = context.makeTraceSpan(kj::mv(operationName));
 
   auto cacheClient = context.getCacheClient();
   auto httpClient = cacheName.map([&](kj::String& n) {

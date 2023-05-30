@@ -347,7 +347,7 @@ struct Span {
 public:
   using TagValue = kj::OneOf<bool, int64_t, double, kj::String>;
   // TODO(someday): Support binary bytes, too.
-  using TagMap = kj::HashMap<kj::StringPtr, TagValue>;
+  using TagMap = kj::HashMap<kj::ConstString, TagValue>;
   using Tag = TagMap::Entry;
 
   struct Log {
@@ -355,7 +355,7 @@ public:
     Tag tag;
   };
 
-  kj::StringPtr operationName;
+  kj::ConstString operationName;
   kj::Date startTime;
   kj::Date endTime;
   TagMap tags;
@@ -370,8 +370,8 @@ public:
   // we'll typically have space for one last element available for the "dropped_logs" log without
   // needing to grow the vector.
 
-  explicit Span(kj::StringPtr operationName, kj::Date startTime)
-      : operationName(operationName), startTime(startTime), endTime(startTime) {}
+  explicit Span(kj::ConstString operationName, kj::Date startTime)
+      : operationName(kj::mv(operationName)), startTime(startTime), endTime(startTime) {}
 };
 
 class SpanParent {
@@ -394,7 +394,7 @@ public:
 
   SpanParent addRef();
 
-  SpanBuilder newChild(kj::StringPtr operationName,
+  SpanBuilder newChild(kj::ConstString operationName,
       kj::Date startTime = kj::systemPreciseCalendarClock().now());
   // Create a new child span.
   //
@@ -427,11 +427,11 @@ class SpanBuilder {
   // observer (if there is one) receives the content.
 
 public:
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::StringPtr operationName,
+  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName,
                        kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
     if (observer != nullptr) {
       this->observer = kj::mv(observer);
-      span.emplace(operationName, startTime);
+      span.emplace(kj::mv(operationName), startTime);
     }
   }
   // Create a new top-level span that will report to the given observer. If the observer is null,
@@ -464,23 +464,23 @@ public:
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
 
-  SpanBuilder newChild(kj::StringPtr operationName,
+  SpanBuilder newChild(kj::ConstString operationName,
       kj::Date startTime = kj::systemPreciseCalendarClock().now());
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
 
-  void setOperationName(kj::StringPtr operationName);
+  void setOperationName(kj::ConstString operationName);
   // Change the operation name from what was specified at span creation.
   //
   // `operationName` should be a string literal with infinite lifetime.
 
   using TagValue = Span::TagValue;
-  void setTag(kj::StringPtr key, TagValue value);
+  void setTag(kj::ConstString key, TagValue value);
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
 
-  void addLog(kj::Date timestamp, kj::StringPtr key, TagValue value);
+  void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
   //
@@ -522,14 +522,14 @@ inline SpanParent SpanParent::addRef() {
   return SpanParent(mapAddRef(observer));
 }
 
-inline SpanBuilder SpanParent::newChild(kj::StringPtr operationName, kj::Date startTime) {
+inline SpanBuilder SpanParent::newChild(kj::ConstString operationName, kj::Date startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     operationName, startTime);
+                     kj::mv(operationName), startTime);
 }
 
-inline SpanBuilder SpanBuilder::newChild(kj::StringPtr operationName, kj::Date startTime) {
+inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     operationName, startTime);
+                     kj::mv(operationName), startTime);
 }
 
 } // namespace workerd

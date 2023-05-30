@@ -32,7 +32,7 @@ public:
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
       if (span.isObserved()) {
-        span.setTag("actor_id"_kj, kj::str(actorId));
+        span.setTag("actor_id"_kjc, kj::str(actorId));
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
@@ -42,7 +42,7 @@ public:
     }, {
       .inHouse = true,
       .wrapMetrics = true,
-      .operationName = "actor_subrequest"_kj
+      .operationName = kj::ConstString("actor_subrequest"_kjc)
     }));
   }
 
@@ -77,7 +77,7 @@ public:
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
       if (span.isObserved()) {
-        span.setTag("actor_id"_kj, id->toString());
+        span.setTag("actor_id"_kjc, id->toString());
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
@@ -87,7 +87,7 @@ public:
     }, {
       .inHouse = true,
       .wrapMetrics = true,
-      .operationName = "actor_subrequest"_kj
+      .operationName = kj::ConstString("actor_subrequest"_kjc)
     }));
   }
 
