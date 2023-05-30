@@ -263,8 +263,8 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "4fdc770d9949df2a12d3eb1c7dcdd46425200edf",
-    shallow_since = "1684750317 +0000",
+    commit = "68903e142b1a554df821a78a420b7777aadb9cc9",
+    shallow_since = "1685092309 +0000",
     patch_args = [ "-p1" ],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
