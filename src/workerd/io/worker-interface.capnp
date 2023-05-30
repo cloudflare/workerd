@@ -114,6 +114,7 @@ struct QueueMessage @0x944adb18c0352295 {
   id @0 :Text;
   timestampNs @1 :Int64;
   data @2 :Data;
+  contentType @3 :Text;
 }
 
 struct QueueResponse @0x90e98932c0bfc0de {

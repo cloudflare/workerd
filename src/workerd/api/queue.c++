@@ -1,4 +1,6 @@
 #include "queue.h"
+#include "src/workerd/api/util.h"
+#include "src/workerd/jsg/jsg.h"
 
 #include <workerd/jsg/ser.h>
 #include <workerd/api/global-scope.h>
@@ -6,31 +8,103 @@
 
 namespace workerd::api {
 
-kj::Promise<void> WorkerQueue::send(
-    v8::Local<v8::Value> body, jsg::Optional<SendOptions> options, v8::Isolate* isolate) {
-  auto& context = IoContext::current();
+kj::StringPtr validateContentType(kj::StringPtr contentType) {
+  auto lowerCase = toLower(contentType);
+  if (lowerCase == IncomingQueueMessage::ContentType::TEXT) {
+    return IncomingQueueMessage::ContentType::TEXT;
+  } else if (lowerCase == IncomingQueueMessage::ContentType::BYTES) {
+    return IncomingQueueMessage::ContentType::BYTES;
+  } else if (lowerCase == IncomingQueueMessage::ContentType::JSON) {
+    return IncomingQueueMessage::ContentType::JSON;
+  } else if (lowerCase == IncomingQueueMessage::ContentType::V8) {
+    return IncomingQueueMessage::ContentType::V8;
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", contentType));
+  }
+}
 
-  JSG_REQUIRE(!body->IsUndefined(), TypeError, "Message body cannot be undefined");
-
+kj::Array<kj::byte> serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
-  jsg::Serializer serializer(isolate, jsg::Serializer::Options {
+  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
   serializer.write(body);
-  kj::Array<kj::byte> serialized = serializer.release().data;
+  return serializer.release().data;
+}
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kj);
+kj::Array<kj::byte> serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::StringPtr contentType) {
+  if (contentType == IncomingQueueMessage::ContentType::TEXT) {
+    JSG_REQUIRE(
+      body->IsString(),
+      TypeError,
+      kj::str(
+        "Content Type \"",
+        IncomingQueueMessage::ContentType::TEXT,
+        "\" requires a value of type string, but received: ",
+        body->TypeOf(js.v8Isolate)
+      )
+    );
+
+    kj::String s = js.toString(body);
+    return kj::heapArray(s.asBytes());
+  } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
+    JSG_REQUIRE(
+      body->IsArrayBufferView(),
+      TypeError,
+      kj::str(
+        "Content Type \"",
+        IncomingQueueMessage::ContentType::BYTES,
+        "\" requires a value of type ArrayBufferView, but received: ",
+        body->TypeOf(js.v8Isolate)
+      )
+    );
+
+    jsg::BufferSource source(js, body);
+    return kj::heapArray(source.asArrayPtr());
+  } else if (contentType == IncomingQueueMessage::ContentType::JSON) {
+    kj::String s = js.serializeJson(body);
+    return kj::heapArray(s.asBytes());
+  } else if (contentType == IncomingQueueMessage::ContentType::V8) {
+    return serializeV8(js, body);
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", contentType));
+  }
+}
+
+kj::Promise<void> WorkerQueue::send(
+    jsg::Lock& js, v8::Local<v8::Value> body, jsg::Optional<SendOptions> options) {
+  auto& context = IoContext::current();
+
+  JSG_REQUIRE(!body->IsUndefined(), TypeError, "Message body cannot be undefined");
+
+  kj::Maybe<kj::StringPtr> contentType;
+  KJ_IF_MAYBE(opts, options) {
+    KJ_IF_MAYBE(type, opts->contentType) {
+      contentType = validateContentType(*type);
+    }
+  }
+
+  auto headers = kj::HttpHeaders(context.getHeaderTable());
+  headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/octet-stream");
+
+  kj::Array<kj::byte> serialized;
+  KJ_IF_MAYBE(type, contentType) {
+    headers.add("X-Msg-Fmt", *type);
+    serialized = serialize(js, body, *type);
+  } else {
+    // TODO(cleanup) send message format header (v8) by default
+    serialized = serializeV8(js, body);
+  }
 
   // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/message") to send a single message.
   kj::StringPtr url = "https://fake-host/message"_kj;
-  auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/octet-stream");
-  auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.size());
 
+  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kj);
+  auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.size());
   return req.body->write(serialized.begin(), serialized.size())
       .attach(kj::mv(serialized), kj::mv(req.body), context.registerPendingEvent())
       .then([resp = kj::mv(req.response), &context]() mutable {
@@ -47,8 +121,13 @@ kj::Promise<void> WorkerQueue::send(
   }).attach(kj::mv(client));
 };
 
+struct SerializedBody {
+  kj::Array<kj::byte> body;
+  kj::Maybe<kj::StringPtr> contentType;
+};
+
 kj::Promise<void> WorkerQueue::sendBatch(
-    jsg::Sequence<MessageSendRequest> batch, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch) {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
@@ -56,30 +135,29 @@ kj::Promise<void> WorkerQueue::sendBatch(
   size_t totalSize = 0;
   size_t largestMessage = 0;
   auto messageCount = batch.size();
-  auto builder = kj::heapArrayBuilder<kj::Array<byte>>(messageCount);
+  auto builder = kj::heapArrayBuilder<SerializedBody>(messageCount);
   for (auto& message: batch) {
-    JSG_REQUIRE(!message.body.getHandle(isolate)->IsUndefined(), TypeError,
+    JSG_REQUIRE(!message.body.getHandle(js)->IsUndefined(), TypeError,
         "Message body cannot be undefined");
 
-    // Use a specific serialization version to avoid sending messages using a new version before all
-    // runtimes at the edge know how to read it.
-    // TODO(perf): Would we be better off just serializing all the messages together in one big
-    // buffer rather than separately?
-    jsg::Serializer serializer(isolate, jsg::Serializer::Options {
-      .version = 15,
-      .omitHeader = false,
-    });
-    serializer.write(kj::mv(message.body));
-    builder.add(serializer.release().data);
-    totalSize += builder.back().size();
-    largestMessage = kj::max(largestMessage, builder.back().size());
+    SerializedBody item;
+    KJ_IF_MAYBE(contentType, message.contentType) {
+      item.contentType = validateContentType(*contentType);
+      item.body = serialize(js, message.body.getHandle(js), *contentType);
+    } else {
+      item.body = serializeV8(js, message.body.getHandle(js));
+    }
+
+    builder.add(kj::mv(item));
+    totalSize += builder.back().body.size();
+    largestMessage = kj::max(largestMessage, builder.back().body.size());
   }
   auto serializedBodies = builder.finish();
 
   // Construct the request body by concatenating the messages together into a JSON message.
   // Done manually to minimize copies, although it'd be nice to make this safer.
   // (totalSize + 2) / 3 * 4 is equivalent to ceil(totalSize / 3) * 4 for base64 encoding overhead.
-  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 16 + 32;
+  auto estimatedSize = (totalSize + 2) / 3 * 4 + messageCount * 32 + 32;
   kj::Vector<char> bodyBuilder(estimatedSize);
   bodyBuilder.addAll("{\"messages\":["_kj);
   for (size_t i = 0; i < messageCount; ++i) {
@@ -87,8 +165,16 @@ kj::Promise<void> WorkerQueue::sendBatch(
     // TODO(perf): We should be able to encode the data directly into bodyBuilder's buffer to
     // eliminate a lot of data copying (whereas now encodeBase64 allocates a new buffer of its own
     // to hold its result, which we then have to copy into bodyBuilder).
-    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i]));
-    bodyBuilder.addAll("\"}"_kj);
+    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body));
+    bodyBuilder.add('"');
+
+    KJ_IF_MAYBE(contentType, serializedBodies[i].contentType) {
+      bodyBuilder.addAll(",\"contentType\":\""_kj);
+      bodyBuilder.addAll(*contentType);
+      bodyBuilder.add('"');
+    }
+
+    bodyBuilder.addAll("}"_kj);
     if (i < messageCount - 1) {
       bodyBuilder.add(',');
     }
@@ -98,7 +184,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
   KJ_DASSERT(bodyBuilder.size() <= estimatedSize);
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::check(
-        v8::JSON::Parse(isolate->GetCurrentContext(), jsg::v8Str(isolate, body)))->IsObject());
+        v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsg::v8Str(js.v8Isolate, body)))->IsObject());
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kj);
 
@@ -134,20 +220,61 @@ kj::Promise<void> WorkerQueue::sendBatch(
   }).attach(kj::mv(client));
 };
 
+jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::StringPtr> contentType) {
+  auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
+
+  if (type == IncomingQueueMessage::ContentType::TEXT) {
+    auto str = kj::heapString(body.asChars());
+    return jsg::Value(js.v8Isolate, js.wrapString(str));
+  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
+    return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(body)));
+  } else if (type == IncomingQueueMessage::ContentType::JSON) {
+    auto str = kj::heapString(body.asChars());
+    return js.parseJson(str);
+  } else if (type == IncomingQueueMessage::ContentType::V8) {
+    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, kj::mv(body)).readValue());
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
+  }
+}
+
+jsg::Value deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
+  kj::StringPtr type = message.getContentType();
+  if (type == "") {
+    // default to v8 format
+    type = IncomingQueueMessage::ContentType::V8;
+  }
+
+  if (type == IncomingQueueMessage::ContentType::TEXT) {
+    auto str = kj::heapString(message.getData().asChars());
+    return jsg::Value(js.v8Isolate, js.wrapString(str));
+  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
+    kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
+    return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(bytes)));
+  } else if (type == IncomingQueueMessage::ContentType::JSON) {
+    auto str = kj::heapString(message.getData().asChars());
+    return js.parseJson(str);
+  } else if (type == IncomingQueueMessage::ContentType::V8) {
+    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, message.getData()).readValue());
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
+  }
+}
+
 QueueMessage::QueueMessage(
-    v8::Isolate* isolate, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
-      body(isolate, jsg::Deserializer(isolate, message.getData()).readValue()),
+      body(deserialize(js, message)),
       result(result) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
 
 QueueMessage::QueueMessage(
-    v8::Isolate* isolate, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
+    jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
-      body(isolate, jsg::Deserializer(isolate, message.body.asPtr()).readValue()),
+      body(deserialize(js, kj::mv(message.body), message.contentType)),
       result(result) {}
 
 jsg::Value QueueMessage::getBody(jsg::Lock& js) {
@@ -200,23 +327,23 @@ void QueueMessage::ack() {
   result->explicitAcks.findOrCreate(id, [this]() { return kj::heapString(id); } );
 }
 
-QueueEvent::QueueEvent(v8::Isolate* isolate, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
+QueueEvent::QueueEvent(jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result)
     : ExtendableEvent("queue"), queueName(kj::heapString(params.getQueueName())), result(result) {
   // Note that we must make deep copies of all data here since the incoming Reader may be
   // deallocated while JS's GC wrappers still exist.
   auto incoming = params.getMessages();
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(incoming.size());
   for (auto i: kj::indices(incoming)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(isolate, incoming[i], result));
+    messagesBuilder.add(jsg::alloc<QueueMessage>(js, incoming[i], result));
   }
   messages = messagesBuilder.finish();
 }
 
-QueueEvent::QueueEvent(v8::Isolate* isolate, Params params, IoPtr<QueueEventResult> result)
+QueueEvent::QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result)
     : ExtendableEvent("queue"), queueName(kj::mv(params.queueName)), result(result)  {
   auto messagesBuilder = kj::heapArrayBuilder<jsg::Ref<QueueMessage>>(params.messages.size());
   for (auto i: kj::indices(params.messages)) {
-    messagesBuilder.add(jsg::alloc<QueueMessage>(isolate, kj::mv(params.messages[i]), result));
+    messagesBuilder.add(jsg::alloc<QueueMessage>(js, kj::mv(params.messages[i]), result));
   }
   messages = messagesBuilder.finish();
 }
@@ -247,14 +374,14 @@ jsg::Ref<QueueEvent> startQueueEvent(
     IoPtr<QueueEventResult> result,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler,
     const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
-  auto isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
-      event = jsg::alloc<QueueEvent>(isolate, p, result);
+      event = jsg::alloc<QueueEvent>(js, p, result);
     }
     KJ_CASE_ONEOF(p, QueueEvent::Params) {
-      event = jsg::alloc<QueueEvent>(isolate, kj::mv(p), result);
+      event = jsg::alloc<QueueEvent>(js, kj::mv(p), result);
     }
   }
 
@@ -263,7 +390,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
         lock, h->self.getHandle(lock.getIsolate())));
     KJ_IF_MAYBE(f, queueHandler.queue) {
       auto promise = (*f)(lock, jsg::alloc<QueueController>(event.addRef()),
-                          h->env.addRef(isolate), h->getCtx(isolate));
+                          h->env.addRef(js), h->getCtx(js.v8Isolate));
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -356,6 +483,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
         messages[i].setId(p.messages[i].id);
         messages[i].setTimestampNs((p.messages[i].timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
         messages[i].setData(p.messages[i].body);
+        KJ_IF_MAYBE(contentType, p.messages[i].contentType) {
+          messages[i].setContentType(*contentType);
+        }
       }
     }
   }
