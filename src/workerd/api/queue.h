@@ -30,13 +30,12 @@ public:
   struct SendOptions {
     // TODO(soon): Support metadata.
 
-    jsg::Optional<bool> tmp;
-    // TODO(soon): Remove this -- it's only here to make JSG_STRUCT work since it doesn't if a
-    // struct doesn't have any fields.
+    jsg::Optional<kj::String> contentType;
+    // contentType determines the serialization format of the message.
 
-    JSG_STRUCT(tmp);
+    JSG_STRUCT(contentType);
     JSG_STRUCT_TS_OVERRIDE(QueueSendOptions {
-      tmp: never;
+      contentType: never;
     });
     // NOTE: Any new fields added here should also be added to MessageSendRequest below.
   };
@@ -44,17 +43,21 @@ public:
   struct MessageSendRequest {
     jsg::Value body;
 
-    JSG_STRUCT(body);
+    jsg::Optional<kj::String> contentType;
+    // contentType determines the serialization format of the message.
+
+    JSG_STRUCT(body, contentType);
     JSG_STRUCT_TS_OVERRIDE(MessageSendRequest<Body = unknown> {
       body: Body;
+      contentType: never;
     });
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
   kj::Promise<void> send(
-      v8::Local<v8::Value> body, jsg::Optional<SendOptions> options, v8::Isolate* isolate);
+      jsg::Lock& js, v8::Local<v8::Value> body, jsg::Optional<SendOptions> options);
 
-  kj::Promise<void> sendBatch(jsg::Sequence<MessageSendRequest> batch, v8::Isolate* isolate);
+  kj::Promise<void> sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch);
 
   JSG_RESOURCE_TYPE(WorkerQueue) {
     JSG_METHOD(send);
@@ -79,7 +82,15 @@ struct IncomingQueueMessage {
   kj::String id;
   kj::Date timestamp;
   kj::Array<kj::byte> body;
-  JSG_STRUCT(id, timestamp, body);
+  kj::Maybe<kj::String> contentType;
+  JSG_STRUCT(id, timestamp, body, contentType);
+
+  struct ContentType {
+    static constexpr kj::StringPtr TEXT = "text"_kj;
+    static constexpr kj::StringPtr BYTES = "bytes"_kj;
+    static constexpr kj::StringPtr JSON = "json"_kj;
+    static constexpr kj::StringPtr V8 = "v8"_kj;
+  };
 };
 
 struct QueueResponse {
@@ -102,8 +113,8 @@ struct QueueEventResult {
 
 class QueueMessage final: public jsg::Object {
 public:
-  QueueMessage(v8::Isolate* isolate, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result);
-  QueueMessage(v8::Isolate* isolate, IncomingQueueMessage message, IoPtr<QueueEventResult> result);
+  QueueMessage(jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result);
+  QueueMessage(jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result);
 
   kj::StringPtr getId() { return id; }
   kj::Date getTimestamp() { return timestamp; }
@@ -146,8 +157,8 @@ public:
     kj::Array<IncomingQueueMessage> messages;
   };
 
-  explicit QueueEvent(v8::Isolate* isolate, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result);
-  explicit QueueEvent(v8::Isolate* isolate, Params params, IoPtr<QueueEventResult> result);
+  explicit QueueEvent(jsg::Lock& js, rpc::EventDispatcher::QueueParams::Reader params, IoPtr<QueueEventResult> result);
+  explicit QueueEvent(jsg::Lock& js, Params params, IoPtr<QueueEventResult> result);
 
   static jsg::Ref<QueueEvent> constructor(kj::String type) = delete;
 
