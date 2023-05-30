@@ -896,24 +896,29 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     jsg::Lock& js,
     v8::Local<v8::Value> reason,
     AbortOptions options) {
-  // If maybePendingRejection is set, then the returned abort promise will be rejected
+  // If maybePendingAbort is set, then the returned abort promise will be rejected
   // with the specified error once the abort is completed, otherwise the promise will
   // be resolved with undefined.
+
+  // If there is already an abort pending, return that pending promise
+  // instead of trying to schedule another.
+  KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
+    pendingAbort->reject = options.reject;
+    auto promise = pendingAbort->whenResolved();
+    if (options.handled) {
+      promise.markAsHandled();
+    }
+    return kj::mv(promise);
+  }
 
   KJ_IF_MAYBE(writable, state.tryGet<Writable>()) {
     auto exception = js.exceptionToKj(js.v8Ref(reason));
     if (queue.empty()) {
-      KJ_ASSERT(maybePendingAbort == nullptr);
       (*writable)->abort(kj::cp(exception));
       doError(js, reason);
       return options.reject ?
           rejectedMaybeHandledPromise<void>(js, reason, options.handled) :
           js.resolvedPromise();
-    }
-
-    KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
-      pendingAbort->reject = options.reject;
-      return pendingAbort->whenResolved();
     }
 
     maybePendingAbort = PendingAbort(js, reason, options.reject);
