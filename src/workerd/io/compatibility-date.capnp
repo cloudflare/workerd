@@ -297,4 +297,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # This one operates a bit backwards. With the flag *enabled* no default cfBotManagement
   # data will be included. The the flag *disable*, default cfBotManagement data will be
   # included in the request.cf if the field is not present.
+
+  urlSearchParamsDeleteHasValueArg @30 :Bool
+      $compatEnableFlag("urlsearchparams_delete_has_value_arg")
+      $compatDisableFlag("no_urlsearchparams_delete_has_value_arg")
+      $compatEnableDate("2023-07-01");
+  # When enabled, the delete() and has() methods of the standard URLSearchParams object
+  # (see url-standard.h) will have the recently added second value argument enabled.
 }

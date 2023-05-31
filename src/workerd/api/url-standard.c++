@@ -1943,15 +1943,23 @@ void URLSearchParams::append(jsg::UsvString name, jsg::UsvString value) {
   update();
 }
 
-void URLSearchParams::delete_(jsg::UsvString name, jsg::Optional<jsg::Value> value) {
-  KJ_IF_MAYBE(v, value) {
-    // The WHATWG recently added new arguments to the delete() and has() methods.
-    // We need to determine if adding those will break anyone if they are added
-    // without a compat flag. For now, we're just logging so we can know for sure.
-    // If we get this warning even once in production we'll have to introduce the
-    // new arguments behind a compat flag.
-    // https://github.com/whatwg/url/pull/735
-    LOG_WARNING_ONCE("URLSearchParams.prototype.delete() called with a second argument.");
+void URLSearchParams::delete_(jsg::UsvString name,
+                              jsg::Optional<jsg::UsvString> value,
+                              CompatibilityFlags::Reader featureFlags) {
+  if (featureFlags.getUrlSearchParamsDeleteHasValueArg()) {
+    // The whatwg url spec was updated to add a second optional argument to delete()
+    // and has(). While it was determined that it likely didn't break browser users,
+    // the change could break at least a couple existing deployed workers so we have
+    // to gate support behind a compat flag.
+    KJ_IF_MAYBE(v, value) {
+      auto pivot = std::remove_if(list.begin(), list.end(),
+                                  [&name,&v=*v](auto& kv) {
+        return kv.name == name && kv.value == v;
+      });
+      list.truncate(pivot - list.begin());
+      update();
+      return;
+    }
   }
   auto pivot = std::remove_if(list.begin(), list.end(),
                               [&name](auto& kv) { return kv.name == name; });
@@ -1974,15 +1982,19 @@ kj::Array<jsg::UsvStringPtr> URLSearchParams::getAll(jsg::UsvString name) {
   return result.releaseAsArray();
 }
 
-bool URLSearchParams::has(jsg::UsvString name, jsg::Optional<jsg::Value> value) {
-  KJ_IF_MAYBE(v, value) {
-    // The WHATWG recently added new arguments to the delete() and has() methods.
-    // We need to determine if adding those will break anyone if they are added
-    // without a compat flag. For now, we're just logging so we can know for sure.
-    // If we get this warning even once in production we'll have to introduce the
-    // new arguments behind a compat flag.
-    // https://github.com/whatwg/url/pull/735
-    LOG_WARNING_ONCE("URLSearchParams.prototype.has() called with a second argument.");
+bool URLSearchParams::has(jsg::UsvString name, jsg::Optional<jsg::UsvString> value,
+                          CompatibilityFlags::Reader featureFlags) {
+  if (featureFlags.getUrlSearchParamsDeleteHasValueArg()) {
+    // The whatwg url spec was updated to add a second optional argument to delete()
+    // and has(). While it was determined that it likely didn't break browser users,
+    // the change could break at least a couple existing deployed workers so we have
+    // to gate support behind a compat flag.
+    KJ_IF_MAYBE(v, value) {
+      for (auto& entry : list) {
+        if (entry.name == name && entry.value == *v) return true;
+      }
+      return false;
+    }
   }
   for (auto& entry : list) {
     if (entry.name == name) return true;
