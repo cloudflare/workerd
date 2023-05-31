@@ -169,6 +169,9 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "julianday"_kj,
   "unixepoch"_kj,
   "strftime"_kj,
+  "current_date"_kj,
+  "current_time"_kj,
+  "current_timestamp"_kj,
 
   // https://www.sqlite.org/lang_aggfunc.html
   "avg"_kj,
