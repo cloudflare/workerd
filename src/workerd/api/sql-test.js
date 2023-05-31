@@ -177,8 +177,15 @@ async function test(storage) {
   const jsonResult =
       [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
   assert.equal(jsonResult, "[4,5,{\"f\":7}]");
-
-
+  
+  // current_{time,timestamp,date} functions work
+  const resultTime = [...sql.exec("SELECT current_time")];
+  assert.equal(resultTime.length, 1)
+  const resultTimestamp = [...sql.exec("SELECT current_timestamp")];
+  assert.equal(resultTimestamp.length, 1);
+  const resultDate = [...sql.exec("SELECT current_date")];
+  assert.equal(resultDate.length, 1);
+  
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
