@@ -658,6 +658,42 @@ private:
   void assertNoError(jsg::Lock& js);
 };
 
+class HelloWorld: public jsg::Object {
+public:
+  HelloWorld(kj::String name): name(kj::mv(name)) {}
+  // The C++ object constructor.
+
+  static jsg::Ref<HelloWorld> constructor(jsg::Lock& js, kj::String name);
+  // The Javascript object constructor.
+  // This gets called whenever we create a HelloWorld object in JS.
+
+  kj::StringPtr getName() {
+    return name;
+  }
+
+  size_t getNameLength() {
+    return name.size();
+  }
+
+  JSG_RESOURCE_TYPE(HelloWorld) {
+    // Defining the actual HelloWorld resource.
+    // This is where we declare the methods and properties of the HelloWorld JS object.
+    JSG_METHOD(getName);
+    JSG_READONLY_PROTOTYPE_PROPERTY(nameLength, getNameLength);
+    // Note that this property is really just a name and an associated method.
+  }
+
+private:
+  kj::String name;
+  // name is accessible to javascript code via:
+  //  - The `getName()` method, which can be accessed like so:
+  //      let world = new HelloWorld("Cloudflare");
+  //      let name = world.getName(); // name == "Cloudflare"
+  //  - We can get the length in Javascript by doing:
+  //      let nameLen = world.nameLength; // nameLen == 10;
+  // Javascript cannot directly access `name`, we have to provide getters/setters.
+};
+
 #define EW_WEBSOCKET_ISOLATE_TYPES \
   api::CloseEvent,                 \
   api::CloseEvent::Initializer,    \
@@ -665,7 +701,8 @@ private:
   api::MessageEvent::Initializer,  \
   api::ErrorEvent,                 \
   api::WebSocket,                  \
-  api::WebSocketPair
+  api::WebSocketPair,              \
+  api::HelloWorld
 // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

@@ -828,6 +828,10 @@ kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
   });
 }
 
+jsg::Ref<HelloWorld> HelloWorld::constructor(jsg::Lock& js, kj::String name) {
+  return jsg::alloc<HelloWorld>(kj::mv(name));
+}
+
 jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
   auto pipe = kj::newWebSocketPipe();
   auto pair = jsg::alloc<WebSocketPair>(
