@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "getrandom",
+    name = "syn",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,21 @@ rust_library(
         ],
     }),
     crate_features = [
+        "clone-impls",
+        "default",
+        "derive",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "quote",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,29 +89,13 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.8",
+    version = "2.0.18",
     deps = [
     ] + select_with_or({
-        # cfg(target_os = "wasi")
-        #
-        # No supported platform triples for cfg: 'cfg(target_os = "wasi")'
-        # Skipped dependencies: [{"id":"wasi 0.11.0+wasi-snapshot-preview1","target":"wasi"}]
-        #
-        # cfg(unix)
-        (
-            "@rules_rust//rust/platform:aarch64-apple-darwin",
-            "@rules_rust//rust/platform:aarch64-unknown-linux-gnu",
-            "@rules_rust//rust/platform:x86_64-apple-darwin",
-            "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
-        ): [
-            # Target Deps
-            "@crates_vendor__libc-0.2.140//:libc",
-
-            # Common Deps
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        ],
         "//conditions:default": [
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
+            "@crates_vendor__quote-1.0.28//:quote",
+            "@crates_vendor__unicode-ident-1.0.9//:unicode_ident",
         ],
     }),
 )

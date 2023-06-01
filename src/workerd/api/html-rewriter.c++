@@ -590,7 +590,8 @@ void Rewriter::onEndTag(lol_html_element_t *element, ElementCallbackFunction&& c
   // WARNING: if we ever start reusing the same Rewriter for multiple documents,
   // this will cause a memory leak!
   auto& registeredHandlerPtr = registeredEndTagHandlers.add(kj::heap(kj::mv(registeredHandler)));
-  check(lol_html_element_on_end_tag(element, Rewriter::thunk<EndTag>, registeredHandlerPtr.get()));
+  lol_html_element_clear_end_tag_handlers(element);
+  check(lol_html_element_add_end_tag_handler(element, Rewriter::thunk<EndTag>, registeredHandlerPtr.get()));
 }
 
 void Rewriter::output(const char* buffer, size_t size, void* userdata) {

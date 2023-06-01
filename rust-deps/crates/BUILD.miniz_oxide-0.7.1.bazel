@@ -50,6 +50,7 @@ rust_library(
         ],
     }),
     crate_features = [
+        "with-alloc",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -81,7 +82,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.6.2",
+    version = "0.7.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [

@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Zlib OR Apache-2.0
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "miniz_oxide",
+    name = "flate2",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,6 +50,9 @@ rust_library(
         ],
     }),
     crate_features = [
+        "default",
+        "miniz_oxide",
+        "rust_backend",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -81,11 +84,23 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.6.2",
+    version = "1.0.26",
     deps = [
     ] + select_with_or({
+        # cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))
+        (
+            "@rules_rust//rust/platform:wasm32-unknown-unknown",
+        ): [
+            # Target Deps
+            "@crates_vendor__miniz_oxide-0.7.1//:miniz_oxide",
+
+            # Common Deps
+            "@crates_vendor__crc32fast-1.3.2//:crc32fast",
+            "@crates_vendor__miniz_oxide-0.7.1//:miniz_oxide",
+        ],
         "//conditions:default": [
-            "@crates_vendor__adler-1.0.2//:adler",
+            "@crates_vendor__crc32fast-1.3.2//:crc32fast",
+            "@crates_vendor__miniz_oxide-0.7.1//:miniz_oxide",
         ],
     }),
 )

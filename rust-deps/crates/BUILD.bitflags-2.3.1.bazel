@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  #
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "lolhtml",
+    name = "bitflags",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -56,7 +56,7 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,14 +81,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.0",
+    version = "2.3.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
-            "@crates_vendor__libc-0.2.140//:libc",
-            "@crates_vendor__lol_html-0.3.1//:lol_html",
-            "@crates_vendor__thiserror-1.0.39//:thiserror",
         ],
     }),
 )

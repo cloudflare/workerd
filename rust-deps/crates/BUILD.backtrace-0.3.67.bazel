@@ -94,10 +94,10 @@ rust_library(
             "@crates_vendor__addr2line-0.19.0//:addr2line",
             "@crates_vendor__backtrace-0.3.67//:build_script_build",
             "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__libc-0.2.140//:libc",
+            "@crates_vendor__libc-0.2.144//:libc",
             "@crates_vendor__miniz_oxide-0.6.2//:miniz_oxide",
             "@crates_vendor__object-0.30.3//:object",
-            "@crates_vendor__rustc-demangle-0.1.21//:rustc_demangle",
+            "@crates_vendor__rustc-demangle-0.1.23//:rustc_demangle",
         ],
     }),
 )

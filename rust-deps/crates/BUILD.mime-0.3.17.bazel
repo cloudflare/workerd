@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # BSD-3-Clause
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "lol_html",
+    name = "mime",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -56,7 +56,7 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,21 +81,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.1",
+    version = "0.3.17",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__bitflags-1.3.2//:bitflags",
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__cssparser-0.27.2//:cssparser",
-            "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
-            "@crates_vendor__hashbrown-0.12.3//:hashbrown",
-            "@crates_vendor__lazy_static-1.4.0//:lazy_static",
-            "@crates_vendor__lazycell-1.3.0//:lazycell",
-            "@crates_vendor__memchr-2.5.0//:memchr",
-            "@crates_vendor__safemem-0.3.3//:safemem",
-            "@crates_vendor__selectors-0.22.0//:selectors",
-            "@crates_vendor__thiserror-1.0.39//:thiserror",
         ],
     }),
 )

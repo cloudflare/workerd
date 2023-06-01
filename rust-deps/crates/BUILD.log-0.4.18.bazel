@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "anyhow",
+    name = "log",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,15 +54,13 @@ rust_library(
         ],
     }),
     crate_features = [
-        "default",
-        "std",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -87,18 +85,18 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.69",
+    version = "0.4.18",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__anyhow-1.0.69//:build_script_build",
+            "@crates_vendor__log-0.4.18//:build_script_build",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "anyhow_build_script",
+    name = "log_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -117,8 +115,6 @@ cargo_build_script(
         ],
     }),
     crate_features = [
-        "default",
-        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -126,7 +122,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -155,7 +151,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.69",
+    version = "0.4.18",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
@@ -171,7 +167,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "anyhow_build_script",
+    actual = "log_build_script",
     tags = [
         "manual",
     ],

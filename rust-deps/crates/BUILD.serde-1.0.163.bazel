@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "proc_macro2",
+    name = "serde",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -55,17 +55,20 @@ rust_library(
     }),
     crate_features = [
         "default",
-        "proc-macro",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__serde_derive-1.0.163//:serde_derive",
         ],
     }),
     rustc_env = {
@@ -87,19 +90,18 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.52",
+    version = "1.0.163",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.52//:build_script_build",
-            "@crates_vendor__unicode-ident-1.0.8//:unicode_ident",
+            "@crates_vendor__serde-1.0.163//:build_script_build",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "proc-macro2_build_script",
+    name = "serde_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -119,7 +121,9 @@ cargo_build_script(
     }),
     crate_features = [
         "default",
-        "proc-macro",
+        "derive",
+        "serde_derive",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -127,7 +131,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -156,7 +160,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.52",
+    version = "1.0.163",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
@@ -172,7 +176,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "proc-macro2_build_script",
+    actual = "serde_build_script",
     tags = [
         "manual",
     ],

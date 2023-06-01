@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_proc_macro(
-    name = "cxxbridge_macro",
+    name = "serde_derive",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,14 @@ rust_proc_macro(
         ],
     }),
     crate_features = [
+        "default",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,13 +82,13 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.92",
+    version = "1.0.163",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.52//:proc_macro2",
-            "@crates_vendor__quote-1.0.26//:quote",
-            "@crates_vendor__syn-1.0.109//:syn",
+            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
+            "@crates_vendor__quote-1.0.28//:quote",
+            "@crates_vendor__syn-2.0.18//:syn",
         ],
     }),
 )
