@@ -106,7 +106,14 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     };
 
     if (response.statusCode >= 400) {
-      auto error = KJ_REQUIRE_NONNULL(response.headers->get(headerIds.cfR2ErrorHeader));
+      // Error responses should have a cfR2ErrorHeader but don't always. If there
+      // isn't one, we'll use a generic error.
+      if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+        LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
+                         response.statusCode);
+      }
+      auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
+          "Unspecified error"_kj);
       R2Result result = {
         .httpStatus = response.statusCode,
         .toThrow = toError(response.statusCode, error),
@@ -240,8 +247,15 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
       return resp.then([&context](kj::HttpClient::Response&& response) mutable
         -> kj::Promise<R2Result> {
         if (response.statusCode >= 400) {
-          auto error = KJ_ASSERT_NONNULL(response.headers->get(
-              context.getHeaderIds().cfR2ErrorHeader));
+          // Error responses should have a cfR2ErrorHeader but don't always. If there
+          // isn't one, we'll use a generic error.
+          auto& headerIds = context.getHeaderIds();
+          if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+            LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
+                            response.statusCode);
+          }
+          auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
+              "Unspecified error"_kj);
 
           return R2Result {
             .httpStatus = response.statusCode,
