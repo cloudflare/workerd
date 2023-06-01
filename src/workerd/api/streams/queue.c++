@@ -54,10 +54,6 @@ ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
   return QueueEntry { .entry = entry->clone(js) };
 }
 
-void ValueQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {
-  if (entry) visitor.visit(*entry);
-}
-
 #pragma endregion ValueQueue::QueueEntry
 
 #pragma region ValueQueue::Consumer
@@ -186,9 +182,10 @@ void ValueQueue::handleRead(
         return;
       }
       KJ_CASE_ONEOF(entry, QueueEntry) {
-        request.resolve(js, entry.entry->getValue(js));
-        state.queueTotalSize -= entry.entry->getSize();
+        auto freed = kj::mv(entry);
         state.buffer.pop_front();
+        request.resolve(js, freed.entry->getValue(js));
+        state.queueTotalSize -= freed.entry->getSize();
         return;
       }
     }
@@ -328,8 +325,6 @@ ByteQueue::QueueEntry ByteQueue::QueueEntry::clone(jsg::Lock& js) {
     .offset = offset,
   };
 }
-
-void ByteQueue::QueueEntry::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma endregion ByteQueue::QueueEntry
 

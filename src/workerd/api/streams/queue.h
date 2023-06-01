@@ -480,11 +480,6 @@ public:
         visitor.visit(errored);
       }
       KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& entry : ready.buffer) {
-          KJ_IF_MAYBE(e, entry.template tryGet<QueueEntry>()) {
-            visitor.visit(*e);
-          }
-        }
         for (auto& req : ready.readRequests) {
           visitor.visit(req.resolver);
         }
@@ -616,8 +611,6 @@ public:
   struct QueueEntry {
     kj::Own<Entry> entry;
     QueueEntry clone(jsg::Lock& js);
-
-    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer final {
@@ -809,8 +802,6 @@ public:
     size_t offset;
 
     QueueEntry clone(jsg::Lock& js);
-
-    void visitForGc(jsg::GcVisitor& visitor);
   };
 
   class Consumer {
