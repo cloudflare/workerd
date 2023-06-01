@@ -15,17 +15,17 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_library",
+    "rust_proc_macro",
 )
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT/Apache-2.0
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_library(
-    name = "rustc_demangle",
+rust_proc_macro(
+    name = "thiserror_impl",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -56,7 +56,7 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,10 +81,13 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.21",
+    version = "1.0.40",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
+            "@crates_vendor__quote-1.0.28//:quote",
+            "@crates_vendor__syn-2.0.18//:syn",
         ],
     }),
 )

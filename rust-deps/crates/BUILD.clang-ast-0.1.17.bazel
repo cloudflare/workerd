@@ -15,7 +15,7 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_proc_macro",
+    "rust_library",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -24,8 +24,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_proc_macro(
-    name = "thiserror_impl",
+rust_library(
+    name = "clang_ast",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -81,13 +81,11 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.39",
+    version = "0.1.17",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.52//:proc_macro2",
-            "@crates_vendor__quote-1.0.26//:quote",
-            "@crates_vendor__syn-1.0.109//:syn",
+            "@crates_vendor__serde-1.0.163//:serde",
         ],
     }),
 )

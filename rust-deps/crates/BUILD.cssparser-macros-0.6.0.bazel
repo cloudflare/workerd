@@ -85,7 +85,7 @@ rust_proc_macro(
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__quote-1.0.26//:quote",
+            "@crates_vendor__quote-1.0.28//:quote",
             "@crates_vendor__syn-1.0.109//:syn",
         ],
     }),

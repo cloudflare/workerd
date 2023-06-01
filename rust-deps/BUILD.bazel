@@ -109,7 +109,7 @@ crates_vendor(
         ),
         "lolhtml": crate.spec(
             git = "https://github.com/cloudflare/lol-html.git",
-            rev = "e0cc5131055033e443df1e756700b3b914b4c380",
+            rev = "a0053299f6809c2fa4e3af35a4f64bd8069952ba",
         ),
 
         # Used for RTTI parameter extraction
