@@ -12,7 +12,9 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        # TODO(soon): Using windows-2019 as build is broken on windows-latest runner, develop a
+        # fix and go back to the latest version
+        os: [ubuntu-22.04, macos-latest, windows-2019]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v2
