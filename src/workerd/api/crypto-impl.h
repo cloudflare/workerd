@@ -100,7 +100,7 @@ public:
   // C++ API
 
   using ImportFunc = kj::Own<Impl>(
-      kj::StringPtr normalizedName, kj::StringPtr format,
+      jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
       SubtleCrypto::ImportKeyData keyData,
       SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);
@@ -116,7 +116,7 @@ public:
   static ImportFunc importRsaRaw;
 
   using GenerateFunc = kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>(
-      kj::StringPtr normalizedName,
+      jsg::Lock& js, kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages);
 

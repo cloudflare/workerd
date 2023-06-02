@@ -323,4 +323,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Response APIs and compress or decompress data accordingly as with gzip.
   # Note that brotli support also requires backend support from the production environment which
   # may not be available at this time, limiting the functionality of the flag.
+
+  strictCrypto @33 :Bool
+      $compatEnableFlag("strict_crypto_checks")
+      $compatDisableFlag("no_strict_crypto_checks")
+      $compatEnableDate("2023-08-01");
+  # Perform additional error checking in the Web Crypto API to conform with the specification as
+  # well as reject key parameters that may be unsafe based on the modulus or key length.
 }

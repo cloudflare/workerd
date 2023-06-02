@@ -14,6 +14,7 @@
 #include <kj/function.h>
 #include <type_traits>
 #include "util.h"
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 namespace {
@@ -386,12 +387,6 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
           "Multi-prime private keys not supported.");
     } else {
       // Public key.
-      // TODO(soon): The usage set is required to be empty for public ECDH keys, which is not being
-      // checked for currently. See if any code relies on the current behavior and require an empty
-      // an empty set otherwise (i.e. change to allowedUsages = {}. Same applies
-      // for spki-based and raw ECDH key imports.
-      JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
-            "importing jwk-based public ECDH key with non-empty usages");
       keyType = "public";
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
@@ -489,7 +484,9 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
       JSG_FAIL_REQUIRE(DOMDataError, "Invalid ", keyBytes.end() - ptr,
           " trailing bytes after SPKI input.");
     }
-    // usages must be empty for ECDH public keys.
+
+    // usages must be empty for ECDH public keys, so use CryptoKeyUsageSet() when validating the
+    // usage set.
     usages =
         CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                     keyUsages, allowedUsages & (normalizedName == "ECDH" ?
@@ -940,34 +937,20 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
 
 namespace {
 
-void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
-    bool warnImport = false) {
+void validateRsaParams(jsg::Lock& js, int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
+                       bool isImport = false) {
   // The W3C standard itself doesn't describe any parameter validation but the conformance tests
   // do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
   // with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
   // library might be expected to handle such cases on its own, no?).
 
-  // TODO(soon): We should also enforce these limitations on imported keys. To see if this breaks
-  // existing scripts only provide a warning in sentry for now.
-  if (warnImport) {
-    JSG_WARN_ONCE_IF(modulusLength % 8 || modulusLength < 256 || modulusLength > 16384,
-        "Imported RSA key has invalid modulus length ", modulusLength, ".");
-    KJ_IF_MAYBE(v, fromBignum<unsigned>(publicExponent)) {
-      JSG_WARN_ONCE_IF(*v != 3 && *v != 65537,
-          "Imported RSA key has invalid publicExponent ", *v, ".");
-    } else {
-      JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
-          "got a number larger than 2^32.");
-    }
-    return;
-  }
-
   // Use Chromium's limits for RSA keygen to avoid infinite loops:
   // * Key sizes a multiple of 8 bits.
   // * Key sizes must be in [256, 16k] bits.
-  JSG_REQUIRE(modulusLength % 8 == 0 && modulusLength >= 256 && modulusLength <= 16384,
-      DOMOperationError, "The modulus length must be a multiple of 8 & between "
-      "256 and 16k, but ", modulusLength, " was requested.");
+  auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
+  JSG_REQUIRE(!(strictCrypto || !isImport) || (modulusLength % 8 == 0 && modulusLength >= 256 &&
+      modulusLength <= 16384), DOMOperationError, "The modulus length must be a multiple of 8 and "
+      "between 256 and 16k, but ", modulusLength, " was requested.");
 
   // Now check the public exponent for allow-listed values.
   // First see if we can convert the public exponent to an unsigned number. Unfortunately OpenSSL
@@ -975,8 +958,16 @@ void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
   // Since the problematic BIGNUMs are within the range of an unsigned int (& technicall an
   // unsigned short) we can treat an out-of-range issue as valid input.
   KJ_IF_MAYBE(v, fromBignum<unsigned>(publicExponent)) {
-    JSG_REQUIRE(*v == 3 || *v == 65537, DOMOperationError,
-        "The \"publicExponent\" must be either 3 or 65537, but got ", *v, ".");
+    if (!isImport) {
+      JSG_REQUIRE(*v == 3 || *v == 65537, DOMOperationError,
+          "The \"publicExponent\" must be either 3 or 65537, but got ", *v, ".");
+    } else if (strictCrypto) {
+      // While we have long required the exponent to be 3 or 65537 when generating keys, handle
+      // imported keys more permissively and allow additional exponents that are considered safe
+      // and commonly used.
+      JSG_REQUIRE(*v == 3 || *v == 17 || *v == 37 || *v == 65537, DOMOperationError,
+          "Imported RSA key has invalid publicExponent ", *v, ".");
+    }
   } else {
     JSG_FAIL_REQUIRE(DOMOperationError, "The \"publicExponent\" must be either 3 or 65537, but "
         "got a number larger than 2^32.");
@@ -986,7 +977,7 @@ void validateRsaParams(int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
 } // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
-    kj::StringPtr normalizedName,
+    jsg::Lock& js, kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
 
@@ -1010,18 +1001,20 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
   auto usages = CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::generate,
                                             keyUsages, validUsages);
 
-  validateRsaParams(modulusLength, publicExponent.asPtr());
+  validateRsaParams(js, modulusLength, publicExponent.asPtr());
+  // boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds down to the
+  // closest multiple of 128 bits. This can easily cause confusion when non-standard key sizes are
+  // requested.
+  // The `modulusLength` field of the resulting CryptoKey will be incorrect when the compat flag
+  // is disabled and the key size is rounded down, but since it is not currently used this is
+  // acceptable.
+  JSG_REQUIRE(!(FeatureFlags::get(js).getStrictCrypto() && (modulusLength & 127)), DOMOperationError,
+      "Can't generate key: RSA key size is required to be a multiple of 128");
 
   auto bnExponent = OSSLCALL_OWN(BIGNUM, BN_bin2bn(publicExponent.begin(),
       publicExponent.size(), nullptr), InternalDOMOperationError, "Error setting up RSA keygen.");
 
   auto rsaPrivateKey = OSSL_NEW(RSA);
-  // TODO(later): boringssl silently uses (modulusLength & ~127) for the key size, i.e. it rounds
-  // down to the closest multiple of 128 bits. This can easily cause confusion when non-standard
-  // key sizes are requested. Ideally we would throw an error when trying to create keys where the
-  // size would be rounded down, but this would likely break existing scripts.
-  // The modulusLength field of the resulting CryptoKey will be incorrect when the key size is
-  // rounded down, but since it is not currently used this is acceptable.
   OSSLCALL(RSA_generate_key_ex(rsaPrivateKey, modulusLength, bnExponent.get(), 0));
   auto privateEvpPKey = OSSL_NEW(EVP_PKEY);
   OSSLCALL(EVP_PKEY_set1_RSA(privateEvpPKey.get(), rsaPrivateKey.get()));
@@ -1110,7 +1103,7 @@ kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk) {
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1196,7 +1189,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
-  validateRsaParams(modulusLength, publicExponent, true);
+  validateRsaParams(js, modulusLength, publicExponent, true);
 
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = normalizedName,
@@ -1218,7 +1211,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1267,7 +1260,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
   KJ_ASSERT(BN_bn2bin(e, publicExponent.begin()) == publicExponent.size());
 
   // Validate modulus and exponent, reject imported RSA keys that may be unsafe.
-  validateRsaParams(modulusLength, publicExponent, true);
+  validateRsaParams(js, modulusLength, publicExponent, true);
 
   auto keyAlgorithm = CryptoKey::RsaKeyAlgorithm {
     .name = "RSA-RAW"_kj,
@@ -1693,8 +1686,6 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
   const auto& raw = keyData.get<kj::Array<kj::byte>>();
 
-  JSG_WARN_ONCE_IF(normalizedName == "ECDH" && keyUsages.size(),
-      "importing raw ECDH key with non-empty usages");
   auto usages = CryptoKeyUsageSet::validate(normalizedName,
       CryptoKeyUsageSet::Context::importPublic, keyUsages, allowedUsages);
 
@@ -1837,7 +1828,7 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
-    kj::StringPtr normalizedName,
+    jsg::Lock& js, kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
@@ -1851,7 +1842,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdsa(
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1894,7 +1885,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
 }
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(
-    kj::StringPtr normalizedName,
+    jsg::Lock& js, kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
@@ -1904,7 +1895,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEcdh(
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -1914,16 +1905,19 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
   auto [normalizedNamedCurve, curveId, rsSize] = lookupEllipticCurve(namedCurve);
 
   auto [evpPkey, keyType, usages] = [&, curveId = curveId] {
+    auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
+    auto usageSet = strictCrypto ? CryptoKeyUsageSet() : CryptoKeyUsageSet::derivationKeyMask();
+
     if (format != "raw") {
       return importAsymmetric(
           format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
           [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
         return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
-      }, CryptoKeyUsageSet::derivationKeyMask());
+      }, usageSet);
     } else {
-      return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages,
-          CryptoKeyUsageSet::derivationKeyMask());
+      // The usage set is required to be empty for public ECDH keys, including raw keys.
+      return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages, usageSet);
     }
   }();
 
@@ -2255,7 +2249,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
-    kj::StringPtr normalizedName,
+    jsg::Lock& js, kj::StringPtr normalizedName,
     SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
   auto usages =
@@ -2278,7 +2272,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateEddsa(
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
@@ -2302,8 +2296,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
       }, normalizedName == "X25519" ? CryptoKeyUsageSet::derivationKeyMask() :
          CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
-      return importEllipticRaw(kj::mv(keyData), nid, normalizedName, keyUsages,
-                               normalizedName == "X25519" ? CryptoKeyUsageSet() : CryptoKeyUsageSet::verify());
+      return importEllipticRaw(
+          kj::mv(keyData), nid, normalizedName, keyUsages,
+          normalizedName == "X25519" ? CryptoKeyUsageSet() : CryptoKeyUsageSet::verify());
     }
   }();
 

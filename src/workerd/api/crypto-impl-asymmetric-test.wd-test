@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "crypto-impl-asymmetric-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "crypto-impl-asymmetric-test.js")
+        ],
+        compatibilityDate = "2023-05-18",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      )
+    ),
+  ],
+);
