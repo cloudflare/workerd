@@ -12,7 +12,9 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
+#include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/promise.h>
 #include <v8.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/api/util.h>

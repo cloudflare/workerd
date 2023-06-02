@@ -9,8 +9,6 @@
 #include <unicode/uchar.h>
 #include <algorithm>
 
-#include <workerd/io/io-context.h>
-
 namespace workerd::api {
 
 namespace {

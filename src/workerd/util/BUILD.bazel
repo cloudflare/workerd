@@ -26,7 +26,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
-        "@capnp-cpp//src/kj/compat:kj-tls",
+        "@ssl",
     ],
 )
 

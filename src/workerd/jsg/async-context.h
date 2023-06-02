@@ -5,6 +5,8 @@
 
 #include "jsg.h"
 #include <v8.h>
+#include <kj/table.h>
+#include <kj/hash.h>
 
 namespace workerd::jsg {
 

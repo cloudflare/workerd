@@ -5,6 +5,8 @@
 #pragma once
 
 #include "jsg.h"
+#include "function.h"
+#include "promise.h"
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <workerd/jsg/modules.capnp.h>

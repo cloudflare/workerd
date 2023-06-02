@@ -16,6 +16,8 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/jsg:rtti",
+        "//src/workerd/api:html-rewriter",
+        "//src/workerd/api:r2",
         "@capnp-cpp//src/capnp:capnpc",
     ],
 )

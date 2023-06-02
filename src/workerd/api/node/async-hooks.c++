@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "async-hooks.h"
 #include <kj/vector.h>
+#include <workerd/jsg/resource.h>
 
 namespace workerd::api::node {
 

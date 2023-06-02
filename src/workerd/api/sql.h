@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/iterator.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>

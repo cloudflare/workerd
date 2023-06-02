@@ -1,6 +1,7 @@
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_test.bzl", "wd_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 filegroup(
     name = "srcs",
@@ -8,6 +9,8 @@ filegroup(
         ["**/*.c++"],
         exclude = [
             "**/*test*.c++",
+            "html-rewriter.c++",
+            "r2*.c++",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -17,9 +20,35 @@ filegroup(
     name = "hdrs",
     srcs = glob(
         ["**/*.h"],
-        exclude = ["*test*.h"],
+        exclude = ["*test*.h",  "r2*.h"],
     ),
     visibility = ["//visibility:public"],
+)
+
+# As a step towards modularizing the io library, turn html-rewriter into its own library. Since
+# the server implementation is the only code depending on it, we can compile it on its own, which
+# allows us to not link test targets with the rust dependencies reducing test binary sizes and
+# link times.
+wd_cc_library(
+    name = "html-rewriter",
+    srcs = ["html-rewriter.c++"],
+    hdrs = [":hdrs"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io",
+        "@com_cloudflare_lol_html//:lolhtml",
+    ],
+)
+
+wd_cc_library(
+    name = "r2-api",
+    srcs = ["r2-admin.c++", "r2-bucket.c++", "r2-multipart.c++", "r2-rpc.c++"],
+    hdrs = ["r2-admin.h", "r2-bucket.h", "r2-multipart.h", "r2-rpc.h", "r2.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":r2-api_capnp",
+        "//src/workerd/io",
+    ],
 )
 
 wd_cc_capnp_library(
@@ -38,14 +67,23 @@ wd_cc_capnp_library(
     src = f,
     deps = [
         "//src/workerd/io",
-        "//src/workerd/jsg:rtti",
     ],
 ) for f in glob(
     ["**/*-test.c++"],
     exclude = [
         "node/*-test.c++",
+        "api-rtti-test.c++",
     ],
 )]
+
+kj_test(
+    src = "api-rtti-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg:rtti",
+        ":html-rewriter",
+    ],
+)
 
 kj_test(
     src = "node/buffer-test.c++",

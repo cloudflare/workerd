@@ -4,9 +4,11 @@
 
 #pragma once
 
+#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include "streams.h"
-#include "util.h"
+#include <workerd/jsg/promise.h>
+namespace workerd { namespace api { class ReadableStream; } }
+using kj::byte;
 
 namespace workerd::api {
 

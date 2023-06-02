@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/iterator.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <kj/refcount.h>
 #include <kj/compat/url.h>
