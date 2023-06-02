@@ -281,7 +281,9 @@ public:
       MetaConfiguration&& configuration,
       v8::Isolate::CreateParams createParams = {})
       : IsolateBase(system, kj::mv(createParams)),
-        wrapper(wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration))) {}
+        wrapper(wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration))) {
+          wrapper->initTypeWrapper();
+        }
   // Construct an isolate that requires configuration. `configuration` is a value that all
   // individual wrappers' configurations must be able to be constructed from. For example, if all
   // wrappers use the same configuration type, then `MetaConfiguration` should just be that type.
