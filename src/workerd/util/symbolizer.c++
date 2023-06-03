@@ -10,6 +10,7 @@
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include "dlfcn.h"
+#include <workerd/util/sentry.h>
 
 // Stack trace symbolizer. To use link this source to the binary.
 // Current implementation shells out to $LLVM_SYMBOLIZER if it is defined.
@@ -21,7 +22,7 @@ namespace {
 struct Subprocess {
   // A simple subprocess wrapper with in/out pipes.
 
-  static kj::Maybe<Subprocess> exec(kj::StringPtr cmd) {
+  static kj::Maybe<Subprocess> exec(const char* argv[]) noexcept {
     // Execute command with a shell.
     // Since this is used during error handling we do not to try to free resources in
     // case of errors.
@@ -61,7 +62,12 @@ struct Subprocess {
         _exit(3 * errno);
       }
 
-      execl("/bin/sh", "sh", "-c", cmd.cStr(), nullptr);
+      KJ_SYSCALL_HANDLE_ERRORS(execvp(argv[0], const_cast<char**>(argv))) {
+        case ENOENT:
+          _exit(2);
+        default:
+          KJ_FAIL_SYSCALL("execvp", error);
+      }
       _exit(1);
     }
   }
@@ -84,11 +90,28 @@ struct Subprocess {
 String stringifyStackTrace(ArrayPtr<void* const> trace) {
   const char* llvmSymbolizer = getenv("LLVM_SYMBOLIZER");
   if (llvmSymbolizer == nullptr) {
-    return kj::str("\n$LLVM_SYMBOLIZER not defined");
+    LOG_WARNING_ONCE("Not symbolizing stack traces because $LLVM_SYMBOLIZER is not set. "
+        "To symbolize stack traces, set $LLVM_SYMBOLIZER to the location of the llvm-symbolizer "
+        "binary. When running tests under bazel, use `--test_env=LLVM_SYMBOLIZER=<path>`.");
+    return nullptr;
   }
 
-  auto cmd = kj::str(llvmSymbolizer, " --pretty-print --relativenames");
-  KJ_IF_MAYBE(subprocess, Subprocess::exec(cmd)) {
+  const char* argv[] = {
+    llvmSymbolizer,
+    "--pretty-print",
+    "--relativenames",
+    nullptr
+  };
+
+  bool disableSigpipeOnce KJ_UNUSED = []() {
+    // Just in case for some reason SIGPIPE is not already disabled in this process, disable it
+    // now, otherwise the below will fail in the case that llvm-symbolizer is not found. Note
+    // that if the process creates a kj::UnixEventPort, then SIGPIPE will already be disabled.
+    signal(SIGPIPE, SIG_IGN);
+    return false;
+  }();
+
+  KJ_IF_MAYBE(subprocess, Subprocess::exec(argv)) {
     // write addresses as "CODE <file_name> <hex_address>" lines.
     auto addrs = strArray(KJ_MAP(addr, trace) {
       Dl_info info;
@@ -101,8 +124,11 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
       }
     }, "\n");
     if (write(subprocess->in, addrs.cStr(), addrs.size()) != addrs.size()) {
-      KJ_LOG(ERROR, "write error", strerror(errno));
-      return nullptr;
+      // Ignore EPIPE, which means the process exited early. We'll deal with it below, presumably.
+      if (errno != EPIPE) {
+        KJ_LOG(ERROR, "write error", strerror(errno));
+        return nullptr;
+      }
     }
     close(subprocess->in);
 
@@ -123,7 +149,14 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
     int status = subprocess->closeAndWait();
     if (WIFEXITED(status)) {
       if (WEXITSTATUS(status) != 0) {
-        KJ_LOG(ERROR, "bad exit code", WEXITSTATUS(status));
+        if (WEXITSTATUS(status) == 2) {
+          LOG_WARNING_ONCE(kj::str(llvmSymbolizer, " was not found. "
+              "To symbolize stack traces, install it in your $PATH or set $LLVM_SYMBOLIZER to the "
+              "location of the binary. When running tests under bazel, use "
+              "`--test_env=LLVM_SYMBOLIZER=<path>`."));
+        } else {
+          KJ_LOG(ERROR, "bad exit code", WEXITSTATUS(status));
+        }
         return nullptr;
       }
     } else {

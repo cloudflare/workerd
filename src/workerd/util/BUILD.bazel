@@ -64,6 +64,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
+        ":sentry",
     ],
     alwayslink = 1,
     target_compatible_with = select({
