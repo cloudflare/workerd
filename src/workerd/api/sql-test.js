@@ -194,6 +194,28 @@ async function test(storage) {
   // Should match results in the format "2023-06-01 15:30:03"
   assert.match(resultTimestamp[0]["current_timestamp"], /^\d{4}-\d{2}-\d{2}\s{1}\d{2}:\d{2}:\d{2}$/)
   
+  // Can rename tables
+  sql.exec(`
+    CREATE TABLE beforerename (
+      id INTEGER
+    );
+  `)
+  sql.exec(`
+    ALTER TABLE beforerename
+    RENAME TO afterrename;
+  `)
+  
+  // Can rename columns within a table
+  sql.exec(`
+    CREATE TABLE renamecolumn (
+      meta TEXT
+     );
+  `);
+  sql.exec(`
+    ALTER TABLE renamecolumn
+    RENAME COLUMN meta TO metadata
+  `);
+  
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
