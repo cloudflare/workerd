@@ -249,6 +249,9 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "highlight"_kj,
   "bm25"_kj,
   "snippet"_kj,
+    
+  // https://www.sqlite.org/lang_altertable.html
+  "sqlite_rename_table"_kj,
 };
 
 enum class PragmaSignature {
