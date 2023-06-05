@@ -1,4 +1,4 @@
-From a18ca013187714f2f1c7ae630fcedf1eb8579a4f Mon Sep 17 00:00:00 2001
+From 476c6a6b8bb1cc1db9b2152e1320b4eec3103e5b Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 8 Mar 2023 16:15:31 -0500
 Subject: Fix v8 code_generator imports
@@ -8,10 +8,10 @@ Subject: Fix v8 code_generator imports
  1 file changed, 5 insertions(+)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 83cb5a4d6b6fd19a83d863d7253c230109621d85..366312ce0735989b54090f53b88c035c239cd7b6 100644
+index dcc64bc2fdafc6c87459798245dbb6de84470a81..9d1a83a1ee1b9184daa6f9b1c48bdd28bac082f9 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3592,6 +3592,11 @@ py_binary(
+@@ -3604,6 +3604,11 @@ py_binary(
      deps = [
          requirement("jinja2"),
      ],

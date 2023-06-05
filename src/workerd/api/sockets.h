@@ -6,10 +6,11 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
-#include "http.h"
-
+#include "streams.h"
 
 namespace workerd::api {
+
+class Fetcher;
 
 enum class SecureTransportKind {
   OFF, // plain-text
@@ -22,6 +23,8 @@ struct SocketAddress {
   uint16_t port;
   JSG_STRUCT(hostname, port);
 };
+
+typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
 
 struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;

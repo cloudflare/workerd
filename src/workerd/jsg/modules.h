@@ -612,6 +612,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   auto registry = ModuleRegistry::from(lock);
   auto& wrapper = TypeWrapper::from(isolate);
 
+  // TODO(cleanup): This could probably be simplified using jsg::Promise
   const auto makeRejected = [&](auto reason) {
     v8::Local<v8::Promise::Resolver> resolver;
     if (v8::Promise::Resolver::New(context).ToLocal(&resolver) &&
@@ -629,20 +630,53 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   // Importantly, we defensively catch any synchronous errors here and handle them
   // explicitly as rejected Promises.
   v8::TryCatch tryCatch(isolate);
+  auto& js = jsg::Lock::from(isolate);
+
+  // TODO(cleanup): If kj::Path::parse or kj::Path::eval fail it is most likely the application's
+  // fault. We'll return a "No such module" error. We could handle this more gracefully
+  // if kj::Path had tryParse()/tryEval() variants.
+
+  auto maybeReferrerPath = ([&]() -> kj::Maybe<kj::Path> {
+    try {
+      return kj::Path::parse(kj::str(resource_name));
+    } catch (kj::Exception& ex) {
+      return nullptr;
+    }
+  })();
+
+  auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
+    KJ_IF_MAYBE(referrerPath, maybeReferrerPath) {
+      try {
+        return referrerPath->parent().eval(kj::str(specifier));
+      } catch (kj::Exception& ex) {
+        return nullptr;
+      }
+    }
+    return nullptr;
+  })();
+
+  if (maybeReferrerPath == nullptr || maybeSpecifierPath == nullptr) {
+    // If either of these are nullptr it means the kj::Path::parse or
+    // kj::Path::eval failed. We want to handle these as No such module
+    // errors.
+    return makeRejected(js.v8Error(kj::str("No such module \"", specifier, "\"")));
+  }
+
+  auto& referrerPath = KJ_ASSERT_NONNULL(maybeReferrerPath);
+  auto& specifierPath = KJ_ASSERT_NONNULL(maybeSpecifierPath);
+
   try {
-    auto& js = jsg::Lock::from(isolate);
-    auto referrerPath = kj::Path::parse(kj::str(resource_name));
-    auto specifierPath = referrerPath.parent().eval(kj::str(specifier));
-    // TODO(soon): If kj::Path::parse fails it is most likely the application's fault and yet
-    // we end up throwing an "internal error" here. We could handle this more gracefully
-    // (and correctly) if kj::Path had a tryEval() variant.
     return wrapper.wrap(context, nullptr,
         registry->resolveDynamicImport(js, specifierPath, referrerPath));
   } catch (JsExceptionThrown&) {
-    if (!tryCatch.CanContinue()) {
+    // If the tryCatch.Exception().IsEmpty() here is true, no JavaScript error
+    // was scheduled which can happen in a few edge cases. Treat it as if
+    // CanContinue() is false.
+    if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
       // There's nothing else we can reasonably do.
       return v8::MaybeLocal<v8::Promise>();
     }
+
     return makeRejected(tryCatch.Exception());
   } catch (kj::Exception& ex) {
     return makeRejected(makeInternalError(isolate, kj::mv(ex)));

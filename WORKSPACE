@@ -35,11 +35,16 @@ rules_foreign_cc_dependencies()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "d51c3ca9062d4fbd64f66722b08aafe18976aff3e9965aa0958a0afd4323d4b8",
-    strip_prefix = "capnproto-capnproto-b2afb7f/c++",
+    sha256 = "dfca9b050b0e3b381c39f44a998cbb6885b36ab650bc041b6ade55b11473e0d4",
+    strip_prefix = "capnproto-capnproto-6e26d26/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/b2afb7f8fe393466a38e2fd2ad98482c34aafcee"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/6e26d260d1d91e0465ca12bbb5230a1dfa28f00d"],
 )
+
+# Fetch brotli via capnproto. While workerd does not use brotli directly, this is required to work
+# around bazel shenanigans.
+load("@capnp-cpp//:build/load_br.bzl", "load_brotli")
+load_brotli()
 
 http_archive(
     name = "ssl",
@@ -263,8 +268,8 @@ npm_repositories()
 git_repository(
     name = "v8",
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    commit = "68903e142b1a554df821a78a420b7777aadb9cc9",
-    shallow_since = "1685092309 +0000",
+    commit = "84b0aff45ebe07dce522d2c90b42074b25b60927",
+    shallow_since = "1685722300 +0000",
     patch_args = [ "-p1" ],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -277,15 +282,14 @@ git_repository(
         "//:patches/v8/0008-Disable-bazel-whole-archive-build.patch",
         "//:patches/v8/0009-Make-v8-Locker-automatically-call-isolate-Enter.patch",
         "//:patches/v8/0010-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
-	"//:patches/v8/0011-Cherry-pick-to-fix-mksnapshot-on-OS-X-ARM.patch",
     ],
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "d8daa943f64cd5dd2a55e9baf2e655ab4bfa5ae9",
-    shallow_since = "1680552685 +0000",
+    commit = "a2961dc659b4ae847a9c6120718cc2517ee57d9e",
+    shallow_since = "1683080067 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
     patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ],
     patch_cmds_win = [ "Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item" ],

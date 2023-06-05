@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "http.h"
+#include "sockets.h"
 #include "system-streams.h"
 #include "util.h"
+#include "queue.h"
 #include <kj/encoding.h>
 #include <kj/compat/url.h>
 #include <kj/memory.h>
@@ -1283,7 +1285,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader fla
 
 kj::Promise<DeferredProxy<void>> Response::send(
     jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags) {
   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1351,7 +1353,7 @@ kj::Promise<DeferredProxy<void>> Response::send(
     }
     return wsPromise;
   } else KJ_IF_MAYBE(jsBody, getBody()) {
-    auto encoding = getContentEncoding(context, outHeaders, bodyEncoding);
+    auto encoding = getContentEncoding(context, outHeaders, flags, bodyEncoding);
     auto maybeLength = (*jsBody)->tryGetLength(encoding);
     auto stream = newSystemStream(
         outer.send(statusCode, statusText, outHeaders, maybeLength),
@@ -1806,7 +1808,7 @@ jsg::Ref<Response> makeHttpResponse(
   kj::Maybe<Body::ExtractedBody> responseBody = nullptr;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
     responseBody = Body::ExtractedBody(jsg::alloc<ReadableStream>(context,
-        newSystemStream(kj::mv(body), getContentEncoding(context, headers, bodyEncoding))));
+        newSystemStream(kj::mv(body), getContentEncoding(context, headers, flags, bodyEncoding))));
   }
 
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list

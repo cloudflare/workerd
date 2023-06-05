@@ -872,7 +872,9 @@ public:
 
   template <typename MetaConfiguration>
   ResourceWrapper(MetaConfiguration&& configuration)
-      : configuration(kj::fwd<MetaConfiguration>(configuration)) {
+      : configuration(kj::fwd<MetaConfiguration>(configuration)) { }
+
+  inline void initTypeWrapper() {
     static_cast<TypeWrapper&>(*this).resourceTypeMap.insert(typeid(T),
         [](TypeWrapper& wrapper, v8::Isolate* isolate)
         -> typename DynamicResourceTypeMap<TypeWrapper>::DynamicTypeInfo {

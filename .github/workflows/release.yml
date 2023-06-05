@@ -11,11 +11,11 @@ jobs:
       version: ${{ steps.echo.outputs.version }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
       - name: Cache
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
           key: capnp-cache
@@ -28,13 +28,15 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        # TODO(soon): Using windows-2019 as build is broken on windows-latest runner, develop a
+        # fix and go back to the latest version
+        os: [ubuntu-22.04, macos-latest, windows-2019]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Cache
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache

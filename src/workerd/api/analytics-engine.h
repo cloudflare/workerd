@@ -11,9 +11,6 @@
 
 namespace workerd::api {
 
-using kj::byte;
-using kj::uint;
-
 class AnalyticsEngine: public jsg::Object {
   // Analytics Engine is a tool for customers to get telemetry about anything
   // using Workers. The data points gathered from the edge are stored into

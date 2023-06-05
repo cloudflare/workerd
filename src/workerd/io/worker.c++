@@ -8,6 +8,7 @@
 #include "actor-cache.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
 #include <workerd/jsg/async-context.h>
@@ -18,6 +19,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <capnp/compat/json.h>
 #include <kj/compat/gzip.h>
+#include <kj/compat/brotli.h>
 #include <kj/encoding.h>
 #include <kj/filesystem.h>
 #include <kj/map.h>
@@ -2554,7 +2556,7 @@ void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
 
 // =======================================================================================
 
-struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
+struct Worker::Actor::Impl {
   Actor::Id actorId;
   MakeStorageFunc makeStorage;
 
@@ -2656,20 +2658,38 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
   kj::Maybe<uint16_t> hibernationEventType;
   kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
-  struct Alarm {
-    kj::Promise<void> alarmTask;
-    kj::ForkedPromise<WorkerInterface::AlarmResult> alarm;
-    kj::Own<kj::PromiseFulfiller<WorkerInterface::AlarmResult>> fulfiller;
+  struct ScheduledAlarm {
+    ScheduledAlarm(kj::Date scheduledTime, kj::PromiseFulfillerPair<AlarmResult> pf)
+      : scheduledTime(scheduledTime), resultFulfiller(kj::mv(pf.fulfiller)),
+        resultPromise(pf.promise.fork()) {}
+    KJ_DISALLOW_COPY(ScheduledAlarm);
+    ScheduledAlarm(ScheduledAlarm&&) = default;
+    ~ScheduledAlarm() noexcept(false) {}
+
     kj::Date scheduledTime;
+    AlarmFulfiller resultFulfiller;
+    kj::ForkedPromise<AlarmResult> resultPromise;
+    kj::Promise<void> cleanupPromise =
+        resultPromise.addBranch().then([](AlarmResult&&){}, [](kj::Exception&&){});
+    // The first thing we do after we get a result should be to remove the running alarm (if we got
+    // that far). So we grab the first branch now and ignore any results, before anyone else has a
+    // chance to do so.
   };
-
-  struct RunningAlarm : public Alarm {
-    kj::Maybe<Alarm> queuedAlarm;
+  struct RunningAlarm {
+    kj::Date scheduledTime;
+    kj::ForkedPromise<AlarmResult> resultPromise;
   };
+  kj::Maybe<ScheduledAlarm> maybeScheduledAlarm;
+  // If valid, we have an alarm invocation that has not yet received an `AlarmFulfiller` and thus
+  // is either waiting for a running alarm or its scheduled time.
 
-  kj::TaskSet deletedAlarmTasks;
-  kj::Maybe<RunningAlarm> runningAlarm;
-  // Used to handle deduplication of alarm requests
+  kj::Maybe<RunningAlarm> maybeRunningAlarm;
+  // If valid, we have an alarm invocation that has received an `AlarmFulfiller` and is currently
+  // considered running. This alarm is no longer cancellable.
+
+  kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
+  // This is a forked promise so that we can schedule and then cancel multiple alarms while an alarm
+  // is running.
 
   Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, MakeActorCacheFunc makeActorCache,
@@ -2686,8 +2706,7 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
         shutdownPromise(paf.promise.fork()),
         shutdownFulfiller(kj::mv(paf.fulfiller)),
         hibernationManager(kj::mv(manager)),
-        hibernationEventType(kj::mv(hibernationEventType)),
-        deletedAlarmTasks(*this) {
+        hibernationEventType(kj::mv(hibernationEventType)) {
     v8::Isolate* isolate = lock.getIsolate();
     v8::HandleScope scope(isolate);
     v8::Context::Scope contextScope(lock.getContext());
@@ -2696,10 +2715,6 @@ struct Worker::Actor::Impl final: public kj::TaskSet::ErrorHandler {
     }
 
     actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
-  }
-
-  void taskFailed(kj::Exception&& e) override {
-    LOG_EXCEPTION("deletedAlarmTaskFailed", e);
   }
 };
 
@@ -2953,89 +2968,81 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
   maybeAlarmPreviewTask = retry();
 }
 
-kj::Promise<WorkerInterface::AlarmResult> Worker::Actor::dedupAlarm(
-    kj::Date scheduledTime, kj::Function<kj::Promise<WorkerInterface::AlarmResult>()> func) {
-  // We want to de-duplicate alarm requests as follows:
-  // - An alarm must not be canceled once it is started, UNLESS the whole actor is shut down.
-  // - If multiple alarm invocations arrive with the same scheduled time, we only run one.
-  // - If requests have different times, we don't want them to overlap, so we queue the next
-  //   request.
-  // - However, we queue no more than one request. If another one (with yet another different
-  //   scheduled time) arrives while we still have one running and one queued, we discard the
-  //   previous queued request.
-
-  auto runAlarmImpl = [this, func = kj::mv(func)](auto& fulfiller) mutable -> kj::Promise<void> {
-    return func().then([&](auto result) mutable {
-      fulfiller.fulfill(kj::mv(result));
-    }, [&](kj::Exception&& e) {
-      fulfiller.reject(kj::mv(e));
-    }).then([this]() {
-      auto& running = KJ_ASSERT_NONNULL(impl->runningAlarm);
-
-      // We can't overwrite runningAlarm before moving ourselves out of it, as a promise cannot
-      // delete itself.
-      impl->deletedAlarmTasks.add(kj::mv(running.alarmTask));
-
-      impl->runningAlarm = running.queuedAlarm.map([](auto& alarm) -> Impl::RunningAlarm {
-        return Impl::RunningAlarm { Impl::Alarm { kj::mv(alarm) } };
-      });
-    }).eagerlyEvaluate([](kj::Exception&& e) {
-      LOG_EXCEPTION("runQueuedAlarm", e);
-    });
-  };
-
-  auto makeQueuedAlarm = [&, scheduledTime](auto runningProm) mutable {
-    auto [prom, fulfiller] = kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>();
-    auto& fulfillerRef = *fulfiller;
-
-    return Impl::Alarm {
-      runningProm.then([runAlarmImpl = kj::mv(runAlarmImpl), &fulfillerRef]() mutable {
-        return runAlarmImpl(fulfillerRef);
-      }),
-      prom.fork(),
-      kj::mv(fulfiller),
-      scheduledTime
-    };
-  };
-
-  KJ_IF_MAYBE(r, impl->runningAlarm) {
-    if (r->scheduledTime == scheduledTime) {
-      return r->alarm.addBranch();
-    } else KJ_IF_MAYBE(q, r->queuedAlarm) {
-      if (q->scheduledTime == scheduledTime) {
-        return q->alarm.addBranch();
-      } else {
-        // cancel the old invocations
-        q->fulfiller->fulfill(WorkerInterface::AlarmResult {
-          .retry = false,
-          .outcome = EventOutcome::CANCELED
-        });
-
-        // now we can replace the queued alarm with a new one. we exclusiveJoin with the paf promise
-        // to allow for future overwrites
-        return r->queuedAlarm
-          .emplace(makeQueuedAlarm(r->alarm.addBranch().ignoreResult()))
-          .alarm.addBranch();
-      }
-    } else {
-      // there's not a queued alarm already, so we're safe to just go ahead and set it.
-      return r->queuedAlarm
-        .emplace(makeQueuedAlarm(r->alarm.addBranch().ignoreResult()))
-        .alarm.addBranch();
+auto Worker::Actor::getAlarm(kj::Date scheduledTime) -> kj::Maybe<kj::Promise<AlarmResult>> {
+  KJ_IF_MAYBE(runningAlarm, impl->maybeRunningAlarm) {
+    if (runningAlarm->scheduledTime == scheduledTime) {
+      // The running alarm has the same time, we can just wait for it.
+      return runningAlarm->resultPromise.addBranch();
     }
-  } else {
-    auto [prom, fulfiller] = kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>();
-    auto& fulfillerRef = *fulfiller;
-    auto& running = impl->runningAlarm.emplace(Impl::RunningAlarm {
-      Impl::Alarm {
-        runAlarmImpl(fulfillerRef),
-        prom.fork(),
-        kj::mv(fulfiller),
-        scheduledTime
-      }
-    });
-    return running.alarm.addBranch();
   }
+
+  KJ_IF_MAYBE(scheduledAlarm, impl->maybeScheduledAlarm) {
+    if (scheduledAlarm->scheduledTime == scheduledTime) {
+      // The scheduled alarm has the same time, we can just wait for it.
+      return scheduledAlarm->resultPromise.addBranch();
+    }
+  }
+
+  return nullptr;
+}
+
+auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<ScheduleAlarmResult> {
+  KJ_IF_MAYBE(runningAlarm, impl->maybeRunningAlarm) {
+    if (runningAlarm->scheduledTime == scheduledTime) {
+      // The running alarm has the same time, we can just wait for it.
+      auto result = co_await runningAlarm->resultPromise.addBranch();
+      co_return result;
+    }
+  }
+
+  KJ_IF_MAYBE(scheduledAlarm, impl->maybeScheduledAlarm) {
+      // We had a previously scheduled alarm, let's cancel it.
+      scheduledAlarm->resultFulfiller.cancel();
+      impl->maybeScheduledAlarm = nullptr;
+  }
+
+  KJ_IASSERT(impl->maybeScheduledAlarm == nullptr);
+  auto& scheduledAlarm = impl->maybeScheduledAlarm.emplace(
+      scheduledTime, kj::newPromiseAndFulfiller<AlarmResult>());
+
+  auto whenCanceled = scheduledAlarm.resultPromise.addBranch().then(
+      [](AlarmResult result) -> ScheduleAlarmResult {
+    // We've been cancelled, so return that result. Note that we cannot be resolved any other
+    // way until we return an AlarmFulfiller below.
+    return result;
+  });
+
+  // Let's wait for any running alarm to cleanup before we even delay.
+  auto whenReady = impl->runningAlarmTask.addBranch().then([this, scheduledTime](){
+    // Date.now() < scheduledTime when the alarm comes in, since we subtract elapsed CPU time from
+    // the time of last I/O in the implementation of Date.now(). This difference could be used to
+    // implement a spectre timer, so we have to wait a little longer until
+    // `Date.now() == scheduledTime`. Note that this also means that we could invoke ahead of its
+    // `scheduledTime` and we'll delay until appropriate, this may be useful in cases of clock skew.
+    return KJ_ASSERT_NONNULL(impl->ioContext)->atTime(scheduledTime);
+  });
+
+  co_return co_await whenReady.then([this]() -> ScheduleAlarmResult {
+    // It's time to run! Let's tear apart the scheduled alarm and make a running alarm.
+
+    // `maybeScheduledAlarm` should have the same value we emplaced above. If another call to
+    // `scheduleAlarm()` emplaced a new value, then `whenCanceled` should have resolved which
+    // cancels this this promise chain.
+    auto scheduledAlarm = KJ_ASSERT_NONNULL(kj::mv(impl->maybeScheduledAlarm));
+    impl->maybeScheduledAlarm = nullptr;
+
+    impl->maybeRunningAlarm.emplace(Impl::RunningAlarm{
+      .scheduledTime = scheduledAlarm.scheduledTime,
+      .resultPromise = kj::mv(scheduledAlarm.resultPromise),
+    });
+    impl->runningAlarmTask = scheduledAlarm.cleanupPromise.attach(kj::defer([this](){
+      // As soon as we get fulfilled or rejected, let's unset this alarm as the running alarm.
+      impl->maybeRunningAlarm = nullptr;
+    })).eagerlyEvaluate([](kj::Exception&& e){
+      LOG_EXCEPTION("actorAlarmCleanup", e);
+    }).fork();
+    return kj::mv(scheduledAlarm.resultFulfiller);
+  }).exclusiveJoin(kj::mv(whenCanceled));
 }
 
 kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
@@ -3196,7 +3203,11 @@ public:
       : constIsolate(kj::mv(isolate)), requestId(kj::mv(requestId)), inner(kj::mv(inner)),
         requestMetrics(requestMetrics) {
     if (encoding == api::StreamEncoding::GZIP) {
-      gz.emplace(decodedBuf, kj::GzipOutputStream::DECOMPRESS);
+      compStream.emplace().init<kj::GzipOutputStream>(decodedBuf,
+          kj::GzipOutputStream::DECOMPRESS);
+    } else if (encoding == api::StreamEncoding::BROTLI) {
+      compStream.emplace().init<kj::BrotliOutputStream>(decodedBuf,
+          kj::BrotliOutputStream::DECOMPRESS);
     }
   }
 
@@ -3242,13 +3253,23 @@ public:
     rawSize += buffer.size();
 
     auto prevDecodedSize = decodedBuf.getWrittenSize();
-    KJ_IF_MAYBE(gzip, gz) {
-      // On invalid gzip discard the previously decoded body and rethrow to stop the stream.
-      // This way we will report sizes up to this point but won't read any more invalid data.
-      KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
+    KJ_IF_MAYBE(comp, compStream) {
+      KJ_SWITCH_ONEOF(*comp) {
+        KJ_CASE_ONEOF(gzip, kj::GzipOutputStream) {
+          // On invalid gzip discard the previously decoded body and rethrow to stop the stream.
+          // This way we will report sizes up to this point but won't read any more invalid data.
+          KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
 
-      gzip->write(buffer.begin(), buffer.size());
-      gzip->flush();
+          gzip.write(buffer.begin(), buffer.size());
+          gzip.flush();
+        }
+        KJ_CASE_ONEOF(brotli, kj::BrotliOutputStream) {
+          KJ_ON_SCOPE_FAILURE(decodedBuf.reset());
+
+          brotli.write(buffer.begin(), buffer.size());
+          brotli.flush();
+        }
+      }
     } else {
       decodedBuf.write(buffer.begin(), buffer.size());
     }
@@ -3288,7 +3309,7 @@ private:
   kj::Own<kj::AsyncOutputStream> inner;
   size_t rawSize = 0;
   LimitedBodyWrapper decodedBuf;
-  kj::Maybe<kj::GzipOutputStream> gz;
+  kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
   RequestObserver& requestMetrics;
 };
 
@@ -3420,6 +3441,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
     KJ_IF_MAYBE(encodingStr, headers.get(contentEncodingHeaderId)) {
       if (*encodingStr == "gzip") {
         encoding = api::StreamEncoding::GZIP;
+      } else if (*encodingStr == "br") {
+        encoding = api::StreamEncoding::BROTLI;
       }
     }
 

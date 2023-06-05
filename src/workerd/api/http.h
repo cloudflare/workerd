@@ -16,10 +16,11 @@
 #include "url.h"
 #include "url-standard.h"
 #include "blob.h"
-#include "queue.h"
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
+
+struct QueueResponse;
 
 class Headers: public jsg::Object {
 private:
@@ -911,7 +912,7 @@ public:
   };
   kj::Promise<DeferredProxy<void>> send(
       jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
+      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags);
   // Helper not exposed to JavaScript.
 
   int getStatus();

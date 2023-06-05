@@ -5,11 +5,13 @@
 #pragma once
 
 #include <kj/string.h>
-#include <kj/compat/http.h>
 #include <workerd/io/trace.h>
-#include <workerd/io/worker-interface.h>
+
+namespace kj { class HttpClient; }
 
 namespace workerd {
+
+class WorkerInterface;
 
 class CacheClient {
   // Interface for talking to the Cache API. Needs to be declared here so that IoContext can

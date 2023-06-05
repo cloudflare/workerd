@@ -31,11 +31,17 @@ The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks
 * Bazel build all (dbg)
 * Bazel clean
 * Bazel clean --expunge
-* Bazel run all tests
+* Bazel run all tests (dbg)
+* Bazel run all tests (fastbuild)
+* Bazel run all tests (opt)
 * Generate compile_commands.json
 * Generate rust-project.json
 
-The keyboard shortcut for **Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
+The keyboard shortcut for **Tasks: Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
+
+The test tasks can be run with **Tasks: Run Test Task**, which does not have a default
+keybinding in VSCode, but can be found with the command palette with `shift+ctrl+p` on Linux and Windows, and `shift+cmd+p` on OS X.
+
 ## Running and debugging workerd in Visual Studio Code
 
 There are workerd debugging targets within Visual Studio Code which are supported on Linux, OS X, and Windows.
@@ -53,11 +59,14 @@ The main targets of interest are:
 * workerd debug
 * workerd debug with inspector enabled
 * workerd test case
+* workerd wdtest case
 
 Launching either "workerd debug" or "workerd debug with inspector enabled" will prompt for a workerd configuration for
 workerd to serve, the default is [${workspaceFolder}/samples/helloworld/config.capnp](../samples/helloworld/config.capnp).
 
-Launching "workerd test case" will prompt for a test to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+Launching "workerd test case" will prompt for a test binary to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+
+Launching "workerd wdtest case" will prompt for wd-test file to provide to workerd to debug, the default is `src/workerd/api/node/path-test.wd-test`.
 
 ## Generating compile_commands.json
 

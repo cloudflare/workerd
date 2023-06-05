@@ -8,24 +8,30 @@
 #include <workerd/jsg/dom-exception.h>
 #include "basics.h"
 #include "http.h"
-#include "encoding.h"
 #include "url.h"
 #include "url-standard.h"
-#include "urlpattern.h"
 #include "form-data.h"
-#include "crypto.h"
-#include "cache.h"
-#include "html-rewriter.h"
-#include "trace.h"
-#include "scheduled.h"
-#include "queue.h"
 #include "hibernation-event-params.h"
 #include "blob.h"
-#include "sockets.h"
 #include "streams.h"
-#include "streams/standard.h"
 
 namespace workerd::api {
+
+class TailEvent;
+class Cache;
+class CacheStorage;
+class Crypto;
+class CryptoKey;
+class SubtleCrypto;
+class TextDecoder;
+class TextEncoder;
+class HTMLRewriter;
+class Response;
+class TraceItem;
+class ScheduledController;
+class ScheduledEvent;
+class ReadableStreamBYOBRequest;
+class URLPattern;
 
 using DOMException = jsg::DOMException;
 // We need access to DOMException within this namespace so JSG_NESTED_TYPE can name it correctly.
@@ -352,9 +358,8 @@ public:
     return JSG_THIS;
   }
 
-  jsg::Ref<Crypto> getCrypto() {
-    return jsg::alloc<Crypto>();
-  }
+  // Implemented in global-scope.c++ to avoid including crypto.h
+  jsg::Ref<Crypto> getCrypto();
 
   jsg::Ref<Scheduler> getScheduler() {
     return jsg::alloc<Scheduler>();
@@ -372,9 +377,7 @@ public:
   // The origin is unknown, return "null" as described in
   // https://html.spec.whatwg.org/multipage/browsers.html#concept-origin-opaque.
 
-  jsg::Ref<CacheStorage> getCaches() {
-    return jsg::alloc<CacheStorage>();
-  }
+  jsg::Ref<CacheStorage> getCaches();
 
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);

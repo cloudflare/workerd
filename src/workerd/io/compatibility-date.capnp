@@ -47,7 +47,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # be enabled.
 
   annotation compatEnableAllDates @0x9a1d37c8030d9418 (field) :Void;
-  # All compatability dates should start using the flag as enabled.
+  # All compatibility dates should start using the flag as enabled.
   # NOTE: This is almost NEVER what you actually want because you're most likely breaking back
   # compat. Note that workers uploaded with the flag will fail validation, so this will break
   # uploads for anyone still using the flag.
@@ -62,8 +62,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   annotation neededByFl @0xbd23aff9deefc308 (field) :Void;
   # A tag to tell us which fields we'll need to propagate to FL on subrequests and responses.
   #
-  # ("FL" refers to Cloudflare's HTTP proxy stack which is used for all outbound requests. Flags
-  # with this annotation have no effect when `workerd` is used outside of Cloudflare.)
+  # ("FL" refers to Cloudflare's HTTP proxy stack which is used for all outbound requests. Except
+  # for `brotliContentEncoding`, flags with this annotation have no effect when `workerd` is used
+  # outside of Cloudflare.)
 
   annotation experimental @0xe3e5a63e76284d88 (field):Void;
   # Flags with this annotation can only be used when workerd is run with the --experimental flag.
@@ -304,4 +305,22 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2023-07-01");
   # When enabled, the delete() and has() methods of the standard URLSearchParams object
   # (see url-standard.h) will have the recently added second value argument enabled.
+
+  strictCompression @31 :Bool
+      $compatEnableFlag("strict_compression_checks")
+      $compatDisableFlag("no_strict_compression_checks")
+      $compatEnableDate("2023-08-01");
+  # Perform additional error checking in the Web Compression API and throw an error if a
+  # DecompressionStream has trailing data or gets closed before the full compressed data has been
+  # provided.
+
+  brotliContentEncoding @32 :Bool
+      $compatEnableFlag("brotli_content_encoding")
+      $compatDisableFlag("no_brotli_content_encoding")
+      $neededByFl;
+  # Enables compression/decompression support for the brotli compression algorithm.
+  # With the flag enabled workerd will support the "br" content encoding in the Request and
+  # Response APIs and compress or decompress data accordingly as with gzip.
+  # Note that brotli support also requires backend support from the production environment which
+  # may not be available at this time, limiting the functionality of the flag.
 }

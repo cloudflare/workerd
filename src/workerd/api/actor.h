@@ -13,7 +13,10 @@
 #include <capnp/compat/http-over-capnp.h>
 #include <workerd/api/http.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/io/io-context.h>
+
+namespace workerd {
+  template <typename T> class IoOwn;
+}
 
 namespace workerd::api {
 

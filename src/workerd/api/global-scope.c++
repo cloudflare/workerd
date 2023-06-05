@@ -6,7 +6,11 @@
 
 #include <kj/encoding.h>
 
+#include <workerd/api/cache.h>
+#include <workerd/api/crypto.h>
+#include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
+#include <workerd/api/trace.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
@@ -170,6 +174,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
   kj::Maybe<jsg::V8Ref<v8::Object>> cf;
 
+  auto flags = lock.getWorker().getIsolate().getApiIsolate().getFeatureFlags();
   KJ_IF_MAYBE(c, cfBlobJson) {
     auto jsonString = jsg::v8Str(isolate, *c);
     auto context = isolate->GetCurrentContext();
@@ -177,11 +182,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
     KJ_ASSERT(handle->IsObject());
 
-    if (!lock.getWorker()
-             .getIsolate()
-             .getApiIsolate()
-             .getFeatureFlags()
-             .getNoCfBotManagementDefault()) {
+    if (!flags.getNoCfBotManagementDefault()) {
       handleDefaultBotManagement(isolate, handle.As<v8::Object>());
     }
 
@@ -300,7 +301,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     return ioContext.awaitJs(promise->then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers]
+             canceled = kj::addRef(*canceled), &headers, flags]
             (jsg::Lock& js, jsg::Ref<Response> innerResponse)
             -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
@@ -310,7 +311,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
       } else {
         return context.addObject(kj::heap(innerResponse->send(
-            js, response, { .allowWebSocket = allowWebSocket }, headers)));
+            js, response, { .allowWebSocket = allowWebSocket }, headers,
+            flags)));
       }
     }))).attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
         .then([ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)]
@@ -716,6 +718,14 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
     (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
+}
+
+jsg::Ref<Crypto> ServiceWorkerGlobalScope::getCrypto() {
+  return jsg::alloc<Crypto>();
+}
+
+jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
+  return jsg::alloc<CacheStorage>();
 }
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(

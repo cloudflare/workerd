@@ -764,7 +764,7 @@ def crate_repositories():
         name = "crates_vendor__lol_html-1.0.0",
         commit = "a0053299f6809c2fa4e3af35a4f64bd8069952ba",
         init_submodules = True,
-        shallow_since = "1657163695 -0400",
+        shallow_since = "1684955245 +0100",
         remote = "https://github.com/cloudflare/lol-html.git",
         build_file = Label("@workerd//rust-deps/crates:BUILD.lol_html-1.0.0.bazel"),
     )
@@ -774,7 +774,7 @@ def crate_repositories():
         name = "crates_vendor__lolhtml-1.0.0",
         commit = "a0053299f6809c2fa4e3af35a4f64bd8069952ba",
         init_submodules = True,
-        shallow_since = "1657163695 -0400",
+        shallow_since = "1684955245 +0100",
         remote = "https://github.com/cloudflare/lol-html.git",
         build_file = Label("@workerd//rust-deps/crates:BUILD.lolhtml-1.0.0.bazel"),
         strip_prefix = "c-api",

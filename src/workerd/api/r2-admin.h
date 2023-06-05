@@ -6,7 +6,6 @@
 
 #include "r2-bucket.h"
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/http.h>
 
 namespace edgeworker::api {
 class R2CrossAccount;
@@ -86,7 +85,7 @@ public:
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<ListResult> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<RetrievedBucket>>& retrievedBucketType,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags);
 
   JSG_RESOURCE_TYPE(R2Admin) {
     JSG_METHOD(create);
