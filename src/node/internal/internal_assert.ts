@@ -65,6 +65,7 @@ function createAssertionError(
   return error;
 }
 
+// Note: Intentionally not exported, use assert.ok() instead.
 function assert(actual: unknown, message?: string | Error): asserts actual {
   if (arguments.length === 0) {
     throw new AssertionError({
