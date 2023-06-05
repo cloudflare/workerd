@@ -2,6 +2,9 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
+# Changes to this file must be reflected in the official Cloudflare docs:
+# https://github.com/cloudflare/cloudflare-docs/blob/production/content/workers/platform/compatibility-dates.md
+
 @0x8b3d4aaa36221ec8;
 
 using Cxx = import "/capnp/c++.capnp";
@@ -312,4 +315,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Perform additional error checking in the Web Compression API and throw an error if a
   # DecompressionStream has trailing data or gets closed before the full compressed data has been
   # provided.
+
+  # If you are adding a new flag, you must update the official Cloudflare docs:
+  # https://github.com/cloudflare/cloudflare-docs/blob/production/content/workers/platform/compatibility-dates.md
 }
