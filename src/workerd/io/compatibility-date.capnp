@@ -47,7 +47,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # be enabled.
 
   annotation compatEnableAllDates @0x9a1d37c8030d9418 (field) :Void;
-  # All compatability dates should start using the flag as enabled.
+  # All compatibility dates should start using the flag as enabled.
   # NOTE: This is almost NEVER what you actually want because you're most likely breaking back
   # compat. Note that workers uploaded with the flag will fail validation, so this will break
   # uploads for anyone still using the flag.
@@ -304,4 +304,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2023-07-01");
   # When enabled, the delete() and has() methods of the standard URLSearchParams object
   # (see url-standard.h) will have the recently added second value argument enabled.
+
+  strictCompression @31 :Bool
+      $compatEnableFlag("strict_compression_checks")
+      $compatDisableFlag("no_strict_compression_checks")
+      $compatEnableDate("2023-08-01");
+  # Perform additional error checking in the Web Compression API and throw an error if a
+  # DecompressionStream has trailing data or gets closed before the full compressed data has been
+  # provided.
 }

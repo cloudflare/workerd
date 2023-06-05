@@ -19,12 +19,18 @@ public:
     DECOMPRESS,
   };
 
+  enum class ContextFlags {
+    NONE,
+    STRICT,
+  };
+
   struct Result {
     bool success = false;
     kj::ArrayPtr<const byte> buffer;
   };
 
-  explicit Context(Mode mode, kj::StringPtr format) : mode(mode) {
+  explicit Context(Mode mode, kj::StringPtr format, ContextFlags flags) :
+      mode(mode), strictCompression(flags) {
     int result = Z_OK;
     switch (mode) {
       case Mode::COMPRESS:
@@ -82,19 +88,16 @@ public:
                      Error,
                      "Decompression failed.");
 
-        // TODO(soon): The spec requires that a TypeError is produced if there is trailing data
-        // after the end of the compression stream. This is a potentially breaking change, so just
-        // put out a warning for now. Later, make it an error and provide a test to confirm that
-        // input with trailing data causes a TypeError.
-        JSG_WARN_ONCE_IF(result == Z_STREAM_END && ctx.avail_in > 0,
-            "Trailing bytes after end of compressed data");
-
-        // TODO(soon): Same applies to closing a stream before the complete decompressed data is
-        // available. Once this is converted to an error, provide a test case checking that
-        // providing incomplete compressed data results in a TypeError.
-        JSG_WARN_ONCE_IF(flush == Z_FINISH && result == Z_BUF_ERROR &&
-            ctx.avail_out == sizeof(buffer),
-            "Called close() on a decompression stream with incomplete data");
+        if (strictCompression == ContextFlags::STRICT) {
+          // The spec requires that a TypeError is produced if there is trailing data after the end
+          // of the compression stream.
+          JSG_REQUIRE(!(result == Z_STREAM_END && ctx.avail_in > 0), TypeError,
+              "Trailing bytes after end of compressed data");
+          // Same applies to closing a stream before the complete decompressed data is available.
+          JSG_REQUIRE(!(flush == Z_FINISH && result == Z_BUF_ERROR &&
+              ctx.avail_out == sizeof(buffer)), TypeError,
+              "Called close() on a decompression stream with incomplete data");
+        }
         break;
       default:
         KJ_UNREACHABLE;
@@ -126,6 +129,9 @@ private:
   Mode mode;
   z_stream ctx = {};
   kj::byte buffer[4096];
+
+  // For the eponymous compatibility flag
+  ContextFlags strictCompression;
 };
 
 template <Context::Mode mode>
@@ -134,8 +140,8 @@ class CompressionStreamImpl: public kj::Refcounted,
                              public WritableStreamSink {
   // Uncompressed data goes in. Compressed data comes out.
 public:
-  explicit CompressionStreamImpl(kj::String format)
-      : context(mode, format) {}
+  explicit CompressionStreamImpl(kj::String format, Context::ContextFlags flags)
+      : context(mode, format, flags) {}
 
   // WritableStreamSink implementation ---------------------------------------------------
 
@@ -375,14 +381,13 @@ private:
 };
 }  // namespace
 
-jsg::Ref<CompressionStream> CompressionStream::constructor(
-    jsg::Lock& js,
-    kj::String format) {
+jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
                "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format));
+      kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format),
+                                                                     Context::ContextFlags::NONE);
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
@@ -393,12 +398,14 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(
 }
 
 jsg::Ref<DecompressionStream> DecompressionStream::constructor(
-    jsg::Lock& js,
-    kj::String format) {
+    jsg::Lock& js, kj::String format, CompatibilityFlags::Reader flags) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
                "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
+
   auto readableSide =
-      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(kj::mv(format));
+      kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(
+          kj::mv(format), flags.getStrictCompression() ? Context::ContextFlags::STRICT :
+          Context::ContextFlags::NONE);
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();
