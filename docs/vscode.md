@@ -53,11 +53,14 @@ The main targets of interest are:
 * workerd debug
 * workerd debug with inspector enabled
 * workerd test case
+* workerd wdtest case
 
 Launching either "workerd debug" or "workerd debug with inspector enabled" will prompt for a workerd configuration for
 workerd to serve, the default is [${workspaceFolder}/samples/helloworld/config.capnp](../samples/helloworld/config.capnp).
 
-Launching "workerd test case" will prompt for a test to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+Launching "workerd test case" will prompt for a test binary to debug, the default is `bazel-bin/src/workerd/jsg/jsg-test`.
+
+Launching "workerd wdtest case" will prompt for wd-test file to provide to workerd to debug, the default is `src/workerd/api/node/path-test.wd-test`.
 
 ## Generating compile_commands.json
 
