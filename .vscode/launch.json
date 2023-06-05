@@ -120,6 +120,42 @@
       },
       "stopAtEntry": false,
       "externalConsole": false
+    },
+    {
+      "name": "workerd wdtest case",
+      "preLaunchTask": "Bazel build all (dbg)",
+      "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
+      "args": [
+        "test",
+        "${input:wdtestToDebug}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "type": "cppdbg",
+      "request": "launch",
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "linux": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+      },
+      "osx": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "targetArchitecture": "arm64",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+      },
+      "windows": {
+        "type": "cppvsdbg",
+        "request": "launch",
+      },
     }
   ],
   "inputs": [
@@ -172,6 +208,32 @@
         "bazel-bin/src/workerd/api/node/buffer-test",
         "bazel-bin/src/workerd/api/crypto-impl-asymmetric-test",
         "bazel-bin/src/workerd/api/url-standard-test",
+      ],
+    },
+    {
+      "id": "wdtestToDebug",
+      "description": "Workerd Driven Test to debug",
+      "type": "pickString",
+      "default": "src/workerd/api/node/path-test.wd-test",
+      "options": [
+        "src/workerd/api/blob-test.wd-test",
+        "src/workerd/api/node/assert-test.wd-test",
+        "src/workerd/api/node/buffer-nodejs-test.wd-test",
+        "src/workerd/api/node/crypto_keys-test.wd-test",
+        "src/workerd/api/node/crypto_pbkdf2-test.wd-test",
+        "src/workerd/api/node/crypto_random-test.wd-test",
+        "src/workerd/api/node/path-test.wd-test",
+        "src/workerd/api/node/streams-test.wd-test",
+        "src/workerd/api/node/string-decoder-test.wd-test",
+        "src/workerd/api/streams/identitytransformstream-backpressure-test.wd-test",
+        "src/workerd/server/tests/extensions/extensions-test.wd-test",
+        "src/workerd/tests/performance-test.wd-test",
+        // The following tests are not supported yet in vscode. They require
+        // TEST_TMPDIR to be defined, usually this comes from bazel. There needs to
+        // be some logic to create the test directory and set the environment variable
+        // for the test.
+        // "src/workerd/api/actor-alarms-test.wd-test",
+        // "src/workerd/api/sql-test.wd-test",
       ],
     }
   ]
