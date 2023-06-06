@@ -177,45 +177,23 @@ async function test(storage) {
   const jsonResult =
       [...sql.exec("SELECT '{\"a\":2,\"c\":[4,5,{\"f\":7}]}' -> '$.c' AS value")][0].value;
   assert.equal(jsonResult, "[4,5,{\"f\":7}]");
-  
+
   // current_{date,time,timestamp} functions work
   const resultDate = [...sql.exec("SELECT current_date")];
   assert.equal(resultDate.length, 1);
   // Should match results in the format "2023-06-01"
   assert.match(resultDate[0]["current_date"], /^\d{4}-\d{2}-\d{2}$/)
-  
+
   const resultTime = [...sql.exec("SELECT current_time")];
   assert.equal(resultTime.length, 1)
   // Should match results in the format "15:30:03"
   assert.match(resultTime[0]["current_time"], /^\d{2}:\d{2}:\d{2}$/)
-  
+
   const resultTimestamp = [...sql.exec("SELECT current_timestamp")];
   assert.equal(resultTimestamp.length, 1);
   // Should match results in the format "2023-06-01 15:30:03"
   assert.match(resultTimestamp[0]["current_timestamp"], /^\d{4}-\d{2}-\d{2}\s{1}\d{2}:\d{2}:\d{2}$/)
-  
-  // Can rename tables
-  sql.exec(`
-    CREATE TABLE beforerename (
-      id INTEGER
-    );
-  `)
-  sql.exec(`
-    ALTER TABLE beforerename
-    RENAME TO afterrename;
-  `)
-  
-  // Can rename columns within a table
-  sql.exec(`
-    CREATE TABLE renamecolumn (
-      meta TEXT
-     );
-  `);
-  sql.exec(`
-    ALTER TABLE renamecolumn
-    RENAME COLUMN meta TO metadata
-  `);
-  
+
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
@@ -532,6 +510,28 @@ async function test(storage) {
     assert.equal(results[2].data, null)
     assert.equal(results[3].data, null)
   }
+
+  // Can rename tables
+  sql.exec(`
+    CREATE TABLE beforerename (
+      id INTEGER
+    );
+  `)
+  sql.exec(`
+    ALTER TABLE beforerename
+    RENAME TO afterrename;
+  `)
+
+  // Can rename columns within a table
+  sql.exec(`
+    CREATE TABLE renamecolumn (
+      meta TEXT
+     );
+  `);
+  sql.exec(`
+    ALTER TABLE renamecolumn
+    RENAME COLUMN meta TO metadata
+  `);
 }
 
 export class DurableObjectExample {
