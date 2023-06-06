@@ -21,11 +21,11 @@ jobs:
       release_version: ${{ steps.echo.outputs.release_version }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
       - name: Cache
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
           key: capnp-cache
@@ -41,11 +41,11 @@ jobs:
     runs-on: ubuntu-22.04
     needs: version
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
       - name: Cache
         id: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
           key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache-types
