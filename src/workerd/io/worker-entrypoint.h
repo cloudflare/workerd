@@ -88,6 +88,9 @@ private:
   template <typename T>
   void maybeAddGcPassForTest(IoContext& context, kj::Promise<T>& promise);
 
+  kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
+      kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime);
+
 public:  // For kj::heap() only; pretend this is private.
   WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
                    ThreadContext& threadContext,

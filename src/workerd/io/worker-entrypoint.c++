@@ -378,47 +378,89 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   return promise;
 }
 
+kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
+    kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime) {
+  // We want to de-duplicate alarm requests as follows:
+  // - An alarm must not be canceled once it is running, UNLESS the whole actor is shut down.
+  // - If multiple alarm invocations arrive with the same scheduled time, we only run one.
+  // - If we are asked to schedule an alarm while one is running, we wait for the running alarm to
+  //   finish.
+  // - However, we schedule no more than one alarm. If another one (with yet another different
+  //   scheduled time) arrives while we still have one running and one scheduled, we discard the
+  //   previous scheduled alarm.
+
+  auto& context = incomingRequest->getContext();
+  auto& actor = KJ_REQUIRE_NONNULL(context.getActor(), "alarm() should only work with actors");
+
+  KJ_IF_MAYBE(promise, actor.getAlarm(scheduledTime)) {
+    // There is a pre-existing alarm for `scheduledTime`, we can just wait for its result.
+    // TODO(someday) If the request responsible for fulfilling this alarm were to be cancelled, then
+    // we could probably take over and try to fulfill it ourselves. Maybe we'd want to loop on
+    // `actor.getAlarm()`? We'd have to distinguish between rescheduling and request cancellation.
+    auto result = co_await *promise;
+    co_return result;
+  }
+
+  // There isn't a pre-existing alarm, we can call `delivered()` (and emit metrics events).
+  incomingRequest->delivered();
+
+  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
+    t->setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
+  }
+
+  auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
+  KJ_SWITCH_ONEOF(scheduleAlarmResult) {
+    KJ_CASE_ONEOF(af, Worker::Actor::AlarmFulfiller) {
+      // We're now in charge of running this alarm!
+      auto cancellationGuard = kj::defer([&af]() {
+        // Our promise chain was cancelled, let's cancel our fulfiller for any other requests
+        // that were waiting on us.
+        af.cancel();
+      });
+
+      KJ_DEFER({
+        // The alarm has finished but allow the request to continue executing in the background.
+        waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+      });
+
+
+      try {
+        auto result = co_await context.run(
+            [scheduledTime, entrypointName=entrypointName, &context](Worker::Lock& lock){
+          jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
+          auto handler = lock.getExportedHandler(entrypointName, context.getActor());
+          return lock.getGlobalScope().runAlarm(scheduledTime, lock, handler);
+        });
+
+        // We succeeded, inform any other entrypoints that may be waiting upon us.
+        af.fulfill(result);
+        cancellationGuard.cancel();
+        co_return result;
+      } catch (const kj::Exception& e) {
+        // We failed, inform any other entrypoints that may be waiting upon us.
+        af.reject(e);
+        cancellationGuard.cancel();
+        throw;
+      }
+    }
+    KJ_CASE_ONEOF(result, Worker::Actor::AlarmResult) {
+      // The alarm was cancelled while we were waiting to run, go ahead and return the result.
+      co_return result;
+    }
+  }
+
+  KJ_UNREACHABLE;
+}
+
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
     kj::Date scheduledTime) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "runAlarm() can only be called once"));
   this->incomingRequest = nullptr;
-  // Note: Don't call incomingRequest->delivered() until we've de-duped (later on).
+
   auto& context = incomingRequest->getContext();
-
-  //alarm() should only work with actors
-  auto& actor = KJ_REQUIRE_NONNULL(context.getActor());
-
-  auto promise = actor.dedupAlarm(scheduledTime,
-      [this,&context,scheduledTime,incomingRequest = kj::mv(incomingRequest)]() mutable
-      -> kj::Promise<WorkerInterface::AlarmResult> {
-    incomingRequest->delivered();
-
-    KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
-      t->setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
-    }
-
-    // Date.now() < scheduledTime when the alarm comes in, since we subtract
-    // elapsed CPU time from the time of last I/O in the implementation of Date.now().
-    // This difference could be used to implement a spectre timer, so we have to wait a little
-    // longer until Date.now() = scheduledTime.
-    return context.atTime(scheduledTime).then(
-        [this, scheduledTime, &context, incomingRequest = kj::mv(incomingRequest)]() mutable {
-      return context.run(
-          [scheduledTime, entrypointName=entrypointName, &context,
-           &metrics = incomingRequest->getMetrics()]
-          (Worker::Lock& lock){
-        jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-
-        return lock.getGlobalScope().runAlarm(scheduledTime, lock,
-            lock.getExportedHandler(entrypointName, context.getActor()));
-      }).attach(kj::defer([this, incomingRequest = kj::mv(incomingRequest)]() mutable {
-        // The alarm has finished but allow the request to continue executing in the background.
-        waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
-      }));
-    });
-  });
-
+  auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime);
   maybeAddGcPassForTest(context, promise);
 
   return promise;
