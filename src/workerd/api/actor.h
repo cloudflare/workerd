@@ -152,15 +152,15 @@ public:
   };
 
   jsg::Ref<DurableObject> get(
+      jsg::Lock& js,
       jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<GetDurableObjectOptions> options);
   // Gets a durable object by ID or creates it if it doesn't already exist.
 
   jsg::Ref<DurableObject> getExisting(
+      jsg::Lock& js,
       jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<GetDurableObjectOptions> options);
   // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
   // by cloudflare only.
 
@@ -188,10 +188,10 @@ private:
   kj::Own<ActorIdFactory> idFactory;
 
   jsg::Ref<DurableObject> getImpl(
+      jsg::Lock& js,
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
-      jsg::Optional<GetDurableObjectOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<GetDurableObjectOptions> options);
 };
 
 #define EW_ACTOR_ISOLATE_TYPES                      \
