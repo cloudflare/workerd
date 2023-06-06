@@ -95,8 +95,7 @@ public:
   // ElementContentHandlers or DocumentContentHandlers struct, respectively. We take it as a
   // v8::Object so that we can use it as the `this` argument for the function calls.
 
-  jsg::Ref<Response> transform(jsg::Lock& js, jsg::Ref<Response> response,
-      CompatibilityFlags::Reader featureFlags);
+  jsg::Ref<Response> transform(jsg::Lock& js, jsg::Ref<Response> response);
   // Create a new Response object that is identical to the input response except that its body is
   // the result of running the original body through this HTMLRewriter's rewriter. This
   // function does not run the parser itself -- to drive the parser, you must read the transformed

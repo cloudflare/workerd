@@ -6,6 +6,7 @@
 #include "streams.h"
 #include "util.h"
 #include "c-api/include/lol_html.h"
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 struct lol_html_HtmlRewriter {};
@@ -207,8 +208,7 @@ public:
       jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
       kj::ArrayPtr<const char> encoding,
-      kj::Own<WritableStreamSink> inner,
-      CompatibilityFlags::Reader featureFlags);
+      kj::Own<WritableStreamSink> inner);
   KJ_DISALLOW_COPY_AND_MOVE(Rewriter);
 
   // WritableStreamSink implementation. The input body pumpTo() operation calls these.
@@ -228,8 +228,7 @@ private:
 
   static kj::Own<lol_html_HtmlRewriter> buildRewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
-      kj::ArrayPtr<const char> encoding, Rewriter& rewriterWrapper,
-      CompatibilityFlags::Reader featureFlags);
+      kj::ArrayPtr<const char> encoding, Rewriter& rewriterWrapper);
 
   static void output(const char* buffer, size_t size, void* userdata);
   void outputImpl(const char* buffer, size_t size);
@@ -316,8 +315,7 @@ private:
 
 kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
     jsg::Lock& js, kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
-    kj::ArrayPtr<const char> encoding, Rewriter& rewriter,
-    CompatibilityFlags::Reader featureFlags) {
+    kj::ArrayPtr<const char> encoding, Rewriter& rewriter) {
   auto builder = LOL_HTML_OWN(rewriter_builder, lol_html_rewriter_builder_new());
 
   auto registerCallback = [&](ElementCallbackFunction& callback) {
@@ -375,7 +373,7 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
       .max_allowed_memory_usage = 3 * 1024 * 1024
   };
 
-  if (featureFlags.getEsiIncludeIsVoidTag()) {
+  if (FeatureFlags::get(js).getEsiIncludeIsVoidTag()) {
     return LOL_HTML_OWN(rewriter, unstable_lol_html_rewriter_build_with_esi_tags(
         builder, encoding.begin(), encoding.size(), memorySettings, &Rewriter::output, &rewriter, isStrict));
 
@@ -389,9 +387,8 @@ Rewriter::Rewriter(
     jsg::Lock& js,
     kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
     kj::ArrayPtr<const char> encoding,
-    kj::Own<WritableStreamSink> inner,
-    CompatibilityFlags::Reader featureFlags)
-    : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this, featureFlags)),
+    kj::Own<WritableStreamSink> inner)
+    : rewriter(buildRewriter(js, unregisteredHandlers, encoding, *this)),
       inner(kj::mv(inner)),
       ioContext(IoContext::current()),
       maybeAsyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
@@ -1028,9 +1025,7 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handle
   return JSG_THIS;
 }
 
-jsg::Ref<Response> HTMLRewriter::transform(
-    jsg::Lock& js, jsg::Ref<Response> response,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> response) {
   auto maybeInput = response->getBody();
 
   if (maybeInput == nullptr) {
@@ -1043,7 +1038,7 @@ jsg::Ref<Response> HTMLRewriter::transform(
   // lol-html writes to a pipe, the other end of which is our transformed response body.
   auto ts = IdentityTransformStream::constructor(js);
   response = Response::constructor(js,
-    kj::Maybe(ts->getReadable()), kj::mv(response), featureFlags);
+    kj::Maybe(ts->getReadable()), kj::mv(response), FeatureFlags::get(js));
 
   auto outputSink = ts->getWritable()->removeSink(js);
 
@@ -1057,8 +1052,7 @@ jsg::Ref<Response> HTMLRewriter::transform(
     }
   }
 
-  auto rewriter = kj::heap<Rewriter>(
-      js, impl->unregisteredHandlers, encoding, kj::mv(outputSink), featureFlags);
+  auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(outputSink));
 
   // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
   //   the input response object disturbed (response.bodyUsed === true), which should only happen
