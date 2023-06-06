@@ -730,9 +730,8 @@ jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
-    jsg::Optional<Request::Initializer> requestInit,
-    CompatibilityFlags::Reader featureFlags) {
-  return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit), featureFlags);
+    jsg::Optional<Request::Initializer> requestInit) {
+  return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
 double Performance::now() {

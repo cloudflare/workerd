@@ -67,8 +67,7 @@ jsg::Unimplemented Cache::addAll(kj::Array<Request::Info> requests) {
 }
 
 jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
-    jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options,
-    CompatibilityFlags::Reader flags) {
+    jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   if (context.isFiddle()) {
@@ -95,7 +94,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient), &context, flags = kj::mv(flags)]
+        [httpClient = kj::mv(httpClient), &context]
         (jsg::Lock& js, kj::HttpClient::Response&& response)
         mutable -> jsg::Optional<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(httpClient));
@@ -133,7 +132,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return makeHttpResponse(
           js, kj::HttpMethod::GET, {},
           response.statusCode, response.statusText, *response.headers,
-          kj::mv(response.body), nullptr, flags);
+          kj::mv(response.body), nullptr);
     });
   });
 }

@@ -41,8 +41,7 @@ public:
   jsg::Unimplemented addAll(kj::Array<Request::Info> requests);
 
   jsg::Promise<jsg::Optional<jsg::Ref<Response>>> match(
-      jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options,
-      CompatibilityFlags::Reader flags);
+      jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
 
   jsg::Promise<void> put(jsg::Lock& js, Request::Info request, jsg::Ref<Response> response,
       CompatibilityFlags::Reader flags);

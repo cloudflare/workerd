@@ -1037,8 +1037,7 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
 
   // lol-html writes to a pipe, the other end of which is our transformed response body.
   auto ts = IdentityTransformStream::constructor(js);
-  response = Response::constructor(js,
-    kj::Maybe(ts->getReadable()), kj::mv(response), FeatureFlags::get(js));
+  response = Response::constructor(js, kj::Maybe(ts->getReadable()), kj::mv(response));
 
   auto outputSink = ts->getWritable()->removeSink(js);
 
