@@ -310,11 +310,11 @@ public:
 
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> head(
       jsg::Lock& js, kj::String key,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
   );
   jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>>> get(
       jsg::Lock& js, kj::String key, jsg::Optional<GetOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
   );
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> put(jsg::Lock& js,
       kj::String key, kj::Maybe<R2PutValue> value, jsg::Optional<PutOptions> options,
@@ -334,7 +334,7 @@ public:
   );
   jsg::Promise<ListResult> list(
       jsg::Lock& js, jsg::Optional<ListOptions> options,
-      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags
   );
 
   JSG_RESOURCE_TYPE(R2Bucket, CompatibilityFlags::Reader flags) {

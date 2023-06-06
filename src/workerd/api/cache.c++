@@ -138,8 +138,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
   });
 }
 
-jsg::Promise<void> Cache::put(
-    jsg::Lock& js, Request::Info requestOrUrl, jsg::Ref<Response> jsResponse) {
+jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
+    jsg::Ref<Response> jsResponse, CompatibilityFlags::Reader flags) {
   // Send a PUT request to the cache whose URL is the original request URL and whose body is the
   // HTTP response we'd like to cache for that request.
   //
@@ -278,7 +278,7 @@ jsg::Promise<void> Cache::put(
     // We need to send the response to our serializer immediately in order to fulfill Cache.put()'s
     // contract: the caller should be able to observe that the response body is disturbed as soon
     // as put() returns.
-    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr);
+    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr, flags);
     auto payload = serializer.getPayload();
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,

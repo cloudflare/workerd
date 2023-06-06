@@ -49,7 +49,7 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
 jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<RetrievedBucket>>& retrievedBucketType,
-    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType, CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "r2_delete"_kj);
 
@@ -72,7 +72,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
   }
 
   auto requestJson = json.encode(requestBuilder);
-  auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), nullptr, jwt);
+  auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), nullptr, jwt, flags);
 
   return context.awaitIo(js, kj::mv(promise),
       [this, &retrievedBucketType, &errorType](jsg::Lock& js, R2Result r2Result) mutable {

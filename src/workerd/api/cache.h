@@ -44,8 +44,8 @@ public:
       jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options,
       CompatibilityFlags::Reader flags);
 
-  jsg::Promise<void> put(
-      jsg::Lock& js, Request::Info request, jsg::Ref<Response> response);
+  jsg::Promise<void> put(jsg::Lock& js, Request::Info request, jsg::Ref<Response> response,
+      CompatibilityFlags::Reader flags);
 
   jsg::Promise<bool> delete_(
       jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);

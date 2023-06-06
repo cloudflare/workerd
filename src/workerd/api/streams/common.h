@@ -29,7 +29,8 @@ class TransformStreamDefaultController;
 
 enum class StreamEncoding {
   IDENTITY,
-  GZIP
+  GZIP,
+  BROTLI
 };
 
 struct ReadResult {
