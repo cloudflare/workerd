@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "writable.h"
+#include <workerd/io/features.h>
 
 namespace workerd::api {
 
@@ -248,9 +249,8 @@ jsg::Ref<WritableStreamDefaultWriter> WritableStream::getWriter(jsg::Lock& js) {
 jsg::Ref<WritableStream> WritableStream::constructor(
     jsg::Lock& js,
     jsg::Optional<UnderlyingSink> underlyingSink,
-    jsg::Optional<StreamQueuingStrategy> queuingStrategy,
-    CompatibilityFlags::Reader flags) {
-  JSG_REQUIRE(flags.getStreamsJavaScriptControllers(),
+    jsg::Optional<StreamQueuingStrategy> queuingStrategy) {
+  JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(),
                Error,
                "To use the new WritableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");

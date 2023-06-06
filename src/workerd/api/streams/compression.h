@@ -28,7 +28,7 @@ class DecompressionStream: public TransformStream {
 public:
   using TransformStream::TransformStream;
 
-  static jsg::Ref<DecompressionStream> constructor(jsg::Lock& js, kj::String format, CompatibilityFlags::Reader flags);
+  static jsg::Ref<DecompressionStream> constructor(jsg::Lock& js, kj::String format);
 
   JSG_RESOURCE_TYPE(DecompressionStream) {
     JSG_INHERIT(TransformStream);

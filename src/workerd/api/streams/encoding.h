@@ -14,9 +14,7 @@ class TextEncoderStream: public TransformStream {
 public:
   using TransformStream::TransformStream;
 
-  static jsg::Ref<TextEncoderStream> constructor(
-      jsg::Lock& js,
-      CompatibilityFlags::Reader flags);
+  static jsg::Ref<TextEncoderStream> constructor(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TextEncoderStream) {
     JSG_INHERIT(TransformStream);
@@ -38,8 +36,7 @@ public:
   static jsg::Ref<TextDecoderStream> constructor(
       jsg::Lock& js,
       jsg::Optional<kj::String> label,
-      jsg::Optional<TextDecoderStreamInit> options,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<TextDecoderStreamInit> options);
 
   JSG_RESOURCE_TYPE(TextDecoderStream) {
     JSG_INHERIT(TransformStream);

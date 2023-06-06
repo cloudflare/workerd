@@ -17,9 +17,7 @@ private:
 };
 }  // namespace
 
-jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(
-    jsg::Lock& js,
-    CompatibilityFlags::Reader flags) {
+jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(jsg::Lock& js) {
   auto transformer = TransformStream::constructor(
     js,
     Transformer {
@@ -46,8 +44,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(
       return js.resolvedPromise();
     })},
     StreamQueuingStrategy {},
-    StreamQueuingStrategy {},
-    kj::mv(flags));
+    StreamQueuingStrategy {});
 
   return jsg::alloc<TextEncoderStream>(transformer->getReadable(), transformer->getWritable());
 }
@@ -55,8 +52,7 @@ jsg::Ref<TextEncoderStream> TextEncoderStream::constructor(
 jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::String> label,
-    jsg::Optional<TextDecoderStreamInit> options,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<TextDecoderStreamInit> options) {
   auto decoder = TextDecoder::constructor(kj::mv(label), options.map([](auto& opts) {
     return TextDecoder::ConstructorOptions {
       .fatal = opts.fatal.orDefault(true),
@@ -91,8 +87,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
       }))
     },
     StreamQueuingStrategy {},
-    StreamQueuingStrategy {},
-    kj::mv(flags));
+    StreamQueuingStrategy {});
 
   return jsg::alloc<TextDecoderStream>(transformer->getReadable(), transformer->getWritable());
 }

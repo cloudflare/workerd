@@ -116,10 +116,7 @@ public:
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
-  jsg::Promise<ReadResult> read(
-      jsg::Lock& js,
-      v8::Local<v8::ArrayBufferView> byobBuffer,
-      CompatibilityFlags::Reader featureFlags);
+  jsg::Promise<ReadResult> read(jsg::Lock& js, v8::Local<v8::ArrayBufferView> byobBuffer);
 
   jsg::Promise<ReadResult> readAtLeast(jsg::Lock& js,
                                         int minBytes,
@@ -207,8 +204,7 @@ public:
   static jsg::Ref<ReadableStream> constructor(
       jsg::Lock& js,
       jsg::Optional<UnderlyingSource> underlyingSource,
-      jsg::Optional<StreamQueuingStrategy> queuingStrategy,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<StreamQueuingStrategy> queuingStrategy);
   // Creates a new JS-backed ReadableStream using the provided source and strategy.
   // We use v8::Local<v8::Object>'s here instead of jsg structs because we need
   // to preserve the object references within the implementation.
