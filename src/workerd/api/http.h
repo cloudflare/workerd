@@ -433,8 +433,7 @@ public:
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
   jsg::Promise<jsg::Ref<Response>> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,

@@ -173,8 +173,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
-    jsg::Optional<SocketOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<SocketOptions> options) {
   jsg::Ref<Fetcher> actualFetcher = nullptr;
   KJ_IF_MAYBE(f, fetcher) {
     actualFetcher = kj::mv(*f);

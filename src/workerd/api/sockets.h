@@ -79,7 +79,7 @@ public:
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
 
-  JSG_RESOURCE_TYPE(Socket, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Socket) {
     JSG_READONLY_PROTOTYPE_PROPERTY(readable, getReadable);
     JSG_READONLY_PROTOTYPE_PROPERTY(writable, getWritable);
     JSG_READONLY_PROTOTYPE_PROPERTY(closed, getClosed);
@@ -132,18 +132,16 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
-    jsg::Optional<SocketOptions> options,
-    CompatibilityFlags::Reader featureFlags);
+    jsg::Optional<SocketOptions> options);
 
 class SocketsModule final: public jsg::Object {
 public:
   jsg::Ref<Socket> connect(jsg::Lock& js, AnySocketAddress address,
-    jsg::Optional<SocketOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
-    return connectImpl(js, nullptr, kj::mv(address), kj::mv(options), featureFlags);
+    jsg::Optional<SocketOptions> options) {
+    return connectImpl(js, nullptr, kj::mv(address), kj::mv(options));
   }
 
-  JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(SocketsModule) {
     JSG_METHOD(connect);
   }
 };
