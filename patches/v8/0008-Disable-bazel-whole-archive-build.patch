@@ -1,4 +1,4 @@
-From b1ec056cfcb3d00a092b1f4059f1c829a42239fb Mon Sep 17 00:00:00 2001
+From 30f97af7945ad6c417048d3e76ef384c9f811c27 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Tue, 11 Apr 2023 14:41:31 -0400
 Subject: Disable bazel whole-archive build
@@ -40,7 +40,7 @@ index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6
  
  cc_library(
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 1a167f2338b70bb9e3152af2daaa74880b878b99..471682f0c3ca427963b96c7353c63fd572e8eec2 100644
+index 236fffe8e673ecf948ca494db02bd4a164c6eaeb..77a850bdd667930f63299f2f6fac4f97d094b2ec 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -299,7 +299,7 @@ def v8_library(
