@@ -4,7 +4,19 @@
 
 #include <kj/test.h>
 #include <workerd/api/actor.h>
+#include <workerd/api/actor-state.h>
+#include <workerd/api/cache.h>
+#include <workerd/api/crypto.h>
+#include <workerd/api/encoding.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/html-rewriter.h>
+#include <workerd/api/queue.h>
+#include <workerd/api/scheduled.h>
+#include <workerd/api/sockets.h>
+#include <workerd/api/sql.h>
+#include <workerd/api/streams/standard.h>
+#include <workerd/api/trace.h>
+#include <workerd/api/urlpattern.h>
 #include <workerd/jsg/rtti.h>
 
 // Test building rtti for various APIs.

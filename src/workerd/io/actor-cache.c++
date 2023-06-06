@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "actor-cache.h"
-
 #include <algorithm>
 
 #include <kj/debug.h>
@@ -11,10 +10,6 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/util/sentry.h>
-
-// TODO(cleanup): Break dependency on IoContext. ActorCache is intended to be independent of the
-//   rest of the codebase.
-#include <workerd/io/io-context.h>
 
 namespace workerd {
 

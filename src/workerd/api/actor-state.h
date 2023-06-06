@@ -13,9 +13,9 @@
 #include <kj/async.h>
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
-#include "sql.h"
 
 namespace workerd::api {
+class SqlStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObjectId;

@@ -7,10 +7,14 @@
 #include "r2-rpc.h"
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/api/http.h>
+#include "streams.h"
 #include <workerd/api/r2-api.capnp.h>
 #include <capnp/compat/json.h>
 #include <workerd/util/http-util.h>
+
+namespace workerd::api {
+  class Headers;
+}
 
 namespace workerd::api::public_beta {
 

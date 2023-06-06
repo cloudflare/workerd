@@ -5,7 +5,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include "http.h"
+#include "streams.h"
 #include <workerd/io/limit-enforcer.h>
 
 namespace workerd { class IoContext; }

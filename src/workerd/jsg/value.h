@@ -877,8 +877,6 @@ public:
 //
 // 3. If a method returns an ArrayBuffer, create and return a `kj::Array<kj::byte>`.
 
-using kj::byte;
-
 template <typename TypeWrapper>
 class ArrayBufferWrapper {
   // TypeWrapper mixin for ArrayBuffers and ArrayBufferViews.

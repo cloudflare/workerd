@@ -4,10 +4,15 @@
 
 #pragma once
 
-#include <workerd/api/http.h>
+#include <workerd/api/basics.h>
+#include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
+
+class ReadableStreamSource;
+class ReadableStream;
+
 // NOTE: We don't currently actually use this as a structured object (hence the `kj::Own<R2Error>`
 // that we see pop up).
 // TODO(soon): Switch to structured objects and use jsg::Ref<R2Error> instead of kj::Own<R2Error>

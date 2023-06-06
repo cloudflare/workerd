@@ -7,8 +7,8 @@
 #include "r2-rpc.h"
 #include <array>
 #include <math.h>
-#include <workerd/api/util.h>
-#include <workerd/api/system-streams.h>
+#include <workerd/api/http.h>
+#include <workerd/api/streams.h>
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/json.h>

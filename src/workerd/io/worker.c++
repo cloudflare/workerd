@@ -8,6 +8,7 @@
 #include "actor-cache.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
 #include <workerd/jsg/async-context.h>

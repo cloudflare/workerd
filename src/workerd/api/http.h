@@ -16,10 +16,11 @@
 #include "url.h"
 #include "url-standard.h"
 #include "blob.h"
-#include "queue.h"
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
+
+struct QueueResponse;
 
 class Headers: public jsg::Object {
 private:

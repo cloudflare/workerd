@@ -5,10 +5,11 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include "streams.h"
-#include "util.h"
+#include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
+
+class ReadableStream;
 
 class Blob: public jsg::Object {
 public:

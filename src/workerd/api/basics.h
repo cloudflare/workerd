@@ -8,17 +8,18 @@
 // TODO(cleanp): Rename to events.h?
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/io/io-context.h>
 #include <workerd/util/canceler.h>
 #include <kj/function.h>
 #include <kj/map.h>
 #include <workerd/io/compatibility-date.capnp.h>
-#include "actor-state.h"
 
 namespace workerd::api {
 
 class EventTarget;
 class AbortSignal;
 class AbortController;
+class ActorState;
 
 class Event: public jsg::Object {
 public:

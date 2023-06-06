@@ -19,6 +19,8 @@
 
 #include <workerd/jsg/exception.h>
 
+using kj::byte;
+using kj::uint;
 
 namespace workerd::jsg {
   kj::String stringifyHandle(v8::Local<v8::Value> value);
@@ -33,8 +35,6 @@ namespace v8 {
 }
 
 namespace workerd::jsg {
-
-using kj::byte;
 
 class JsExceptionThrown: public std::exception {
 public:

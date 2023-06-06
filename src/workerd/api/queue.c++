@@ -2,6 +2,7 @@
 #include "src/workerd/api/util.h"
 #include "src/workerd/jsg/jsg.h"
 
+#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/api/global-scope.h>
 #include <kj/encoding.h>
@@ -368,6 +369,7 @@ void QueueEvent::ackAll() {
   result->ackAll = true;
 }
 
+namespace {
 jsg::Ref<QueueEvent> startQueueEvent(
     EventTarget& globalEventTarget,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
@@ -375,6 +377,8 @@ jsg::Ref<QueueEvent> startQueueEvent(
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler,
     const jsg::TypeHandler<QueueExportedHandler>& handlerHandler) {
   jsg::Lock& js = lock;
+  // Start a queue event (called from C++, not JS). Similar to startScheduled(), the caller must
+  // wait for waitUntil()s to produce the final QueueResult.
   jsg::Ref<QueueEvent> event(nullptr);
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(p, rpc::EventDispatcher::QueueParams::Reader) {
@@ -409,6 +413,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
   }
 
   return event.addRef();
+}
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(

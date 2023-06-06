@@ -12,8 +12,6 @@
 
 namespace workerd::api {
 
-using kj::uint;
-
 class ExecutionContext;
 
 // Binding types
@@ -238,15 +236,6 @@ struct QueueExportedHandler {
 
   JSG_STRUCT(queue);
 };
-
-jsg::Ref<QueueEvent> startQueueEvent(
-    EventTarget& globalEventTarget,
-    kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
-    IoPtr<QueueEventResult> result,
-    Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler,
-    const jsg::TypeHandler<QueueExportedHandler>& handlerHandler);
-// Start a queue event (called from C++, not JS). Similar to startScheduled(), the caller must
-// wait for waitUntil()s to produce the final QueueResult.
 
 class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj::Refcounted {
 public:

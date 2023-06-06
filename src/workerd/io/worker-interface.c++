@@ -5,6 +5,9 @@
 #include "worker-interface.h"
 #include <kj/debug.h>
 
+using kj::byte;
+using kj::uint;
+
 namespace workerd {
 
 class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
