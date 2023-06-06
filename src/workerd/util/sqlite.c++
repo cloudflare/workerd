@@ -249,9 +249,14 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "highlight"_kj,
   "bm25"_kj,
   "snippet"_kj,
-    
+
   // https://www.sqlite.org/lang_altertable.html
+  // Functions declared in https://sqlite.org/src/file?name=src/alter.c&ci=trunk
+  "sqlite_rename_column"_kj,
   "sqlite_rename_table"_kj,
+  "sqlite_rename_test"_kj,
+  "sqlite_drop_column"_kj,
+  "sqlite_rename_quotefix"_kj,
 };
 
 enum class PragmaSignature {
@@ -440,9 +445,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_MAYBE(d, dbName) {
-    if (*d != "main"_kj) {
-      // We don't allow opening multiple databases (including temporary databases), as our storage
-      // engine is not designed for this at present.
+    if (*d != "main"_kj && *d != "temp"_kj) {
+      // We don't allow opening multiple databases (except for temporary databases,
+      // which should be in-memory only), as our storage engine is not designed to
+      // track multiple files on-disk.
       return false;
     }
   }
