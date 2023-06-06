@@ -130,10 +130,48 @@
       }
     },
     {
-      "label": "Bazel run all tests",
+      "label": "Bazel run all tests (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["test", "--cache_test_results=no", "//..."],
+      "args": ["test", "-c", "dbg", "--cache_test_results=no", "//..."],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel run all tests (fastbuild)",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["test", "-c", "fastbuild", "--cache_test_results=no", "//..."],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      }
+    },
+    {
+      "label": "Bazel run all tests (opt)",
+      "type": "shell",
+      "command": "bazel",
+      "args": ["test", "-c", "opt", "--cache_test_results=no", "//..."],
       "group": {
         "kind": "test",
         "isDefault": true

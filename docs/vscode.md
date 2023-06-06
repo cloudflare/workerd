@@ -31,11 +31,17 @@ The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks
 * Bazel build all (dbg)
 * Bazel clean
 * Bazel clean --expunge
-* Bazel run all tests
+* Bazel run all tests (dbg)
+* Bazel run all tests (fastbuild)
+* Bazel run all tests (opt)
 * Generate compile_commands.json
 * Generate rust-project.json
 
-The keyboard shortcut for **Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
+The keyboard shortcut for **Tasks: Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
+
+The test tasks can be run with **Tasks: Run Test Task**, which does not have a default
+keybinding in VSCode, but can be found with the command palette with `shift+ctrl+p` on Linux and Windows, and `shift+cmd+p` on OS X.
+
 ## Running and debugging workerd in Visual Studio Code
 
 There are workerd debugging targets within Visual Studio Code which are supported on Linux, OS X, and Windows.
