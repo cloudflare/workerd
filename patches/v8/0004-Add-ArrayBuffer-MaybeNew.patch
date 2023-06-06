@@ -1,4 +1,4 @@
-From 011d7954e60346b47dee5697a41120a9858e92fd Mon Sep 17 00:00:00 2001
+From 9f9703297cc4fb282faba598721d46f7cfe604a1 Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Fri, 16 Sep 2022 21:41:45 -0500
 Subject: Add `ArrayBuffer::MaybeNew()`.

@@ -1,4 +1,4 @@
-From 094a86545cd7a11e924cfd131bea6e7e6cb23a79 Mon Sep 17 00:00:00 2001
+From 69914af325585c0a41a75fe3923d371a487cbdb9 Mon Sep 17 00:00:00 2001
 From: Dhi Aurrahman <dio@rockybars.com>
 Date: Thu, 27 Oct 2022 12:45:05 +0700
 Subject: Allow compiling on macOS catalina and ventura
@@ -9,7 +9,7 @@ Signed-off-by: Dhi Aurrahman <dio@rockybars.com>
  1 file changed, 12 insertions(+)
 
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 9024b1e14f6f032d636e26e18f88db6d3365ee4c..459979f1637199e06a9ba5b0df6d63c3d778a460 100644
+index 9651a31e062b2739e01bce1e8259030564dad9d8..0be041c35bd3a1967800d2cf30d82369c11c51ed 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -156,6 +156,18 @@ def _default_args():
