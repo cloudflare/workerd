@@ -251,6 +251,8 @@ public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config) {}
 
+  inline void initTypeWrapper() { }
+
   void unwrap() = delete;  // StructWrapper only implements tryUnwrap(), not unwrap()
 };
 
@@ -279,6 +281,8 @@ public:
   TypeWrapperBase(MetaConfiguration& config, bool = false): Extension<Self>(config) {}
 
   void unwrap() = delete;  // extensions only implement tryUnwrap(), not unwrap()
+
+  inline void initTypeWrapper() { }
 };
 
 template <typename Self, typename Configuration>
@@ -300,6 +304,8 @@ public:
   void wrap() = delete;
   void newContext() = delete;
   void getTemplate() = delete;
+
+  inline void initTypeWrapper() { }
 
 private:
   Configuration configuration;
@@ -409,6 +415,10 @@ public:
     isolate->SetData(1, this);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
+
+  void initTypeWrapper() {
+    (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
+  }
 
   static TypeWrapper& from(v8::Isolate* isolate) {
     return *reinterpret_cast<TypeWrapper*>(isolate->GetData(1));
