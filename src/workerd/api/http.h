@@ -64,7 +64,7 @@ public:
   // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
   // unnecessary string allocation. Not part of the JS interface.
 
-  kj::Array<DisplayedHeader> getDisplayedHeaders(CompatibilityFlags::Reader featureFlags);
+  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
   // Returns headers with lower-case name and comma-concatenated duplicates.
 
   using ByteStringPair = jsg::Sequence<jsg::ByteString>;
@@ -99,8 +99,7 @@ public:
   void delete_(jsg::ByteString name);
   void forEach(jsg::Lock& js,
       jsg::V8Ref<v8::Function>,
-      jsg::Optional<jsg::Value>,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<jsg::Value>);
 
   JSG_ITERATOR(EntryIterator, entries,
                 kj::Array<jsg::ByteString>,

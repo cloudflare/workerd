@@ -90,9 +90,7 @@ void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
   }
 }
 
-jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(
-    jsg::Lock& js,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
   KJ_IF_MAYBE(s, state) {
     cachedColumnNames.ensureInitialized(js, (*s)->query);
   }
@@ -116,9 +114,7 @@ kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
   });
 }
 
-jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
   return jsg::alloc<RawIterator>(JSG_THIS);
 }
 

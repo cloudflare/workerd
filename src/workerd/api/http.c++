@@ -11,6 +11,7 @@
 #include <kj/compat/url.h>
 #include <kj/memory.h>
 #include <kj/parse/char.h>
+#include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
@@ -164,10 +165,8 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
   return headers.find(name) != headers.end();
 }
 
-kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
-    CompatibilityFlags::Reader featureFlags) {
-
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<Headers::DisplayedHeader> copy;
     for (auto& entry : headers) {
       if (entry.first == "set-cookie") {
@@ -339,17 +338,13 @@ void Headers::delete_(jsg::ByteString name) {
 //   applied to the header map elements? We'd still copy the whole data structure to avoid iterator
 //   invalidation, but the elements would be cheaper to copy.
 
-jsg::Ref<Headers::EntryIterator> Headers::entries(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock& js) {
   return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> {
-    getDisplayedHeaders(featureFlags)
+    getDisplayedHeaders(js)
   });
 }
-jsg::Ref<Headers::KeyIterator> Headers::keys(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<jsg::ByteString> keysCopy;
     for (auto& entry : headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
@@ -371,10 +366,8 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(
     return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
   }
 }
-jsg::Ref<Headers::ValueIterator> Headers::values(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<jsg::ByteString> values;
     for (auto& entry : headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
@@ -399,8 +392,7 @@ jsg::Ref<Headers::ValueIterator> Headers::values(
 void Headers::forEach(
     jsg::Lock& js,
     jsg::V8Ref<v8::Function> callback,
-    jsg::Optional<jsg::Value> thisArg,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<jsg::Value> thisArg) {
   auto localCallback = callback.getHandle(js);
   auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
       .orDefault(js.v8Undefined());
@@ -412,7 +404,7 @@ void Headers::forEach(
   auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
   auto context = js.v8Context();  // Needed later for Call().
-  for (auto& entry: getDisplayedHeaders(featureFlags)) {
+  for (auto& entry: getDisplayedHeaders(js)) {
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {
       jsg::v8Str(isolate, entry.value),
