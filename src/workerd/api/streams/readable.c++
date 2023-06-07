@@ -4,6 +4,7 @@
 
 #include "readable.h"
 #include "writable.h"
+#include <workerd/io/features.h>
 #include <workerd/jsg/buffersource.h>
 
 namespace workerd::api {
@@ -253,14 +254,13 @@ void ReadableStreamBYOBReader::lockToStream(jsg::Lock& js, ReadableStream& strea
 
 jsg::Promise<ReadResult> ReadableStreamBYOBReader::read(
     jsg::Lock& js,
-    v8::Local<v8::ArrayBufferView> byobBuffer,
-    CompatibilityFlags::Reader featureFlags) {
+    v8::Local<v8::ArrayBufferView> byobBuffer) {
   auto options = ReadableStreamController::ByobOptions {
     .bufferView = js.v8Ref(byobBuffer),
     .byteOffset = byobBuffer->ByteOffset(),
     .byteLength = byobBuffer->ByteLength(),
     .atLeast = 1,
-    .detachBuffer = featureFlags.getStreamsByobReaderDetachesBuffer(),
+    .detachBuffer = FeatureFlags::get(js).getStreamsByobReaderDetachesBuffer(),
   };
   return impl.read(js, kj::mv(options));
 }
@@ -480,10 +480,9 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
 jsg::Ref<ReadableStream> ReadableStream::constructor(
     jsg::Lock& js,
     jsg::Optional<UnderlyingSource> underlyingSource,
-    jsg::Optional<StreamQueuingStrategy> queuingStrategy,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<StreamQueuingStrategy> queuingStrategy) {
 
-  JSG_REQUIRE(flags.getStreamsJavaScriptControllers(),
+  JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(),
                Error,
                "To use the new ReadableStream() constructor, enable the "
                "streams_enable_constructors feature flag.");

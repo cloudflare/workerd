@@ -64,7 +64,7 @@ public:
   // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
   // unnecessary string allocation. Not part of the JS interface.
 
-  kj::Array<DisplayedHeader> getDisplayedHeaders(CompatibilityFlags::Reader featureFlags);
+  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
   // Returns headers with lower-case name and comma-concatenated duplicates.
 
   using ByteStringPair = jsg::Sequence<jsg::ByteString>;
@@ -99,8 +99,7 @@ public:
   void delete_(jsg::ByteString name);
   void forEach(jsg::Lock& js,
       jsg::V8Ref<v8::Function>,
-      jsg::Optional<jsg::Value>,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<jsg::Value>);
 
   JSG_ITERATOR(EntryIterator, entries,
                 kj::Array<jsg::ByteString>,
@@ -306,8 +305,7 @@ public:
   bool getBodyUsed();
   jsg::Promise<kj::Array<byte>> arrayBuffer(jsg::Lock& js);
   jsg::Promise<kj::String> text(jsg::Lock& js);
-  jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js,
-      CompatibilityFlags::Reader featureFlags);
+  jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
   jsg::Promise<jsg::Value> json(jsg::Lock& js);
   jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
 
@@ -428,25 +426,20 @@ public:
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
 
-  kj::Url parseUrl(jsg::Lock& js, kj::StringPtr url,
-                   CompatibilityFlags::Reader featureFlags);
+  kj::Url parseUrl(jsg::Lock& js, kj::StringPtr url);
   // Wraps kj::Url::parse to take into account whether the Fetcher requires a host to be
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
 
   jsg::Ref<Socket> connect(
-      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
   jsg::Promise<jsg::Ref<Response>> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
-      jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
   using GetResult = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::Value>;
 
-  jsg::Promise<GetResult> get(
-      jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type,
-      CompatibilityFlags::Reader featureFlags);
+  jsg::Promise<GetResult> get(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type);
 
   struct PutOptions {
     // Optional parameter for passing options into a Fetcher::put. Initially
@@ -459,11 +452,9 @@ public:
   };
 
   jsg::Promise<void> put(
-      jsg::Lock& js, kj::String url, Body::Initializer body, jsg::Optional<PutOptions> options,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Lock& js, kj::String url, Body::Initializer body, jsg::Optional<PutOptions> options);
 
-  jsg::Promise<void> delete_(jsg::Lock& js, kj::String url,
-      CompatibilityFlags::Reader featureFlags);
+  jsg::Promise<void> delete_(jsg::Lock& js, kj::String url);
 
   struct ServiceBindingQueueMessage {
     // Representation of a queue message for use when invoking the queue() event handler on another
@@ -819,20 +810,9 @@ public:
 
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
-           CompatibilityFlags::Reader reader,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
-           Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO)
-      : Body(kj::mv(body), *headers),
-        statusCode(statusCode),
-        statusText(kj::mv(statusText)),
-        headers(kj::mv(headers)),
-        cf(kj::mv(cf)),
-        urlList(kj::mv(urlList)),
-        webSocket(kj::mv(webSocket)),
-        bodyEncoding(bodyEncoding),
-        hasEnabledWebSocketCompression(reader.getWebSocketCompression()),
-        asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
+           Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -861,8 +841,7 @@ public:
   static jsg::Ref<Response> constructor(
       jsg::Lock& js,
       jsg::Optional<kj::Maybe<Body::Initializer>> bodyInit,
-      jsg::Optional<Initializer> maybeInit,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<Initializer> maybeInit);
   // Response's constructor has two arguments: an optional, nullable body that defaults to null, and
   // an optional initializer property bag. Tragically, the only way to express the "optional,
   // nullable body that defaults to null" is with an Optional<Maybe<Body::Initializer>>. The reason
@@ -872,8 +851,7 @@ public:
   //   - We need to be able to call `new Response(null)`, but `null` cannot implicitly convert to
   //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
 
-  static jsg::Ref<Response> redirect(
-      jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status, CompatibilityFlags::Reader flags);
+  static jsg::Ref<Response> redirect(jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status);
   // Constructs a redirection response. `status` must be a redirect status if given, otherwise it
   // defaults to 302 (technically a non-conformity, but both Chrome and Firefox use this default).
   //
@@ -899,20 +877,19 @@ public:
   //    client. However, we were conserned about possible side-effects and incorrect
   //    error reporting.
 
-  jsg::Ref<Response> clone(jsg::Lock& js, CompatibilityFlags::Reader flags);
+  jsg::Ref<Response> clone(jsg::Lock& js);
 
   static jsg::Ref<Response> json_(
       jsg::Lock& js,
       v8::Local<v8::Value> any,
-      jsg::Optional<Initializer> maybeInit,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<Initializer> maybeInit);
 
   struct SendOptions {
     bool allowWebSocket = false;
   };
   kj::Promise<DeferredProxy<void>> send(
       jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags);
+      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
   // Helper not exposed to JavaScript.
 
   int getStatus();
@@ -1063,14 +1040,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImpl(
     jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,  // if null, use fetcher from request object
     Request::Info requestOrUrl,
-    jsg::Optional<Request::Initializer> requestInit,
-    CompatibilityFlags::Reader featureFlags);
+    jsg::Optional<Request::Initializer> requestInit);
 
 jsg::Ref<Response> makeHttpResponse(
     jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlList,
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
-    CompatibilityFlags::Reader flags,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = nullptr);
 

@@ -11,6 +11,7 @@
 #include <kj/compat/url.h>
 #include <kj/memory.h>
 #include <kj/parse/char.h>
+#include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
@@ -164,10 +165,8 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
   return headers.find(name) != headers.end();
 }
 
-kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
-    CompatibilityFlags::Reader featureFlags) {
-
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<Headers::DisplayedHeader> copy;
     for (auto& entry : headers) {
       if (entry.first == "set-cookie") {
@@ -339,17 +338,13 @@ void Headers::delete_(jsg::ByteString name) {
 //   applied to the header map elements? We'd still copy the whole data structure to avoid iterator
 //   invalidation, but the elements would be cheaper to copy.
 
-jsg::Ref<Headers::EntryIterator> Headers::entries(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock& js) {
   return jsg::alloc<EntryIterator>(IteratorState<DisplayedHeader> {
-    getDisplayedHeaders(featureFlags)
+    getDisplayedHeaders(js)
   });
 }
-jsg::Ref<Headers::KeyIterator> Headers::keys(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<jsg::ByteString> keysCopy;
     for (auto& entry : headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
@@ -371,10 +366,8 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(
     return jsg::alloc<KeyIterator>(IteratorState<jsg::ByteString> { kj::mv(keysCopy) });
   }
 }
-jsg::Ref<Headers::ValueIterator> Headers::values(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getHttpHeadersGetSetCookie()) {
+jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
+  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<jsg::ByteString> values;
     for (auto& entry : headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
@@ -399,8 +392,7 @@ jsg::Ref<Headers::ValueIterator> Headers::values(
 void Headers::forEach(
     jsg::Lock& js,
     jsg::V8Ref<v8::Function> callback,
-    jsg::Optional<jsg::Value> thisArg,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<jsg::Value> thisArg) {
   auto localCallback = callback.getHandle(js);
   auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
       .orDefault(js.v8Undefined());
@@ -412,7 +404,7 @@ void Headers::forEach(
   auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
 
   auto context = js.v8Context();  // Needed later for Call().
-  for (auto& entry: getDisplayedHeaders(featureFlags)) {
+  for (auto& entry: getDisplayedHeaders(js)) {
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {
       jsg::v8Str(isolate, entry.value),
@@ -678,8 +670,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
   return js.resolvedPromise(kj::String());
 }
 
-jsg::Promise<jsg::Ref<FormData>> Body::formData(
-    jsg::Lock& js, CompatibilityFlags::Reader featureFlags) {
+jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
   auto formData = jsg::alloc<FormData>();
 
   return js.evalNow([&] {
@@ -695,10 +686,10 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(
       auto& context = IoContext::current();
       return i->stream->getController().readAllText(js,
           context.getLimitEnforcer().getBufferingLimit()).then(js,
-          [contentType = kj::mv(contentType), formData = kj::mv(formData), featureFlags]
+          [contentType = kj::mv(contentType), formData = kj::mv(formData)]
           (auto& js, kj::String rawText) mutable {
         formData->parse(kj::mv(rawText), contentType,
-            !featureFlags.getFormDataParserSupportsFiles());
+            !FeatureFlags::get(js).getFormDataParserSupportsFiles());
         return kj::mv(formData);
       });
     }
@@ -707,7 +698,7 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(
     // application/x-www-form-urlencoded body, but not multipart/form-data. However, best to let
     // FormData::parse() make the decision, to keep the logic in one place.
     formData->parse(kj::String(), contentType,
-        !featureFlags.getFormDataParserSupportsFiles());
+        !FeatureFlags::get(js).getFormDataParserSupportsFiles());
     return js.resolvedPromise(kj::mv(formData));
   });
 }
@@ -1018,11 +1009,27 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 
 // =======================================================================================
 
+Response::Response(
+          jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
+          kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+          kj::Array<kj::String> urlList,
+          kj::Maybe<jsg::Ref<WebSocket>> webSocket,
+          Response::BodyEncoding bodyEncoding)
+    : Body(kj::mv(body), *headers),
+      statusCode(statusCode),
+      statusText(kj::mv(statusText)),
+      headers(kj::mv(headers)),
+      cf(kj::mv(cf)),
+      urlList(kj::mv(urlList)),
+      webSocket(kj::mv(webSocket)),
+      bodyEncoding(bodyEncoding),
+      hasEnabledWebSocketCompression(FeatureFlags::get(js).getWebSocketCompression()),
+      asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
+
 jsg::Ref<Response> Response::constructor(
     jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
-    jsg::Optional<Initializer> maybeInit,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<Initializer> maybeInit) {
   auto bodyInit = kj::mv(optionalBodyInit).orDefault(nullptr);
   Initializer init = kj::mv(maybeInit).orDefault(InitializerDict());
 
@@ -1156,12 +1163,12 @@ jsg::Ref<Response> Response::constructor(
   }
 
   return jsg::alloc<Response>(js, statusCode, KJ_ASSERT_NONNULL(kj::mv(statusText)),
-                              kj::mv(headers), kj::mv(cf), kj::mv(body), flags, nullptr,
+                              kj::mv(headers), kj::mv(cf), kj::mv(body), nullptr,
                               kj::mv(webSocket), bodyEncoding);
 }
 
 jsg::Ref<Response> Response::redirect(
-    jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status, CompatibilityFlags::Reader flags) {
+    jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status) {
   auto statusCode = status.orDefault(302);
   if (!isRedirectStatusCode(statusCode)) {
     JSG_FAIL_REQUIRE(RangeError,
@@ -1172,7 +1179,7 @@ jsg::Ref<Response> Response::redirect(
   // TODO(conform): The URL is supposed to be parsed relative to the "current setting's object's API
   //   base URL".
   kj::String parsedUrl = nullptr;
-  if (flags.getSpecCompliantResponseRedirect()) {
+  if (FeatureFlags::get(js).getSpecCompliantResponseRedirect()) {
     auto maybeParsedUrl = url::URL::parse(url);
     if (maybeParsedUrl == nullptr) {
       JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
@@ -1200,14 +1207,13 @@ jsg::Ref<Response> Response::redirect(
   auto statusText = KJ_ASSERT_NONNULL(defaultStatusText(statusCode));
 
   return jsg::alloc<Response>(js, statusCode, kj::str(statusText), kj::mv(headers), nullptr,
-                              nullptr, flags);
+                              nullptr);
 }
 
 jsg::Ref<Response> Response::json_(
     jsg::Lock& js,
     v8::Local<v8::Value> any,
-    jsg::Optional<Initializer> maybeInit,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<Initializer> maybeInit) {
 
   const auto maybeSetContentType = [](auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
@@ -1261,10 +1267,10 @@ jsg::Ref<Response> Response::json_(
     };
   }
   kj::String json = js.serializeJson(any);
-  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit), flags);
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
 }
 
-jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader flags) {
+jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   JSG_REQUIRE(webSocket == nullptr,
       TypeError, "Cannot clone a response to a WebSocket handshake.");
 
@@ -1280,12 +1286,12 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js, CompatibilityFlags::Reader fla
 
   return jsg::alloc<Response>(
       js, statusCode, kj::str(statusText), kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone),
-      flags, kj::mv(urlListClone));
+      kj::mv(urlListClone));
 }
 
 kj::Promise<DeferredProxy<void>> Response::send(
     jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags) {
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1353,7 +1359,7 @@ kj::Promise<DeferredProxy<void>> Response::send(
     }
     return wsPromise;
   } else KJ_IF_MAYBE(jsBody, getBody()) {
-    auto encoding = getContentEncoding(context, outHeaders, flags, bodyEncoding);
+    auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto maybeLength = (*jsBody)->tryGetLength(encoding);
     auto stream = newSystemStream(
         outer.send(statusCode, statusText, outHeaders, maybeLength),
@@ -1513,20 +1519,17 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags,
     kj::HttpClient::Response&& response);
 jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags,
     uint status, kj::StringPtr location);
 
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
-    jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList) {
   KJ_ASSERT(!urlList.empty());
 
   auto& ioContext = IoContext::current();
@@ -1551,7 +1554,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
       urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
 
   if (headers.isWebSocket()) {
-    if (!featureFlags.getWebSocketCompression()) {
+    if (!FeatureFlags::get(js).getWebSocketCompression()) {
       // If we haven't enabled the websocket compression feature flag, strip the header from the
       // subrequest.
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
@@ -1559,7 +1562,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     auto webSocketResponse = client->openWebSocket(url, headers);
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(signal, kj::mv(webSocketResponse)),
-        [fetcher = kj::mv(fetcher), featureFlags, jsRequest = kj::mv(jsRequest),
+        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
          urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal)]
         (jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable
           -> jsg::Promise<jsg::Ref<Response>> {
@@ -1567,7 +1570,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
         KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
           body = body.attach(kj::mv(client));
           return handleHttpResponse(
-              js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), featureFlags,
+              js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
               { response.statusCode, response.statusText, response.headers, kj::mv(body) });
         }
         KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
@@ -1585,7 +1588,6 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
               response.statusCode, response.statusText, *response.headers,
               kj::heap<NullInputStream>(),
               jsg::alloc<WebSocket>(kj::mv(webSocket), WebSocket::REMOTE),
-              featureFlags,
               Response::BodyEncoding::AUTO,
               kj::mv(signal)));
         }
@@ -1636,14 +1638,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     }
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)),
-        [fetcher = kj::mv(fetcher), featureFlags, jsRequest = kj::mv(jsRequest),
+        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
          urlList = kj::mv(urlList), client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
       return handleHttpResponse(
-          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), featureFlags,
-          kj::mv(response));
+          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
     });
   }
 }
@@ -1651,21 +1652,18 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
 jsg::Promise<jsg::Ref<Response>> fetchImpl(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
-    jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList) {
   auto& context = IoContext::current();
   // Optimization: For non-actors, which never have output locks, avoid the overhead of
   // awaitIo() and such by not going back to the event loop at all.
   KJ_IF_MAYBE(promise, context.waitForOutputLocksIfNecessary()) {
     return context.awaitIo(js, kj::mv(*promise),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
-         urlList = kj::mv(urlList), featureFlags](jsg::Lock& js) mutable {
-      return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest),
-                                   kj::mv(urlList), featureFlags);
+         urlList = kj::mv(urlList)](jsg::Lock& js) mutable {
+      return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList));
     });
   } else {
-    return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest),
-                                 kj::mv(urlList), featureFlags);
+    return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList));
   }
 }
 
@@ -1673,7 +1671,6 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags,
     kj::HttpClient::Response&& response) {
   auto signal = jsRequest->getSignal();
 
@@ -1690,8 +1687,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(
       && jsRequest->getRedirectEnum() == Request::Redirect::FOLLOW) {
     KJ_IF_MAYBE(l, response.headers->get(kj::HttpHeaderId::LOCATION)) {
       return handleHttpRedirectResponse(
-          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), featureFlags,
-          response.statusCode, *l);
+          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), response.statusCode, *l);
     } else {
       // No Location header. That's okay, we just return the response as is.
       // See https://fetch.spec.whatwg.org/#http-redirect-fetch step 2.
@@ -1700,7 +1696,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(
 
   auto result = makeHttpResponse(js, jsRequest->getMethodEnum(), kj::mv(urlList),
       response.statusCode, response.statusText, *response.headers,
-      kj::mv(response.body), nullptr, featureFlags, Response::BodyEncoding::AUTO,
+      kj::mv(response.body), nullptr, Response::BodyEncoding::AUTO,
       kj::mv(signal));
 
   return js.resolvedPromise(kj::mv(result));
@@ -1710,7 +1706,6 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(
     jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest, kj::Vector<kj::Url> urlList,
-    CompatibilityFlags::Reader featureFlags,
     uint status, kj::StringPtr location) {
   // Reconstruct the request body stream for retransmission in the face of a redirect. Before
   // reconstructing the stream, however, this function:
@@ -1783,8 +1778,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(
 
   // No need to wait for output locks again when following a redirect, because we didn't interact
   // with the app state in any way.
-  return fetchImplNoOutputLock(
-      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), featureFlags);
+  return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList));
 }
 
 }  // namespace
@@ -1793,7 +1787,6 @@ jsg::Ref<Response> makeHttpResponse(
     jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlListParam,
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
-    CompatibilityFlags::Reader flags,
     Response::BodyEncoding bodyEncoding,
     kj::Maybe<jsg::Ref<AbortSignal>> signal) {
   auto responseHeaders = jsg::alloc<Headers>(headers, Headers::Guard::RESPONSE);
@@ -1808,7 +1801,9 @@ jsg::Ref<Response> makeHttpResponse(
   kj::Maybe<Body::ExtractedBody> responseBody = nullptr;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
     responseBody = Body::ExtractedBody(jsg::alloc<ReadableStream>(context,
-        newSystemStream(kj::mv(body), getContentEncoding(context, headers, flags, bodyEncoding))));
+        newSystemStream(kj::mv(body),
+                        getContentEncoding(context, headers, bodyEncoding,
+                                           FeatureFlags::get(js)))));
   }
 
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list
@@ -1822,7 +1817,7 @@ jsg::Ref<Response> makeHttpResponse(
   // TODO(someday): Fill response CF blob from somewhere?
   return jsg::alloc<Response>(
         js, statusCode, kj::str(statusText), kj::mv(responseHeaders),
-        nullptr, kj::mv(responseBody), flags, kj::mv(urlList), kj::mv(webSocket));
+        nullptr, kj::mv(responseBody), kj::mv(urlList), kj::mv(webSocket));
 }
 
 namespace {
@@ -1831,8 +1826,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
     jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     Request::Info requestOrUrl,
-    jsg::Optional<Request::Initializer> requestInit,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<Request::Initializer> requestInit) {
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
   return js.evalNow([&] {
@@ -1865,9 +1859,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
           IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
     }
 
-    urlList.add(actualFetcher->parseUrl(js, jsRequest->getUrl(), featureFlags));
-    return fetchImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(jsRequest), kj::mv(urlList),
-                                 featureFlags);
+    urlList.add(actualFetcher->parseUrl(js, jsRequest->getUrl()));
+    return fetchImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(jsRequest), kj::mv(urlList));
   });
 }
 
@@ -1877,35 +1870,30 @@ jsg::Promise<jsg::Ref<Response>> fetchImpl(
     jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     Request::Info requestOrUrl,
-    jsg::Optional<Request::Initializer> requestInit,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<Request::Initializer> requestInit) {
   auto& context = IoContext::current();
   // Optimization: For non-actors, which never have output locks, avoid the overhead of
   // awaitIo() and such by not going back to the event loop at all.
   KJ_IF_MAYBE(promise, context.waitForOutputLocksIfNecessary()) {
     return context.awaitIo(js, kj::mv(*promise),
         [fetcher = kj::mv(fetcher), requestOrUrl = kj::mv(requestOrUrl),
-         requestInit = kj::mv(requestInit), featureFlags](jsg::Lock& js) mutable {
-      return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(requestOrUrl),
-                                   kj::mv(requestInit), featureFlags);
+         requestInit = kj::mv(requestInit)](jsg::Lock& js) mutable {
+      return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(requestOrUrl), kj::mv(requestInit));
     });
   } else {
-    return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(requestOrUrl),
-                                 kj::mv(requestInit), featureFlags);
+    return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(requestOrUrl), kj::mv(requestInit));
   }
 }
 
 jsg::Ref<Socket> Fetcher::connect(
-    jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
-  return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options), featureFlags);
+    jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
+  return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
 jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
-    jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit,
-    CompatibilityFlags::Reader featureFlags) {
-  return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit), featureFlags);
+    jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit) {
+  return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
 static jsg::Promise<void> throwOnError(
@@ -1964,12 +1952,11 @@ static jsg::Promise<Fetcher::GetResult> parseResponse(
 }
 
 jsg::Promise<Fetcher::GetResult> Fetcher::get(
-    jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type) {
   RequestInitializerDict subInit;
   subInit.method = kj::str("GET");
 
-  return fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit), featureFlags)
+  return fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit))
       .then(js, [type = kj::mv(type)](jsg::Lock& js, jsg::Ref<Response> response) mutable
                 -> jsg::Promise<GetResult> {
     uint status = response->getStatus();
@@ -1992,8 +1979,7 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
 
 jsg::Promise<void> Fetcher::put(
     jsg::Lock& js, kj::String url, Body::Initializer body,
-    jsg::Optional<Fetcher::PutOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<Fetcher::PutOptions> options) {
   // Note that this borrows liberally from fetchImpl(fetcher, request, init, isolate).
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
@@ -2004,7 +1990,7 @@ jsg::Promise<void> Fetcher::put(
     auto jsRequest = Request::constructor(js, kj::mv(url), kj::mv(subInit));
     auto urlList = kj::Vector<kj::Url>(1 + MAX_REDIRECT_COUNT);
 
-    kj::Url parsedUrl = this->parseUrl(js, jsRequest->getUrl(), featureFlags);
+    kj::Url parsedUrl = this->parseUrl(js, jsRequest->getUrl());
 
     // If any optional parameters were specified by the client, append them to
     // the URL's query parameters.
@@ -2018,16 +2004,14 @@ jsg::Promise<void> Fetcher::put(
     }
 
     urlList.add(kj::mv(parsedUrl));
-    return fetchImpl(js, JSG_THIS, kj::mv(jsRequest), kj::mv(urlList), featureFlags);
+    return fetchImpl(js, JSG_THIS, kj::mv(jsRequest), kj::mv(urlList));
   }));
 }
 
-jsg::Promise<void> Fetcher::delete_(
-    jsg::Lock& js, kj::String url, CompatibilityFlags::Reader featureFlags) {
+jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   RequestInitializerDict subInit;
   subInit.method = kj::str("DELETE");
-  return throwOnError("DELETE", fetchImpl(
-      js, JSG_THIS, kj::mv(url), kj::mv(subInit), featureFlags));
+  return throwOnError("DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
 
 jsg::Promise<QueueResponse> Fetcher::queue(
@@ -2083,8 +2067,7 @@ kj::Own<WorkerInterface> Fetcher::getClient(
   KJ_UNREACHABLE;
 }
 
-kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url,
-                          CompatibilityFlags::Reader featureFlags) {
+kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   // We need to prep the request's URL for transmission over HTTP. fetch() accepts URLs that have
   // "." and ".." components as well as fragments (stuff after '#'), all of which needs to be
   // removed/collapsed before the URL is HTTP-ready. Luckily our URL parser does all this if we
@@ -2109,7 +2092,7 @@ kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url,
       // in production have grown dependent on the bug. We'll have to use a runtime versioning flag
       // to fix this.
 
-      if (featureFlags.getFetchRefusesUnknownProtocols()) {
+      if (FeatureFlags::get(js).getFetchRefusesUnknownProtocols()) {
         // Backwards-compatibility flag not enabled, so just fail.
         JSG_FAIL_REQUIRE(TypeError, kj::str("Fetch API cannot load: ", url));
       }

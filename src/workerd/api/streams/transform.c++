@@ -5,6 +5,7 @@
 #include "transform.h"
 #include "standard.h"
 #include "internal.h"
+#include <workerd/io/features.h>
 #include <workerd/jsg/function.h>
 
 namespace workerd::api {
@@ -23,10 +24,9 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     jsg::Lock& js,
     jsg::Optional<Transformer> maybeTransformer,
     jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
-    jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy) {
 
-  if (flags.getTransformStreamJavaScriptControllers()) {
+  if (FeatureFlags::get(js).getTransformStreamJavaScriptControllers()) {
     // The standard implementation. Here the TransformStream is backed by readable
     // and writable streams using the JavaScript-backed controllers. Data that is
     // written to the writable side passes through the transform function that is
@@ -67,8 +67,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
             return controller->cancel(js, reason);
           })),
         },
-        kj::mv(maybeReadableStrategy),
-        kj::cp(flags));
+        kj::mv(maybeReadableStrategy));
 
     auto writable = WritableStream::constructor(
         js,
@@ -99,8 +98,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
             return controller->close(js);
           })),
         },
-        kj::mv(maybeWritableStrategy),
-        kj::mv(flags));
+        kj::mv(maybeWritableStrategy));
 
     // The controller will store c++ references to both the readable and writable
     // streams underlying controllers.

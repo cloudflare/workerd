@@ -910,18 +910,18 @@ private:
   friend SelfType;
 };
 
-#define JSG_ITERATOR(Name, Label, Type, State, NextFunc)                                       \
-  class Name final: public jsg::IteratorBase<Name, Type, State> {                              \
+#define JSG_ITERATOR(Name, Label, Type, State, NextFunc)                                        \
+  class Name final: public jsg::IteratorBase<Name, Type, State> {                               \
   public:                                                                                       \
-    using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                  \
-    inline Next next(jsg::Lock& js) { return nextImpl(js, NextFunc); }                         \
-    JSG_RESOURCE_TYPE(Name) {                                                                  \
-      JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype);                                           \
-      JSG_METHOD(next);                                                                        \
-      JSG_ITERABLE(self);                                                                      \
+    using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                   \
+    inline Next next(jsg::Lock& js) { return nextImpl(js, NextFunc); }                          \
+    JSG_RESOURCE_TYPE(Name) {                                                                   \
+      JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype);                                            \
+      JSG_METHOD(next);                                                                         \
+      JSG_ITERABLE(self);                                                                       \
     }                                                                                           \
   };                                                                                            \
-  jsg::Ref<Name> Label(jsg::Lock&, CompatibilityFlags::Reader featureFlags);
+  jsg::Ref<Name> Label(jsg::Lock&);
 // The JSG_ITERATOR macro provides a mechanism for easily implementing JavaScript-style iterators
 // for JSG_RESOURCE_TYPES.
 //

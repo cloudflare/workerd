@@ -4,6 +4,7 @@
 
 #include "actor.h"
 #include "util.h"
+#include <workerd/io/features.h>
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/byte-stream.h>
@@ -133,24 +134,24 @@ jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(kj::String id) {
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
+    jsg::Lock& js,
     jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
-  return getImpl(ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options), kj::mv(featureFlags));
+    jsg::Optional<GetDurableObjectOptions> options) {
+  return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::getExisting(
+    jsg::Lock& js,
     jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
-  return getImpl(ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options), kj::mv(featureFlags));
+    jsg::Optional<GetDurableObjectOptions> options) {
+  return getImpl(js, ActorGetMode::GET_EXISTING, kj::mv(id), kj::mv(options));
 }
 
 jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
+    jsg::Lock& js,
     ActorGetMode mode,
     jsg::Ref<DurableObjectId> id,
-    jsg::Optional<GetDurableObjectOptions> options,
-    CompatibilityFlags::Reader featureFlags) {
+    jsg::Optional<GetDurableObjectOptions> options) {
   JSG_REQUIRE(idFactory->matchesJurisdiction(id->getInner()), TypeError,
       "get called on jurisdictional subnamespace with an ID from a different jurisdiction");
 
@@ -162,7 +163,7 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
 
   auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
       kj::heap<GlobalActorOutgoingFactory>(channel, id.addRef(), kj::mv(locationHint), mode));
-  auto requiresHost = featureFlags.getDurableObjectFetchRequiresSchemeAuthority()
+  auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
   return jsg::alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);

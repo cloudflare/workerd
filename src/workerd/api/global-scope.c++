@@ -301,7 +301,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     return ioContext.awaitJs(promise->then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers, flags]
+             canceled = kj::addRef(*canceled), &headers]
             (jsg::Lock& js, jsg::Ref<Response> innerResponse)
             -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
@@ -311,8 +311,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
       } else {
         return context.addObject(kj::heap(innerResponse->send(
-            js, response, { .allowWebSocket = allowWebSocket }, headers,
-            flags)));
+            js, response, { .allowWebSocket = allowWebSocket }, headers)));
       }
     }))).attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
         .then([ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)]
@@ -730,9 +729,8 @@ jsg::Ref<CacheStorage> ServiceWorkerGlobalScope::getCaches() {
 
 jsg::Promise<jsg::Ref<Response>> ServiceWorkerGlobalScope::fetch(
     jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
-    jsg::Optional<Request::Initializer> requestInit,
-    CompatibilityFlags::Reader featureFlags) {
-  return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit), featureFlags);
+    jsg::Optional<Request::Initializer> requestInit) {
+  return fetchImpl(js, nullptr, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
 double Performance::now() {

@@ -118,8 +118,7 @@ public:
   static jsg::Ref<WritableStream> constructor(
       jsg::Lock& js,
       jsg::Optional<UnderlyingSink> underlyingSink,
-      jsg::Optional<StreamQueuingStrategy> queuingStrategy,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<StreamQueuingStrategy> queuingStrategy);
 
   bool isLocked();
 

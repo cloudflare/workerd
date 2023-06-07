@@ -32,8 +32,7 @@ public:
       jsg::Lock& js,
       jsg::Optional<Transformer> maybeTransformer,
       jsg::Optional<StreamQueuingStrategy> maybeWritableStrategy,
-      jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<StreamQueuingStrategy> maybeReadableStrategy);
 
   jsg::Ref<ReadableStream> getReadable() {
     return readable.addRef();

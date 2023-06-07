@@ -342,16 +342,19 @@ SystemMultiStream newSystemMultiStream(
   };
 }
 
+ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)
+    : brotliEnabled(flags.getBrotliContentEncoding()) {}
+
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
-                                  CompatibilityFlags::Reader flags,
-                                  Response::BodyEncoding bodyEncoding) {
+                                  Response::BodyEncoding bodyEncoding,
+                                  ContentEncodingOptions options) {
   if (bodyEncoding == Response::BodyEncoding::MANUAL) {
     return StreamEncoding::IDENTITY;
   }
   KJ_IF_MAYBE(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
     if (*encodingStr == "gzip") {
       return StreamEncoding::GZIP;
-    } else if (flags.getBrotliContentEncoding() && *encodingStr == "br") {
+    } else if (options.brotliEnabled && *encodingStr == "br") {
       return StreamEncoding::BROTLI;
     }
   }

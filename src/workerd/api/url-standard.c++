@@ -5,6 +5,7 @@
 #include "url-standard.h"
 #include "blob.h"
 #include "util.h"
+#include <workerd/io/features.h>
 #include <kj/array.h>
 #include <cmath>
 #include <map>
@@ -1943,10 +1944,9 @@ void URLSearchParams::append(jsg::UsvString name, jsg::UsvString value) {
   update();
 }
 
-void URLSearchParams::delete_(jsg::UsvString name,
-                              jsg::Optional<jsg::UsvString> value,
-                              CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getUrlSearchParamsDeleteHasValueArg()) {
+void URLSearchParams::delete_(jsg::Lock& js, jsg::UsvString name,
+                              jsg::Optional<jsg::UsvString> value) {
+  if (FeatureFlags::get(js).getUrlSearchParamsDeleteHasValueArg()) {
     // The whatwg url spec was updated to add a second optional argument to delete()
     // and has(). While it was determined that it likely didn't break browser users,
     // the change could break at least a couple existing deployed workers so we have
@@ -1982,9 +1982,8 @@ kj::Array<jsg::UsvStringPtr> URLSearchParams::getAll(jsg::UsvString name) {
   return result.releaseAsArray();
 }
 
-bool URLSearchParams::has(jsg::UsvString name, jsg::Optional<jsg::UsvString> value,
-                          CompatibilityFlags::Reader featureFlags) {
-  if (featureFlags.getUrlSearchParamsDeleteHasValueArg()) {
+bool URLSearchParams::has(jsg::Lock& js, jsg::UsvString name, jsg::Optional<jsg::UsvString> value) {
+  if (FeatureFlags::get(js).getUrlSearchParamsDeleteHasValueArg()) {
     // The whatwg url spec was updated to add a second optional argument to delete()
     // and has(). While it was determined that it likely didn't break browser users,
     // the change could break at least a couple existing deployed workers so we have
@@ -2057,21 +2056,15 @@ void URLSearchParams::sort() {
   update();
 }
 
-jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<URLSearchParams::EntryIterator> URLSearchParams::entries(jsg::Lock&) {
   return jsg::alloc<URLSearchParams::EntryIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<URLSearchParams::KeyIterator> URLSearchParams::keys(jsg::Lock&) {
   return jsg::alloc<URLSearchParams::KeyIterator>(IteratorState { JSG_THIS });
 }
 
-jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(
-    jsg::Lock&,
-    CompatibilityFlags::Reader featureFlags) {
+jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
   return jsg::alloc<URLSearchParams::ValueIterator>(IteratorState { JSG_THIS });
 }
 

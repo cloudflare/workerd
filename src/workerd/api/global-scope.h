@@ -351,8 +351,7 @@ public:
 
   jsg::Promise<jsg::Ref<Response>> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> request,
-      jsg::Optional<Request::Initializer> requestInitr,
-      CompatibilityFlags::Reader featureFlags);
+      jsg::Optional<Request::Initializer> requestInitr);
 
   jsg::Ref<ServiceWorkerGlobalScope> getSelf() {
     return JSG_THIS;

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "compression.h"
+#include <workerd/io/features.h>
 #include <zlib.h>
 #include <deque>
 #include <vector>
@@ -397,15 +398,16 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
     jsg::alloc<WritableStream>(ioContext, kj::mv(writableSide)));
 }
 
-jsg::Ref<DecompressionStream> DecompressionStream::constructor(
-    jsg::Lock& js, kj::String format, CompatibilityFlags::Reader flags) {
+jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj::String format) {
   JSG_REQUIRE(format == "deflate" || format == "gzip" || format == "deflate-raw", TypeError,
                "The compression format must be either 'deflate', 'deflate-raw' or 'gzip'.");
 
   auto readableSide =
       kj::refcounted<CompressionStreamImpl<Context::Mode::DECOMPRESS>>(
-          kj::mv(format), flags.getStrictCompression() ? Context::ContextFlags::STRICT :
-          Context::ContextFlags::NONE);
+          kj::mv(format),
+          FeatureFlags::get(js).getStrictCompression() ?
+              Context::ContextFlags::STRICT :
+              Context::ContextFlags::NONE);
   auto writableSide = kj::addRef(*readableSide);
 
   auto& ioContext = IoContext::current();

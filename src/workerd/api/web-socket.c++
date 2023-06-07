@@ -4,6 +4,7 @@
 
 #include "web-socket.h"
 #include <workerd/jsg/jsg.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <workerd/util/sentry.h>
@@ -167,8 +168,7 @@ bool validProtoToken(const kj::StringPtr protocol) {
 jsg::Ref<WebSocket> WebSocket::constructor(
     jsg::Lock& js,
     kj::String url,
-    jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols,
-    CompatibilityFlags::Reader flags) {
+    jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols) {
 
   auto& context = IoContext::current();
 
@@ -236,7 +236,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   headers.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, kj::str("permessage-deflate"));
   // By default, browsers set the compression extension header for `new WebSocket()`.
 
-  if (!flags.getWebSocketCompression()) {
+  if (!FeatureFlags::get(js).getWebSocketCompression()) {
     // If we haven't enabled the websocket compression feature flag, strip the header from the
     // subrequest.
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
