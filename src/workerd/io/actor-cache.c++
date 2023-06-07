@@ -3268,4 +3268,21 @@ kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
   }
 }
 
+// =======================================================================================
+
+kj::Promise<kj::String> ActorCacheInterface::getCurrentBookmark() {
+  JSG_FAIL_REQUIRE(Error,
+      "This Durable Object's storage back-end does not implement point-in-time recovery.");
+}
+
+kj::Promise<kj::String> ActorCacheInterface::getBookmarkForTime(kj::Date timestamp) {
+  JSG_FAIL_REQUIRE(Error,
+      "This Durable Object's storage back-end does not implement point-in-time recovery.");
+}
+
+kj::Promise<kj::String> ActorCacheInterface::onNextSessionRestoreBookmark(kj::StringPtr bookmark) {
+  JSG_FAIL_REQUIRE(Error,
+      "This Durable Object's storage back-end does not implement point-in-time recovery.");
+}
+
 }  // namespace workerd
