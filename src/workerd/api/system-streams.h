@@ -41,9 +41,15 @@ SystemMultiStream newSystemMultiStream(
     kj::Own<kj::AsyncIoStream> stream, IoContext& context = IoContext::current());
 // A combo ReadableStreamSource and WritableStreamSink.
 
+struct ContentEncodingOptions {
+  bool brotliEnabled = false;
+  ContentEncodingOptions() = default;
+  ContentEncodingOptions(CompatibilityFlags::Reader flags);
+};
+
 StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& headers,
-                                  CompatibilityFlags::Reader flags,
-                                  Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
+                                  Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
+                                  ContentEncodingOptions options = {});
 // Get the Content-Encoding header from an HttpHeaders object as a StreamEncoding enum. Unsupported
 // encodings return IDENTITY.
 

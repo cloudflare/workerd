@@ -59,8 +59,7 @@ public:
   jsg::Promise<GetWithMetadataResult> getWithMetadata(
       jsg::Lock& js,
       kj::String name,
-      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
-      CompatibilityFlags::Reader flags);
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   struct ListOptions {
     jsg::Optional<int> limit;
@@ -71,8 +70,7 @@ public:
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceListOptions);
   };
 
-  jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options,
-      CompatibilityFlags::Reader flags);
+  jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   struct PutOptions {
     // Optional parameter for passing options into a Fetcher::put. Initially

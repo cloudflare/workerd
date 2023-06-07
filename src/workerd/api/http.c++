@@ -1291,7 +1291,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 
 kj::Promise<DeferredProxy<void>> Response::send(
     jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags) {
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1359,7 +1359,7 @@ kj::Promise<DeferredProxy<void>> Response::send(
     }
     return wsPromise;
   } else KJ_IF_MAYBE(jsBody, getBody()) {
-    auto encoding = getContentEncoding(context, outHeaders, flags, bodyEncoding);
+    auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
     auto maybeLength = (*jsBody)->tryGetLength(encoding);
     auto stream = newSystemStream(
         outer.send(statusCode, statusText, outHeaders, maybeLength),
@@ -1801,7 +1801,9 @@ jsg::Ref<Response> makeHttpResponse(
   kj::Maybe<Body::ExtractedBody> responseBody = nullptr;
   if (method != kj::HttpMethod::HEAD && !isNullBodyStatusCode(statusCode)) {
     responseBody = Body::ExtractedBody(jsg::alloc<ReadableStream>(context,
-        newSystemStream(kj::mv(body), getContentEncoding(context, headers, flags, bodyEncoding))));
+        newSystemStream(kj::mv(body),
+                        getContentEncoding(context, headers, bodyEncoding,
+                                           FeatureFlags::get(js)))));
   }
 
   // The Fetch spec defines "response URLs" as having no fragments. Since the last URL in the list

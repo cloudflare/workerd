@@ -84,7 +84,8 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     auto processStream = [&](kj::StringPtr metadata) -> kj::Promise<R2Result> {
       auto stream = newSystemStream(
         response.body.attach(kj::mv(client)),
-        getContentEncoding(context, *response.headers, flags), context);
+        getContentEncoding(context, *response.headers, Response::BodyEncoding::AUTO, flags),
+        context);
       auto metadataSize = atoi((metadata).cStr());
       // R2 itself will try to stick to a cap of 256 KiB of response here. However for listing
       // sometimes our heuristics have corner cases. This way we're more lenient in case someone

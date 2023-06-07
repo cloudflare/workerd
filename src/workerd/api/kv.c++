@@ -5,6 +5,7 @@
 #include "kv.h"
 #include "util.h"
 #include "system-streams.h"
+#include <workerd/io/features.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/util/http-util.h>
 #include <workerd/io/io-context.h>
@@ -107,7 +108,7 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
-    auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options), flags);
+    auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
     return resp.then([](KvNamespace::GetWithMetadataResult result) {
       return kj::mv(result.value);
     });
@@ -115,8 +116,7 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
 }
 
 jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
-    jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
-    CompatibilityFlags::Reader flags) {
+    jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options) {
   validateKeyName("GET", name);
 
   auto& context = IoContext::current();
@@ -152,7 +152,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
   return context.awaitIo(js,
       kj::mv(request.response),
-      [type = kj::mv(type), &context, flags, client = kj::mv(client)]
+      [type = kj::mv(type), &context, client = kj::mv(client)]
           (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
           -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
 
@@ -178,7 +178,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     auto& context = IoContext::current();
     auto stream = newSystemStream(
         response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers,
-            flags));
+            Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
     jsg::Promise<KvNamespace::GetResult> result = nullptr;
 
@@ -226,8 +226,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   });
 }
 
-jsg::Promise<jsg::Value> KvNamespace::list(
-    jsg::Lock& js, jsg::Optional<ListOptions> options, CompatibilityFlags::Reader flags) {
+jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
@@ -260,7 +259,7 @@ jsg::Promise<jsg::Value> KvNamespace::list(
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js,
         kj::mv(request.response),
-        [&context, flags, client = kj::mv(client)]
+        [&context, client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::Value> {
 
@@ -268,7 +267,7 @@ jsg::Promise<jsg::Value> KvNamespace::list(
 
       auto stream = newSystemStream(
           response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers,
-              flags));
+              Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())

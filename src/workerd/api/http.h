@@ -889,7 +889,7 @@ public:
   };
   kj::Promise<DeferredProxy<void>> send(
       jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders, CompatibilityFlags::Reader flags);
+      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
   // Helper not exposed to JavaScript.
 
   int getStatus();
