@@ -113,6 +113,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // (It turns out you can call v8::V8::SetFlagsFromString() as many times as you want to add
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
+  v8::V8::SetFlagsFromString("--single_threaded_gc");
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
