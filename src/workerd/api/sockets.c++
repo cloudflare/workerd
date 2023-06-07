@@ -255,11 +255,38 @@ void Socket::handleProxyStatus(
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsucessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
-      auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-        kj::str(JSG_EXCEPTION(Error) ": proxy request failed"));
-      resolveFulfiller(js, exc);
-      readable->getController().cancel(js, nullptr).markAsHandled();
-      writable->getController().abort(js, nullptr).markAsHandled();
+      closureInProgress = false;
+      if (status.statusCode == 403) {
+        KJ_IF_MAYBE(errorBody, status.errorBody) {
+          // The proxy denied our request with a helpful error message. So read it here and return
+          // to the user.
+          auto& context = IoContext::current();
+          auto maybeSize = status.headers->get(
+              kj::HttpHeaderId::CONTENT_LENGTH).orDefault("").tryParseAs<int64_t>();
+          KJ_IF_MAYBE(size, maybeSize) {
+            KJ_DBG("Maybe size ", *size);
+            closureInProgress = true;
+            auto buffer = kj::heapString(*size);
+            auto promise = context.awaitIo(js, (*errorBody)->tryRead(buffer.begin(), 1, *size),
+                [this, self = JSG_THIS, buffer=kj::mv(buffer)](jsg::Lock& js, size_t amount) {
+              KJ_DBG("Rejecting! ", amount, buffer);
+              auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+                  kj::str(JSG_EXCEPTION(Error), ": ", buffer));
+              resolveFulfiller(js, exc);
+              readable->getController().cancel(js, nullptr).markAsHandled();
+              writable->getController().abort(js, nullptr).markAsHandled();
+            });
+            promise.markAsHandled();
+          }
+        }
+      }
+      if (!closureInProgress) {
+        auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+            kj::str(JSG_EXCEPTION(Error) ": proxy request failed"));
+        resolveFulfiller(js, exc);
+        readable->getController().cancel(js, nullptr).markAsHandled();
+        writable->getController().abort(js, nullptr).markAsHandled();
+      }
     }
   });
   result.markAsHandled();

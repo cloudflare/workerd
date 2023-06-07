@@ -51,12 +51,16 @@ public:
         // Listen for abrupt disconnects and resolve the `closed` promise when they occur.
         writeDisconnectedPromise(IoContext::current().awaitIo(kj::mv(connDisconnPromise))
             .then(js, [this](jsg::Lock& js) {
-              closeFulfiller.resolver.resolve();
+              if (!closureInProgress) {
+                KJ_DBG("Resolving closefulfill");
+                closeFulfiller.resolver.resolve();
+              }
             })),
         options(kj::mv(options)),
         tlsStarter(IoContext::current().addObject(kj::mv(tlsStarter))),
         isSecureSocket(isSecureSocket),
-        domain(kj::mv(domain)) { };
+        domain(kj::mv(domain)),
+        closureInProgress(false) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -103,11 +107,14 @@ private:
   // `startTls`.
   kj::String domain;
   // The domain/ip this socket is connected to. Used for startTls.
+  bool closureInProgress;
+  // Used to prevent races in writeDisconnectedPromise when the proxy rejects the connection.
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
+    KJ_DBG("Resolving fulfiller");
     KJ_IF_MAYBE(err, maybeErr) {
       closeFulfiller.resolver.reject(js, kj::cp(*err));
     } else {
