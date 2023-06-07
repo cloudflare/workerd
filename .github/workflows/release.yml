@@ -28,8 +28,8 @@ jobs:
   build:
     strategy:
       matrix:
-        # TODO(soon): Using windows-2019 as build is broken on windows-latest runner, develop a
-        # fix and go back to the latest version
+        # TODO(soon): Using windows-2019 as build is broken on windows-latest runner due to another
+        # bazel bug https://github.com/bazelbuild/bazel/issues/18592
         os: [ubuntu-22.04, macos-latest, windows-2019]
     runs-on: ${{ matrix.os }}
     steps:

@@ -99,4 +99,4 @@ build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-u
 # TODO(soon): Integrate this into V8 instead
 build:windows --cxxopt='-Wno-invalid-offsetof' --host_cxxopt='-Wno-invalid-offsetof'
 
-build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True
+build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True

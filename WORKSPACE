@@ -41,11 +41,6 @@ http_archive(
     urls = ["https://github.com/capnproto/capnproto/tarball/6e26d260d1d91e0465ca12bbb5230a1dfa28f00d"],
 )
 
-# Fetch brotli via capnproto. While workerd does not use brotli directly, this is required to work
-# around bazel shenanigans.
-load("@capnp-cpp//:build/load_br.bzl", "load_brotli")
-load_brotli()
-
 http_archive(
     name = "ssl",
     sha256 = "81bd4b20f53b0aa4bccc3f8bc7c5eda18550a91697ba956668dbeba0e3d0965d",
@@ -71,6 +66,19 @@ http_archive(
     type = "zip",
     sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
     build_file = "//:build/BUILD.sqlite3",
+)
+
+# Using latest brotli commit due to macOS compile issues with v1.0.9, switch to a release version
+# later.
+# TODO(soon): Using a modified build file as brotli bazel build is broken using clang-cl on
+# Windows, make a PR to fix this soon.
+http_archive(
+    name = "brotli",
+    sha256 = "e33f397d86aaa7f3e786bdf01a7b5cff4101cfb20041c04b313b149d34332f64",
+    strip_prefix = "google-brotli-ed1995b",
+    type = "tgz",
+    urls = ["https://github.com/google/brotli/tarball/ed1995b6bda19244070ab5d331111f16f67c8054"],
+    build_file = "//:build/BUILD.brotli",
 )
 
 # ========================================================================================
