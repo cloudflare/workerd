@@ -9,6 +9,7 @@
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/uuid.h>
 #include <map>
 
 namespace workerd {
@@ -160,7 +161,9 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
       waitUntilTasks(*this),
-      timeoutManager(kj::heap<TimeoutManagerImpl>()) {
+      timeoutManager(kj::heap<TimeoutManagerImpl>()),
+      requestId(randomUUID(nullptr)),
+      requestIdKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   auto localAbortPromise = kj::mv(paf.promise);
@@ -1407,6 +1410,11 @@ void IoContext::requireCurrentOrThrowJs() {
       "streams, request/response bodies, and others) created in the context of one request "
       "handler cannot be accessed from a different request's handler. This is a limitation "
       "of Cloudflare Workers which allows us to improve overall performance.");
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeRequestIdStorageScope(jsg::Lock& js) {
+  return jsg::AsyncContextFrame::StorageScope(
+      js, getRequestIdKey(), js.v8Ref(jsg::v8Str(js.v8Isolate, requestId).As<v8::Value>()));
 }
 
 }  // namespace workerd

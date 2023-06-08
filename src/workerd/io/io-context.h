@@ -850,6 +850,9 @@ public:
 
   void writeLogfwdr(uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage);
 
+  inline jsg::AsyncContextFrame::StorageKey& getRequestIdKey() { return *requestIdKey; }
+  jsg::AsyncContextFrame::StorageScope makeRequestIdStorageScope(jsg::Lock& js);
+
 private:
   ThreadContext& thread;
 
@@ -1054,6 +1057,9 @@ private:
   IoChannelFactory& getIoChannelFactory() {
     return *getCurrentIncomingRequest().ioChannelFactory;
   }
+
+  kj::String requestId;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> requestIdKey;
 
   class ThreadScope;
   class Scope;

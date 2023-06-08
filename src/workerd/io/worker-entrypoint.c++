@@ -161,6 +161,7 @@ kj::Promise<void> WorkerEntrypoint::request(
        &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
       (Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope requestIdScope = context.makeRequestIdStorageScope(lock);
 
     return lock.getGlobalScope().request(
         method, url, headers, requestBody, wrappedResponse,
@@ -361,6 +362,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
        &metrics = incomingRequest->getMetrics()]
       (Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope requestIdScope = context.makeRequestIdStorageScope(lock);
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(entrypointName, context.getActor()));
@@ -428,6 +430,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         auto result = co_await context.run(
             [scheduledTime, entrypointName=entrypointName, &context](Worker::Lock& lock){
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+          jsg::AsyncContextFrame::StorageScope requestIdScope =
+              context.makeRequestIdStorageScope(lock);
 
           auto handler = lock.getExportedHandler(entrypointName, context.getActor());
           return lock.getGlobalScope().runAlarm(scheduledTime, lock, handler);
@@ -478,6 +482,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       [entrypointName=entrypointName, &context, &metrics = incomingRequest->getMetrics()]
       (Worker::Lock& lock) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope requestIdScope = context.makeRequestIdStorageScope(lock);
 
     return context.awaitJs(lock.getGlobalScope()
         .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));

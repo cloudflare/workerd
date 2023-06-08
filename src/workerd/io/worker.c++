@@ -1051,9 +1051,28 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
     // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
     // do something like unwrap(isolate->GetCurrentContext()).emitPromiseRejection(). However, JSG
     // doesn't currently provide an easy way to do this.
+
+    auto needsRequestIdStorageScope = [&](IoContext& context) {
+      auto& lock = context.getCurrentLock();
+      KJ_IF_MAYBE(frame, jsg::AsyncContextFrame::current(lock)) {
+        return frame->get(context.getRequestIdKey()) == nullptr;
+      }
+      return true;
+    };
+
     if (IoContext::hasCurrent()) {
       try {
-        IoContext::current().reportPromiseRejectEvent(message);
+        auto& context = IoContext::current();
+
+        // Make sure that the current IoContext's request ID is set in the async context when
+        // the rejection occurs so that the rejection can be properly associated with the
+        // request in which the rejection occurred.
+        if (needsRequestIdStorageScope(context)) {
+          auto requestIdStorage = context.makeRequestIdStorageScope(context.getCurrentLock());
+          context.reportPromiseRejectEvent(message);
+        } else {
+          context.reportPromiseRejectEvent(message);
+        }
       } catch (jsg::JsExceptionThrown&) {
         // V8 expects us to just return.
         return;
