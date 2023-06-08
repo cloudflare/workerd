@@ -532,6 +532,12 @@ async function test(storage) {
     ALTER TABLE renamecolumn
     RENAME COLUMN meta TO metadata
   `);
+
+  // Can't create another temp table
+  requireException(() => sql.exec(`
+    CREATE TEMP TABLE tempy AS
+      SELECT * FROM sqlite_master;
+  `), "Error: not authorized");
 }
 
 export class DurableObjectExample {

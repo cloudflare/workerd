@@ -445,10 +445,12 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_MAYBE(d, dbName) {
-    if (*d != "main"_kj && *d != "temp"_kj) {
-      // We don't allow opening multiple databases (except for temporary databases,
-      // which should be in-memory only), as our storage engine is not designed to
-      // track multiple files on-disk.
+    if (*d == "temp"_kj) {
+      return isAuthorizedTemp(actionCode, param1, param2, regulator);
+    } else if (*d != "main"_kj) {
+      // We don't allow opening multiple databases (except for 'main' and the 'temp'
+      // temporary database), as our storage engine is not designed to track multiple
+      // files on-disk.
       return false;
     }
   }
@@ -636,6 +638,20 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     default:
       KJ_LOG(WARNING, "unknown SQLite action", actionCode);
+      return false;
+  }
+}
+
+// Temp databases have very restricted operations
+bool SqliteDatabase::isAuthorizedTemp(int actionCode,
+    const kj::Maybe<kj::StringPtr> &param1, const kj::Maybe<kj::StringPtr> &param2,
+    Regulator &regulator) {
+
+  switch (actionCode) {
+    case SQLITE_READ               :   /* Table Name      Column Name     */
+    case SQLITE_UPDATE             :   /* Table Name      Column Name     */
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+    default:
       return false;
   }
 }

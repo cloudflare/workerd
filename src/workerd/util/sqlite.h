@@ -119,6 +119,11 @@ private:
       kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName);
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
 
+  bool isAuthorizedTemp(int actionCode,
+      const kj::Maybe <kj::StringPtr> &param1, const kj::Maybe <kj::StringPtr> &param2,
+      Regulator &regulator);
+  // Implements SQLite authorizer for 'temp' DB
+
   void setupSecurity();
 };
 
