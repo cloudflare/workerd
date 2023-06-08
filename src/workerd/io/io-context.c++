@@ -9,6 +9,7 @@
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/uuid.h>
 #include <map>
 
 namespace workerd {
@@ -160,7 +161,9 @@ IoContext::IoContext(ThreadContext& thread,
       threadId(getThreadId()),
       deleteQueue(kj::atomicRefcounted<DeleteQueue>()),
       waitUntilTasks(*this),
-      timeoutManager(kj::heap<TimeoutManagerImpl>()) {
+      timeoutManager(kj::heap<TimeoutManagerImpl>()),
+      requestId(randomUUID(nullptr)),
+      requestIdKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   auto localAbortPromise = kj::mv(paf.promise);
@@ -1420,6 +1423,11 @@ v8::Local<v8::Object> IoContext::getPromiseContextTag(jsg::Lock& js) {
     promiseContextTag = js.v8Ref(v8::Object::New(js.v8Isolate));
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeRequestIdStorageScope(jsg::Lock& js) {
+  return jsg::AsyncContextFrame::StorageScope(
+      js, getRequestIdKey(), js.v8Ref(jsg::v8Str(js.v8Isolate, requestId).As<v8::Value>()));
 }
 
 }  // namespace workerd

@@ -451,6 +451,7 @@ kj::Promise<void> sendTracesToExportedHandler(
         [&context, traces=mapAddRef(traces), entrypointName=kj::mv(entrypointName)]
         (Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+      jsg::AsyncContextFrame::StorageScope requestIdScope = context.makeRequestIdStorageScope(lock);
 
       auto handler = lock.getExportedHandler(entrypointName, context.getActor());
       lock.getGlobalScope().sendTraces(traces, lock, handler);

@@ -18,6 +18,7 @@
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/queue.h>
+#include <workerd/api/request-context.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/standard.h>
@@ -78,6 +79,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_WEBSOCKET_ISOLATE_TYPES,
   EW_SQL_ISOLATE_TYPES,
   EW_NODE_ISOLATE_TYPES,
+  EW_REQUEST_CONTEXT_ISOLATE_TYPES,
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
@@ -376,6 +378,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
   }
 
   api::registerSocketsModule(*modules, getFeatureFlags());
+  api::registerRequestContextModule(*modules, getFeatureFlags());
   modules->addBuiltinBundle(CLOUDFLARE_BUNDLE);
 
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
