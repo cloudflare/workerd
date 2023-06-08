@@ -14,104 +14,239 @@
 
 namespace workerd::api {
 
-TailEvent::TailEvent(kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events)
+TailEvent::TailEvent(jsg::Lock& js, kj::StringPtr type, kj::ArrayPtr<kj::Own<Trace>> events)
     : ExtendableEvent(kj::str(type)),
       events(KJ_MAP(e, events) -> jsg::Ref<TraceItem> {
-        return jsg::alloc<TraceItem>(kj::addRef(*e));
+        return jsg::alloc<TraceItem>(js, *e);
       }) {}
 
 kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
   return KJ_MAP(e, events) -> jsg::Ref<TraceItem> { return e.addRef(); };
 }
 
-TraceItem::TraceItem(kj::Own<Trace> trace) : trace(kj::mv(trace)) {}
+namespace {
+kj::Maybe<double> getTraceTimestamp(const Trace& trace) {
+  if (trace.eventTimestamp == kj::UNIX_EPOCH) {
+    return nullptr;
+  }
+  if (isPredictableModeForTest()) {
+    return 0.0;
+  }
+  return (trace.eventTimestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+}
 
-kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent() {
-  KJ_IF_MAYBE(e, trace->eventInfo) {
+double getTraceLogTimestamp(const Trace::Log& log) {
+  if (isPredictableModeForTest()) {
+    return 0;
+  } else {
+    return (log.timestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+  }
+}
+
+kj::String getTraceLogLevel(const Trace::Log& log) {
+    switch (log.logLevel) {
+    case LogLevel::DEBUG_: return kj::str("debug");
+    case LogLevel::INFO: return kj::str("info");
+    case LogLevel::LOG: return kj::str("log");
+    case LogLevel::WARN: return kj::str("warn");
+    case LogLevel::ERROR: return kj::str("error");
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const Trace::Log& log) {
+  auto jsonString = jsg::v8Str(js.v8Isolate, log.message);
+  auto handle = jsg::check(v8::JSON::Parse(js.v8Context(), jsonString));
+  return js.v8Ref(handle.As<v8::Object>());
+}
+
+kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
+  return KJ_MAP(x, trace.logs) -> jsg::Ref<TraceLog> {
+    return jsg::alloc<TraceLog>(js, trace, x);
+  };
+}
+
+double getTraceExceptionTimestamp(const Trace::Exception& ex) {
+  if (isPredictableModeForTest()) {
+    return 0;
+  } else {
+    return (ex.timestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+  }
+}
+
+kj::Array<jsg::Ref<TraceException>> getTraceExceptions(const Trace& trace) {
+  return KJ_MAP(x, trace.exceptions) -> jsg::Ref<TraceException> {
+    return jsg::alloc<TraceException>(trace, x);
+  };
+}
+
+jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
+  if (trace.scriptTags.size() > 0) {
+    return KJ_MAP(t, trace.scriptTags) -> kj::String { return kj::str(t); };
+  } else {
+    return nullptr;
+  }
+}
+
+kj::String getTraceOutcome(const Trace& trace) {
+  // TODO(cleanup): Add to enumToStr() to capnp?
+  auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();
+  uint i = static_cast<uint>(trace.outcome);
+  KJ_ASSERT(i < enums.size(), "invalid outcome");
+  return kj::str(enums[i].getProto().getName());
+}
+
+kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
+    jsg::Lock& js,
+    const Trace& trace,
+    const Trace::FetchEventInfo& eventInfo) {
+  const auto getCf = [&]() -> jsg::Optional<jsg::V8Ref<v8::Object>> {
+    const auto& cfJson = eventInfo.cfJson;
+    if (cfJson.size() > 0) {
+      auto jsonString = jsg::v8Str(js.v8Isolate, cfJson);
+      auto handle = jsg::check(v8::JSON::Parse(js.v8Context(), jsonString));
+      return js.v8Ref(handle.As<v8::Object>());
+    }
+    return nullptr;
+  };
+
+  const auto getHeaders = [&]() -> kj::Array<Trace::FetchEventInfo::Header> {
+    return KJ_MAP(header, eventInfo.headers) {
+      return Trace::FetchEventInfo::Header(kj::str(header.name), kj::str(header.value));
+    };
+  };
+
+  return kj::refcounted<TraceItem::FetchEventInfo::Request::Detail>(
+    getCf(),
+    getHeaders(),
+    kj::str(eventInfo.method),
+    kj::str(eventInfo.url));
+}
+
+kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace) {
+  KJ_IF_MAYBE(e, trace.eventInfo) {
     KJ_SWITCH_ONEOF(*e) {
       KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
-        return kj::Maybe(jsg::alloc<FetchEventInfo>(kj::addRef(*trace), fetch, trace->fetchResponseInfo));
+        return kj::Maybe(jsg::alloc<TraceItem::FetchEventInfo>(js, trace, fetch, trace.fetchResponseInfo));
       }
       KJ_CASE_ONEOF(scheduled, Trace::ScheduledEventInfo) {
-        return kj::Maybe(jsg::alloc<ScheduledEventInfo>(kj::addRef(*trace), scheduled));
+        return kj::Maybe(jsg::alloc<TraceItem::ScheduledEventInfo>(trace, scheduled));
       }
       KJ_CASE_ONEOF(alarm, Trace::AlarmEventInfo) {
-        return kj::Maybe(jsg::alloc<AlarmEventInfo>(kj::addRef(*trace), alarm));
+        return kj::Maybe(jsg::alloc<TraceItem::AlarmEventInfo>(trace, alarm));
       }
       KJ_CASE_ONEOF(queue, Trace::QueueEventInfo) {
-        return kj::Maybe(jsg::alloc<QueueEventInfo>(kj::addRef(*trace), queue));
+        return kj::Maybe(jsg::alloc<TraceItem::QueueEventInfo>(trace, queue));
       }
       KJ_CASE_ONEOF(email, Trace::EmailEventInfo) {
-        return kj::Maybe(jsg::alloc<EmailEventInfo>(kj::addRef(*trace), email));
+        return kj::Maybe(jsg::alloc<TraceItem::EmailEventInfo>(trace, email));
       }
       KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
-        return kj::Maybe(jsg::alloc<CustomEventInfo>(kj::addRef(*trace), custom));
+        return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
     }
   }
   return nullptr;
+}
+}  // namespace
+
+TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
+    : eventInfo(getTraceEvent(js, trace)),
+      eventTimestamp(getTraceTimestamp(trace)),
+      logs(getTraceLogs(js, trace)),
+      exceptions(getTraceExceptions(trace)),
+      scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
+      dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
+      scriptTags(getTraceScriptTags(trace)),
+      outcome(getTraceOutcome(trace)),
+      cpuTime(trace.cpuTime / kj::MILLISECONDS),
+      wallTime(trace.wallTime / kj::MILLISECONDS) {}
+
+kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
+  return eventInfo.map([](auto& info) -> TraceItem::EventInfo {
+    KJ_SWITCH_ONEOF(info) {
+      KJ_CASE_ONEOF(info, jsg::Ref<FetchEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<ScheduledEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) { return info.addRef(); }
+    }
+    KJ_UNREACHABLE;
+  });
 }
 
 kj::Maybe<double> TraceItem::getEventTimestamp() {
-  if (trace->eventTimestamp == kj::UNIX_EPOCH) {
-    return nullptr;
-  } else {
-    if (isPredictableModeForTest()) {
-      return 0.0;
-    } else {
-      return (trace->eventTimestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-    }
-  }
+  return eventTimestamp;
 }
 
-kj::Array<jsg::Ref<TraceLog>> TraceItem::getLogs() {
-  return KJ_MAP(x, trace->logs) -> jsg::Ref<TraceLog> {
-    return jsg::alloc<TraceLog>(kj::addRef(*trace), x);
-  };
+kj::ArrayPtr<jsg::Ref<TraceLog>> TraceItem::getLogs() {
+  return logs;
 }
 
-kj::Array<jsg::Ref<TraceException>> TraceItem::getExceptions() {
-  return KJ_MAP(x, trace->exceptions) -> jsg::Ref<TraceException> {
-    return jsg::alloc<TraceException>(kj::addRef(*trace), x);
-  };
+kj::ArrayPtr<jsg::Ref<TraceException>> TraceItem::getExceptions() {
+  return exceptions;
 }
 
-uint TraceItem::getCpuTime() {
-  return trace->cpuTime / kj::MILLISECONDS;
+kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
+  return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
 }
 
-uint TraceItem::getWallTime() {
-  return trace->wallTime / kj::MILLISECONDS;
+jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
+  return dispatchNamespace.map([](auto& ns) -> kj::StringPtr { return ns; });
 }
 
-TraceItem::FetchEventInfo::FetchEventInfo(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo,
+jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
+  return scriptTags.map([](kj::Array<kj::String>& tags) {
+    return KJ_MAP(t, tags) -> kj::StringPtr { return t; };
+  });
+}
+
+kj::StringPtr TraceItem::getOutcome() { return outcome; }
+
+uint TraceItem::getCpuTime() { return cpuTime; }
+
+uint TraceItem::getWallTime() { return wallTime; }
+
+TraceItem::FetchEventInfo::FetchEventInfo(jsg::Lock& js,
+                                          const Trace& trace,
+                                          const Trace::FetchEventInfo& eventInfo,
                                           kj::Maybe<const Trace::FetchResponseInfo&> responseInfo)
-    : trace(kj::mv(trace)), eventInfo(eventInfo), responseInfo(responseInfo) {}
+    : request(jsg::alloc<Request>(js, trace, eventInfo)),
+      response(responseInfo.map([&](auto& info) { return jsg::alloc<Response>(trace, info); })) {}
+
+TraceItem::FetchEventInfo::Request::Detail::Detail(
+    jsg::Optional<jsg::V8Ref<v8::Object>> cf,
+    kj::Array<Trace::FetchEventInfo::Header> headers,
+    kj::String method,
+    kj::String url)
+    : cf(kj::mv(cf)),
+      headers(kj::mv(headers)),
+      method(kj::mv(method)),
+      url(kj::mv(url)) {}
 
 jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::getRequest() {
-  return jsg::alloc<Request>(kj::addRef(*trace), eventInfo);
+  return request.addRef();
 }
 
 jsg::Optional<jsg::Ref<TraceItem::FetchEventInfo::Response>> TraceItem::FetchEventInfo::getResponse() {
-  KJ_IF_MAYBE(response, responseInfo) {
-    return jsg::alloc<Response>(kj::addRef(*trace), *response);
-  } else {
-    return nullptr;
-  }
+  return response.map([](auto& ref) mutable -> jsg::Ref<TraceItem::FetchEventInfo::Response> {
+    return ref.addRef();
+  });
 }
 
-TraceItem::FetchEventInfo::Request::Request(kj::Own<Trace> trace, const Trace::FetchEventInfo& eventInfo)
-    : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::FetchEventInfo::Request::Request(jsg::Lock& js,
+                                            const Trace& trace,
+                                            const Trace::FetchEventInfo& eventInfo)
+    : detail(getFetchRequestDetail(js, trace, eventInfo)) {}
 
-jsg::Optional<v8::Local<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(
-    v8::Isolate* isolate) {
-  const auto& cfJson = eventInfo.cfJson;
-  if (cfJson.size() > 0) {
-    auto jsonString = jsg::v8Str(isolate, cfJson);
-    auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
-    return handle.As<v8::Object>();
-  }
-  return nullptr;
+TraceItem::FetchEventInfo::Request::Request(Detail& detail, bool redacted)
+    : redacted(redacted), detail(kj::addRef(detail)) {}
+
+jsg::Optional<jsg::V8Ref<v8::Object>> TraceItem::FetchEventInfo::Request::getCf(jsg::Lock& js) {
+  return detail->cf.map([&](jsg::V8Ref<v8::Object>& obj) {
+    return obj.addRef(js);
+  });
 }
 
 jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::getHeaders() {
@@ -129,8 +264,8 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   };
 
   using HeaderDict = jsg::Dict<jsg::ByteString, jsg::ByteString>;
-  auto builder = kj::heapArrayBuilder<HeaderDict::Field>(eventInfo.headers.size());
-  for (const auto& header: eventInfo.headers) {
+  auto builder = kj::heapArrayBuilder<HeaderDict::Field>(detail->headers.size());
+  for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
     builder.add(HeaderDict::Field {
         jsg::ByteString(kj::str(header.name)),
@@ -142,141 +277,112 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
 }
 
 kj::StringPtr TraceItem::FetchEventInfo::Request::getMethod() {
-  return kj::toCharSequence(eventInfo.method);
+  return detail->method;
 }
 
 kj::String TraceItem::FetchEventInfo::Request::getUrl() {
-  kj::StringPtr url = eventInfo.url;
-  return (redacted ? redactUrl(url) : kj::str(url));
+  return (redacted ? redactUrl(detail->url) : kj::str(detail->url));
 }
 
 jsg::Ref<TraceItem::FetchEventInfo::Request> TraceItem::FetchEventInfo::Request::getUnredacted() {
-  auto request = jsg::alloc<Request>(kj::addRef(*trace), eventInfo);
-  request->redacted = false;
-  return kj::mv(request);
+  return jsg::alloc<Request>(*detail, false /* details are not redacted */);
 }
 
-TraceItem::FetchEventInfo::Response::Response(kj::Own<Trace> trace, const Trace::FetchResponseInfo& responseInfo)
-    : trace(kj::mv(trace)), responseInfo(responseInfo) {}
+TraceItem::FetchEventInfo::Response::Response(const Trace& trace,
+                                              const Trace::FetchResponseInfo& responseInfo)
+    : status(responseInfo.statusCode) {}
 
 uint16_t TraceItem::FetchEventInfo::Response::getStatus() {
-  return responseInfo.statusCode;
+  return status;
 }
 
-TraceItem::ScheduledEventInfo::ScheduledEventInfo(kj::Own<Trace> trace,
-    const Trace::ScheduledEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::ScheduledEventInfo::ScheduledEventInfo(const Trace& trace,
+                                                  const Trace::ScheduledEventInfo& eventInfo)
+    : scheduledTime(eventInfo.scheduledTime),
+      cron(kj::str(eventInfo.cron)) {}
 
 double TraceItem::ScheduledEventInfo::getScheduledTime() {
-  return eventInfo.scheduledTime;
+  return scheduledTime;
 }
 kj::StringPtr TraceItem::ScheduledEventInfo::getCron() {
-  return eventInfo.cron;
+  return cron;
 }
 
-TraceItem::AlarmEventInfo::AlarmEventInfo(kj::Own<Trace> trace,
-    const Trace::AlarmEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::AlarmEventInfo::AlarmEventInfo(const Trace& trace,
+                                          const Trace::AlarmEventInfo& eventInfo)
+  : scheduledTime(eventInfo.scheduledTime) {}
 
 kj::Date TraceItem::AlarmEventInfo::getScheduledTime() {
-  return eventInfo.scheduledTime;
+  return scheduledTime;
 }
 
-TraceItem::QueueEventInfo::QueueEventInfo(kj::Own<Trace> trace,
-    const Trace::QueueEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::QueueEventInfo::QueueEventInfo(const Trace& trace,
+                                          const Trace::QueueEventInfo& eventInfo)
+    : queueName(kj::str(eventInfo.queueName)),
+      batchSize(eventInfo.batchSize) {}
 
 kj::StringPtr TraceItem::QueueEventInfo::getQueueName() {
-  return eventInfo.queueName;
+  return queueName;
 }
 
 uint32_t TraceItem::QueueEventInfo::getBatchSize() {
-  return eventInfo.batchSize;
+  return batchSize;
 }
 
-TraceItem::EmailEventInfo::EmailEventInfo(kj::Own<Trace> trace,
-    const Trace::EmailEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::EmailEventInfo::EmailEventInfo(const Trace& trace,
+                                          const Trace::EmailEventInfo& eventInfo)
+    : mailFrom(kj::str(eventInfo.mailFrom)),
+      rcptTo(kj::str(eventInfo.rcptTo)),
+      rawSize(eventInfo.rawSize) {}
 
 kj::StringPtr TraceItem::EmailEventInfo::getMailFrom() {
-  return eventInfo.mailFrom;
+  return mailFrom;
 }
 
 kj::StringPtr TraceItem::EmailEventInfo::getRcptTo() {
-  return eventInfo.rcptTo;
+  return rcptTo;
 }
 
 uint32_t TraceItem::EmailEventInfo::getRawSize() {
-  return eventInfo.rawSize;
+  return rawSize;
 }
 
-TraceItem::CustomEventInfo::CustomEventInfo(kj::Own<Trace> trace,
-    const Trace::CustomEventInfo& eventInfo) : trace(kj::mv(trace)), eventInfo(eventInfo) {}
+TraceItem::CustomEventInfo::CustomEventInfo(const Trace& trace,
+                                            const Trace::CustomEventInfo& eventInfo)
+    : eventInfo(eventInfo) {}
 
-kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
-  return trace->scriptName;
-}
-
-jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
-  return trace->dispatchNamespace;
-}
-
-jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
-  if (trace->scriptTags.size() > 0) {
-    return KJ_MAP(t, trace->scriptTags) -> kj::StringPtr { return t; };
-  } else {
-    return nullptr;
-  }
-}
-
-kj::StringPtr TraceItem::getOutcome() {
-  // TODO(cleanup): Add to enumToStr() to capnp?
-  auto enums = capnp::Schema::from<EventOutcome>().getEnumerants();
-  uint i = static_cast<uint>(trace->outcome);
-  KJ_ASSERT(i < enums.size(), "invalid outcome");
-  return enums[i].getProto().getName();
-}
-
-TraceLog::TraceLog(kj::Own<Trace> trace, const Trace::Log& log) : trace(kj::mv(trace)), log(log) {}
+TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const Trace::Log& log)
+    : timestamp(getTraceLogTimestamp(log)),
+      level(getTraceLogLevel(log)),
+      message(getTraceLogMessage(js, log)) {}
 
 double TraceLog::getTimestamp() {
-  if (isPredictableModeForTest()) {
-    return 0;
-  } else {
-    return (log.timestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-  }
+  return timestamp;
 }
 
 kj::StringPtr TraceLog::getLevel() {
-  switch (log.logLevel) {
-    case LogLevel::DEBUG_: return "debug"_kj;
-    case LogLevel::INFO: return "info"_kj;
-    case LogLevel::LOG: return "log"_kj;
-    case LogLevel::WARN: return "warn"_kj;
-    case LogLevel::ERROR: return "error"_kj;
-  }
-  KJ_UNREACHABLE;
+  return level;
 }
 
-v8::Local<v8::Object> TraceLog::getMessage(v8::Isolate* isolate) {
-  auto jsonString = jsg::v8Str(isolate, log.message);
-  auto handle = jsg::check(v8::JSON::Parse(isolate->GetCurrentContext(), jsonString));
-  return handle.As<v8::Object>();
+jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
+  return message.addRef(js);
 }
 
-TraceException::TraceException(kj::Own<Trace> trace, const Trace::Exception& exception)
-    : trace(kj::mv(trace)), exception(exception) {}
+TraceException::TraceException(const Trace& trace, const Trace::Exception& exception)
+    : timestamp(getTraceExceptionTimestamp(exception)),
+      name(kj::str(exception.name)),
+      message(kj::str(exception.message)) {}
 
 double TraceException::getTimestamp() {
-  if (isPredictableModeForTest()) {
-    return 0;
-  } else {
-    return (exception.timestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-  }
+  return timestamp;
 }
 
 kj::StringPtr TraceException::getMessage() {
-  return exception.message;
+  return message;
 }
 
 kj::StringPtr TraceException::getName() {
-  return exception.name;
+  return name;
 }
 
 TraceMetrics::TraceMetrics(uint cpuTime, uint wallTime) : cpuTime(cpuTime), wallTime(wallTime) {}

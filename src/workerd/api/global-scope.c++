@@ -347,11 +347,11 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->tail) {
-      auto tailEvent = jsg::alloc<TailEvent>("tail"_kj, traces);
+      auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
       auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_MAYBE(f, h->trace) {
-      auto traceEvent = jsg::alloc<TailEvent>("trace"_kj, traces);
+      auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
       auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
       traceEvent->waitUntil(kj::mv(promise));
     } else {
@@ -363,8 +363,8 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   } else {
     // Fire off the handlers.
     // We only create both events here.
-    auto tailEvent = jsg::alloc<TailEvent>("tail"_kj, traces);
-    auto traceEvent = jsg::alloc<TailEvent>("trace"_kj, traces);
+    auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
+    auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
     dispatchEventImpl(lock, tailEvent.addRef());
     dispatchEventImpl(lock, traceEvent.addRef());
 
