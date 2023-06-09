@@ -194,6 +194,7 @@ public:
   // implements EmbedderRootsHandler -------------------------------------------
   bool IsRoot(const v8::TracedReference<v8::Value>& handle) override;
   void ResetRoot(const v8::TracedReference<v8::Value>& handle) override;
+  bool TryResetRoot(const v8::TracedReference<v8::Value>& handle) override;
 
 private:
   v8::Isolate* isolate;

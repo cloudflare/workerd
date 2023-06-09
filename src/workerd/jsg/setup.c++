@@ -113,7 +113,6 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // (It turns out you can call v8::V8::SetFlagsFromString() as many times as you want to add
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
-  v8::V8::SetFlagsFromString("--single_threaded_gc");
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
@@ -240,6 +239,13 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // if the wrapable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
   detachLater.add(&wrappable);
+}
+
+bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
+  // This method is potentially called on a separate thread. Our ResetRoot() implementation,
+  // though, only works on the main thread. Return false to request V8 schedule the call for the
+  // main thread later on.
+  return false;
 }
 
 namespace {
