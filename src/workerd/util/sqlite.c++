@@ -249,6 +249,14 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
   "highlight"_kj,
   "bm25"_kj,
   "snippet"_kj,
+
+  // https://www.sqlite.org/lang_altertable.html
+  // Functions declared in https://sqlite.org/src/file?name=src/alter.c&ci=trunk
+  "sqlite_rename_column"_kj,
+  "sqlite_rename_table"_kj,
+  "sqlite_rename_test"_kj,
+  "sqlite_drop_column"_kj,
+  "sqlite_rename_quotefix"_kj,
 };
 
 enum class PragmaSignature {
@@ -437,9 +445,12 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_MAYBE(d, dbName) {
-    if (*d != "main"_kj) {
-      // We don't allow opening multiple databases (including temporary databases), as our storage
-      // engine is not designed for this at present.
+    if (*d == "temp"_kj) {
+      return isAuthorizedTemp(actionCode, param1, param2, regulator);
+    } else if (*d != "main"_kj) {
+      // We don't allow opening multiple databases (except for 'main' and the 'temp'
+      // temporary database), as our storage engine is not designed to track multiple
+      // files on-disk.
       return false;
     }
   }
@@ -627,6 +638,20 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
     default:
       KJ_LOG(WARNING, "unknown SQLite action", actionCode);
+      return false;
+  }
+}
+
+// Temp databases have very restricted operations
+bool SqliteDatabase::isAuthorizedTemp(int actionCode,
+    const kj::Maybe<kj::StringPtr> &param1, const kj::Maybe<kj::StringPtr> &param2,
+    Regulator &regulator) {
+
+  switch (actionCode) {
+    case SQLITE_READ               :   /* Table Name      Column Name     */
+    case SQLITE_UPDATE             :   /* Table Name      Column Name     */
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
+    default:
       return false;
   }
 }
