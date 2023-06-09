@@ -116,7 +116,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
                          response.statusCode);
       }
       auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
-          "Unspecified error"_kj);
+          "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
       R2Result result = {
         .httpStatus = response.statusCode,
         .toThrow = toError(response.statusCode, error),
@@ -258,7 +258,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
                             response.statusCode);
           }
           auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
-              "Unspecified error"_kj);
+              "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
 
           return R2Result {
             .httpStatus = response.statusCode,
