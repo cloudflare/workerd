@@ -165,7 +165,7 @@ private:
     Entry& operator=(Entry&&) = default;
 
     inline uint hashCode() const { return hash; }
-    inline bool operator==(const Entry& other) const { return hash == other.hash; }
+    inline bool operator==(const Entry& other) const { return name == other.name; }
   };
 
   kj::Vector<Entry> list;
