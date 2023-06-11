@@ -800,12 +800,25 @@ private:
     uint hashCode() const { return hash; }
   };
 
+  struct HashedPromise {
+    // A v8::Promise with memoized hash code.
+    v8::Local<v8::Promise> promise;
+    uint hash;
+
+    HashedPromise(v8::Local<v8::Promise> promise)
+        : promise(promise), hash(promise->GetIdentityHash()) {}
+  };
+
   struct UnhandledRejectionCallbacks {
-    inline uint keyForRow(const UnhandledRejection& row) const { return row.hashCode(); }
-    inline bool matches(const UnhandledRejection& a, uint& hash) const {
-      return a.hashCode() == hash;
+    inline const UnhandledRejection& keyForRow(const UnhandledRejection& row) const { return row; }
+    inline bool matches(const UnhandledRejection& a, const UnhandledRejection& b) const {
+      return a.promise == b.promise;
     }
-    inline uint hashCode(uint hash) const { return hash; }
+    inline bool matches(const UnhandledRejection& a, const HashedPromise& b) const {
+      return a.promise == b.promise;
+    }
+    inline uint hashCode(const UnhandledRejection& row) const { return row.hashCode(); }
+    inline uint hashCode(const HashedPromise& key) const { return key.hash; }
   };
 
   kj::Function<Handler> handler;

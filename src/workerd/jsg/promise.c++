@@ -126,13 +126,13 @@ void UnhandledRejectionHandler::handledAfterRejection(
   // emit another warning indicating that it's been handled.
   KJ_DEFER(ensureProcessingWarnings(js));
 
-  uint hash = promise.getHandle(js)->GetIdentityHash();
+  HashedPromise key(promise.getHandle(js));
 
-  if (unhandledRejections.eraseMatch(hash)) {
+  if (unhandledRejections.eraseMatch(key)) {
     return;
   }
 
-  KJ_IF_MAYBE(item, warnedRejections.find(hash)) {
+  KJ_IF_MAYBE(item, warnedRejections.find(key)) {
     auto promise = getLocal(js.v8Isolate, item->promise);
     if (!promise.IsEmpty()) {
       // TODO(later): Chromium handles this differently... essentially when the
