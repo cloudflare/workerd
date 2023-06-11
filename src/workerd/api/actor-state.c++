@@ -675,6 +675,18 @@ jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
   }
 }
 
+kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
+  return cache->getCurrentBookmark();
+}
+
+kj::Promise<kj::String> DurableObjectStorage::getBookmarkForTime(kj::Date timestamp) {
+  return cache->getBookmarkForTime(timestamp);
+}
+
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::String bookmark) {
+  return cache->onNextSessionRestoreBookmark(bookmark);
+}
+
 ActorCacheOps& DurableObjectTransaction::getCache(OpName op) {
   JSG_REQUIRE(!rolledBack, Error, kj::str("Cannot ", op, " on rolled back transaction"));
   auto& result = *JSG_REQUIRE_NONNULL(cacheTxn, Error,

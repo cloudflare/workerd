@@ -202,6 +202,26 @@ public:
 
   jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
 
+  kj::Promise<kj::String> getCurrentBookmark();
+  // Get a bookmark for the current state of the database. Note that since this is async, the
+  // bookmark will include any writes in the current atomic batch, including writes that are
+  // performed after this call begins. It could also include concurrent writes that haven't happned
+  // yet, unless blockConcurrencyWhile() is used to prevent them.
+
+  kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
+  // Get a bookmark representing approximately the given timestamp, which is a time up to 30 days
+  // in the past (or whatever the backup retention period is).
+
+  kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
+  // Arrange that the next time the Durable Object restarts, the database will be restored to
+  // the state represented by the given bookmark. This returns a bookmark string which represents
+  // the state immediately before the restoration takes place, and thus can be used to undo the
+  // restore. (This bookmark technically refers to a *future* state -- it specifies the state the
+  // object will have at the end of the current session.)
+  //
+  // It is up to the caller to force a restart in order to complete the restoration, for instance
+  // by calling state.abort() or by throwing from a blockConcurrencyWhile() callback.
+
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(list);
@@ -217,6 +237,10 @@ public:
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
       JSG_METHOD(transactionSync);
+
+      JSG_METHOD(getCurrentBookmark);
+      JSG_METHOD(getBookmarkForTime);
+      JSG_METHOD(onNextSessionRestoreBookmark);
     }
 
     JSG_TS_OVERRIDE({
