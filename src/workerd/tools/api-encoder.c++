@@ -5,10 +5,16 @@
 // Encodes JSG RTTI for all APIs defined in `src/workerd/api` to a capnp binary
 // for consumption by other tools (e.g. TypeScript type generation).
 
+// When creating type definitions, only include the API headers to reduce the clang AST dump size.
+#if !API_ENCODER_HDRS_ONLY
 #include <capnp/serialize-packed.h>
 #include <initializer_list>
 #include <kj/filesystem.h>
 #include <kj/main.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/jsg/rtti.h>
+#endif // !API_ENCODER_HDRS_ONLY
+
 #include <workerd/api/actor.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/analytics-engine.h>
@@ -28,8 +34,8 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
-#include <workerd/io/compatibility-date.h>
-#include <workerd/jsg/rtti.h>
+
+#if !API_ENCODER_HDRS_ONLY
 
 #define EW_TYPE_GROUP_FOR_EACH(F)                                              \
   F("dom-exception", jsg::DOMException)                                        \
@@ -245,3 +251,6 @@ private:
 } // namespace workerd::api
 
 KJ_MAIN(workerd::api::ApiEncoderMain);
+
+#endif // !API_ENCODER_HDRS_ONLY
+
