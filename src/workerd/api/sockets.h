@@ -43,7 +43,7 @@ public:
       jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
-      bool isSecureSocket, kj::String domain)
+      bool isSecureSocket, kj::String domain, int port)
       : connectionStream(IoContext::current().addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closeFulfiller(kj::mv(close)),
@@ -56,7 +56,8 @@ public:
         options(kj::mv(options)),
         tlsStarter(IoContext::current().addObject(kj::mv(tlsStarter))),
         isSecureSocket(isSecureSocket),
-        domain(kj::mv(domain)) { };
+        domain(kj::mv(domain)),
+        port(port) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -103,6 +104,8 @@ private:
   // `startTls`.
   kj::String domain;
   // The domain/ip this socket is connected to. Used for startTls.
+  int port;
+  // The port this socket is connected to. Used for nicer errors.
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
