@@ -336,7 +336,7 @@ public:
     bool detachBuffer = true;
     // True if the given buffer should be detached. Per the spec, we should always be
     // detaching a BYOB buffer but the original Workers implementation did not.
-    // To avoid breaking backwards compatibility, a feature flag is provided to turn
+    // To avoid breaking backwards compatibility, a compatibility flag is provided to turn
     // detach on/off as appropriate.
   };
 
