@@ -5,11 +5,16 @@ interface D1Result<T = unknown> {
   meta: any;
 }
 
+interface D1ExecResult<T = unknown> {
+  count: number;
+  duration: number;
+}
+
 declare abstract class D1Database {
   prepare(query: string): D1PreparedStatement;
   dump(): Promise<ArrayBuffer>;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
-  exec<T = unknown>(query: string): Promise<D1Result<T>>;
+  exec<T = unknown>(query: string): Promise<D1ExecResult<T>>;
 }
 
 declare abstract class D1PreparedStatement {
