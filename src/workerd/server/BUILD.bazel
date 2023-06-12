@@ -34,7 +34,10 @@ wd_cc_binary(
         ":server",
         ":workerd_capnp",
         ":workerd-meta_capnp",
-    ],
+    ] + select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
+    }),
     malloc = select({
         ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
         "//conditions:default": "@bazel_tools//tools/cpp:malloc",

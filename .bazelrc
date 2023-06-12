@@ -48,6 +48,8 @@ build:unix --action_env=BAZEL_COMPILER=clang
 build:unix --action_env=CC=clang
 build:unix --action_env=CXX=clang++
 
+build:unix --test_env=LLVM_SYMBOLIZER=llvm-symbolizer
+
 # Warning options.
 build:unix --cxxopt='-Wall' --host_cxxopt='-Wall'
 build:unix --cxxopt='-Wextra' --host_cxxopt='-Wextra'
