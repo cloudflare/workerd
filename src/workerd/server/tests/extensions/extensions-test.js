@@ -1,6 +1,9 @@
 import * as assert from 'node:assert'
 import { openDoor } from 'test:module'
 
+// prettier-ignore
+const diff = (() => {const richTypes={Date:!0,RegExp:!0,String:!0,Number:!0};return function diff(e,t,r={cyclesFix:!0},a=[]){let c=[];var s=Array.isArray(e);for(const y in e){var p=e[y];const l=s?+y:y;if(y in t){var i=t[y],o="object"==typeof p&&"object"==typeof i;if(!(p&&i&&o)||richTypes[Object.getPrototypeOf(p)?.constructor?.name]||r.cyclesFix&&a.includes(p))p===i||o&&(isNaN(p)?p+""==i+"":+p==+i)||c.push({path:[l],type:"CHANGE",value:i,oldValue:p});else{const u=diff(p,i,r,r.cyclesFix?a.concat([p]):[]);c.push.apply(c,u.map(e=>(e.path.unshift(l),e)))}}else c.push({type:"REMOVE",path:[l],oldValue:e[y]})}var n=Array.isArray(t);for(const f in t)f in e||c.push({type:"CREATE",path:[n?+f:f],value:t[f]});return c}})();
+
 export const test_module_api = {
   test() {
     assert.throws(() => openDoor('test key'))
@@ -45,6 +48,8 @@ export const test_wrapped_binding = {
 
     // NOTE: you need to be running `npx wrangler dev echoback.js` in another terminal
     // for this to pass (for now)...
-    console.log(await env.d1.exec(`select 1`))
+    assert.deepStrictEqual(await env.d1.prepare(`select 1`).all(), {
+      lol: 'boats',
+    })
   },
 }
