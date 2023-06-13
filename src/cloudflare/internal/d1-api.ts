@@ -1,4 +1,4 @@
-type DatabaseBinding = {
+type Fetcher = {
   fetch: typeof fetch
 }
 
@@ -26,10 +26,10 @@ type SQLError = {
 }
 
 export class D1Database {
-  private readonly binding: DatabaseBinding
+  private readonly fetcher: Fetcher
 
-  constructor(binding: DatabaseBinding) {
-    this.binding = binding
+  constructor(fetcher: Fetcher) {
+    this.fetcher = fetcher
   }
 
   prepare(query: string): D1PreparedStatement {
@@ -37,7 +37,7 @@ export class D1Database {
   }
 
   async dump(): Promise<ArrayBuffer> {
-    const response = await this.binding.fetch('http://d1/dump', {
+    const response = await this.fetcher.fetch('http://d1/dump', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -138,7 +138,7 @@ export class D1Database {
           }
     )
 
-    const response = await this.binding.fetch(new URL(endpoint, 'http://d1'), {
+    const response = await this.fetcher.fetch(new URL(endpoint, 'http://d1'), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -147,7 +147,7 @@ export class D1Database {
     })
 
     try {
-      const answer = (await response.json()) as any[] | any
+      const answer = (await toJson(response)) as any[] | any
 
       if (Array.isArray(answer)) {
         return answer.map((r: any) => mapD1Result<T>(r))
@@ -155,8 +155,9 @@ export class D1Database {
         return mapD1Result<T>(answer)
       }
     } catch (e: any) {
-      throw new Error(`D1_ERROR: ${e.cause || 'Something went wrong'}`, {
-        cause: new Error(e.cause || 'Something went wrong'),
+      const message = e.cause?.message || e.message || 'Something went wrong'
+      throw new Error(`D1_ERROR: ${message}`, {
+        cause: new Error(message),
       })
     }
   }
@@ -310,4 +311,18 @@ function mapD1Result<T>(result: any): D1Result<T> {
         meta: result.meta || {},
         results: result.results || [],
       }
+}
+
+async function toJson(response: Response) {
+  const body = await response.text()
+  try {
+    return JSON.parse(body)
+  } catch (e) {
+    throw new Error(`Failed to parse body as JSON, got: ${body}`)
+  }
+}
+
+export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
+  console.log(env)
+  return new D1Database(env.fetcher)
 }

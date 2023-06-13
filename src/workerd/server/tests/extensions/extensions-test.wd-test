@@ -26,10 +26,39 @@ const unitTests :Workerd.Config = (
               entrypoint = "wrap",
               innerBindings = [ (name = "secret", text = "custom open sesame") ],
             )
+          ),
+          (
+            name = "d1",
+            wrapped = (
+              moduleName = "cloudflare-internal:d1-api",
+              innerBindings = [(
+                name = "fetcher",
+                service = "d1_fetcher_1"
+              )],
+            )
           )
         ],
-     )
+      )
     ),
+    ( name = "d1_fetcher_1",
+      external = (
+        address = "localhost:8787",
+        http = (
+          injectRequestHeaders = [
+            ( name = "Authorization", value = "Bearer <redacted>" )
+          ]
+        )
+      )
+    ),
+    # ( name = "echoback",
+    #  worker = (
+    #    compatibilityDate = "2023-01-15",
+    #    modules = [
+    #      (name = "worker", esModule = embed "echoback.js")
+    #    ],
+    #  )
+    # )
   ],
+  # sockets = [ ( name = "http", address = "*:3000", http = (), service = "echoback" ) ],
   extensions = [ TestExtension.extension ],
 );
