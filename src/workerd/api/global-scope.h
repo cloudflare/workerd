@@ -213,7 +213,7 @@ struct ExportedHandler {
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
   );
-  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueMessage = unknown, CfHostMetadata = unknown> {
+  JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
     email?: EmailExportedHandler<Env>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
     tail?: ExportedHandlerTailHandler<Env>;
@@ -223,7 +223,7 @@ struct ExportedHandler {
     webSocketMessage: never;
     webSocketClose: never;
     webSocketError: never;
-    queue?: ExportedHandlerQueueHandler<Env, QueueMessage>;
+    queue?: ExportedHandlerQueueHandler<Env, QueueHandlerMessage>;
     test?: ExportedHandlerTestHandler<Env>;
   });
   // Make `env` parameter generic
