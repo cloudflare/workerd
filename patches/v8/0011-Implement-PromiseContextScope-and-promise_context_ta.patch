@@ -1,0 +1,323 @@
+From 1b1fef9e8a209cdac74b93900d7223416c2eb686 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Wed, 14 Jun 2023 12:45:50 -0700
+Subject: Implement PromiseContextScope and promise_context_tag
+
+Allows optional detection of promises created and waited on within
+different context scopes.
+---
+ include/v8-isolate.h                        | 17 +++++++++++++++++
+ src/api/api.cc                              | 12 ++++++++++++
+ src/builtins/promise-abstract-operations.tq |  4 ++++
+ src/builtins/promise-constructor.tq         |  4 ++++
+ src/builtins/promise-misc.tq                |  9 +++++++++
+ src/common/message-template.h               |  7 ++++++-
+ src/compiler/js-create-lowering.cc          |  4 +++-
+ src/execution/isolate.cc                    |  9 ++++++++-
+ src/execution/isolate.h                     |  5 +++++
+ src/heap/factory.cc                         |  1 +
+ src/objects/js-promise.tq                   |  1 +
+ src/runtime/runtime-promise.cc              | 19 +++++++++++++++++++
+ src/runtime/runtime.h                       |  4 +++-
+ 13 files changed, 92 insertions(+), 4 deletions(-)
+
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index 1d079ac0bb1dd3921d680bcd1958da4bbc114e9e..f4fbe23e4ac6e333719a7a519a46ed184d36318d 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1635,6 +1635,8 @@ class V8_EXPORT Isolate {
+    */
+   void LocaleConfigurationChangeNotification();
+ 
++  class PromiseContextScope;
++
+   Isolate() = delete;
+   ~Isolate() = delete;
+   Isolate(const Isolate&) = delete;
+@@ -1678,6 +1680,21 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+   return Local<T>::FromSlot(slot);
+ }
+ 
++class Isolate::PromiseContextScope {
++public:
++  explicit PromiseContextScope(Isolate* v8_isolate, int32_t tag);
++  PromiseContextScope(const PromiseContextScope&) = delete;
++  PromiseContextScope(PromiseContextScope&&) = delete;
++  PromiseContextScope& operator=(const PromiseContextScope&) = delete;
++  PromiseContextScope& operator=(PromiseContextScope&&) = delete;
++  ~PromiseContextScope();
++
++private:
++  internal::Isolate* i_isolate_;
++  int32_t current_tag_;
++  int32_t previous_tag_ = 0;
++};
++
+ }  // namespace v8
+ 
+ #endif  // INCLUDE_V8_ISOLATE_H_
+diff --git a/src/api/api.cc b/src/api/api.cc
+index bddda91dbb07500eac71274fe859603a416821b8..90d76b2f46398fd501532f5d43598536590b69a3 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -11610,6 +11610,18 @@ std::string SourceLocation::ToString() const {
+   return std::string(function_) + "@" + file_ + ":" + std::to_string(line_);
+ }
+ 
++Isolate::PromiseContextScope::PromiseContextScope(Isolate* v8_isolate, int32_t tag)
++    : i_isolate_(reinterpret_cast<i::Isolate*>(v8_isolate)),
++      current_tag_(tag),
++      previous_tag_(i_isolate_->promise_context_tag()) {
++  DCHECK_EQ(previous_tag_, 0);
++  i_isolate_->set_promise_context_tag(tag);
++}
++
++Isolate::PromiseContextScope::~PromiseContextScope() {
++  DCHECK_EQ(i_isolate_->promise_context_tag(), (int32_t)current_tag_);  i_isolate_->set_promise_context_tag(previous_tag_);
++}
++
+ }  // namespace v8
+ 
+ #include "src/api/api-macros-undef.h"
+diff --git a/src/builtins/promise-abstract-operations.tq b/src/builtins/promise-abstract-operations.tq
+index 2e2dd0e1ef71e9a7c2e2ca6bea3cb5d551f6ed4e..d88a930204511fd4d5cc071cf385674c84b7182c 100644
+--- a/src/builtins/promise-abstract-operations.tq
++++ b/src/builtins/promise-abstract-operations.tq
+@@ -20,6 +20,9 @@ PromiseResolveAfterResolved(implicit context: Context)(JSPromise, JSAny): JSAny;
+ 
+ extern transitioning runtime
+ PromiseRejectEventFromStack(implicit context: Context)(JSPromise, JSAny): JSAny;
++
++extern transitioning runtime
++PromiseContextCheck(implicit context: Context)(Object): JSAny;
+ }
+ 
+ // https://tc39.es/ecma262/#sec-promise-abstract-operations
+@@ -451,6 +454,7 @@ transitioning macro PerformPromiseThenImpl(implicit context: Context)(
+     // PromiseReaction holding both the onFulfilled and onRejected callbacks.
+     // Once the {promise} is resolved we decide on the concrete handler to
+     // push onto the microtask queue.
++    runtime::PromiseContextCheck(promise);
+     const handlerContext = ExtractHandlerContext(onFulfilled, onRejected);
+     const promiseReactions =
+         UnsafeCast<(Zero | PromiseReaction)>(promise.reactions_or_result);
+diff --git a/src/builtins/promise-constructor.tq b/src/builtins/promise-constructor.tq
+index b502eabf05f614ed58c058487e3117fea68973bd..e9277f72e5ded2564df34dcfb5dd7ed9f51b9c69 100644
+--- a/src/builtins/promise-constructor.tq
++++ b/src/builtins/promise-constructor.tq
+@@ -14,6 +14,9 @@ DebugPopPromise(implicit context: Context)(): JSAny;
+ 
+ extern transitioning runtime
+ PromiseHookInit(implicit context: Context)(Object, Object): JSAny;
++
++extern transitioning runtime
++PromiseContextInit(implicit context: Context)(Object): JSAny;
+ }
+ 
+ // https://tc39.es/ecma262/#sec-promise-constructor
+@@ -74,6 +77,7 @@ PromiseConstructor(
+     result = UnsafeCast<JSPromise>(
+         FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
+     PromiseInit(result);
++    PromiseContextInit(result);
+     RunAnyPromiseHookInit(result, Undefined);
+   }
+ 
+diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
+index 199fc313193e82d149a9f389a12081bf1110a105..31ce2e11ffbb3554c4ce7fd136c23e22de582767 100644
+--- a/src/builtins/promise-misc.tq
++++ b/src/builtins/promise-misc.tq
+@@ -42,6 +42,7 @@ macro PromiseHasHandler(promise: JSPromise): bool {
+ @export
+ macro PromiseInit(promise: JSPromise): void {
+   promise.reactions_or_result = kZero;
++  promise.context_tag = 0;
+   promise.flags = SmiTag(JSPromiseFlags{
+     status: PromiseState::kPending,
+     has_handler: false,
+@@ -62,6 +63,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
+   promise.properties_or_hash = kEmptyFixedArray;
+   promise.elements = kEmptyFixedArray;
+   promise.reactions_or_result = kZero;
++  promise.context_tag = 0;
+   promise.flags = SmiTag(JSPromiseFlags{
+     status: PromiseState::kPending,
+     has_handler: false,
+@@ -217,6 +219,11 @@ transitioning macro RunContextPromiseHook(implicit context: Context)(
+   }
+ }
+ 
++transitioning macro PromiseContextInit(implicit context: Context)(
++    promise: JSPromise): void {
++  runtime::PromiseContextInit(promise);
++}
++
+ transitioning macro RunAnyPromiseHookInit(implicit context: Context)(
+     promise: JSPromise, parent: Object): void {
+   const promiseHookFlags = PromiseHookFlags();
+@@ -242,6 +249,7 @@ transitioning macro NewJSPromise(implicit context: Context)(parent: Object):
+     JSPromise {
+   const instance = InnerNewJSPromise();
+   PromiseInit(instance);
++  PromiseContextInit(instance);
+   RunAnyPromiseHookInit(instance, parent);
+   return instance;
+ }
+@@ -264,6 +272,7 @@ transitioning macro NewJSPromise(implicit context: Context)(
+   instance.reactions_or_result = result;
+   instance.SetStatus(status);
+   promise_internal::ZeroOutEmbedderOffsets(instance);
++  PromiseContextInit(instance);
+   RunAnyPromiseHookInit(instance, Undefined);
+   return instance;
+ }
+diff --git a/src/common/message-template.h b/src/common/message-template.h
+index cdf8e309e6213193e63a12fb66f14b1b78f03afe..fad55cb80f1cbf6a40c512095180e93f0dc3b120 100644
+--- a/src/common/message-template.h
++++ b/src/common/message-template.h
+@@ -716,7 +716,12 @@ namespace internal {
+   /* AggregateError */                                                         \
+   T(AllPromisesRejected, "All promises were rejected")                         \
+   T(CannotDeepFreezeObject, "Cannot DeepFreeze object of type %")              \
+-  T(CannotDeepFreezeValue, "Cannot DeepFreeze non-const value %")
++  T(CannotDeepFreezeValue, "Cannot DeepFreeze non-const value %")              \
++  /* PromiseContextTagMismatch is a Cloudflare-specific error used to */       \
++  /* indicate that an attempt was made to wait on a promise from a different */\
++  /* request. */                                                               \
++  T(PromiseContextTagMismatch,                                                 \
++      "Cannot await a promise from a different request")
+ 
+ enum class MessageTemplate {
+ #define TEMPLATE(NAME, STRING) k##NAME,
+diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
+index 335a66d9e78bcacb2e470ad4bfbdd870b3986df3..eb87ef9984e1896cb87078a19127d913b23b2adb 100644
+--- a/src/compiler/js-create-lowering.cc
++++ b/src/compiler/js-create-lowering.cc
+@@ -1081,7 +1081,9 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
+   static_assert(v8::Promise::kPending == 0);
+   a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kFlagsOffset),
+           jsgraph()->ZeroConstant());
+-  static_assert(JSPromise::kHeaderSize == 5 * kTaggedSize);
++  a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kContextTagOffset),
++          jsgraph()->ZeroConstant());
++  static_assert(JSPromise::kHeaderSize == 6 * kTaggedSize);
+   for (int offset = JSPromise::kHeaderSize;
+        offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
+     a.Store(AccessBuilder::ForJSObjectOffset(offset),
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 40d1b394ef30c7cdf1d5aa05a051d3a497abf28e..64b3130c52bcebd3a1320c130dce7650c070a791 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -3433,7 +3433,8 @@ Isolate::Isolate(std::unique_ptr<i::IsolateAllocator> isolate_allocator)
+ #endif
+       next_module_async_evaluating_ordinal_(
+           SourceTextModule::kFirstAsyncEvaluatingOrdinal),
+-      cancelable_task_manager_(new CancelableTaskManager()) {
++      cancelable_task_manager_(new CancelableTaskManager()),
++      promise_context_tag_(0) {
+   TRACE_ISOLATE(constructor);
+   CheckIsolateLayout();
+ 
+@@ -6208,5 +6209,11 @@ void DefaultWasmAsyncResolvePromiseCallback(
+   CHECK(ret.IsJust() ? ret.FromJust() : isolate->IsExecutionTerminating());
+ }
+ 
++int32_t Isolate::promise_context_tag() { return promise_context_tag_; }
++
++void Isolate::set_promise_context_tag(int32_t tag) {
++  promise_context_tag_ = tag;
++}
++
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+index 5a0972dee86aa993c2526a4f9596af12eeaf647d..1d5eeb3729f573303e2ae91e2b7fa6dc67e9193d 100644
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -2052,6 +2052,9 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+   void VerifyStaticRoots();
+ 
++  int32_t promise_context_tag();
++  void set_promise_context_tag(int32_t tag);
++
+  private:
+   explicit Isolate(std::unique_ptr<IsolateAllocator> isolate_allocator);
+   ~Isolate();
+@@ -2509,6 +2512,8 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+   SimulatorData* simulator_data_ = nullptr;
+ #endif
+ 
++  int32_t promise_context_tag_ = 0;
++
+   friend class heap::HeapTester;
+   friend class GlobalSafepoint;
+   friend class TestSerializer;
+diff --git a/src/heap/factory.cc b/src/heap/factory.cc
+index 16bbb62bf9dd97d112c6b55dd338d7ab1709aade..4f6bc2d9e34fbda2085d585728cdf40900a0ef72 100644
+--- a/src/heap/factory.cc
++++ b/src/heap/factory.cc
+@@ -4019,6 +4019,7 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+   JSPromise raw = *promise;
+   raw.set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
+   raw.set_flags(0);
++  raw.set_context_tag(isolate()->promise_context_tag());
+   // TODO(v8) remove once embedder data slots are always zero-initialized.
+   InitEmbedderFields(*promise, Smi::zero());
+   DCHECK_EQ(raw.GetEmbedderFieldCount(), v8::Promise::kEmbedderFieldCount);
+diff --git a/src/objects/js-promise.tq b/src/objects/js-promise.tq
+index 25c7e1f76c72996eb1d8fb3d93cbfc06f4f41bf3..4a68e642eb64a506688bd4d68b6856584b01b537 100644
+--- a/src/objects/js-promise.tq
++++ b/src/objects/js-promise.tq
+@@ -34,6 +34,7 @@ extern class JSPromise extends JSObjectWithEmbedderSlots {
+   // not settled yet, otherwise the result.
+   reactions_or_result: Zero|PromiseReaction|JSAny;
+   flags: SmiTagged<JSPromiseFlags>;
++  context_tag: Smi;
+ }
+ 
+ @doNotGenerateCast
+diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
+index 5fa806068b5185b7293a5d00d50da26f5cdcb1a9..350f1ece5affb0091a8f33b4a7e64137589809c8 100644
+--- a/src/runtime/runtime-promise.cc
++++ b/src/runtime/runtime-promise.cc
+@@ -216,5 +216,24 @@ RUNTIME_FUNCTION(Runtime_ConstructInternalAggregateErrorHelper) {
+   return *result;
+ }
+ 
++RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
++  HandleScope scope(isolate);
++  DCHECK_EQ(1, args.length());
++  args.at<JSPromise>(0)->set_context_tag(isolate->promise_context_tag());
++  return ReadOnlyRoots(isolate).undefined_value();
++}
++
++RUNTIME_FUNCTION(Runtime_PromiseContextCheck) {
++  HandleScope scope(isolate);
++  DCHECK_EQ(1, args.length());
++  int32_t promise_tag = args.at<JSPromise>(0)->context_tag();
++  // We only do the comparison if the promise_tag is not zero.
++  if (promise_tag != 0 && promise_tag != isolate->promise_context_tag()) {
++    THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewError(
++        MessageTemplate::kPromiseContextTagMismatch));
++  }
++  return ReadOnlyRoots(isolate).undefined_value();
++}
++
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index e11c08398c50c1978270d8a181c7c5cf27d77fff..453e34803e8639777885cdcba3f1df9525c2daac 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -399,7 +399,9 @@ namespace internal {
+   F(PromiseRejectAfterResolved, 2, 1)    \
+   F(PromiseResolveAfterResolved, 2, 1)   \
+   F(ConstructAggregateErrorHelper, 4, 1) \
+-  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1)
++  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
++  F(PromiseContextInit, 1, 1) \
++  F(PromiseContextCheck, 1, 1)
+ 
+ #define FOR_EACH_INTRINSIC_PROXY(F, I) \
+   F(CheckProxyGetSetTrapResult, 2, 1)  \
