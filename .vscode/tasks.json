@@ -39,7 +39,7 @@
         // flags for the spawn_strategy and oso_prefix. Ideally these would
         // be in a platform specific config in .bazelrc, but this is not supported
         // (https://github.com/bazelbuild/bazel/issues/5055).
-        "args": ["build", "-c", "dbg","--features=oso_prefix_is_pwd", "//..."],
+        "args": ["build", "-c", "dbg", "--features=oso_prefix_is_pwd", "//..."],
       },
       "group": {
         "kind": "build",
@@ -79,6 +79,8 @@
       "type": "shell",
       "command": "bazel",
       "args": ["build", "-c", "opt", "//src/workerd/server:workerd"],
+      // To enable debug symbols for an optimized build, add the following args for bazel:
+      // "--strategy=local", "--copt='-g'", "--cxxopt='-g'", "--host_copt='-g'", "--host_cxxopt='-g'", "--strip=never"
       "group": {
         "kind": "build",
         "isDefault": false
