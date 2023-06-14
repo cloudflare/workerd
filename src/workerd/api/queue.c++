@@ -25,7 +25,7 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
 }
 
 struct Serialized {
-  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>>> own;
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::BufferSource>> own;
   // Holds onto the owner of a given array of serialized data.
   kj::ArrayPtr<kj::byte> data;
   // A pointer into that data that can be directly written into an outgoing queue send, regardless
@@ -47,7 +47,18 @@ Serialized serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
   return kj::mv(result);
 }
 
-Serialized serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::StringPtr contentType) {
+// Control whether the serialize() method makes a deep copy of provided ArrayBuffer types or if it
+// just returns a shallow reference that is only valid until the given method returns.
+enum class SerializeArrayBufferBehavior {
+  DEEP_COPY,
+  SHALLOW_REFERENCE,
+};
+
+Serialized serialize(
+    jsg::Lock& js,
+    v8::Local<v8::Value> body,
+    kj::StringPtr contentType,
+    SerializeArrayBufferBehavior bufferBehavior) {
   if (contentType == IncomingQueueMessage::ContentType::TEXT) {
     JSG_REQUIRE(
       body->IsString(),
@@ -78,6 +89,13 @@ Serialized serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::StringPtr con
     );
 
     jsg::BufferSource source(js, body);
+    if (bufferBehavior == SerializeArrayBufferBehavior::SHALLOW_REFERENCE) {
+      // If we know the data will be consumed synchronously, we can avoid copying it.
+      Serialized result;
+      result.data = source.asArrayPtr();
+      result.own = kj::mv(source);
+      return kj::mv(result);
+    }
     kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
     Serialized result;
     result.data = bytes;
@@ -115,7 +133,7 @@ kj::Promise<void> WorkerQueue::send(
   Serialized serialized;
   KJ_IF_MAYBE(type, contentType) {
     headers.add("X-Msg-Fmt", *type);
-    serialized = serialize(js, body, *type);
+    serialized = serialize(js, body, *type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
     // TODO(cleanup) send message format header (v8) by default
     serialized = serializeV8(js, body);
@@ -166,7 +184,8 @@ kj::Promise<void> WorkerQueue::sendBatch(
     SerializedWithContentType item;
     KJ_IF_MAYBE(contentType, message.contentType) {
       item.contentType = validateContentType(*contentType);
-      item.body = serialize(js, message.body.getHandle(js), *contentType);
+      item.body = serialize(js, message.body.getHandle(js), *contentType,
+          SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
     } else {
       item.body = serializeV8(js, message.body.getHandle(js));
     }
