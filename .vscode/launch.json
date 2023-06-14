@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "workerd debug",
+      "name": "workerd (dbg)",
       "preLaunchTask": "Bazel build workerd (dbg)",
       "program": "workerd",
       "request": "launch",
@@ -13,14 +13,12 @@
       "cwd": "${workspaceFolder}",
       "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "linux": {
-        "name": "workerd debug",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
       },
       "osx": {
-        "name": "workerd debug",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "lldb",
@@ -32,7 +30,6 @@
          },
       },
       "windows": {
-        "name": "workerd debug",
         "type": "cppvsdbg",
         "request": "launch",
       },
@@ -44,21 +41,20 @@
       "externalConsole": false,
     },
     {
-      "name": "workerd debug with inspector enabled",
-      "preLaunchTask": "Bazel build workerd (dbg)",
-      "type": "cppdbg",
+      "name": "workerd (opt)",
+      "preLaunchTask": "Bazel build workerd (opt)",
+      "program": "workerd",
       "request": "launch",
+      "type": "cppdbg",
       "cwd": "${workspaceFolder}",
       "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "linux": {
-        "name": "workerd debug with inspector enabled",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
         "miDebuggerArgs": "-d ${workspaceFolder}",
       },
       "osx": {
-        "name": "workerd debug with inspector enabled",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "lldb",
@@ -70,7 +66,41 @@
          },
       },
       "windows": {
-        "name": "workerd debug with inspector enabled",
+        "type": "cppvsdbg",
+        "request": "launch",
+      },
+      "args": [
+        "serve",
+        "${input:workerdConfig}"
+      ],
+      "stopAtEntry": false,
+      "externalConsole": false,
+    },
+    {
+      "name": "workerd with inspector enabled (dbg)",
+      "preLaunchTask": "Bazel build workerd (dbg)",
+      "type": "cppdbg",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
+      "linux": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+      },
+      "osx": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+      },
+      "windows": {
         "type": "cppvsdbg",
         "request": "launch",
       },
@@ -84,14 +114,50 @@
       "externalConsole": false
     },
     {
-      "name": "workerd test case",
+      "name": "workerd with inspector enabled (opt)",
+      "preLaunchTask": "Bazel build workerd (opt)",
+      "type": "cppdbg",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
+      "linux": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "gdb",
+        "miDebuggerArgs": "-d ${workspaceFolder}",
+      },
+      "osx": {
+        "type": "cppdbg",
+        "request": "launch",
+        "MIMode": "lldb",
+        "sourceFileMap": {
+          "src" : "${workspaceFolder}/src",
+          "bazel-bin" : "${workspaceFolder}/bazel-bin",
+          "bazel-out" : "${workspaceFolder}/bazel-out",
+          "external" : "${workspaceFolder}/external"
+         },
+      },
+      "windows": {
+        "type": "cppvsdbg",
+        "request": "launch",
+      },
+      "args": [
+        "serve",
+        "-i0.0.0.0",
+        "--verbose",
+        "${input:workerdConfig}"
+      ],
+      "stopAtEntry": false,
+      "externalConsole": false
+    },
+    {
+      "name": "workerd test case (dbg)",
       "preLaunchTask": "Bazel build all (dbg)",
       "program": "${workspaceFolder}/${input:testToDebug}",
       "cwd": "${workspaceFolder}",
       "type": "cppdbg",
       "request": "launch",
       "linux": {
-        "name": "workerd test case",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "gdb",
@@ -99,7 +165,6 @@
         "program": "${workspaceFolder}/${input:testToDebug}",
       },
       "osx": {
-        "name": "workerd test case",
         "type": "cppdbg",
         "request": "launch",
         "MIMode": "lldb",
@@ -113,7 +178,6 @@
          "program": "${workspaceFolder}/${input:testToDebug}",
       },
       "windows": {
-        "name": "workerd test case",
         "type": "cppvsdbg",
         "request": "launch",
         "program": "${workspaceFolder}/${input:testToDebug}",
@@ -122,7 +186,7 @@
       "externalConsole": false
     },
     {
-      "name": "workerd wdtest case",
+      "name": "workerd wd-test case (dbg)",
       "preLaunchTask": "Bazel build all (dbg)",
       "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "args": [
