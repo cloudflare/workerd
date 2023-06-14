@@ -2,19 +2,20 @@ type Fetcher = {
   fetch: typeof fetch
 }
 
-type D1SuccessResult<T = unknown> = {
+type D1Result<T = unknown> = {
   results: T[]
   success: true
   meta: any
   error?: never
 }
-type D1FailureResult = {
+
+type D1UpstreamFailure = {
   results?: never
   error: string
   success: false
   meta: any
 }
-export type D1Result<T = unknown> = D1SuccessResult<T> | D1FailureResult
+export type D1UpstreamResponse<T = unknown> = D1Result<T> | D1UpstreamFailure
 
 export type D1ExecResult = {
   count: number
@@ -60,13 +61,13 @@ export class D1Database {
 
   async batch<T = unknown>(
     statements: D1PreparedStatement[]
-  ): Promise<D1SuccessResult<T>[]> {
+  ): Promise<D1Result<T>[]> {
     const exec = await this._sendOrThrow(
       '/query',
       statements.map((s: D1PreparedStatement) => s.statement),
       statements.map((s: D1PreparedStatement) => s.params)
     )
-    return exec as D1SuccessResult<T>[]
+    return exec as D1Result<T>[]
   }
 
   async exec<T = unknown>(query: string): Promise<D1ExecResult> {
@@ -109,7 +110,7 @@ export class D1Database {
     endpoint: string,
     query: any,
     params: any[]
-  ): Promise<D1SuccessResult<T>[] | D1SuccessResult<T>> {
+  ): Promise<D1Result<T>[] | D1Result<T>> {
     const results = await this._send(endpoint, query, params)
     const firstResult = firstIfArray(results)
     if (!firstResult.success) {
@@ -117,7 +118,7 @@ export class D1Database {
         cause: new Error(firstResult.error),
       })
     } else {
-      return results as D1SuccessResult<T>[] | D1SuccessResult<T>
+      return results as D1Result<T>[] | D1Result<T>
     }
   }
 
@@ -125,7 +126,7 @@ export class D1Database {
     endpoint: string,
     query: any,
     params: any[]
-  ): Promise<D1Result<T>[] | D1Result<T>> {
+  ): Promise<D1UpstreamResponse<T>[] | D1UpstreamResponse<T>> {
     /* this needs work - we currently only support ordered ?n params */
     const body = JSON.stringify(
       typeof query == 'object'
@@ -226,6 +227,10 @@ export class D1PreparedStatement {
     return new D1PreparedStatement(this.database, this.statement, values)
   }
 
+  async first<T = unknown>(colName: string): Promise<T | null>
+  async first<T = unknown>(
+    colName: undefined
+  ): Promise<Record<string, T> | null>
   async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
@@ -254,7 +259,7 @@ export class D1PreparedStatement {
     }
   }
 
-  async run<T = unknown>(): Promise<D1SuccessResult<T>> {
+  async run<T = unknown>(): Promise<D1Result<T>> {
     return firstIfArray(
       await this.database._sendOrThrow<T>(
         '/execute',
@@ -297,7 +302,7 @@ function firstIfArray<T>(results: T | T[]): T {
   return Array.isArray(results) ? results[0]! : results
 }
 
-function mapD1Result<T>(result: any): D1Result<T> {
+function mapD1Result<T>(result: D1UpstreamResponse<T>): D1UpstreamResponse<T> {
   // The rest of the app can guarantee that success is true/false, but from the API
   // we only guarantee that error is present/absent.
   return result.error
