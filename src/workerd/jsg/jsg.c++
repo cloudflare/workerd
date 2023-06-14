@@ -145,6 +145,12 @@ Value Lock::parseJson(kj::StringPtr text) {
       jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), v8Str(v8Isolate, text))));
 }
 
+Value Lock::parseJson(v8::Local<v8::String> text) {
+  v8::HandleScope scope(v8Isolate);
+  return jsg::Value(v8Isolate,
+      jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), text)));
+}
+
 kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
   v8::HandleScope scope(v8Isolate);
   return toString(jsg::check(
