@@ -24,7 +24,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -50,7 +50,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -69,7 +69,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -90,7 +90,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -108,7 +108,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -126,7 +126,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -145,7 +145,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -164,7 +164,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
@@ -183,7 +183,7 @@
         "focus": false,
         "panel": "shared",
         "showReuseMessage": false,
-        "clear": true
+        "clear": false
       }
     },
     {
