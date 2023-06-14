@@ -26,6 +26,7 @@
 /* eslint-disable */
 
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
+import util from 'node-internal:inspect_polyfill';
 
 let blue = "";
 let green = "";
@@ -65,26 +66,22 @@ export function copyError(source: any): Error {
 }
 
 export function inspectValue(val: unknown): string {
-  // The util.inspect default values could be changed. This makes sure the
-  // error messages contain the necessary information nevertheless.
-  // TODO(soon): Implement inspect
-  // return inspect(
-  //   val,
-  //   {
-  //     compact: true,
-  //     customInspect: false,
-  //     depth: 1000,
-  //     maxArrayLength: Infinity,
-  //     // Assert compares only enumerable properties (with a few exceptions).
-  //     showHidden: false,
-  //     // Assert does not detect proxies currently.
-  //     showProxy: false,
-  //     sorted: true,
-  //     // Inspect getters as we also check them when comparing entries.
-  //     getters: true,
-  //   },
-  // );
-  return `${val}`;
+  return util.inspect(
+    val,
+    {
+      compact: true,
+      customInspect: false,
+      depth: 1000,
+      maxArrayLength: Infinity,
+      // Assert compares only enumerable properties (with a few exceptions).
+      showHidden: false,
+      // Assert does not detect proxies currently.
+      showProxy: false,
+      sorted: true,
+      // Inspect getters as we also check them when comparing entries.
+      getters: true,
+    },
+  );
 }
 
 export function createErrDiff(
@@ -337,7 +334,7 @@ export interface AssertionErrorDetailsDescriptor {
 }
 
 export interface AssertionErrorConstructorOptions {
-  message?: string | Error;
+  message: string | Error | undefined;
   actual?: unknown;
   expected?: unknown;
   operator?: string;
