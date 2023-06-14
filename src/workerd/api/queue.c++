@@ -225,13 +225,11 @@ jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::St
   auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
 
   if (type == IncomingQueueMessage::ContentType::TEXT) {
-    auto str = kj::heapString(body.asChars());
-    return jsg::Value(js.v8Isolate, js.wrapString(str));
+    return jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, body.asChars()));
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
     return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(body)));
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    auto str = kj::heapString(body.asChars());
-    return js.parseJson(str);
+    return js.parseJson(jsg::v8Str(js.v8Isolate, body.asChars()));
   } else if (type == IncomingQueueMessage::ContentType::V8) {
     return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, kj::mv(body)).readValue());
   } else {
@@ -247,14 +245,12 @@ jsg::Value deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   }
 
   if (type == IncomingQueueMessage::ContentType::TEXT) {
-    auto str = kj::heapString(message.getData().asChars());
-    return jsg::Value(js.v8Isolate, js.wrapString(str));
+    return jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, message.getData().asChars()));
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
     kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
     return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(bytes)));
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    auto str = kj::heapString(message.getData().asChars());
-    return js.parseJson(str);
+    return js.parseJson(jsg::v8Str(js.v8Isolate, message.getData().asChars()));
   } else if (type == IncomingQueueMessage::ContentType::V8) {
     return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, message.getData()).readValue());
   } else {

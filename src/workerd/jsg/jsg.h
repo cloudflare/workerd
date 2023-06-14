@@ -1750,6 +1750,7 @@ public:
   }
 
   Value parseJson(kj::StringPtr text);
+  Value parseJson(v8::Local<v8::String> text);
   template <typename T>
   kj::String serializeJson(V8Ref<T>& value) { return serializeJson(value.getHandle(*this)); }
   template <typename T>
