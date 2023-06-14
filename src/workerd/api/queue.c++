@@ -24,7 +24,15 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
   }
 }
 
-kj::Array<kj::byte> serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
+struct Serialized {
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>>> own;
+  // Holds onto the owner of a given array of serialized data.
+  kj::ArrayPtr<kj::byte> data;
+  // A pointer into that data that can be directly written into an outgoing queue send, regardless
+  // of its holder.
+};
+
+Serialized serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
   jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
@@ -32,10 +40,14 @@ kj::Array<kj::byte> serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
     .omitHeader = false,
   });
   serializer.write(body);
-  return serializer.release().data;
+  kj::Array<kj::byte> bytes = serializer.release().data;
+  Serialized result;
+  result.data = bytes;
+  result.own = kj::mv(bytes);
+  return kj::mv(result);
 }
 
-kj::Array<kj::byte> serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::StringPtr contentType) {
+Serialized serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::StringPtr contentType) {
   if (contentType == IncomingQueueMessage::ContentType::TEXT) {
     JSG_REQUIRE(
       body->IsString(),
@@ -49,7 +61,10 @@ kj::Array<kj::byte> serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::Stri
     );
 
     kj::String s = js.toString(body);
-    return kj::heapArray(s.asBytes());
+    Serialized result;
+    result.data = s.asBytes();
+    result.own = kj::mv(s);
+    return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
     JSG_REQUIRE(
       body->IsArrayBufferView(),
@@ -63,10 +78,17 @@ kj::Array<kj::byte> serialize(jsg::Lock& js, v8::Local<v8::Value> body, kj::Stri
     );
 
     jsg::BufferSource source(js, body);
-    return kj::heapArray(source.asArrayPtr());
+    kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+    Serialized result;
+    result.data = bytes;
+    result.own = kj::mv(bytes);
+    return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::JSON) {
     kj::String s = js.serializeJson(body);
-    return kj::heapArray(s.asBytes());
+    Serialized result;
+    result.data = s.asBytes();
+    result.own = kj::mv(s);
+    return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::V8) {
     return serializeV8(js, body);
   } else {
@@ -90,7 +112,7 @@ kj::Promise<void> WorkerQueue::send(
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/octet-stream");
 
-  kj::Array<kj::byte> serialized;
+  Serialized serialized;
   KJ_IF_MAYBE(type, contentType) {
     headers.add("X-Msg-Fmt", *type);
     serialized = serialize(js, body, *type);
@@ -105,9 +127,9 @@ kj::Promise<void> WorkerQueue::send(
   kj::StringPtr url = "https://fake-host/message"_kj;
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
-  auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.size());
-  return req.body->write(serialized.begin(), serialized.size())
-      .attach(kj::mv(serialized), kj::mv(req.body), context.registerPendingEvent())
+  auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.data.size());
+  return req.body->write(serialized.data.begin(), serialized.data.size())
+      .attach(kj::mv(serialized.own), kj::mv(req.body), context.registerPendingEvent())
       .then([resp = kj::mv(req.response), &context]() mutable {
     return resp.then([](kj::HttpClient::Response&& response) mutable {
       if (response.statusCode != 200) {
@@ -122,8 +144,8 @@ kj::Promise<void> WorkerQueue::send(
   }).attach(kj::mv(client));
 };
 
-struct SerializedBody {
-  kj::Array<kj::byte> body;
+struct SerializedWithContentType {
+  Serialized body;
   kj::Maybe<kj::StringPtr> contentType;
 };
 
@@ -136,12 +158,12 @@ kj::Promise<void> WorkerQueue::sendBatch(
   size_t totalSize = 0;
   size_t largestMessage = 0;
   auto messageCount = batch.size();
-  auto builder = kj::heapArrayBuilder<SerializedBody>(messageCount);
+  auto builder = kj::heapArrayBuilder<SerializedWithContentType>(messageCount);
   for (auto& message: batch) {
     JSG_REQUIRE(!message.body.getHandle(js)->IsUndefined(), TypeError,
         "Message body cannot be undefined");
 
-    SerializedBody item;
+    SerializedWithContentType item;
     KJ_IF_MAYBE(contentType, message.contentType) {
       item.contentType = validateContentType(*contentType);
       item.body = serialize(js, message.body.getHandle(js), *contentType);
@@ -150,8 +172,8 @@ kj::Promise<void> WorkerQueue::sendBatch(
     }
 
     builder.add(kj::mv(item));
-    totalSize += builder.back().body.size();
-    largestMessage = kj::max(largestMessage, builder.back().body.size());
+    totalSize += builder.back().body.data.size();
+    largestMessage = kj::max(largestMessage, builder.back().body.data.size());
   }
   auto serializedBodies = builder.finish();
 
@@ -166,7 +188,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
     // TODO(perf): We should be able to encode the data directly into bodyBuilder's buffer to
     // eliminate a lot of data copying (whereas now encodeBase64 allocates a new buffer of its own
     // to hold its result, which we then have to copy into bodyBuilder).
-    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body));
+    bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body.data));
     bodyBuilder.add('"');
 
     KJ_IF_MAYBE(contentType, serializedBodies[i].contentType) {
