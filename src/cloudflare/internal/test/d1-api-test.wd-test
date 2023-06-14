@@ -1,5 +1,4 @@
 using Workerd = import "/workerd/workerd.capnp";
-using TestExtension = import "extension.capnp";
 
 const unitTests :Workerd.Config = (
   services = [
@@ -32,6 +31,5 @@ const unitTests :Workerd.Config = (
        ],
      )
     )
-  ],
-  extensions = [ TestExtension.extension ],
+  ]
 );
