@@ -25,6 +25,7 @@
 #include <kj/map.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
+#include <v8-internal.h>  // for SMI min and max values
 #include <map>
 #include <time.h>
 #include <numeric>
@@ -515,6 +516,8 @@ struct Worker::Impl {
 
   kj::Maybe<kj::Exception> permanentException;
   // If set, then any attempt to use this worker shall throw this exception.
+
+  mutable uint32_t promiseContextTag = 0;
 };
 
 struct Worker::Isolate::Impl {
@@ -3563,6 +3566,27 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::run
 kj::Promise<WorkerInterface::CustomEvent::Result>
     Worker::Isolate::SubrequestClient::customEvent(kj::Own<CustomEvent> event) {
   return inner->customEvent(kj::mv(event));
+}
+
+int32_t Worker::getNextPromiseContextTag() const {
+  // This calculation gives us 2,147,483,647 IoContexts before the counter rolls
+  // over, meaning that there is an ever so slight possibility of conflicts if a
+  // worker is busy enough. That's a large enough range that it's probably unlikely
+  // to be an issue?
+  //
+  // We use a value in the v8 SMI range currently because that's the easiest and
+  // most performant thing That Just Works when extending v8's internal JSPromise
+  // to include this additional information. We could use a uint32_t or uint64_t
+  // range value to expand the range but we'd have to either wrap that in a v8
+  // Value (which requires additional allocations) or or teach v8's garbage collector
+  // about a JSPromise with an additional uint32_t or uint64_t field, which is a
+  // much more complicated change.
+  static constexpr int32_t kSmiMax = v8::internal::kSmiMaxValue;
+  static constexpr int32_t kSmiMin = v8::internal::kSmiMinValue;
+  int32_t ret = (__atomic_fetch_add(&impl->promiseContextTag, 1, __ATOMIC_RELAXED) %
+                 kSmiMax) + kSmiMin;
+  KJ_ASSERT(ret <= kSmiMax && ret >= kSmiMin, "Invalid SMI range");
+  return ret;
 }
 
 }  // namespace workerd

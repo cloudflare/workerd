@@ -136,6 +136,8 @@ public:
     bool released = false;
   };
 
+  int32_t getNextPromiseContextTag() const;
+
 private:
   kj::Own<const Script> script;
 

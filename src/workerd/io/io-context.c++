@@ -163,7 +163,8 @@ IoContext::IoContext(ThreadContext& thread,
       waitUntilTasks(*this),
       timeoutManager(kj::heap<TimeoutManagerImpl>()),
       requestId(randomUUID(nullptr)),
-      requestIdKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      requestIdKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
+      promiseContextTag(worker->getNextPromiseContextTag()) {
   kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
   abortFulfiller = kj::mv(paf.fulfiller);
   auto localAbortPromise = kj::mv(paf.promise);
@@ -1095,7 +1096,8 @@ public:
         threadScope(context),
         workerLock(*context.worker, lockType),
         handleScope(workerLock.getIsolate()),
-        jsContextScope(workerLock.getContext()) {
+        jsContextScope(workerLock.getContext()),
+        promiseContextScope(workerLock.getIsolate(), context.getPromiseContextTag()) {
     KJ_REQUIRE(context.currentInputLock == nullptr);
     KJ_REQUIRE(context.currentLock == nullptr);
     context.currentInputLock = kj::mv(inputLock);
@@ -1128,6 +1130,7 @@ private:
   Worker::Lock workerLock;
   v8::HandleScope handleScope;
   v8::Context::Scope jsContextScope;
+  v8::Isolate::PromiseContextScope promiseContextScope;
 };
 
 void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,

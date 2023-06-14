@@ -28,7 +28,7 @@ index 1d079ac0bb1dd3921d680bcd1958da4bbc114e9e..f4fbe23e4ac6e333719a7a519a46ed18
 @@ -1635,6 +1635,8 @@ class V8_EXPORT Isolate {
     */
    void LocaleConfigurationChangeNotification();
- 
+
 +  class PromiseContextScope;
 +
    Isolate() = delete;
@@ -37,7 +37,7 @@ index 1d079ac0bb1dd3921d680bcd1958da4bbc114e9e..f4fbe23e4ac6e333719a7a519a46ed18
 @@ -1678,6 +1680,21 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
    return Local<T>::FromSlot(slot);
  }
- 
+
 +class Isolate::PromiseContextScope {
 +public:
 +  explicit PromiseContextScope(Isolate* v8_isolate, int32_t tag);
@@ -54,7 +54,7 @@ index 1d079ac0bb1dd3921d680bcd1958da4bbc114e9e..f4fbe23e4ac6e333719a7a519a46ed18
 +};
 +
  }  // namespace v8
- 
+
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
 index bddda91dbb07500eac71274fe859603a416821b8..90d76b2f46398fd501532f5d43598536590b69a3 100644
@@ -63,35 +63,35 @@ index bddda91dbb07500eac71274fe859603a416821b8..90d76b2f46398fd501532f5d43598536
 @@ -11610,6 +11610,18 @@ std::string SourceLocation::ToString() const {
    return std::string(function_) + "@" + file_ + ":" + std::to_string(line_);
  }
- 
+
 +Isolate::PromiseContextScope::PromiseContextScope(Isolate* v8_isolate, int32_t tag)
 +    : i_isolate_(reinterpret_cast<i::Isolate*>(v8_isolate)),
 +      current_tag_(tag),
 +      previous_tag_(i_isolate_->promise_context_tag()) {
-+  DCHECK_EQ(previous_tag_, 0);
++  CHECK_EQ(previous_tag_, 0);
 +  i_isolate_->set_promise_context_tag(tag);
 +}
 +
 +Isolate::PromiseContextScope::~PromiseContextScope() {
-+  DCHECK_EQ(i_isolate_->promise_context_tag(), (int32_t)current_tag_);  i_isolate_->set_promise_context_tag(previous_tag_);
++  CHECK_EQ(i_isolate_->promise_context_tag(), (int32_t)current_tag_);  i_isolate_->set_promise_context_tag(previous_tag_);
 +}
 +
  }  // namespace v8
- 
+
  #include "src/api/api-macros-undef.h"
 diff --git a/src/builtins/promise-abstract-operations.tq b/src/builtins/promise-abstract-operations.tq
 index 2e2dd0e1ef71e9a7c2e2ca6bea3cb5d551f6ed4e..d88a930204511fd4d5cc071cf385674c84b7182c 100644
 --- a/src/builtins/promise-abstract-operations.tq
 +++ b/src/builtins/promise-abstract-operations.tq
 @@ -20,6 +20,9 @@ PromiseResolveAfterResolved(implicit context: Context)(JSPromise, JSAny): JSAny;
- 
+
  extern transitioning runtime
  PromiseRejectEventFromStack(implicit context: Context)(JSPromise, JSAny): JSAny;
 +
 +extern transitioning runtime
 +PromiseContextCheck(implicit context: Context)(Object): JSAny;
  }
- 
+
  // https://tc39.es/ecma262/#sec-promise-abstract-operations
 @@ -451,6 +454,7 @@ transitioning macro PerformPromiseThenImpl(implicit context: Context)(
      // PromiseReaction holding both the onFulfilled and onRejected callbacks.
@@ -106,14 +106,14 @@ index b502eabf05f614ed58c058487e3117fea68973bd..e9277f72e5ded2564df34dcfb5dd7ed9
 --- a/src/builtins/promise-constructor.tq
 +++ b/src/builtins/promise-constructor.tq
 @@ -14,6 +14,9 @@ DebugPopPromise(implicit context: Context)(): JSAny;
- 
+
  extern transitioning runtime
  PromiseHookInit(implicit context: Context)(Object, Object): JSAny;
 +
 +extern transitioning runtime
 +PromiseContextInit(implicit context: Context)(Object): JSAny;
  }
- 
+
  // https://tc39.es/ecma262/#sec-promise-constructor
 @@ -74,6 +77,7 @@ PromiseConstructor(
      result = UnsafeCast<JSPromise>(
@@ -122,7 +122,7 @@ index b502eabf05f614ed58c058487e3117fea68973bd..e9277f72e5ded2564df34dcfb5dd7ed9
 +    PromiseContextInit(result);
      RunAnyPromiseHookInit(result, Undefined);
    }
- 
+
 diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
 index 199fc313193e82d149a9f389a12081bf1110a105..31ce2e11ffbb3554c4ce7fd136c23e22de582767 100644
 --- a/src/builtins/promise-misc.tq
@@ -146,7 +146,7 @@ index 199fc313193e82d149a9f389a12081bf1110a105..31ce2e11ffbb3554c4ce7fd136c23e22
 @@ -217,6 +219,11 @@ transitioning macro RunContextPromiseHook(implicit context: Context)(
    }
  }
- 
+
 +transitioning macro PromiseContextInit(implicit context: Context)(
 +    promise: JSPromise): void {
 +  runtime::PromiseContextInit(promise);
@@ -186,7 +186,7 @@ index cdf8e309e6213193e63a12fb66f14b1b78f03afe..fad55cb80f1cbf6a40c512095180e93f
 +  /* request. */                                                               \
 +  T(PromiseContextTagMismatch,                                                 \
 +      "Cannot await a promise from a different request")
- 
+
  enum class MessageTemplate {
  #define TEMPLATE(NAME, STRING) k##NAME,
 diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
@@ -217,11 +217,11 @@ index 40d1b394ef30c7cdf1d5aa05a051d3a497abf28e..64b3130c52bcebd3a1320c130dce7650
 +      promise_context_tag_(0) {
    TRACE_ISOLATE(constructor);
    CheckIsolateLayout();
- 
+
 @@ -6208,5 +6209,11 @@ void DefaultWasmAsyncResolvePromiseCallback(
    CHECK(ret.IsJust() ? ret.FromJust() : isolate->IsExecutionTerminating());
  }
- 
+
 +int32_t Isolate::promise_context_tag() { return promise_context_tag_; }
 +
 +void Isolate::set_promise_context_tag(int32_t tag) {
@@ -235,9 +235,9 @@ index 5a0972dee86aa993c2526a4f9596af12eeaf647d..1d5eeb3729f573303e2ae91e2b7fa6dc
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
 @@ -2052,6 +2052,9 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
- 
+
    void VerifyStaticRoots();
- 
+
 +  int32_t promise_context_tag();
 +  void set_promise_context_tag(int32_t tag);
 +
@@ -247,7 +247,7 @@ index 5a0972dee86aa993c2526a4f9596af12eeaf647d..1d5eeb3729f573303e2ae91e2b7fa6dc
 @@ -2509,6 +2512,8 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    SimulatorData* simulator_data_ = nullptr;
  #endif
- 
+
 +  int32_t promise_context_tag_ = 0;
 +
    friend class heap::HeapTester;
@@ -275,7 +275,7 @@ index 25c7e1f76c72996eb1d8fb3d93cbfc06f4f41bf3..4a68e642eb64a506688bd4d68b685658
    flags: SmiTagged<JSPromiseFlags>;
 +  context_tag: Smi;
  }
- 
+
  @doNotGenerateCast
 diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
 index 5fa806068b5185b7293a5d00d50da26f5cdcb1a9..350f1ece5affb0091a8f33b4a7e64137589809c8 100644
@@ -284,7 +284,7 @@ index 5fa806068b5185b7293a5d00d50da26f5cdcb1a9..350f1ece5affb0091a8f33b4a7e64137
 @@ -216,5 +216,24 @@ RUNTIME_FUNCTION(Runtime_ConstructInternalAggregateErrorHelper) {
    return *result;
  }
- 
+
 +RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
 +  HandleScope scope(isolate);
 +  DCHECK_EQ(1, args.length());
@@ -318,6 +318,6 @@ index e11c08398c50c1978270d8a181c7c5cf27d77fff..453e34803e8639777885cdcba3f1df95
 +  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
 +  F(PromiseContextInit, 1, 1) \
 +  F(PromiseContextCheck, 1, 1)
- 
+
  #define FOR_EACH_INTRINSIC_PROXY(F, I) \
    F(CheckProxyGetSetTrapResult, 2, 1)  \

@@ -853,6 +853,8 @@ public:
   inline jsg::AsyncContextFrame::StorageKey& getRequestIdKey() { return *requestIdKey; }
   jsg::AsyncContextFrame::StorageScope makeRequestIdStorageScope(jsg::Lock& js);
 
+  inline int32_t getPromiseContextTag() const { return promiseContextTag;  }
+
 private:
   ThreadContext& thread;
 
@@ -1060,6 +1062,7 @@ private:
 
   kj::String requestId;
   kj::Own<jsg::AsyncContextFrame::StorageKey> requestIdKey;
+  int32_t promiseContextTag;
 
   class ThreadScope;
   class Scope;
