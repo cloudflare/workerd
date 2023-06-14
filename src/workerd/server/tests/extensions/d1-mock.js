@@ -1,30 +1,32 @@
 export default {
   async fetch(request, env, ctx) {
     try {
-      const { url, method } = request
-      const headers = {}
+      const { pathname } = new URL(request.url)
+      const body = await request.json()
 
-      for (const [k, v] of request.headers.entries()) {
-        headers[k] = v
+      if (request.method === 'POST' && pathname.startsWith('/query')) {
+        const { sql, params } = body
+        switch (sql) {
+          case 'select 1':
+            return ok({ 1: 1 })
+          default:
+            return Response.json({ error: 'Unmocked query' }, { status: 400 })
+        }
+      } else {
+        return Response.json({ error: 'Not found' }, { status: 404 })
       }
-
-      const payload = {
-        headers,
-        url,
-        method,
-        env: Object.keys(env),
-        body: await request.text(),
-      }
-      for (const k of Object.entries(payload)) {
-        console.log(...k)
-      }
-      return Response.json(payload, {
-        headers: {
-          'content-type': 'application/json',
-        },
-      })
     } catch (err) {
-      Response.json({ error: err.message, stack: err.stack }, { status: 500 })
+      return Response.json(
+        { error: err.message, stack: err.stack },
+        { status: 500 }
+      )
     }
   },
+}
+
+function ok(...results) {
+  return Response.json({
+    results,
+    meta: { duration: 0.001, served_by: 'd1-mock' },
+  })
 }

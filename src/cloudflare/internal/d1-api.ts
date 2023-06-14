@@ -328,6 +328,5 @@ async function toJson(response: Response) {
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
-  console.log(env)
   return new D1Database(env.fetcher)
 }
