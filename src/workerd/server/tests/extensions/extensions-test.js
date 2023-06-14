@@ -39,19 +39,5 @@ export const test_wrapped_binding = {
     assert.ok(env.customDoor, 'custom binding is not present')
     assert.ok(!env.customDoor.tryOpen('open sesame'))
     assert.ok(env.customDoor.tryOpen('custom open sesame'))
-
-    const DB = env.d1
-    {
-      const stmt = DB.prepare(`select 1`)
-      assert.deepEqual(await stmt.all(), {
-        results: [{ 1: 1 }],
-        meta: { duration: 0.001, served_by: 'd1-mock' },
-        success: true,
-      })
-
-      assert.deepEqual(await stmt.raw(), [[1]])
-      assert.deepEqual(await stmt.first(), { 1: 1 })
-      assert.deepEqual(await stmt.first('1'), 1)
-    }
   },
 }

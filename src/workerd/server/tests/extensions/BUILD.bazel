@@ -7,3 +7,11 @@ wd_test(
         "*.capnp",
     ]),
 )
+
+wd_test(
+    src = "d1-api-test.wd-test",
+    data = glob([
+        "*.js",
+        "*.capnp",
+    ]),
+)

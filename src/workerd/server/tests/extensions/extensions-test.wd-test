@@ -26,27 +26,9 @@ const unitTests :Workerd.Config = (
               entrypoint = "wrap",
               innerBindings = [ (name = "secret", text = "custom open sesame") ],
             )
-          ),
-          (
-            name = "d1",
-            wrapped = (
-              moduleName = "cloudflare-internal:d1-api",
-              innerBindings = [(
-                name = "fetcher",
-                service = "d1-mock"
-              )],
-            )
           )
         ],
       )
-    ),
-    ( name = "d1-mock",
-     worker = (
-       compatibilityDate = "2023-01-15",
-       modules = [
-         (name = "worker", esModule = embed "d1-mock.js")
-       ],
-     )
     )
   ],
   extensions = [ TestExtension.extension ],

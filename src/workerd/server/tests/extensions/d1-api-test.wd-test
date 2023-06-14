@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+using TestExtension = import "extension.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "d1-api-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "d1-api-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (
+            name = "d1",
+            wrapped = (
+              moduleName = "cloudflare-internal:d1-api",
+              innerBindings = [(
+                name = "fetcher",
+                service = "d1-mock"
+              )],
+            )
+          )
+        ],
+      )
+    ),
+    ( name = "d1-mock",
+     worker = (
+       compatibilityDate = "2023-01-15",
+       modules = [
+         (name = "worker", esModule = embed "d1-mock.js")
+       ],
+     )
+    )
+  ],
+  extensions = [ TestExtension.extension ],
+);
