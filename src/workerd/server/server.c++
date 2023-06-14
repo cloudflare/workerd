@@ -26,6 +26,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/util/mimetype.h>
+#include "src/workerd/api/web-socket.h"
 #include "workerd-api.h"
 #include "workerd/io/hibernation-manager.h"
 #include <stdlib.h>
@@ -2771,11 +2772,13 @@ private:
         : parent(parent), cfBlobJson(kj::mv(cfBlobJson)),
           listedHttp(parent.owner, parent.timer, parent.headerTable, *this, kj::HttpServerSettings {
             .errorHandler = *this,
+            .webSocketErrorHandler = this->webSocketErrorHandler,
             .webSocketCompressionMode = kj::HttpServerSettings::MANUAL_COMPRESSION
           }) {}
 
     HttpListener& parent;
     kj::Maybe<kj::String> cfBlobJson;
+    workerd::api::WebSocketErrorHandler webSocketErrorHandler;
     ListedHttpServer listedHttp;
 
     class ResponseWrapper final: public kj::HttpService::Response {

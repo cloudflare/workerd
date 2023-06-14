@@ -130,8 +130,8 @@ git_repository(
 
 # tcmalloc requires Abseil.
 #
-# WARNING: This MUST appear before rules_fuzzing_depnedencies(), below. Otherwise,
-#   rules_fuzzing_depnedencies() will choose to pull in a different version of Abseil that is too
+# WARNING: This MUST appear before rules_fuzzing_dependencies(), below. Otherwise,
+#   rules_fuzzing_dependencies() will choose to pull in a different version of Abseil that is too
 #   old for tcmalloc. Absurdly, Bazel simply ignores later attempts to define the same repo name,
 #   rather than erroring out. Thus this leads to confusing compiler errors in tcmalloc complaining
 #   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.

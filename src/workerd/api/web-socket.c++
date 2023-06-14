@@ -9,8 +9,25 @@
 #include <workerd/io/worker.h>
 #include <workerd/util/sentry.h>
 #include <kj/compat/url.h>
+#include <kj/common.h>
 
 namespace workerd::api {
+
+kj::Maybe<WebSocketProtocolError> WebSocketProtocolError::fromException(const kj::Exception& ex) {
+  auto maybeContext = ex.getContext();
+  while (maybeContext != kj::none) {
+    auto& context = KJ_ASSERT_NONNULL(maybeContext);
+    if (magicFileValue == context.file) {
+      return WebSocketProtocolError(context.line, kj::str(context.description));
+    }
+    maybeContext = context.next;
+  }
+  return kj::none;
+}
+
+void WebSocketProtocolError::encodeToException(kj::Exception &ex) && {
+  ex.wrapContext(magicFileValue.cStr(), code, kj::mv(description));
+}
 
 kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
   // TODO(someday) We might care more about this `OneOf` than its which, that probably means
@@ -23,6 +40,20 @@ kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
     KJ_CASE_ONEOF(r, WebSocket::Released) return "Released";
   }
   KJ_UNREACHABLE;
+}
+
+kj::Exception WebSocketErrorHandler::handleWebSocketProtocolError(kj::WebSocket::ProtocolError protocolError) {
+  KJ_REQUIRE(protocolError.description.size() <= 122);
+  // We're going to put this as the reason in a WebSocket Close frame, so it has to fit.
+  // RFC6455 section 5.5 puts a maximum payload length of 125 on control frames, of which Close
+  // is one type. The payload also needs room for a status code (2 bytes) and maybe a null
+  // terminator (1 byte), leaving 122 bytes for the description.
+  kj::Exception ex = KJ_EXCEPTION(FAILED, "worker_do_not_log: WebSocket protocol error");
+  api::WebSocketProtocolError wspe{static_cast<int>(protocolError.statusCode),
+    kj::heapString(protocolError.description)};
+  // The status codes are all 4-digit decimal numbers, so they'll easily fit in an int.
+  kj::mv(wspe).encodeToException(ex);
+  return ex;
 }
 
 IoOwn<WebSocket::Native> WebSocket::initNative(
@@ -292,6 +323,17 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   return ws;
 }
 
+kj::Promise<void> pumpIgnoringProtocolErrors(kj::WebSocket* from, kj::WebSocket* to) {
+  try {
+    co_await from->pumpTo(*to);
+  } catch (...) {
+    auto ex = kj::getCaughtExceptionAsKj();
+    if (WebSocketProtocolError::fromException(ex) == kj::none) {
+      kj::throwFatalException(kj::mv(ex));
+    }
+  }
+}
+
 kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
@@ -316,8 +358,9 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
 
   auto& context = IoContext::current();
 
-  auto upstream = other->pumpTo(*self);
-  auto downstream = self->pumpTo(*other);
+  kj::WebSocket* selfPtr = &*self;
+  auto upstream = pumpIgnoringProtocolErrors(other, selfPtr);
+  auto downstream = pumpIgnoringProtocolErrors(selfPtr, other);
 
   if (locality == LOCAL) {
     // We're terminating the WebSocket in this worker, so the upstream promise (which pumps
@@ -362,7 +405,7 @@ void WebSocket::accept(jsg::Lock& js) {
         "Can't accept() WebSocket after enabling hibernation.");
     // Technically, this means it's okay to invoke `accept()` once a `new WebSocket()` resolves to
     // an established connection. This is probably okay? It might spare the worker devs a class of
-    // errors they do not care care about.
+    // errors they do not care about.
     return;
   }
 
@@ -442,7 +485,7 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
 void WebSocket::startReadLoop(jsg::Lock& js) {
   // If the kj::WebSocket happens to be an AbortableWebSocket (see util/abortable.h), then
   // calling readLoop here could throw synchronously if the canceler has already been tripped.
-  // Using kj::evalNow() here let's us capture that and handle correctly.
+  // Using kj::evalNow() here lets us capture that and handle correctly.
   //
   // We catch exceptions and return Maybe<Exception> instead since we want to handle the exceptions
   // in awaitIo() below, but we don't want the KJ exception converted to JavaScript before we can
@@ -477,12 +520,22 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
                 (jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;
     KJ_IF_SOME(e, maybeError) {
-      if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
+      KJ_IF_SOME(wspe, WebSocketProtocolError::fromException(e)) {
+        // The client sent us an invalid websocket message.
+        if (!native.closedOutgoing) {
+          // Send a close message to the client if we can.
+          native.closedIncoming = true;
+          close(js, wspe.getCode(), kj::str(wspe.getDescription()));
+        }
+        // Report to the application as an error event.
+        jsg::Value errorDescription{js.v8Isolate, js.wrapString(wspe.getDescription())};
+        reportError(js, jsg::JsValue(errorDescription.getHandle(js)).addRef(js));
+      } else if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
         dispatchEventImpl(js, jsg::alloc<CloseEvent>(
             1006, kj::str("WebSocket disconnected without sending Close frame."), false));
         native.closedIncoming = true;
-        // If there are no further messages to send, so we can discard the underlying connection.
+        // If there are no further messages to send, we can discard the underlying connection.
         tryReleaseNative(js);
       } else {
         native.closedIncoming = true;

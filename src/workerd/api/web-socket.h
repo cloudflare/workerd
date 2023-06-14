@@ -155,6 +155,39 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+class WebSocketProtocolError {
+public:
+  // Exception-like thing for WebSocket protocol errors. Since kj::WebSocket indicates protocol
+  // errors by throwing an exception and since exceptions are caught by kj::Promise, we can't just
+  // throw WebSocketProtocolError. Instead, we smuggle the extra in the exception's context.
+  WebSocketProtocolError(int code, kj::String description)
+      : code(code), description(kj::mv(description)) {}
+
+  static kj::Maybe<WebSocketProtocolError> fromException(const kj::Exception& ex);
+  // Generates a WebSocketProtocolError from the exception's context, but only if the context
+  // actually holds appropriate data, i.e. someone previously used encodeToException on it.
+
+  int getCode() const { return code; }
+  kj::StringPtr getDescription() const { return description; }
+
+  void encodeToException(kj::Exception& ex) &&;
+  // Adds a context entry to the exception containing this object's data. This is only useful if
+  // you're going to retrieve it with fromException later.
+
+private:
+  int code;
+  kj::String description;
+  static inline constexpr kj::StringPtr magicFileValue = "__WebSocketProtocolError_magicFileValue"_kj;
+  // Used as a sentinel in exception context frames; if frame.file == magicFileValue, then that
+  // frame contains data about a websocket protocol error. The exact value is unimportant; it just
+  // has to not look like a real file path.
+};
+
+class WebSocketErrorHandler : public kj::WebSocketErrorHandler {
+  kj::Exception handleWebSocketProtocolError(kj::WebSocket::ProtocolError protocolError) override;
+};
+// Handler for WebSocket protocol errors.
+
 // The forward declaration is necessary so we can make some
 // WebSocket methods accessible to WebSocketPair via friend declaration.
 class WebSocket;

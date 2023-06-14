@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "server.h"
+#include <cstddef>
 #include <kj/test.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/jsg/setup.h>
@@ -114,7 +115,7 @@ public:
 
   void recvWebSocketRegex(kj::StringPtr matcher, kj::SourceLocation loc = {}) {
     auto actual = readWebSocketMessage();
-    std::regex target(matcher.cStr());
+    std::regex target(matcher.cStr(), std::regex_constants::extended);
     KJ_EXPECT(std::regex_match(actual.cStr(), target), actual, matcher, loc);
   }
 
@@ -180,7 +181,7 @@ public:
       Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==
       Sec-WebSocket-Version: 13
 
-    )"_blockquote, {});
+    )"_blockquote);
 
     recv(R"(
       HTTP/1.1 101 Switching Protocols
@@ -188,7 +189,7 @@ public:
       Upgrade: websocket
       Sec-WebSocket-Accept: ICX+Yqv66kxgM0FcWaLWlFLwTAI=
 
-    )"_blockquote, {});
+    )"_blockquote);
   }
 
 private:
@@ -600,6 +601,90 @@ KJ_TEST("Server: serve basic Service Worker") {
     Content-Length: 11
 
     Bad Request)"_blockquote);
+}
+
+KJ_TEST("Server: serve simple WebSocket echo service") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    const upgradeHeader = request.headers.get('Upgrade');
+          `    if (!upgradeHeader || upgradeHeader !== 'websocket') {
+          `      return new Response('Expected Upgrade: websocket', {status: 400});
+          `    }
+          `    const pair = new WebSocketPair();
+          `    const client = pair[0], server = pair[1];
+          `    server.accept();
+          `    server.addEventListener('message', (event) => {
+          `      server.send(event.data);  // echo it back
+          `    });
+          `    return new Response(null, {status: 101, webSocket: client});
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.upgradeToWebSocket();
+  conn.send("\x82\x05hello");
+  conn.recvWebSocket("hello");
+}
+
+KJ_TEST("Server: test WebSocket errors: bad RSV bits") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `var errors = [];
+          `export default {
+          `  async fetch(request) {
+          `    const upgradeHeader = request.headers.get('Upgrade');
+          `    if (!upgradeHeader || upgradeHeader !== 'websocket') {
+          `      return new Response("expected Upgrade: 'websocket'", {status: 400});
+          `    }
+          `    const pair = new WebSocketPair();
+          `    const client = pair[0], server = pair[1];
+          `    server.accept();
+          `    server.addEventListener('message', (event) => {
+          `      if (event.data === "getErrors") {
+          `        server.send(JSON.stringify(errors))
+          `      } else if (event.data === "getErrorCount") {
+          `        server.send(errors.length.toString())
+          `      } else {
+          `        server.send(event.data);  // echo
+          `      }
+          `    });
+          `    server.addEventListener('error', (event) => {
+          `      console.log(event.error);
+          `      errors.push(event);
+          `    });
+          `    return new Response(null, {status: 101, webSocket: client});
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+
+  auto wsConn = test.connect("test-addr");
+  // wsConn will send some bad WebSocket data.
+  wsConn.upgradeToWebSocket();
+  wsConn.send("\xf1\x08hi there");  // bad frame: all RSV bits set
+  wsConn.recvWebSocketClose(1002);
+
+  auto errWsConn = test.connect("test-addr");
+  errWsConn.upgradeToWebSocket();
+  errWsConn.send("\x81\x0dgetErrorCount");
+  errWsConn.recvWebSocketRegex("1");
+  errWsConn.send("\x81\x09getErrors");
+  errWsConn.recvWebSocketRegex(".*RSV bits.*");
 }
 
 KJ_TEST("Server: use service name as Service Worker origin") {
