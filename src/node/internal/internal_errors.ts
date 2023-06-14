@@ -206,6 +206,24 @@ function addNumericalSeparator(val: string) {
   return `${val.slice(0, i)}${res}`;
 }
 
+export class ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY extends NodeError {
+  constructor() {
+    super("ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY", "Public key is not valid for specified curve");
+  }
+}
+
+export class ERR_CRYPTO_INCOMPATIBLE_KEY extends NodeError {
+  constructor(name: string, msg: string) {
+    super("ERR_CRYPTO_INCOMPATIBLE_KEY", `Incompatible ${name}: ${msg}`);
+  }
+}
+
+export class ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE extends NodeError {
+  constructor(actual: string, expected: string) {
+    super("ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", `Invalid key object type ${actual}, expected ${expected}.`);
+  }
+}
+
 export class ERR_INVALID_ARG_TYPE_RANGE extends NodeRangeError {
   constructor(name: string, expected: string | string[], actual: unknown) {
     const msg = createInvalidArgType(name, expected);
