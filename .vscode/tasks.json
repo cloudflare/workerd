@@ -2,17 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Bazel build workerd (dbg)",
+      "label": "Bazel build all (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
+      "args": ["build", "-c", "dbg", "//..."],
       "osx": {
-        // OS X needs additional build options for symbols to work correctly
-        // (https://github.com/bazelbuild/bazel/issues/6327), hence the additional
-        // flags for the spawn_strategy and oso_prefix. Ideally these would
-        // be in a platform specific config in .bazelrc, but this is not supported
-        // (https://github.com/bazelbuild/bazel/issues/5055).
-        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "--features=oso_prefix_is_pwd", "//src/workerd/server:workerd"],
+        // OS X needs to set the bazel `spawn_strategy` option to `local` for symbols to work
+        // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
+        // precludes the use of sandboxing during the build (see
+        // https://bazel.build/docs/user-manual#execution-strategy).
+        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//..."],
       },
       "group": {
         "kind": "build",
@@ -29,17 +28,16 @@
       }
     },
     {
-      "label": "Bazel build all (dbg)",
+      "label": "Bazel build workerd (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "dbg", "//..."],
+      "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
       "osx": {
-        // OS X needs additional build option for symbols to work correctly
-        // (https://github.com/bazelbuild/bazel/issues/6327), hence the additional
-        // flags for the spawn_strategy and oso_prefix. Ideally these would
-        // be in a platform specific config in .bazelrc, but this is not supported
-        // (https://github.com/bazelbuild/bazel/issues/5055).
-        "args": ["build", "-c", "dbg", "--features=oso_prefix_is_pwd", "//..."],
+        // OS X needs to set the bazel `spawn_strategy` option to `local` for symbols to work
+        // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
+        // precludes the use of sandboxing during the build (see
+        // https://bazel.build/docs/user-manual#execution-strategy).
+        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//src/workerd/server:workerd"],
       },
       "group": {
         "kind": "build",
