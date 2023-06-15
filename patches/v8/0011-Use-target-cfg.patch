@@ -1,0 +1,420 @@
+From af2e30c7d0a83d1f549c92e353d54d9e18f69544 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 7 Jun 2023 21:40:54 -0400
+Subject: Speed up V8 bazel build by always using target cfg
+
+See the workerd build cfg changes for rationale. This provides a significant
+speedup for the build: Components like ICU were previously compiled in
+both target and exec configurations as generator tools depend on them.
+This also changes torque generation to only run once by splitting up the
+output set instead of running it twice but only defining a part of the
+generated files as the output set. While unrelated to the build cfg change,
+this also improves build times.
+---
+ BUILD.bazel    |  83 +++++++++++++---------
+ bazel/defs.bzl | 182 ++++++++++++++++++++++---------------------------
+ 2 files changed, 130 insertions(+), 135 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331fe9b810c 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -16,8 +16,8 @@ load(
+     "v8_library",
+     "v8_mksnapshot",
+     "v8_string",
+-    "v8_torque_definitions",
+-    "v8_torque_initializers",
++    "v8_torque_outputs",
++    "genrule_target",
+ )
+ load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
+ 
+@@ -3531,10 +3531,42 @@ filegroup(
+ # Generated files
+ # =================================================
+ 
++filegroup(
++    name = "icu/generated_torque_definitions",
++    visibility = ["//visibility:public"],
++    srcs = [":icu/generated_torque_outputs"],
++    output_group = "definitions",
++)
++
++filegroup(
++    name = "noicu/generated_torque_definitions",
++    visibility = ["//visibility:public"],
++    srcs = [":noicu/generated_torque_outputs"],
++    output_group = "definitions",
++)
++
++filegroup(
++    name = "icu/generated_torque_initializers",
++    visibility = ["//visibility:public"],
++    srcs = [":icu/generated_torque_outputs"],
++    output_group = "initializers",
++)
++
++filegroup(
++    name = "noicu/generated_torque_initializers",
++    visibility = ["//visibility:public"],
++    srcs = [":noicu/generated_torque_outputs"],
++    output_group = "initializers",
++)
++
+ # TODO(victorgomes): Add support to tools/debug_helper,
+ # which needs class-debug-readers and debug-macros.
+-v8_torque_definitions(
+-    name = "generated_torque_definitions",
++
++# replace v8_torque_definitions and v8_torque_initializers with a single generator target. Since
++# the command generates both definitions and initializers anyway, this allows us to not run the
++# torque generator not twice but only once per build cfg.
++v8_torque_outputs(
++    name = "generated_torque_outputs",
+     args = select({
+         ":is_v8_annotate_torque_ir": ["-annotate-ir"],
+         "//conditions:default": [],
+@@ -3542,7 +3574,13 @@ v8_torque_definitions(
+         "@v8//bazel/config:v8_target_is_32_bits": ["-m32"],
+         "//conditions:default": [],
+     }),
+-    extras = [
++    initializer_extras = [
++        "csa-types.h",
++        "enum-verifiers.cc",
++        "exported-macros-assembler.cc",
++        "exported-macros-assembler.h",
++    ],
++    definition_extras = [
+         "bit-fields.h",
+         "builtin-definitions.h",
+         # "class-debug-readers.cc",
+@@ -3559,25 +3597,7 @@ v8_torque_definitions(
+         "objects-body-descriptors-inl.inc",
+         "objects-printer.cc",
+         "visitor-lists.h",
+-    ],
+-    icu_srcs = [":icu/torque_files"],
+-    noicu_srcs = [":noicu/torque_files"],
+-)
+ 
+-v8_torque_initializers(
+-    name = "generated_torque_initializers",
+-    args = select({
+-        ":is_v8_annotate_torque_ir": ["-annotate-ir"],
+-        "//conditions:default": [],
+-    }) + select({
+-        "@v8//bazel/config:v8_target_is_32_bits": ["-m32"],
+-        "//conditions:default": [],
+-    }),
+-    extras = [
+-        "csa-types.h",
+-        "enum-verifiers.cc",
+-        "exported-macros-assembler.cc",
+-        "exported-macros-assembler.h",
+     ],
+     icu_srcs = [":icu/torque_files"],
+     noicu_srcs = [":noicu/torque_files"],
+@@ -3681,22 +3701,20 @@ filegroup(
+     }),
+ )
+ 
+-genrule(
++genrule_target(
+     name = "generated_bytecode_builtins_list",
+     srcs = [],
+     outs = ["builtins-generated/bytecodes-builtins-list.h"],
+-    cmd = "$(location :bytecode_builtins_list_generator) $@",
+-    cmd_bat = "$(location :bytecode_builtins_list_generator) $@",
+-    tools = [":bytecode_builtins_list_generator"],
++    args = ["$(location :builtins-generated/bytecodes-builtins-list.h)"],
++    tool = ":bytecode_builtins_list_generator",
+ )
+ 
+-genrule(
++genrule_target(
+     name = "generated_regexp_special_case",
+     srcs = [],
+     outs = ["src/regexp/special-case.cc"],
+-    cmd = "$(location :regexp_special_case_generator) $@",
+-    cmd_bat = "$(location :regexp_special_case_generator) $@",
+-    tools = [":regexp_special_case_generator"],
++    args = ["$(location :src/regexp/special-case.cc)"],
++    tool = ":regexp_special_case_generator",
+ )
+ 
+ v8_mksnapshot(
+@@ -3873,8 +3891,6 @@ v8_binary(
+     srcs = [
+         "src/regexp/gen-regexp-special-case.cc",
+         "src/regexp/special-case.h",
+-        ":v8_libbase_files",
+-        ":v8_shared_internal_headers",
+     ],
+     copts = ["-Wno-implicit-fallthrough"],
+     defines = [
+@@ -3885,6 +3901,7 @@ v8_binary(
+         "UNISTR_FROM_CHAR_EXPLICIT=",
+     ],
+     deps = [
++        "v8_libbase",
+         "//external:icu",
+     ],
+ )
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 77a850bdd667930f63299f2f6fac4f97d094b2ec..a11e086837014caf41c86b603eaf038e477dc612 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -343,7 +343,16 @@ def v8_library(
+             **kwargs
+         )
+ 
+-def _torque_initializers_impl(ctx):
++def get_cfg():
++    # Setting the configuration to "target" allows us to avoid compiling code used in both V8 and a
++    # generator tool twice. For cross-compilation this would need to be set to "exec" manually.
++    # Unfortunately bazel makes it very difficult to set the configuration at build time as macros
++    # are resolved before select() can be resolved based on the command line. This could
++    # alternatively be done by defining build targets and the rules used to declare them twice
++    # (once for exec and for target).
++    return "target"
++
++def _torque_outputs_impl(ctx):
+     if ctx.workspace_name == "v8":
+         v8root = "."
+     else:
+@@ -362,7 +371,8 @@ def _torque_initializers_impl(ctx):
+     args += [f.path for f in ctx.files.srcs]
+ 
+     # Generate/declare output files
+-    outs = []
++    inits = []
++    defs = []
+     for src in ctx.files.srcs:
+         root, _period, _ext = src.path.rpartition(".")
+ 
+@@ -370,134 +380,68 @@ def _torque_initializers_impl(ctx):
+         if root[:len(v8root)] == v8root:
+             root = root[len(v8root):]
+         file = ctx.attr.prefix + "/torque-generated/" + root
+-        outs.append(ctx.actions.declare_file(file + "-tq-csa.cc"))
+-        outs.append(ctx.actions.declare_file(file + "-tq-csa.h"))
+-    outs += [ctx.actions.declare_file(ctx.attr.prefix + "/torque-generated/" + f) for f in ctx.attr.extras]
++        inits.append(ctx.actions.declare_file(file + "-tq-csa.cc"))
++        inits.append(ctx.actions.declare_file(file + "-tq-csa.h"))
++        defs.append(ctx.actions.declare_file(file + "-tq-inl.inc"))
++        defs.append(ctx.actions.declare_file(file + "-tq.inc"))
++        defs.append(ctx.actions.declare_file(file + "-tq.cc"))
++
++    defs += [ctx.actions.declare_file(ctx.attr.prefix + "/torque-generated/" + f) for f in ctx.attr.definition_extras]
++    inits += [ctx.actions.declare_file(ctx.attr.prefix + "/torque-generated/" + f) for f in ctx.attr.initializer_extras]
++    outs = defs + inits
+     ctx.actions.run(
+         outputs = outs,
+         inputs = ctx.files.srcs,
+         arguments = args,
+         executable = ctx.executable.tool,
+-        mnemonic = "GenTorqueInitializers",
+-        progress_message = "Generating Torque initializers",
++        mnemonic = "GenTorqueOutputs",
++        progress_message = "Generating Torque outputs",
+     )
+-    return [DefaultInfo(files = depset(outs))]
+-
+-_v8_torque_initializers = rule(
+-    implementation = _torque_initializers_impl,
+-    # cfg = v8_target_cpu_transition,
+-    attrs = {
+-        "prefix": attr.string(mandatory = True),
+-        "srcs": attr.label_list(allow_files = True, mandatory = True),
+-        "extras": attr.string_list(),
+-        "tool": attr.label(
+-            allow_files = True,
+-            executable = True,
+-            cfg = "exec",
++    return [
++        DefaultInfo(files = depset(outs)),
++        OutputGroupInfo(
++            initializers = depset(inits),
++            definitions = depset(defs),
+         ),
+-        "args": attr.string_list(),
+-    },
+-)
+-
+-def v8_torque_initializers(name, noicu_srcs, icu_srcs, args, extras):
+-    _v8_torque_initializers(
+-        name = "noicu/" + name,
+-        prefix = "noicu",
+-        srcs = noicu_srcs,
+-        args = args,
+-        extras = extras,
+-        tool = select({
+-            "@v8//bazel/config:v8_target_is_32_bits": ":noicu/torque_non_pointer_compression",
+-            "//conditions:default": ":noicu/torque",
+-        }),
+-    )
+-    _v8_torque_initializers(
+-        name = "icu/" + name,
+-        prefix = "icu",
+-        srcs = icu_srcs,
+-        args = args,
+-        extras = extras,
+-        tool = select({
+-            "@v8//bazel/config:v8_target_is_32_bits": ":icu/torque_non_pointer_compression",
+-            "//conditions:default": ":icu/torque",
+-        }),
+-    )
+-
+-def _torque_definitions_impl(ctx):
+-    if ctx.workspace_name == "v8":
+-        v8root = "."
+-    else:
+-        v8root = "external/v8"
+-
+-    # Arguments
+-    args = []
+-    args += ctx.attr.args
+-    args.append("-o")
+-    args.append(ctx.bin_dir.path + "/" + v8root + "/" + ctx.attr.prefix + "/torque-generated")
+-    args.append("-strip-v8-root")
+-    args.append("-v8-root")
+-    args.append(v8root)
+-
+-    # Sources
+-    args += [f.path for f in ctx.files.srcs]
+-
+-    # Generate/declare output files
+-    outs = []
+-    for src in ctx.files.srcs:
+-        root, _period, _ext = src.path.rpartition(".")
+-
+-        # Strip v8root
+-        if root[:len(v8root)] == v8root:
+-            root = root[len(v8root):]
+-        file = ctx.attr.prefix + "/torque-generated/" + root
+-        outs.append(ctx.actions.declare_file(file + "-tq-inl.inc"))
+-        outs.append(ctx.actions.declare_file(file + "-tq.inc"))
+-        outs.append(ctx.actions.declare_file(file + "-tq.cc"))
+-    outs += [ctx.actions.declare_file(ctx.attr.prefix + "/torque-generated/" + f) for f in ctx.attr.extras]
+-    ctx.actions.run(
+-        outputs = outs,
+-        inputs = ctx.files.srcs,
+-        arguments = args,
+-        executable = ctx.executable.tool,
+-        mnemonic = "GenTorqueDefinitions",
+-        progress_message = "Generating Torque definitions",
+-    )
+-    return [DefaultInfo(files = depset(outs))]
++    ]
+ 
+-_v8_torque_definitions = rule(
+-    implementation = _torque_definitions_impl,
++_v8_torque_outputs = rule(
++    implementation = _torque_outputs_impl,
+     # cfg = v8_target_cpu_transition,
+     attrs = {
+         "prefix": attr.string(mandatory = True),
+         "srcs": attr.label_list(allow_files = True, mandatory = True),
+-        "extras": attr.string_list(),
++        "definition_extras": attr.string_list(),
++        "initializer_extras": attr.string_list(),
+         "tool": attr.label(
+             allow_files = True,
+             executable = True,
+-            cfg = "exec",
++            cfg = get_cfg(),
+         ),
+         "args": attr.string_list(),
+     },
+ )
+ 
+-def v8_torque_definitions(name, noicu_srcs, icu_srcs, args, extras):
+-    _v8_torque_definitions(
++def v8_torque_outputs(name, noicu_srcs, icu_srcs, args, definition_extras, initializer_extras):
++    _v8_torque_outputs(
+         name = "noicu/" + name,
+         prefix = "noicu",
+         srcs = noicu_srcs,
+         args = args,
+-        extras = extras,
++        definition_extras = definition_extras,
++        initializer_extras = initializer_extras,
+         tool = select({
+             "@v8//bazel/config:v8_target_is_32_bits": ":noicu/torque_non_pointer_compression",
+             "//conditions:default": ":noicu/torque",
+         }),
+     )
+-    _v8_torque_definitions(
++    _v8_torque_outputs(
+         name = "icu/" + name,
+         prefix = "icu",
+         srcs = icu_srcs,
+         args = args,
+-        extras = extras,
++        definition_extras = definition_extras,
++        initializer_extras = initializer_extras,
+         tool = select({
+             "@v8//bazel/config:v8_target_is_32_bits": ":icu/torque_non_pointer_compression",
+             "//conditions:default": ":icu/torque",
+@@ -573,16 +517,19 @@ _v8_mksnapshot = rule(
+             mandatory = True,
+             allow_files = True,
+             executable = True,
+-            cfg = "exec",
++            cfg = get_cfg(),
+         ),
+         "target_os": attr.string(mandatory = True),
+-        "_allowlist_function_transition": attr.label(
+-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+-        ),
++        # "_allowlist_function_transition": attr.label(
++        #     default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
++        # ),
+         "prefix": attr.string(mandatory = True),
+         "suffix": attr.string(mandatory = True),
+     },
+-    cfg = v8_target_cpu_transition,
++    # This allows specifying a CPU architecture on the command line to be used when compiling
++    # mksnapshot. Disable this functionality as we do not use it and it makes cfg changes more
++    # difficult.
++    # cfg = v8_target_cpu_transition,
+ )
+ 
+ def v8_mksnapshot(name, args, suffix = ""):
+@@ -703,3 +650,34 @@ def v8_build_config(name):
+         outs = ["icu/" + name + ".json"],
+         cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
+     )
++
++# Clone of genrule, but set up to compile for target configuration. Use with care, this may not
++# support all features of genrule(), but is sufficient for this use case.
++# Derived from the tensorflow project, see workerd build/run_binary_target.bzl for details.
++def _genrule_target_impl(ctx):
++    tool = ctx.attr.tool[DefaultInfo].files_to_run.executable
++    flags = [ ctx.expand_location(a) if "$(location" in a else a for a in ctx.attr.args ]
++
++    cmd = " ".join([tool.path] + flags)
++    ctx.actions.run_shell(
++        inputs = ctx.files.srcs,
++        outputs = ctx.outputs.outs,
++        tools = [tool],
++        use_default_shell_env = True,
++        command = cmd,
++    )
++
++genrule_target = rule(
++    implementation = _genrule_target_impl,
++    output_to_genfiles = True,
++    attrs = {
++        "outs": attr.output_list(mandatory = True),
++        "srcs": attr.label_list(allow_files = True),
++        "args": attr.string_list(),
++        "tool": attr.label(
++            executable = True,
++            cfg = get_cfg(),
++            mandatory = True
++        ),
++    },
++)

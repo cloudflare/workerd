@@ -1,6 +1,7 @@
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
+load("//:build/run_binary_target.bzl", "run_binary_target")
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 
@@ -69,7 +70,7 @@ filegroup(
 )
 
 [
-    run_binary(
+    run_binary_target(
         name = "api_encoder_" + label,
         outs = [label + ".api.capnp.bin"],
         args = [
@@ -123,6 +124,12 @@ rust_binary(
     ],
 )
 
+# Deliberately not marking this run_binary_target(): The exec configuration appears to use
+# different optimization settings, causing it to run markedly faster than the target configuration,
+# where param_extractor would otherwise take several minutes to run. The rules_rust documentation
+# does not indicate any reason why exec would use different settings. A different approach would be
+# to set `rustc_flags	= ["-C", "opt-level=3"],` for param_extractor_bin, although in this case
+# the binary dependencies shared with the rust-deps target would still need to be compiled twice.
 run_binary(
     name = "param_extractor",
     srcs = [
