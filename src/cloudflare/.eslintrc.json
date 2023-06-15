@@ -20,6 +20,7 @@
       "@typescript-eslint/explicit-module-boundary-types": "error",
       "@typescript-eslint/no-require-imports": "error",
       "@typescript-eslint/prefer-enum-initializers": "error",
-      "@typescript-eslint/type-annotation-spacing": "error"
+      "@typescript-eslint/type-annotation-spacing": "error",
+      "@typescript-eslint/restrict-template-expressions": "warn"
   }
 }

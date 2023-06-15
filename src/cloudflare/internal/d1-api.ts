@@ -1,43 +1,44 @@
-type Fetcher = {
+interface Fetcher {
   fetch: typeof fetch
 }
 
-type D1Result<T = unknown> = {
+interface D1Result<T = unknown> {
   results: T[]
   success: true
-  meta: any
+  meta: Record<string, unknown>
   error?: never
 }
 
-type D1UpstreamFailure = {
+interface D1UpstreamFailure {
   results?: never
   error: string
   success: false
-  meta: any
+  meta: Record<string, unknown>
 }
-export type D1UpstreamResponse<T = unknown> = D1Result<T> | D1UpstreamFailure
 
-export type D1ExecResult = {
+type D1UpstreamResponse<T = unknown> = D1Result<T> | D1UpstreamFailure
+
+interface D1ExecResult {
   count: number
   duration: number
 }
 
-type SQLError = {
+interface SQLError {
   error: string
 }
 
-export class D1Database {
+class D1Database {
   private readonly fetcher: Fetcher
 
-  constructor(fetcher: Fetcher) {
+  public constructor(fetcher: Fetcher) {
     this.fetcher = fetcher
   }
 
-  prepare(query: string): D1PreparedStatement {
+  public prepare(query: string): D1PreparedStatement {
     return new D1PreparedStatement(this, query)
   }
 
-  async dump(): Promise<ArrayBuffer> {
+  public async dump(): Promise<ArrayBuffer> {
     const response = await this.fetcher.fetch('http://d1/dump', {
       method: 'POST',
       headers: {
@@ -52,14 +53,14 @@ export class D1Database {
         })
       } catch (e) {
         throw new Error(`D1_DUMP_ERROR: Status + ${response.status}`, {
-          cause: new Error('Status ' + response.status),
+          cause: new Error(`Status ${response.status}`),
         })
       }
     }
     return await response.arrayBuffer()
   }
 
-  async batch<T = unknown>(
+  public async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     const exec = await this._sendOrThrow(
@@ -70,7 +71,7 @@ export class D1Database {
     return exec as D1Result<T>[]
   }
 
-  async exec<T = unknown>(query: string): Promise<D1ExecResult> {
+  public async exec<T = unknown>(query: string): Promise<D1ExecResult> {
     // should be /execute - see CFSQL-52
     const lines = query.trim().split('\n')
     const _exec = await this._send<T>('/query', lines, [])
@@ -83,16 +84,11 @@ export class D1Database {
     if (error !== -1) {
       throw new Error(
         `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
-          exec[error]!.error
+          exec[error]?.error
         }`,
         {
           cause: new Error(
-            'Error in line ' +
-              (error + 1) +
-              ': ' +
-              lines[error] +
-              ': ' +
-              exec[error]!.error
+            `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
           ),
         }
       )
@@ -100,16 +96,16 @@ export class D1Database {
       return {
         count: exec.length,
         duration: exec.reduce((p, c) => {
-          return p + c.meta.duration
+          return p + (c.meta['duration'] as number)
         }, 0),
       }
     }
   }
 
-  async _sendOrThrow<T = unknown>(
+  public async _sendOrThrow<T = unknown>(
     endpoint: string,
-    query: any,
-    params: any[]
+    query: unknown,
+    params: unknown[]
   ): Promise<D1Result<T>[] | D1Result<T>> {
     const results = await this._send(endpoint, query, params)
     const firstResult = firstIfArray(results)
@@ -122,15 +118,15 @@ export class D1Database {
     }
   }
 
-  async _send<T = unknown>(
+  public async _send<T = unknown>(
     endpoint: string,
-    query: any,
-    params: any[]
+    query: unknown,
+    params: unknown[]
   ): Promise<D1UpstreamResponse<T>[] | D1UpstreamResponse<T>> {
     /* this needs work - we currently only support ordered ?n params */
     const body = JSON.stringify(
       typeof query == 'object'
-        ? (query as any[]).map((s: string, index: number) => {
+        ? (query as string[]).map((s: string, index: number) => {
             return { sql: s, params: params[index] }
           })
         : {
@@ -148,15 +144,21 @@ export class D1Database {
     })
 
     try {
-      const answer = (await toJson(response)) as any[] | any
+      const answer = await toJson<
+        D1UpstreamResponse<T>[] | D1UpstreamResponse<T>
+      >(response)
 
       if (Array.isArray(answer)) {
-        return answer.map((r: any) => mapD1Result<T>(r))
+        return answer.map((r: D1UpstreamResponse<T>) => mapD1Result<T>(r))
       } else {
         return mapD1Result<T>(answer)
       }
-    } catch (e: any) {
-      const message = e.cause?.message || e.message || 'Something went wrong'
+    } catch (_e: unknown) {
+      const e = _e as Error
+      const message =
+        (e.cause as Error | undefined)?.message ||
+        e.message ||
+        'Something went wrong'
       throw new Error(`D1_ERROR: ${message}`, {
         cause: new Error(message),
       })
@@ -164,74 +166,67 @@ export class D1Database {
   }
 }
 
-export class D1PreparedStatement {
-  readonly statement: string
+class D1PreparedStatement {
   private readonly database: D1Database
-  params: any[]
+  public readonly statement: string
+  public readonly params: unknown[]
 
-  constructor(database: D1Database, statement: string, values?: any) {
+  public constructor(
+    database: D1Database,
+    statement: string,
+    values?: unknown[]
+  ) {
     this.database = database
     this.statement = statement
     this.params = values || []
   }
 
-  bind(...values: any[]) {
+  public bind(...values: unknown[]): D1PreparedStatement {
     // Validate value types
-    for (var r in values) {
-      switch (typeof values[r]) {
-        case 'number':
-        case 'string':
-          break
-        case 'object':
-          // nulls are objects in javascript
-          if (values[r] == null) break
-          // arrays with uint8's are good
-          if (
-            Array.isArray(values[r]) &&
-            values[r]
-              .map((b: any) => {
-                return typeof b == 'number' && b >= 0 && b < 256 ? 1 : 0
-              })
-              .indexOf(0) == -1
-          )
-            break
-          // convert ArrayBuffer to array
-          if (values[r] instanceof ArrayBuffer) {
-            values[r] = Array.from(new Uint8Array(values[r]))
-            break
-          }
-          // convert view to array
-          if (ArrayBuffer.isView(values[r])) {
-            values[r] = Array.from(values[r])
-            break
-          }
-          // Unreachable, added for compiler's sake
-          break
-        default:
-          throw new Error(
-            `D1_TYPE_ERROR: Type '${typeof values[
-              r
-            ]}' not supported for value '${values[r]}'`,
-            {
-              cause: new Error(
-                "Type '" +
-                  typeof values[r] +
-                  "' not supported for value '" +
-                  values[r] +
-                  "'"
-              ),
-            }
-          )
+    const transformedValues = values.map((r: unknown): unknown => {
+      if (typeof r === 'number' || typeof r === 'string') {
+        return r
+      } else if (typeof r === 'object') {
+        // nulls are objects in javascript
+        if (r == null) return r
+        // arrays with uint8's are good
+        if (
+          Array.isArray(r) &&
+          r.every((b: unknown) => {
+            return typeof b == 'number' && b >= 0 && b < 256
+          })
+        )
+          return r as unknown[]
+        // convert ArrayBuffer to array
+        if (r instanceof ArrayBuffer) {
+          return Array.from(new Uint8Array(r))
+        }
+        // convert view to array
+        if (ArrayBuffer.isView(r)) {
+          // For some reason TS doesn't think this is valid, but it is!
+          return Array.from(r as unknown as ArrayLike<unknown>)
+        }
       }
-    }
-    return new D1PreparedStatement(this.database, this.statement, values)
+
+      throw new Error(
+        `D1_TYPE_ERROR: Type '${typeof r}' not supported for value '${r}'`,
+        {
+          cause: new Error(`Type '${typeof r}' not supported for value '${r}'`),
+        }
+      )
+    })
+    return new D1PreparedStatement(
+      this.database,
+      this.statement,
+      transformedValues
+    )
   }
 
-  async first<T = unknown>(colName: string): Promise<T | null>
-  async first<T = unknown>(
+  public async first<T = unknown>(colName: string): Promise<T | null>
+  public async first<T = unknown>(
     colName: undefined
   ): Promise<Record<string, T> | null>
-  async first<T = unknown>(
+  public async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
     const info = firstIfArray(
@@ -259,7 +254,7 @@ export class D1PreparedStatement {
     }
   }
 
-  async run<T = unknown>(): Promise<D1Result<T>> {
+  public async run<T = unknown>(): Promise<D1Result<T>> {
     return firstIfArray(
       await this.database._sendOrThrow<T>(
         '/execute',
@@ -269,7 +264,7 @@ export class D1PreparedStatement {
     )
   }
 
-  async all<T = unknown>(): Promise<D1Result<T[]>> {
+  public async all<T = unknown>(): Promise<D1Result<T[]>> {
     return firstIfArray(
       await this.database._sendOrThrow<T[]>(
         '/query',
@@ -279,9 +274,9 @@ export class D1PreparedStatement {
     )
   }
 
-  async raw<T = unknown>(): Promise<T[]> {
+  public async raw<T = unknown>(): Promise<T[]> {
     const s = firstIfArray(
-      await this.database._sendOrThrow<any>(
+      await this.database._sendOrThrow<Record<string, unknown>>(
         '/query',
         this.statement,
         this.params
@@ -318,10 +313,10 @@ function mapD1Result<T>(result: D1UpstreamResponse<T>): D1UpstreamResponse<T> {
       }
 }
 
-async function toJson(response: Response) {
+async function toJson<T = unknown>(response: Response): Promise<T> {
   const body = await response.text()
   try {
-    return JSON.parse(body)
+    return JSON.parse(body) as T
   } catch (e) {
     throw new Error(`Failed to parse body as JSON, got: ${body}`)
   }

@@ -1,14 +1,14 @@
-type D1Result<T = unknown> = {
+interface D1Result<T = unknown> {
   results: T[];
   success: true;
   meta: any;
   error?: never;
-};
+}
 
-type D1ExecResult = {
+interface D1ExecResult {
   count: number;
   duration: number;
-};
+}
 
 declare abstract class D1Database {
   prepare(query: string): D1PreparedStatement;
