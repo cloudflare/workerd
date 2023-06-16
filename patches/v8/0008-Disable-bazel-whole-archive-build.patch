@@ -1,10 +1,7 @@
-From bc960c096afbc6576d1b67d77d0f3fb742c5e319 Mon Sep 17 00:00:00 2001
+From 5071fbad481a774b2a25b9b5d166116478effd36 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Tue, 11 Apr 2023 14:41:31 -0400
 Subject: Disable bazel whole-archive build
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
 
 V8's bazel configuration system adds the alwayslink parameter (equivalent
 to --Wl,-whole-archive on Linux) to all V8 libraries, causing all V8
@@ -14,8 +11,7 @@ workerd – disabling alwayslink improves the binary size by ~ 1MB as it
 allows the linker to eliminate unused symbols.
 ---
  bazel/BUILD.icu | 4 ++--
- bazel/defs.bzl  | 2 +-
- 2 files changed, 3 insertions(+), 3 deletions(-)
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
 index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6f216ce95 100644
@@ -39,16 +35,3 @@ index 4843ea09f99fa1b45bf66af8fd971adfd89efe45..73a25df55abc380092a0177bb13364e6
  )
  
  cc_library(
-diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 236fffe8e673ecf948ca494db02bd4a164c6eaeb..77a850bdd667930f63299f2f6fac4f97d094b2ec 100644
---- a/bazel/defs.bzl
-+++ b/bazel/defs.bzl
-@@ -299,7 +299,7 @@ def v8_library(
-             includes = includes + ["noicu/"] + default.includes,
-             copts = copts + default.copts,
-             linkopts = linkopts + default.linkopts,
--            alwayslink = 1,
-+            alwayslink = 0,
-             linkstatic = 1,
-             **kwargs
-         )
