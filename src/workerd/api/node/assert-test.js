@@ -16,6 +16,7 @@ import {
   rejects,
   strictEqual,
   throws,
+  AssertionError,
 } from 'node:assert';
 
 import { default as assert } from 'node:assert';
@@ -136,3 +137,87 @@ export const test_deep_equal = {
     notDeepStrictEqual(a,b);
   }
 };
+
+export const test_deep_equal_errors = {
+  test(ctrl, env, ctx) {
+    const a = {
+      b: [
+        {
+          c: new Uint8Array([1, 2, 3]),
+          d: false,
+          e: 'hello',
+        },
+      ],
+    };
+    const b = {
+      b: [
+        {
+          c: new Uint8Array([1, 2, 4]),
+          d: true,
+          e: 'hello',
+        },
+      ],
+    };
+
+    {
+      const expectedError = [
+        `Expected values to be strictly deep-equal:`,
+        `+ actual - expected`,
+        `+ { b: [ { c: Uint8Array(3) [ 1, 2, 3 ], d: false, e: 'hello' } ] }`,
+        `- { b: [ { c: Uint8Array(3) [ 1, 2, 4 ], d: true, e: 'hello' } ] }`,
+      ];
+      throws(
+        () => deepEqual(a, b),
+        (err) => {
+          assert(err instanceof AssertionError);
+          deepEqual(trimMessage(err.message), expectedError);
+          return true
+        }
+      );
+      throws(
+        () => deepStrictEqual(a, b),
+        (err) => {
+          assert(err instanceof AssertionError);
+          deepEqual(trimMessage(err.message), expectedError);
+          return true
+        }
+      );
+    }
+
+    // Fix one value, message updates
+    b.b[0].c[2] = 3;
+
+    {
+      const expectedError = [
+        `Expected values to be strictly deep-equal:`,
+        `+ actual - expected`,
+        `+ { b: [ { c: Uint8Array(3) [ 1, 2, 3 ], d: false, e: 'hello' } ] }`,
+        `- { b: [ { c: Uint8Array(3) [ 1, 2, 3 ], d: true, e: 'hello' } ] }`,
+      ];
+      throws(
+        () => deepEqual(a, b),
+        (err) => {
+          assert(err instanceof AssertionError);
+          deepEqual(trimMessage(err.message), expectedError);
+          return true
+        }
+      );
+      throws(
+        () => deepStrictEqual(a, b),
+        (err) => {
+          assert(err instanceof AssertionError);
+          deepEqual(trimMessage(err.message), expectedError);
+          return true
+        }
+      );
+    }
+  },
+};
+
+function trimMessage(msg) {
+  return msg
+    .trim()
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
