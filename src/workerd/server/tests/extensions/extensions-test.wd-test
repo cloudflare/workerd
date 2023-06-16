@@ -28,8 +28,8 @@ const unitTests :Workerd.Config = (
             )
           )
         ],
-      )
-    )
+     )
+    ),
   ],
   extensions = [ TestExtension.extension ],
 );

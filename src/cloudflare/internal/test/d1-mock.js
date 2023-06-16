@@ -20,9 +20,9 @@ export default {
   async fetch(request, env, ctx) {
     try {
       const { pathname } = new URL(request.url)
-      const body = await request.json()
 
       if (request.method === 'POST' && pathname.startsWith('/query')) {
+        const body = await request.json()
         return Response.json(
           Array.isArray(body)
             ? body.map((query) => mockQuery(query))

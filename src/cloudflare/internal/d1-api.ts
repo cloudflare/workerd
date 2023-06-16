@@ -223,9 +223,7 @@ class D1PreparedStatement {
   }
 
   public async first<T = unknown>(colName: string): Promise<T | null>
-  public async first<T = unknown>(
-    colName: undefined
-  ): Promise<Record<string, T> | null>
+  public async first<T = unknown>(): Promise<Record<string, T> | null>
   public async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
