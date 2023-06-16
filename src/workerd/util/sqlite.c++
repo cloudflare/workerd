@@ -528,7 +528,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           // TODO function_list & pragma_list should be authorized but return
           // ALLOWED_SQLITE_FUNCTIONS & ALLOWED_[READ|WRITE]_PRAGMAS
           // respectively
-        } else if (pragma == "table_info") {
+        } else if (pragma == "table_info" || pragma == "table_xinfo") {
           // Allow if the specific named table is not protected.
           KJ_IF_MAYBE (name, param2) {
             return regulator.isAllowedName(*name);
