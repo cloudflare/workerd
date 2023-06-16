@@ -6,8 +6,8 @@ Subject: Allow Windows builds under Bazel
 ---
  BUILD.bazel              | 29 +++++++++++++++++------------
  bazel/config/BUILD.bazel | 37 +++++++++++++++++++++++++++++++++++++
- bazel/defs.bzl           | 25 +++++++++++++++++++++++++
- 3 files changed, 79 insertions(+), 12 deletions(-)
+ bazel/defs.bzl           | 30 ++++++++++++++++++++++++++++++
+ 3 files changed, 84 insertions(+), 12 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
 index 9d1a83a1ee1b9184daa6f9b1c48bdd28bac082f9..68480f5461d3afa1c826ca8cd929cdc7d44882b0 100644
@@ -183,7 +183,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0be041c35bd3a1967800d2cf30d82369c11c51ed..236fffe8e673ecf948ca494db02bd4a164c6eaeb 100644
+index 0be041c35bd3a1967800d2cf30d82369c11c51ed..9fe9a78fd777eabdff8db2555b0cb212630fb319 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -117,6 +117,24 @@ def _default_args():
@@ -211,7 +211,16 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..236fffe8e673ecf948ca494db02bd4a1
              "//conditions:default": [],
          }) + select({
              "@v8//bazel/config:is_clang": [
-@@ -179,9 +197,14 @@ def _default_args():
+@@ -175,13 +193,23 @@ def _default_args():
+             ],
+             "//conditions:default": [
+             ],
++        }) + select({
++            "@v8//bazel/config:is_compiler_clang_cl": [
++                "-Wno-invalid-offsetof",
++            ],
++            "//conditions:default": [],
+         }),
          includes = ["include"],
          linkopts = select({
              "@v8//bazel/config:is_windows": [
@@ -226,7 +235,7 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..236fffe8e673ecf948ca494db02bd4a1
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],
              "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
-@@ -571,6 +594,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -571,6 +599,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
@@ -234,7 +243,7 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..236fffe8e673ecf948ca494db02bd4a1
              "//conditions:default": "",
          }),
      )
-@@ -582,6 +606,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -582,6 +611,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
