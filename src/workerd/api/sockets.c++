@@ -68,7 +68,7 @@ bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
 jsg::Ref<Socket> setupSocket(
     jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
-    bool isSecureSocket, kj::String domain, int port) {
+    bool isSecureSocket, kj::String domain, bool isDefaultFetchPort) {
   auto& ioContext = IoContext::current();
   auto connDisconnPromise = connection->whenWriteDisconnected();
 
@@ -97,7 +97,7 @@ jsg::Ref<Socket> setupSocket(
       kj::mv(tlsStarter),
       isSecureSocket,
       kj::mv(domain),
-      port);
+      isDefaultFetchPort);
   KJ_IF_MAYBE(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(*p));
   }
@@ -112,7 +112,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   // Extract the domain/ip we are connecting to from the address.
   kj::String domain;
-  int port;
+  bool isDefaultFetchPort = false;
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.
@@ -121,13 +121,15 @@ jsg::Ref<Socket> connectImplNoOutputLock(
           TypeError, "Specified address could not be parsed.");
       auto& host = JSG_REQUIRE_NONNULL(record.host, TypeError,
           "Specified address is missing hostname.");
-      port = JSG_REQUIRE_NONNULL(record.port, TypeError,
-          "Specified address is missing a port.");
+      // Note that there is an edge case here where the address containing `:443` will nonetheless
+      // parse to a record whose `port` is set to nullptr.
+      auto port = record.port.orDefault(443);
+      isDefaultFetchPort = port == 443 || port == 80;
       domain = host.toStr();
     }
     KJ_CASE_ONEOF(record, SocketAddress) {
       domain = kj::heapString(record.hostname);
-      port = record.port;
+      isDefaultFetchPort = record.port == 443 || record.port == 80;
     }
   }
 
@@ -168,7 +170,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   auto result = setupSocket(
       js, kj::mv(request.connection), kj::mv(options), kj::mv(tlsStarter),
-      httpConnectSettings.useTls, kj::mv(domain), port);
+      httpConnectSettings.useTls, kj::mv(domain), isDefaultFetchPort);
   // `handleProxyStatus` needs an initialised refcount to use `JSG_THIS`, hence it cannot be
   // called in Socket's constructor. Also it's only necessary when creating a Socket as a result of
   // a `connect`.
@@ -248,7 +250,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
   return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), kj::mv(options),
-      kj::mv(newTlsStarter), true, kj::mv(domain), kj::mv(port));
+      kj::mv(newTlsStarter), true, kj::mv(domain), isDefaultFetchPort);
 }
 
 void Socket::handleProxyStatus(
@@ -260,7 +262,7 @@ void Socket::handleProxyStatus(
       // If the status indicates an unsucessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
       auto msg = kj::str(": proxy request failed, cannot connect to the specified address");
-      if (port == 443 || port == 80) {
+      if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
       }
