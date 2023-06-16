@@ -154,13 +154,18 @@ async function test(storage) {
   requireException(() => sql.exec("PRAGMA page_size = 8192"),
     "not authorized");
 
-  // PRAGMA table_info is allowed.
+  // PRAGMA table_info and PRAGMA table_xinfo are allowed.
   sql.exec("CREATE TABLE myTable (foo TEXT, bar INTEGER)");
   {
     let info = [...sql.exec("PRAGMA table_info(myTable)")];
     assert.equal(info.length, 2);
     assert.equal(info[0].name, "foo");
     assert.equal(info[1].name, "bar");
+
+    let xInfo = [...sql.exec("PRAGMA table_xinfo(myTable)")];
+    assert.equal(xInfo.length, 2);
+    assert.equal(xInfo[0].name, "foo");
+    assert.equal(xInfo[1].name, "bar");
   }
 
   // Can't get table_info for _cf_KV.
