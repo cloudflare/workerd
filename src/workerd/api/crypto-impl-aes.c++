@@ -674,7 +674,7 @@ CryptoKeyUsageSet validateAesUsages(CryptoKeyUsageSet::Context ctx, kj::StringPt
 }  // namespace
 
 kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
-      kj::StringPtr normalizedName,
+      jsg::Lock& js, kj::StringPtr normalizedName,
       SubtleCrypto::GenerateKeyAlgorithm&& algorithm, bool extractable,
       kj::ArrayPtr<const kj::String> keyUsages) {
   CryptoKeyUsageSet usages =
@@ -715,7 +715,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateAes(
 }
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {

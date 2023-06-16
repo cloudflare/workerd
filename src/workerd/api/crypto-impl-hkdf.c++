@@ -69,7 +69,7 @@ private:
 }  // namespace
 
 kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHkdf(
-    kj::StringPtr normalizedName, kj::StringPtr format,
+    jsg::Lock& js, kj::StringPtr normalizedName, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {

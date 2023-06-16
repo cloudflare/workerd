@@ -26,6 +26,12 @@ JSG_DECLARE_ISOLATE_TYPE(CryptoIsolate, CryptoContext);
 KJ_TEST("AES-KW key wrap") {
   // Basic test that I wrote when I was seeing heap corruption. Found it easier to iterate on with
   // ASAN/valgrind than using our conformance tests with test-runner.
+  jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
+  CryptoIsolate &cryptoIsolate = e.getIsolate();
+  jsg::V8StackScope stackScope;
+  CryptoIsolate::Lock isolateLock(cryptoIsolate, stackScope);
+  auto isolate = isolateLock.v8Isolate;
+  auto& js = jsg::Lock::from(isolate);
 
   auto rawWrappingKeys = std::array<kj::Array<kj::byte>, 3>({
       kj::heapArray<kj::byte>({0xe6, 0x95, 0xea, 0xe3, 0xa8, 0xc0, 0x30,
@@ -51,7 +57,7 @@ KJ_TEST("AES-KW key wrap") {
     bool extractable = false;
 
     return CryptoKey::Impl::importAes(
-        "AES-KW", "raw", kj::mv(rawKey), kj::mv(algorithm), extractable,
+        js, "AES-KW", "raw", kj::mv(rawKey), kj::mv(algorithm), extractable,
         {kj::str("wrapKey"), kj::str("unwrapKey")});
   };
 

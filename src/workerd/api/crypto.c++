@@ -394,7 +394,7 @@ jsg::Promise<kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair>> SubtleCrypto::genera
     JSG_REQUIRE(algoImpl.generateFunc != nullptr, DOMNotSupportedError,
         "Unrecognized key generation algorithm \"", algorithm.name, "\" requested.");
 
-    auto cryptoKeyOrPair = algoImpl.generateFunc(algoImpl.name, kj::mv(algorithm), extractable,
+    auto cryptoKeyOrPair = algoImpl.generateFunc(js, algoImpl.name, kj::mv(algorithm), extractable,
                                                  keyUsages);
     KJ_SWITCH_ONEOF(cryptoKeyOrPair) {
       KJ_CASE_ONEOF(cryptoKey, jsg::Ref<CryptoKey>) {
@@ -617,7 +617,7 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(
   //   importing (importKeyAesImpl handles AES-CTR, -CBC, and -GCM, for instance), so they should
   //   rely on this value to set the imported CryptoKey's name.
   auto cryptoKey = jsg::alloc<CryptoKey>(
-      algoImpl.importFunc(algoImpl.name, format, kj::mv(keyData),
+      algoImpl.importFunc(js, algoImpl.name, format, kj::mv(keyData),
                           kj::mv(algorithm), extractable, keyUsages));
 
   if (cryptoKey->getUsageSet().size() == 0) {
