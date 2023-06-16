@@ -343,8 +343,6 @@ export function deepStrictEqual(
 
   if (message) {
     message = `${message}`;
-  } else {
-    message = 'Expected actual to be deeply strictly equal to expected';
   }
 
   throw new AssertionError({
