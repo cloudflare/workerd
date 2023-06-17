@@ -251,6 +251,30 @@ void Name::visitForGc(GcVisitor& visitor) {
   }
 }
 
+Name Name::clone(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return Name(kj::str(str));
+    }
+    KJ_CASE_ONEOF(symbol, V8Ref<v8::Symbol>) {
+      return Name(js, symbol.getHandle(js));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::String Name::toString(jsg::Lock& js) {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(str, kj::String) {
+      return kj::str(str);
+    }
+    KJ_CASE_ONEOF(sym, V8Ref<v8::Symbol>) {
+      return kj::str("Symbol(", sym.getHandle(js)->Description(js.v8Isolate), ")");
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 V8StackScope::V8StackScope() {
   kj::requireOnStack(this, "V8StackScope must be allocated on the stack");
 }

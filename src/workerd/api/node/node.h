@@ -3,6 +3,7 @@
 #include "async-hooks.h"
 #include "buffer.h"
 #include "crypto.h"
+#include "diagnostics-channel.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
@@ -37,7 +38,8 @@ void registerNodeJsCompatModules(
   V(CompatibilityFlags, "workerd:compatibility-flags")                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                              \
   V(BufferUtil, "node-internal:buffer")                                         \
-  V(CryptoImpl, "node-internal:crypto")
+  V(CryptoImpl, "node-internal:crypto")                                         \
+  V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
 
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
@@ -59,9 +61,10 @@ void registerNodeJsCompatModules(
   registry.addBuiltinBundle(NODE_BUNDLE);
 }
 
-#define EW_NODE_ISOLATE_TYPES      \
-  api::node::CompatibilityFlags,   \
-  EW_NODE_BUFFER_ISOLATE_TYPES,    \
-  EW_NODE_CRYPTO_ISOLATE_TYPES,    \
+#define EW_NODE_ISOLATE_TYPES              \
+  api::node::CompatibilityFlags,           \
+  EW_NODE_BUFFER_ISOLATE_TYPES,            \
+  EW_NODE_CRYPTO_ISOLATE_TYPES,            \
+  EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, \
   EW_NODE_ASYNCHOOKS_ISOLATE_TYPES
 }  // namespace workerd::api::node

@@ -87,6 +87,8 @@ public:
     }
   }
 
+  kj::Own<jsg::AsyncContextFrame::StorageKey> getKey();
+
 private:
   kj::Own<jsg::AsyncContextFrame::StorageKey> key;
 };

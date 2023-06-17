@@ -8,6 +8,7 @@
 #include <workerd/api/http.h>
 #include <workerd/api/util.h>
 #include <workerd/io/io-context.h>
+#include <workerd/jsg/ser.h>
 #include <capnp/schema.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/own-util.h>
@@ -43,6 +44,14 @@ double getTraceLogTimestamp(const Trace::Log& log) {
   }
 }
 
+double getTraceDiagnosticChannelEventTimestamp(const Trace::DiagnosticChannelEvent& event) {
+  if (isPredictableModeForTest()) {
+    return 0;
+  } else {
+    return (event.timestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+  }
+}
+
 kj::String getTraceLogLevel(const Trace::Log& log) {
     switch (log.logLevel) {
     case LogLevel::DEBUG_: return kj::str("debug");
@@ -63,6 +72,13 @@ jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const Trace::Log& log) 
 kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
   return KJ_MAP(x, trace.logs) -> jsg::Ref<TraceLog> {
     return jsg::alloc<TraceLog>(js, trace, x);
+  };
+}
+
+kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents(
+    jsg::Lock& js, const Trace& trace) {
+  return KJ_MAP(x, trace.diagnosticChannelEvents) -> jsg::Ref<TraceDiagnosticChannelEvent> {
+    return jsg::alloc<TraceDiagnosticChannelEvent>(trace, x);
   };
 }
 
@@ -155,6 +171,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       eventTimestamp(getTraceTimestamp(trace)),
       logs(getTraceLogs(js, trace)),
       exceptions(getTraceExceptions(trace)),
+      diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
       scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
@@ -186,6 +203,10 @@ kj::ArrayPtr<jsg::Ref<TraceLog>> TraceItem::getLogs() {
 
 kj::ArrayPtr<jsg::Ref<TraceException>> TraceItem::getExceptions() {
   return exceptions;
+}
+
+kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> TraceItem::getDiagnosticChannelEvents() {
+  return diagnosticChannelEvents;
 }
 
 kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
@@ -346,6 +367,26 @@ kj::StringPtr TraceItem::EmailEventInfo::getRcptTo() {
 uint32_t TraceItem::EmailEventInfo::getRawSize() {
   return rawSize;
 }
+
+TraceDiagnosticChannelEvent::TraceDiagnosticChannelEvent(
+    const Trace& trace,
+    const Trace::DiagnosticChannelEvent& eventInfo)
+    : timestamp(getTraceDiagnosticChannelEventTimestamp(eventInfo)),
+      channel(kj::heapString(eventInfo.channel)),
+      message(kj::heapArray<kj::byte>(eventInfo.message)) {}
+
+kj::StringPtr TraceDiagnosticChannelEvent::getChannel() {
+  return channel;
+}
+
+v8::Local<v8::Value> TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
+  // This is a lazy property that is evaluated at most once, so it is ok to move the message here.
+  if (message.size() == 0) return js.v8Undefined();
+  jsg::Deserializer des(js.v8Isolate, kj::mv(message));
+  return des.readValue();
+}
+
+double TraceDiagnosticChannelEvent::getTimestamp() { return timestamp; }
 
 TraceItem::CustomEventInfo::CustomEventInfo(const Trace& trace,
                                             const Trace::CustomEventInfo& eventInfo)

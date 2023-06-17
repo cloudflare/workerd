@@ -18,6 +18,7 @@ namespace workerd::api {
 class TraceItem;
 class TraceException;
 class TraceLog;
+class TraceDiagnosticChannelEvent;
 
 class TailEvent final: public ExtendableEvent {
 public:
@@ -55,14 +56,18 @@ public:
 
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
-  typedef kj::OneOf<jsg::Ref<FetchEventInfo>, jsg::Ref<ScheduledEventInfo>,
-      jsg::Ref<AlarmEventInfo>, jsg::Ref<QueueEventInfo>,
-      jsg::Ref<EmailEventInfo>, jsg::Ref<CustomEventInfo>> EventInfo;
+  typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
+                    jsg::Ref<ScheduledEventInfo>,
+                    jsg::Ref<AlarmEventInfo>,
+                    jsg::Ref<QueueEventInfo>,
+                    jsg::Ref<EmailEventInfo>,
+                    jsg::Ref<CustomEventInfo>> EventInfo;
   kj::Maybe<EventInfo> getEvent(jsg::Lock& js);
   kj::Maybe<double> getEventTimestamp();
 
   kj::ArrayPtr<jsg::Ref<TraceLog>> getLogs();
   kj::ArrayPtr<jsg::Ref<TraceException>> getExceptions();
+  kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> getDiagnosticChannelEvents();
   kj::Maybe<kj::StringPtr> getScriptName();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
@@ -76,6 +81,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(eventTimestamp, getEventTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(logs, getLogs);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
@@ -87,6 +93,7 @@ private:
   kj::Maybe<double> eventTimestamp;
   kj::Array<jsg::Ref<TraceLog>> logs;
   kj::Array<jsg::Ref<TraceException>> exceptions;
+  kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents;
   kj::Maybe<kj::String> scriptName;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
@@ -270,6 +277,28 @@ private:
   const Trace::CustomEventInfo& eventInfo;
 };
 
+class TraceDiagnosticChannelEvent final: public jsg::Object {
+public:
+  explicit TraceDiagnosticChannelEvent(
+      const Trace& trace,
+      const Trace::DiagnosticChannelEvent& eventInfo);
+
+  double getTimestamp();
+  kj::StringPtr getChannel();
+  v8::Local<v8::Value> getMessage(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(TraceDiagnosticChannelEvent) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(channel, getChannel);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+  }
+
+private:
+  double timestamp;
+  kj::String channel;
+  kj::Array<kj::byte> message;
+};
+
 class TraceLog final: public jsg::Object {
 public:
   TraceLog(jsg::Lock& js, const Trace& trace, const Trace::Log& log);
@@ -378,6 +407,7 @@ private:
   api::TraceItem::FetchEventInfo::Response,   \
   api::TraceLog,                              \
   api::TraceException,                        \
+  api::TraceDiagnosticChannelEvent,           \
   api::TraceMetrics,                          \
   api::UnsafeTraceMetrics
 // The list of trace.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
