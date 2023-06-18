@@ -195,7 +195,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
       "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
-  auto client = context.getHttpClient(0, false, nullptr, "WebSocket::constructor");
+  auto client = context.getHttpClient(0, false, nullptr, "WebSocket::constructor"_kjc);
 
   // Set protocols header if necessary.
   KJ_IF_MAYBE(variant, protocols) {

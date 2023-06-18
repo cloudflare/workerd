@@ -1545,7 +1545,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(fetcher->getClient(
-      ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kj));
+      ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc));
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
@@ -2017,7 +2017,7 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
 jsg::Promise<QueueResponse> Fetcher::queue(
       jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, nullptr, "queue"_kj);
+  auto worker = getClient(ioContext, nullptr, "queue"_kjc);
 
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
   for (auto& msg : messages) {
@@ -2052,10 +2052,10 @@ jsg::Promise<QueueResponse> Fetcher::queue(
 }
 
 kj::Own<WorkerInterface> Fetcher::getClient(
-    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::StringPtr operationName) {
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      return ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), operationName);
+      return ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), kj::mv(operationName));
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       return outgoingFactory->newSingleUseClient(kj::mv(cfStr));

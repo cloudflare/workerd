@@ -156,7 +156,7 @@ protected:
   kj::Own<kj::HttpClient> getHttpClient(
       IoContext& context,
       kj::HttpHeaders& headers,
-      kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrName,
+      kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
       kj::StringPtr urlStr
   );
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes

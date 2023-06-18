@@ -747,7 +747,7 @@ public:
     bool wrapMetrics;
     // When true, the client is wrapped by metrics.wrapSubrequestClient() ensuring appropriate
     // metrics collection.
-    kj::Maybe<kj::StringPtr> operationName;
+    kj::Maybe<kj::ConstString> operationName;
     // The name to use for the request's span if tracing is turned on.
   };
 
@@ -761,7 +761,7 @@ public:
   // If creating a new subrequest is permitted, calls the given factory function to create one.
 
   kj::Own<WorkerInterface> getSubrequestChannel(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::StringPtr operationName);
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
   // Get WorkerInterface objects to use for subrequests.
   //
   // `channel` specifies which outgoing channel to use. The special channel 0 refers to the "null"
@@ -783,14 +783,14 @@ public:
 
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::StringPtr> operationName = nullptr);
+      kj::Maybe<kj::ConstString> operationName = nullptr);
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
 
   kj::Own<kj::HttpClient> getHttpClient(
-      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::StringPtr operationName);
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName);
   kj::Own<kj::HttpClient> getHttpClientNoChecks(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::StringPtr> operationName = nullptr);
+      kj::Maybe<kj::ConstString> operationName = nullptr);
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
   //
@@ -822,7 +822,7 @@ public:
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
 
-  SpanBuilder makeTraceSpan(kj::StringPtr operationName);
+  SpanBuilder makeTraceSpan(kj::ConstString operationName);
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.

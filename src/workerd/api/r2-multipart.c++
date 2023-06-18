@@ -24,7 +24,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
       "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_uploadPart"_kj);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_uploadPart"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -72,7 +72,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
   const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_completeMultipartUpload"_kj);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_completeMultipartUpload"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -119,7 +119,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
 jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_abortMultipartUpload"_kj);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_abortMultipartUpload"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

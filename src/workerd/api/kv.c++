@@ -67,11 +67,11 @@ constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
     IoContext& context,
     kj::HttpHeaders& headers,
-    kj::OneOf<LimitEnforcer::KvOpType, kj::StringPtr> opTypeOrUnknown,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
     kj::StringPtr urlStr) {
   const auto operationName = [&] {
     KJ_SWITCH_ONEOF(opTypeOrUnknown) {
-      KJ_CASE_ONEOF(name, kj::StringPtr) {
+      KJ_CASE_ONEOF(name, kj::LiteralStringConst) {
         return name;
       }
       KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
@@ -80,13 +80,13 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
 
         switch (opType) {
           case LimitEnforcer::KvOpType::GET:
-            return "kv_get"_kj;
+            return "kv_get"_kjc;
           case LimitEnforcer::KvOpType::PUT:
-            return "kv_put"_kj;
+            return "kv_put"_kjc;
           case LimitEnforcer::KvOpType::LIST:
-            return "kv_list"_kj;
+            return "kv_list"_kjc;
           case LimitEnforcer::KvOpType::DELETE:
-            return "kv_delete"_kj;
+            return "kv_delete"_kjc;
         }
       }
     }

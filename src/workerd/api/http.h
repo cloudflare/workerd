@@ -422,7 +422,7 @@ public:
   kj::Own<WorkerInterface> getClient(
       IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
-      kj::StringPtr operationName);
+      kj::ConstString operationName);
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
 

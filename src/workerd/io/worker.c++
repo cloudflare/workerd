@@ -1280,18 +1280,18 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   });
 
   auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
-    auto span = parentSpan.newChild(operationName);
+    auto span = parentSpan.newChild(kj::mv(operationName));
     if (span.isObserved()) {
-      span.setTag("truncated_script_id"_kj, truncateScriptId(script->getId()));
+      span.setTag("truncated_script_id"_kjc, truncateScriptId(script->getId()));
     }
     return span;
   };
 
-  auto currentSpan = maybeMakeSpan("lw:new_startup_metrics"_kj);
+  auto currentSpan = maybeMakeSpan("lw:new_startup_metrics"_kjc);
 
   auto startupMetrics = metrics->startup(startType);
 
-  currentSpan = maybeMakeSpan("lw:new_context");
+  currentSpan = maybeMakeSpan("lw:new_context"_kjc);
 
   // Create a stack-allocated handle scope.
   v8::HandleScope handleScope(lock.v8Isolate);
@@ -1302,7 +1302,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     // const_cast OK because guarded by `lock`.
     context = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(c)
         ->getHandle(lock.v8Isolate);
-    currentSpan.setTag("module_context", true);
+    currentSpan.setTag("module_context"_kjc, true);
   } else {
     // Create a new context.
     context = this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock))
@@ -1325,7 +1325,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
   try {
     try {
-      currentSpan = maybeMakeSpan("lw:globals_instantiation"_kj);
+      currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
       v8::Local<v8::Object> bindingsScope;
       if (script->isModular()) {
@@ -1353,7 +1353,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       compileBindings(lock, *script->isolate->apiIsolate, bindingsScope);
 
       // Execute script.
-      currentSpan = maybeMakeSpan("lw:top_level_execution"_kj);
+      currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
 
       KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
         KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {

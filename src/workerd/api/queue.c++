@@ -104,7 +104,7 @@ kj::Promise<void> WorkerQueue::send(
   // we have to do is provide the end of the path (which is "/message") to send a single message.
   kj::StringPtr url = "https://fake-host/message"_kj;
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kj);
+  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
   auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.size());
   return req.body->write(serialized.begin(), serialized.size())
       .attach(kj::mv(serialized), kj::mv(req.body), context.registerPendingEvent())
@@ -187,7 +187,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
   KJ_DASSERT(jsg::check(
         v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsg::v8Str(js.v8Isolate, body)))->IsObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kj);
+  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
 
   // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
