@@ -21,6 +21,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/api/actor-state.h>
 #include "workerd-api.h"
+#include <stdlib.h>
 
 namespace workerd::server {
 
@@ -1890,6 +1891,17 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
         .entrypoint = kj::str(wrapped.getEntrypoint()),
         .innerBindings = innerGlobals.releaseAsArray(),
       });
+    }
+
+    case config::Worker::Binding::FROM_ENVIRONMENT: {
+      const char* value = getenv(binding.getFromEnvironment().cStr());
+      if (value == nullptr) {
+        // TODO(cleanup): Maybe make a Global::Null? (Can't use nullptr_t in OneOf.) For now,
+        // using JSON gets the job done hackily.
+        return makeGlobal(Global::Json { kj::str("null") });
+      } else {
+        return makeGlobal(kj::str(value));
+      }
     }
 
   }
