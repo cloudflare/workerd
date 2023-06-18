@@ -39,22 +39,19 @@ struct TlsOptions {
 
 class Socket: public jsg::Object {
 public:
-  Socket(jsg::Lock& js, kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
+  Socket(jsg::Lock& js, IoContext& context,
+      kj::Own<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream,
       jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
-      jsg::PromiseResolverPair<void> close, kj::Promise<void> connDisconnPromise,
+      jsg::PromiseResolverPair<void> closedPrPair, kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
       bool isSecureSocket, kj::String domain, bool isDefaultFetchPort)
-      : connectionStream(IoContext::current().addObject(kj::mv(connectionStream))),
+      : connectionStream(context.addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
-        closeFulfiller(kj::mv(close)),
-        closedPromise(kj::mv(closeFulfiller.promise)),
-        // Listen for abrupt disconnects and resolve the `closed` promise when they occur.
-        writeDisconnectedPromise(IoContext::current().awaitIo(kj::mv(connDisconnPromise))
-            .then(js, [this](jsg::Lock& js) {
-              closeFulfiller.resolver.resolve();
-            })),
+        closedResolver(kj::mv(closedPrPair.resolver)),
+        closedPromise(kj::mv(closedPrPair.promise)),
+        watchForDisconnectTask(context.addObject(kj::heap(kj::mv(watchForDisconnectTask)))),
         options(kj::mv(options)),
-        tlsStarter(IoContext::current().addObject(kj::mv(tlsStarter))),
+        tlsStarter(context.addObject(kj::mv(tlsStarter))),
         isSecureSocket(isSecureSocket),
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort) { };
@@ -89,13 +86,16 @@ public:
   }
 
 private:
+  // TODO(cleanup): Combine all the IoOwns here into one, to improve efficiency and make
+  //   shutdown order clearer.
+
   IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
-  jsg::PromiseResolverPair<void> closeFulfiller;
+  jsg::Promise<void>::Resolver closedResolver;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
-  jsg::Promise<void> writeDisconnectedPromise;
+  IoOwn<kj::Promise<void>> watchForDisconnectTask;
   jsg::Optional<SocketOptions> options;
   IoOwn<kj::TlsStarterCallback> tlsStarter;
   // Callback used to upgrade the existing connection to a secure one.
@@ -112,9 +112,9 @@ private:
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_MAYBE(err, maybeErr) {
-      closeFulfiller.resolver.reject(js, kj::cp(*err));
+      closedResolver.reject(js, kj::cp(*err));
     } else {
-      closeFulfiller.resolver.resolve();
+      closedResolver.resolve();
     }
   };
 
