@@ -71,7 +71,7 @@ private:
   // Members initialized at startup.
 
   kj::Maybe<kj::Promise<void>> proxyTask;
-  kj::Maybe<kj::Own<kj::HttpClient>> failOpenClient;
+  kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
   // Hacky members used to hold some temporary state while processing a request.
   // See gory details in WorkerEntrypoint::request().

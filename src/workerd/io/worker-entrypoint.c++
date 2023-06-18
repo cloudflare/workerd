@@ -183,10 +183,10 @@ kj::Promise<void> WorkerEntrypoint::request(
   }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
     // The request has been canceled, but allow it to continue executing in the background.
     if (context.isFailOpen()) {
-      // Fail-open behavior has been chosen, we'd better save an HttpClient that we can use for
+      // Fail-open behavior has been chosen, we'd better save an interface that we can use for
       // that purpose later.
-      failOpenClient = context.getHttpClientNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
-                                                     kj::mv(cfBlobJson));
+      failOpenService = context.getSubrequestChannelNoChecks(IoContext::NEXT_CLIENT_CHANNEL, false,
+                                                             kj::mv(cfBlobJson));
     }
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
     maybeAddGcPassForTest(context, promise);
@@ -246,9 +246,9 @@ kj::Promise<void> WorkerEntrypoint::request(
     };
 
     if (wrappedResponse->isSent()) {
-      // We can't fail open if the response was already sent, so set `failOpenClient` null so that
+      // We can't fail open if the response was already sent, so set `failOpenService` null so that
       // that branch isn't taken below.
-      failOpenClient = nullptr;
+      failOpenService = nullptr;
     }
 
     if (isActor) {
@@ -257,20 +257,17 @@ kj::Promise<void> WorkerEntrypoint::request(
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
       return exceptionToPropagate();
-    } else KJ_IF_MAYBE(client, failOpenClient) {
+    } else KJ_IF_MAYBE(service, failOpenService) {
       // Fall back to origin.
 
       // We're catching the exception, but metrics should still indicate an exception.
       metrics->reportFailure(exception);
 
       auto promise = kj::evalNow([&] {
-        // kj::newHttpService adapts an HttpClient to look like an HttpService which makes it
-        // easier to forward the call.
-        auto httpWrapper = kj::newHttpService(**client);
-        auto promise = httpWrapper->request(
+        auto promise = service->get()->request(
             method, url, headers, requestBody, *wrappedResponse);
         metrics->setFailedOpen(true);
-        return promise.attach(kj::mv(httpWrapper), kj::mv(*client));
+        return promise.attach(kj::mv(*service));
       });
       return promise.catch_([this,wrappedResponse = kj::mv(wrappedResponse),
                              metrics = kj::mv(metrics)]
