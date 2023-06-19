@@ -8,6 +8,7 @@
 #include <workerd/jsg/setup.h>
 #include <kj/async-queue.h>
 #include <regex>
+#include <stdlib.h>
 
 namespace workerd::server {
 namespace {
@@ -651,6 +652,12 @@ KJ_TEST("Server: compatibility dates are required") {
 }
 
 KJ_TEST("Server: value bindings") {
+#if _WIN32
+  _putenv("TEST_ENVIRONMENT_VAR=Hello from environment variable");
+#else
+  setenv("TEST_ENVIRONMENT_VAR", "Hello from environment variable", true);
+#endif
+
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     # (Must use Service Worker syntax to allow Wasm bindings.)
@@ -662,6 +669,8 @@ KJ_TEST("Server: value bindings") {
       `  items.push(new TextDecoder().decode(BAR));
       `  items.push("wasm says square(5) = " + SQUARE.exports.square(5));
       `  items.push(QUX.message);
+      `  items.push(CORGE);
+      `  items.push("GRAULT is null? " + (GRAULT === null));
       `  return new Response(items.join("\n"));
       `}
       `addEventListener("fetch", event => {
@@ -681,7 +690,9 @@ KJ_TEST("Server: value bindings") {
       ),
       ( name = "QUX",
         json = `{"message": "Hello from json binding"}
-      )
+      ),
+      ( name = "CORGE", fromEnvironment = "TEST_ENVIRONMENT_VAR" ),
+      ( name = "GRAULT", fromEnvironment = "TEST_NONEXISTENT_ENVIRONMENT_VAR" ),
     ]
   ))"_kj));
 
@@ -691,7 +702,9 @@ KJ_TEST("Server: value bindings") {
       "Hello from text binding\n"
       "Hello from data binding\n"
       "wasm says square(5) = 25\n"
-      "Hello from json binding");
+      "Hello from json binding\n"
+      "Hello from environment variable\n"
+      "GRAULT is null? true");
 }
 
 KJ_TEST("Server: WebCrypto bindings") {
