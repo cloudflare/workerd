@@ -1,4 +1,8 @@
 // process is a global in Node.js so comes as a global for nodeJsCompatModules.
+
+process.env.FOO = 1;
+console.log(process.env.FOO);
+
 process.nextTick(() => {
   console.log('this should work', __filename, __dirname, module.path);
 });
