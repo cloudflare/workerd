@@ -10,7 +10,7 @@ def wd_cc_binary(
     native.cc_binary(
         name = name,
         linkopts = linkopts + select({
-          "@//:use_dead_strip": ["-Wl,-dead_strip"],
+          # "@//:use_dead_strip": ["-Wl,-dead_strip"],
           "//conditions:default": [""],
         }),
         visibility = visibility,

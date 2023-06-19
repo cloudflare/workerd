@@ -14,7 +14,7 @@ def kj_test(
             "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
         }) + deps,
         linkopts = select({
-          "@//:use_dead_strip": ["-Wl,-dead_strip"],
+        #   "@//:use_dead_strip": ["-Wl,-dead_strip"], # FIXME: dead strip seems to remove some V8DeserializerDelegate symbol, probably ok to keep in wd_cc_binary, likely an lld64 issue
           "//conditions:default": [""],
         }),
     )

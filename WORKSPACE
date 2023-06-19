@@ -402,3 +402,8 @@ load("@chromium_repo//toolchains:repositories.bzl", "toolchain_repositories", "r
 
 toolchain_repositories()
 register_chromium_toolchains()
+
+# # NOTE: This works (Bazel 6.1.2 uses 0.0.2: https://github.com/bazelbuild/bazel/blob/6.1.2/src/MODULE.tools)
+# load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies", "rules_cc_toolchains")
+# rules_cc_dependencies()
+# rules_cc_toolchains()

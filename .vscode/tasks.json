@@ -5,13 +5,13 @@
       "label": "Bazel build all (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "dbg", "//..."],
+      "args": ["build", "--disk_cache=.bazel-cache", "-c", "dbg", "//..."],
       "osx": {
         // OS X needs to set the bazel `spawn_strategy` option to `local` for symbols to work
         // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
         // precludes the use of sandboxing during the build (see
         // https://bazel.build/docs/user-manual#execution-strategy).
-        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//..."],
+        "args": ["build", "--disk_cache=.bazel-cache", "-c", "dbg", "--spawn_strategy=local", "//..."],
       },
       "group": {
         "kind": "build",
@@ -31,13 +31,13 @@
       "label": "Bazel build workerd (dbg)",
       "type": "shell",
       "command": "bazel",
-      "args": ["build", "-c", "dbg", "//src/workerd/server:workerd"],
+      "args": ["build", "--disk_cache=.bazel-cache", "-c", "dbg", "//src/workerd/server:workerd"],
       "osx": {
         // OS X needs to set the bazel `spawn_strategy` option to `local` for symbols to work
         // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
         // precludes the use of sandboxing during the build (see
         // https://bazel.build/docs/user-manual#execution-strategy).
-        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//src/workerd/server:workerd"],
+        "args": ["build", "--disk_cache=.bazel-cache", "-c", "dbg", "--spawn_strategy=local", "//src/workerd/server:workerd"],
       },
       "group": {
         "kind": "build",

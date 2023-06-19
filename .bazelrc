@@ -40,6 +40,7 @@ build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units
 #
 # Linux and macOS
 #
+# build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic --verbose_failures
 build:unix --force_pic --verbose_failures
 build:unix --cxxopt='-fcoroutines-ts' --host_cxxopt='-fcoroutines-ts'
 
