@@ -1394,10 +1394,13 @@ public:
 
           auto loopback = kj::refcounted<Loopback>(*this, kj::str(id));
           Worker::Lock lock(*service.worker, asyncLock);
+          // We define this event ID in the internal codebase, but to have WebSocket Hibernation
+          // work for local development we need to pass an event type.
+          static constexpr uint16_t hibernationEventTypeId = 8;
           auto newActor = kj::refcounted<Worker::Actor>(
               *service.worker, nullptr, kj::str(id), true, kj::mv(makeActorCache),
               className, kj::mv(makeStorage), lock, kj::mv(loopback),
-              timerChannel, kj::refcounted<ActorObserver>(), nullptr, nullptr);
+              timerChannel, kj::refcounted<ActorObserver>(), nullptr, hibernationEventTypeId);
 
           // If the actor becomes broken, remove it from the map, so a new one will be created
           // next time.
