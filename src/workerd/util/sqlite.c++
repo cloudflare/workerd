@@ -394,9 +394,22 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
 
       case MULTI:
         if (tail != sqlCode.end()) {
+          // There are more statements after this one, so execute this statement now.
+
           SQLITE_REQUIRE(sqlite3_bind_parameter_count(result) == 0,
               "When executing multiple SQL statements in a single call, only the last statement "
               "can have parameters.");
+
+          // Be sure to call the onWrite callback if necessary for this statement.
+          KJ_IF_MAYBE(cb, onWriteCallback) {
+            if (!sqlite3_stmt_readonly(result)) {
+              // The callback is allowed to invoke queries of its own, so we have to un-set the
+              // regulator while we call it.
+              currentRegulator = nullptr;
+              KJ_DEFER(currentRegulator = regulator);
+              (*cb)();
+            }
+          }
 
           // This isn't the last statement in the code. Execute it immediately.
           int err = sqlite3_step(result);

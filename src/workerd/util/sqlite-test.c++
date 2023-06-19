@@ -355,6 +355,15 @@ KJ_TEST("SQLite onWrite callback") {
 
   checkSql(db);
   KJ_EXPECT(!sawWrite);  // checkSql() only does reads
+
+  // Test for bug where the write callback would only be called for the last statement in a
+  // multi-statement execution.
+  auto q = db.run(R"(
+    INSERT INTO people (id, name, email) VALUES (12321, "Eve", "eve@example.com");
+    SELECT COUNT(*) FROM people;
+  )");
+  KJ_EXPECT(q.getInt(0) == 3);
+  KJ_EXPECT(sawWrite);
 }
 
 }  // namespace
