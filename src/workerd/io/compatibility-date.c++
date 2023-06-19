@@ -118,7 +118,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
   kj::HashSet<kj::String> flagSet;
   for (auto flag: compatFlags) {
     flagSet.upsert(kj::str(flag), [&](auto& existing, auto&& newValue) {
-      errorReporter.addError(kj::str("Feature flag specified multiple times: ", flag));
+      errorReporter.addError(kj::str("Compatibility flag specified multiple times: ", flag));
     });
   }
 
@@ -197,7 +197,7 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
   }
 
   for (auto& flag: flagSet) {
-    errorReporter.addError(kj::str("No such feature flag: ", flag));
+    errorReporter.addError(kj::str("No such compatibility flag: ", flag));
   }
 }
 

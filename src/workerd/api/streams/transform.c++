@@ -109,13 +109,14 @@ jsg::Ref<TransformStream> TransformStream::constructor(
 
   // The old implementation just defers to IdentityTransformStream. If any of the arguments
   // are specified we throw because it's most likely that they want the standard implementation
-  // but the feature flag is not set.
+  // but the compatibility flag is not set.
   if (maybeTransformer != nullptr ||
       maybeWritableStrategy != nullptr ||
       maybeReadableStrategy != nullptr) {
     IoContext::current().logWarningOnce(
         "To use the new TransformStream() constructor with a "
-        "custom transformer, enable the transformstream_enable_standard_constructor feature flag.");
+        "custom transformer, enable the transformstream_enable_standard_constructor compatibility flag. "
+        "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
   }
 
   return IdentityTransformStream::constructor(js);

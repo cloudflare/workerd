@@ -485,7 +485,8 @@ jsg::Ref<ReadableStream> ReadableStream::constructor(
   JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(),
                Error,
                "To use the new ReadableStream() constructor, enable the "
-               "streams_enable_constructors feature flag.");
+               "streams_enable_constructors compatibility flag. "
+               "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
   auto stream = jsg::alloc<ReadableStream>(newReadableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSource), kj::mv(queuingStrategy));
   return kj::mv(stream);

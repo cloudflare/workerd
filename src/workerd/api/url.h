@@ -61,7 +61,7 @@ public:
   JSG_RESOURCE_TYPE(URL, CompatibilityFlags::Reader flags) {
     // Previously, we were setting all properties as instance properties,
     // which broke the ability to subclass the URL object. With the
-    // feature flag set, we instead attach the properties to the
+    // compatibility flag set, we instead attach the properties to the
     // prototype.
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_PROTOTYPE_PROPERTY(href, getHref, setHref);

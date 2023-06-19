@@ -17,7 +17,7 @@ class TransformStream: public jsg::Object {
   // passthrough that only handled byte data. No actual transformation of the value was performed.
   // The original version did not conform to the streams standard. That original version has been
   // migrated into the IdentityTransformStream class. If the transformstream_enable_standard_constructor
-  // feature flag is not enabled, then TransformStream is just an alias for IdentityTransformStream
+  // compatibility flag is not enabled, then TransformStream is just an alias for IdentityTransformStream
   // and continues to implement the non-standard behavior. With the transformstream_enable_standard_constructor
   // flag set, however, the TransformStream implements standardized behavior.
 

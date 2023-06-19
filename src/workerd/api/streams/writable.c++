@@ -253,7 +253,8 @@ jsg::Ref<WritableStream> WritableStream::constructor(
   JSG_REQUIRE(FeatureFlags::get(js).getStreamsJavaScriptControllers(),
                Error,
                "To use the new WritableStream() constructor, enable the "
-               "streams_enable_constructors feature flag.");
+               "streams_enable_constructors compatibility flag. "
+               "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
   auto stream = jsg::alloc<WritableStream>(newWritableStreamJsController());
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);

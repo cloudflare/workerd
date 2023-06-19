@@ -1555,7 +1555,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
 
   if (headers.isWebSocket()) {
     if (!FeatureFlags::get(js).getWebSocketCompression()) {
-      // If we haven't enabled the websocket compression feature flag, strip the header from the
+      // If we haven't enabled the websocket compression compatibility flag, strip the header from the
       // subrequest.
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }

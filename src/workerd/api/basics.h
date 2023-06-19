@@ -104,7 +104,7 @@ public:
   JSG_RESOURCE_TYPE(Event, CompatibilityFlags::Reader flags) {
     // Previously, we were setting all properties as instance properties,
     // which broke the ability to subclass the Event object. With the
-    // feature flag set, we instead attach the properties to the
+    // compatibility flag set, we instead attach the properties to the
     // prototype.
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
