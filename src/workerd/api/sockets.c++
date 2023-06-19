@@ -65,6 +65,8 @@ bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
   return false;
 }
 
+} // namespace
+
 jsg::Ref<Socket> setupSocket(
     jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
@@ -156,8 +158,6 @@ jsg::Ref<Socket> setupSocket(
   }
   return result;
 }
-
-} // namespace
 
 jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,

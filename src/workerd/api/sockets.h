@@ -129,6 +129,11 @@ private:
   }
 };
 
+jsg::Ref<Socket> setupSocket(
+    jsg::Lock& js, kj::Own<kj::AsyncIoStream> connection,
+    jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
+    bool isSecureSocket, kj::String domain, bool isDefaultFetchPort);
+
 jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
