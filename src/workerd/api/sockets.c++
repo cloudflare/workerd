@@ -70,7 +70,63 @@ jsg::Ref<Socket> setupSocket(
     jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
     bool isSecureSocket, kj::String domain, bool isDefaultFetchPort) {
   auto& ioContext = IoContext::current();
-  auto connDisconnPromise = connection->whenWriteDisconnected();
+
+  // Disconnection handling is annoyingly complicated:
+  //
+  // We can't just context.awaitIo(connection->whenWriteDisconnected()) directly, because the
+  // Socket could be GC'd before `whenWriteDisconnected()` completes, causing the underlying
+  // `connection` to be destroyed. By KJ rules, we are required to cancel the promise returned by
+  // `whenWriteDisconnected()` before destroying `connection`. But there's no way to cancel a
+  // promise passed to `context.awaitIo()`. We have to hold the promise directly in `Socket`, so
+  // that we can cancel it on destruction. But we *do* want to create a JS promise that resolves
+  // on disconnect, which is what awaitIo() would give us.
+  //
+  // So, we have to chain through a promise/fulfiller pair. The `Socket` holds
+  // `watchForDisconnectTask`, which is a `kj::Promise<void>` representing a task that waits for
+  // `whenWriteDisconnected()` and then fulfills the fulfiller end of `disconnectedPaf` with
+  // `false`. If the task is canceled, we instead fulfill `disconnectedPaf` with `true`.
+  //
+  // We then use `context.awaitIo()` to await the promise end of `disconnectedPaf`, and this gives
+  // us our `closed` promise. Well, almost...
+  //
+  // There's another wrinkle: There are some circumstances where we want to resolve the `closed`
+  // promise directly from an API call. We'd rather this did not have to drop out of the isolate
+  // and enter it a gain. So, our `awaitIo()` actually awaits a task that listens for the
+  // disconnected promise and then resolves some other JS resolver, `closedResolver`.
+  auto disconnectedPaf = kj::newPromiseAndFulfiller<bool>();
+  auto& disconnectedFulfiller = *disconnectedPaf.fulfiller;
+  auto deferredCancelDisconnected = kj::defer(
+      [fulfiller=kj::mv(disconnectedPaf.fulfiller)]() mutable {
+    // In case the `whenWriteDisconected()` listener task is canceled without fulfilling the
+    // fulfiller, we want to silently fulfill it. This will happen when the Socket is GC'd.
+    fulfiller->fulfill(true);
+  });
+
+  auto watchForDisconnectTask = connection->whenWriteDisconnected()
+      .then([&disconnectedFulfiller]() {
+    disconnectedFulfiller.fulfill(false);
+  }, [&disconnectedFulfiller](kj::Exception&& e) {
+    disconnectedFulfiller.reject(kj::mv(e));
+  }).eagerlyEvaluate(
+        [deferredCancelDisconnected = kj::mv(deferredCancelDisconnected)](kj::Exception&& e) {
+    // Should never get here because we caught exceptions above.
+    LOG_EXCEPTION("socketWatchForDisconnectTask", e);
+  });
+
+  auto closedPrPair = js.newPromiseAndResolver<void>();
+  closedPrPair.promise.markAsHandled();
+
+  ioContext.awaitIo(js, kj::mv(disconnectedPaf.promise),
+      [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, bool canceled) mutable {
+    // We want to silently ignore the canceled case, without ever resolving anything. Note that
+    // if the application actually fetches the `closed` promise, then the JSG glue will prevent
+    // the socket from being GC'd until that promise resolves, so it won't be canceled.
+    if (!canceled) {
+      resolver.resolve();
+    }
+  }, [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
+    resolver.reject(js, exception.getHandle(js));
+  });
 
   auto refcountedConnection = kj::refcountedWrapper(kj::mv(connection));
   // Initialise the readable/writable streams with the readable/writable sides of an AsyncIoStream.
@@ -83,16 +139,13 @@ jsg::Ref<Socket> setupSocket(
   }
   auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable));
 
-  auto closeFulfiller = jsg::newPromiseAndResolver<void>(ioContext.getCurrentLock().getIsolate());
-  closeFulfiller.promise.markAsHandled();
-
   auto result = jsg::alloc<Socket>(
-      js,
+      js, ioContext,
       kj::mv(refcountedConnection),
       kj::mv(readable),
       kj::mv(writable),
-      kj::mv(closeFulfiller),
-      kj::mv(connDisconnPromise),
+      kj::mv(closedPrPair),
+      kj::mv(watchForDisconnectTask),
       kj::mv(options),
       kj::mv(tlsStarter),
       isSecureSocket,
@@ -229,7 +282,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
     writable->removeSink(js);
     readable = readable->detach(js, true);
-    closeFulfiller.resolver.resolve();
+    closedResolver.resolve();
 
     auto acceptedHostname = domain.asPtr();
     KJ_IF_MAYBE(s, tlsOptions) {
@@ -303,9 +356,9 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
   // been flushed.
   return writable->getController().close(js).catch_(js,
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value&& exc) {
-    ref->closeFulfiller.resolver.reject(js, exc.getHandle(js.v8Isolate));
+    ref->closedResolver.reject(js, exc.getHandle(js.v8Isolate));
   })).then(js, JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
-    ref->closeFulfiller.resolver.resolve();
+    ref->closedResolver.resolve();
   }));
 }
 
