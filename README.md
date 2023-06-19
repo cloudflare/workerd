@@ -185,11 +185,9 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 
 ### Local Worker development with `wrangler`
 
-[Wrangler](https://developers.cloudflare.com/workers/wrangler/) has experimental support for running Workers with `workerd`:
+You can use [Wrangler](https://developers.cloudflare.com/workers/wrangler/) (v3.0 or greater) to develop Cloudflare Workers locally, using `workerd`. Run:
 
-`wrangler dev --experimental-local`
-
-This feature is under active development.
+`wrangler dev`
 
 ### Serving in production
 
