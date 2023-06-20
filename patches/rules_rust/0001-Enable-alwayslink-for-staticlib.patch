@@ -1,0 +1,24 @@
+From 6e0787eb30f77bf7a80db7dfaade0c2e65e7fd21 Mon Sep 17 00:00:00 2001
+From: bcoll <bcoll@cloudflare.com>
+Date: Tue, 20 Jun 2023 14:14:50 +0100
+Subject: [PATCH] Enable-alwayslink-for-staticlib
+
+---
+ rust/private/rustc.bzl | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+index 2e8e82ca..122be678 100644
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -1453,6 +1453,7 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
+             static_library = crate_info.output,
+             # TODO(hlopko): handle PIC/NOPIC correctly
+             pic_static_library = crate_info.output,
++            alwayslink = True,
+         )
+     elif crate_info.type in ("rlib", "lib"):
+         # bazel hard-codes a check for endswith((".a", ".pic.a",
+--
+2.39.2 (Apple Git-143)
+

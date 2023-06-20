@@ -180,7 +180,11 @@ http_file(
 git_repository(
     name = "rules_rust",
     commit = "94cbe4c2c4d0181a56a256d44c3ed5b9af2aca04",
-    remote = "https://github.com/bazelbuild/rules_rust.git"
+    remote = "https://github.com/bazelbuild/rules_rust.git",
+    patch_args = [ "-p1" ],
+    patches = [
+        "//:patches/rules_rust/0001-Enable-alwayslink-for-staticlib.patch",
+    ],
 )
 
 load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains", "rust_repository_set")
