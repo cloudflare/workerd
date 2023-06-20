@@ -487,7 +487,8 @@ private:
 static v8::Local<v8::Value> createBindingValue(
     JsgWorkerdIsolate::Lock& lock,
     const WorkerdApiIsolate::Global& global,
-    CompatibilityFlags::Reader featureFlags) {
+    CompatibilityFlags::Reader featureFlags,
+    uint32_t ownerId) {
   using Global = WorkerdApiIsolate::Global;
   auto context = lock.v8Context();
 
@@ -561,6 +562,10 @@ static v8::Local<v8::Value> createBindingValue(
           kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
+    KJ_CASE_ONEOF(ns, Global::AnalyticsEngine) {
+        value = lock.wrap(context, jsg::alloc<api::AnalyticsEngine>(ns.logfwdrChannel, kj::str(ns.dataset), ns.version, ownerId));
+    }
+
     KJ_CASE_ONEOF(text, kj::String) {
       value = lock.wrap(context, kj::mv(text));
     }
@@ -585,7 +590,7 @@ static v8::Local<v8::Value> createBindingValue(
         for (const auto& innerBinding: wrapped.innerBindings) {
           jsg::check(env->Set(context,
               lock.wrapString(innerBinding.name),
-              createBindingValue(lock, innerBinding, featureFlags)));
+              createBindingValue(lock, innerBinding, featureFlags, ownerId)));
         }
 
         // obtain exported function to call
@@ -620,7 +625,7 @@ void WorkerdApiIsolate::compileGlobals(
 
     // Don't use String's usual TypeHandler here because we want to intern the string.
     auto name = jsg::v8StrIntern(lock.v8Isolate, global.name);
-    auto value = createBindingValue(lock, global, featureFlags);
+    auto value = createBindingValue(lock, global, featureFlags, ownerId);
 
     KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
     bool setResult = jsg::check(target->Set(context, name, value));
@@ -664,6 +669,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
       result.value = ns.clone();
     }
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
+      result.value = ns.clone();
+    }
+    KJ_CASE_ONEOF(ns, Global::AnalyticsEngine) {
       result.value = ns.clone();
     }
     KJ_CASE_ONEOF(text, kj::String) {
