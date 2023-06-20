@@ -71,6 +71,10 @@ build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@c
 build:linux --config=unix
 build:macos --config=unix
 
+# Support macOS 11 as the minimum version. There should be at least a warning when backward
+# compatibility is broken as -Wunguarded-availability-new is enabled by default.
+build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
+
 #
 # Windows
 #
