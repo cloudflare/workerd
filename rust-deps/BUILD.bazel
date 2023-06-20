@@ -1,6 +1,6 @@
 load("//:build/rust_cxx_bridge.bzl", "rust_cxx_bridge", "rust_cxx_include")
 load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
-load("@rules_rust//rust:defs.bzl", "rust_shared_library")
+load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 
 selects.config_setting_group(
@@ -187,7 +187,7 @@ rust_cxx_bridge(
 )
 
 # FIXME: Using a rust_static_library here seems to duplicate some runtime symbols, and not get linked when linking test binaries :confused:
-rust_shared_library(
+rust_static_library(
     name = "rust-deps",
     srcs = glob(["**/*.rs"]),
     stamp = -1, # default to bazel --stamp flag
