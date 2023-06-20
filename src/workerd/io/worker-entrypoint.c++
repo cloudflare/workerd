@@ -513,6 +513,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 template <typename T>
 void WorkerEntrypoint::maybeAddGcPassForTest(
     IoContext& context, kj::Promise<T>& promise) {
+#ifdef KJ_DEBUG
   if (isPredictableModeForTest()) {
     auto worker = kj::atomicAddRef(context.getWorker());
     if constexpr (kj::isSameType<T, void>()) {
@@ -530,6 +531,7 @@ void WorkerEntrypoint::maybeAddGcPassForTest(
       });
     }
   }
+#endif
 }
 
 } // namespace workerd
