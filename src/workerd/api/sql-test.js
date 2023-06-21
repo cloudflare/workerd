@@ -199,6 +199,11 @@ async function test(storage) {
   // Should match results in the format "2023-06-01 15:30:03"
   assert.match(resultTimestamp[0]["current_timestamp"], /^\d{4}-\d{2}-\d{2}\s{1}\d{2}:\d{2}:\d{2}$/)
 
+  // Validate that the SQLITE_LIMIT_COMPOUND_SELECT limit is enforced as expected
+  const compoundWithinLimits = [...sql.exec("SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5")];
+  assert.equal(compoundWithinLimits.length, 5);
+  requireException(() => sql.exec("SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6"), "too many terms in compound SELECT");
+
   // Can't start transactions or savepoints.
   requireException(() => sql.exec("BEGIN TRANSACTION"), "not authorized");
   requireException(() => sql.exec("SAVEPOINT foo"), "not authorized");
