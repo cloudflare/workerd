@@ -73,6 +73,7 @@ public:
   void registerNamespace(kj::StringPtr uniqueKey, GetActorFn getActor);
 
 private:
+  enum class AlarmStatus {WAITING, STARTED, FINISHED};
   const kj::Clock& clock;
   kj::Timer& timer;
   std::default_random_engine random;
@@ -90,7 +91,7 @@ private:
     kj::Promise<void> task;
     kj::Maybe<kj::Date> queuedAlarm = nullptr;
     // Once started, an alarm can have a single alarm queued behind it.
-    bool started = false;
+    AlarmStatus status = AlarmStatus::WAITING;
 
     bool previousRetryCountedAgainstLimit = false;
 
