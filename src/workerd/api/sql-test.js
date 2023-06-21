@@ -328,17 +328,15 @@ async function test(storage) {
     assert.equal(jsonResult[1].columns.content, 'TEXT')
   }
 
-  // Let the current open transaction commit. We have to do this before playing with the
-  // foreign_keys pragma because it doesn't work while a transaction is open.
-  await scheduler.wait(1);
-
   let assertValidBool = (name, val) => {
-    sql.exec("PRAGMA foreign_keys = " + name + ";");
-    assert.equal([...sql.exec("PRAGMA foreign_keys;")][0].foreign_keys, val);
+    sql.exec("PRAGMA defer_foreign_keys = " + name + ";");
+    assert.equal([...sql.exec("PRAGMA defer_foreign_keys;")][0].defer_foreign_keys, val);
   };
   let assertInvalidBool = (name, msg) => {
-    requireException(() => sql.exec("PRAGMA foreign_keys = " + name + ";"),
-        msg || "not authorized");
+    requireException(
+      () => sql.exec("PRAGMA defer_foreign_keys = " + name + ";"),
+      msg || "not authorized"
+    );
   };
 
   assertValidBool("true", 1);
@@ -485,6 +483,52 @@ async function test(storage) {
       assert.equal(getI(), 2);
     });
     assert.equal(getI(), 2);
+  }
+
+  // Test defer_foreign_keys
+  {
+    sql.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`);
+    sql.exec(
+      `CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, content TEXT, FOREIGN KEY(user_id) REFERENCES users(id));`
+    );
+
+    // By default, primary keys are enforced:
+    requireException(
+      () => sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1"),
+      "Error: FOREIGN KEY constraint failed"
+    );
+
+    // Transactions fail immediately too
+    let passed_first_statement = false;
+    requireException(
+      () =>
+        storage.transactionSync(() => {
+          sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1");
+          passed_first_statement = true;
+        }),
+      "Error: FOREIGN KEY constraint failed"
+    );
+    assert.equal(passed_first_statement, false);
+
+    // With defer_foreign_keys, we pass the first statement then fail when the transaction ends
+    requireException(
+      () =>
+        storage.transactionSync(() => {
+          sql.exec(`PRAGMA defer_foreign_keys=ON;`);
+          sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1");
+          passed_first_statement = true;
+        }),
+      "FOREIGN KEY constraint failed"
+    );
+    assert.equal(passed_first_statement, true);
+
+    // But this means we can insert rows out-of-order within transactions, as long as the data
+    // is valid by the end.
+    storage.transactionSync(() => {
+      sql.exec(`PRAGMA defer_foreign_keys=ON;`);
+      sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1");
+      sql.exec(`INSERT INTO users VALUES (?, ?)`, 1, "Alice");
+    })
   }
 
   await scheduler.wait(1);
