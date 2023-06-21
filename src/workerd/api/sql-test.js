@@ -1,6 +1,6 @@
 import * as assert from 'node:assert'
 
-function requireException(callback, expectStr) {
+function requireException(callback, expectStr, errCheck = () => {}) {
   try {
     callback();
   } catch (err) {
@@ -8,6 +8,21 @@ function requireException(callback, expectStr) {
     if (!errStr.includes(expectStr)) {
       throw new Error(`Got unexpected exception '${errStr}', expected: '${expectStr}'`);
     }
+    errCheck(err)
+    return;
+  }
+  throw new Error(`Expected exception '${expectStr}' but none was thrown`);
+}
+
+async function requireAsyncException(callback, expectStr, errCheck = () => {}) {
+  try {
+    await callback();
+  } catch (err) {
+    const errStr = `${err}`;
+    if (!errStr.includes(expectStr)) {
+      throw new Error(`Got unexpected exception '${errStr}', expected: '${expectStr}'`);
+    }
+    await errCheck(err)
     return;
   }
   throw new Error(`Expected exception '${expectStr}' but none was thrown`);
@@ -328,17 +343,15 @@ async function test(storage) {
     assert.equal(jsonResult[1].columns.content, 'TEXT')
   }
 
-  // Let the current open transaction commit. We have to do this before playing with the
-  // foreign_keys pragma because it doesn't work while a transaction is open.
-  await scheduler.wait(1);
-
   let assertValidBool = (name, val) => {
-    sql.exec("PRAGMA foreign_keys = " + name + ";");
-    assert.equal([...sql.exec("PRAGMA foreign_keys;")][0].foreign_keys, val);
+    sql.exec("PRAGMA defer_foreign_keys = " + name + ";");
+    assert.equal([...sql.exec("PRAGMA defer_foreign_keys;")][0].defer_foreign_keys, val);
   };
   let assertInvalidBool = (name, msg) => {
-    requireException(() => sql.exec("PRAGMA foreign_keys = " + name + ";"),
-        msg || "not authorized");
+    requireException(
+      () => sql.exec("PRAGMA defer_foreign_keys = " + name + ";"),
+      msg || "not authorized"
+    );
   };
 
   assertValidBool("true", 1);
@@ -550,6 +563,56 @@ async function test(storage) {
   `), "Error: not authorized");
 }
 
+async function testForeignKeys(storage) {
+  const sql = storage.sql
+
+  // Test defer_foreign_keys
+  {
+    sql.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);`);
+    sql.exec(
+      `CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, content TEXT, FOREIGN KEY(user_id) REFERENCES users(id));`
+    );
+
+    await scheduler.wait(1);
+
+    // By default, primary keys are enforced:
+    requireException(
+      () => sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1"),
+      "Error: FOREIGN KEY constraint failed"
+    );
+
+    // Transactions fail immediately too
+    let passed_first_statement = false;
+    requireException(
+      () =>
+        storage.transactionSync(() => {
+          sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1");
+          passed_first_statement = true;
+        }),
+      "Error: FOREIGN KEY constraint failed"
+    );
+    assert.equal(passed_first_statement, false);
+
+    await scheduler.wait(1);
+
+    // With defer_foreign_keys, we can insert things out-of-order within transactions,
+    // as long as the data is valid by the end.
+    storage.transactionSync(() => {
+      sql.exec(`PRAGMA defer_foreign_keys=ON;`);
+      sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 1, "Post 1");
+      sql.exec(`INSERT INTO users VALUES (?, ?)`, 1, "Alice");
+    })
+
+    await scheduler.wait(1);
+
+    // But if we use defer_foreign_keys but try to commit, it resets the DO
+    storage.transactionSync(() => {
+      sql.exec(`PRAGMA defer_foreign_keys=ON;`);
+      sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 2, "Post 2");
+    });
+  }
+}
+
 export class DurableObjectExample {
   constructor(state, env) {
     this.state = state;
@@ -558,7 +621,10 @@ export class DurableObjectExample {
   async fetch(req) {
     if (req.url.endsWith("/sql-test")) {
       await test(this.state.storage);
-      return new Response();
+      return Response.json({ ok: true })
+    } else if (req.url.endsWith("/sql-test-foreign-keys")) {
+      await testForeignKeys(this.state.storage);
+      return Response.json({ ok: true })
     } else if (req.url.endsWith("/increment")) {
       let val = (await this.state.storage.get("counter")) || 0;
       ++val;
@@ -583,7 +649,6 @@ export default {
   async test(ctrl, env, ctx) {
     let id = env.ns.idFromName("A");
     let obj = env.ns.get(id);
-    await obj.fetch("http://foo/sql-test");
 
     // Now let's test persistence through breakage and atomic write coalescing.
     let doReq = async path => {
@@ -591,20 +656,24 @@ export default {
       return await resp.json();
     };
 
+    // Test SQL API
+    assert.deepEqual(await doReq("sql-test"), {ok: true});
+
+    // Test defer_foreign_keys (explodes the DO)
+    await requireAsyncException(async () => {
+      await doReq("sql-test-foreign-keys");
+    }, "Error: internal error")
+
     // Some increments.
     assert.equal(await doReq("increment"), 1);
     assert.equal(await doReq("increment"), 2);
 
     // Now induce a failure.
-    try {
+    await requireAsyncException(async () => {
       await doReq("break");
-      throw new Error("expected failure");
-    } catch (err) {
-      if (err.message != "test broken") {
-        throw err;
-      }
+    }, "test broken", err => {
       assert.equal(err.durableObjectReset, true);
-    }
+    })
 
     // Get a new stub.
     obj = env.ns.get(id);
