@@ -15,12 +15,9 @@ TAG_NAME=$(curl -sL https://api.github.com/repos/cloudflare/workerd/releases/lat
 git checkout $TAG_NAME
 
 # Build macOS binary
-#
-# This is using fastbuild rather than opt until SIGBUS issue with the opt binary are resolved.
-# The issue is tracked in https://github.com/cloudflare/workers-sdk/issues/2386.
-pnpm exec bazelisk build -c fastbuild //src/workerd/server:workerd
-echo Stripping binary
-strip bazel-bin/src/workerd/server/workerd -o ./workerd-darwin-arm64
+pnpm exec bazelisk build --disk_cache=./.bazel-cache -c opt //src/workerd/server:workerd
+
+cp bazel-bin/src/workerd/server/workerd ./workerd-darwin-arm64
 
 docker buildx build --platform linux/arm64 -f Dockerfile.release -t workerd:$TAG_NAME --target=artifact --output type=local,dest=$(pwd) .
 
