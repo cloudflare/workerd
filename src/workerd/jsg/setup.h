@@ -373,6 +373,13 @@ public:
       return jsgIsolate.wrapper->template unwrap<jsg::Dict<v8::Local<v8::Value>>>(
           v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
+    v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
+      return jsgIsolate.wrapper->wrap(v8Context(), nullptr, kj::mv(promise));
+    }
+    jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Promise> promise) override {
+      return jsgIsolate.wrapper->template unwrap<jsg::Promise<jsg::Value>>(
+          v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
+    }
 
     template <typename T, typename... Args>
     JsContext<T> newContext(Args&&... args) {

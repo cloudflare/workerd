@@ -1092,7 +1092,8 @@ public:
         threadScope(context),
         workerLock(*context.worker, lockType),
         handleScope(workerLock.getIsolate()),
-        jsContextScope(workerLock.getContext()) {
+        jsContextScope(workerLock.getContext()),
+        promiseContextScope(workerLock.getIsolate(), context.getPromiseContextTag(workerLock)) {
     KJ_REQUIRE(context.currentInputLock == nullptr);
     KJ_REQUIRE(context.currentLock == nullptr);
     context.currentInputLock = kj::mv(inputLock);
@@ -1125,6 +1126,7 @@ private:
   Worker::Lock workerLock;
   v8::HandleScope handleScope;
   v8::Context::Scope jsContextScope;
+  v8::Isolate::PromiseContextScope promiseContextScope;
 };
 
 void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
@@ -1285,6 +1287,8 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     RunnableImpl runnable(*this, kj::mv(warnings));
     runImpl(runnable, false, asyncLock, nullptr, true);
   }
+
+  promiseContextTag = nullptr;
 }
 
 #ifdef KJ_DEBUG
@@ -1407,6 +1411,13 @@ void IoContext::requireCurrentOrThrowJs() {
       "streams, request/response bodies, and others) created in the context of one request "
       "handler cannot be accessed from a different request's handler. This is a limitation "
       "of Cloudflare Workers which allows us to improve overall performance.");
+}
+
+v8::Local<v8::Object> IoContext::getPromiseContextTag(jsg::Lock& js) {
+  if (promiseContextTag == nullptr) {
+    promiseContextTag = js.v8Ref(v8::Object::New(js.v8Isolate));
+  }
+  return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
 }
 
 }  // namespace workerd

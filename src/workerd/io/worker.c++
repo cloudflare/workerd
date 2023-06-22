@@ -978,6 +978,45 @@ kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
   return kj::String(json.releaseAsArray());
 }
 
+jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js,
+                                               v8::Local<v8::Promise>& promise) {
+  // When a promise is created in a different IoContext, we need to use a
+  // kj::CrossThreadFulfiller in order to wait on it. The Waiter instance will
+  // be held on the Promise itself, and will be fulfilled/rejected when the
+  // promise is resolved or rejected. This will signal all of the waiters
+  // from other IoContexts.
+
+  auto waiter = kj::newPromiseAndCrossThreadFulfiller<void>();
+
+  struct Waiter: public kj::Refcounted {
+    kj::Maybe<kj::Own<kj::CrossThreadPromiseFulfiller<void>>> fulfiller;
+    void done() {
+      KJ_IF_MAYBE(f, fulfiller) {
+        // Done this way so that the fulfiller is released as soon as possible
+        // when done as the JS promise may not clean up reactions right away.
+        (*f)->fulfill();
+        fulfiller = nullptr;
+      }
+    }
+    Waiter(kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller)
+        : fulfiller(kj::mv(fulfiller)) {}
+  };
+
+  auto fulfiller = kj::refcounted<Waiter>(kj::mv(waiter.fulfiller));
+
+  auto onSuccess = [waiter=kj::addRef(*fulfiller)](jsg::Lock& js, jsg::Value value) mutable {
+    waiter->done();
+  };
+
+  auto onFailure = [waiter=kj::mv(fulfiller)](jsg::Lock& js, jsg::Value exception) mutable {
+    waiter->done();
+  };
+
+  js.toPromise(promise).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+
+  return IoContext::current().awaitIo(js, kj::mv(waiter.promise));
+}
+
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
@@ -1059,6 +1098,37 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
         return;
       }
     }
+  });
+
+  // The PromiseCrossContextCallback is used to allow cross-IoContext promise following.
+  // When the IoContext::Scope is entered, we set the "promise context tag" associated
+  // with the IoContext on the Isolate that is locked. Any Promise that is created within
+  // that scope will be tagged with the same promise context tag. When an attempt to
+  // follow a promise occurs (e.g. either using Promise.prototype.then() or await, etc)
+  // our patched v8 logic will check to see if the followed promise's tag matches the
+  // current Isolate tag. If they do not, then v8 will invoke this callback. The promise
+  // here is the promise that belongs to a different IoContext.
+  lock->v8Isolate->SetPromiseCrossContextCallback([](v8::Local<v8::Context> context,
+                                                     v8::Local<v8::Promise> promise,
+                                                     v8::Local<v8::Object> tag) ->
+                                                       v8::MaybeLocal<v8::Promise> {
+    auto& js = jsg::Lock::from(context->GetIsolate());
+
+    // Generally this condition is only going to happen when using dynamic imports.
+    // It should not be common.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error,
+        "Unable to wait on a promise created within a request when not running within a "
+        "request.");
+
+    return js.wrapSimplePromise(addCrossThreadPromiseWaiter(js, promise).then(js,
+        [promise=js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
+      // Once the waiter has been resolved, return the now settled promise.
+      // Since the promise has been settled, it is now safe to access from
+      // other requests. Note that the resolved value of the promise still
+      // might not be safe to access! (e.g. if it contains any IoOwns attached
+      // to the other request IoContext).
+      return kj::mv(promise);
+    }));
   });
 }
 
