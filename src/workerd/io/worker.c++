@@ -3110,6 +3110,9 @@ kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManag
 
 void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
   KJ_REQUIRE(impl->hibernationManager == nullptr);
+  hib->setTimerChannel(impl->timerChannel);
+  // Not the cleanest way to provide hibernation manager with a timer channel reference, but
+  // where HibernationManager is constructed (actor-state), we don't have a timer channel ref.
   impl->hibernationManager = kj::mv(hib);
 }
 

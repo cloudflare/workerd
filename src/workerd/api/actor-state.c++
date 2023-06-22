@@ -842,6 +842,53 @@ kj::Array<jsg::Ref<api::WebSocket>> DurableObjectState::getWebSockets(
   return kj::Array<jsg::Ref<api::WebSocket>>();
 }
 
+void DurableObjectState::setWebSocketAutoResponse(
+      jsg::Optional<jsg::Ref<WebSocketRequestResponsePair>> maybeReqResp) {
+  auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+
+  if (maybeReqResp == nullptr) {
+    // If there's no request/response pair, we unset any current set auto response configuration.
+    KJ_IF_MAYBE(manager, a.getHibernationManager()) {
+      // If there's no hibernation manager created yet, there's nothing to do here.
+      manager->unsetWebSocketAutoResponse();
+    }
+    return;
+  }
+
+  auto reqResp = KJ_REQUIRE_NONNULL(kj::mv(maybeReqResp));
+  auto maxRequestOrResponseSize = 2048;
+
+  JSG_REQUIRE(reqResp->getRequest().size() <= maxRequestOrResponseSize, RangeError, kj::str(
+      "Request cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
+      "A request of size ", reqResp->getRequest().size(), " was provided."));
+
+  JSG_REQUIRE(reqResp->getResponse().size() <= maxRequestOrResponseSize, RangeError, kj::str(
+      "Response cannot be larger than ", maxRequestOrResponseSize, " bytes. ",
+      "A response of size ", reqResp->getResponse().size(), " was provided."));
+
+  if (a.getHibernationManager() == nullptr) {
+    a.setHibernationManager(kj::refcounted<HibernationManagerImpl>(
+            a.getLoopback(), KJ_REQUIRE_NONNULL(a.getHibernationEventType())));
+    // If there's no hibernation manager created yet, we should create one and
+    // set its auto response.
+  }
+  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setWebSocketAutoResponse(kj::mv(reqResp));
+}
+
+kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWebSocketAutoResponse() {
+  auto& a = KJ_REQUIRE_NONNULL(IoContext::current().getActor());
+  KJ_IF_MAYBE(manager, a.getHibernationManager()) {
+    // If there's no hibernation manager created yet, there's nothing to do here.
+    auto r = manager->getWebSocketAutoResponse();
+    return r;
+  }
+  return nullptr;
+}
+
+kj::Maybe<kj::Date> DurableObjectState::getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws) {
+  return ws->getAutoResponseTimestamp();
+}
+
 kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate) {
   jsg::Serializer serializer(isolate, jsg::Serializer::Options {
     .version = 15,
