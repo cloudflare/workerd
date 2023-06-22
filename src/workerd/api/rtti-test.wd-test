@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "rtti-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "rtti-test.js")
+        ],
+        compatibilityDate = "2023-05-18",
+        compatibilityFlags = ["nodejs_compat", "rtti_api"],
+      )
+    ),
+  ],
+);
