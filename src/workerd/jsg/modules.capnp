@@ -15,6 +15,7 @@ struct Module {
 
   name @0 :Text;
   src @1 :Data;
+  tsDeclaration @3 :Text;
 
   internal @2 :Bool;
   # internal modules can't be imported by user's code

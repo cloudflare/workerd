@@ -76,7 +76,6 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":workerd_capnp",
-        "//src/cloudflare",
         ":alarm-scheduler",
         "@capnp-cpp//src/capnp:capnpc",
         "//src/workerd/io",

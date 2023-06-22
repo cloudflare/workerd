@@ -13,47 +13,9 @@
 
 namespace workerd::api {
 
-struct TypesEncoder {
-public:
-  TypesEncoder(kj::String compatDate, kj::Array<kj::String> compatFlags): compatDate(kj::mv(compatDate)), compatFlags(kj::mv(compatFlags)) {}
-
-  kj::Array<byte> encode();
-
-private:
-  template <typename Type>
-  void writeStructure(jsg::rtti::Builder<CompatibilityFlags::Reader> &builder,
-                      capnp::List<jsg::rtti::Structure>::Builder structures) {
-    auto reader = builder.structure<Type>();
-    structures.setWithCaveats(structureIndex++, reader);
-  }
-
-  template <typename... Types>
-  void writeGroup(
-      capnp::List<jsg::rtti::StructureGroups::StructureGroup>::Builder &groups,
-      jsg::rtti::Builder<CompatibilityFlags::Reader> &builder, kj::StringPtr name) {
-    auto group = groups[groupsIndex++];
-    group.setName(name);
-
-    unsigned int structuresSize = sizeof...(Types);
-    auto structures = group.initStructures(structuresSize);
-    structureIndex = 0;
-    (writeStructure<Types>(builder, structures), ...);
-    KJ_ASSERT(structureIndex == structuresSize);
-  }
-
-  kj::String compatDate;
-  kj::Array<kj::String> compatFlags;
-
-  unsigned int groupsIndex = 0;
-  unsigned int structureIndex = 0;
-};
-
 class RTTIModule final: public jsg::Object {
 public:
-  kj::Array<byte> exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags) {
-    TypesEncoder encoder(kj::mv(compatDate), kj::mv(compatFlags));
-    return encoder.encode();
-  }
+  kj::Array<byte> exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags);
 
   JSG_RESOURCE_TYPE(RTTIModule) {
     JSG_METHOD(exportTypes);
@@ -68,4 +30,4 @@ void registerRTTIModule(Registry& registry) {
 
 #define EW_RTTI_ISOLATE_TYPES api::RTTIModule
 
-}
+} // namespace workerd::api

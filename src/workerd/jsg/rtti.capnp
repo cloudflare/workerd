@@ -275,10 +275,17 @@ struct Constructor {
   args @0 :List(Type);
 }
 
+struct Module {
+  specifier @0 :Text;
+  internal @1 :Bool;
+  union {
+    structureName @2 :Text;
+    tsDeclarations @3 :Text;
+  }
+}
+
 struct StructureGroups {
   # Collection of structure groups, consumed by TypeScript definitions generator
-
-  groups @0 :List(StructureGroup);
 
   struct StructureGroup {
     # Collection of related structures
@@ -287,4 +294,8 @@ struct StructureGroups {
 
     structures @1 :List(Structure);
   }
+
+  groups @0 :List(StructureGroup);
+
+  modules @1 :List(Module);
 }

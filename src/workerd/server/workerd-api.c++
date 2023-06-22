@@ -17,8 +17,8 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
 #include <workerd/api/kv.h>
+#include <workerd/api/modules.h>
 #include <workerd/api/queue.h>
-#include <workerd/api/rtti.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/standard.h>
@@ -34,8 +34,6 @@
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
 
-#include <cloudflare/cloudflare.capnp.h>
-
 namespace workerd::server {
 
 JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
@@ -50,8 +48,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   // types defined in worker.c++ or as part of jsg.
   //
   // When adding a new NNNN_ISOLATE_TYPES macro, remember to add it to
-  // src/workerd/tools/api-encoder.c++ too, so it gets included in the
-  // TypeScript types.
+  // src/workerd/api/rtti.c++ too (and tools/api-encoder.c++ for the
+  // time being), so it gets included in the TypeScript types.
   EW_GLOBAL_SCOPE_ISOLATE_TYPES,
 
   EW_ACTOR_ISOLATE_TYPES,
@@ -373,15 +371,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
     }
   }
 
-  if (getFeatureFlags().getNodeJsCompat()) {
-    api::node::registerNodeJsCompatModules(*modules, getFeatureFlags());
-  }
-  if (getFeatureFlags().getRttiApi()) {
-    api::registerRTTIModule(registry);
-  }
-
-  api::registerSocketsModule(*modules, getFeatureFlags());
-  modules->addBuiltinBundle(CLOUDFLARE_BUNDLE);
+  api::registerModules(*modules, getFeatureFlags());
 
   jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
 

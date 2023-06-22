@@ -154,9 +154,9 @@ public:
   }
 };
 
-template <typename TypeWrapper>
+template <class Registry>
 void registerSocketsModule(
-    workerd::jsg::ModuleRegistryImpl<TypeWrapper>& registry, auto featureFlags) {
+    Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<SocketsModule>("cloudflare-internal:sockets",
     workerd::jsg::ModuleRegistry::Type::INTERNAL);
 
