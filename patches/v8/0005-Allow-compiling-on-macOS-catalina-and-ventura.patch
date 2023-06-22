@@ -1,4 +1,4 @@
-From 69914af325585c0a41a75fe3923d371a487cbdb9 Mon Sep 17 00:00:00 2001
+From 04784b18abcc279bcac806d4ba4217713b15d422 Mon Sep 17 00:00:00 2001
 From: Dhi Aurrahman <dio@rockybars.com>
 Date: Thu, 27 Oct 2022 12:45:05 +0700
 Subject: Allow compiling on macOS catalina and ventura

@@ -1,4 +1,4 @@
-From b092a30de5789ab99e5e3f222e2f195c629331eb Mon Sep 17 00:00:00 2001
+From 77c635804ca6e9351f52eff90730ee952db64d5b Mon Sep 17 00:00:00 2001
 From: Kenton Varda <kenton@cloudflare.com>
 Date: Sat, 17 Sep 2022 11:11:15 -0500
 Subject: Make `:icudata` target public.
