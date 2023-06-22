@@ -360,7 +360,7 @@ enum class UsageFamily {
   EncryptDecrypt,
 };
 
-ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
+ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
     SubtleCrypto::ImportKeyData keyData, kj::StringPtr normalizedName, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages,
     kj::FunctionParam<kj::Own<EVP_PKEY>(SubtleCrypto::JsonWebKey)> readJwk,
@@ -388,9 +388,14 @@ ImportAsymmetricResult importAsymmetric(kj::StringPtr format,
     } else {
       // Public key.
       keyType = "public";
+      auto strictCrypto = FeatureFlags::get(js).getStrictCrypto();
+      // restrict key usages to public key usages. In the case of ECDH, usages must be empty, but
+      // if the strict crypto compat flag is not enabled allow the same usages as with private ECDH
+      // keys, i.e. derivationKeyMask().
       usages =
           CryptoKeyUsageSet::validate(normalizedName, CryptoKeyUsageSet::Context::importPublic,
                                       keyUsages, allowedUsages & (normalizedName == "ECDH" ?
+                                      strictCrypto ? CryptoKeyUsageSet():
                                       CryptoKeyUsageSet::derivationKeyMask() :
                                       CryptoKeyUsageSet::publicKeyMask()));
     }
@@ -1118,7 +1123,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(
   auto [normalizedHashName, hashEvpMd] = lookupDigestAlgorithm(hash);
 
   auto [evpPkey, keyType, usages] = importAsymmetric(
-      kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
+      js, kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
       // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
       [hashEvpMd = hashEvpMd, &algorithm](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
     JSG_REQUIRE(keyDataJwk.kty == "RSA", DOMDataError,
@@ -1219,7 +1224,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsaRaw(
   // data. Importing raw keys is currently not supported for this algorithm.
   CryptoKeyUsageSet allowedUsages = CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify();
   auto [evpPkey, keyType, usages] = importAsymmetric(
-      kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
+      js, kj::mv(format), kj::mv(keyData), normalizedName, extractable, keyUsages,
       // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
       [](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
     JSG_REQUIRE(keyDataJwk.kty == "RSA", DOMDataError,
@@ -1854,7 +1859,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
   auto [evpPkey, keyType, usages] = [&, curveId = curveId] {
     if (format != "raw") {
       return importAsymmetric(
-          format, kj::mv(keyData), normalizedName, extractable, keyUsages,
+          js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
           [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
         return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
@@ -1910,11 +1915,11 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
 
     if (format != "raw") {
       return importAsymmetric(
-          format, kj::mv(keyData), normalizedName, extractable, keyUsages,
+          js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
           [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
         return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
-      }, usageSet);
+      }, CryptoKeyUsageSet::derivationKeyMask());
     } else {
       // The usage set is required to be empty for public ECDH keys, including raw keys.
       return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages, usageSet);
@@ -2290,7 +2295,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
     auto nid = normalizedName == "X25519" ? NID_X25519 : NID_ED25519;
     if (format != "raw") {
       return importAsymmetric(
-          format, kj::mv(keyData), normalizedName, extractable, keyUsages,
+          js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           [nid](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
         return ellipticJwkReader(nid, kj::mv(keyDataJwk));
       }, normalizedName == "X25519" ? CryptoKeyUsageSet::derivationKeyMask() :

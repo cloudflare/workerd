@@ -329,5 +329,5 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_strict_crypto_checks")
       $compatEnableDate("2023-08-01");
   # Perform additional error checking in the Web Crypto API to conform with the specification as
-  # well as reject key parameters that may be unsafe based on the modulus or key length.
+  # well as reject key parameters that may be unsafe based on key length or public exponent.
 }
