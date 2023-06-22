@@ -114,6 +114,17 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // more flags.)
   v8::V8::SetFlagsFromString("--noincremental-marking");
 
+#ifdef __APPLE__
+  // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
+  // handling requests in short succession. There are some specific differences for macOS arm64
+  // that may be a factor:
+  //   https://chromium.googlesource.com/v8/v8.git/+/refs/tags/11.5.150.4/src/heap/heap.h#2523
+  //
+  // Bugs attributable to this are https://github.com/cloudflare/workers-sdk/issues/2386 and
+  // CUSTESC-29094.
+  v8::V8::SetFlagsFromString("--single-threaded-gc");
+#endif  // __APPLE__
+
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
   // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
