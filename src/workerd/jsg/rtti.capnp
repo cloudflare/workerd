@@ -171,6 +171,8 @@ struct JsgImplType {
     v8FunctionCallbackInfo @7;
 
     v8PropertyCallbackInfo @8;
+
+    jsgName @9;
   }
 
   type @0 :Type;

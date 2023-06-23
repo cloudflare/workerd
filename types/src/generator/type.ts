@@ -357,6 +357,8 @@ export function createTypeNode(
           return f.createTypeReferenceNode("never");
         case JsgImplType_Type.JSG_VARARGS:
           return f.createArrayTypeNode(f.createTypeReferenceNode("any"));
+        case JsgImplType_Type.JSG_NAME:
+          return f.createTypeReferenceNode("PropertyKey");
         default:
           assert.fail(`Unknown JSG implementation type: ${impl}`);
       }
