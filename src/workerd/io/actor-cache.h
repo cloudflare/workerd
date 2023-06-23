@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/async.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/io/actor-storage.h>
 #include <kj/one-of.h>
 #include <kj/map.h>
@@ -182,6 +183,7 @@ public:
   };
 
   virtual kj::Own<Transaction> startTransaction() = 0;
+  virtual jsg::Value transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) = 0;
 
   struct DeleteAllResults {
     // We split these up so client code that doesn't need the count doesn't have to
@@ -285,6 +287,10 @@ public:
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  jsg::Value transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) override {
+    JSG_FAIL_REQUIRE(Error, "Durable Object is not backed by SQL.");
+  };
+
   DeleteAllResults deleteAll(WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;

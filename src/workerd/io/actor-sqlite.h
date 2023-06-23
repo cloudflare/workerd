@@ -67,6 +67,7 @@ public:
   // See ActorCacheOps.
 
   kj::Own<ActorCacheInterface::Transaction> startTransaction() override;
+  jsg::Value transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) override;
   DeleteAllResults deleteAll(WriteOptions options) override;
   kj::Maybe<kj::Promise<void>> evictStale(kj::Date now) override;
   void shutdown(kj::Maybe<const kj::Exception&> maybeException) override;
@@ -86,6 +87,8 @@ private:
   SqliteDatabase::Statement commitTxn = db->prepare("COMMIT TRANSACTION");
 
   kj::Maybe<kj::Exception> broken;
+
+  uint transactionSyncDepth = 0;
 
   struct NoTxn {};
 
