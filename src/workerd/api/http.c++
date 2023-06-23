@@ -408,7 +408,9 @@ void Headers::forEach(
     static constexpr auto ARG_COUNT = 3;
     v8::Local<v8::Value> args[ARG_COUNT] = {
       jsg::v8Str(isolate, entry.value),
-      jsg::v8Str(isolate, entry.key),
+      // Intern the header name and not the value since the names are generally
+      // stable.
+      jsg::v8StrIntern(isolate, entry.key),
       localHeaders,
     };
     // Call jsg::check() to propagate exceptions, but we don't expect any

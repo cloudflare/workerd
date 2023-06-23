@@ -753,13 +753,13 @@ static void startProfiling(v8::CpuProfiler& profiler, v8::Isolate* isolate) {
     v8::kLeafNodeLineNumbers,
     v8::CpuProfilingOptions::kNoSampleLimit
   );
-  profiler.StartProfiling(jsg::v8Str(isolate, PROFILE_NAME.cStr()), kj::mv(options));
+  profiler.StartProfiling(jsg::v8StrIntern(isolate, PROFILE_NAME.cStr()), kj::mv(options));
 }
 
 static void stopProfiling(v8::CpuProfiler& profiler,v8::Isolate* isolate,
     cdp::Command::Builder& cmd) {
   v8::HandleScope handleScope(isolate);
-  auto cpuProfile = profiler.StopProfiling(jsg::v8Str(isolate, PROFILE_NAME.cStr()));
+  auto cpuProfile = profiler.StopProfiling(jsg::v8StrIntern(isolate, PROFILE_NAME.cStr()));
   if (cpuProfile == nullptr) return; // profiling never started
 
   kj::Vector<const v8::CpuProfileNode*> allNodes;
@@ -1246,9 +1246,9 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
   v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
 
   v8::Object* webAssembly = v8::Object::Cast(*jsg::check(
-      context->Global()->Get(context, jsg::v8Str(lock.v8Isolate, "WebAssembly"))));
+      context->Global()->Get(context, jsg::v8StrIntern(lock.v8Isolate, "WebAssembly"))));
   v8::Object* module = v8::Object::Cast(*jsg::check(
-      webAssembly->Get(context, jsg::v8Str(lock.v8Isolate, "Module"))));
+      webAssembly->Get(context, jsg::v8StrIntern(lock.v8Isolate, "Module"))));
   jsg::check(module->DefineOwnProperty(
       context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }

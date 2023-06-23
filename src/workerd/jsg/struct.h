@@ -22,7 +22,7 @@ public:
   using Type = T;
 
   explicit FieldWrapper(v8::Isolate* isolate)
-      : nameHandle(isolate, v8Str(isolate, exportedName, v8::NewStringType::kInternalized)) {}
+      : nameHandle(isolate, v8StrIntern(isolate, exportedName)) {}
 
   void wrap(TypeWrapper& wrapper, v8::Isolate* isolate, v8::Local<v8::Context> context,
             kj::Maybe<v8::Local<v8::Object>> creator, Struct& in, v8::Local<v8::Object> out) {

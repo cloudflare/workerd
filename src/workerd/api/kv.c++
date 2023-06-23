@@ -41,12 +41,12 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) 
   KJ_ASSERT(listResponse->IsObject());
   v8::Local<v8::Object> obj = listResponse.As<v8::Object>();
   auto context = js.v8Context();
-  auto keyName = jsg::v8Str(isolate, "keys"_kj);
+  auto keyName = jsg::v8StrIntern(isolate, "keys"_kj);
   auto keys = jsg::check(obj->Get(context, keyName));
   if (keys->IsArray()) {
     auto keysArr = keys.As<v8::Array>();
     auto length = keysArr->Length();
-    auto metaName = jsg::v8Str(isolate, "metadata"_kj);
+    auto metaName = jsg::v8StrIntern(isolate, "metadata"_kj);
     v8::Local<v8::Object> key;
     for (int i = 0; i < length; i++) {
       v8::HandleScope handleScope(isolate);

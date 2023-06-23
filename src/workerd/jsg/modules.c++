@@ -371,7 +371,7 @@ v8::Local<v8::Module> compileEsmModule(
     // TODO(later): Use of newExternalOneByteString here limits our built-in source
     // modules (for which this path is used) to only the latin1 character set. We
     // may need to revisit that to import built-ins as UTF-16 (two-byte).
-    contentStr = jsg::check(jsg::newExternalOneByteString(js, content));
+    contentStr = jsg::newExternalOneByteString(js, content);
 
     // TODO(bug): The cache is failing under certain conditions. Disabling this logic
     // for now until it can be debugged.
@@ -616,7 +616,7 @@ v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
   auto value = require(kj::str("node:buffer"), js.v8Isolate);
   JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:buffer implementation");
   auto module = value.As<v8::Object>();
-  auto buffer = jsg::check(module->Get(js.v8Context(), jsg::v8Str(js.v8Isolate, "Buffer")));
+  auto buffer = jsg::check(module->Get(js.v8Context(), jsg::v8StrIntern(js.v8Isolate, "Buffer")));
   JSG_REQUIRE(buffer->IsFunction(), TypeError, "Invalid node:buffer implementation");
   return buffer;
 }

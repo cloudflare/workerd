@@ -390,7 +390,8 @@ bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& c
   auto context = js.v8Context();
 
   const auto checkIt = [&handle, &js, &context](const char* name) {
-    return !jsg::check(handle->Exec(context, jsg::v8Str(js.v8Isolate, name)))->IsNullOrUndefined();
+    return !jsg::check(handle->Exec(context, jsg::v8StrIntern(js.v8Isolate, name)))
+        ->IsNullOrUndefined();
   };
 
   return js.tryCatch([&] {

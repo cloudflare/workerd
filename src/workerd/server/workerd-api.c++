@@ -610,7 +610,7 @@ static v8::Local<v8::Value> createBindingValue(
 
         // obtain exported function to call
         auto moduleNs = jsg::check(module->GetModuleNamespace()->ToObject(context));
-        auto fn = jsg::check(moduleNs->Get(context, jsg::v8Str(lock.v8Isolate, wrapped.entrypoint)));
+        auto fn = jsg::check(moduleNs->Get(context, jsg::v8StrIntern(lock.v8Isolate, wrapped.entrypoint)));
         KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
 
         // invoke the function, its result will be binding value

@@ -687,8 +687,7 @@ struct ResourceTypeBuilder {
   inline void registerInheritIntrinsic(v8::Intrinsic intrinsic) {
     auto intrinsicPrototype = v8::FunctionTemplate::New(isolate);
     intrinsicPrototype->RemovePrototype();
-    auto prototypeString = ::workerd::jsg::v8Str( \
-        isolate, "prototype", v8::NewStringType::kInternalized);
+    auto prototypeString = ::workerd::jsg::v8StrIntern(isolate, "prototype");
     intrinsicPrototype->SetIntrinsicDataProperty(prototypeString, intrinsic);
     constructor->Inherit(intrinsicPrototype);
   }
@@ -715,7 +714,6 @@ struct ResourceTypeBuilder {
 
   template<const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
-    auto v8Name = v8Str(isolate, name, v8::NewStringType::kInternalized);
     // Notably, we specify an empty signature because a static method invocation will have no holder
     // object.
     auto functionTemplate = v8::FunctionTemplate::New(isolate,
@@ -723,7 +721,7 @@ struct ResourceTypeBuilder {
                               ArgumentIndexes<Method>>::callback,
         v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
     functionTemplate->RemovePrototype();
-    constructor->Set(v8Name, functionTemplate);
+    constructor->Set(v8StrIntern(isolate, name), functionTemplate);
   }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
@@ -731,7 +729,7 @@ struct ResourceTypeBuilder {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     instance->SetNativeDataProperty(
-        v8Str(isolate, name, v8::NewStringType::kInternalized),
+        v8StrIntern(isolate, name),
         Gcb::callback, &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
         v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::None : v8::PropertyAttribute::DontEnum);
@@ -742,7 +740,7 @@ struct ResourceTypeBuilder {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     prototype->SetAccessor(
-        v8Str(isolate, name, v8::NewStringType::kInternalized),
+        v8StrIntern(isolate, name),
         Gcb::callback,
         &SetterCallback<TypeWrapper, name, Setter, setter, isContext>::callback,
         v8::Local<v8::Value>(),
@@ -755,7 +753,7 @@ struct ResourceTypeBuilder {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     instance->SetNativeDataProperty(
-        v8Str(isolate, name, v8::NewStringType::kInternalized),
+        v8StrIntern(isolate, name),
         &Gcb::callback, nullptr, v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(
@@ -774,7 +772,7 @@ struct ResourceTypeBuilder {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
 
     prototype->SetAccessor(
-        v8Str(isolate, name, v8::NewStringType::kInternalized),
+        v8StrIntern(isolate, name),
         &Gcb::callback,
         nullptr,
         v8::Local<v8::Value>(),
@@ -794,7 +792,7 @@ struct ResourceTypeBuilder {
       attributes = static_cast<v8::PropertyAttribute>(attributes | v8::PropertyAttribute::ReadOnly);
     }
     instance->SetLazyDataProperty(
-        v8Str(isolate, name, v8::NewStringType::kInternalized),
+        v8StrIntern(isolate, name),
         &Gcb::callback, v8::Local<v8::Value>(),
         attributes);
   }
@@ -959,11 +957,8 @@ public:
 
     // We do not allow use of WeakRef or FinalizationRegistry because they introduce
     // non-deterministic behavior.
-    check(global->Delete(context,
-                         v8Str(isolate, "WeakRef"_kj, v8::NewStringType::kInternalized)));
-    check(global->Delete(context,
-                         v8Str(isolate, "FinalizationRegistry"_kj,
-                               v8::NewStringType::kInternalized)));
+    check(global->Delete(context, v8StrIntern(isolate, "WeakRef"_kj)));
+    check(global->Delete(context, v8StrIntern(isolate, "FinalizationRegistry"_kj)));
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
     context->SetAlignedPointerInEmbedderData(1, ptr.get());
@@ -1046,8 +1041,7 @@ private:
 
     instance->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
 
-    constructor->SetClassName(v8Str(
-        isolate, typeName(typeid(T)), v8::NewStringType::kInternalized));
+    constructor->SetClassName(v8StrIntern(isolate, typeName(typeid(T))));
 
     static_assert(kj::isSameType<typename T::jsgThis, T>(),
         "Name passed to JSG_RESOURCE_TYPE() must be the class's own name.");
