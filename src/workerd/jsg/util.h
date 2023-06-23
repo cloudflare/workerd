@@ -378,8 +378,8 @@ inline bool isFinite(double value) {
 
 class Lock;
 
-v8::MaybeLocal<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
-v8::MaybeLocal<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.

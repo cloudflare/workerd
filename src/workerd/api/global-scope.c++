@@ -90,20 +90,21 @@ private:
   }
 };
 
+static constexpr auto kDefaultBotManagementValue = R"DATA({
+  "corporateProxy": false,
+  "verifiedBot": false,
+  "jsDetection": { "passed": false },
+  "staticResource": false,
+  "detectionIds": {},
+  "score": 99
+})DATA";
+
 void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) {
   // When the cfBotManagementNoOp compatibility flag is set, we'll check the
   // request cf blob to see if it contains a botManagement field. If it does
   // *not* we will add it using the following default fields.
   // Note that if the botManagement team changes any of the fields they provide,
   // this default value may need to be changed also.
-  static constexpr auto DEFAULT_BM = R"DATA({
-    "corporateProxy": false,
-    "verifiedBot": false,
-    "jsDetection": { "passed": false },
-    "staticResource": false,
-    "detectionIds": {},
-    "score": 99
-  })DATA"_kj;
 
   auto context = isolate->GetCurrentContext();
   auto name = jsg::v8StrIntern(isolate, "botManagement"_kj);
@@ -115,7 +116,8 @@ void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) 
     // pull the exact same value.
     auto defaultBm = jsg::check(context->Global()->GetPrivate(context, sym));
     if (defaultBm->IsUndefined()) {
-      defaultBm = jsg::check(v8::JSON::Parse(context, jsg::v8Str(isolate, DEFAULT_BM)));
+      defaultBm = jsg::check(v8::JSON::Parse(context,
+          jsg::v8StrIntern(isolate, kDefaultBotManagementValue)));
       KJ_ASSERT(defaultBm->IsObject());
       jsg::recursivelyFreeze(context, defaultBm);
       jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));

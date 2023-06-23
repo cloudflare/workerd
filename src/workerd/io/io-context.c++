@@ -1213,16 +1213,18 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
   }
 }
 
+static constexpr auto kAsyncIoErrorMessage =
+    "Some functionality, such as asynchronous I/O, timeouts, and "
+    "generating random values, can only be performed while handling a "
+    "request.";
+
 IoContext& IoContext::current() {
   if (threadLocalRequest == nullptr) {
     v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
     if (isolate == nullptr) {
       KJ_FAIL_REQUIRE("there is no current request on this thread");
     } else {
-      kj::StringPtr message = "Some functionality, such as asynchronous I/O, timeouts, and "
-                              "generating random values, can only be performed while handling a "
-                              "request.";
-      isolate->ThrowException(v8::Exception::Error(jsg::v8Str(isolate, message)));
+      isolate->ThrowError(jsg::v8StrIntern(isolate, kAsyncIoErrorMessage));
       throw jsg::JsExceptionThrown();
     }
   } else {

@@ -114,14 +114,13 @@ kj::Maybe<v8::Local<v8::Value>> tryMakeDomException(v8::Isolate* isolate,
     return check(value->ToObject(context));
   };
   const auto getInterned = [isolate, context](v8::Local<v8::Object> object, const char* s) {
-    auto name = v8StrIntern(isolate, s);
-    return check(object->Get(context, name));
+    return check(object->Get(context, v8StrIntern(isolate, s)));
   };
 
   if (auto domException = getInterned(global, "DOMException"); domException->IsObject()) {
     if (auto domExceptionCtor = toObject(domException); domExceptionCtor->IsConstructor()) {
       v8::Local<v8::Value> args[2] = {
-        message, v8Str(isolate, errorName)
+        message, v8StrIntern(isolate, errorName)
       };
       return check(domExceptionCtor->CallAsConstructor(context, 2, args));
     }
@@ -436,18 +435,19 @@ void throwTypeError(v8::Isolate* isolate,
 void throwTypeError(v8::Isolate* isolate,
     TypeErrorContext errorContext, const std::type_info& expectedType) {
   if (expectedType == typeid(Unimplemented)) {
-    isolate->ThrowException(v8::Exception::Error(
-        v8Str(isolate, unimplementedErrorMessage(errorContext))));
+    isolate->ThrowError(v8StrIntern(isolate, unimplementedErrorMessage(errorContext)));
     throw JsExceptionThrown();
   } else {
     throwTypeError(isolate, errorContext, typeName(expectedType).cStr());
   }
 }
 
+static constexpr auto kIllegalConstructorMessage = "Illegal constructor";
+
 void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
   auto isolate = args.GetIsolate();
-  kj::StringPtr message = "Illegal constructor";
-  isolate->ThrowException(v8::Exception::TypeError(v8Str(isolate, message)));
+  isolate->ThrowException(
+      v8::Exception::TypeError(v8StrIntern(isolate, kIllegalConstructorMessage)));
 }
 
 void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
@@ -661,12 +661,12 @@ private:
 using ExternOneByteString = ExternString<v8::String::ExternalOneByteStringResource, char>;
 using ExternTwoByteString = ExternString<v8::String::ExternalStringResource, uint16_t>;
 
-v8::MaybeLocal<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf) {
-  return ExternOneByteString::createExtern(js.v8Isolate, buf);
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf) {
+  return check(ExternOneByteString::createExtern(js.v8Isolate, buf));
 }
 
-v8::MaybeLocal<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
-  return ExternTwoByteString::createExtern(js.v8Isolate, buf);
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf) {
+  return check(ExternTwoByteString::createExtern(js.v8Isolate, buf));
 }
 
 }  // namespace workerd::jsg
