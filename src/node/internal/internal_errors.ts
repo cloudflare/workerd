@@ -212,6 +212,18 @@ export class ERR_CRYPTO_ECDH_INVALID_PUBLIC_KEY extends NodeError {
   }
 }
 
+export class ERR_CRYPTO_HASH_FINALIZED extends NodeError {
+  constructor() {
+    super("ERR_CRYPTO_HASH_FINALIZED", "Digest already called");
+  }
+}
+
+export class ERR_CRYPTO_HASH_UPDATE_FAILED extends NodeError {
+  constructor() {
+    super("ERR_CRYPTO_HASH_UPDATE_FAILED", "Hash update failed");
+  }
+}
+
 export class ERR_CRYPTO_INCOMPATIBLE_KEY extends NodeError {
   constructor(name: string, msg: string) {
     super("ERR_CRYPTO_INCOMPATIBLE_KEY", `Incompatible ${name}: ${msg}`);

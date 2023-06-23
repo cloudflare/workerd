@@ -101,6 +101,14 @@ export {
   createSecretKey,
 }
 
+export function getHashes() {
+  // Hardcoded list of hashes supported in boringssl, node's approach looks pretty clunky. This is
+  // expected to change infrequently based of bssl's stability-focused approach.
+  return ['md4', 'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512', 'md5-sha1', 'RSA-MD5',
+          'RSA-SHA1', 'RSA-SHA224', 'RSA-SHA256', 'RSA-SHA384', 'RSA-SHA512', 'DSA-SHA',
+          'DSA-SHA1', 'ecdsa-with-SHA1'];
+}
+
 // We do not implement the openssl secure heap.
 export function secureHeapUsed() {
   return {
@@ -155,6 +163,8 @@ export default {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  // Hash
+  getHashes,
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
@@ -211,7 +221,7 @@ export default {
 // * Hash
 //   * [ ] crypto.createHash(algorithm[, options])
 //   * [ ] crypto.createHmac(algorithm, key[, options])
-//   * [ ] crypto.getHashes()
+//   * [x] crypto.getHashes()
 // * Keys
 //   * [ ] crypto.createPrivateKey(key)
 //   * [ ] crypto.createPublicKey(key)
