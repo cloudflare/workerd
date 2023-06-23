@@ -9,7 +9,7 @@ jobs:
   version:
     outputs:
       version: ${{ steps.echo.outputs.version }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
@@ -30,8 +30,16 @@ jobs:
       matrix:
         # TODO(soon): Using windows-2019 as build is broken on windows-latest runner due to another
         # bazel bug https://github.com/bazelbuild/bazel/issues/18592
-        os: [ubuntu-22.04, macos-latest, windows-2019]
+        os: [ubuntu-20.04, macos-latest, windows-2019]
+        include:
+          - os-name: linux
+            os: ubuntu-20.04
+          - os-name: macOS
+            os: macos-latest
+          - os-name: windows
+            os: windows-2019
     runs-on: ${{ matrix.os }}
+    name: build (${{ matrix.os-name }})
     steps:
       - uses: actions/checkout@v3
       - name: Cache
@@ -45,7 +53,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get install -y build-essential git clang libc++-dev
+          sudo apt-get install -y build-essential git lsb-release wget software-properties-common gnupg
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 14
+          sudo apt-get install -y libc++-14-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
       - name: Setup Windows
         if: runner.os == 'Windows'
         run: |
