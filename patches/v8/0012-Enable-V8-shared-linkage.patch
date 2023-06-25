@@ -1,0 +1,70 @@
+From 8d67d6057f5ce99cd56a3ad6f2cc5cb66b3eaf13 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 9 Jul 2023 18:46:20 -0400
+Subject: Enable V8 shared linkage
+
+---
+ BUILD.bazel    | 7 ++++++-
+ bazel/defs.bzl | 3 ---
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index f1a0121373eae1102e057252d5048331fe9b810c..b272818e582a7f4aed3d7ab3996c99eeb8c542b8 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -1368,7 +1368,6 @@ filegroup(
+         "src/execution/futex-emulation.h",
+         "src/execution/interrupts-scope.cc",
+         "src/execution/interrupts-scope.h",
+-        "src/execution/isolate.cc",
+         "src/execution/isolate.h",
+         "src/execution/isolate-data.h",
+         "src/execution/isolate-inl.h",
+@@ -3370,6 +3369,10 @@ filegroup(
+         "src/snapshot/snapshot-empty.cc",
+         "src/snapshot/static-roots-gen.cc",
+         "src/snapshot/static-roots-gen.h",
++        # file moved here to make dynamic linkage possible. Keeping it in the v8 base causes issues
++        # with dynamic linking as it depends on symbols only defined in the snapshot (or through a
++        # placeholder when building the snapshot itself).
++        "src/execution/isolate.cc",
+     ],
+ )
+ 
+@@ -3831,6 +3834,8 @@ v8_library(
+     name = "v8",
+     srcs = [
+         ":v8_inspector_files",
++        # file moved here to make dynamic linkage possible.
++        "src/execution/isolate.cc",
+     ] + select({
+         ":is_not_v8_enable_turbofan": [
+             # With Turbofan disabled, we only include the stubbed-out API.
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 402c4d384466c5a3be35ae69d1527c8e6d12a9b8..f28d04b0f5a670b9356a8499da5876f6743e4484 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -293,7 +293,6 @@ def v8_library(
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 
+@@ -312,7 +311,6 @@ def v8_library(
+             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 
+@@ -332,7 +330,6 @@ def v8_library(
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 
