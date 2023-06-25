@@ -310,6 +310,7 @@ git_repository(
         "//:patches/v8/0009-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
         "//:patches/v8/0010-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
         "//:patches/v8/0011-Implement-Promise-Context-Tagging.patch",
+        "//:patches/v8/0012-Enable-V8-shared-linkage.patch",
     ],
     remote = "https://chromium.googlesource.com/v8/v8.git",
     shallow_since = "1685722300 +0000",
