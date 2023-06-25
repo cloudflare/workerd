@@ -34,7 +34,6 @@ The [.vscode/tasks.json](../.vscode/tasks.json) file provides a few useful tasks
 * Bazel run all tests (dbg)
 * Bazel run all tests (fastbuild)
 * Bazel run all tests (opt)
-* Generate compile_commands.json
 * Generate rust-project.json
 
 The keyboard shortcut for **Tasks: Run Build Task** is `shift+ctrl+b` on Linux and Windows, `shift+cmd+b` on OS X.
@@ -68,26 +67,29 @@ Launching "workerd test case (dbg)" will prompt for a test binary to debug, the 
 
 Launching "workerd wd-test case (dbg)" will prompt for wd-test file to provide to workerd to debug, the default is `src/workerd/api/node/path-test.wd-test`.
 
-## Generating compile_commands.json
+## Clangd code completion, navigation, language server
 
-We use clangd for code completion and navigation with the editor. Clangd requires a `compile_commands.json` file to find and process the project source code. This can be generated from within VSCode using the **Run Build Task** command and choosing "Generate compile_commands.json" (or via `shift+ctrl+b` on Linux / Windows, `shift_cmd+b` on OS X).
+We use clangd for code completion and navigation within the Visual Code. We use the simple
+[compile_flags.txt](../compile_flags.txt) option provide compiler arguments for clangd to analyze sources.
 
-Alternatively, you can generate `compile_commands.json` at the command-line directly:
-
-```sh
-bazel run //:refresh_compile_commands
+If `compile_flags.txt` is not working well on your system, try running:
 ```
-
-There is an issue between workerd's bazel setup and Hedron's compile_commands.json generator (tracked in
-https://github.com/cloudflare/workerd/issues/506).
-
-If you hit any problems, you may find this helps (though it takes a long time!):
-
-```sh
-bazel clean --expunge
-bazel test //...
-bazel run //:refresh_compile_commands
+bazel build --copt="-MD" --cxxopt="-MD" //src/workerd/server:workerd
 ```
+to generate dependency files and:
+```
+find bazel-out/ -name '*.d'`
+```
+to locate the generated dependency files. These files will help you align the include paths in
+`compile_flags.txt` with the ones that the bazel build is using.
+
+There is also a script [clangd-check.sh](../tools/unix/clangd-check.sh) that checks every `.h` and
+`.c++` file in the workerd source tree. Fixing errors there inevitably improves the experience in
+Visual Studio Code.
+
+In the past we used [Hedron's Bazel Compile Commands Extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
+to generate a `compile_commands.json` file for clangd, but this was slow and unreliable for the `workerd` use case
+(see https://github.com/cloudflare/workerd/issues/506).
 
 ## Miscellaneous tips
 

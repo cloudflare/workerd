@@ -204,11 +204,11 @@
       }
     },
     {
-      "label": "Generate compile_commands.json",
-      "command": "bazel",
-      "args": ["run", "//:refresh_compile_commands"],
-      "options": {
-        "cwd": "${workspaceFolder}"
+      // Create ${workspaceFolder}/external for clangd on opening VSCode.
+      "label": "Symlink external directory",
+      "command": "${workspaceFolder}/tools/unix/create-external.sh",
+      "windows": {
+        "command": "${workspaceFolder}/tools/windows/create-external.bat",
       },
       "group": "build",
       "problemMatcher": [],
@@ -217,7 +217,8 @@
         "panel": "dedicated"
       },
       "runOptions": {
-        "runOn": "default"
+        "reevaluateOnRerun": false,
+        "runOn": "folderOpen"
       }
     }
   ]

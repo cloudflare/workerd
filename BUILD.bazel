@@ -1,5 +1,4 @@
 load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package", "npm_package")
 load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
@@ -13,10 +12,6 @@ cc_capnp_library(
     visibility = ["//visibility:public"],
     data = ["@com_googlesource_chromium_icu//:icudata"],
     defines = [ "WORKERD_ICU_DATA_EMBED" ],
-)
-
-refresh_compile_commands(
-    name = "refresh_compile_commands",
 )
 
 npm_link_all_packages(name = "node_modules")

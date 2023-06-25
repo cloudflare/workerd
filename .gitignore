@@ -11,8 +11,7 @@ node_modules
 /npm/workerd/install.js
 /npm/workerd/lib/
 
-### Added by Hedron's Bazel Compile Commands Extractor: https://github.com/hedronvision/bazel-compile-commands-extractor
-# The external link: Differs on Windows vs macOS/Linux, so we can't check it in. The pattern needs to not have a trailing / because it's a symlink on macOS/Linux.
+# The external link for compile_flags.txt: Differs on Windows vs macOS/Linux, so we can't check it in. The pattern needs to not have a trailing / because it's a symlink on macOS/Linux.
 /external
 # Bazel output symlinks: Same reasoning as /external. You need the * because people can change the name of the directory your repository is cloned into, changing the bazel-<workspace_name> symlink.
 /bazel-*
