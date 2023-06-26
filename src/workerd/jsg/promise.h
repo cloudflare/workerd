@@ -4,11 +4,10 @@
 
 #pragma once
 
+#include <kj/async.h>
+#include "jsg.h"
 #include "util.h"
 #include "wrappable.h"
-#include "jsg.h"
-#include "web-idl.h"
-#include <kj/async.h>
 
 namespace workerd::jsg {
 
