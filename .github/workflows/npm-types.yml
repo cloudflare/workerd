@@ -19,7 +19,7 @@ jobs:
       version: ${{ steps.echo.outputs.version }}
       date: ${{ steps.echo.outputs.date }}
       release_version: ${{ steps.echo.outputs.release_version }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
@@ -38,7 +38,7 @@ jobs:
           echo "version=${{ inputs.prerelease == false && '4' || '0'}}.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
   build-and-publish-types:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: version
     steps:
       - uses: actions/checkout@v3

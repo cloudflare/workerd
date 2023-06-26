@@ -9,7 +9,9 @@ jobs:
   version:
     outputs:
       version: ${{ steps.echo.outputs.version }}
-    runs-on: ubuntu-20.04
+    # version job uses ubuntu 22.04, this way we don't have to install the updated clang while
+    # the build job uses 20.04 for libc compatibility.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
