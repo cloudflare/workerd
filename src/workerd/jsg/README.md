@@ -153,9 +153,9 @@ TODO(soon): Open Question: What happens if you try `kj::OneOf<kj::Maybe<kj::Stri
 kj::Maybe<bool>>` and pass a `null`?
 
 TODO(soon): Open Question: What happens if you have a catch-all coercible like kj::String
-in the the list?
+in the list?
 
-### Array types ('kj::Array<T>` and `kj::ArrayPtr<T>`)
+### Array types (`kj::Array<T>` and `kj::ArrayPtr<T>`)
 
 The `kj::Array<T>` and `kj::ArrayPtr<T>` types map to JavaScript arrays. Here, `T` can
 be any value or resource type.
@@ -366,7 +366,7 @@ uses multi-byte values (e.g. a `Uint32Array` would still be mapped to `kj::Array
 the fact that each member entry is 4-bytes.)
 
 When a `kj::Array<kj::byte>` is passed back *out* to JavaScript, it is always mapped into a *new*
-`ArrayBuffer` instance over the same memory (no copy of the data is made but ownershop of the
+`ArrayBuffer` instance over the same memory (no copy of the data is made but ownership of the
 memory is transferred to the `std::shared_ptr<v8::BackingStore>` instance that underlies the
 `ArrayBuffer`).
 
@@ -374,13 +374,13 @@ For many cases, this mapping behavior is just fine, but some APIs (such as Strea
 more nuanced type of mapping. For those cases, we provide `jsg::BufferSource`.
 
 A `jsg::BufferSource` wraps the v8 handle of a given `TypedArray` or `ArrayBuffer` and remembers
-it's type. When the `jsg::BufferSource` is passed back out to JavaScript, it will map to exactly
+its type. When the `jsg::BufferSource` is passed back out to JavaScript, it will map to exactly
 the same kind of object that was passed in (e.g. `Uint16Array` passed to `jsg::BufferSource` will
 produce a `Uint16Array` when passed back out to JavaScript.)
 
 The `jsg::BufferSource` also supports the ability to "detach" the backing store. What this does
 is separate the `v8::BackingStore` from the original `TypedArray`/`BufferSource` such that the
-original can no longer be used to read or mutate the data. This is important is cases where ownership
+original can no longer be used to read or mutate the data. This is important in cases where ownership
 of the data storage must transfer and cannot be shared.
 
 ### Functions (`jsg::Function<Ret(Args...)>`)
@@ -467,7 +467,7 @@ jsg::Name doSomething(jsg::Name name) {
 
 ### Reference types (`jsg::V8Ref<T>`, `jsg::Value`, `jsg::Ref<T>`)
 
-#### `jsg::V8Ref<T>` (and `jsg::Value`, and `cjfs::HashableV8Ref<T>`)
+#### `jsg::V8Ref<T>` (and `jsg::Value`, and `jsg::HashableV8Ref<T>`)
 
 The `jsg::V8Ref<T>` type holds a persistent reference to a JavaScript type. The `T` must
 be one of the `v8` types (e.g. `v8::Object`, `v8::Function`, etc). A `jsg::V8Ref<T>` is used
@@ -1166,7 +1166,7 @@ For all of the JSG type system to function, we need to declare the types that we
 Without diving into all of the internal details that make it happen, for now we'll focus on just
 the top level requirements.
 
-Somewhere in your application (e.g. see sserve/sserve-api.c++) you must include an instance of
+Somewhere in your application (e.g. see server/workerd-api.c++) you must include an instance of
 the `JSG_DECLARE_ISOLATE_TYPE` macro. This macro sets up the base isolate types and helpers that
 implement the entire type system.
 
@@ -1249,7 +1249,7 @@ object A referencing object B which references object A...).
 
 Because ref types are strong references, any ref type that is not explicitly visited will not be
 eligible for garbage collection, so failure to implement proper visitation may lead to memory leaks.
-As as best practice, it is recommended that you implement `visitForGc()` on all types that contain
+As a best practice, it is recommended that you implement `visitForGc()` on all types that contain
 refs, regardless of whether or not you are concerned about reference cycles.
 
 For `jsg::Ref<T>`, garbage collection only applies to the JavaScript wrapper around the C++ object.
