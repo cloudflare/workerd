@@ -25,7 +25,7 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
 }
 
 struct Serialized {
-  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::BufferSource>> own;
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::BufferSource, jsg::BackingStore>> own;
   // Holds onto the owner of a given array of serialized data.
   kj::ArrayPtr<kj::byte> data;
   // A pointer into that data that can be directly written into an outgoing queue send, regardless
@@ -95,12 +95,20 @@ Serialized serialize(
       result.data = source.asArrayPtr();
       result.own = kj::mv(source);
       return kj::mv(result);
+    } else if (source.canDetach(js)) {
+      // Prefer detaching the input ArrayBuffer whenever possible to avoid needing to copy it.
+      auto backingSource = source.detach(js);
+      Serialized result;
+      result.data = backingSource.asArrayPtr();
+      result.own = kj::mv(backingSource);
+      return kj::mv(result);
+    } else {
+      kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
+      Serialized result;
+      result.data = bytes;
+      result.own = kj::mv(bytes);
+      return kj::mv(result);
     }
-    kj::Array<kj::byte> bytes = kj::heapArray(source.asArrayPtr());
-    Serialized result;
-    result.data = bytes;
-    result.own = kj::mv(bytes);
-    return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::JSON) {
     kj::String s = js.serializeJson(body);
     Serialized result;
