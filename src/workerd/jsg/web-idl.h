@@ -15,7 +15,7 @@
 namespace workerd::jsg {
 class UsvString;
 class UsvStringPtr;
-}  // namespace workerd::cjfs
+}  // namespace workerd::jsg
 
 namespace workerd::jsg::webidl {
 

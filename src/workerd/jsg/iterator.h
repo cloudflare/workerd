@@ -5,6 +5,7 @@
 #pragma once
 
 #include "jsg.h"
+#include "struct.h"
 #include <concepts>
 #include <deque>
 

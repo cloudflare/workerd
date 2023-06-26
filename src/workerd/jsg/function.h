@@ -7,9 +7,9 @@
 //
 // Handles wrapping a C++ function so that it can be called from JavaScript, and vice versa.
 
-#include "wrappable.h"
-#include "resource.h"  // for ArgumentIndexes
 #include <kj/function.h>
+#include "resource.h"  // for ArgumentIndexes
+#include "wrappable.h"
 
 namespace workerd::jsg {
 

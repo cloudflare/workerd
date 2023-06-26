@@ -10,13 +10,13 @@
 // can call back to the class's methods. This differs from, say, a struct type, which will be deeply
 // converted into a JS object when passed into JS.
 
-#include "util.h"
-#include "wrappable.h"
-#include "jsg.h"
 #include <kj/tuple.h>
 #include <kj/debug.h>
 #include <type_traits>
 #include <kj/map.h>
+#include "util.h"
+#include "wrappable.h"
+#include "jsg.h"
 #include <typeindex>
 
 namespace std {
