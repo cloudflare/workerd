@@ -1,4 +1,4 @@
-From 476c6a6b8bb1cc1db9b2152e1320b4eec3103e5b Mon Sep 17 00:00:00 2001
+From 83cbeb6956004e3a55bb0d050eac27f907cb18ce Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 8 Mar 2023 16:15:31 -0500
 Subject: Fix v8 code_generator imports

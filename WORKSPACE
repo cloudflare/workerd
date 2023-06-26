@@ -290,7 +290,8 @@ git_repository(
         "//:patches/v8/0008-Disable-bazel-whole-archive-build.patch",
         "//:patches/v8/0009-Make-v8-Locker-automatically-call-isolate-Enter.patch",
         "//:patches/v8/0010-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
-        "//:patches/v8/0011-Use-target-cfg.patch",
+        "//:patches/v8/0011-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0012-Implement-Promise-Context-Tagging.patch"
     ],
 )
 

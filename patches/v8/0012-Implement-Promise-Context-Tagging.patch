@@ -1,0 +1,468 @@
+From 5f0ccf4ff0bda92a2a7cb5c3abff1054235cabba Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Thu, 22 Jun 2023 15:29:26 -0700
+Subject: Implement Promise Context Tagging
+
+---
+ include/v8-callbacks.h                      |  9 +++++
+ include/v8-isolate.h                        | 16 +++++++++
+ src/api/api.cc                              | 17 ++++++++++
+ src/builtins/promise-abstract-operations.tq | 11 ++++--
+ src/builtins/promise-constructor.tq         |  4 +++
+ src/builtins/promise-misc.tq                |  4 +++
+ src/compiler/js-create-lowering.cc          |  4 ++-
+ src/diagnostics/objects-printer.cc          |  1 +
+ src/execution/isolate-inl.h                 | 20 +++++++++++
+ src/execution/isolate.cc                    | 37 +++++++++++++++++++++
+ src/execution/isolate.h                     | 15 +++++++++
+ src/heap/factory.cc                         |  6 ++++
+ src/objects/js-promise.tq                   |  1 +
+ src/profiler/heap-snapshot-generator.cc     |  3 ++
+ src/runtime/runtime-promise.cc              | 35 +++++++++++++++++++
+ src/runtime/runtime.h                       |  4 ++-
+ 16 files changed, 182 insertions(+), 5 deletions(-)
+
+diff --git a/include/v8-callbacks.h b/include/v8-callbacks.h
+index 2743d5cc69e3c299bb3b84e1e97424b4dee0ae9e..b862ead1533eccfc9340ae6031c1bdab301550a8 100644
+--- a/include/v8-callbacks.h
++++ b/include/v8-callbacks.h
+@@ -413,6 +413,15 @@ using PrepareStackTraceCallback = MaybeLocal<Value> (*)(Local<Context> context,
+                                                         Local<Value> error,
+                                                         Local<Array> sites);
+ 
++/**
++ * PromiseCrossContextCallback is called when following a promise and the
++ * promise's context tag is not strictly equal to the isolate's current
++ * promise context tag.
++ */
++using PromiseCrossContextCallback = MaybeLocal<Promise> (*)(Local<Context> context,
++                                                            Local<Promise> promise,
++                                                            Local<Object> tag);
++
+ }  // namespace v8
+ 
+ #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
+diff --git a/include/v8-isolate.h b/include/v8-isolate.h
+index 1d079ac0bb1dd3921d680bcd1958da4bbc114e9e..4d1ab8bd462359a8173cdce6e8173e475f879690 100644
+--- a/include/v8-isolate.h
++++ b/include/v8-isolate.h
+@@ -1635,6 +1635,9 @@ class V8_EXPORT Isolate {
+    */
+   void LocaleConfigurationChangeNotification();
+ 
++  class PromiseContextScope;
++  void SetPromiseCrossContextCallback(PromiseCrossContextCallback callback);
++
+   Isolate() = delete;
+   ~Isolate() = delete;
+   Isolate(const Isolate&) = delete;
+@@ -1678,6 +1681,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+   return Local<T>::FromSlot(slot);
+ }
+ 
++class Isolate::PromiseContextScope {
++public:
++  PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag);
++  ~PromiseContextScope();
++  PromiseContextScope(const PromiseContextScope&) = delete;
++  PromiseContextScope(PromiseContextScope&&) = delete;
++  PromiseContextScope& operator=(const PromiseContextScope&) = delete;
++  PromiseContextScope& operator=(PromiseContextScope&&) = delete;
++
++private:
++  internal::Isolate* isolate_;
++};
++
+ }  // namespace v8
+ 
+ #endif  // INCLUDE_V8_ISOLATE_H_
+diff --git a/src/api/api.cc b/src/api/api.cc
+index bddda91dbb07500eac71274fe859603a416821b8..96d8736bfd67a18c4c70e32fd50b4062e0974d7d 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -11610,6 +11610,23 @@ std::string SourceLocation::ToString() const {
+   return std::string(function_) + "@" + file_ + ":" + std::to_string(line_);
+ }
+ 
++void Isolate::SetPromiseCrossContextCallback(PromiseCrossContextCallback callback) {
++  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(this);
++  isolate->set_promise_cross_context_callback(callback);
++}
++
++Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag)
++    : isolate_(reinterpret_cast<i::Isolate*>(isolate)) {
++  DCHECK(!isolate_->has_promise_context_tag());
++  DCHECK(!tag.IsEmpty());
++  i::Handle<i::Object> handle = Utils::OpenHandle(*tag);
++  isolate_->set_promise_context_tag(*handle);
++}
++
++Isolate::PromiseContextScope::~PromiseContextScope() {
++  isolate_->clear_promise_context_tag();
++}
++
+ }  // namespace v8
+ 
+ #include "src/api/api-macros-undef.h"
+diff --git a/src/builtins/promise-abstract-operations.tq b/src/builtins/promise-abstract-operations.tq
+index 2e2dd0e1ef71e9a7c2e2ca6bea3cb5d551f6ed4e..d5a6d3ac1d7131666c9b09e8b6afe0f4b9397fee 100644
+--- a/src/builtins/promise-abstract-operations.tq
++++ b/src/builtins/promise-abstract-operations.tq
+@@ -20,6 +20,9 @@ PromiseResolveAfterResolved(implicit context: Context)(JSPromise, JSAny): JSAny;
+ 
+ extern transitioning runtime
+ PromiseRejectEventFromStack(implicit context: Context)(JSPromise, JSAny): JSAny;
++
++extern transitioning runtime
++PromiseContextCheck(implicit context: Context)(JSPromise): JSPromise;
+ }
+ 
+ // https://tc39.es/ecma262/#sec-promise-abstract-operations
+@@ -451,13 +454,15 @@ transitioning macro PerformPromiseThenImpl(implicit context: Context)(
+     // PromiseReaction holding both the onFulfilled and onRejected callbacks.
+     // Once the {promise} is resolved we decide on the concrete handler to
+     // push onto the microtask queue.
++    const delegate = runtime::PromiseContextCheck(promise);
+     const handlerContext = ExtractHandlerContext(onFulfilled, onRejected);
+     const promiseReactions =
+-        UnsafeCast<(Zero | PromiseReaction)>(promise.reactions_or_result);
++        UnsafeCast<(Zero | PromiseReaction)>(delegate.reactions_or_result);
+     const reaction = NewPromiseReaction(
+         handlerContext, promiseReactions, resultPromiseOrCapability,
+         onFulfilled, onRejected);
+-    promise.reactions_or_result = reaction;
++    delegate.reactions_or_result = reaction;
++    delegate.SetHasHandler();
+   } else {
+     const reactionsOrResult = promise.reactions_or_result;
+     let microtask: PromiseReactionJobTask;
+@@ -479,8 +484,8 @@ transitioning macro PerformPromiseThenImpl(implicit context: Context)(
+         }
+       }
+     EnqueueMicrotask(handlerContext, microtask);
++    promise.SetHasHandler();
+   }
+-  promise.SetHasHandler();
+ }
+ 
+ // https://tc39.es/ecma262/#sec-performpromisethen
+diff --git a/src/builtins/promise-constructor.tq b/src/builtins/promise-constructor.tq
+index b502eabf05f614ed58c058487e3117fea68973bd..604a4a49d7c15b9752be5132002734aa699a759c 100644
+--- a/src/builtins/promise-constructor.tq
++++ b/src/builtins/promise-constructor.tq
+@@ -14,6 +14,9 @@ DebugPopPromise(implicit context: Context)(): JSAny;
+ 
+ extern transitioning runtime
+ PromiseHookInit(implicit context: Context)(Object, Object): JSAny;
++
++extern transitioning runtime
++PromiseContextInit(implicit context: Context)(JSPromise): JSAny;
+ }
+ 
+ // https://tc39.es/ecma262/#sec-promise-constructor
+@@ -74,6 +77,7 @@ PromiseConstructor(
+     result = UnsafeCast<JSPromise>(
+         FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
+     PromiseInit(result);
++    runtime::PromiseContextInit(result);
+     RunAnyPromiseHookInit(result, Undefined);
+   }
+ 
+diff --git a/src/builtins/promise-misc.tq b/src/builtins/promise-misc.tq
+index 199fc313193e82d149a9f389a12081bf1110a105..fdbf039d0c1926ec51dc4739ea5f0a23fbdfb3b8 100644
+--- a/src/builtins/promise-misc.tq
++++ b/src/builtins/promise-misc.tq
+@@ -49,6 +49,7 @@ macro PromiseInit(promise: JSPromise): void {
+     is_silent: false,
+     async_task_id: 0
+   });
++  promise.context_tag = kZero;
+   promise_internal::ZeroOutEmbedderOffsets(promise);
+ }
+ 
+@@ -69,6 +70,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
+     is_silent: false,
+     async_task_id: 0
+   });
++  promise.context_tag = kZero;
+   return promise;
+ }
+ 
+@@ -242,6 +244,7 @@ transitioning macro NewJSPromise(implicit context: Context)(parent: Object):
+     JSPromise {
+   const instance = InnerNewJSPromise();
+   PromiseInit(instance);
++  runtime::PromiseContextInit(instance);
+   RunAnyPromiseHookInit(instance, parent);
+   return instance;
+ }
+@@ -264,6 +267,7 @@ transitioning macro NewJSPromise(implicit context: Context)(
+   instance.reactions_or_result = result;
+   instance.SetStatus(status);
+   promise_internal::ZeroOutEmbedderOffsets(instance);
++  runtime::PromiseContextInit(instance);
+   RunAnyPromiseHookInit(instance, Undefined);
+   return instance;
+ }
+diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
+index 335a66d9e78bcacb2e470ad4bfbdd870b3986df3..f6a1211910d01d846da71b0e9bd48b801324e144 100644
+--- a/src/compiler/js-create-lowering.cc
++++ b/src/compiler/js-create-lowering.cc
+@@ -1078,10 +1078,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
+           jsgraph()->EmptyFixedArrayConstant());
+   a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kReactionsOrResultOffset),
+           jsgraph()->ZeroConstant());
++  a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kContextTagOffset),
++          jsgraph()->ZeroConstant());
+   static_assert(v8::Promise::kPending == 0);
+   a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kFlagsOffset),
+           jsgraph()->ZeroConstant());
+-  static_assert(JSPromise::kHeaderSize == 5 * kTaggedSize);
++  static_assert(JSPromise::kHeaderSize == 6 * kTaggedSize);
+   for (int offset = JSPromise::kHeaderSize;
+        offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
+     a.Store(AccessBuilder::ForJSObjectOffset(offset),
+diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
+index 65b4341baea0118baec2641a9304a9778604a86b..534594dbc43830ba311de81ee926e1a851719514 100644
+--- a/src/diagnostics/objects-printer.cc
++++ b/src/diagnostics/objects-printer.cc
+@@ -710,6 +710,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
+   os << "\n - has_handler: " << has_handler();
+   os << "\n - handled_hint: " << handled_hint();
+   os << "\n - is_silent: " << is_silent();
++  os << "\n - context_tag: " << Brief(context_tag());
+   JSObjectPrintBody(os, *this);
+ }
+ 
+diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
+index 8edeb5dfb837ab1ca86bdaa426752ed9f867ea37..c696ef9e6f378a4c9cae97920b9717b25a50218c 100644
+--- a/src/execution/isolate-inl.h
++++ b/src/execution/isolate-inl.h
+@@ -125,6 +125,26 @@ bool Isolate::is_execution_terminating() {
+          i::ReadOnlyRoots(this).termination_exception();
+ }
+ 
++Object Isolate::promise_context_tag() {
++  return promise_context_tag_;
++}
++
++bool Isolate::has_promise_context_tag() {
++  return promise_context_tag_ != ReadOnlyRoots(this).the_hole_value();
++}
++
++void Isolate::clear_promise_context_tag() {
++  set_promise_context_tag(ReadOnlyRoots(this).the_hole_value());
++}
++
++void Isolate::set_promise_context_tag(Object tag) {
++  promise_context_tag_ = tag;
++}
++
++void Isolate::set_promise_cross_context_callback(PromiseCrossContextCallback callback) {
++  promise_cross_context_callback_ = callback;
++}
++
+ #ifdef DEBUG
+ Object Isolate::VerifyBuiltinsResult(Object result) {
+   DCHECK_EQ(has_pending_exception(), result == ReadOnlyRoots(this).exception());
+diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
+index 40d1b394ef30c7cdf1d5aa05a051d3a497abf28e..253461765a904d8a74289ca20bbc2b0886b9e908 100644
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -569,6 +569,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
+                       FullObjectSlot(&thread->context_));
+   v->VisitRootPointer(Root::kStackRoots, nullptr,
+                       FullObjectSlot(&thread->scheduled_exception_));
++  v->VisitRootPointer(Root::kStackRoots, nullptr,
++                      FullObjectSlot(&promise_context_tag_));
+ 
+   for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
+        block = block->next_) {
+@@ -4489,6 +4491,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+     shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
+   }
+ 
++  clear_promise_context_tag();
+   InitializeThreadLocal();
+ 
+   // Profiler has to be created after ThreadLocal is initialized
+@@ -6208,5 +6211,39 @@ void DefaultWasmAsyncResolvePromiseCallback(
+   CHECK(ret.IsJust() ? ret.FromJust() : isolate->IsExecutionTerminating());
+ }
+ 
++class Isolate::PromiseCrossContextCallbackScope {
++public:
++  PromiseCrossContextCallbackScope(Isolate& isolate) : isolate_(isolate) {
++    DCHECK(!isolate_.in_promise_cross_context_callback_);
++    isolate_.in_promise_cross_context_callback_ = true;
++  }
++  ~PromiseCrossContextCallbackScope() {
++    isolate_.in_promise_cross_context_callback_ = false;
++  }
++private:
++  Isolate& isolate_;
++};
++
++MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(Handle<Context> context,
++                                                               Handle<JSPromise> promise) {
++  if (promise_cross_context_callback_ == nullptr || in_promise_cross_context_callback_) {
++    return promise;
++  }
++  PromiseCrossContextCallbackScope callback_scope(*this);
++  CHECK(promise->context_tag().IsJSReceiver());
++
++  Handle<JSObject> context_tag(JSObject::cast(promise->context_tag()), this);
++  v8::Local<v8::Promise> result;
++  ASSIGN_RETURN_ON_SCHEDULED_EXCEPTION_VALUE(
++      this, result,
++      promise_cross_context_callback_(
++          Utils::ToLocal(context),
++          v8::Utils::PromiseToLocal(promise),
++          v8::Utils::ToLocal(context_tag)),
++      MaybeHandle<JSPromise>());
++
++  return v8::Utils::OpenHandle(*result);
++}
++
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/execution/isolate.h b/src/execution/isolate.h
+index 5a0972dee86aa993c2526a4f9596af12eeaf647d..dab141597c47883277d399b7f5f122b3ddf5bf62 100644
+--- a/src/execution/isolate.h
++++ b/src/execution/isolate.h
+@@ -2052,6 +2052,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+ 
+   void VerifyStaticRoots();
+ 
++  inline Object promise_context_tag();
++  inline bool has_promise_context_tag();
++  inline void clear_promise_context_tag();
++  inline void set_promise_context_tag(Object tag);
++  inline void set_promise_cross_context_callback(PromiseCrossContextCallback callback);
++  MaybeHandle<JSPromise> RunPromiseCrossContextCallback(Handle<Context> context,
++                                                        Handle<JSPromise> promise);
++
+  private:
+   explicit Isolate(std::unique_ptr<IsolateAllocator> isolate_allocator);
+   ~Isolate();
+@@ -2509,10 +2517,17 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+   SimulatorData* simulator_data_ = nullptr;
+ #endif
+ 
++  Object promise_context_tag_;
++  PromiseCrossContextCallback promise_cross_context_callback_;
++  bool in_promise_cross_context_callback_ = false;
++
++  class PromiseCrossContextCallbackScope;
++
+   friend class heap::HeapTester;
+   friend class GlobalSafepoint;
+   friend class TestSerializer;
+   friend class SharedHeapNoClientsTest;
++  friend class PromiseCrossContextCallbackScope;
+ };
+ 
+ // The current entered Isolate and its thread data. Do not access these
+diff --git a/src/heap/factory.cc b/src/heap/factory.cc
+index 16bbb62bf9dd97d112c6b55dd338d7ab1709aade..324cca9dda73efdcd790427fdbf5edba5164e548 100644
+--- a/src/heap/factory.cc
++++ b/src/heap/factory.cc
+@@ -4018,6 +4018,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+   DisallowGarbageCollection no_gc;
+   JSPromise raw = *promise;
+   raw.set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
++  if (!isolate()->has_promise_context_tag()) {
++    raw.set_context_tag(Smi::zero(), SKIP_WRITE_BARRIER);
++  } else {
++    raw.set_context_tag(isolate()->promise_context_tag());
++  }
++
+   raw.set_flags(0);
+   // TODO(v8) remove once embedder data slots are always zero-initialized.
+   InitEmbedderFields(*promise, Smi::zero());
+diff --git a/src/objects/js-promise.tq b/src/objects/js-promise.tq
+index 25c7e1f76c72996eb1d8fb3d93cbfc06f4f41bf3..5afde92d7cdbd7d1b06060a2c047474a18ed04fd 100644
+--- a/src/objects/js-promise.tq
++++ b/src/objects/js-promise.tq
+@@ -33,6 +33,7 @@ extern class JSPromise extends JSObjectWithEmbedderSlots {
+   // Smi 0 terminated list of PromiseReaction objects in case the JSPromise was
+   // not settled yet, otherwise the result.
+   reactions_or_result: Zero|PromiseReaction|JSAny;
++  context_tag: Zero|JSAny;
+   flags: SmiTagged<JSPromiseFlags>;
+ }
+ 
+diff --git a/src/profiler/heap-snapshot-generator.cc b/src/profiler/heap-snapshot-generator.cc
+index 1c12edd7901aa431ac2d6e690c7cbb182fdc2299..c7053c847b4c26bd017c79d0fc75b9ceaba2678e 100644
+--- a/src/profiler/heap-snapshot-generator.cc
++++ b/src/profiler/heap-snapshot-generator.cc
+@@ -1765,6 +1765,9 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
+   SetInternalReference(entry, "reactions_or_result",
+                        promise.reactions_or_result(),
+                        JSPromise::kReactionsOrResultOffset);
++  SetInternalReference(entry, "context_tag",
++                       promise.context_tag(),
++                       JSPromise::kContextTagOffset);
+ }
+ 
+ void V8HeapExplorer::ExtractJSGeneratorObjectReferences(
+diff --git a/src/runtime/runtime-promise.cc b/src/runtime/runtime-promise.cc
+index 5fa806068b5185b7293a5d00d50da26f5cdcb1a9..9713ac971fdf440c5d598141dfe21c10a1fa99f7 100644
+--- a/src/runtime/runtime-promise.cc
++++ b/src/runtime/runtime-promise.cc
+@@ -216,5 +216,40 @@ RUNTIME_FUNCTION(Runtime_ConstructInternalAggregateErrorHelper) {
+   return *result;
+ }
+ 
++RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
++  HandleScope scope(isolate);
++  DCHECK_EQ(1, args.length());
++  if (!isolate->has_promise_context_tag()) {
++    args.at<JSPromise>(0)->set_context_tag(Smi::zero());
++  } else {
++    CHECK(!isolate->promise_context_tag().IsUndefined());
++    args.at<JSPromise>(0)->set_context_tag(isolate->promise_context_tag());
++  }
++  return ReadOnlyRoots(isolate).undefined_value();
++}
++
++RUNTIME_FUNCTION(Runtime_PromiseContextCheck) {
++  HandleScope scope(isolate);
++  DCHECK_EQ(1, args.length());
++
++  Handle<JSPromise> promise = args.at<JSPromise>(0);
++
++  // If promise.context_tag() is strict equal to isolate.promise_context_tag(),
++  // or if the promise being checked does not have a context tag, we'll just return
++  // promise directly.
++  Object obj = promise->context_tag();
++  if (obj == Smi::zero() || obj == isolate->promise_context_tag()) {
++    return *promise;
++  }
++
++  // Otherwise we defer to the PromiseCrossContextCallback. If the callback
++  // has not been set, then it should just return the same promise back here.
++  Handle<JSPromise> result;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
++    isolate->RunPromiseCrossContextCallback(handle(isolate->context(), isolate), promise));
++
++  return *result;
++}
++
+ }  // namespace internal
+ }  // namespace v8
+diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
+index e11c08398c50c1978270d8a181c7c5cf27d77fff..a6dec7e07e0cd9624033e22df1e96c246dbcd641 100644
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -399,7 +399,9 @@ namespace internal {
+   F(PromiseRejectAfterResolved, 2, 1)    \
+   F(PromiseResolveAfterResolved, 2, 1)   \
+   F(ConstructAggregateErrorHelper, 4, 1) \
+-  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1)
++  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
++  F(PromiseContextInit, 1, 1)            \
++  F(PromiseContextCheck, 1, 1)
+ 
+ #define FOR_EACH_INTRINSIC_PROXY(F, I) \
+   F(CheckProxyGetSetTrapResult, 2, 1)  \

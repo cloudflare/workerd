@@ -1919,11 +1919,14 @@ public:
   // TODO(later): See if we can easily combine wrapSimpleFunction and wrapReturningFunction
   // into one.
 
+  virtual v8::Local<v8::Promise> wrapSimplePromise(Promise<Value> promise) = 0;
+
   bool toBool(v8::Local<v8::Value> value);
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;
   // Convenience methods to unwrap various types of V8 values. All of these could be done manually
   // via the V8 API, but these methods are much easier.
+  virtual Promise<Value> toPromise(v8::Local<v8::Promise> promise) = 0;
 
   // ---------------------------------------------------------------------------
   // Setup stuff
