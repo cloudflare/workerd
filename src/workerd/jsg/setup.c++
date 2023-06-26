@@ -237,7 +237,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // returned false earlier. It may still be reachable via C++, but we can recreate the wrapper
   // as needed if the C++ object is exported to JavaScript again later.
   auto& wrappable = *reinterpret_cast<Wrappable*>(
-      handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
