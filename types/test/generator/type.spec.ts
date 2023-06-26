@@ -185,10 +185,18 @@ test("createTypeNode: implementation types", () => {
     (member) => typeof member === "number"
   );
   for (const implType of implTypes) {
-    // VARARGS is the only type we care about which will be tested with function
-    // types, the rest should be ignored
-    if (implType === JsgImplType_Type.JSG_VARARGS) continue;
+    // VARARGS and NAME are the only types we care about which will be tested
+    // with function types, the rest should be ignored
+    if (
+      implType === JsgImplType_Type.JSG_VARARGS ||
+      implType === JsgImplType_Type.JSG_NAME
+    ) {
+      continue;
+    }
     impl.setType(implType);
     assert.strictEqual(printNode(createTypeNode(type)), "never");
   }
+
+  impl.setType(JsgImplType_Type.JSG_NAME);
+  assert.strictEqual(printNode(createTypeNode(type)), "PropertyKey");
 });

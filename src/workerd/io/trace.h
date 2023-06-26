@@ -142,6 +142,22 @@ public:
     void copyTo(rpc::Trace::FetchResponseInfo::Builder builder);
   };
 
+  class DiagnosticChannelEvent {
+  public:
+    explicit DiagnosticChannelEvent(kj::Date timestamp,
+                                    kj::String channel,
+                                    kj::Array<kj::byte> message);
+    DiagnosticChannelEvent(rpc::Trace::DiagnosticChannelEvent::Reader reader);
+    DiagnosticChannelEvent(DiagnosticChannelEvent&&) = default;
+    KJ_DISALLOW_COPY(DiagnosticChannelEvent);
+
+    kj::Date timestamp;
+    kj::String channel;
+    kj::Array<kj::byte> message;
+
+    void copyTo(rpc::Trace::DiagnosticChannelEvent::Builder builder);
+  };
+
   class Log {
   public:
     explicit Log(kj::Date timestamp, LogLevel logLevel, kj::String message);
@@ -199,6 +215,8 @@ public:
   kj::Vector<Exception> exceptions;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
 
+  kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
+
   EventOutcome outcome = EventOutcome::UNKNOWN;
 
   kj::Maybe<FetchResponseInfo> fetchResponseInfo;
@@ -208,6 +226,7 @@ public:
 
   bool exceededLogLimit = false;
   bool exceededExceptionLimit = false;
+  bool exceededDiagnosticChannelEventLimit = false;
   size_t bytesUsed = 0;
   // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
   // data size, and we stop recording if too much is used.
@@ -284,6 +303,9 @@ public:
   //void setMetrics(...) // Or get from MetricsCollector::Request directly?
 
   void addException(kj::Date timestamp, kj::String name, kj::String message);
+
+  void addDiagnosticChannelEvent(kj::Date timestamp, kj::String channel,
+                                 kj::Array<kj::byte> message);
 
   void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
   // Adds info about the event that triggered the trace.  Must not be called more than once.

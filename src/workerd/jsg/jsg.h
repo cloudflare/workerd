@@ -1175,6 +1175,10 @@ public:
 
   inline int hashCode() const { return hash; }
 
+  Name clone(jsg::Lock& js);
+
+  kj::String toString(jsg::Lock& js);
+
 private:
   int hash;
   kj::OneOf<kj::String, V8Ref<v8::Symbol>> inner;

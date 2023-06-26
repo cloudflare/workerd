@@ -95,6 +95,13 @@ struct Trace @0x8e8d911203762d34 {
 
   dispatchNamespace @12 :Text;
   scriptTags @14 :List(Text);
+
+  diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
+  struct DiagnosticChannelEvent {
+    timestampNs @0 :Int64;
+    channel @1 :Text;
+    message @2 :Data;
+  }
 }
 
 struct ScheduledRun @0xd98fc1ae5c8095d0 {

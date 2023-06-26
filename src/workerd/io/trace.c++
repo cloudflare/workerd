@@ -106,6 +106,26 @@ void Trace::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) 
   builder.setRawSize(rawSize);
 }
 
+Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(kj::Date timestamp,
+                                                      kj::String channel,
+                                                      kj::Array<kj::byte> message)
+    : timestamp(timestamp),
+      channel(kj::mv(channel)),
+      message(kj::mv(message)) {}
+
+Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(
+    rpc::Trace::DiagnosticChannelEvent::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      channel(kj::heapString(reader.getChannel())),
+      message(kj::heapArray<kj::byte>(reader.getMessage())) {}
+
+void Trace::DiagnosticChannelEvent::copyTo(
+    rpc::Trace::DiagnosticChannelEvent::Builder builder) {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setChannel(channel);
+  builder.setMessage(message);
+}
+
 Trace::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode)
     : statusCode(statusCode) {}
 
@@ -224,6 +244,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   if (pipelineLogLevel != PipelineLogLevel::NONE) {
     logs.addAll(reader.getLogs());
     exceptions.addAll(reader.getExceptions());
+    diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
 
   outcome = reader.getOutcome();
@@ -424,6 +445,27 @@ void WorkerTracer::addException(kj::Date timestamp, kj::String name, kj::String 
   }
   trace->bytesUsed = newSize;
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message));
+}
+
+void WorkerTracer::addDiagnosticChannelEvent(kj::Date timestamp,
+                                             kj::String channel,
+                                             kj::Array<kj::byte> message) {
+  if (trace->exceededDiagnosticChannelEventLimit) {
+    return;
+  }
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+  size_t newSize = trace->bytesUsed + sizeof(Trace::DiagnosticChannelEvent) + channel.size() +
+                   message.size();
+  if (newSize > MAX_TRACE_BYTES) {
+    trace->exceededDiagnosticChannelEventLimit = true;
+    trace->diagnosticChannelEvents.add(timestamp, kj::str("workerd.LimitExceeded"),
+                                       kj::Array<kj::byte>());
+    return;
+  }
+  trace->bytesUsed = newSize;
+  trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }
 
 void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
