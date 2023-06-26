@@ -75,6 +75,9 @@ build:macos --config=unix
 # compatibility is broken as -Wunguarded-availability-new is enabled by default.
 build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
 
+# On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
+build:linux --action_env=BAZEL_LINKLIBS='-l%:libc++.a -lm -static-libgcc'
+
 #
 # Windows
 #

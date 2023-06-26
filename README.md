@@ -177,8 +177,6 @@ To serve your config, do:
 For more details about command-line usage, use `workerd --help`.
 
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:
-* On Linux:
-  * libc++ (e.g. the package `libc++1` on Debian Bullseye)
 * On macOS:
   * macOS 11 or higher
   * The Xcode command line tools, which can be installed with `xcode-select --install`
