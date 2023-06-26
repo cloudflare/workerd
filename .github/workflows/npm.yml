@@ -19,7 +19,7 @@ jobs:
       version: ${{ steps.echo.outputs.version }}
       date: ${{ steps.echo.outputs.date }}
       release_version: ${{ steps.echo.outputs.release_version }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - uses: bazelbuild/setup-bazelisk@v2
