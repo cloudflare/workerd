@@ -30,9 +30,9 @@ public:
   }
 };
 
-template <typename TypeWrapper>
+template <class Registry>
 void registerNodeJsCompatModules(
-    workerd::jsg::ModuleRegistryImpl<TypeWrapper>& registry, auto featureFlags) {
+    Registry& registry, auto featureFlags) {
 
 #define NODEJS_MODULES(V)                                                       \
   V(CompatibilityFlags, "workerd:compatibility-flags")                          \

@@ -7,6 +7,9 @@ def _to_js(file_name):
         return file_name.removesuffix(".ts") + ".js"
     return file_name
 
+def _to_d_ts(file_name):
+    return file_name.removesuffix(".ts") + ".d.ts"
+
 def _to_name(file_name):
     return file_name.removesuffix(".ts").removesuffix(".js")
 
@@ -42,11 +45,13 @@ def wd_ts_bundle(
 
     srcs = modules + internal_modules
     ts_srcs = [src for src in srcs if src.endswith(".ts")]
+    declarations = [_to_d_ts(src) for src in ts_srcs if not src.endswith(".d.ts")]
 
     ts_project(
         name = name + "@tsproject",
         srcs = ts_srcs,
         allow_js = True,
+        declaration = True,
         tsconfig = name + "@tsconfig",
         deps = deps,
     )
@@ -63,6 +68,7 @@ def wd_ts_bundle(
             _to_js(m),
             import_name + "-internal:" + _to_name(m.removeprefix("internal/")),
         ) for m in internal_modules if not m.endswith(".d.ts")]),
+        declarations = declarations,
         schema_id = schema_id,
     )
 

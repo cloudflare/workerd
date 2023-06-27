@@ -72,19 +72,15 @@ public:
     JSG_STATIC_METHOD(bind);
     JSG_STATIC_METHOD(snapshot);
 
-    if (flags.getNodeJsCompat()) {
-      JSG_TS_OVERRIDE(AsyncLocalStorage<T> {
-        getStore(): T | undefined;
-        run<R, TArgs extends any[]>(store: T, callback: (...args: TArgs) => R, ...args: TArgs): R;
-        exit<R, TArgs extends any[]>(callback: (...args: TArgs) => R, ...args: TArgs): R;
-        disable(): void;
-        enterWith(store: T): void;
-        static bind<Func extends (...args: any[]) => any>(fn: Func): Func;
-        static snapshot<R, TArgs extends any[]>() : ((...args: TArgs) => R, ...args: TArgs) => R;
-      });
-    } else {
-      JSG_TS_OVERRIDE(type AsyncLocalStorage = never);
-    }
+    JSG_TS_OVERRIDE(AsyncLocalStorage<T> {
+      getStore(): T | undefined;
+      run<R, TArgs extends any[]>(store: T, callback: (...args: TArgs) => R, ...args: TArgs): R;
+      exit<R, TArgs extends any[]>(callback: (...args: TArgs) => R, ...args: TArgs): R;
+      enterWith(store: T): never;
+      disable(): never;
+      static bind<Func extends (...args: any[]) => any>(fn: Func): Func;
+      static snapshot<R, TArgs extends any[]>(): (fn: (...args: TArgs) => R, ...args: TArgs) => R;
+    });
   }
 
   kj::Own<jsg::AsyncContextFrame::StorageKey> getKey();
@@ -144,7 +140,6 @@ public:
     // that we do not implement. We can simply omit it here. There's no risk of
     // bugs or unexpected behavior by doing so.
 
-    JSG_STRUCT_TS_OVERRIDE(type AsyncResourceOptions = never);
     JSG_STRUCT(triggerAsyncId);
   };
 
@@ -190,27 +185,13 @@ public:
     JSG_METHOD(bind);
     JSG_METHOD(runInAsyncScope);
 
-    if (flags.getNodeJsCompat()) {
-      JSG_TS_OVERRIDE(interface AsyncResourceOptions {
-        triggerAsyncId?: number;
-      });
+    JSG_TS_OVERRIDE(AsyncResource {
+      constructor(type: string, options?: AsyncResourceOptions);
+      static bind<Func extends (this: ThisArg, ...args: any[]) => any, ThisArg>(fn: Func, type?: string, thisArg?: ThisArg): Func;
+      bind<Func extends (...args: any[]) => any>(fn: Func): Func;
+      runInAsyncScope<This, Result>(fn: (this: This, ...args: any[]) => Result, thisArg?: This, ...args: any[]): Result;
+    });
 
-      JSG_TS_OVERRIDE(AsyncResource {
-        constructor(type: string, options?: AsyncResourceOptions);
-        static bind<Func extends (this: ThisArg, ...args: any[]) => any, ThisArg>(
-            fn: Func,
-            type?: string,
-            thisArg?: ThisArg): Func & { asyncResource: AsyncResource; };
-        bind<Func extends (...args: any[]) => any>(
-            fn: Func ): Func & { asyncResource: AsyncResource; };
-        runInAsyncScope<This, Result>(fn: (this: This, ...args: any[]) => Result, thisArg?: This,
-                                      ...args: any[]): Result;
-        asyncId(): number;
-        triggerAsyncId(): number;
-      });
-    } else {
-      JSG_TS_OVERRIDE(type AsyncResource = never);
-    }
   }
 
   kj::Maybe<jsg::AsyncContextFrame&> getFrame();
@@ -231,16 +212,9 @@ class AsyncHooksModule final: public jsg::Object {
   // Node.js.
 public:
 
-  JSG_RESOURCE_TYPE(AsyncHooksModule, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(AsyncHooksModule) {
     JSG_NESTED_TYPE(AsyncLocalStorage);
     JSG_NESTED_TYPE(AsyncResource);
-
-    if (flags.getNodeJsCompat()) {
-      JSG_TS_ROOT();
-      JSG_TS_OVERRIDE(AsyncHooksModule {});
-    } else {
-      JSG_TS_OVERRIDE(type AsyncHooksModule = never);
-    }
   }
 };
 
