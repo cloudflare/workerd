@@ -21,7 +21,6 @@ export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExpo
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
 export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
 export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
-export function generateKeyPair(type: AsymmetricKeyType, options: GenerateKeyPairOptions): CryptoKeyPair;
 export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
 export function createPrivateKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
 export function createPublicKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
