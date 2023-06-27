@@ -81,7 +81,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(eventTimestamp, getEventTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(logs, getLogs);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticChannelEvents, getDiagnosticChannelEvents);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
