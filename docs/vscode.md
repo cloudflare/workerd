@@ -6,10 +6,9 @@ Visual Studio Code is a commonly used editor by workerd developers (other editor
 
 The recommended extensions to install are:
 
-* [LLVM clangd extension](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd)
-for code completion and navigation.
+* [LLVM clangd extension](https://marketplace.visualstudio.com/items?itemName=llvm-vs-code-extensions.vscode-clangd) for code completion and navigation.
 
-  For clangd to work well, you need to generate a `compile_commands.json` file. This is described below in [Generating compile_commands.json](#generating-compile_commandsjson).
+  This is described below in [Clangd code completion, navigation, language server](#clangd-code-completion-navigation-language-server).
 
 * [Microsoft C/C++ extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) for debugging, syntax highlighting, etc.
 
@@ -18,6 +17,8 @@ for code completion and navigation.
 * [Capnproto-syntax extension](https://marketplace.visualstudio.com/items?itemName=abronan.capnproto-syntax) for syntax highlighting if you are editing `.capnp` files.
 
 * [GitLens extension](https://marketplace.visualstudio.com/items?itemName=eamodio.gitlens) for super charged git functionality within Visual Studio Code.
+
+* [markdownlint](https://marketplace.visualstudio.com/items?itemName=DavidAnson.vscode-markdownlint) for creating well formed markdown documents.
 
 You can install all of these extensions with the **Extensions: Configure Recommended Extensions (Workspace Folder)** command. You can find this through the Visual Studio Code Command Palette (`shift+ctrl+p` on Linux / Windows, `shift+cmd+p` on OS X) and typing "Configure Recommended Extensions". The recommendations that will be installed can be found in the [.vscode/extensions.json](../.vscode/extensions.json) file.
 
@@ -48,7 +49,7 @@ There are workerd debugging targets within Visual Studio Code which are supporte
 The [.vscode/launch.json](../.vscode/launch.json) file has launch targets to that can be debugged within VSCode.
 
 Before you start debugging, ensure that you have saved a vscode workspace for workerd,
-"File → Save Workspace As...". For more information about workspaces, see https://code.visualstudio.com/docs/editor/workspaces.
+"File → Save Workspace As...". For more information about workspaces, see <https://code.visualstudio.com/docs/editor/workspaces>.
 
 The **Run and Debug** view in VSCode (accessible via `shift+ctrl+d` on Linux and Windows, `shift+cmd+d` on OS X) has a drop-down that allows you to choose which target to run and debug. After selecting a target, hitting `F5` will launch the
 target with the debugger attached.
@@ -73,13 +74,17 @@ We use clangd for code completion and navigation within the Visual Code. We use 
 [compile_flags.txt](../compile_flags.txt) option provide compiler arguments for clangd to analyze sources.
 
 If `compile_flags.txt` is not working well on your system, try running:
-```
+
+```sh
 bazel build --copt="-MD" --cxxopt="-MD" //src/workerd/server:workerd
 ```
+
 to generate dependency files and:
-```
+
+```sh
 find bazel-out/ -name '*.d'`
 ```
+
 to locate the generated dependency files. These files will help you align the include paths in
 `compile_flags.txt` with the ones that the bazel build is using.
 
@@ -89,7 +94,7 @@ Visual Studio Code.
 
 In the past we used [Hedron's Bazel Compile Commands Extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
 to generate a `compile_commands.json` file for clangd, but this was slow and unreliable for the `workerd` use case
-(see https://github.com/cloudflare/workerd/issues/506).
+(see <https://github.com/cloudflare/workerd/issues/506>).
 
 ## Miscellaneous tips
 
