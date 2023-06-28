@@ -46,7 +46,19 @@ public:
   using HostObjectDelegate = jsg::Value(v8::Local<v8::Object>);
 
 private:
-  class Delegate;
+  class Delegate final: public v8::ValueSerializer::Delegate {
+  public:
+    Delegate(v8::Isolate* isolate, SerializerHandle& handle);
+    ~Delegate() override = default;
+    void ThrowDataCloneError(v8::Local<v8::String>) override;
+    v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object>) override;
+    v8::Maybe<uint32_t> GetSharedArrayBufferId(v8::Isolate*,
+                                               v8::Local<v8::SharedArrayBuffer>) override;
+  private:
+    v8::Isolate* isolate;
+    SerializerHandle& handle;
+  };
+
   kj::Own<Delegate> inner;
   v8::ValueSerializer ser;
   jsg::PropertyReflection<jsg::Optional<jsg::Function<HostObjectDelegate>>> delegate;
@@ -90,7 +102,16 @@ public:
   using HostObjectDelegate = jsg::V8Ref<v8::Object>();
 
 private:
-  class Delegate;
+  class Delegate final: public v8::ValueDeserializer::Delegate {
+  public:
+    Delegate(DeserializerHandle& handle);
+
+    v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override;
+
+  private:
+    DeserializerHandle& handle;
+  };
+
   kj::Own<Delegate> inner;
   kj::Array<kj::byte> buffer;
   v8::ValueDeserializer des;

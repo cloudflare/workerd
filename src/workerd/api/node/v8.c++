@@ -3,66 +3,52 @@
 
 namespace workerd::api::node {
 
-class SerializerHandle::Delegate: public v8::ValueSerializer::Delegate {
-public:
-  Delegate(v8::Isolate* isolate, SerializerHandle& handle)
-      : isolate(isolate),
-        handle(handle) {}
-  ~Delegate() override = default;
+SerializerHandle::Delegate::Delegate(v8::Isolate* isolate, SerializerHandle& handle)
+    : isolate(isolate),
+      handle(handle) {}
 
-  void ThrowDataCloneError(v8::Local<v8::String> message) override {
-    isolate->ThrowException(jsg::makeDOMException(isolate, message, "DataCloneError"));
-  }
+void SerializerHandle::Delegate::ThrowDataCloneError(v8::Local<v8::String> message) {
+  isolate->ThrowException(jsg::makeDOMException(isolate, message, "DataCloneError"));
+}
 
-  v8::Maybe<bool> WriteHostObject(
-      v8::Isolate* isolate,
-      v8::Local<v8::Object> object) override {
-    auto& js = jsg::Lock::from(isolate);
-    KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_writeHostObject"))) {
-      KJ_IF_MAYBE(fn, *maybeFn) {
-        return v8::Just((*fn)(js, object).getHandle(js)->BooleanValue(isolate));
-      }
+v8::Maybe<bool> SerializerHandle::Delegate::WriteHostObject(
+    v8::Isolate* isolate,
+    v8::Local<v8::Object> object) {
+  auto& js = jsg::Lock::from(isolate);
+  KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_writeHostObject"))) {
+    KJ_IF_MAYBE(fn, *maybeFn) {
+      return v8::Just((*fn)(js, object).getHandle(js)->BooleanValue(isolate));
     }
-    return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
   }
+  return v8::ValueSerializer::Delegate::WriteHostObject(isolate, object);
+}
 
-  v8::Maybe<uint32_t> GetSharedArrayBufferId(
-      v8::Isolate* isolate,
-      v8::Local<v8::SharedArrayBuffer> sab) override {
-    auto& js = jsg::Lock::from(isolate);
-    KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_getSharedArrayBufferId"))) {
-      KJ_IF_MAYBE(fn, *maybeFn) {
-        return v8::Just(jsg::check((*fn)(js, sab).getHandle(js)->Uint32Value(js.v8Context())));
-      }
+v8::Maybe<uint32_t> SerializerHandle::Delegate::GetSharedArrayBufferId(
+    v8::Isolate* isolate,
+    v8::Local<v8::SharedArrayBuffer> sab) {
+  auto& js = jsg::Lock::from(isolate);
+  KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_getSharedArrayBufferId"))) {
+    KJ_IF_MAYBE(fn, *maybeFn) {
+      return v8::Just(jsg::check((*fn)(js, sab).getHandle(js)->Uint32Value(js.v8Context())));
     }
-    return v8::ValueSerializer::Delegate::GetSharedArrayBufferId(isolate, sab);
   }
+  return v8::ValueSerializer::Delegate::GetSharedArrayBufferId(isolate, sab);
+}
 
-private:
-  v8::Isolate* isolate;
-  SerializerHandle& handle;
-};
+DeserializerHandle::Delegate::Delegate(DeserializerHandle& handle): handle(handle) {}
 
-class DeserializerHandle::Delegate: public v8::ValueDeserializer::Delegate {
-public:
-  Delegate(DeserializerHandle& handle): handle(handle) {}
-
-  v8::MaybeLocal<v8::Object> ReadHostObject(v8::Isolate* isolate) override {
-    auto& js = jsg::Lock::from(isolate);
-    v8::Isolate::AllowJavascriptExecutionScope allow_js(isolate);
-    KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_readHostObject"))) {
-      KJ_IF_MAYBE(fn, *maybeFn) {
-        auto handle = (*fn)(js).getHandle(js);
-        JSG_REQUIRE(handle->IsObject(), TypeError, "_readHostObject must return an object");
-        return v8::MaybeLocal<v8::Object>(handle.As<v8::Object>());
-      }
+v8::MaybeLocal<v8::Object> DeserializerHandle::Delegate::ReadHostObject(v8::Isolate* isolate) {
+  auto& js = jsg::Lock::from(isolate);
+  v8::Isolate::AllowJavascriptExecutionScope allow_js(isolate);
+  KJ_IF_MAYBE(maybeFn, handle.delegate.get(js, kj::str("_readHostObject"))) {
+    KJ_IF_MAYBE(fn, *maybeFn) {
+      auto handle = (*fn)(js).getHandle(js);
+      JSG_REQUIRE(handle->IsObject(), TypeError, "_readHostObject must return an object");
+      return v8::MaybeLocal<v8::Object>(handle.As<v8::Object>());
     }
-    return v8::ValueDeserializer::Delegate::ReadHostObject(js.v8Isolate);
   }
-
-private:
-  DeserializerHandle& handle;
-};
+  return v8::ValueDeserializer::Delegate::ReadHostObject(js.v8Isolate);
+}
 
 SerializerHandle::SerializerHandle(jsg::Lock& js, jsg::Optional<Options> options)
     : inner(kj::heap<SerializerHandle::Delegate>(js.v8Isolate, *this)),
@@ -157,7 +143,28 @@ bool DeserializerHandle::readHeader(jsg::Lock& js) {
 }
 
 v8::Local<v8::Value> DeserializerHandle::readValue(jsg::Lock& js) {
-  return jsg::check(des.ReadValue(js.v8Context()));
+  v8::TryCatch tryCatch(js.v8Isolate);
+  auto value = des.ReadValue(js.v8Context());
+  // On certain inputs, it seems ReadValue can fail with an empty exception.
+  // Fun! We handle the case here by using our own tryCatch and checking to
+  // see if tryCatch.CanContinue() is false or tryCatch.Exception() is empty.
+  if (tryCatch.HasCaught()) {
+    if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
+      // Nothing else we can do...
+      kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+          "Failed to deserialize cloned data."));
+    }
+    // Propagate the exception up...
+    tryCatch.ReThrow();
+    throw jsg::JsExceptionThrown();
+  }
+  // It also appears that it is possible for ReadValue to return an empty
+  // MaybeLocal on some inputs without actually scheduling an exception!
+  // Possibly a v8 bug? Let's handle with a reasonable error.
+  JSG_REQUIRE(!value.IsEmpty(), Error, "Unable to deserialize cloned data.");
+  v8::Local<v8::Value> handle;
+  KJ_ASSERT(value.ToLocal(&handle));
+  return handle;
 }
 
 void DeserializerHandle::transferArrayBuffer(jsg::Lock& js, uint32_t id,
