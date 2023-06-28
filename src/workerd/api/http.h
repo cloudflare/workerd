@@ -10,6 +10,7 @@
 #include <kj/compat/http.h>
 #include <map>
 #include "basics.h"
+#include "src/workerd/jsg/jsg.h"
 #include "streams.h"
 #include "form-data.h"
 #include "web-socket.h"
@@ -356,6 +357,46 @@ class Socket;
 struct SocketOptions;
 struct SocketAddress;
 typedef kj::OneOf<SocketAddress, kj::String> AnySocketAddress;
+
+class NativeRequest: public jsg::Object {
+public:
+  NativeRequest(
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      kj::Own<kj::AsyncInputStream> body) : method(method), url(kj::str(url)), body(kj::mv(body)) {}
+
+  kj::String getMethod() {
+    return kj::str(method);
+  }
+
+  kj::StringPtr getUrl() {
+    return url;
+  }
+
+  kj::Promise<kj::String> readAllText() {
+    return body->readAllText();
+  }
+
+  JSG_RESOURCE_TYPE(NativeRequest, CompatibilityFlags::Reader flags) {
+    JSG_READONLY_INSTANCE_PROPERTY(method, getMethod);
+    JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
+    JSG_METHOD(readAllText);
+  };
+
+private:
+  kj::HttpMethod method;
+  kj::String url;
+  kj::Own<kj::AsyncInputStream> body;
+};
+
+struct HttpModuleInterface {
+public:
+  // Alarms are only exported on DOs, which receive env bindings from the constructor
+  jsg::Function<jsg::Value(jsg::Ref<NativeRequest>)> createRequest;
+
+  JSG_STRUCT(createRequest);
+};
+
 
 class Fetcher: public jsg::Object {
   // A capability to send HTTP requests to some destination other than the public internet.
@@ -996,7 +1037,7 @@ private:
 
 class FetchEvent: public ExtendableEvent {
 public:
-  FetchEvent(jsg::Ref<Request> request)
+  FetchEvent(jsg::Value request)
       : ExtendableEvent("fetch"), request(kj::mv(request)),
         state(AwaitingRespondWith()) {}
 
@@ -1005,7 +1046,7 @@ public:
   static jsg::Ref<FetchEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor
 
-  jsg::Ref<Request> getRequest();
+  jsg::Value getRequest(v8::Isolate* isolate);
   void respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
 
   void passThroughOnException();
@@ -1021,7 +1062,7 @@ public:
   }
 
 private:
-  jsg::Ref<Request> request;
+  jsg::Value request;
 
   struct AwaitingRespondWith {};
   struct RespondWithCalled {
@@ -1069,8 +1110,10 @@ kj::String makeRandomBoundaryCharacters();
   api::Headers::ValueIterator,        \
   api::Headers::ValueIterator::Next,  \
   api::Body,                          \
+  api::HttpModuleInterface,                          \
   api::Response,                      \
   api::Response::InitializerDict,     \
+  api::NativeRequest,                \
   api::Request,                       \
   api::Request::InitializerDict,      \
   api::Fetcher,                       \

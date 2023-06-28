@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "src/workerd/api/http.h"
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
@@ -26,6 +27,9 @@ public:
       getErrorInterfaceTypeHandler(jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
+
+  api::HttpModuleInterface unwrapHttpModuleNamespace(
+      jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

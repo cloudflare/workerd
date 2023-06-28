@@ -335,7 +335,7 @@ public:
     template <typename T>
     auto wrap(v8::Local<v8::Context> context, T&& value) {
       // Wrap a C++ value, returning a v8::Local (possibly of a specific type).
-      return jsgIsolate.wrapper->wrap(context, nullptr, kj::fwd<T>(value));
+      return jsgIsolate.wrapper-> wrap(context, nullptr, kj::fwd<T>(value));
     }
     template <typename T>
     auto wrapNoContext(T&& value) {

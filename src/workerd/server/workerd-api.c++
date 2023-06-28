@@ -178,6 +178,12 @@ const jsg::TypeHandler<api::QueueExportedHandler>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
+api::HttpModuleInterface WorkerdApiIsolate::unwrapHttpModuleNamespace(
+    jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
+      .unwrap<api::HttpModuleInterface>(lock.v8Context(), moduleNamespace);
+}
+
 struct NoopCompilationObserver final : public jsg::CompilationObserver {
   kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
       kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {

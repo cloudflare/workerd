@@ -166,7 +166,7 @@ struct ExportedHandler {
   // constructors that set a field with one of these names would cause confusing type errors.
 
   typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(
-      jsg::Ref<api::Request> request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+      jsg::Value request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
   typedef kj::Promise<void> TailHandler(

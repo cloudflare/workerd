@@ -39,6 +39,7 @@ namespace api {
   struct QueueExportedHandler;
   class WebSocket;
   class WebSocketRequestResponsePair;
+  struct HttpModuleInterface;
 }
 
 class IoContext;
@@ -487,6 +488,9 @@ public:
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
   // Given a module's export namespace, return all the top-level exports.
+
+  virtual api::HttpModuleInterface unwrapHttpModuleNamespace(
+      jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
 
   struct ErrorInterface {
     // Convenience struct for accessing typical Error properties.

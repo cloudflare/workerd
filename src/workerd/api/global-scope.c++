@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "global-scope.h"
+#include "src/workerd/jsg/jsg.h"
 
 #include <kj/encoding.h>
 
@@ -12,6 +13,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
 #include <workerd/jsg/async-context.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/io/io-context.h>
@@ -194,11 +196,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
   }
 
-  auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
+  // auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
-  auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
-  auto jsStream = jsg::alloc<ReadableStream>(ioContext, kj::mv(b));
+  // auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+  // auto jsStream = jsg::alloc<ReadableStream>(ioContext, kj::mv(b));
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
   // thing as the request having a body that happens to be empty. Unfortunately, KJ HTTP gives us
@@ -220,22 +222,32 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   //
   // TODO(cleanup): Should KJ HTTP interfaces explicitly communicate the difference between a
   //   missing body and an empty one?
-  kj::Maybe<Body::ExtractedBody> body;
-  if (headers.get(kj::HttpHeaderId::CONTENT_LENGTH) != nullptr ||
-      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) != nullptr ||
-      requestBody.tryGetLength().orDefault(1) > 0) {
-    body = Body::ExtractedBody(jsStream.addRef());
-  }
+  // kj::Maybe<Body::ExtractedBody> body;
+  // if (headers.get(kj::HttpHeaderId::CONTENT_LENGTH) != nullptr ||
+      // headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) != nullptr ||
+      // requestBody.tryGetLength().orDefault(1) > 0) {
+    // body = Body::ExtractedBody(jsStream.addRef());
+  // }
 
-  auto jsRequest = jsg::alloc<Request>(
-      method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-      jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL,
-                           Fetcher::RequiresHostAndProtocol::YES),
-      nullptr /** AbortSignal **/, kj::mv(cf), kj::mv(body));
+  // auto jsRequest = jsg::alloc<Request>(
+  //     method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+  //     jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL,
+  //                          Fetcher::RequiresHostAndProtocol::YES),
+  //     nullptr /** AbortSignal **/, kj::mv(cf), kj::mv(body));
   // I set the redirect mode to manual here, so that by default scripts that just pass requests
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
+  auto moduleRegistry = jsg::ModuleRegistry::from(lock);
+  auto moduleName = kj::Path::parse("cloudflare-internal:http");
+  auto& moduleInfo = KJ_REQUIRE_NONNULL(
+    moduleRegistry->resolve(lock, moduleName, jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY));
+  auto module = moduleInfo.module.getHandle(lock);
+  jsg::instantiateModule(lock, module);
+
+  auto httpModule = lock.getWorker().getIsolate().getApiIsolate().unwrapHttpModuleNamespace(lock, module->GetModuleNamespace());
+  auto support = jsg::alloc<NativeRequest>(method, url, kj::addRef(*ownRequestBody));
+  auto jsRequest = httpModule.createRequest(lock, kj::mv(support));
   auto event = jsg::alloc<FetchEvent>(kj::mv(jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
@@ -243,7 +255,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   bool useDefaultHandling;
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->fetch) {
-      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, event->getRequest(isolate), h->env.addRef(isolate), h->getCtx(isolate));
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
@@ -271,12 +283,13 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
           "the eventual Response) as the argument.");
     }
 
-    if (jsStream->isDisturbed()) {
-      lock.logUncaughtException(
-          "Script consumed request body but didn't call respondWith(). Can't forward request.");
-      response.sendError(500, "Internal Server Error", ioContext.getHeaderTable());
-      return addNoopDeferredProxy(kj::READY_NOW);
-    } else {
+    // if (jsStream->isDisturbed()) {
+    //   lock.logUncaughtException(
+    //       "Script consumed request body but didn't call respondWith(). Can't forward request.");
+    //   response.sendError(500, "Internal Server Error", ioContext.getHeaderTable());
+    //   return addNoopDeferredProxy(kj::READY_NOW);
+    // } else
+    {
       auto client = ioContext.getHttpClient(
           IoContext::NEXT_CLIENT_CHANNEL, false,
           cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }),
@@ -288,7 +301,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
       return DeferredProxy<void> { promise.attach(kj::mv(adapter), kj::mv(client)) };
     }
   } else KJ_IF_MAYBE(promise, event->getResponsePromise(lock)) {
-    auto body2 = kj::addRef(*ownRequestBody);
+    // auto body2 = kj::addRef(*ownRequestBody);
 
     // HACK: If the client disconnects, the `response` reference is no longer valid. But our
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
@@ -330,10 +343,10 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
       }).attach(kj::mv(deferredNeuter));
 
       return deferredProxy;
-    }, [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+    }, [/*body = kj::mv(body2)*/](kj::Exception&& e) mutable -> DeferredProxy<void> {
       // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
       //   so `deferredNeuter` hasn't been destroyed yet.
-      body->neuter(NeuterableInputStream::THREW_EXCEPTION);
+      // body->neuter(NeuterableInputStream::THREW_EXCEPTION);
       kj::throwFatalException(kj::mv(e));
     });
   } else {

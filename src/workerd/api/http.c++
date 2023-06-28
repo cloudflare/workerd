@@ -1419,8 +1419,8 @@ jsg::Optional<v8::Local<v8::Object>> Response::getCf(
 
 // =======================================================================================
 
-jsg::Ref<Request> FetchEvent::getRequest() {
-  return request.addRef();
+jsg::Value FetchEvent::getRequest(v8::Isolate* isolate) {
+  return request.addRef(isolate);
 }
 
 kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::Lock& js) {
