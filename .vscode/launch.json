@@ -297,6 +297,7 @@
         // be some logic to create the test directory and set the environment variable
         // for the test.
         // "src/workerd/api/actor-alarms-test.wd-test",
+        // "src/workerd/api/actor-alarms-delete-test.wd-test",
         // "src/workerd/api/sql-test.wd-test",
       ],
     }

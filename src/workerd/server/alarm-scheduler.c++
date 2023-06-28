@@ -85,7 +85,7 @@ void AlarmScheduler::registerNamespace(kj::StringPtr uniqueKey, GetActorFn getAc
 
 kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
   KJ_IF_MAYBE(alarm, alarms.find(actor)) {
-    if (alarm->started) {
+    if (alarm->status == AlarmStatus::STARTED) {
       // getAlarm() when the alarm handler is running should return null,
       // unless an alarm is queued;
       return alarm->queuedAlarm;
@@ -116,7 +116,7 @@ bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
   });
 
   if (existing) {
-    if (entry.started) {
+    if (entry.status != AlarmStatus::WAITING) {
       // We queue any new alarm after the existing alarm even if the new alarm has the same scheduled
       // time, as receiving a notification directly maps to a write for that time in the actor.
       entry.queuedAlarm = scheduledTime;
@@ -133,9 +133,17 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 
   KJ_IF_MAYBE(entry, alarms.findEntry(actor)) {
     KJ_IF_MAYBE(queued, entry->value.queuedAlarm) {
-      entry->value = scheduleAlarm(clock.now(), kj::mv(entry->value.actor), *queued);
+      if ((*entry).value.status == AlarmStatus::STARTED) {
+        // If we are currently running an alarm, we want to delete the queued instead of current.
+        entry->value.queuedAlarm = nullptr;
+      } else {
+        entry->value = scheduleAlarm(clock.now(), kj::mv(entry->value.actor), *queued);
+      }
     } else {
-      alarms.erase(*entry);
+      if ((*entry).value.status != AlarmStatus::STARTED) {
+        // We can't remove running alarms.
+        alarms.erase(*entry);
+      }
     }
   }
 
@@ -169,7 +177,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       -> kj::Promise<RetryInfo> {
     {
       auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(*actor));
-      entry.value.started = true;
+      entry.value.status = AlarmStatus::STARTED;
     }
 
     return runAlarm(*actor, scheduledTime).catch_([](kj::Exception&& e)
@@ -197,16 +205,20 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
     // to running the queued alarm instead.
     KJ_IF_MAYBE(a, entry.value.queuedAlarm) {
       // creating a new alarm and overwriting the old one will reset
-      // `started` to false and `queuedAlarm` to null
+      // `status` to WAITING and `queuedAlarm` to null
       entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), *a);
       return kj::READY_NOW;
     }
+
+    // When we reach this block of code and alarm has either successed or failed and may (or may not)
+    // retry. Setting the status of an alarm as FINISHED here, will allow deletion of alarms between
+    // retries. If there's a retry, `makeAlarmTask` is called, setting status as RUNNING again.
+    entry.value.status = AlarmStatus::FINISHED;
 
     if (retryInfo.retry) {
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
         deleteAlarm(*entry.value.actor);
-
         return kj::READY_NOW;
       }
       if (retryInfo.retryCountsAgainstLimit) {
