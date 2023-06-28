@@ -38,13 +38,15 @@ jobs:
         # will also install lldb and clangd alongside dependencies, which can be removed with
         # `sudo apt-get remove -y lldb-14 clangd-14; sudo apt-get autoremove -y` if space is
         # limited.
+        # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
+        # libc++, but this appears to cause errors so they are also being explicitly installed.
         run: |
             export DEBIAN_FRONTEND=noninteractive
             sudo apt-get install -y build-essential git lsb-release wget software-properties-common gnupg
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
             sudo ./llvm.sh 14
-            sudo apt-get install -y libc++-14-dev
+            sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev
             echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
             echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
       - name: Setup Windows
