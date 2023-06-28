@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
+#include "v8.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
@@ -39,7 +40,8 @@ void registerNodeJsCompatModules(
   V(AsyncHooksModule, "node-internal:async_hooks")                              \
   V(BufferUtil, "node-internal:buffer")                                         \
   V(CryptoImpl, "node-internal:crypto")                                         \
-  V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
+  V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")              \
+  V(V8Module, "node-internal:v8")
 
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
@@ -65,6 +67,7 @@ void registerNodeJsCompatModules(
   api::node::CompatibilityFlags,           \
   EW_NODE_BUFFER_ISOLATE_TYPES,            \
   EW_NODE_CRYPTO_ISOLATE_TYPES,            \
+  EW_NODE_V8_ISOLATE_TYPES,                \
   EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, \
   EW_NODE_ASYNCHOOKS_ISOLATE_TYPES
 }  // namespace workerd::api::node
