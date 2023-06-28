@@ -34,7 +34,10 @@ export default {
 
     {
       // Using Serializer and Deserializer directly
-      const ser = new Serializer();
+      // Passing an optional version to the Serializer is a Cloudflare-specific
+      // extension to the Node.js API that allows specific control over the wire
+      // serialization format.
+      const ser = new Serializer({ version: 15 });
       ser.writeHeader();
       ser.writeValue(1);
       ser.writeUint32(2);
@@ -50,6 +53,7 @@ export default {
       des.transferArrayBuffer(0, u8.buffer);
 
       ok(des.readHeader());
+      console.log(des.getWireFormatVersion()) // Prints: 15
       strictEqual(des.readValue(), 1);
       strictEqual(des.readUint32(), 2);
       deepStrictEqual(des.readUint64(), [1, 2]);

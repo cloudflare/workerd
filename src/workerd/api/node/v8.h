@@ -3,13 +3,23 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/ser.h>
+#include <v8-value-serializer-version.h>
 
 namespace workerd::api::node {
 
+static constexpr uint32_t kMaxSerializationVersion = v8::CurrentValueSerializerFormatVersion();
+static constexpr uint32_t kMinSerializationVersion = 13;
+
 class SerializerHandle final: public jsg::Object {
 public:
-  SerializerHandle(jsg::Lock& js);
-  static jsg::Ref<SerializerHandle> constructor(jsg::Lock& js);
+  struct Options {
+    jsg::Optional<uint32_t> version;
+    JSG_STRUCT(version);
+  };
+
+  SerializerHandle(jsg::Lock& js, jsg::Optional<Options> options = nullptr);
+  static jsg::Ref<SerializerHandle> constructor(jsg::Lock& js,
+                                                jsg::Optional<Options> options);
   void writeHeader();
   bool writeValue(jsg::Lock& js, jsg::Value value);
   kj::Array<kj::byte> releaseBuffer();
@@ -45,8 +55,17 @@ private:
 
 class DeserializerHandle final: public jsg::Object {
 public:
-  DeserializerHandle(jsg::Lock& js, jsg::BufferSource source);
-  static jsg::Ref<DeserializerHandle> constructor(jsg::Lock& js, jsg::BufferSource source);
+  struct Options {
+    jsg::Optional<uint32_t> version;
+    JSG_STRUCT(version);
+  };
+
+  DeserializerHandle(jsg::Lock& js,
+                     jsg::BufferSource source,
+                     jsg::Optional<Options> options = nullptr);
+  static jsg::Ref<DeserializerHandle> constructor(jsg::Lock& js,
+                                                  jsg::BufferSource source,
+                                                  jsg::Optional<Options> options);
   bool readHeader(jsg::Lock& js);
   v8::Local<v8::Value> readValue(jsg::Lock& js);
   void transferArrayBuffer(jsg::Lock& js, uint32_t id, jsg::V8Ref<v8::Object> ab);
@@ -82,15 +101,23 @@ private:
 
 class V8Module: public jsg::Object {
 public:
+  static constexpr auto MAX_SERIALIZATION_VERSION = kMaxSerializationVersion;
+  static constexpr auto MIN_SERIALIZATION_VERSION = kMinSerializationVersion;
+
   JSG_RESOURCE_TYPE(V8Module) {
     JSG_NESTED_TYPE(SerializerHandle);
     JSG_NESTED_TYPE(DeserializerHandle);
+
+    JSG_STATIC_CONSTANT(MAX_SERIALIZATION_VERSION);
+    JSG_STATIC_CONSTANT(MIN_SERIALIZATION_VERSION);
   }
 };
 
-#define EW_NODE_V8_ISOLATE_TYPES        \
-    api::node::SerializerHandle,        \
-    api::node::DeserializerHandle,      \
+#define EW_NODE_V8_ISOLATE_TYPES            \
+    api::node::SerializerHandle,            \
+    api::node::SerializerHandle::Options,   \
+    api::node::DeserializerHandle,          \
+    api::node::DeserializerHandle::Options, \
     api::node::V8Module
 
 }  // namespace workerd::api::node

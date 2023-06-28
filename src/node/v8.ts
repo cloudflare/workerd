@@ -30,13 +30,17 @@ import { Buffer } from 'node-internal:internal_buffer';
 import { default as v8Module } from 'node-internal:v8';
 const {
   SerializerHandle,
-  DeserializerHandle
+  DeserializerHandle,
+  MAX_SERIALIZATION_VERSION,
+  MIN_SERIALIZATION_VERSION
 } = v8Module;
 
 import {
   isArrayBuffer,
   isArrayBufferView,
 } from 'node-internal:internal_types';
+
+import { validateObject } from 'node-internal:validators';
 
 import {
   ERR_INVALID_ARG_TYPE,
@@ -47,11 +51,16 @@ declare class DOMException {
   constructor(message: string, name: string);
 }
 
+export interface Options {
+  version?: number;
+};
+
 export class Serializer {
   #handle: typeof SerializerHandle;
 
-  constructor() {
-    this.#handle = new (SerializerHandle as any)();
+  constructor(options: Options = {}) {
+    validateObject(options, 'options', {});
+    this.#handle = new (SerializerHandle as any)(options);
     const self: any = this;
     Object.defineProperties(this.#handle, {
       _writeHostObject: {
@@ -128,11 +137,12 @@ export class Deserializer {
   #handle: typeof DeserializerHandle;
   buffer: Buffer;
 
-  constructor(buffer: ArrayBufferView) {
+  constructor(buffer: ArrayBufferView, options: Options = {}) {
     if (!isArrayBufferView(buffer)) {
       throw new ERR_INVALID_ARG_TYPE('buffer', ['Buffer', 'TypeArray', 'DataView'], buffer);
     }
-    this.#handle = new (DeserializerHandle as any)(buffer);
+    validateObject(options, 'options', {});
+    this.#handle = new (DeserializerHandle as any)(buffer, options);
     const self: any = this;
     Object.defineProperties(this.#handle, {
       _readHostObject: {
@@ -232,8 +242,8 @@ function arrayBufferViewIndexToType(index: number) {
 }
 
 export class DefaultSerializer extends Serializer {
-  constructor() {
-    super();
+  constructor(options: Options = {}) {
+    super(options);
     this._setTreatArrayBufferViewsAsHostObjects(true);
   }
 
@@ -262,8 +272,8 @@ export class DefaultSerializer extends Serializer {
 }
 
 export class DefaultDeserializer extends Deserializer {
-  constructor(buffer: ArrayBufferView) {
-    super(buffer);
+  constructor(buffer: ArrayBufferView, options: Options = {}) {
+    super(buffer, options);
   }
 
   _readHostObject() : object {
@@ -288,18 +298,25 @@ export class DefaultDeserializer extends Deserializer {
   }
 }
 
-export function serialize(value: any): Buffer {
-  const serializer = new DefaultSerializer();
+export function serialize(value: any, options: Options = {}): Buffer {
+  const serializer = new DefaultSerializer(options);
   serializer.writeHeader();
   serializer.writeValue(value);
   return serializer.releaseBuffer();
 }
 
-export function deserialize(buffer: ArrayBufferView): any {
-  const deserializer = new DefaultDeserializer(buffer);
+export function deserialize(buffer: ArrayBufferView, options: Options = {}): any {
+  const deserializer = new DefaultDeserializer(buffer, options);
   deserializer.readHeader();
   return deserializer.readValue();
 }
+
+// These are cloudflare-specific additions to the API to support explicitly
+// specifying the serialization version.
+export {
+  MIN_SERIALIZATION_VERSION,
+  MAX_SERIALIZATION_VERSION
+};
 
 export default {
   serialize,
@@ -308,4 +325,8 @@ export default {
   Deserializer,
   DefaultSerializer,
   DefaultDeserializer,
+  // These are cloudflare-specific additions to the API to support explicitly
+  // specifying the serialization version.
+  MAX_SERIALIZATION_VERSION,
+  MIN_SERIALIZATION_VERSION,
 };

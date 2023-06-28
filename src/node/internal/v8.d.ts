@@ -30,3 +30,6 @@ export declare const DeserializerHandle: {
   transferArrayBuffer(id: number, arrayBuffer: ArrayBuffer): void;
   getWireFormatVersion(): number;
 }
+
+export const MIN_SERIALIZATION_VERSION: number;
+export const MAX_SERIALIZATION_VERSION: number;

@@ -64,12 +64,24 @@ private:
   DeserializerHandle& handle;
 };
 
-SerializerHandle::SerializerHandle(jsg::Lock& js)
+SerializerHandle::SerializerHandle(jsg::Lock& js, jsg::Optional<Options> options)
     : inner(kj::heap<SerializerHandle::Delegate>(js.v8Isolate, *this)),
-      ser(js.v8Isolate, inner.get()) {}
+      ser(js.v8Isolate, inner.get()) {
+  KJ_IF_MAYBE(opt, options) {
+    KJ_IF_MAYBE(version, opt->version) {
+      JSG_REQUIRE(*version >= kMinSerializationVersion, Error,
+          kj::str("The minimum serialization version is ", kMinSerializationVersion));
+      JSG_REQUIRE(*version <= kMaxSerializationVersion, Error,
+          kj::str("The maximum serialization version is ", kMaxSerializationVersion));
+      ser.SetWriteVersion(*version);
+    }
+  }
+}
 
-jsg::Ref<SerializerHandle> SerializerHandle::constructor(jsg::Lock& js) {
-  return jsg::alloc<SerializerHandle>(js);
+jsg::Ref<SerializerHandle> SerializerHandle::constructor(
+    jsg::Lock& js,
+    jsg::Optional<Options> options) {
+  return jsg::alloc<SerializerHandle>(js, kj::mv(options));
 }
 
 void SerializerHandle::writeHeader() {
@@ -115,14 +127,29 @@ void SerializerHandle::setTreatArrayBufferViewsAsHostObjects(bool flag) {
   ser.SetTreatArrayBufferViewsAsHostObjects(flag);
 }
 
-DeserializerHandle::DeserializerHandle(jsg::Lock& js, jsg::BufferSource source)
+DeserializerHandle::DeserializerHandle(
+    jsg::Lock& js,
+    jsg::BufferSource source,
+    jsg::Optional<Options> options)
     : inner(kj::heap<Delegate>(*this)),
       buffer(kj::heapArray(source.asArrayPtr())),
-      des(js.v8Isolate, buffer.begin(), buffer.size(), inner.get()) {}
+      des(js.v8Isolate, buffer.begin(), buffer.size(), inner.get()) {
+  KJ_IF_MAYBE(opt, options) {
+    KJ_IF_MAYBE(version, opt->version) {
+      JSG_REQUIRE(*version >= kMinSerializationVersion, Error,
+          kj::str("The minimum serialization version is ", kMinSerializationVersion));
+      JSG_REQUIRE(*version <= kMaxSerializationVersion, Error,
+          kj::str("The maximum serialization version is ", kMaxSerializationVersion));
+      des.SetWireFormatVersion(*version);
+    }
+  }
+}
 
-jsg::Ref<DeserializerHandle> DeserializerHandle::constructor(jsg::Lock& js,
-                                                             jsg::BufferSource source) {
-  return jsg::alloc<DeserializerHandle>(js, kj::mv(source));
+jsg::Ref<DeserializerHandle> DeserializerHandle::constructor(
+    jsg::Lock& js,
+    jsg::BufferSource source,
+    jsg::Optional<Options> options) {
+  return jsg::alloc<DeserializerHandle>(js, kj::mv(source), kj::mv(options));
 }
 
 bool DeserializerHandle::readHeader(jsg::Lock& js) {
