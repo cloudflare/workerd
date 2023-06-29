@@ -42,6 +42,8 @@ import {
 } from 'node-internal:internal_errors';
 
 export const kHandle = Symbol('kHandle');
+export const kFinalized = Symbol('kFinalized');
+export const kState = Symbol('kFinalized');
 
 export function getArrayBufferOrView(buffer: Buffer | ArrayBuffer | ArrayBufferView | string, name: string, encoding?: string): Buffer | ArrayBuffer | ArrayBufferView {
   if (isAnyArrayBuffer(buffer))

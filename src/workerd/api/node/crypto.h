@@ -2,6 +2,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/api/crypto.h>
+#include <openssl/evp.h>
 
 namespace workerd::api::node {
 
@@ -55,8 +56,33 @@ public:
   // Primes
   kj::Array<kj::byte> randomPrime(uint32_t size, bool safe,
       jsg::Optional<kj::Array<kj::byte>> add, jsg::Optional<kj::Array<kj::byte>> rem);
-
   bool checkPrimeSync(kj::Array<kj::byte> bufferView, uint32_t num_checks);
+
+  // Hash
+  class HashHandle final: public jsg::Object {
+    public:
+      HashHandle(kj::String& algorithm, kj::Maybe<uint32_t> xofLen);
+      HashHandle(EVP_MD_CTX* in_ctx, kj::Maybe<uint32_t> xofLen);
+
+      jsg::Ref<HashHandle> copy(jsg::Lock& js, kj::Maybe<uint32_t> xofLen);
+      int update(jsg::Lock& js, kj::Array<kj::byte> data);
+      kj::Array<kj::byte> digest(jsg::Lock& js);
+      static jsg::Ref<HashHandle> constructor(jsg::Lock& js, kj::String algorithm,
+                                              kj::Maybe<uint32_t> xofLen);
+
+      JSG_RESOURCE_TYPE(HashHandle) {
+        JSG_METHOD(update);
+        JSG_METHOD(digest);
+        JSG_METHOD(copy);
+      };
+
+    private:
+      void checkDigestLength(const EVP_MD* md, kj::Maybe<uint32_t> xofLen);
+
+      jsg::Optional<kj::Array<kj::byte>> _digest;
+      kj::Own<EVP_MD_CTX> md_ctx;
+      unsigned md_len;
+  };
 
   // Pbkdf2
   kj::Array<kj::byte> getPbkdf(kj::Array<kj::byte> password, kj::Array<kj::byte> salt,
@@ -137,6 +163,8 @@ public:
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);
+    // Hash
+    JSG_NESTED_TYPE(HashHandle);
     // Pbkdf2
     JSG_METHOD(getPbkdf);
     // Keys
@@ -153,6 +181,7 @@ public:
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                   \
     api::node::CryptoImpl,                             \
     api::node::CryptoImpl::DiffieHellmanHandle,        \
+    api::node::CryptoImpl::HashHandle,                 \
     api::node::CryptoImpl::KeyExportOptions,           \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
     api::node::CryptoImpl::CreateAsymmetricKeyOptions
