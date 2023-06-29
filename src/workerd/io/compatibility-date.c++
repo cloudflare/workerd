@@ -87,6 +87,10 @@ struct CompatDate {
 
 }  // namespace
 
+kj::String currentDateStr() {
+  return CompatDate::today().toString();
+}
+
 void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text>::Reader compatFlags,
                          CompatibilityFlags::Builder output,
                          Worker::ValidationErrorReporter& errorReporter,
