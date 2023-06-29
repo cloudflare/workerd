@@ -302,6 +302,40 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
       check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
 }
 
+void instantiateModule(v8::Isolate* isolate, v8::Local<v8::Context> context, v8::Local<v8::Module>& module) {
+  KJ_ASSERT(!module.IsEmpty());
+
+  auto status = module->GetStatus();
+  // Nothing to do if the module is already instantiated, evaluated, or errored.
+  if (status == v8::Module::Status::kInstantiated ||
+      status == v8::Module::Status::kEvaluated ||
+      status == v8::Module::Status::kErrored) return;
+
+  JSG_REQUIRE(status == v8::Module::Status::kUninstantiated, Error,
+      "Module cannot be synchronously required while it is being instantiated or evaluated. "
+      "This error typically means that a CommonJS or NodeJS-Compat type module has a circular "
+      "dependency on itself, and that a synchronous require() is being called while the module "
+      "is being loaded.");
+
+  jsg::check(module->InstantiateModule(context, &resolveCallback));
+  auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
+  isolate->PerformMicrotaskCheckpoint();
+
+  switch (prom->State()) {
+    case v8::Promise::kPending:
+      // Let's make sure nobody is depending on pending modules that do not resolve first.
+      KJ_LOG(ERROR, "Async module was not immediately resolved.");
+    break;
+    case v8::Promise::kRejected:
+      // Since we don't actually support I/O when instantiating a worker, we don't return the
+      // promise from module->Evaluate, which means we lose any errors that happen during
+      // instantiation if we don't throw the rejection exception here.
+      isolate->ThrowException(module->GetException());
+      throw jsg::JsExceptionThrown();
+    case v8::Promise::kFulfilled:
+    break;
+  }}
+
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   KJ_ASSERT(!module.IsEmpty());
   auto isolate = js.v8Isolate;

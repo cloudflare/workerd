@@ -432,6 +432,12 @@ using HasGetTemplateOverload = decltype(
 // declarations to make other types appear in the global scope. It is not necessary for the types
 // to be nested in C++.
 
+#define JSG_NESTED_JS_TYPE(Bundle, Module, Type) \
+  do { \
+    static const char NAME[] = #Type; \
+    registry.registerNestedJsType(Bundle, Module, NAME); \
+  } while (false)
+
 #define JSG_NESTED_TYPE_NAMED(Type, Name) \
   do { \
     /* Note that `Type` may be incomplete here, we should be OK with that. */ \

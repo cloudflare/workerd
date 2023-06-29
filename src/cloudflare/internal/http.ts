@@ -32,3 +32,7 @@ class RequestImpl {
 export function createRequest(support: INativeRequest) {
   return new RequestImpl(support);
 }
+
+export class Response {
+
+}

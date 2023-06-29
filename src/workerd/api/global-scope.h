@@ -14,6 +14,7 @@
 #include "hibernation-event-params.h"
 #include "blob.h"
 #include "streams.h"
+#include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
 
@@ -26,7 +27,6 @@ class SubtleCrypto;
 class TextDecoder;
 class TextEncoder;
 class HTMLRewriter;
-class Response;
 class TraceItem;
 class ScheduledController;
 class ScheduledEvent;
@@ -454,8 +454,8 @@ public:
 
     JSG_NESTED_TYPE(Headers);
     JSG_NESTED_TYPE(Body);
-    JSG_NESTED_TYPE(Request);
-    JSG_NESTED_TYPE(Response);
+    // JSG_NESTED_TYPE(Request);
+    JSG_NESTED_JS_TYPE(CLOUDFLARE_BUNDLE, "cloudflare-internal:http", Response);
     JSG_NESTED_TYPE(WebSocket);
     JSG_NESTED_TYPE(WebSocketPair);
     JSG_NESTED_TYPE(WebSocketRequestResponsePair);
