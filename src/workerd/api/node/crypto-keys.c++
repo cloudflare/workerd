@@ -115,13 +115,6 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return key->getAlgorithmName();
 }
 
-CryptoKeyPair CryptoImpl::generateKeyPair(
-    jsg::Lock& js,
-    kj::String type,
-    CryptoImpl::GenerateKeyPairOptions options) {
-  KJ_UNIMPLEMENTED("not implemented");
-}
-
 jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, kj::Array<kj::byte> keyData) {
   return jsg::alloc<CryptoKey>(kj::heap<SecretKey>(kj::heapArray(keyData.asPtr())));
 }

@@ -27,10 +27,9 @@
 /* eslint-disable */
 
 import { Buffer } from 'node-internal:internal_buffer';
-import { randomBytes } from 'node-internal:crypto_random';
+
 import {
   CryptoKey,
-  CryptoKeyPair,
   JsonWebKey,
   KeyData,
   KeyObjectType,
@@ -66,15 +65,12 @@ import {
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 
 import {
-  validateFunction,
-  validateInteger,
   validateObject,
-  validateOneOf,
   validateString,
-  validateUint32,
 } from 'node-internal:validators';
 
 // In Node.js, the definition of KeyObject is a bit complicated because
@@ -393,48 +389,11 @@ export function createPublicKey(key: CreateAsymmetricKeyOptions | KeyData | Cryp
   return KeyObject.from(cryptoImpl.createPublicKey(inner)) as PublicKeyObject;
 }
 
-export type GenerateKeyCallback = (err?: any, key?: KeyObject) => void;
-
-function validateGenerateKeyOptions(type: SecretKeyType, options: GenerateKeyOptions) {
-  // While Node.js requires that we pass in a type, it uses that
-  // only for validation of the length. The secret key returned
-  // is not specific to either hmac or aes.
-  validateOneOf(type, 'type', ['hmac', 'aes']);
-  validateObject(options, 'options', {});
-  const { length } = options;
-  validateUint32(length, 'options.length');
-  if (type === 'aes') {
-    validateOneOf(length, 'options.length', [128, 192, 256]);
-  } else if (type === 'hmac') {
-    validateInteger(length, 'options.length', 8, 2147483647);
-  } else {
-    throw new ERR_INVALID_ARG_VALUE('type', type);
-  }
-}
-
-export function generateKey(type: SecretKeyType,
-                            options: GenerateKeyOptions,
-                            callback: GenerateKeyCallback) {
-  validateGenerateKeyOptions(type, options);
-  validateFunction(callback, 'callback');
-  new Promise<KeyObject>((resolve, reject) => {
-    try {
-      resolve(KeyObject.from(cryptoImpl.createSecretKey(randomBytes(options.length))));
-    } catch (err) {
-      reject(err);
-    }
-  }).then((key: KeyObject) => callback(null, key))
-    .catch((err: any) => callback(err));
-}
-
-export function generateKeySync(type: SecretKeyType,
-                                options: GenerateKeyOptions) {
-  validateGenerateKeyOptions(type, options);
-  return KeyObject.from(cryptoImpl.createSecretKey(randomBytes(options.length)));
-}
+// ======================================================================================
 
 export type PublicKeyResult = KeyExportResult | PublicKeyObject;
 export type PrivateKeyResult = KeyExportResult | PrivateKeyObject;
+export type GenerateKeyCallback = (err?: any, key?: KeyObject) => void;
 export type GenerateKeyPairCallback =
   (err?: any, publicKey?: PublicKeyResult, privateKey?: PrivateKeyResult) => void;
 
@@ -443,109 +402,42 @@ export interface KeyObjectPair {
   privateKey: PrivateKeyResult;
 }
 
-function validateGenerateKeyPairOptions(
-    type : AsymmetricKeyType,
-    options: GenerateKeyPairOptions) {
-  validateOneOf(type, 'type', ['rsa', 'rsa-pss', 'dsa', 'ec', 'x25519', 'ed25519', 'dh']);
-  validateObject(options, 'options', {});
-  const {
-    modulusLength,
-    publicExponent,
-    hashAlgorithm,
-    mgf1HashAlgorithm,
-    saltLength,
-    divisorLength,
-    namedCurve,
-    prime,
-    primeLength,
-    generator,
-    groupName,
-    paramEncoding,
-    publicKeyEncoding,
-    privateKeyEncoding,
-  } = options;
-  if (modulusLength !== undefined) validateInteger(modulusLength, 'options.modulusLength', 0);
-  if (publicExponent !== undefined) {
-    if (typeof publicExponent !== 'bigint' && typeof publicExponent !== 'number')
-      throw new ERR_INVALID_ARG_TYPE('options.publicExponent', ['bigint', 'number'], publicExponent);
-  }
-  if (hashAlgorithm !== undefined) {
-    validateString(hashAlgorithm, 'options.hashAlgorithm');
-  }
-  if (mgf1HashAlgorithm !== undefined) {
-    validateString(mgf1HashAlgorithm, 'options.mgf1HashAlgorithm');
-  }
-  if (saltLength !== undefined) {
-    validateInteger(saltLength, 'options.saltLength', 0);
-  }
-  if (divisorLength !== undefined) {
-    validateInteger(divisorLength, 'options.divisorLength', 0);
-  }
-  if (namedCurve !== undefined) {
-    validateString(namedCurve, 'options.namedCurve');
-  }
-  if (prime !== undefined) {
-    if (!isUint8Array(prime))
-      throw new ERR_INVALID_ARG_TYPE('options.prime', 'Uint8Array', prime);
-  }
-  if (primeLength !== undefined) {
-    validateInteger(primeLength, 'options.primeLength', 0);
-  }
-  if (generator !== undefined) {
-    validateInteger(generator, 'options.generator', 0);
-  }
-  if (groupName !== undefined) {
-    validateString(groupName, 'options.groupName');
-  }
-  if (paramEncoding !== undefined) {
-    validateOneOf(paramEncoding, 'options.paramEncoding', ['named', 'explicit']);
-  }
-  if (publicKeyEncoding !== undefined) {
-    validateObject(publicKeyEncoding, 'options.publicKeyEncoding', {});
-  }
-  if (privateKeyEncoding !== undefined) {
-    validateObject(privateKeyEncoding, 'options.privateKeyEncoding', {});
-  }
+export function generateKey(_type: SecretKeyType,
+  _options: GenerateKeyOptions,
+  callback: GenerateKeyCallback) {
+// We intentionally have not implemented key generation up to this point.
+// The reason is that generation of cryptographically safe keys is a CPU
+// intensive operation that can often exceed limits on the amount of CPU
+// time a worker is allowed.
+callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync'));
 }
 
-function toExportedKeyPair(inner : CryptoKeyPair, options: GenerateKeyPairOptions) : KeyObjectPair {
-  const {
-    publicKey: pubkey,
-    privateKey: pvtkey,
-  } = inner;
-
-  let publicKey: PublicKeyResult = KeyObject.from(pubkey) as PublicKeyObject;
-  let privateKey: PrivateKeyResult = KeyObject.from(pvtkey) as PrivateKeyObject;
-
-  if (options.publicKeyEncoding !== undefined) {
-    publicKey = publicKey.export(options.publicKeyEncoding);
-  }
-  if (options.privateKeyEncoding !== undefined) {
-    privateKey = privateKey.export(options.privateKeyEncoding);
-  }
-
-  return { publicKey, privateKey };
+export function generateKeySync(_type: SecretKeyType,
+      _options: GenerateKeyOptions) {
+// We intentionally have not implemented key generation up to this point.
+// The reason is that generation of cryptographically safe keys is a CPU
+// intensive operation that can often exceed limits on the amount of CPU
+// time a worker is allowed.
+throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeySync');
 }
 
 export function generateKeyPair(
-    type : AsymmetricKeyType,
-    options: GenerateKeyPairOptions,
+    _type : AsymmetricKeyType,
+    _options: GenerateKeyPairOptions,
     callback: GenerateKeyPairCallback) {
-  validateGenerateKeyPairOptions(type, options);
-  validateFunction(callback, 'callback');
-  new Promise<KeyObjectPair>((resolve, reject) => {
-    try {
-      resolve(toExportedKeyPair(cryptoImpl.generateKeyPair(type, options), options));
-    } catch (err) {
-      reject(err);
-    }
-  }).then(({ publicKey, privateKey }) => callback(null, publicKey, privateKey))
-    .catch((err: any) => callback(err));
+  // We intentionally have not implemented key generation up to this point.
+  // The reason is that generation of cryptographically safe keys is a CPU
+  // intensive operation that can often exceed limits on the amount of CPU
+  // time a worker is allowed.
+  callback(new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPair'));
 }
 
 export function generateKeyPairSync(
-    type : AsymmetricKeyType,
-    options: GenerateKeyPairOptions) : KeyObjectPair {
-  validateGenerateKeyPairOptions(type, options);
-  return toExportedKeyPair(cryptoImpl.generateKeyPair(type, options), options);
+    _type : AsymmetricKeyType,
+    _options: GenerateKeyPairOptions) : KeyObjectPair {
+  // We intentionally have not implemented key generation up to this point.
+  // The reason is that generation of cryptographically safe keys is a CPU
+  // intensive operation that can often exceed limits on the amount of CPU
+  // time a worker is allowed.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('crypto.generateKeyPairSync');
 }

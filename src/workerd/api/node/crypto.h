@@ -126,8 +126,6 @@ public:
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
 
-  CryptoKeyPair generateKeyPair(jsg::Lock& js, kj::String type, GenerateKeyPairOptions options);
-
   jsg::Ref<CryptoKey> createSecretKey(jsg::Lock& js, kj::Array<kj::byte>);
   jsg::Ref<CryptoKey> createPrivateKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
   jsg::Ref<CryptoKey> createPublicKey(jsg::Lock& js, CreateAsymmetricKeyOptions options);
@@ -146,7 +144,6 @@ public:
     JSG_METHOD(equals);
     JSG_METHOD(getAsymmetricKeyDetail);
     JSG_METHOD(getAsymmetricKeyType);
-    JSG_METHOD(generateKeyPair);
     JSG_METHOD(createSecretKey);
     JSG_METHOD(createPrivateKey);
     JSG_METHOD(createPublicKey);

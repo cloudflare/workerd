@@ -7,7 +7,6 @@ import {
   KeyObject,
   SecretKeyObject,
   createSecretKey,
-  generateKeySync,
 } from 'node:crypto';
 import {
   Buffer,
@@ -183,19 +182,13 @@ export const secret_key_test = {
     const key1 = createSecretKey('hello');
     const key2 = createSecretKey('hello');
     const key3 = createSecretKey('there');
-    const key4 = generateKeySync('aes', { length: 128 });
-    const key5 = generateKeySync('hmac', { length: 128 });
 
     ok(key1 instanceof SecretKeyObject);
     ok(key2 instanceof SecretKeyObject);
     ok(key3 instanceof SecretKeyObject);
-    ok(key4 instanceof SecretKeyObject);
-    ok(key5 instanceof SecretKeyObject);
     strictEqual(key1.type, 'secret');
     strictEqual(key2.type, 'secret');
     strictEqual(key3.type, 'secret');
-    strictEqual(key4.type, 'secret');
-    strictEqual(key5.type, 'secret');
     ok(key1.equals(key2));
     ok(!key1.equals(key3));
   }
