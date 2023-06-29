@@ -34,5 +34,12 @@ export function createRequest(support: INativeRequest) {
 }
 
 export class Response {
+  public body: string;
+  public status: number;
+  public statusText: string = "";
 
+  constructor(body: string, options?: { status?: number }) {
+    this.status = options?.status ?? 200;
+    this.body = body;
+  }
 }

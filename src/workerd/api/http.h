@@ -350,7 +350,7 @@ private:
 };
 
 class Request;
-class Response;
+struct Response;
 struct RequestInitializerDict;
 
 class Socket;
@@ -474,7 +474,7 @@ public:
   jsg::Ref<Socket> connect(
       jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
-  jsg::Promise<jsg::Ref<Response>> fetch(
+  jsg::Promise<Response> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
@@ -842,198 +842,213 @@ private:
   }
 };
 
-class Response: public Body {
-public:
+// class Response: public Body {
+// public:
+//   enum class BodyEncoding {
+//     AUTO,
+//     MANUAL
+//   };
+
+//   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
+//            kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+//            kj::Array<kj::String> urlList = {},
+//            kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
+//            Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
+
+//   // ---------------------------------------------------------------------------
+//   // JS API
+
+//   struct InitializerDict {
+//     jsg::Optional<int> status;
+//     jsg::Optional<kj::String> statusText;
+//     jsg::Optional<Headers::Initializer> headers;
+
+//     jsg::Optional<jsg::V8Ref<v8::Object>> cf;
+//     // Cloudflare-specific feature flags.
+
+//     jsg::Optional<kj::Maybe<jsg::Ref<WebSocket>>> webSocket;
+
+//     jsg::Optional<kj::String> encodeBody;
+
+//     JSG_STRUCT(status, statusText, headers, cf, webSocket, encodeBody);
+//     JSG_STRUCT_TS_OVERRIDE(ResponseInit {
+//       headers?: HeadersInit;
+//       encodeBody?: "automatic" | "manual";
+//     });
+//   };
+
+//   using Initializer = kj::OneOf<InitializerDict, jsg::Ref<Response>>;
+
+//   static jsg::Ref<Response> constructor(
+//       jsg::Lock& js,
+//       jsg::Optional<kj::Maybe<Body::Initializer>> bodyInit,
+//       jsg::Optional<Initializer> maybeInit);
+//   // Response's constructor has two arguments: an optional, nullable body that defaults to null, and
+//   // an optional initializer property bag. Tragically, the only way to express the "optional,
+//   // nullable body that defaults to null" is with an Optional<Maybe<Body::Initializer>>. The reason
+//   // for this is because:
+//   //
+//   //   - We need to be able to call `new Response()`, meaning the body initializer MUST be Optional.
+//   //   - We need to be able to call `new Response(null)`, but `null` cannot implicitly convert to
+//   //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
+
+//   static jsg::Ref<Response> redirect(jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status);
+//   // Constructs a redirection response. `status` must be a redirect status if given, otherwise it
+//   // defaults to 302 (technically a non-conformity, but both Chrome and Firefox use this default).
+//   //
+//   // It's worth noting a couple property quirks of Responses constructed using this method:
+//   //   1. `url` will be the empty string, because the response didn't actually come from any
+//   //      particular URL.
+//   //   2. `redirected` will equal false, for the same reason as (1).
+//   //   3. `body` will be empty -- we don't even provide a default courtesy body. If you need one,
+//   //      you'll need to use the regular constructor, which is more flexible.
+//   //
+//   // These behaviors surprised me, but they match both the spec and Chrome/Firefox behavior.
+
+//   static jsg::Unimplemented error() { return {}; };
+//   // Constructs a `network error` response.
+//   //
+//   // A network error is a response whose status is always 0, status message is always the empty
+//   // byte sequence, header list is always empty, body is always null, and trailer is always empty.
+//   //
+//   // TODO(conform): implementation is missing; two approaches where tested:
+//   //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
+//   //    find it useful.
+//   //  - throwing/propaging a DISCONNECTED kj::Exception to actually disconnect the
+//   //    client. However, we were conserned about possible side-effects and incorrect
+//   //    error reporting.
+
+//   jsg::Ref<Response> clone(jsg::Lock& js);
+
+//   static jsg::Ref<Response> json_(
+//       jsg::Lock& js,
+//       v8::Local<v8::Value> any,
+//       jsg::Optional<Initializer> maybeInit);
+
+
+//   int getStatus();
+//   kj::StringPtr getStatusText();
+//   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
+
+//   bool getOk();
+//   bool getRedirected();
+//   kj::StringPtr getUrl();
+
+//   kj::Maybe<jsg::Ref<WebSocket>> getWebSocket(jsg::Lock& js);
+
+//   jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
+//   // Returns the `cf` field containing Cloudflare feature flags.
+
+//   // v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
+//   // TODO(conform): Won't implement?
+//   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
+//   // In discussing with other runtime implementations that do not implement CORS, it was
+//   // determined that just have this property as undefined is the best option.
+
+//   JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
+//     JSG_INHERIT(Body);
+
+//     JSG_STATIC_METHOD(error);
+//     JSG_STATIC_METHOD(redirect);
+//     JSG_STATIC_METHOD_NAMED(json, json_);
+//     JSG_METHOD(clone);
+
+//     if (flags.getJsgPropertyOnPrototypeTemplate()) {
+//       JSG_READONLY_PROTOTYPE_PROPERTY(status, getStatus);
+//       JSG_READONLY_PROTOTYPE_PROPERTY(statusText, getStatusText);
+//       JSG_READONLY_PROTOTYPE_PROPERTY(headers, getHeaders);
+
+//       JSG_READONLY_PROTOTYPE_PROPERTY(ok, getOk);
+//       JSG_READONLY_PROTOTYPE_PROPERTY(redirected, getRedirected);
+//       JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
+
+//       JSG_READONLY_PROTOTYPE_PROPERTY(webSocket, getWebSocket);
+
+//       JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
+
+//       // TODO(conform): This is a standard properties that we do not implement (see description
+//       // above).
+//       // JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
+//     } else {
+//       JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
+//       JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
+//       JSG_READONLY_INSTANCE_PROPERTY(headers, getHeaders);
+
+//       JSG_READONLY_INSTANCE_PROPERTY(ok, getOk);
+//       JSG_READONLY_INSTANCE_PROPERTY(redirected, getRedirected);
+//       JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
+
+//       JSG_READONLY_INSTANCE_PROPERTY(webSocket, getWebSocket);
+
+//       JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
+
+//       // TODO(conform): This is a standard properties that we do not implement (see description
+//       // above).
+//       // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
+//     }
+
+//     JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
+//     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
+//   }
+
+// private:
+//   int statusCode;
+//   kj::String statusText;
+//   jsg::Ref<Headers> headers;
+//   kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+
+//   kj::Array<kj::String> urlList;
+//   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
+//   // URL list; for responses created from JavaScript this is empty. The list is filled in with the
+//   // sequence of URLs that fetch() requested. In redirect manual mode, this will be one element,
+//   // and just be a copy of the corresponding request's URL; in redirect follow mode the length of
+//   // the list will be one plus the number of redirects followed.
+//   //
+//   // The last URL is typically the only one that the user will care about, and is the one exposed
+//   // by getUrl().
+
+//   kj::Maybe<jsg::Ref<WebSocket>> webSocket;
+//   // If this response represents a successful WebSocket handshake, this is the socket, and the body
+//   // is empty.
+
+//   Response::BodyEncoding bodyEncoding;
+//   // If this response is already encoded and the user don't want to encode the
+//   // body twice, they can specify encodeBody: "manual".
+
+//   bool hasEnabledWebSocketCompression = false;
+
+//   kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext;
+//   // Capturing the AsyncContextFrame when the Response is created is necessary because there's
+//   // a natural separation that occurs between the moment the Response is created and when we
+//   // actually start consuming it. If a JS-backed ReadableStream is used, we end up losing the
+//   // appropriate async context in the promise read loop since that is kicked off later.
+
+//   void visitForGc(jsg::GcVisitor& visitor) {
+//     visitor.visit(headers, webSocket, cf, asyncContext);
+//   }
+// };
+
+struct Response {
   enum class BodyEncoding {
     AUTO,
     MANUAL
   };
 
-  Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
-           kj::Array<kj::String> urlList = {},
-           kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
-           Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
-
-  // ---------------------------------------------------------------------------
-  // JS API
-
-  struct InitializerDict {
-    jsg::Optional<int> status;
-    jsg::Optional<kj::String> statusText;
-    jsg::Optional<Headers::Initializer> headers;
-
-    jsg::Optional<jsg::V8Ref<v8::Object>> cf;
-    // Cloudflare-specific feature flags.
-
-    jsg::Optional<kj::Maybe<jsg::Ref<WebSocket>>> webSocket;
-
-    jsg::Optional<kj::String> encodeBody;
-
-    JSG_STRUCT(status, statusText, headers, cf, webSocket, encodeBody);
-    JSG_STRUCT_TS_OVERRIDE(ResponseInit {
-      headers?: HeadersInit;
-      encodeBody?: "automatic" | "manual";
-    });
-  };
-
-  using Initializer = kj::OneOf<InitializerDict, jsg::Ref<Response>>;
-
-  static jsg::Ref<Response> constructor(
-      jsg::Lock& js,
-      jsg::Optional<kj::Maybe<Body::Initializer>> bodyInit,
-      jsg::Optional<Initializer> maybeInit);
-  // Response's constructor has two arguments: an optional, nullable body that defaults to null, and
-  // an optional initializer property bag. Tragically, the only way to express the "optional,
-  // nullable body that defaults to null" is with an Optional<Maybe<Body::Initializer>>. The reason
-  // for this is because:
-  //
-  //   - We need to be able to call `new Response()`, meaning the body initializer MUST be Optional.
-  //   - We need to be able to call `new Response(null)`, but `null` cannot implicitly convert to
-  //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
-
-  static jsg::Ref<Response> redirect(jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status);
-  // Constructs a redirection response. `status` must be a redirect status if given, otherwise it
-  // defaults to 302 (technically a non-conformity, but both Chrome and Firefox use this default).
-  //
-  // It's worth noting a couple property quirks of Responses constructed using this method:
-  //   1. `url` will be the empty string, because the response didn't actually come from any
-  //      particular URL.
-  //   2. `redirected` will equal false, for the same reason as (1).
-  //   3. `body` will be empty -- we don't even provide a default courtesy body. If you need one,
-  //      you'll need to use the regular constructor, which is more flexible.
-  //
-  // These behaviors surprised me, but they match both the spec and Chrome/Firefox behavior.
-
-  static jsg::Unimplemented error() { return {}; };
-  // Constructs a `network error` response.
-  //
-  // A network error is a response whose status is always 0, status message is always the empty
-  // byte sequence, header list is always empty, body is always null, and trailer is always empty.
-  //
-  // TODO(conform): implementation is missing; two approaches where tested:
-  //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
-  //    find it useful.
-  //  - throwing/propaging a DISCONNECTED kj::Exception to actually disconnect the
-  //    client. However, we were conserned about possible side-effects and incorrect
-  //    error reporting.
-
-  jsg::Ref<Response> clone(jsg::Lock& js);
-
-  static jsg::Ref<Response> json_(
-      jsg::Lock& js,
-      v8::Local<v8::Value> any,
-      jsg::Optional<Initializer> maybeInit);
-
-  struct SendOptions {
-    bool allowWebSocket = false;
-  };
-  kj::Promise<DeferredProxy<void>> send(
-      jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
-      kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
-  // Helper not exposed to JavaScript.
-
-  int getStatus();
-  kj::StringPtr getStatusText();
-  jsg::Ref<Headers> getHeaders(jsg::Lock& js);
-
-  bool getOk();
-  bool getRedirected();
-  kj::StringPtr getUrl();
-
-  kj::Maybe<jsg::Ref<WebSocket>> getWebSocket(jsg::Lock& js);
-
-  jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
-  // Returns the `cf` field containing Cloudflare feature flags.
-
-  // v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
-  // TODO(conform): Won't implement?
-  // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
-  // In discussing with other runtime implementations that do not implement CORS, it was
-  // determined that just have this property as undefined is the best option.
-
-  JSG_RESOURCE_TYPE(Response, CompatibilityFlags::Reader flags) {
-    JSG_INHERIT(Body);
-
-    JSG_STATIC_METHOD(error);
-    JSG_STATIC_METHOD(redirect);
-    JSG_STATIC_METHOD_NAMED(json, json_);
-    JSG_METHOD(clone);
-
-    if (flags.getJsgPropertyOnPrototypeTemplate()) {
-      JSG_READONLY_PROTOTYPE_PROPERTY(status, getStatus);
-      JSG_READONLY_PROTOTYPE_PROPERTY(statusText, getStatusText);
-      JSG_READONLY_PROTOTYPE_PROPERTY(headers, getHeaders);
-
-      JSG_READONLY_PROTOTYPE_PROPERTY(ok, getOk);
-      JSG_READONLY_PROTOTYPE_PROPERTY(redirected, getRedirected);
-      JSG_READONLY_PROTOTYPE_PROPERTY(url, getUrl);
-
-      JSG_READONLY_PROTOTYPE_PROPERTY(webSocket, getWebSocket);
-
-      JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
-
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_PROTOTYPE_PROPERTY(type, getType);
-    } else {
-      JSG_READONLY_INSTANCE_PROPERTY(status, getStatus);
-      JSG_READONLY_INSTANCE_PROPERTY(statusText, getStatusText);
-      JSG_READONLY_INSTANCE_PROPERTY(headers, getHeaders);
-
-      JSG_READONLY_INSTANCE_PROPERTY(ok, getOk);
-      JSG_READONLY_INSTANCE_PROPERTY(redirected, getRedirected);
-      JSG_READONLY_INSTANCE_PROPERTY(url, getUrl);
-
-      JSG_READONLY_INSTANCE_PROPERTY(webSocket, getWebSocket);
-
-      JSG_READONLY_INSTANCE_PROPERTY(cf, getCf);
-
-      // TODO(conform): This is a standard properties that we do not implement (see description
-      // above).
-      // JSG_READONLY_INSTANCE_PROPERTY(type, getType);
-    }
-
-    JSG_TS_OVERRIDE({ constructor(body?: BodyInit | null, init?: ResponseInit); });
-    // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
-  }
-
-private:
-  int statusCode;
+  int status;
   kj::String statusText;
-  jsg::Ref<Headers> headers;
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  kj::String body;
 
-  kj::Array<kj::String> urlList;
-  // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
-  // URL list; for responses created from JavaScript this is empty. The list is filled in with the
-  // sequence of URLs that fetch() requested. In redirect manual mode, this will be one element,
-  // and just be a copy of the corresponding request's URL; in redirect follow mode the length of
-  // the list will be one plus the number of redirects followed.
-  //
-  // The last URL is typically the only one that the user will care about, and is the one exposed
-  // by getUrl().
-
-  kj::Maybe<jsg::Ref<WebSocket>> webSocket;
-  // If this response represents a successful WebSocket handshake, this is the socket, and the body
-  // is empty.
-
-  Response::BodyEncoding bodyEncoding;
-  // If this response is already encoded and the user don't want to encode the
-  // body twice, they can specify encodeBody: "manual".
-
-  bool hasEnabledWebSocketCompression = false;
-
-  kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext;
-  // Capturing the AsyncContextFrame when the Response is created is necessary because there's
-  // a natural separation that occurs between the moment the Response is created and when we
-  // actually start consuming it. If a JS-backed ReadableStream is used, we end up losing the
-  // appropriate async context in the promise read loop since that is kicked off later.
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(headers, webSocket, cf, asyncContext);
-  }
+  JSG_STRUCT(status, statusText, body);
 };
+
+struct SendOptions {
+  bool allowWebSocket = false;
+};
+
+kj::Promise<DeferredProxy<void>> sendResponse(
+    jsg::Lock& js, Response& response, kj::HttpService::Response& outer, SendOptions options,
+    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
+
 
 class FetchEvent: public ExtendableEvent {
 public:
@@ -1041,13 +1056,13 @@ public:
       : ExtendableEvent("fetch"), request(kj::mv(request)),
         state(AwaitingRespondWith()) {}
 
-  kj::Maybe<jsg::Promise<jsg::Ref<Response>>> getResponsePromise(jsg::Lock& js);
+  kj::Maybe<jsg::Promise<Response>> getResponsePromise(jsg::Lock& js);
 
   static jsg::Ref<FetchEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor
 
   jsg::Value getRequest(v8::Isolate* isolate);
-  void respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise);
+  void respondWith(jsg::Lock& js, jsg::Promise<Response> promise);
 
   void passThroughOnException();
 
@@ -1066,7 +1081,7 @@ private:
 
   struct AwaitingRespondWith {};
   struct RespondWithCalled {
-    jsg::Promise<jsg::Ref<Response>> promise;
+    jsg::Promise<Response> promise;
   };
   struct ResponseSent {};
 
@@ -1077,13 +1092,13 @@ private:
   }
 };
 
-jsg::Promise<jsg::Ref<Response>> fetchImpl(
+jsg::Promise<Response> fetchImpl(
     jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,  // if null, use fetcher from request object
     Request::Info requestOrUrl,
     jsg::Optional<Request::Initializer> requestInit);
 
-jsg::Ref<Response> makeHttpResponse(
+Response makeHttpResponse(
     jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlList,
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
@@ -1112,7 +1127,6 @@ kj::String makeRandomBoundaryCharacters();
   api::Body,                          \
   api::HttpModuleInterface,                          \
   api::Response,                      \
-  api::Response::InitializerDict,     \
   api::NativeRequest,                \
   api::Request,                       \
   api::Request::InitializerDict,      \

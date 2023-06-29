@@ -165,7 +165,7 @@ struct ExportedHandler {
   // treat incorrect types as if the field is undefined. Without this, Durable Object class
   // constructors that set a field with one of these names would cause confusing type errors.
 
-  typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(
+  typedef jsg::Promise<api::Response> FetchHandler(
       jsg::Value request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
 
@@ -349,7 +349,7 @@ public:
                                     jsg::Varargs args);
   void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) { clearTimeout(timeoutId); }
 
-  jsg::Promise<jsg::Ref<Response>> fetch(
+  jsg::Promise<Response> fetch(
       jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> request,
       jsg::Optional<Request::Initializer> requestInitr);
 

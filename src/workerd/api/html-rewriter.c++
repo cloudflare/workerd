@@ -1025,45 +1025,46 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handle
   return JSG_THIS;
 }
 
-jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> response) {
-  auto maybeInput = response->getBody();
+Response HTMLRewriter::transform(jsg::Lock& js, Response response) {
+  KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+  // auto maybeInput = response->getBody();
 
-  if (maybeInput == nullptr) {
-    // That was easy!
-    return kj::mv(response);
-  }
+  // if (maybeInput == nullptr) {
+  //   // That was easy!
+  //   return kj::mv(response);
+  // }
 
-  auto& ioContext = IoContext::current();
+  // auto& ioContext = IoContext::current();
 
-  // lol-html writes to a pipe, the other end of which is our transformed response body.
-  auto ts = IdentityTransformStream::constructor(js);
-  response = Response::constructor(js, kj::Maybe(ts->getReadable()), kj::mv(response));
+  // // lol-html writes to a pipe, the other end of which is our transformed response body.
+  // auto ts = IdentityTransformStream::constructor(js);
+  // response = Response::constructor(js, kj::Maybe(ts->getReadable()), kj::mv(response));
 
-  auto outputSink = ts->getWritable()->removeSink(js);
+  // auto outputSink = ts->getWritable()->removeSink(js);
 
-  kj::String ownContentType;
-  kj::ArrayPtr<const char> encoding = "utf-8"_kj;
-  auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
-  KJ_IF_MAYBE(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
-    KJ_IF_MAYBE(charset, readContentTypeParameter(*contentType, "charset")) {
-      ownContentType = kj::mv(*contentType);
-      encoding = *charset;
-    }
-  }
+  // kj::String ownContentType;
+  // kj::ArrayPtr<const char> encoding = "utf-8"_kj;
+  // auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
+  // KJ_IF_MAYBE(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
+  //   KJ_IF_MAYBE(charset, readContentTypeParameter(*contentType, "charset")) {
+  //     ownContentType = kj::mv(*contentType);
+  //     encoding = *charset;
+  //   }
+  // }
 
-  auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(outputSink));
+  // auto rewriter = kj::heap<Rewriter>(js, impl->unregisteredHandlers, encoding, kj::mv(outputSink));
 
-  // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
-  //   the input response object disturbed (response.bodyUsed === true), which should only happen
-  //   after we know that nothing else (like invalid encoding) could cause an exception.
+  // // NOTE: Avoid throwing any exceptions after initiating the pump below. This makes
+  // //   the input response object disturbed (response.bodyUsed === true), which should only happen
+  // //   after we know that nothing else (like invalid encoding) could cause an exception.
 
-  // Drive and flush the parser asynchronously.
-  ioContext.addTask(ioContext.waitForDeferredProxy(
-      KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true)));
+  // // Drive and flush the parser asynchronously.
+  // ioContext.addTask(ioContext.waitForDeferredProxy(
+  //     KJ_ASSERT_NONNULL(maybeInput)->pumpTo(js, kj::mv(rewriter), true)));
 
-  // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
-  //   response so the GC can find the handlers which Rewriter co-owns.
-  return kj::mv(response);
+  // // TODO(soon): EW-2025 Make Rewriter a proper wrapper object and put it in hidden property on the
+  // //   response so the GC can find the handlers which Rewriter co-owns.
+  // return kj::mv(response);
 }
 
 void HTMLRewriter::visitForGc(jsg::GcVisitor& visitor) {

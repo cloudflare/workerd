@@ -66,23 +66,23 @@ jsg::Unimplemented Cache::addAll(kj::Array<Request::Info> requests) {
   return {};
 }
 
-jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
+jsg::Promise<jsg::Optional<Response>> Cache::match(
     jsg::Lock& js, Request::Info requestOrUrl, jsg::Optional<CacheQueryOptions> options) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-    return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>(nullptr));
+    return js.resolvedPromise(jsg::Optional<Response>(nullptr));
   }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
-  return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
+  return js.evalNow([&]() -> jsg::Promise<jsg::Optional<Response>> {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), nullptr);
 
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
-      return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>(nullptr));
+      return js.resolvedPromise(jsg::Optional<Response>(nullptr));
     }
 
     auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
@@ -96,7 +96,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
     return context.awaitIo(js, kj::mv(nativeRequest.response),
         [httpClient = kj::mv(httpClient), &context]
         (jsg::Lock& js, kj::HttpClient::Response&& response)
-        mutable -> jsg::Optional<jsg::Ref<Response>> {
+        mutable -> jsg::Optional<Response> {
       response.body = response.body.attach(kj::mv(httpClient));
 
       kj::StringPtr cacheStatus;
@@ -138,7 +138,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
 }
 
 jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
-    jsg::Ref<Response> jsResponse, CompatibilityFlags::Reader flags) {
+    Response jsResponse, CompatibilityFlags::Reader flags) {
   // Send a PUT request to the cache whose URL is the original request URL and whose body is the
   // HTTP response we'd like to cache for that request.
   //
@@ -243,18 +243,18 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     JSG_REQUIRE(jsRequest->getMethodEnum() == kj::HttpMethod::GET,
         TypeError, "Cannot cache response to non-GET request.");
 
-    JSG_REQUIRE(jsResponse->getStatus() != 206,
+    JSG_REQUIRE(jsResponse.status != 206,
         TypeError, "Cannot cache response to a range request (206 Partial Content).");
 
-    auto responseHeadersRef = jsResponse->getHeaders(js);
-    KJ_IF_MAYBE(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
-      JSG_REQUIRE(vary->findFirst('*') == nullptr,
-          TypeError, "Cannot cache response with 'Vary: *' header.");
-    }
+    // auto responseHeadersRef = jsResponse->getHeaders(js);
+    // KJ_IF_MAYBE(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
+    //   JSG_REQUIRE(vary->findFirst('*') == nullptr,
+    //       TypeError, "Cannot cache response with 'Vary: *' header.");
+    // }
 
     auto& context = IoContext::current();
 
-    if (jsResponse->getStatus() == 304) {
+    if (jsResponse.status == 304) {
       // Silently discard 304 status responses to conditional requests. Caching 304s could be a
       // source of bugs in a worker, since a worker which blindly stuffs responses from `fetch()`
       // into cache could end up caching one, then later respond to non-conditional requests with
@@ -277,7 +277,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     // We need to send the response to our serializer immediately in order to fulfill Cache.put()'s
     // contract: the caller should be able to observe that the response body is disturbed as soon
     // as put() returns.
-    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr);
+    auto serializePromise = sendResponse(js, jsResponse, serializer, {}, nullptr);
     auto payload = serializer.getPayload();
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,
