@@ -44,8 +44,10 @@ import {
 
 import {
   createHash,
+  createHmac,
   Hash,
   HashOptions,
+  Hmac,
 } from 'node-internal:crypto_hash';
 
 import {
@@ -89,10 +91,12 @@ export {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
-  // Hash
+  // Hash and Hmac
   createHash,
+  createHmac,
   Hash,
   HashOptions,
+  Hmac,
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
@@ -173,9 +177,11 @@ export default {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
-  // Hash
+  // Hash and Hmac
   Hash,
+  Hmac,
   createHash,
+  createHmac,
   getHashes,
   // Pbkdf2
   pbkdf2,
@@ -202,7 +208,7 @@ export default {
 //   * [x] crypto.DiffieHellmanGroup
 //   * [ ] crypto.ECDH
 //   * [x] crypto.Hash
-//   * [ ] crypto.Hmac
+//   * [x] crypto.Hmac
 //   * [ ] crypto.KeyObject
 //   * [ ] crypto.Sign
 //   * [ ] crypto.Verify
@@ -232,7 +238,7 @@ export default {
 //   * [x] crypto.getDiffieHellman(groupName)
 // * Hash
 //   * [x] crypto.createHash(algorithm[, options])
-//   * [ ] crypto.createHmac(algorithm, key[, options])
+//   * [x] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
 // * Keys
 //   * [ ] crypto.createPrivateKey(key)
