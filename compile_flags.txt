@@ -11,8 +11,9 @@
 -isystem/usr/include/x86_64-linux-gnu
 -isystem/usr/lib/llvm-15/include/c++/v1
 -isystem/usr/lib/llvm-15/lib/clang/15.0.7/include
--isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1
+-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
+-isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Kernel.framework/Versions/Current/Headers
 -isystemC:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.35.32215\include
 -isystemc:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\ucrt
 -isystembazel-bin/external/v8
