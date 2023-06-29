@@ -84,6 +84,26 @@ public:
       unsigned md_len;
   };
 
+// Hmac
+    class HmacHandle final: public jsg::Object {
+    public:
+      HmacHandle(kj::String& algorithm, kj::Array<kj::byte>& key);
+
+      int update(jsg::Lock& js, kj::Array<kj::byte> data);
+      kj::Array<kj::byte> digest(jsg::Lock& js);
+      static jsg::Ref<HmacHandle> constructor(jsg::Lock& js, kj::String algorithm,
+                                              kj::Array<kj::byte> key);
+
+      JSG_RESOURCE_TYPE(HmacHandle) {
+        JSG_METHOD(update);
+        JSG_METHOD(digest);
+      };
+
+    private:
+      jsg::Optional<kj::Array<kj::byte>> _digest;
+      kj::Own<HMAC_CTX> hmac_ctx;
+  };
+
   // Pbkdf2
   kj::Array<kj::byte> getPbkdf(kj::Array<kj::byte> password, kj::Array<kj::byte> salt,
                                uint32_t num_iterations, uint32_t keylen, kj::String name);
@@ -163,8 +183,9 @@ public:
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);
-    // Hash
+    // Hash and Hmac
     JSG_NESTED_TYPE(HashHandle);
+    JSG_NESTED_TYPE(HmacHandle);
     // Pbkdf2
     JSG_METHOD(getPbkdf);
     // Keys
@@ -182,6 +203,7 @@ public:
     api::node::CryptoImpl,                             \
     api::node::CryptoImpl::DiffieHellmanHandle,        \
     api::node::CryptoImpl::HashHandle,                 \
+    api::node::CryptoImpl::HmacHandle,                 \
     api::node::CryptoImpl::KeyExportOptions,           \
     api::node::CryptoImpl::GenerateKeyPairOptions,     \
     api::node::CryptoImpl::CreateAsymmetricKeyOptions

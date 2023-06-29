@@ -11,12 +11,18 @@ export function checkPrimeSync(candidate: ArrayBufferView, num_checks: number): 
 export function randomPrime(size: number, safe: boolean, add?: ArrayBufferView|undefined,
                             rem?: ArrayBufferView|undefined): ArrayBuffer;
 
-// Hash
+// Hash and Hmac
 export class HashHandle {
   public constructor(algorithm: string, xofLen: number);
   public update(data: Buffer | ArrayBufferView): number;
   public digest(): ArrayBuffer;
   public copy(xofLen: number): HashHandle;
+}
+
+export class HmacHandle {
+  public constructor(algorithm: string, key: Buffer | ArrayBufferView | ArrayBuffer);
+  public update(data: Buffer | ArrayBufferView): number;
+  public digest(): ArrayBuffer;
 }
 
 // pbkdf2
