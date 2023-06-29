@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "global-scope.h"
-#include "src/workerd/jsg/jsg.h"
 
 #include <kj/encoding.h>
 

@@ -505,7 +505,7 @@ struct MemberCounter {
   template<typename Type, const char* name>
   inline void registerNestedType() { ++count; }
 
-  inline void registerNestedJsType(Bundle::Reader reader, kj::StringPtr moduleName, kj::StringPtr typeName) { ++count; }
+  inline void registerNestedJsModule(Bundle::Reader reader, kj::StringPtr moduleName) {  }
 
   template<const char* name, typename Property, auto property>
   inline void registerStructProperty() { ++count; }
@@ -574,7 +574,7 @@ struct MembersBuilder {
     BuildRtti<Configuration, Type>::build(nested.initStructure(), rtti);
   }
 
-  inline void registerNestedJsType(Bundle::Reader reader, kj::StringPtr moduleName, kj::StringPtr typeName) {
+  inline void registerNestedJsModule(Bundle::Reader reader, kj::StringPtr moduleName) {
     // auto nested = members[index++].initNested();
     // nested.setName(name);
     // BuildRtti<Configuration, Type>::build(nested.initStructure(), rtti);

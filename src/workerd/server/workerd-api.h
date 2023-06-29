@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "src/workerd/api/http.h"
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 

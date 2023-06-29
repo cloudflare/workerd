@@ -207,29 +207,8 @@ struct ResourceTypeBuilder {
     KJ_FAIL_REQUIRE("Module not found", moduleName);
   }
 
-  inline void registerNestedJsType(Bundle::Reader bundle, kj::StringPtr moduleName, kj::StringPtr typeName) {
-    // // Must pass true for `is_module`, but we can skip everything else.
-    // const int resourceLineOffset = 0;
-    // const int resourceColumnOffset = 0;
-    // const bool resourceIsSharedCrossOrigin = false;
-    // const int scriptId = -1;
-    // const bool resourceIsOpaque = false;
-    // const bool isWasm = false;
-    // const bool isModule = true;
-    // v8::ScriptOrigin origin(js.v8Isolate,
-    //                         v8StrIntern(js.v8Isolate, moduleName),
-    //                         resourceLineOffset,
-    //                         resourceColumnOffset,
-    //                         resourceIsSharedCrossOrigin, scriptId, {},
-    //                         resourceIsOpaque, isWasm, isModule);
-    // v8::Local<v8::String> contentStr;
-    // contentStr = jsg::v8Str(js.v8Isolate, findModule(bundle, moduleName));
-    // v8::ScriptCompiler::Source source(contentStr, origin);
-    // auto module = jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
-    // jsg::instantiateModule(js, module);
-
-    // KJ_FAIL_REQUIRE("NOT IMPLEMENTED", moduleName, typeName);
-    // prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, (Type*)nullptr));
+  inline void registerNestedJsModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
+    // do nothing, this will happen in the second phase once v8 context exists.
   }
 
   inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
@@ -312,7 +291,7 @@ struct JsTypesLoader {
     KJ_FAIL_REQUIRE("Module not found", moduleName);
   }
 
-  inline void registerNestedJsType(Bundle::Reader bundle, kj::StringPtr moduleName, kj::StringPtr typeName) {
+  inline void registerNestedJsModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
     // // Must pass true for `is_module`, but we can skip everything else.
     const int resourceLineOffset = 0;
     const int resourceColumnOffset = 0;

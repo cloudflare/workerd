@@ -1294,7 +1294,6 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
 kj::Promise<DeferredProxy<void>> sendResponse(
     jsg::Lock& js, Response& response, kj::HttpService::Response& outer, SendOptions options,
     kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
-      KJ_FAIL_REQUIRE("NOT IMPLEMENTED", response.status, response.statusText, response.body);
 //   JSG_REQUIRE(!getBodyUsed(), TypeError, "Body has already been used. "
 //       "It can only be used once. Use tee() first if you need to read it twice.");
 
@@ -1305,8 +1304,8 @@ kj::Promise<DeferredProxy<void>> sendResponse(
 //   // example, put the response body into a JS heap object. That should all be fine as long as we
 //   // use a pumpTo() that can be canceled.
 
-//   auto& context = IoContext::current();
-//   kj::HttpHeaders outHeaders(context.getHeaderTable());
+  auto& context = IoContext::current();
+  kj::HttpHeaders outHeaders(context.getHeaderTable());
 //   headers->shallowCopyTo(outHeaders);
 
 //   KJ_IF_MAYBE(ws, webSocket) {
@@ -1362,19 +1361,21 @@ kj::Promise<DeferredProxy<void>> sendResponse(
 //     }
 //     return wsPromise;
 //   } else KJ_IF_MAYBE(jsBody, getBody()) {
+       auto stream = outer.send(response.status, response.statusText, outHeaders, response.body.size());
+       return addNoopDeferredProxy(stream->write(response.body.begin(), response.body.size()));
 //     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
 //     auto maybeLength = (*jsBody)->tryGetLength(encoding);
 //     auto stream = newSystemStream(
-//         outer.send(statusCode, statusText, outHeaders, maybeLength),
 //         encoding);
 //     // We need to enter the AsyncContextFrame that was captured when the
 //     // Response was created before starting the loop.
 //     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
 //     return (*jsBody)->pumpTo(js, kj::mv(stream), true);
 //   } else {
-//     outer.send(statusCode, statusText, outHeaders, uint64_t(0));
-//     return addNoopDeferredProxy(kj::READY_NOW);
+      // outer.send(response.status, response.statusText, outHeaders, uint64_t(0));
+      // return addNoopDeferredProxy(kj::READY_NOW);
 //   }
+
 }
 
 // jsg::Ref<Headers> Response::getHeaders(jsg::Lock& js) {
