@@ -152,7 +152,6 @@ private:
 };
 
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
-void instantiateModule(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Module>& module);
 
 enum class ModuleInfoCompileOption {
   BUNDLE,

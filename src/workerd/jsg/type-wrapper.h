@@ -230,6 +230,19 @@ class TypeWrapperBase;
 // types passed to JSG_DECLARE_ISOLATE_TYPE() by the application.
 
 template <typename Self, typename T>
+class TypeWrapperBase<Self, T, JsgKind::RESOURCE>
+    : public ResourceWrapper<Self, T> {
+  // Specialization of TypeWrapperBase for types that have a JSG_RESOURCE_TYPE block.
+
+public:
+  template <typename MetaConfiguration>
+  TypeWrapperBase(MetaConfiguration& config)
+      : ResourceWrapper<Self, T>(config) {}
+
+  void unwrap() = delete;  // ResourceWrapper only implements tryUnwrap(), not unwrap()
+};
+
+template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::STRUCT>
     : public StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>> {
   // Specialization of TypeWrapperBase for types that have a JSG_STRUCT block.
@@ -566,5 +579,3 @@ public:
 };
 
 }  // namespace workerd::jsg
-
-#include "resource-impl.h"
