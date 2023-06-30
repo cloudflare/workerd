@@ -5,10 +5,12 @@
 #include "r2-multipart.h"
 #include "r2-bucket.h"
 #include "r2-rpc.h"
+#include "util.h"
 #include <array>
 #include <math.h>
 #include <workerd/api/http.h>
 #include <workerd/api/streams.h>
+#include <workerd/util/mimetype.h>
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
 #include <capnp/compat/json.h>
@@ -1042,24 +1044,14 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
     JSG_REQUIRE(!body->isDisturbed(), TypeError, "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");
 
+    auto& context = IoContext::current();
     // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
     // search-and-replace across your whole site and you forgot that it'll apply to images too.
     // When running in the fiddle, let's warn the developer if they do this.
-    auto& context = IoContext::current();
     if (context.isInspectorEnabled()) {
       // httpMetadata can't be null because GetResult always populates it.
       KJ_IF_MAYBE(type, KJ_REQUIRE_NONNULL(httpMetadata).contentType) {
-        if (!type->startsWith("text/") &&
-            !type->endsWith("charset=UTF-8") &&
-            !type->endsWith("charset=utf-8") &&
-            !type->endsWith("xml") &&
-            !type->endsWith("json") &&
-            !type->endsWith("javascript")) {
-          context.logWarning(kj::str(
-              "Called .text() on an HTTP body which does not appear to be text. The body's "
-              "Content-Type is \"", *type, "\". The result will probably be corrupted. Consider "
-              "checking the Content-Type header before interpreting entities as text."));
-        }
+        maybeWarnIfNotText(*type);
       }
     }
 

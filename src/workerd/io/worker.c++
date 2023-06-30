@@ -7,6 +7,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
 #include <workerd/util/batch-queue.h>
+#include <workerd/util/mimetype.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
@@ -3465,48 +3466,39 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
     response.setStatusText(statusText);
     response.setProtocol("http/1.1");
     KJ_IF_MAYBE(type, headers.get(kj::HttpHeaderId::CONTENT_TYPE)) {
-      KJ_IF_MAYBE(semiColon, type->findFirst(';')) {
-        response.setMimeType(kj::str(type->slice(0, *semiColon)));
+      KJ_IF_MAYBE(parsed, MimeType::tryParse(*type, MimeType::IGNORE_PARAMS)) {
+        response.setMimeType(parsed->toString());
+
+        // Normally Chrome would know what it's loading based on an element or API used for
+        // the request. We don't have that privilege, but still want network filters to work,
+        // so we do our best-effort guess of the resource type based on its mime type.
+        if (MimeType::HTML == *parsed || MimeType::XHTML == *parsed) {
+          params.setType(cdp::Page::ResourceType::DOCUMENT);
+        } else if (MimeType::CSS == *parsed) {
+          params.setType(cdp::Page::ResourceType::STYLESHEET);
+        } else if (MimeType::isJavascript(*parsed)) {
+          params.setType(cdp::Page::ResourceType::SCRIPT);
+        } else if (MimeType::isImage(*parsed)) {
+          params.setType(cdp::Page::ResourceType::IMAGE);
+        } else if (MimeType::isAudio(*parsed) || MimeType::isVideo(*parsed)) {
+          params.setType(cdp::Page::ResourceType::MEDIA);
+        } else if (MimeType::isFont(*parsed)) {
+          params.setType(cdp::Page::ResourceType::FONT);
+        } else if (MimeType::MANIFEST_JSON == *parsed) {
+          params.setType(cdp::Page::ResourceType::MANIFEST);
+        } else if (MimeType::VTT == *parsed) {
+          params.setType(cdp::Page::ResourceType::TEXT_TRACK);
+        } else if (MimeType::EVENT_STREAM == *parsed) {
+          params.setType(cdp::Page::ResourceType::EVENT_SOURCE);
+        } else if (MimeType::isXml(*parsed) || MimeType::isJson(*parsed)) {
+          params.setType(cdp::Page::ResourceType::XHR);
+        }
+
       } else {
-        response.setMimeType(*type);
-      }
-
-      auto mimeType = response.getMimeType().asString();
-
-      // Normally Chrome would know what it's loading based on an element or API used for
-      // the request. We don't have that privilege, but still want network filters to work,
-      // so we do our best-effort guess of the resource type based on its mime type.
-      if (mimeType == "text/html" || mimeType == "application/xhtml+xml") {
-        params.setType(cdp::Page::ResourceType::DOCUMENT);
-      } else if (mimeType == "text/css") {
-        params.setType(cdp::Page::ResourceType::STYLESHEET);
-      } else if (mimeType == "application/javascript" ||
-                  mimeType == "text/javascript" ||
-                  mimeType == "application/x-javascript") {
-        params.setType(cdp::Page::ResourceType::SCRIPT);
-      } else if (mimeType.startsWith("image/")) {
-        params.setType(cdp::Page::ResourceType::IMAGE);
-      } else if (mimeType.startsWith("audio/") ||
-                  mimeType.startsWith("video/")) {
-        params.setType(cdp::Page::ResourceType::MEDIA);
-      } else if (mimeType.startsWith("font/") ||
-                  mimeType.startsWith("application/font-") ||
-                  mimeType.startsWith("application/x-font-")) {
-        params.setType(cdp::Page::ResourceType::FONT);
-      } else if (mimeType == "application/manifest+json") {
-        params.setType(cdp::Page::ResourceType::MANIFEST);
-      } else if (mimeType == "text/vtt") {
-        params.setType(cdp::Page::ResourceType::TEXT_TRACK);
-      } else if (mimeType == "text/event-stream") {
-        params.setType(cdp::Page::ResourceType::EVENT_SOURCE);
-      } else if (mimeType.endsWith("/xml") ||
-                  mimeType.endsWith("/json") ||
-                  mimeType.endsWith("+xml") ||
-                  mimeType.endsWith("+json")) {
-        params.setType(cdp::Page::ResourceType::XHR);
+        response.setMimeType(MimeType::PLAINTEXT.toString());
       }
     } else {
-      response.setMimeType("text/plain");
+      response.setMimeType(MimeType::PLAINTEXT.toString());
     }
     headersToCDP(headers, response.initHeaders());
 

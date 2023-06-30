@@ -6,6 +6,7 @@
 #include <kj/encoding.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/mimetype.h>
 
 namespace workerd::api {
 
@@ -67,84 +68,13 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query, kj::ArrayPtr<const
   }
 }
 
-kj::Maybe<kj::ArrayPtr<const char>> readContentTypeParameter(kj::StringPtr contentType,
-                                                             kj::StringPtr param) {
-  KJ_IF_MAYBE(semiColon, contentType.findFirst(';')) {
-    // Get to the parameters
-    contentType = contentType.slice(*semiColon + 1);
-
-    // The attribute name of a MIME type parameter is always case-insensitive. See definition of
-    // the attribute production rule in https://tools.ietf.org/html/rfc2045#page-29
-    auto lowerParam = toLower(kj::str(param));
-
-    kj::StringPtr leftover = contentType;
-    while(true) {
-      while (leftover.startsWith(" ") || leftover.startsWith(";")) {
-        leftover = leftover.slice(1);
-      }
-
-      KJ_IF_MAYBE(equal, leftover.findFirst('=')) {
-        // Handle parameter
-        auto name = toLower(kj::str(leftover.slice(0, *equal)));
-        auto valueStart = *equal + 1;
-        kj::ArrayPtr<const char> value = nullptr;
-
-        if (leftover[valueStart] == '"') {
-          // parameter value surrounded by quotes
-          size_t pos = 0;
-          auto valueStr = leftover.slice(valueStart + 1);
-
-          while(pos < valueStr.size()) {
-            if (valueStr[pos] == '\\') {
-              pos++;
-            } else if (valueStr[pos] == '"') {
-              break;
-            }
-            pos++;
-          }
-
-          if (pos >= valueStr.size()) {
-            // invalid value, no closing "
-            break;
-          }
-
-          value = leftover.slice(valueStart + 1, valueStart + 1 + pos);
-          // skip name, =, value and quotes
-          leftover = leftover.slice(name.size() + 1 + value.size() + 2);
-
-        } else {
-          // parameter value with no quotes, just glob until the next ;
-          KJ_IF_MAYBE(valueEnd, leftover.slice(valueStart).findFirst(';')) {
-            value = leftover.slice(valueStart, valueStart + *valueEnd);
-            leftover = leftover.slice(valueStart + *valueEnd + 1);
-          } else {
-            // there's nothing else
-            value = leftover.slice(valueStart);
-            leftover = leftover.slice(leftover.size());
-          }
-
-          // since there are no quotes, remove spurious whitespace at the end
-          while(value.size() > 0 && value[value.size() - 1] == ' ') {
-            value = value.slice(0, value.size() - 1);
-          }
-        }
-
-        // have we got it?
-        if (name == lowerParam && value.size() > 0) {
-          return value;
-        }
-      } else {
-        // skip to next parameter
-        KJ_IF_MAYBE(nextParam, leftover.findFirst(';')) {
-          leftover = leftover.slice(*nextParam + 1);
-        } else {
-          // we are done and we didn't find the parameter
-          break;
-        }
-      }
-    }
+kj::Maybe<kj::String> readContentTypeParameter(kj::StringPtr contentType,
+                                               kj::StringPtr param) {
+  KJ_IF_MAYBE(parsed, MimeType::tryParse(contentType)) {
+    return parsed->params().find(toLower(param)).map([](auto& value) {
+      return kj::str(value);
+    });
   }
-
   return nullptr;
 }
 
@@ -292,5 +222,22 @@ kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
     return cf->deepClone(js);
   }
   return nullptr;
+}
+
+void maybeWarnIfNotText(kj::StringPtr str) {
+  // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
+  // search-and-replace across your whole site and you forgot that it'll apply to images too.
+  // When running in the fiddle, let's warn the developer if they do this.
+  if (!str.startsWith("text/") &&
+      !str.endsWith("charset=UTF-8") &&
+      !str.endsWith("charset=utf-8") &&
+      !str.endsWith("xml") &&
+      !str.endsWith("json") &&
+      !str.endsWith("javascript")) {
+    IoContext::current().logWarning(kj::str(
+        "Called .text() on an HTTP body which does not appear to be text. The body's "
+        "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
+        "checking the Content-Type header before interpreting entities as text."));
+  }
 }
 }  // namespace workerd::api

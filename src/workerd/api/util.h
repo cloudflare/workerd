@@ -49,8 +49,8 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query, kj::ArrayPtr<const
 //
 // TODO(cleanup): Would be really nice to move this to kj-url.
 
-kj::Maybe<kj::ArrayPtr<const char>> readContentTypeParameter(kj::StringPtr contentType,
-                                                             kj::StringPtr param);
+kj::Maybe<kj::String> readContentTypeParameter(kj::StringPtr contentType,
+                                               kj::StringPtr param);
 // Given the value of a Content-Type header, returns the value of a single expected parameter.
 // For example:
 //
@@ -145,4 +145,7 @@ inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> p
 
 kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
     jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf);
+
+void maybeWarnIfNotText(kj::StringPtr str);
+
 }  // namespace workerd::api
