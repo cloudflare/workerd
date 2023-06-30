@@ -11,6 +11,14 @@ export function checkPrimeSync(candidate: ArrayBufferView, num_checks: number): 
 export function randomPrime(size: number, safe: boolean, add?: ArrayBufferView|undefined,
                             rem?: ArrayBufferView|undefined): ArrayBuffer;
 
+// Hash
+export class HashHandle {
+  public constructor(algorithm: string, xofLen: number);
+  public update(data: Buffer | ArrayBufferView): number;
+  public digest(): ArrayBuffer;
+  public copy(xofLen: number): HashHandle;
+}
+
 // pbkdf2
 export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
 export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
@@ -21,7 +29,6 @@ export function exportKey(key: CryptoKey, options?: InnerExportOptions): KeyExpo
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
 export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
 export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
-export function generateKeyPair(type: AsymmetricKeyType, options: GenerateKeyPairOptions): CryptoKeyPair;
 export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
 export function createPrivateKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;
 export function createPublicKey(key: InnerCreateAsymmetricKeyOptions): CryptoKey;

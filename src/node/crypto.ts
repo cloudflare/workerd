@@ -43,6 +43,12 @@ import {
 } from 'node-internal:crypto_random';
 
 import {
+  createHash,
+  Hash,
+  HashOptions,
+} from 'node-internal:crypto_hash';
+
+import {
   pbkdf2,
   pbkdf2Sync,
   ArrayLike,
@@ -83,6 +89,10 @@ export {
   generatePrimeSync,
   checkPrime,
   checkPrimeSync,
+  // Hash
+  createHash,
+  Hash,
+  HashOptions,
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
@@ -164,6 +174,8 @@ export default {
   checkPrime,
   checkPrimeSync,
   // Hash
+  Hash,
+  createHash,
   getHashes,
   // Pbkdf2
   pbkdf2,
@@ -189,7 +201,7 @@ export default {
 //   * [x] crypto.DiffieHellman
 //   * [x] crypto.DiffieHellmanGroup
 //   * [ ] crypto.ECDH
-//   * [ ] crypto.Hash
+//   * [x] crypto.Hash
 //   * [ ] crypto.Hmac
 //   * [ ] crypto.KeyObject
 //   * [ ] crypto.Sign
@@ -219,17 +231,17 @@ export default {
 //   * [ ] crypto.diffieHellman(options)
 //   * [x] crypto.getDiffieHellman(groupName)
 // * Hash
-//   * [ ] crypto.createHash(algorithm[, options])
+//   * [x] crypto.createHash(algorithm[, options])
 //   * [ ] crypto.createHmac(algorithm, key[, options])
 //   * [x] crypto.getHashes()
 // * Keys
 //   * [ ] crypto.createPrivateKey(key)
 //   * [ ] crypto.createPublicKey(key)
-//   * [ ] crypto.createSecretKey(key[, encoding])
-//   * [ ] crypto.generateKey(type, options, callback)
-//   * [ ] crypto.generateKeyPair(type, options, callback)
-//   * [ ] crypto.generateKeyPairSync(type, options)
-//   * [ ] crypto.generateKeySync(type, options)
+//   * [x] crypto.createSecretKey(key[, encoding])
+//   * [x] crypto.generateKey(type, options, callback)
+//   * [x] crypto.generateKeyPair(type, options, callback)
+//   * [x] crypto.generateKeyPairSync(type, options)
+//   * [x] crypto.generateKeySync(type, options)
 // * Sign/Verify
 //   * [ ] crypto.createSign(algorithm[, options])
 //   * [ ] crypto.createVerify(algorithm[, options])
