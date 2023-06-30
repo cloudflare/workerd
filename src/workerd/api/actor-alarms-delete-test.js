@@ -3,26 +3,19 @@
 // else.
 import * as assert from 'node:assert'
 
-async function timeout(ms) {
-  await scheduler.wait(ms);
-  throw new Error(`timed out`);
-}
-
 export class DurableObjectExample {
   constructor(state) {
     this.state = state;
   }
 
-  async waitForAlarm(scheduledTime, timeoutOverrideMs) {
+  async waitForAlarm(scheduledTime) {
     let self = this;
     let prom = new Promise((resolve) => {
       self.resolve = resolve;
     });
 
-    let timeMs = scheduledTime.valueOf();
-    let timeoutMs = (timeMs - Date.now().valueOf()) + (timeoutOverrideMs ?? 4000);
     try {
-      await Promise.race([prom, timeout(timeoutMs)]);
+      await prom;
       if (Date.now() < scheduledTime.valueOf()) {
         throw new Error(`Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`);
       }
@@ -49,17 +42,17 @@ export class DurableObjectExample {
 
     // On the other hand, if we have an alarm queued, it will be deleted. If this is working properly,
     // we'll only have one alarm triggered.
-    await this.state.storage.setAlarm(50);
+    await this.state.storage.setAlarm(Date.now() + 50);
     await this.state.storage.deleteAlarm();
 
     // All done inside `alarm()`.
     this.resolve();
   }
 
-  async fetch(request) {
+  async fetch() {
     this.state.alarmsTriggered = 0;
     // We set an alarm that will never trigger because it gets deleted before running.
-    await this.state.storage.setAlarm(500);
+    await this.state.storage.setAlarm(Date.now() + 500);
     await this.state.storage.deleteAlarm();
 
     // We set another alarm that will run in 0.5s to test that deleting an alarm inside its handler
@@ -69,7 +62,7 @@ export class DurableObjectExample {
     assert.equal(await this.state.storage.getAlarm(), time);
 
     // We should wait for all alarms the run before returning.
-    await this.waitForAlarm(time, 3000);
+    await this.waitForAlarm(time);
 
     // We should have ran `alarm()` only once.
     assert.equal(this.state.alarmsTriggered, 1);

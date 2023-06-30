@@ -58,8 +58,4 @@ kj_test(
     data = [f.removesuffix(".wd-test") + ".js"],
 ) for f in glob(
     ["**/*.wd-test"],
-    exclude = [
-        # TODO(soon): actor-alarms-delete-test is flaky, fix it and enable it again
-        "actor-alarms-delete-test.wd-test",
-    ],
 )]
