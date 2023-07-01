@@ -52,10 +52,10 @@ http_archive(
 
 http_archive(
     name = "com_cloudflare_lol_html",
-    url = "https://github.com/cloudflare/lol-html/tarball/a0053299f6809c2fa4e3af35a4f64bd8069952ba",
-    strip_prefix = "cloudflare-lol-html-a005329",
+    url = "https://github.com/cloudflare/lol-html/tarball/2681dcf0b3e6907111565199df8c43cc9aab7fe8",
+    strip_prefix = "cloudflare-lol-html-2681dcf",
     type = "tgz",
-    sha256 = "eba5f6ce291bc0f8e1ba588573c5e88a6a1ba4264b7961b1a674fdbe334b50c2",
+    sha256 = "ea56ce51ff6cf362d2f04f09f709278c111dac8e8d1d171edf04f9d28d16ac5f",
     build_file = "//:build/BUILD.lol-html",
 )
 
