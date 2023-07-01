@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # Apache-2.0 OR MIT
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "addr2line",
+    name = "once_cell",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,16 @@ rust_library(
         ],
     }),
     crate_features = [
+        "alloc",
+        "race",
+        "unstable",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,11 +84,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.19.0",
+    version = "1.18.0",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__gimli-0.27.2//:gimli",
         ],
     }),
 )

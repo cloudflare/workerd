@@ -93,7 +93,7 @@ rust_library(
             "@crates_vendor__bitflags-1.3.2//:bitflags",
             "@crates_vendor__cssparser-0.27.2//:cssparser",
             "@crates_vendor__fxhash-0.2.1//:fxhash",
-            "@crates_vendor__log-0.4.18//:log",
+            "@crates_vendor__log-0.4.19//:log",
             "@crates_vendor__matches-0.1.10//:matches",
             "@crates_vendor__phf-0.8.0//:phf",
             "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",

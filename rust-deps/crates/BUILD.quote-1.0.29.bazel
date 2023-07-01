@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "libc",
+    name = "quote",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -55,14 +55,14 @@ rust_library(
     }),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -87,18 +87,19 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.144",
+    version = "1.0.29",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__libc-0.2.144//:build_script_build",
+            "@crates_vendor__proc-macro2-1.0.63//:proc_macro2",
+            "@crates_vendor__quote-1.0.29//:build_script_build",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "libc_build_script",
+    name = "quote_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -118,7 +119,7 @@ cargo_build_script(
     }),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -126,7 +127,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -155,7 +156,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "0.2.144",
+    version = "1.0.29",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
@@ -171,7 +172,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "libc_build_script",
+    actual = "quote_build_script",
     tags = [
         "manual",
     ],

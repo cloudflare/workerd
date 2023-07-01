@@ -64,7 +64,7 @@ rust_library(
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cssparser-macros-0.6.0//:cssparser_macros",
+            "@crates_vendor__cssparser-macros-0.6.1//:cssparser_macros",
         ],
     }),
     rustc_env = {
@@ -91,7 +91,7 @@ rust_library(
     ] + select_with_or({
         "//conditions:default": [
             "@crates_vendor__cssparser-0.27.2//:build_script_build",
-            "@crates_vendor__dtoa-short-0.3.3//:dtoa_short",
+            "@crates_vendor__dtoa-short-0.3.4//:dtoa_short",
             "@crates_vendor__itoa-0.4.8//:itoa",
             "@crates_vendor__matches-0.1.10//:matches",
             "@crates_vendor__phf-0.8.0//:phf",
@@ -162,8 +162,8 @@ cargo_build_script(
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
-            "@crates_vendor__quote-1.0.28//:quote",
+            "@crates_vendor__proc-macro2-1.0.63//:proc_macro2",
+            "@crates_vendor__quote-1.0.29//:quote",
             "@crates_vendor__syn-1.0.109//:syn",
         ],
     }),

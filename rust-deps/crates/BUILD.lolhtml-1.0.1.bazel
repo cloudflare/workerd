@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # Apache-2.0 OR MIT
+#     "TODO",  #
 # ])
 
 rust_library(
-    name = "object",
+    name = "lolhtml",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,20 +50,13 @@ rust_library(
         ],
     }),
     crate_features = [
-        "archive",
-        "coff",
-        "elf",
-        "macho",
-        "pe",
-        "read_core",
-        "unaligned",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -88,11 +81,14 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.30.3",
+    version = "1.0.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__memchr-2.5.0//:memchr",
+            "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
+            "@crates_vendor__libc-0.2.147//:libc",
+            "@crates_vendor__lol_html-1.0.1//:lol_html",
+            "@crates_vendor__thiserror-1.0.40//:thiserror",
         ],
     }),
 )

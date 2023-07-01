@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "cxx",
+    name = "libc",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -54,7 +54,6 @@ rust_library(
         ],
     }),
     crate_features = [
-        "alloc",
         "default",
         "std",
     ],
@@ -63,11 +62,10 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cxxbridge-macro-1.0.95//:cxxbridge_macro",
         ],
     }),
     rustc_env = {
@@ -89,19 +87,18 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.95",
+    version = "0.2.147",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cxx-1.0.95//:build_script_build",
-            "@crates_vendor__link-cplusplus-1.0.8//:link_cplusplus",
+            "@crates_vendor__libc-0.2.147//:build_script_build",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "cxx_build_script",
+    name = "libc_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -120,7 +117,6 @@ cargo_build_script(
         ],
     }),
     crate_features = [
-        "alloc",
         "default",
         "std",
     ],
@@ -130,8 +126,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
-    links = "cxxbridge1",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -160,13 +155,11 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.95",
+    version = "0.2.147",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cc-1.0.79//:cc",
-            "@crates_vendor__cxxbridge-flags-1.0.95//:cxxbridge_flags",
         ],
     }),
 )
@@ -178,7 +171,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "cxx_build_script",
+    actual = "libc_build_script",
     tags = [
         "manual",
     ],

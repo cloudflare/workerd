@@ -29,7 +29,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "backtrace",
+    name = "proc_macro2",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -55,7 +55,7 @@ rust_library(
     }),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
@@ -87,24 +87,19 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.67",
+    version = "1.0.63",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__addr2line-0.19.0//:addr2line",
-            "@crates_vendor__backtrace-0.3.67//:build_script_build",
-            "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-            "@crates_vendor__libc-0.2.144//:libc",
-            "@crates_vendor__miniz_oxide-0.6.2//:miniz_oxide",
-            "@crates_vendor__object-0.30.3//:object",
-            "@crates_vendor__rustc-demangle-0.1.23//:rustc_demangle",
+            "@crates_vendor__proc-macro2-1.0.63//:build_script_build",
+            "@crates_vendor__unicode-ident-1.0.9//:unicode_ident",
         ],
     }),
 )
 
 cargo_build_script(
     # See comment associated with alias. Do not change this name
-    name = "backtrace_build_script",
+    name = "proc-macro2_build_script",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -124,7 +119,7 @@ cargo_build_script(
     }),
     crate_features = [
         "default",
-        "std",
+        "proc-macro",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -161,12 +156,11 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "0.3.67",
+    version = "1.0.63",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__cc-1.0.79//:cc",
         ],
     }),
 )
@@ -178,7 +172,7 @@ alias(
     # of `build_script_build` without losing out on having certain Cargo
     # environment variables set.
     name = "build_script_build",
-    actual = "backtrace_build_script",
+    actual = "proc-macro2_build_script",
     tags = [
         "manual",
     ],

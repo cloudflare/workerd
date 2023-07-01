@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # Apache-2.0 OR MIT
 # ])
 
 rust_library(
-    name = "bitflags",
+    name = "addr2line",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -56,7 +56,7 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2021",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,10 +81,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.3.1",
+    version = "0.20.0",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__gimli-0.27.3//:gimli",
         ],
     }),
 )

@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # Apache-2.0 OR MIT
 # ])
 
 rust_library(
-    name = "dtoa",
+    name = "object",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,20 @@ rust_library(
         ],
     }),
     crate_features = [
+        "archive",
+        "coff",
+        "elf",
+        "macho",
+        "pe",
+        "read_core",
+        "unaligned",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,10 +88,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.8",
+    version = "0.31.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__memchr-2.5.0//:memchr",
         ],
     }),
 )
