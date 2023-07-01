@@ -57,10 +57,10 @@ crates_vendor(
     name = "crates_vendor",
     annotations = {
         "lolhtml": [crate.annotation(
-            shallow_since = "1657163695 -0400",
+            shallow_since = "1686149015 +0100",
         )],
         "lol_html": [crate.annotation(
-            shallow_since = "1657163695 -0400",
+            shallow_since = "1686149015 +0100",
         )],
     },
     cargo_bazel = CARGO_BAZEL,
