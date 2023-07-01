@@ -1,8 +1,0 @@
-# cc_library that provides necessary lolhtml headers and ensures that the implementation is linked
-# in.
-cc_library(
-    name = "lolhtml",
-    hdrs = ["c-api/include/lol_html.h"],
-    visibility = ["//visibility:public"],
-    deps = ["@workerd//rust-deps"]
-)

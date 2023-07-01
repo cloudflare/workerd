@@ -51,15 +51,6 @@ http_archive(
 )
 
 http_archive(
-    name = "com_cloudflare_lol_html",
-    url = "https://github.com/cloudflare/lol-html/tarball/a0053299f6809c2fa4e3af35a4f64bd8069952ba",
-    strip_prefix = "cloudflare-lol-html-a005329",
-    type = "tgz",
-    sha256 = "eba5f6ce291bc0f8e1ba588573c5e88a6a1ba4264b7961b1a674fdbe334b50c2",
-    build_file = "//:build/BUILD.lol-html",
-)
-
-http_archive(
     name = "sqlite3",
     url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
     strip_prefix = "sqlite-amalgamation-3400100",
@@ -125,6 +116,9 @@ http_archive(
 # Rust bootstrap
 #
 # workerd uses some Rust libraries, especially lolhtml for implementing HtmlRewriter.
+# Note that lol_html itself is not included here to avoid dependency duplication and simplify
+# the build process. To update the dependency, update the reference commit in
+# rust-deps/BUILD.bazel and run `bazel run //rust-deps:crates_vendor -- --repin`
 
 http_file(
     name = "cargo_bazel_linux_x64",
@@ -196,10 +190,6 @@ crate_universe_dependencies()
 load("//rust-deps/crates:crates.bzl", "crate_repositories")
 
 crate_repositories()
-
-load("//rust-deps/cxxbridge_crates:crates.bzl", cxxbridge_repositories = "crate_repositories")
-
-cxxbridge_repositories()
 
 load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 
@@ -346,5 +336,17 @@ new_local_repository(
         name = "v8",
         deps = ["@v8//:v8_icu", "@workerd//:icudata-embed"],
         visibility = ["//visibility:public"])""",
+    path = "empty",
+)
+
+# rust-based lolhtml dependency, including the API header. See rust-deps for details.
+new_local_repository(
+    name = "com_cloudflare_lol_html",
+    build_file_content = """cc_library(
+        name = "lolhtml",
+        hdrs = ["@workerd//rust-deps:lol_html_api"],
+        deps = ["@workerd//rust-deps"],
+        strip_include_prefix = "/",
+        visibility = ["//visibility:public"],)""",
     path = "empty",
 )
