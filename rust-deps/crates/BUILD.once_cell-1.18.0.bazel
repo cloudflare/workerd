@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "dtoa",
+    name = "once_cell",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,16 @@ rust_library(
         ],
     }),
     crate_features = [
+        "alloc",
+        "race",
+        "unstable",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2021",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,7 +84,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.4.8",
+    version = "1.18.0",
     deps = [
     ] + select_with_or({
         "//conditions:default": [

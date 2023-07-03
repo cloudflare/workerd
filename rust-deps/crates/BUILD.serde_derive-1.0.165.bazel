@@ -15,17 +15,17 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_library",
+    "rust_proc_macro",
 )
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  #
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_library(
-    name = "lolhtml",
+rust_proc_macro(
+    name = "serde_derive",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,13 +50,14 @@ rust_library(
         ],
     }),
     crate_features = [
+        "default",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2021",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,14 +82,13 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.0",
+    version = "1.0.165",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
-            "@crates_vendor__libc-0.2.144//:libc",
-            "@crates_vendor__lol_html-1.0.0//:lol_html",
-            "@crates_vendor__thiserror-1.0.40//:thiserror",
+            "@crates_vendor__proc-macro2-1.0.63//:proc_macro2",
+            "@crates_vendor__quote-1.0.29//:quote",
+            "@crates_vendor__syn-2.0.23//:syn",
         ],
     }),
 )

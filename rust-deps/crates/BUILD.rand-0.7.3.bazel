@@ -123,7 +123,7 @@ rust_library(
             "@rules_rust//rust/platform:x86_64-unknown-linux-gnu",
         ): [
             # Target Deps
-            "@crates_vendor__libc-0.2.144//:libc",
+            "@crates_vendor__libc-0.2.147//:libc",
 
             # Common Deps
             "@crates_vendor__getrandom-0.1.16//:getrandom",

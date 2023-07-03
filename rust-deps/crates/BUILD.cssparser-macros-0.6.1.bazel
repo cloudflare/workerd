@@ -15,7 +15,7 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_library",
+    "rust_proc_macro",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -24,8 +24,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MPL-2.0
 # ])
 
-rust_library(
-    name = "dtoa_short",
+rust_proc_macro(
+    name = "cssparser_macros",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -51,12 +51,12 @@ rust_library(
     }),
     crate_features = [
     ],
-    crate_root = "src/lib.rs",
+    crate_root = "lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,11 +81,12 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.3",
+    version = "0.6.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__dtoa-0.4.8//:dtoa",
+            "@crates_vendor__quote-1.0.29//:quote",
+            "@crates_vendor__syn-2.0.23//:syn",
         ],
     }),
 )

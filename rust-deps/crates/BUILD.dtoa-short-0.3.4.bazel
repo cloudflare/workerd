@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # MPL-2.0
 # ])
 
 rust_library(
-    name = "itoa",
+    name = "dtoa_short",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -56,7 +56,7 @@ rust_library(
         "//conditions:default": [
         ],
     }),
-    edition = "2018",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -81,10 +81,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.6",
+    version = "0.3.4",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__dtoa-1.0.7//:dtoa",
         ],
     }),
 )
