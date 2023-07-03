@@ -21,11 +21,11 @@ load(
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  #
 # ])
 
 rust_library(
-    name = "bitflags",
+    name = "lolhtml",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -81,10 +81,14 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.3.1",
+    version = "1.0.1",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
+            "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
+            "@crates_vendor__libc-0.2.147//:libc",
+            "@crates_vendor__lol_html-1.0.1//:lol_html",
+            "@crates_vendor__thiserror-1.0.40//:thiserror",
         ],
     }),
 )

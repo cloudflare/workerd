@@ -68,7 +68,7 @@ rust_library(
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__serde_derive-1.0.163//:serde_derive",
+            "@crates_vendor__serde_derive-1.0.165//:serde_derive",
         ],
     }),
     rustc_env = {
@@ -90,11 +90,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.163",
+    version = "1.0.165",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__serde-1.0.163//:build_script_build",
+            "@crates_vendor__serde-1.0.165//:build_script_build",
         ],
     }),
 )
@@ -160,7 +160,7 @@ cargo_build_script(
         "//conditions:default": [
         ],
     }),
-    version = "1.0.163",
+    version = "1.0.165",
     visibility = ["//visibility:private"],
     deps = [
     ] + select_with_or({

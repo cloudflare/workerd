@@ -52,10 +52,10 @@ crates_vendor(
     name = "crates_vendor",
     annotations = {
         "lolhtml": [crate.annotation(
-            shallow_since = "1657163695 -0400",
+            shallow_since = "1686149015 +0100",
         )],
         "lol_html": [crate.annotation(
-            shallow_since = "1657163695 -0400",
+            shallow_since = "1686149015 +0100",
         )],
     },
     cargo_bazel = CARGO_BAZEL,
@@ -81,7 +81,7 @@ crates_vendor(
         ),
         "lolhtml": crate.spec(
             git = "https://github.com/cloudflare/lol-html.git",
-            rev = "a0053299f6809c2fa4e3af35a4f64bd8069952ba",
+            rev = "2681dcf0b3e6907111565199df8c43cc9aab7fe8",
         ),
 
         # Used for RTTI parameter extraction
@@ -138,7 +138,7 @@ rust_static_library(
 # repository twice.
 alias(
     name = "lol_html_api",
-    actual = "@crates_vendor__lol_html-1.0.0//:c-api/include/lol_html.h",
+    actual = "@crates_vendor__lol_html-1.0.1//:c-api/include/lol_html.h",
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )

@@ -25,7 +25,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "syn",
+    name = "log",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,21 +50,13 @@ rust_library(
         ],
     }),
     crate_features = [
-        "clone-impls",
-        "default",
-        "derive",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
-        "quote",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2021",
+    edition = "2015",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -89,13 +81,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.18",
+    version = "0.4.19",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
-            "@crates_vendor__quote-1.0.28//:quote",
-            "@crates_vendor__unicode-ident-1.0.9//:unicode_ident",
         ],
     }),
 )

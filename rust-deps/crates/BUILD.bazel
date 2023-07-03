@@ -53,13 +53,13 @@ alias(
 
 alias(
     name = "libc",
-    actual = "@crates_vendor__libc-0.2.144//:libc",
+    actual = "@crates_vendor__libc-0.2.147//:libc",
     tags = ["manual"],
 )
 
 alias(
     name = "lolhtml",
-    actual = "@crates_vendor__lolhtml-1.0.0//:lolhtml",
+    actual = "@crates_vendor__lolhtml-1.0.1//:lolhtml",
     tags = ["manual"],
 )
 
@@ -71,13 +71,13 @@ alias(
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.163//:serde",
+    actual = "@crates_vendor__serde-1.0.165//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.96//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.99//:serde_json",
     tags = ["manual"],
 )
 

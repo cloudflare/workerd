@@ -15,7 +15,7 @@ load(
 load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
 load(
     "@rules_rust//rust:defs.bzl",
-    "rust_proc_macro",
+    "rust_library",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -24,8 +24,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_proc_macro(
-    name = "serde_derive",
+rust_library(
+    name = "itoa",
     srcs = glob(
         include = [
             "**/*.rs",
@@ -50,14 +50,13 @@ rust_proc_macro(
         ],
     }),
     crate_features = [
-        "default",
     ],
     crate_root = "src/lib.rs",
     data = select_with_or({
         "//conditions:default": [
         ],
     }),
-    edition = "2015",
+    edition = "2018",
     proc_macro_deps = [
     ] + select_with_or({
         "//conditions:default": [
@@ -82,13 +81,10 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.163",
+    version = "1.0.7",
     deps = [
     ] + select_with_or({
         "//conditions:default": [
-            "@crates_vendor__proc-macro2-1.0.59//:proc_macro2",
-            "@crates_vendor__quote-1.0.28//:quote",
-            "@crates_vendor__syn-2.0.18//:syn",
         ],
     }),
 )
