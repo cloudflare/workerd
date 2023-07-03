@@ -15,3 +15,16 @@ wd_ts_bundle(
     schema_id = "0xbcc8f57c63814006",
     tsconfig_json = "tsconfig.json",
 )
+
+wd_ts_bundle(
+    name = "bootstrap",
+    eslintrc_json = ".eslintrc.json",
+    import_name = "bootstrap",
+    modules = glob([
+        "bootstrap/*.ts",
+        "bootstrap/*.js",
+    ]),
+    internal_modules = [],
+    schema_id = "0xbcc8f57c63814006",
+    tsconfig_json = "tsconfig.json",
+)

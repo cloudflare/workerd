@@ -11,7 +11,8 @@ def _to_d_ts(file_name):
     return file_name.removesuffix(".ts") + ".d.ts"
 
 def _to_name(file_name):
-    return file_name.removesuffix(".ts").removesuffix(".js")
+    name = file_name.removesuffix(".ts").removesuffix(".js")
+    return name.rpartition("/")[2]
 
 def wd_ts_bundle(
         name,

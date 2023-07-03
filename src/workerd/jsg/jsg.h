@@ -582,6 +582,11 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
   decltype(::kj::instance<Self>().name), &Self::name>()
 // (Internal implementation details for JSG_STRUCT.)
 
+#define JSG_JS_BOOTSTRAP_CONTEXT(Bundle, ModuleName) \
+  do { \
+    registry.registerJsBootstrapModule(Bundle, ModuleName); \
+  } while (false)
+
 // =======================================================================================
 // Special types
 //

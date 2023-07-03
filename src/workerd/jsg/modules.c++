@@ -4,6 +4,7 @@
 
 #include "modules.h"
 #include "promise.h"
+#include "workerd/jsg/resource.h"
 #include <kj/mutex.h>
 #include <set>
 
@@ -303,10 +304,11 @@ NonModuleScript NonModuleScript::compile(kj::StringPtr code, jsg::Lock& js, kj::
 }
 
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
-  KJ_ASSERT(!module.IsEmpty());
-  auto isolate = js.v8Isolate;
-  auto context = js.v8Context();
+  instantiateModule(js.v8Isolate, js.v8Context(), module);
+}
 
+void instantiateModule(v8::Isolate* isolate, v8::Local<v8::Context> context, v8::Local<v8::Module>& module) {
+  KJ_ASSERT(!module.IsEmpty());
   auto status = module->GetStatus();
   // Nothing to do if the module is already instantiated, evaluated, or errored.
   if (status == v8::Module::Status::kInstantiated ||

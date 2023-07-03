@@ -30,6 +30,7 @@
   },
   "include": [
     "*.ts",
-    "internal/*.ts"
+    "internal/*.ts",
+    "bootstrap/*.ts",
   ],
 }
