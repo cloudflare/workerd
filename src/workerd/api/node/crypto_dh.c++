@@ -43,13 +43,13 @@ BIGNUM* (*FindDiffieHellmanGroup(const char* name))(BIGNUM*) {
 } // namespace
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanGroupHandle(kj::String name) {
-  return jsg::alloc<CryptoImpl::DiffieHellmanHandle>(name);
+  return jsg::alloc<DiffieHellmanHandle>(name);
 }
 
 jsg::Ref<CryptoImpl::DiffieHellmanHandle> CryptoImpl::DiffieHellmanHandle::constructor(
     jsg::Lock &js, kj::OneOf<kj::Array<kj::byte>, int> sizeOrKey,
     kj::OneOf<kj::Array<kj::byte>, int> generator) {
-  return jsg::alloc<CryptoImpl::DiffieHellmanHandle>(sizeOrKey, generator);
+  return jsg::alloc<DiffieHellmanHandle>(sizeOrKey, generator);
 }
 
 bool CryptoImpl::DiffieHellmanHandle::VerifyContext() {

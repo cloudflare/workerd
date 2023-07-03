@@ -20,7 +20,7 @@ export class HashHandle {
 }
 
 export class HmacHandle {
-  public constructor(algorithm: string, key: Buffer | ArrayBufferView | ArrayBuffer);
+  public constructor(algorithm: string, key: ArrayLike | CryptoKey);
   public update(data: Buffer | ArrayBufferView): number;
   public digest(): ArrayBuffer;
 }
