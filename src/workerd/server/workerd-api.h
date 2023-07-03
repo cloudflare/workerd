@@ -27,8 +27,8 @@ public:
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
 
-  api::HttpModuleInterface unwrapHttpModuleNamespace(
-      jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
+  v8::Local<v8::Value> wrapNativeRequest(
+      jsg::Lock& lock, jsg::Ref<api::NativeRequest>&& request) const override;
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,

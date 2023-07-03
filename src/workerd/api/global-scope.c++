@@ -237,17 +237,17 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   // through to a fetch() call will behave the same as scripts which don't call .respondWith(): if
   // the request results in a redirect, the visitor will see that redirect.
 
-  auto moduleRegistry = jsg::ModuleRegistry::from(lock);
-  auto moduleName = kj::Path::parse("cloudflare-internal:http");
-  auto& moduleInfo = KJ_REQUIRE_NONNULL(
-    moduleRegistry->resolve(lock, moduleName, jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY));
-  auto module = moduleInfo.module.getHandle(lock);
-  jsg::instantiateModule(lock, module);
+  auto context = lock.getContext();
 
-  auto httpModule = lock.getWorker().getIsolate().getApiIsolate().unwrapHttpModuleNamespace(lock, module->GetModuleNamespace());
-  auto support = jsg::alloc<NativeRequest>(method, url, kj::addRef(*ownRequestBody));
-  auto jsRequest = httpModule.createRequest(lock, kj::mv(support));
-  auto event = jsg::alloc<FetchEvent>(kj::mv(jsRequest));
+  auto nativeRequest = jsg::alloc<NativeRequest>(method, url, kj::addRef(*ownRequestBody));
+  auto wrappedNativeRequest = lock.getWorker().getIsolate().getApiIsolate().wrapNativeRequest(lock, kj::mv(nativeRequest));
+
+  auto createRequest = KJ_REQUIRE_NONNULL(lock.getGlobalScope().jsSymbols.find("createRequest"_kj)).getHandle(isolate);
+  KJ_ASSERT(createRequest->IsFunction());
+  auto args = kj::arr(wrappedNativeRequest);
+  auto jsRequest = v8::Function::Cast(*createRequest)->
+        Call(context, context->Global(), args.size(), args.begin()).ToLocalChecked();
+  auto event = jsg::alloc<FetchEvent>(jsg::Value(isolate, jsRequest));
 
   uint tasksBefore = ioContext.taskCount();
 

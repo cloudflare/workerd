@@ -12,6 +12,7 @@
 #include <kj/exception.h>
 #include <kj/one-of.h>
 #include <kj/debug.h>
+#include <kj/map.h>
 #include <type_traits>
 #include <v8.h>
 #include "macro-meta.h"
@@ -432,9 +433,9 @@ using HasGetTemplateOverload = decltype(
 // declarations to make other types appear in the global scope. It is not necessary for the types
 // to be nested in C++.
 
-#define JSG_NESTED_JS_MODULE(Bundle, Module) \
+#define JSG_NESTED_JS_MODULE(Bundle, Module, tableField) \
   do { \
-    registry.registerNestedJsModule(Bundle, Module); \
+    registry.template registerNestedJsModule<decltype(&Self::tableField), &Self::tableField>(Bundle, Module); \
   } while (false)
 
 #define JSG_NESTED_TYPE_NAMED(Type, Name) \
@@ -730,6 +731,8 @@ private:
 };
 
 using Value = V8Ref<v8::Value>;
+
+using JsSymbolTable = kj::HashMap<kj::String, Value>;
 
 template <typename T>
 class HashableV8Ref: public V8Ref<T> {

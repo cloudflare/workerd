@@ -13,24 +13,24 @@ class RequestImpl {
   public readonly method: string;
   public readonly url: string;
 
-  constructor(readonly support: INativeRequest) {
-    this.method = support.method;
-    this.url = support.url;
+  constructor(readonly native: INativeRequest) {
+    this.method = native.method;
+    this.url = native.url;
   }
 
   public async blob(): Promise<Blob> {
-    const support = this.support;
+    const native = this.native;
 
     return {
       async text(): Promise<String> {
-        return support.readAllText();
+        return native.readAllText();
       }
     };
   }
 }
 
-export function createRequest(support: INativeRequest) {
-  return new RequestImpl(support);
+export function createRequest(native: INativeRequest) {
+  return new RequestImpl(native);
 }
 
 export class Response {

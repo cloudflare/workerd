@@ -14,6 +14,7 @@
 #include <kj/debug.h>
 #include <type_traits>
 #include <kj/map.h>
+#include "src/workerd/jsg/jsg.h"
 #include "util.h"
 #include "wrappable.h"
 #include "jsg.h"
@@ -842,6 +843,7 @@ struct ResourceTypeBuilder {
     prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, (Type*)nullptr));
   }
 
+  template<typename SymbolTableType, SymbolTableType symbolTableField>
   inline void registerNestedJsModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
     // do nothing, this will happen in the second phase once v8 context exists.
   }
@@ -865,9 +867,10 @@ private:
 
 void instantiateModule(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Module>& module);
 
-template<typename TypeWrapper, typename Self>
+template<typename TypeWrapper, typename Self, bool isContext>
 struct JsTypesLoader {
-  JsTypesLoader(v8::Isolate* isolate, v8::Local<v8::Context> context) : isolate(isolate), context(context) {}
+  JsTypesLoader(v8::Isolate* isolate, v8::Local<v8::Context> context, v8::Local<v8::Object> target)
+  : isolate(isolate), context(context), target(target) {}
 
   template<typename Type>
   inline void registerInherit() { }
@@ -926,6 +929,7 @@ struct JsTypesLoader {
     KJ_FAIL_REQUIRE("Module not found", moduleName);
   }
 
+  template<typename SymbolTableType, SymbolTableType symbolTableField>
   inline void registerNestedJsModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
     // // Must pass true for `is_module`, but we can skip everything else.
     const int resourceLineOffset = 0;
@@ -949,16 +953,19 @@ struct JsTypesLoader {
 
     auto moduleNs = module->GetModuleNamespace()->ToObject(context).ToLocalChecked();
 
-    auto names = check(moduleNs->GetPropertyNames(context,
-        v8::KeyCollectionMode::kOwnOnly,
-        v8::ALL_PROPERTIES,
-        v8::IndexFilter::kIncludeIndices));
-    auto global = context->Global();
-
+    auto names = check(moduleNs->GetOwnPropertyNames(context));
     for (auto i: kj::zeroTo(names->Length())) {
       auto name = check(names->Get(context, i));
       auto value = check(moduleNs->Get(context, name));
-      KJ_ASSERT(check(global->Set(context, name, value)));
+
+      // store exported value in v8 target
+      KJ_ASSERT(check(target->Set(context, name, value)));
+
+      // store exported value in type's symbol table field
+      auto utf8Name = v8::String::Utf8Value(isolate, name);
+      auto& self = extractInternalPointer<Self, isContext>(context, target);
+      auto kjName = kj::str(*utf8Name);
+      (self.*symbolTableField).insert(kj::str(kjName), Value(isolate, value));
     }
   }
 
@@ -973,6 +980,7 @@ struct JsTypesLoader {
 private:
   v8::Isolate* isolate;
   v8::Local<v8::Context> context;
+  v8::Local<v8::Object> target;
 };
 
 template <typename TypeWrapper, typename T>
@@ -1181,7 +1189,7 @@ private:
   }
 
   void registerJsTypes(v8::Isolate* isolate, v8::Local<v8::Context> context) {
-    JsTypesLoader<TypeWrapper, T> loader(isolate, context);
+    JsTypesLoader<TypeWrapper, T, true> loader(isolate, context, context->Global());
 
     if constexpr (isDetected<GetConfiguration, T>()) {
       T::template registerMembers<decltype(loader), T>(loader, configuration);

@@ -39,7 +39,7 @@ namespace api {
   struct QueueExportedHandler;
   class WebSocket;
   class WebSocketRequestResponsePair;
-  struct HttpModuleInterface;
+  class NativeRequest;
 }
 
 class IoContext;
@@ -489,8 +489,8 @@ public:
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
   // Given a module's export namespace, return all the top-level exports.
 
-  virtual api::HttpModuleInterface unwrapHttpModuleNamespace(
-      jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
+  virtual v8::Local<v8::Value> wrapNativeRequest(
+      jsg::Lock& lock, jsg::Ref<api::NativeRequest>&& request) const = 0;
 
   struct ErrorInterface {
     // Convenience struct for accessing typical Error properties.

@@ -389,15 +389,6 @@ private:
   kj::Own<kj::AsyncInputStream> body;
 };
 
-struct HttpModuleInterface {
-public:
-  // Alarms are only exported on DOs, which receive env bindings from the constructor
-  jsg::Function<jsg::Value(jsg::Ref<NativeRequest>)> createRequest;
-
-  JSG_STRUCT(createRequest);
-};
-
-
 class Fetcher: public jsg::Object {
   // A capability to send HTTP requests to some destination other than the public internet.
   // This is the type of `request.fetcher` (if it is not null).
@@ -1125,7 +1116,6 @@ kj::String makeRandomBoundaryCharacters();
   api::Headers::ValueIterator,        \
   api::Headers::ValueIterator::Next,  \
   api::Body,                          \
-  api::HttpModuleInterface,                          \
   api::Response,                      \
   api::NativeRequest,                \
   api::Request,                       \

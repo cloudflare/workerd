@@ -8,6 +8,7 @@
 #include <workerd/jsg/dom-exception.h>
 #include "basics.h"
 #include "http.h"
+#include "src/workerd/jsg/jsg.h"
 #include "url.h"
 #include "url-standard.h"
 #include "form-data.h"
@@ -378,6 +379,8 @@ public:
 
   jsg::Ref<CacheStorage> getCaches();
 
+  jsg::JsSymbolTable jsSymbols;
+
   JSG_RESOURCE_TYPE(ServiceWorkerGlobalScope, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(WorkerGlobalScope);
 
@@ -454,7 +457,7 @@ public:
 
     JSG_NESTED_TYPE(Headers);
     JSG_NESTED_TYPE(Body);
-    JSG_NESTED_JS_MODULE(CLOUDFLARE_BUNDLE, "cloudflare-internal:http");
+    JSG_NESTED_JS_MODULE(CLOUDFLARE_BUNDLE, "cloudflare-internal:http", jsSymbols);
     JSG_NESTED_TYPE(WebSocket);
     JSG_NESTED_TYPE(WebSocketPair);
     JSG_NESTED_TYPE(WebSocketRequestResponsePair);

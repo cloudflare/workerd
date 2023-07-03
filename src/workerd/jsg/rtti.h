@@ -505,6 +505,7 @@ struct MemberCounter {
   template<typename Type, const char* name>
   inline void registerNestedType() { ++count; }
 
+  template<typename SymbolTableType, SymbolTableType symbolTableField>
   inline void registerNestedJsModule(Bundle::Reader reader, kj::StringPtr moduleName) {  }
 
   template<const char* name, typename Property, auto property>
@@ -574,6 +575,7 @@ struct MembersBuilder {
     BuildRtti<Configuration, Type>::build(nested.initStructure(), rtti);
   }
 
+  template<typename SymbolTableType, SymbolTableType symbolTableField>
   inline void registerNestedJsModule(Bundle::Reader reader, kj::StringPtr moduleName) {
     // auto nested = members[index++].initNested();
     // nested.setName(name);
