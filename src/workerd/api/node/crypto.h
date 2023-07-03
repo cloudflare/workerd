@@ -53,6 +53,8 @@ public:
 
   jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
 
+  kj::Array<kj::byte> statelessDH(jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey);
+
   // Primes
   kj::Array<kj::byte> randomPrime(uint32_t size, bool safe,
       jsg::Optional<kj::Array<kj::byte>> add, jsg::Optional<kj::Array<kj::byte>> rem);
@@ -185,6 +187,7 @@ public:
     // DH
     JSG_NESTED_TYPE(DiffieHellmanHandle);
     JSG_METHOD(DiffieHellmanGroupHandle);
+    JSG_METHOD(statelessDH);
     // Primes
     JSG_METHOD(randomPrime);
     JSG_METHOD(checkPrimeSync);

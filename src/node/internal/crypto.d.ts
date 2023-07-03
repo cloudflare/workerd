@@ -234,3 +234,5 @@ export class DiffieHellmanHandle {
 }
 
 export function DiffieHellmanGroupHandle(name: string): DiffieHellmanHandle;
+
+export function statelessDH(privateKey: CryptoKey, publicKey: CryptoKey): Buffer;

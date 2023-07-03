@@ -74,7 +74,7 @@ export interface ValidateObjectOptions {
   nullable?: boolean;
 };
 
-export function validateObject(value: unknown, name: string, options: ValidateObjectOptions) {
+export function validateObject(value: unknown, name: string, options?: ValidateObjectOptions) {
   const useDefaultOptions = options == null;
   const allowArray = useDefaultOptions ? false : options.allowArray;
   const allowFunction = useDefaultOptions ? false : options.allowFunction;

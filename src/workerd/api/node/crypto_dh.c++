@@ -272,4 +272,34 @@ kj::Array<kj::byte> CryptoImpl::DiffieHellmanHandle::generateKeys() {
 
 int CryptoImpl::DiffieHellmanHandle::getVerifyError() { return verifyError; }
 
+kj::Array<kj::byte> CryptoImpl::statelessDH(jsg::Ref<CryptoKey> privateKey, jsg::Ref<CryptoKey> publicKey) {
+  JSG_REQUIRE(privateKey->getType() == "private"_kj, Error, "provided key is not private");
+  JSG_REQUIRE(publicKey->getType() == "public"_kj, Error, "provided key is not public");
+
+  JSG_REQUIRE(privateKey->getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
+      "Base ", privateKey->getAlgorithmName(), " private key cannot be used to derive a "
+      "key from a peer ", publicKey->getAlgorithmName(), " public key");
+  size_t out_size;
+  auto privatePKey = CryptoKey::getEvpPkeyIfAsymmetric(privateKey.get());
+  auto publicPKey = CryptoKey::getEvpPkeyIfAsymmetric(publicKey.get());
+
+  auto ctx = OSSLCALL_OWN(EVP_PKEY_CTX, EVP_PKEY_CTX_new(privatePKey, nullptr), Error,
+                                                 "Failed to allocate DH context");
+  if (!ctx ||
+      EVP_PKEY_derive_init(ctx.get()) <= 0 ||
+      EVP_PKEY_derive_set_peer(ctx.get(), publicPKey) <= 0 ||
+      EVP_PKEY_derive(ctx.get(), nullptr, &out_size) <= 0) {
+    JSG_FAIL_REQUIRE(Error, "diffieHellman failed");
+  }
+
+  auto out = kj::heapArray<kj::byte>(out_size);
+
+  if (EVP_PKEY_derive(ctx.get(), out.begin(), &out_size) <= 0) {
+    JSG_FAIL_REQUIRE(Error, "diffieHellman failed");
+  }
+
+  ZeroPadDiffieHellmanSecret(out_size, out.begin(), out.size());
+  return out;
+}
+
 } // namespace workerd::api::node

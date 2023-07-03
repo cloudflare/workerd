@@ -519,6 +519,16 @@ ImportAsymmetricResult importAsymmetric(jsg::Lock& js, kj::StringPtr format,
 
 }  // namespace
 
+EVP_PKEY* CryptoKey::getEvpPkeyIfAsymmetric(const CryptoKey* key) {
+  KJ_IF_MAYBE(keyImpl, kj::dynamicDowncastIfAvailable<const AsymmetricKey>(*key->impl)) {
+    auto pKey = keyImpl->getEvpPkey();
+    JSG_REQUIRE(pKey != nullptr, Error, "could not find public/private key");
+    return pKey;
+  }
+
+  JSG_FAIL_REQUIRE(Error, "called on wrong key");
+}
+
 // =====================================================================================
 // RSASSA-PKCS1-V1_5, RSA-PSS, RSA-OEAP, RSA-RAW
 
