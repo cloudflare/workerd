@@ -19,6 +19,11 @@ class URLSearchParams;
 class FormData: public jsg::Object {
   // Implements the FormData interface as prescribed by:
   // https://xhr.spec.whatwg.org/#interface-formdata
+  //
+  // NOTE: This class is actually reused by some internal code implementing the fiddle service, for
+  //   lack of any other C++ form data parser implementation. In that usage, there is no isolate.
+  //   It uses `parse()` and `getData()`. This relies on the ability to construct `File` objects
+  //   without an isolate.
 private:
   using EntryType = kj::OneOf<jsg::Ref<File>, kj::String>;
   using EntryIteratorType = kj::Array<EntryType>;
