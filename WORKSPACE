@@ -68,17 +68,14 @@ http_archive(
     build_file = "//:build/BUILD.sqlite3",
 )
 
-# Using latest brotli commit due to macOS compile issues with v1.0.9, switch to a release version
-# later.
-# TODO(soon): Using a modified build file as brotli bazel build is broken using clang-cl on
-# Windows, make a PR to fix this soon.
+# Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
+# release version later.
 http_archive(
     name = "brotli",
-    sha256 = "e33f397d86aaa7f3e786bdf01a7b5cff4101cfb20041c04b313b149d34332f64",
-    strip_prefix = "google-brotli-ed1995b",
+    sha256 = "9795b1b2afcc62c254012b1584e849e0c628ceb306756efee8d4539b4c583c09",
+    strip_prefix = "google-brotli-ec107cf",
     type = "tgz",
-    urls = ["https://github.com/google/brotli/tarball/ed1995b6bda19244070ab5d331111f16f67c8054"],
-    build_file = "//:build/BUILD.brotli",
+    urls = ["https://github.com/google/brotli/tarball/ec107cf015139c791f79afac0f96c3a2c45e157f"],
 )
 
 # ========================================================================================
