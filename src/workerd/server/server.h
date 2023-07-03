@@ -75,6 +75,7 @@ public:
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
   class InspectorService;
+  class InspectorServiceIsolateRegistrar;
 
 private:
   kj::Filesystem& fs;
@@ -94,6 +95,7 @@ private:
   // code that parses strings from the config file.
 
   kj::Maybe<kj::String> inspectorOverride;
+  kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
 
   struct GlobalContext;
