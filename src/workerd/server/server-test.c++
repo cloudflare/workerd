@@ -647,7 +647,7 @@ KJ_TEST("Server: compatibility dates are required") {
   ))"_kj));
 
   test.expectErrors(R"(
-    service hello: Worker must specify compatibiltyDate.
+    service hello: Worker must specify compatibilityDate.
   )"_blockquote);
 }
 
@@ -2297,7 +2297,7 @@ KJ_TEST("Server: disk service writable") {
   // Read it back.
   KJ_EXPECT(dir->openFile(kj::Path({"existing.txt"}))->readAllText() == "grault\n");
 
-  // Write a file to a new direcotry.
+  // Write a file to a new directory.
   conn.send(R"(
     PUT /newdir/newfile.txt HTTP/1.1
     Host: foo

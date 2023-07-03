@@ -12,7 +12,7 @@ namespace workerd {
 enum class CompatibilityDateValidation {
   CODE_VERSION,
   // Allow dates up through the date specified by `supportedCompatibilityDate` in
-  // `compatiility-date.capnp`.
+  // `compatibility-date.capnp`.
 
   CURRENT_DATE_FOR_CLOUDFLARE,
   // Allow dates up to through the current date.

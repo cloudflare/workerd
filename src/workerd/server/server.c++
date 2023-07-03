@@ -1955,7 +1955,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
                               featureFlags, errorReporter, experimental,
                               CompatibilityDateValidation::CODE_VERSION);
   } else {
-    errorReporter.addError(kj::str("Worker must specify compatibiltyDate."));
+    errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
 
   class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -2403,7 +2403,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
 
-  // We should have registered all headers synchronously. This is important becaues we want to
+  // We should have registered all headers synchronously. This is important because we want to
   // be able to start handling requests as soon as the services are available, even if some other
   // services take longer to get ready.
   auto ownHeaderTable = headerTableBuilder.build();
@@ -2469,7 +2469,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {
               reportConfigError(kj::str(
-                  "Ephemeral objects (Durable Object namespaces with type 'ehpmeralLocal') are an "
+                  "Ephemeral objects (Durable Object namespaces with type 'ephemeralLocal') are an "
                   "experimental feature which may change or go away in the future. You must run "
                   "workerd with `--experimental` to use this feature."));
             }

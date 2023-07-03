@@ -876,7 +876,7 @@ struct Worker::Script::Impl {
             auto& workerIsolate = worker.getIsolate();
 
             // We have to wrap the call to handler in a try catch here because
-            // we have to tunnel any jsg::JsExceptionThrowns back.
+            // we have to tunnel any jsg::JsExceptionThrown instances back.
             v8::TryCatch tryCatch(isolate);
             kj::Maybe<kj::Exception> maybeLimitError;
             try {
@@ -1170,7 +1170,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
   } else {
     // Although we're going to compile a script independent of context, V8 requires that there be
     // an active context, otherwise it will segfault, I guess. So we create a dummy context.
-    // (Undocumented, as ususual.)
+    // (Undocumented, as usual.)
     context = v8::Context::New(
         lock.v8Isolate, nullptr, v8::ObjectTemplate::New(lock.v8Isolate));
   }
