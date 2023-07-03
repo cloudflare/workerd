@@ -34,8 +34,8 @@ public:
 
   static jsg::Ref<Blob> constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options);
 
-  int getSize() { return data.size(); }
-  kj::StringPtr getType() { return type; }
+  int getSize() const { return data.size(); }
+  kj::StringPtr getType() const { return type; }
 
   jsg::Ref<Blob> slice(jsg::Optional<int> start, jsg::Optional<int> end,
                         jsg::Optional<kj::String> type);

@@ -1048,6 +1048,10 @@ public:
   T* operator->() { return inner.get(); }
   T* get() { return inner.get(); }
 
+  const T& operator*() const { return *inner; }
+  const T* operator->() const { return inner.get(); }
+  const T* get() const { return inner.get(); }
+
   Ref addRef() & {
     return Ref(kj::addRef(*inner));
   }
