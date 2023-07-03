@@ -969,6 +969,38 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 
 // =======================================================================================
 
+class Server::InspectorServiceIsolateRegistrar final {
+  // This class exists to update the InspectorService's table of isolates when a config
+  // has multiple services. The InspectorService exists on the stack of it's own thread and
+  // initializes state that is bound to the thread, e.g. a http server and an event loop.
+  // This class provides a small thread-safe interface to the InspectorService so <name>:<isolate>
+  // mappings can be added after the InspectorService has started.
+  //
+  // The CloudFlare devtools only show the first service in workerd configuration. This service
+  // is always contains a users code. However, in packaging user code wrangler may add
+  // additional services that also have code. If using Chrome devtools to inspect a workerd,
+  // instance all services are visible and can be debugged.
+
+public:
+  InspectorServiceIsolateRegistrar() {}
+  ~InspectorServiceIsolateRegistrar() noexcept(true);
+
+  void registerIsolate(kj::StringPtr name, Worker::Isolate* isolate);
+
+  KJ_DISALLOW_COPY_AND_MOVE(InspectorServiceIsolateRegistrar);
+private:
+  void attach(const Server::InspectorService* anInspectorService) {
+    *inspectorService.lockExclusive() = anInspectorService;
+  }
+
+  void detach() {
+    *inspectorService.lockExclusive() = nullptr;
+  }
+
+  kj::MutexGuarded<const InspectorService*> inspectorService;
+  friend class Server::InspectorService;
+};
+
 class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
   // Implements the interface for the devtools inspector protocol.
   //
@@ -977,12 +1009,26 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
 public:
   InspectorService(
       kj::Timer& timer,
-      kj::HttpHeaderTable::Builder& headerTableBuilder)
+      kj::HttpHeaderTable::Builder& headerTableBuilder,
+      InspectorServiceIsolateRegistrar& registrar)
       : timer(timer),
         headerTable(headerTableBuilder.getFutureTable()),
         server(timer, headerTable, *this, kj::HttpServerSettings {
           .errorHandler = *this
-        }) {}
+        }),
+        registrar(registrar) {
+    registrar.attach(this);
+  }
+
+  ~InspectorService() {
+    KJ_IF_MAYBE(r, registrar) {
+      r->detach();
+    }
+  }
+
+  void invalidateRegistrar() {
+    registrar = nullptr;
+  }
 
   kj::Promise<void> handleApplicationError(
       kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
@@ -1045,6 +1091,7 @@ public:
           }
         }
 
+        KJ_LOG(INFO, kj::str("Unknown worker session [", id, "]"));
         return response.sendError(404, "Unknown worker session", responseHeaders);
       }
 
@@ -1142,9 +1189,25 @@ private:
   kj::HttpHeaderTable& headerTable;
   kj::HashMap<kj::String, kj::Own<const Worker::Isolate::WeakIsolateRef>> isolates;
   kj::HttpServer server;
-
-  friend class Registration;
+  kj::Maybe<InspectorServiceIsolateRegistrar&> registrar;
 };
+
+Server::InspectorServiceIsolateRegistrar::~InspectorServiceIsolateRegistrar() noexcept(true) {
+  auto lockedInspectorService = this->inspectorService.lockExclusive();
+  if (lockedInspectorService != nullptr) {
+    auto is = const_cast<InspectorService*>(*lockedInspectorService);
+    is->invalidateRegistrar();
+  }
+}
+
+void Server::InspectorServiceIsolateRegistrar::registerIsolate(kj::StringPtr name,
+                                                               Worker::Isolate* isolate) {
+  auto lockedInspectorService = this->inspectorService.lockExclusive();
+  if (lockedInspectorService != nullptr) {
+    auto is = const_cast<InspectorService*>(*lockedInspectorService);
+    is->registerIsolate(name, isolate);
+  }
+}
 
 // =======================================================================================
 
@@ -1964,7 +2027,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       "the schema?"));
 }
 
-void startInspector(kj::StringPtr inspectorAddress, kj::StringPtr name, Worker::Isolate* isolate);
+void startInspector(kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar);
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -2068,8 +2131,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
-  KJ_IF_MAYBE(inspector, inspectorOverride) {
-    startInspector(*inspector, name, isolate.get());
+  KJ_IF_MAYBE(isolateRegistrar, inspectorIsolateRegistrar) {
+    (*isolateRegistrar)->registerIsolate(name, isolate.get());
   }
 
   auto script = isolate->newScript(
@@ -2481,16 +2544,15 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
 void startInspector(kj::StringPtr inspectorAddress,
                     Server::InspectorServiceIsolateRegistrar& registrar) {
   // Configure and start the inspector socket.
-  kj::Thread thread([inspectorAddress, name, isolate](){
+  kj::Thread thread([inspectorAddress, &registrar](){
     kj::AsyncIoContext io = kj::setupAsyncIo();
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
 
     // Create the special inspector service.
-    kj::Own<Server::InspectorService> inspectorService(kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder));
+    auto inspectorService(
+        kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder, registrar));
     auto ownHeaderTable = headerTableBuilder.build();
-
-    inspectorService->registerIsolate(name, isolate);
 
     // Configure and start the inspector socket.
     static constexpr uint DEFAULT_PORT = 9229;
@@ -2575,6 +2637,14 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
     actorConfigs.upsert(kj::str(name), kj::mv(serviceActorConfigs), [&](auto&&...) {
       reportConfigError(kj::str("Config defines multiple services named \"", name, "\"."));
     });
+  }
+
+  // If we are using the inspector, we need to register the Worker::Isolate
+  // with the inspector service.
+  KJ_IF_MAYBE(inspectorAddress, inspectorOverride) {
+    auto registrar = kj::heap<InspectorServiceIsolateRegistrar>();
+    startInspector(*inspectorAddress, *registrar);
+    inspectorIsolateRegistrar = kj::mv(registrar);
   }
 
   // Second pass: Build services.
