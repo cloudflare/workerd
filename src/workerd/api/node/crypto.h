@@ -51,7 +51,7 @@ public:
       bool InitGroup(kj::String& name);
   };
 
-  jsg::Ref<CryptoImpl::DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
+  jsg::Ref<DiffieHellmanHandle> DiffieHellmanGroupHandle(kj::String name);
 
   // Primes
   kj::Array<kj::byte> randomPrime(uint32_t size, bool safe,
@@ -84,15 +84,16 @@ public:
       unsigned md_len;
   };
 
-// Hmac
-    class HmacHandle final: public jsg::Object {
+  // Hmac
+  class HmacHandle final: public jsg::Object {
     public:
-      HmacHandle(kj::String& algorithm, kj::Array<kj::byte>& key);
+      HmacHandle(jsg::Lock& js, kj::String& algorithm, kj::OneOf<kj::Array<kj::byte>,
+                 jsg::Ref<CryptoKey>>&_key);
 
       int update(jsg::Lock& js, kj::Array<kj::byte> data);
       kj::Array<kj::byte> digest(jsg::Lock& js);
-      static jsg::Ref<HmacHandle> constructor(jsg::Lock& js, kj::String algorithm,
-                                              kj::Array<kj::byte> key);
+      static jsg::Ref<HmacHandle> constructor(jsg::Lock& js,
+          kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>> key);
 
       JSG_RESOURCE_TYPE(HmacHandle) {
         JSG_METHOD(update);

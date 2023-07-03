@@ -13,7 +13,7 @@
 namespace workerd::api::node {
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::constructor(
     jsg::Lock& js, kj::String algorithm, kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<CryptoImpl::HashHandle>(algorithm, xofLen);
+  return jsg::alloc<HashHandle>(algorithm, xofLen);
 }
 
 int CryptoImpl::HashHandle::update(jsg::Lock& js, kj::Array<kj::byte> data) {
@@ -45,7 +45,7 @@ kj::Array<kj::byte> CryptoImpl::HashHandle::digest(jsg::Lock& js) {
 
 jsg::Ref<CryptoImpl::HashHandle> CryptoImpl::HashHandle::copy(jsg::Lock& js,
                                                               kj::Maybe<uint32_t> xofLen) {
-  return jsg::alloc<CryptoImpl::HashHandle>(this->md_ctx.get(), xofLen);
+  return jsg::alloc<HashHandle>(this->md_ctx.get(), xofLen);
 }
 
 void CryptoImpl::HashHandle::checkDigestLength(const EVP_MD* md, kj::Maybe<uint32_t> xofLen) {

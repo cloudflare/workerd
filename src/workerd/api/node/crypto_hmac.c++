@@ -11,9 +11,9 @@
 #include <workerd/api/crypto-impl.h>
 
 namespace workerd::api::node {
-jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(
-    jsg::Lock& js, kj::String algorithm, kj::Array<kj::byte> key) {
-  return jsg::alloc<CryptoImpl::HmacHandle>(algorithm, key);
+jsg::Ref<CryptoImpl::HmacHandle> CryptoImpl::HmacHandle::constructor(jsg::Lock& js,
+    kj::String algorithm, kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>key) {
+  return jsg::alloc<HmacHandle>(js, algorithm, key);
 }
 
 int CryptoImpl::HmacHandle::update(jsg::Lock& js, kj::Array<kj::byte> data) {
@@ -40,7 +40,30 @@ kj::Array<kj::byte> CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
   }
 }
 
-CryptoImpl::HmacHandle::HmacHandle(kj::String& algorithm, kj::Array<kj::byte>& key) {
+CryptoImpl::HmacHandle::HmacHandle(jsg::Lock& js, kj::String& algorithm,
+                                   kj::OneOf<kj::Array<kj::byte>, jsg::Ref<CryptoKey>>&_key) {
+  const auto key = [&_key]() {
+    KJ_SWITCH_ONEOF(_key) {
+      KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
+        return kj::mv(key_data);
+      }
+      KJ_CASE_ONEOF(key2, jsg::Ref<CryptoKey>) {
+        // We already checked that the key is a secret key, so the following should succeed.
+        SubtleCrypto::ExportKeyData keyData = key2->impl->exportKey("raw"_kj);
+
+        KJ_SWITCH_ONEOF(keyData) {
+          KJ_CASE_ONEOF(key_data, kj::Array<kj::byte>) {
+            return kj::mv(key_data);
+          }
+          KJ_CASE_ONEOF(jwk, SubtleCrypto::JsonWebKey) {
+            KJ_UNREACHABLE;
+          }
+        }
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+
   JSG_REQUIRE(key.size() <= INT_MAX, RangeError, "key is too long");
   const EVP_MD* md = EVP_get_digestbyname(algorithm.begin());
   JSG_REQUIRE(md != nullptr, Error, "Digest method not supported");

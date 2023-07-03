@@ -195,22 +195,24 @@ export function createHmac(hmac: string, key: ArrayLike | KeyObject | CryptoKey,
   return new Hmac(hmac, key, options);
 }
 
-let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | CryptoKey,
+let Hmac = function(this: Hmac, hmac: string, key: ArrayLike | KeyObject | cryptoImpl.CryptoKey,
                     options?: TransformOptions): Hmac {
-  if (!(this instanceof Hmac))
+  if (!(this instanceof Hmac)) {
     return new Hmac(hmac, key, options);
+  }
   validateString(hmac, 'hmac');
   const encoding = getStringOption(options, 'encoding');
 
   if (key instanceof KeyObject) {
-    if (key.type !== 'secret')
+    if (key.type !== 'secret') {
       throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'secret');
-    // TODO: Add support for providing KeyObject, CryptoKey directly
-    // this[kHandle] = new cryptoImpl.HmacHandle(hmac, (key as KeyObject)[kHandle]);
+    }
+    this[kHandle] = new cryptoImpl.HmacHandle(hmac, key[kHandle]);
   } else if (isCryptoKey(key)) {
-    if ((key as cryptoImpl.CryptoKey).type !== 'secret')
+    if ((key as cryptoImpl.CryptoKey).type !== 'secret') {
       throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE((key as cryptoImpl.CryptoKey).type, 'secret');
-    // this[kHandle] = new cryptoImpl.HmacHandle(hmac, key);
+    }
+    this[kHandle] = new cryptoImpl.HmacHandle(hmac, key);
   } else if (typeof key !== 'string' &&
   !isArrayBufferView(key) &&
   !isAnyArrayBuffer(key)) {
