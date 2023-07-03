@@ -38,7 +38,7 @@ v8::Local<v8::Value> AsyncLocalStorage::exit(
   // Node.js defines exit as running "a function synchronously outside of a context".
   // It goes on to say that the store is not accessible within the callback or the
   // asynchronous operations created within the callback. Any getStore() call done
-  // within the callbackfunction will always return undefined... except if run() is
+  // within the callback function will always return undefined... except if run() is
   // called which implicitly enables the context again within that scope.
   //
   // We do not have to emulate Node.js enable/disable behavior since we are not

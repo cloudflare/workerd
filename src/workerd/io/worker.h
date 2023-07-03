@@ -202,7 +202,7 @@ public:
   };
   struct ModulesSource {
     kj::StringPtr mainModule;
-    // Path to the main module, which can be looked up in thne module registry. Pointer is valid
+    // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
 
     kj::Function<kj::Own<jsg::ModuleRegistry>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
@@ -333,7 +333,7 @@ public:
     // underlying Isolate memory has been deallocated (provided ownership of the weak isolate
     // reference is retained).
     // TODO(someday): This can be templatized & even integrated into KJ. That's why the method
-    // bodies are defined ineline.
+    // bodies are defined inline.
   public:
     WeakIsolateRef(Isolate* thisArg) : this_(thisArg) {}
 
@@ -467,13 +467,13 @@ public:
   static const ApiIsolate& current();
   // Get the current `ApiIsolate` or throw if we're not currently executing JavaScript.
   //
-  // TODO(cleanup): This is a hack thrown in quickly because IoContext::curent() dosen't work in
+  // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
 
   virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // Take a lock on the isolate.
   //
-  // TODO(cleanup): Change all locking to a synchrenous callback style rather than RAII style, so
+  // TODO(cleanup): Change all locking to a synchronous callback style rather than RAII style, so
   //   that this doesn't have to allocate and so it's not possible to hold a lock while returning
   //   to the event loop.
 
@@ -501,7 +501,7 @@ public:
 
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
-    // WebCrytpo algorithms supported.
+    // WebCrypto algorithms supported.
     return nullptr;
   }
 };
@@ -677,8 +677,8 @@ public:
 
   class HibernationManager : public kj::Refcounted {
     // The HibernationManager class manages HibernatableWebSockets created by an actor.
-    // The manager handles accepting new websockets, retreiving existing websockets by tag, and
-    // removing websockets from its collection when they disconnect.
+    // The manager handles accepting new WebSockets, retrieving existing WebSockets by tag, and
+    // removing WebSockets from its collection when they disconnect.
   public:
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
@@ -739,7 +739,7 @@ public:
 
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for
-  // modules-syntax worokers. (Note that Service-Workers-syntax actors are not supported publicly.)
+  // modules-syntax workers. (Note that Service-Workers-syntax actors are not supported publicly.)
 
   ActorObserver& getMetrics();
 

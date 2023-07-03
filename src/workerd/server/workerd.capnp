@@ -797,7 +797,7 @@ struct TlsOptions {
 
   minVersion @4 :Version = goodDefault;
   # Minimum TLS version that will be allowed. Generally you should not override this unless you
-  # have unusual backwards-compatibilty needs.
+  # have unusual backwards-compatibility needs.
 
   enum Version {
     goodDefault @0;
