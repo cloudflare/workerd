@@ -640,6 +640,12 @@ jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<js
     sqlite->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
+      if (!sqlite->run("SELECT * FROM pragma_foreign_keys(), pragma_foreign_key_check() WHERE foreign_keys = TRUE;").isDone()) {
+        // PRAGMA foreign_keys is set to true, and yet something in this transaction caused foreign keys
+        // to be violated (probably using PRAGMA defer_foreign_keys). In this case, reject the savepoint
+        // without exploding the whole isolate when the implicit transaction tries to commit.
+        js.throwException(JSG_KJ_EXCEPTION(FAILED, Error, "FOREIGN KEY constraint failed"));
+      }
       sqlite->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::Value {

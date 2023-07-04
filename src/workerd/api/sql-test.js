@@ -606,10 +606,15 @@ async function testForeignKeys(storage) {
     await scheduler.wait(1);
 
     // But if we use defer_foreign_keys but try to commit, it resets the DO
-    storage.transactionSync(() => {
-      sql.exec(`PRAGMA defer_foreign_keys=ON;`);
-      sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 2, "Post 2");
-    });
+    requireException(
+      () => {
+        storage.transactionSync(() => {
+          sql.exec(`PRAGMA defer_foreign_keys=ON;`);
+          sql.exec(`INSERT INTO posts (user_id, content) VALUES (?, ?)`, 2, "Post 2");
+        });
+      },
+      "Error: FOREIGN KEY constraint failed"
+    )
   }
 }
 
@@ -660,9 +665,7 @@ export default {
     assert.deepEqual(await doReq("sql-test"), {ok: true});
 
     // Test defer_foreign_keys (explodes the DO)
-    await requireAsyncException(async () => {
-      await doReq("sql-test-foreign-keys");
-    }, "Error: internal error")
+    assert.deepEqual(await doReq("sql-test-foreign-keys"), {ok: true});
 
     // Some increments.
     assert.equal(await doReq("increment"), 1);
