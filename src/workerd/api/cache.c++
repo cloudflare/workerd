@@ -526,12 +526,15 @@ jsg::Promise<jsg::Ref<Cache>> CacheStorage::open(jsg::Lock& js, kj::String cache
       TypeError, "Cache name is too long.");  // Mah spoon is toooo big.
 
   // TODO(someday): Implement Cache API in preview.
-  // TODO(someday): Calling IoContext::current() here means .open() can't be called in the
-  //   global scope. Do we want that to be possible? It returns a promise, so isn't very useful in
-  //   the global scope anyway. But the returned object also is not tied to any particular request.
-  auto& context = IoContext::current();
-  if (context.isFiddle()) {
-    context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
+
+  // It is possible here that open() will be called in the global scope in fiddle
+  // mode in which case the warning will not be emitted. But that's ok? The warning
+  // is not critical by any stretch.
+  if (IoContext::hasCurrent()) {
+    auto& context = IoContext::current();
+    if (context.isFiddle()) {
+      context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
+    }
   }
 
   return js.resolvedPromise(jsg::alloc<Cache>(kj::mv(cacheName)));
