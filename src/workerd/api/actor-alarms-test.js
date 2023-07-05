@@ -1,26 +1,18 @@
 import * as assert from 'node:assert'
 
-async function timeout(ms) {
-  await scheduler.wait(ms);
-  throw new Error(`timed out`);
-}
-
 export class DurableObjectExample {
   constructor(state, env) {
     this.state = state;
   }
 
-  async waitForAlarm(scheduledTime, timeoutOverrideMs) {
-    console.log(`waiting for ${scheduledTime.valueOf()}`);
+  async waitForAlarm(scheduledTime) {
     let self = this;
     let prom = new Promise((resolve) => {
       self.resolve = resolve;
     });
 
-    let timeMs = scheduledTime.valueOf();
-    let timeoutMs = (timeMs - Date.now().valueOf()) + (timeoutOverrideMs ?? 4000);
     try {
-      await Promise.race([prom, timeout(timeoutMs)]);
+      await prom;
       if (Date.now() < scheduledTime.valueOf()) {
         throw new Error(`Date.now() is before scheduledTime! ${Date.now()} vs ${scheduledTime.valueOf()}`);
       }
@@ -34,20 +26,17 @@ export class DurableObjectExample {
     }
   }
 
-  async fetch(req) {
-    let url = new URL(req.url);
-
+  async fetch() {
     const time = Date.now() + 100;
     await this.state.storage.setAlarm(time);
     assert.equal(await this.state.storage.getAlarm(), time);
 
-    await this.waitForAlarm(time, 3000);
+    await this.waitForAlarm(time);
 
     return new Response("OK");
   }
 
   async alarm() {
-    console.log("alarm()");
     let time = await this.state.storage.getAlarm();
     if (time) {
       throw new Error(`time not null inside alarm handler ${time}`);

@@ -120,6 +120,8 @@ private:
 
   kj::Promise<void> makeAlarmTask(kj::Duration delay, const ActorKey& actor, kj::Date scheduledTime);
 
+  kj::Promise<void> checkTimestamp(kj::Date now, kj::Date scheduledTime);
+
   SqliteDatabase::Statement stmtSetAlarm = db->prepare(R"(
     INSERT INTO _cf_ALARM VALUES(?, ?, ?)
       ON CONFLICT DO UPDATE SET scheduled_time = excluded.scheduled_time;
