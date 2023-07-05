@@ -61,6 +61,7 @@ build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
+build:unix --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 
 # Temporary workaround for zlib warnings and mac compilation, should no longer be needed with next
 # zlib release (https://github.com/madler/zlib/issues/633)
@@ -107,5 +108,6 @@ build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-u
 # being detected as clang...
 # TODO(soon): Integrate this into V8 instead
 build:windows --cxxopt='-Wno-invalid-offsetof' --host_cxxopt='-Wno-invalid-offsetof'
+build:windows --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 
 build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True

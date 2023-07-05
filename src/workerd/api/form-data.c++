@@ -11,6 +11,7 @@
 #include <regex>
 #include <kj/parse/char.h>
 #include <kj/compat/http.h>
+#include <workerd/util/mimetype.h>
 
 #if !_MSC_VER
 #include <strings.h>
@@ -68,7 +69,7 @@ constexpr auto contentDisposition =
     p::sequence(p::discardWhitespace, httpIdentifier,
                 p::discardWhitespace, p::many(contentDispositionParam));
 
-void parseFormData(kj::Vector<FormData::Entry>& data, kj::ArrayPtr<const char> boundary,
+void parseFormData(kj::Vector<FormData::Entry>& data, kj::StringPtr boundary,
                    kj::ArrayPtr<const char> body, bool convertFilesToStrings) {
   // multipart/form-data messages are delimited by <CRLF>--<boundary>. We want to be able to handle
   // omitted carriage returns, though, so our delimiter only matches against a preceding line feed.
@@ -271,9 +272,10 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
         builder.addAll("\"\r\nContent-Type: "_kj);
         auto type = file->getType();
         if (type == nullptr) {
-          type = "application/octet-stream"_kj;
+          builder.addAll(MimeType::OCTET_STREAM.toString());
+        } else {
+          builder.addAll(type);
         }
-        builder.addAll(type);
         builder.addAll("\r\n\r\n"_kj);
         builder.addAll(file->getData().asChars());
       }
@@ -301,33 +303,40 @@ FormData::EntryType FormData::clone(v8::Isolate* isolate, FormData::EntryType& v
 
 void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
                      bool convertFilesToStrings) {
-  if (contentType.startsWith("multipart/form-data")) {
-    auto boundary = JSG_REQUIRE_NONNULL(readContentTypeParameter(contentType, "boundary"),
-        TypeError, "No boundary string in Content-Type header. The multipart/form-data MIME "
-        "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
-        "boundary=\"abcd\"'. See RFC 7578, section 4.");
-    parseFormData(data, boundary, rawText, convertFilesToStrings);
-  } else if (contentType.startsWith("application/x-www-form-urlencoded")) {
-    // Let's read the charset so we can barf if the body isn't UTF-8.
-    //
-    // TODO(conform): Transcode to UTF-8, like the spec tells us to.
-    KJ_IF_MAYBE(charsetParam, readContentTypeParameter(contentType, "charset")) {
-      auto charset = kj::str(*charsetParam);
-      JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
-                 strcasecmp(charset.cStr(), "utf8") == 0 ||
-                 strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
-          TypeError, "Non-utf-8 application/x-www-form-urlencoded body.");
+  KJ_IF_MAYBE(parsed, MimeType::tryParse(contentType)) {
+    auto& params = parsed->params();
+    if (MimeType::FORM_DATA == *parsed) {
+      auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
+          "No boundary string in Content-Type header. The multipart/form-data MIME "
+          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
+          "boundary=\"abcd\"'. See RFC 7578, section 4.");
+      parseFormData(data, boundary, rawText, convertFilesToStrings);
+      return;
+    } else if (MimeType::FORM_URLENCODED == *parsed) {
+      // Let's read the charset so we can barf if the body isn't UTF-8.
+      //
+      // TODO(conform): Transcode to UTF-8, like the spec tells us to.
+      KJ_IF_MAYBE(charsetParam, params.find("charset"_kj)) {
+        auto charset = kj::str(*charsetParam);
+        JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
+                    strcasecmp(charset.cStr(), "utf8") == 0 ||
+                    strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
+            TypeError, "Non-utf-8 application/x-www-form-urlencoded body.");
+      }
+      kj::Vector<kj::Url::QueryParam> query;
+      parseQueryString(query, kj::mv(rawText));
+      data.reserve(query.size());
+      for (auto& param: query) {
+        data.add(Entry { kj::mv(param.name), kj::mv(param.value) });
+      }
+      return;
     }
-    kj::Vector<kj::Url::QueryParam> query;
-    parseQueryString(query, kj::mv(rawText));
-    data.reserve(query.size());
-    for (auto& param: query) {
-      data.add(Entry { kj::mv(param.name), kj::mv(param.value) });
-    }
-  } else {
-    JSG_FAIL_REQUIRE(TypeError, "Unrecognized Content-Type header value. FormData can only "
-        "parse the following MIME types: multipart/form-data, application/x-www-form-urlencoded.");
   }
+  JSG_FAIL_REQUIRE(TypeError, kj::str(
+      "Unrecognized Content-Type header value. FormData can only "
+      "parse the following MIME types: ",
+      MimeType::FORM_DATA.toString(), ", ",
+      MimeType::FORM_URLENCODED.toString()));
 }
 
 jsg::Ref<FormData> FormData::constructor() {

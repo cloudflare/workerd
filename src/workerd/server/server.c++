@@ -20,6 +20,7 @@
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/api/actor-state.h>
+#include <workerd/util/mimetype.h>
 #include "workerd-api.h"
 #include <stdlib.h>
 
@@ -804,7 +805,7 @@ private:
       switch (meta.type) {
         case kj::FsNode::Type::FILE: {
           kj::HttpHeaders headers(headerTable);
-          headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/octet-stream");
+          headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
           headers.set(hLastModified, httpTime(meta.lastModified));
 
           // We explicitly set the Content-Length header because if we don't, and we were called
@@ -835,7 +836,7 @@ private:
           auto dir = readable->openSubdir(path);
 
           kj::HttpHeaders headers(headerTable);
-          headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+          headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
           headers.set(hLastModified, httpTime(meta.lastModified));
 
           // We intentionally don't provide the expected size here in order to reserve the right
@@ -1054,12 +1055,12 @@ public:
     }
 
     if (url.endsWith("/json/version")) {
-      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
       auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
       auto out = response.send(200, "OK", responseHeaders, content.size());
       return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
     } else if (url.endsWith("/json") || url.endsWith("/json/list")) {
-      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+      responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
       auto baseWsUrl = KJ_UNWRAP_OR(headers.get(kj::HttpHeaderId::HOST), {
         return response.sendError(400, "Bad Request", responseHeaders);

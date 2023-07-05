@@ -6,6 +6,7 @@
 /* eslint-disable */
 
 import { default as internalTypes } from 'node-internal:internal_types';
+import { default as utilImpl } from 'node-internal:util';
 
 import {
   validateFunction
@@ -23,6 +24,11 @@ export {
 import { format } from 'node-internal:internal_format';
 
 export const types = internalTypes;
+
+export const {
+  MIMEParams,
+  MIMEType,
+} = utilImpl;
 
 const callbackifyOnRejected = (reason: unknown, cb : Function) => {
   if (!reason) {
@@ -165,6 +171,8 @@ export default {
   format,
   inherits,
   _extend,
+  MIMEParams,
+  MIMEType,
 };
 
 // Node.js util APIs we're currently not supporting

@@ -16,8 +16,7 @@ void expectUnredacted(kj::StringPtr input) {
 }
 
 void expectContentTypeParameter(kj::StringPtr input, kj::StringPtr param, kj::StringPtr expected) {
-  auto res = readContentTypeParameter(input, param);
-  auto value = KJ_ASSERT_NONNULL(res);
+  auto value = KJ_ASSERT_NONNULL(readContentTypeParameter(input, param));
   KJ_EXPECT(value == expected);
 }
 
@@ -124,22 +123,20 @@ KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
   );
 
   // handle non-closing quotes
-  KJ_ASSERT(readContentTypeParameter(
+  expectContentTypeParameter(
     R"(multipart/form-data; charset="boundary=;\"; boundary="__boundary__")",
-    "boundary"_kj
-  ) == nullptr);
+    "boundary"_kj,
+    "__boundary__"_kj);
 
-  // handle non-closing quotes on wanted param
-  KJ_ASSERT(readContentTypeParameter(
+  expectContentTypeParameter(
     R"(multipart/form-data; charset="boundary=;"; boundary="__boundary__\")",
-    "boundary"_kj
-  ) == nullptr);
+    "boundary"_kj,
+    "__boundary__"_kj);
 
-  // handle incorrect quotes
-  KJ_ASSERT(readContentTypeParameter(
+  expectContentTypeParameter(
     R"(multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\")",
-    "boundary"_kj
-  ) == nullptr);
+    "boundary"_kj,
+    R"(\"__boundary__\")");
 
   // spurious whitespace before ;
   expectContentTypeParameter(

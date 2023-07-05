@@ -8,6 +8,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/util/http-util.h>
+#include <workerd/util/mimetype.h>
 #include <workerd/io/io-context.h>
 #include <kj/encoding.h>
 #include <kj/compat/http.h>
@@ -338,7 +339,7 @@ jsg::Promise<void> KvNamespace::put(
 
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
-        headers.set(kj::HttpHeaderId::CONTENT_TYPE, "text/plain;charset=UTF-8");
+        headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT.toString());
         expectedBodySize = uint64_t(text.size());
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {

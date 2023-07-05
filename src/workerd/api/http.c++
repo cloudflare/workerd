@@ -13,6 +13,7 @@
 #include <kj/parse/char.h>
 #include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
+#include <workerd/util/mimetype.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/io/io-context.h>
@@ -515,7 +516,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return kj::mv(stream);
     }
     KJ_CASE_ONEOF(text, kj::String) {
-      contentType = kj::str("text/plain;charset=UTF-8");
+      contentType = MimeType::PLAINTEXT.toString();
       buffer = kj::mv(text);
     }
     KJ_CASE_ONEOF(bytes, kj::Array<byte>) {
@@ -537,11 +538,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       auto boundary = makeRandomBoundaryCharacters();
-      contentType = kj::str("multipart/form-data; boundary=", boundary);
+      auto type = MimeType::FORM_DATA.clone();
+      type.addParam("boundary"_kj, boundary);
+      contentType = type.toString();
       buffer = formData->serialize(boundary);
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      contentType = kj::str("application/x-www-form-urlencoded;charset=UTF-8");
+      auto type = MimeType::FORM_URLENCODED.clone();
+      type.addParam("charset"_kj, "UTF-8"_kj);
+      contentType = type.toString();
       buffer = searchParams->toString();
     }
   }
@@ -562,7 +567,7 @@ Body::Body(kj::Maybe<ExtractedBody> init, Headers& headers)
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.set(jsg::ByteString(kj::str("Content-Type")), jsg::ByteString(kj::mv(*ct)));
-          } else if (ct->startsWith("multipart/form-data")) {
+          } else if (MimeType::FORM_DATA == *ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
             IoContext::current().logWarning(
@@ -648,17 +653,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       auto& context = IoContext::current();
       if (context.isInspectorEnabled()) {
         KJ_IF_MAYBE(type, headersRef.get(jsg::ByteString(kj::str("Content-Type")))) {
-          if (!type->startsWith("text/") &&
-              !type->endsWith("charset=UTF-8") &&
-              !type->endsWith("charset=utf-8") &&
-              !type->endsWith("xml") &&
-              !type->endsWith("json") &&
-              !type->endsWith("javascript")) {
-            context.logWarning(kj::str(
-                "Called .text() on an HTTP body which does not appear to be text. The body's "
-                "Content-Type is \"", *type, "\". The result will probably be corrupted. Consider "
-                "checking the Content-Type header before interpreting entities as text."));
-          }
+          maybeWarnIfNotText(*type);
         }
       }
 
@@ -1221,7 +1216,7 @@ jsg::Ref<Response> Response::json_(
     if (!headers->hasLowerCase("content-type"_kj)) {
       headers->set(
           jsg::ByteString(kj::str("content-type")),
-          jsg::ByteString(kj::str("application/json")));
+          jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };

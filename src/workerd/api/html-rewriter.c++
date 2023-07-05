@@ -1042,12 +1042,14 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   auto outputSink = ts->getWritable()->removeSink(js);
 
   kj::String ownContentType;
-  kj::ArrayPtr<const char> encoding = "utf-8"_kj;
+  kj::String encoding = kj::str("utf-8");
   auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
   KJ_IF_MAYBE(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
+    // TODO(cleanup): readContentTypeParameter can be replaced with using
+    // workerd/util/mimetype.h directly.
     KJ_IF_MAYBE(charset, readContentTypeParameter(*contentType, "charset")) {
       ownContentType = kj::mv(*contentType);
-      encoding = *charset;
+      encoding = kj::mv(*charset);
     }
   }
 

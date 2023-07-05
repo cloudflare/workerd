@@ -1,9 +1,10 @@
 #include "queue.h"
-#include "src/workerd/api/util.h"
-#include "src/workerd/jsg/jsg.h"
+#include "util.h"
 
 #include <workerd/jsg/buffersource.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/mimetype.h>
 #include <workerd/api/global-scope.h>
 #include <kj/encoding.h>
 
@@ -136,7 +137,7 @@ kj::Promise<void> WorkerQueue::send(
   }
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/octet-stream");
+  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
 
   Serialized serialized;
   KJ_IF_MAYBE(type, contentType) {
@@ -250,7 +251,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
   headers.add("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
   headers.add("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
   headers.add("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
-  headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json"_kj);
+  headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
   auto req = client->request(kj::HttpMethod::POST, url, headers, body.size());
 
