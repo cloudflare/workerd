@@ -1,3 +1,7 @@
+// Copyright (c) 2022-2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // An example Worker that serves static files from disk. This includes logic to do things like
 // set Content-Type based on file extension, look for `index.html` in directories, etc.
 //
