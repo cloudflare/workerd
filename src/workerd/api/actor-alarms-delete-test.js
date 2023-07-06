@@ -1,3 +1,7 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // This test is aimed towards validating a correct deleteAlarm behavior in workerd.
 // Currently running alarms cannot be deleted within alarm() handler, but can delete it everywhere
 // else.

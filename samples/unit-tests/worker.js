@@ -1,3 +1,7 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 // Exporting a test is like exporting a `fetch()` handler.
 //
 // It's common to want to write multiple tests in one file. We can export each
