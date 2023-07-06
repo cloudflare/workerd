@@ -51,11 +51,11 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/jsg:rtti",
         "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/kj:kj-async",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-brotli",
-        "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
         "@com_cloudflare_lol_html//:lolhtml",
     ],
 )
@@ -78,7 +78,10 @@ wd_cc_library(
     name = "observer",
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
-    deps = [":trace"],
+    deps = [
+        ":trace",
+        "//src/workerd/jsg:observer",
+    ],
 )
 
 wd_cc_library(

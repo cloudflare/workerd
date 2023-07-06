@@ -6,6 +6,7 @@
 
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::server {
 
@@ -14,7 +15,8 @@ class WorkerdApiIsolate final: public Worker::ApiIsolate {
 public:
   WorkerdApiIsolate(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
-      IsolateLimitEnforcer& limitEnforcer);
+      IsolateLimitEnforcer& limitEnforcer,
+      kj::Own<jsg::IsolateObserver> observer);
   ~WorkerdApiIsolate() noexcept(false);
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
@@ -156,10 +158,14 @@ private:
   kj::Own<Impl> impl;
 
   kj::Array<Worker::Script::CompiledGlobal> compileScriptGlobals(
-      jsg::Lock& lock, config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter) const;
-  kj::Own<jsg::ModuleRegistry> compileModules(
-      jsg::Lock& lock, config::Worker::Reader conf,
+      jsg::Lock& lock,
+      config::Worker::Reader conf,
+      Worker::ValidationErrorReporter& errorReporter,
+      const jsg::CompilationObserver& observer) const;
+
+  void compileModules(
+      jsg::Lock& lock,
+      config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       capnp::List<config::Extension>::Reader extensions) const;
 };

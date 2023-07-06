@@ -861,7 +861,9 @@ public:
   }
 
   template <typename... Args>
-  JsContext<T> newContext(v8::Isolate* isolate, T*, Args&&... args) {
+  JsContext<T> newContext(v8::Isolate* isolate,
+      CompilationObserver& compilationObserver,
+      T*, Args&&... args) {
     // Construct an instance of this type to be used as the Javascript global object, creating
     // a new JavaScript context. Unfortunately, we have to do some things differently in this
     // case, because of quirks in how V8 handles the global object. There appear to be bugs
@@ -906,7 +908,8 @@ public:
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    return JsContext<T>(context, kj::mv(ptr));
+    auto moduleManager = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+    return JsContext<T>(context, kj::mv(ptr), kj::mv(moduleManager));
   }
 
   kj::Maybe<T&> tryUnwrap(

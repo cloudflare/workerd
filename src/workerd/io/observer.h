@@ -12,6 +12,7 @@
 #include <kj/time.h>
 #include <kj/compat/http.h>
 #include <workerd/io/trace.h>
+#include <workerd/jsg/observer.h>
 
 namespace workerd {
 
@@ -72,8 +73,10 @@ public:
   virtual void setFailedOpen(bool value) {}
 };
 
-class IsolateObserver: public kj::AtomicRefcounted {
+class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver {
 public:
+  virtual ~IsolateObserver() noexcept(false) { }
+
   virtual void created() {};
   // Called when Worker::Isolate is created.
 

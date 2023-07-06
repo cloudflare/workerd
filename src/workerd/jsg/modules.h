@@ -4,11 +4,13 @@
 
 #pragma once
 
-#include "jsg.h"
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/observer.h>
 #include <set>
+#include "function.h"
+#include "promise.h"
 
 namespace workerd::jsg {
 
@@ -164,21 +166,6 @@ enum class ModuleInfoCompileOption {
   // the compilation data.
 };
 
-struct CompilationObserver: public kj::Refcounted {
-  // Monitors behavior of compilation processes.
-
-  virtual kj::Own<void> onEsmCompilationStart(
-      v8::Isolate* isolate, kj::StringPtr name, ModuleInfoCompileOption option) const = 0;
-  // Called at the start of module compilation.
-  // Returned value will be destroyed when module compilation finishes.
-  // It is guaranteed that isolate lock is held during both invocations.
-
-  virtual kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const = 0;
-  // Called at the start of wasm compilation.
-  // Returned value will be destroyed when module compilation finishes.
-  // It is guaranteed that isolate lock is held during both invocations.
-};
-
 v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
     kj::ArrayPtr<const uint8_t> code,
     const CompilationObserver& observer);
@@ -187,6 +174,10 @@ class ModuleRegistry {
   // The ModuleRegistry maintains the collection of modules known to a script that can be
   // required or imported.
 public:
+  KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
+
+  ModuleRegistry() { }
+
   enum class Type {
     // BUNDLE is for modules provided by the worker bundle.
     // BUILTIN is for modules that are provided by the runtime and can be
@@ -369,9 +360,34 @@ public:
 };
 
 template <typename TypeWrapper>
+v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context,
+                                                  v8::Local<v8::Data> host_defined_options,
+                                                  v8::Local<v8::Value> resource_name,
+                                                  v8::Local<v8::String> specifier,
+                                                  v8::Local<v8::FixedArray> import_assertions);
+
+template <typename TypeWrapper>
 class ModuleRegistryImpl final: public ModuleRegistry {
 public:
-  ModuleRegistryImpl(kj::Own<CompilationObserver> observer) : observer(kj::mv(observer)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistryImpl);
+
+  ModuleRegistryImpl(CompilationObserver& observer) : observer(observer) { }
+
+  static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      CompilationObserver& observer) {
+    auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
+    context->SetAlignedPointerInEmbedderData(2, registry.get());
+    isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
+    return kj::mv(registry);
+  }
+
+  static inline ModuleRegistryImpl* from(jsg::Lock& js) {
+    return static_cast<ModuleRegistryImpl*>(
+        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+  }
+
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
@@ -443,18 +459,18 @@ public:
     using Key = typename Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
-        return entry->module(js, *observer);
+        return entry->module(js, observer);
       }
     } else {
       if (option == ResolveOption::DEFAULT) {
         // First, we try to resolve a worker bundle version of the module.
         KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
-          return entry->module(js, *observer);
+          return entry->module(js, observer);
         }
       }
       // Then we look for a built-in version of the module.
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUILTIN))) {
-        return entry->module(js, *observer);
+        return entry->module(js, observer);
       }
     }
     return nullptr;
@@ -514,8 +530,10 @@ public:
             kj::str("No such module \"", specifier.toString(), "\"."))));
   }
 
+  CompilationObserver& getObserver() { return observer; }
+
 private:
-  kj::Own<CompilationObserver> observer;
+  CompilationObserver& observer;
   kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
 
   // When we build a bundle containing modules, we must build a table of modules to resolve imports.
@@ -682,13 +700,6 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     return makeRejected(makeInternalError(isolate, kj::mv(ex)));
   }
   KJ_UNREACHABLE;
-}
-
-template <typename TypeWrapper>
-void setModulesForResolveCallback(jsg::Lock& js, ModuleRegistry* table) {
-  KJ_ASSERT(table != nullptr);
-  js.v8Context()->SetAlignedPointerInEmbedderData(2, table);
-  js.v8Isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
 }
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate);

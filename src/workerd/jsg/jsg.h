@@ -1324,6 +1324,8 @@ using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>
 // parameter type. This wraps the function's result type in `jsg::Promise` UNLESS the function
 // already returns a `jsg::Promise`, in which case the type is unchanged.
 
+class ModuleRegistry;
+
 template <typename T>
 class JsContext {
   // Reference to a JavaScript context whose global object wraps a C++ object of type T. This is
@@ -1331,8 +1333,11 @@ class JsContext {
   // which is more than just the global object.
 
 public:
-  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
-      : handle(handle->GetIsolate(), handle), object(kj::mv(object)) {}
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object, kj::Own<ModuleRegistry> moduleRegistry)
+      : handle(handle->GetIsolate(), handle),
+        object(kj::mv(object)),
+        moduleRegistry(kj::mv(moduleRegistry)) {}
+
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
 
@@ -1343,9 +1348,12 @@ public:
     return handle.Get(isolate);
   }
 
+  ModuleRegistry& getModuleRegistry() { return *moduleRegistry; }
+
 private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
+  kj::Own<ModuleRegistry> moduleRegistry;
 };
 
 class BufferSource;
@@ -2019,6 +2027,7 @@ inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) {
 }  // namespace workerd::jsg
 
 // These two includes are needed for the JSG type glue macros to work.
+#include "modules.h"
 #include "resource.h"
 #include "dom-exception.h"
 #include "struct.h"

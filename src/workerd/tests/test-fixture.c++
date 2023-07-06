@@ -261,7 +261,8 @@ TestFixture::TestFixture(SetupParams params)
     apiIsolate(kj::heap<server::WorkerdApiIsolate>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
-      *isolateLimitEnforcer)),
+      *isolateLimitEnforcer,
+      kj::atomicRefcounted<IsolateObserver>())),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(apiIsolate),
       kj::atomicRefcounted<IsolateObserver>(),

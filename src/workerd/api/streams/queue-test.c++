@@ -24,7 +24,7 @@ struct Preamble {
   v8::Local<v8::Context> context;
   v8::Context::Scope contextScope;
   Preamble()
-    : isolate(v8System),
+    : isolate(v8System, kj::heap<jsg::IsolateObserver>()),
       lock(isolate, stackScope),
       scope(lock.v8Isolate),
       context(lock.newContext<QueueContext>().getHandle(lock.v8Isolate)),

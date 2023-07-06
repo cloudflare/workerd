@@ -24,7 +24,7 @@ public:
 
   IsolateType& getIsolate() {
     // Slightly more efficient to only instantiate each isolate type once (17s vs. 20s):
-    static IsolateType isolate(v8System, ConfigurationType());
+    static IsolateType isolate(v8System, ConfigurationType(), kj::heap<IsolateObserver>());
     return isolate;
   }
 
