@@ -16,8 +16,8 @@
 #include <kj/map.h>
 #include "util.h"
 #include "wrappable.h"
-#include "jsg.h"
 #include <typeindex>
+#include "meta.h"
 
 namespace std {
   inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -46,71 +46,6 @@ inline void visitSubclassForGc(T* obj, GcVisitor& visitor) {
   // the parent class's `visitForGc()`.
   if constexpr (&T::visitForGc != &T::jsgSuper::visitForGc) {
     obj->visitForGc(visitor);
-  }
-}
-
-template <typename T>
-struct ArgumentIndexes_;
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(Lock&, Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(const v8::FunctionCallbackInfo<v8::Value>&, Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(Args...) const> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(Lock&, Args...) const> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T, typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret (T::*)(const v8::FunctionCallbackInfo<v8::Value>&, Args...) const> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret(Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret(Lock&, Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename Ret, typename... Args>
-struct ArgumentIndexes_<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)> {
-  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
-};
-template <typename T>
-using ArgumentIndexes = typename ArgumentIndexes_<T>::Indexes;
-// ArgumentIndexes<SomeMethodType> expands to kj::_::Indexes<0, 1, 2, 3, ..., n-1>, where n is the
-// number of arguments to the method, not counting the magic Lock or FunctionCallbackInfo parameter
-// (if any).
-
-template <typename T, bool isContext>
-T& extractInternalPointer(const v8::Local<v8::Context>& context,
-                          const v8::Local<v8::Object>& object) {
-  // Given a handle to a resource type, extract the raw C++ object pointer.
-  //
-  // Due to bugs in V8, we can't use internal fields on the global object:
-  //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
-  //
-  // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
-  // instead of the internal fields of the object.
-
-  if constexpr (isContext) {
-    // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
-    return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
-  } else {
-    KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(
-        Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
   }
 }
 

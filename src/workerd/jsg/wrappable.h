@@ -9,6 +9,7 @@
 // including garbage-collecting those objects.
 
 #include <kj/common.h>
+#include <kj/debug.h>
 #include <kj/refcount.h>
 #include <kj/vector.h>
 #include <kj/list.h>
@@ -221,5 +222,26 @@ private:
 
 // TODO(soon):
 // - Track memory usage of native objects.
+
+template <typename T, bool isContext>
+T& extractInternalPointer(const v8::Local<v8::Context>& context,
+                          const v8::Local<v8::Object>& object) {
+  // Given a handle to a resource type, extract the raw C++ object pointer.
+  //
+  // Due to bugs in V8, we can't use internal fields on the global object:
+  //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
+  //
+  // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
+  // instead of the internal fields of the object.
+
+  if constexpr (isContext) {
+    // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
+    return *reinterpret_cast<T*>(context->GetAlignedPointerFromEmbedderData(1));
+  } else {
+    KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+    return *reinterpret_cast<T*>(object->GetAlignedPointerFromInternalField(
+        Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+  }
+}
 
 }  // namespace workerd::jsg

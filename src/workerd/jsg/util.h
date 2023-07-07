@@ -19,6 +19,25 @@ namespace workerd::jsg {
 
 typedef unsigned int uint;
 
+class JsExceptionThrown: public std::exception {
+public:
+  JsExceptionThrown();
+  const char* what() const noexcept override;
+
+private:
+  void* trace[16];
+  kj::ArrayPtr<void* const> tracePtr;
+  mutable kj::String whatBuffer;
+};
+// When a C++ callback wishes to throw a JavaScript exception, it should first call
+// isolate->ThrowException() to set the JavaScript error value, then it should throw
+// JsExceptionThrown() as a C++ exception. This will be caught by the callback glue before the
+// code returns to V8.
+//
+// This differs from the usual convention in V8 which is to return a v8::Maybe that is null in the
+// case an exception is thrown. Writing code that deals with maybes is cumbersome and error-prone
+// compared to C++ exceptions.
+
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getCommonJsExportDefault(v8::Isolate* isolate);
 
@@ -392,5 +411,22 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
+
+struct Unimplemented {};
+// Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
+// exception.
+// - Use Unimplemented as a method parameter type or struct field type to mark that
+//   parameter/field unimplemented; only the value `undefined` will be allowed.
+// - Use Unimplemented as the return type of a method to mark the whole method unimplemented.
+//   Have the method body simply return `Unimplemented()`.
+//
+// TODO(someday): We should consider making it easier for people to probe features by doing
+//   `if (obj.someMember)`. Currently this check would pass for methods and would throw an
+//   exception for properties. Is it possible for us to hook into the V8 feature where there are
+//   special values of `undefined` that augment the error message thrown if they are used?
+
+using WontImplement = Unimplemented;
+// Use to mark APIs that are not just unimplemented, but that we don't plan to implement, e.g.
+// standard ServiceWorker APIs that don't make sense for Workers.
 
 }  // namespace workerd::jsg
