@@ -228,20 +228,20 @@ void maybeWarnIfNotText(kj::StringPtr str) {
   // A common mistake is to call .text() on non-text content, e.g. because you're implementing a
   // search-and-replace across your whole site and you forgot that it'll apply to images too.
   // When running in the fiddle, let's warn the developer if they do this.
-  KJ_IF_MAYBE (mimeType, MimeType::tryParse(str)) {
-    if (mimeType.type() == "text" || mimeType.subtype() == "json" ||
-        mimeType.subtype() == "xml" || mimeType.subtype() == "javascript") {
+  KJ_IF_MAYBE(mimeType, MimeType::tryParse(str)) {
+    if (mimeType->type() == "text" || mimeType->subtype() == "json" ||
+        mimeType->subtype() == "xml" || mimeType->subtype() == "javascript") {
       return;
     }
-    KJ_IF_MAYBE (charset, mimeType.params().find("charset")) {
-      if (charset.value == "utf-8") {
+    // If content has charset param, it is text content.
+    KJ_IF_MAYBE(charset, mimeType->params().find("charset"_kj)) {
         return;
-      }
     }
     IoContext::current().logWarning(kj::str(
     "Called .text() on an HTTP body which does not appear to be text. The body's "
     "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
     "checking the Content-Type header before interpreting entities as text."));
   }
+
 }
 }  // namespace workerd::api
