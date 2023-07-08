@@ -238,9 +238,9 @@ void maybeWarnIfNotText(kj::StringPtr str) {
         return;
     }
     IoContext::current().logWarning(kj::str(
-    "Called .text() on an HTTP body which does not appear to be text. The body's "
-    "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
-    "checking the Content-Type header before interpreting entities as text."));
+        "Called .text() on an HTTP body which does not appear to be text. The body's "
+        "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
+        "checking the Content-Type header before interpreting entities as text."));
   }
 
 }
