@@ -61,35 +61,20 @@ crates_vendor(
     cargo_bazel = CARGO_BAZEL,
     mode = "remote",
     packages = {
-        "anyhow": crate.spec(
-            features = ["default"],
-            version = "1",
-        ),
-        "libc": crate.spec(
-            version = "0.2",
-        ),
-        "addr2line": crate.spec(
-            default_features = False,
-            features = [
-                "std",
-                "rustc-demangle",
-                "cpp_demangle",
-                "fallible-iterator",
-                "smallvec",
-            ],
-            version = "0.14",
-        ),
         "lolhtml": crate.spec(
             git = "https://github.com/cloudflare/lol-html.git",
             rev = "2681dcf0b3e6907111565199df8c43cc9aab7fe8",
         ),
-
-        # Used for RTTI parameter extraction
+        # Crates used for RTTI parameter extraction
+        "anyhow": crate.spec(
+            features = ["default"],
+            version = "1",
+        ),
         "clang-ast": crate.spec(
             version = "0.1",
         ),
         "flate2": crate.spec(
-            version = "1.0.24",
+            version = "1.0.26",
         ),
         "serde": crate.spec(
             version = "1.0",
@@ -109,11 +94,9 @@ crates_vendor(
         "aarch64-unknown-linux-gnu",
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
-
-        # this is not used but its required to work around a bug in rules_rust where
-        # invalid select statements can get generated in vendored BUILD files
-        "wasm32-unknown-unknown",
     ],
+    # Not needed, we have a well-defined set of supported platforms
+    generate_target_compatible_with = False,
 )
 
 rust_static_library(

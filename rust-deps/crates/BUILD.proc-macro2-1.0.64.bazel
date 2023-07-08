@@ -7,7 +7,7 @@
 ###############################################################################
 
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -15,8 +15,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_proc_macro(
-    name = "proc_macro_hack",
+rust_library(
+    name = "proc_macro2",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,25 +29,34 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro-hack",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "1.0.64",
     deps = [
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:build_script_build",
+        "@crates_vendor__proc-macro2-1.0.64//:build_script_build",
+        "@crates_vendor__unicode-ident-1.0.10//:unicode_ident",
     ],
 )
 
 cargo_build_script(
-    name = "proc-macro-hack_build_script",
+    name = "proc-macro2_build_script",
     srcs = glob(["**/*.rs"]),
+    crate_features = [
+        "default",
+        "proc-macro",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -67,17 +76,17 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro-hack",
+        "crate-name=proc-macro2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "1.0.64",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "proc-macro-hack_build_script",
+    actual = "proc-macro2_build_script",
     tags = ["manual"],
 )

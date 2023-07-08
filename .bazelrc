@@ -29,17 +29,18 @@ build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-
 build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
-# Need to disable debug-assertions for fastbuild, should be off automatically for opt
-build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n
+# Need to disable debug-assertions for fastbuild, should be off automatically for opt. As long as
+# rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
+# improvement to build speed and rust-deps code size.
+build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
 
-build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1
+build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
 
 # TODO(later): -C codegen-units=1 improves code size and quality, should be enabled in a future
 # release configuration even if lto is off. Similarly, adding -C lto=thin would improve binary size
-# a lot (~2.2MB on Linux) – disable it for now due to compile errors and wrong code generation when
-# bazel and Rust use different LLVM versions. -C opt-level=s provides a comparatively small size
-# improvement, ~35k or ~75k with LTO.
-build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1
+# significantly – disable it for now due to compile errors and wrong code generation when bazel and
+# rust use different LLVM versions.
+build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
 
 #
 # Linux and macOS
