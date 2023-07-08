@@ -242,6 +242,5 @@ void maybeWarnIfNotText(kj::StringPtr str) {
         "Content-Type is \"", str, "\". The result will probably be corrupted. Consider "
         "checking the Content-Type header before interpreting entities as text."));
   }
-
 }
 }  // namespace workerd::api
