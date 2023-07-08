@@ -6,21 +6,8 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load(
-    "@bazel_skylib//lib:selects.bzl",
-    "selects",
-)
-load(
-    "@rules_rust//cargo:defs.bzl",
-    "cargo_build_script",
-)
-
-# buildifier: disable=bzl-visibility
-load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -30,149 +17,75 @@ package(default_visibility = ["//visibility:public"])
 
 rust_library(
     name = "memchr",
-    srcs = glob(
-        include = [
-            "**/*.rs",
-        ],
-        exclude = [
-        ],
-    ),
-    aliases = selects.with_or({
-        "//conditions:default": {
-        },
-    }),
+    srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
         exclude = [
+            "**/* *",
+            ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
             "WORKSPACE",
             "WORKSPACE.bazel",
         ],
-    ) + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
+    ),
     crate_features = [
         "default",
         "std",
     ],
     crate_root = "src/lib.rs",
-    data = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
     edition = "2018",
-    proc_macro_deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_env = {
-    },
-    rustc_env_files = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_flags = [
-        # In most cases, warnings in 3rd party crates are not interesting as
-        # they're out of the control of consumers. The flag here silences
-        # warnings. For more details see:
-        # https://doc.rust-lang.org/rustc/lints/levels.html
-        "--cap-lints=allow",
-    ],
+    rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
+        "crate-name=memchr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
     version = "2.5.0",
     deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-            "@crates_vendor__memchr-2.5.0//:build_script_build",
-        ],
-    }),
+        "@crates_vendor__memchr-2.5.0//:build_script_build",
+    ],
 )
 
 cargo_build_script(
-    # See comment associated with alias. Do not change this name
     name = "memchr_build_script",
-    srcs = glob(
-        include = [
-            "**/*.rs",
-        ],
-        exclude = [
-        ],
-    ),
-    aliases = selects.with_or({
-        "//conditions:default": {
-        },
-    }),
-    build_script_env = {
-    },
-    compile_data = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
+    srcs = glob(["**/*.rs"]),
     crate_features = [
         "default",
         "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
-    data = glob(["**"]) + select_with_or({
-        "//conditions:default": [
+    data = glob(
+        include = ["**"],
+        exclude = [
+            "**/* *",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
         ],
-    }),
+    ),
     edition = "2018",
-    proc_macro_deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_env = {
-    },
-    rustc_env_files = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
     rustc_flags = [
-        # In most cases, warnings in 3rd party crates are not interesting as
-        # they're out of the control of consumers. The flag here silences
-        # warnings. For more details see:
-        # https://doc.rust-lang.org/rustc/lints/levels.html
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
+        "crate-name=memchr",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    tools = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
     version = "2.5.0",
     visibility = ["//visibility:private"],
-    deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
 )
 
 alias(
-    # Because `cargo_build_script` does some invisible target name mutating to
-    # determine the package and crate name for a build script, the Bazel
-    # target namename of any build script cannot be the Cargo canonical name
-    # of `build_script_build` without losing out on having certain Cargo
-    # environment variables set.
     name = "build_script_build",
     actual = "memchr_build_script",
-    tags = [
-        "manual",
-    ],
+    tags = ["manual"],
 )

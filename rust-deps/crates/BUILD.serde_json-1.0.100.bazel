@@ -7,7 +7,7 @@
 ###############################################################################
 
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -15,8 +15,8 @@ package(default_visibility = ["//visibility:public"])
 #     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_proc_macro(
-    name = "proc_macro_hack",
+rust_library(
+    name = "serde_json",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,25 +29,36 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro-hack",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "1.0.100",
     deps = [
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:build_script_build",
+        "@crates_vendor__itoa-1.0.8//:itoa",
+        "@crates_vendor__ryu-1.0.14//:ryu",
+        "@crates_vendor__serde-1.0.171//:serde",
+        "@crates_vendor__serde_json-1.0.100//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "proc-macro-hack_build_script",
+    name = "serde_json_build_script",
     srcs = glob(["**/*.rs"]),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -67,17 +78,17 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro-hack",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "1.0.100",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "proc-macro-hack_build_script",
+    actual = "serde_json_build_script",
     tags = ["manual"],
 )

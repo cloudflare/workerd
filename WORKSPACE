@@ -19,17 +19,6 @@ load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
 
-http_archive(
-    name = "rules_foreign_cc",
-    sha256 = "6041f1374ff32ba711564374ad8e007aef77f71561a7ce784123b9b4b88614fc",
-    strip_prefix = "rules_foreign_cc-0.8.0",
-    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/0.8.0.tar.gz",
-)
-
-load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
-
-rules_foreign_cc_dependencies()
-
 # ========================================================================================
 # Simple dependencies
 
@@ -123,54 +112,54 @@ http_archive(
 http_file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "a9f81a6fd356fc01e3da2483bdd1f9dfb080b0bdf5a128fa036c048e5b301562",
+    sha256 = "885c4bd890ace1cf35d19edbeaff4f7ceb99c57f28464d3e979d496a95648866",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/cargo-bazel-x86_64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_linux_arm64",
     executable = True,
-    sha256 = "f2d168c386d38c0d5ca429c34dcbc5a6aec5be19ee1d4f6f0e614293b0e55468",
+    sha256 = "d28587856721782ad2878b20f24f5e01987d0079711c15bd3b98546d716421d1",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-aarch64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/cargo-bazel-aarch64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_x64",
     executable = True,
-    sha256 = "fb80acb9fcfd83674f73e98bf956bc65b33f31a4380ba72fbc1a6a9bf22c2f8c",
+    sha256 = "6b80c992f3eb9860b63b5c2c25b6cd34ff90453e40ac9a87197fb6131f64e9d7",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/cargo-bazel-x86_64-apple-darwin",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "4104ea8edd3fccbcfc43265e4fa02dfc25b12b32250ff46456b829ab9cb78908",
+    sha256 = "e0756e4c11fe459502a8cbf7e4e0ccc6141f352d40274ac625753ec52b998c6d",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
 http_file(
     name = "cargo_bazel_win_x64",
     executable = True,
-    sha256 = "a57c496e8ff9d1b2dcd4f6a3a43c41ed0c54e9f3d48183ed411097c3590176d3",
+    sha256 = "a51d0db5a0c5ce9622d0f87cf8828b7c15825a48558c05d9861563f65837f115",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/cargo-bazel-x86_64-pc-windows-msvc.exe",
     ],
     downloaded_file_path = "downloaded.exe" # .exe extension required for Windows to recognise as executable
 )
 
 http_archive(
     name = "rules_rust",
-    sha256 = "0cc7e6b39e492710b819e00d48f2210ae626b717a3ab96e048c43ab57e61d204",
+    sha256 = "4a9cb4fda6ccd5b5ec393b2e944822a62e050c7c06f1ea41607f14c4fdec57a2",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/rules_rust-v0.10.0.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.25.1/rules_rust-v0.25.1.tar.gz",
     ],
 )
 
@@ -180,7 +169,7 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2018",
-    version = "1.66.0",
+    versions = ["1.66.0"],
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")

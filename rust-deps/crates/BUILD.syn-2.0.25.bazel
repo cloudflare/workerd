@@ -11,11 +11,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # (Apache-2.0 OR MIT) AND BSD-3-Clause
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
 rust_library(
-    name = "encoding_rs",
+    name = "syn",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,21 +29,30 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
+        "clone-impls",
         "default",
+        "derive",
+        "extra-traits",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+        "quote",
     ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=encoding_rs",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.32",
+    version = "2.0.25",
     deps = [
-        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__proc-macro2-1.0.64//:proc_macro2",
+        "@crates_vendor__quote-1.0.29//:quote",
+        "@crates_vendor__unicode-ident-1.0.10//:unicode_ident",
     ],
 )

@@ -6,18 +6,7 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load(
-    "@bazel_skylib//lib:selects.bzl",
-    "selects",
-)
-
-# buildifier: disable=bzl-visibility
-load("@rules_rust//crate_universe/private:selects.bzl", "select_with_or")
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -27,131 +16,27 @@ package(default_visibility = ["//visibility:public"])
 
 rust_library(
     name = "cc",
-    srcs = glob(
-        include = [
-            "**/*.rs",
-        ],
-        exclude = [
-        ],
-    ),
-    aliases = selects.with_or({
-        "//conditions:default": {
-        },
-    }),
+    srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
         exclude = [
+            "**/* *",
+            ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
             "WORKSPACE",
             "WORKSPACE.bazel",
         ],
-    ) + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    crate_features = [
-    ],
+    ),
     crate_root = "src/lib.rs",
-    data = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
     edition = "2018",
-    proc_macro_deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_env = {
-    },
-    rustc_env_files = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_flags = [
-        # In most cases, warnings in 3rd party crates are not interesting as
-        # they're out of the control of consumers. The flag here silences
-        # warnings. For more details see:
-        # https://doc.rust-lang.org/rustc/lints/levels.html
-        "--cap-lints=allow",
-    ],
+    rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
+        "crate-name=cc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
     version = "1.0.79",
-    deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-)
-
-rust_binary(
-    name = "gcc-shim__bin",
-    srcs = glob(
-        include = [
-            "**/*.rs",
-        ],
-        exclude = [
-        ],
-    ),
-    aliases = selects.with_or({
-        "//conditions:default": {
-        },
-    }),
-    compile_data = glob(
-        include = ["**"],
-        exclude = [
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ) + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    crate_features = [
-    ],
-    crate_root = "src/bin/gcc-shim.rs",
-    data = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    edition = "2018",
-    proc_macro_deps = [
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_env = {
-    },
-    rustc_env_files = select_with_or({
-        "//conditions:default": [
-        ],
-    }),
-    rustc_flags = [
-        # In most cases, warnings in 3rd party crates are not interesting as
-        # they're out of the control of consumers. The flag here silences
-        # warnings. For more details see:
-        # https://doc.rust-lang.org/rustc/lints/levels.html
-        "--cap-lints=allow",
-    ],
-    tags = [
-        "cargo-bazel",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "1.0.79",
-    deps = [
-        ":cc",
-    ] + select_with_or({
-        "//conditions:default": [
-        ],
-    }),
 )
