@@ -1,4 +1,5 @@
 common --enable_platform_specific_config
+build --verbose_failures
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
@@ -23,6 +24,10 @@ build:fastdbg --linkopt='-gline-tables-only' --host_linkopt='-gline-tables-only'
 build:fastdbg --strip=never
 build:fastdbg --//:dead_strip=False
 
+# Miscellaneous platform-independent options
+build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
+build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
+
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt
 build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n
@@ -39,10 +44,11 @@ build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units
 #
 # Linux and macOS
 #
-build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic --verbose_failures
+build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic
 build:unix --cxxopt='-fcoroutines-ts' --host_cxxopt='-fcoroutines-ts'
 build:unix --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:unix --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
+build:unix --@capnp-cpp//src/kj:libdl=True
 
 build:unix --action_env=BAZEL_COMPILER=clang
 build:unix --action_env=CC=clang
@@ -61,13 +67,10 @@ build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
-build:unix --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 
 # Temporary workaround for zlib warnings and mac compilation, should no longer be needed with next
 # zlib release (https://github.com/madler/zlib/issues/633)
 build:unix --per_file_copt='external/zlib[~/].*\.c@-std=c90' --host_per_file_copt='external/zlib[~/].*\.c@-std=c90'
-
-build:unix --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True --@capnp-cpp//src/kj:libdl=True
 
 build:linux --config=unix
 build:macos --config=unix
@@ -95,13 +98,10 @@ build:windows --enable_runfiles
 # used by some KJ macros, and understands the `.c++` extension by default.
 build:windows --compiler=clang-cl
 
-build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20' --verbose_failures
+build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --cxxopt='/await' --host_cxxopt='/await'
 build:windows --cxxopt='/wo4503' --host_cxxopt='/wo4503'
 build:windows --cxxopt='/DWINDOWS_LEAN_AND_MEAN' --host_cxxopt='/DWINDOWS_LEAN_AND_MEAN'
 # The `/std:c++14` argument is unused during boringssl compilation and we don't
 # want a warning when compiling each file.
 build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-unused-command-line-argument'
-build:windows --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
-
-build:windows --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
