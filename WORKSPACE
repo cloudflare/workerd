@@ -271,14 +271,13 @@ git_repository(
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
-        "//:patches/v8/0005-Allow-compiling-on-macOS-catalina-and-ventura.patch",
-        "//:patches/v8/0006-Fix-v8-code_generator-imports.patch",
-        "//:patches/v8/0007-Allow-Windows-builds-under-Bazel.patch",
-        "//:patches/v8/0008-Disable-bazel-whole-archive-build.patch",
-        "//:patches/v8/0009-Make-v8-Locker-automatically-call-isolate-Enter.patch",
-        "//:patches/v8/0010-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
-        "//:patches/v8/0011-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0012-Implement-Promise-Context-Tagging.patch"
+        "//:patches/v8/0005-Fix-v8-code_generator-imports.patch",
+        "//:patches/v8/0006-Allow-Windows-builds-under-Bazel.patch",
+        "//:patches/v8/0007-Disable-bazel-whole-archive-build.patch",
+        "//:patches/v8/0008-Make-v8-Locker-automatically-call-isolate-Enter.patch",
+        "//:patches/v8/0009-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
+        "//:patches/v8/0010-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0011-Implement-Promise-Context-Tagging.patch"
     ],
 )
 

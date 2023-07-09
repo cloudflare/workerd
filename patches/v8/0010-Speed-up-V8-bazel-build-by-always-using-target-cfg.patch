@@ -1,4 +1,4 @@
-From cb1c4d8ae1d77857791b3fa4634538ef6d1b0d2f Mon Sep 17 00:00:00 2001
+From 3a11c0c287505a74d0ad028b55db2a696729a80e Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -163,10 +163,10 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 9fe9a78fd777eabdff8db2555b0cb212630fb319..6808b167eafeb8700d075808b9979b63fa84ab22 100644
+index 9badf25f9ac9473c0636dfecf14a279f633f58d4..402c4d384466c5a3be35ae69d1527c8e6d12a9b8 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
-@@ -348,7 +348,16 @@ def v8_library(
+@@ -336,7 +336,16 @@ def v8_library(
              **kwargs
          )
  
@@ -184,7 +184,7 @@ index 9fe9a78fd777eabdff8db2555b0cb212630fb319..6808b167eafeb8700d075808b9979b63
      if ctx.workspace_name == "v8":
          v8root = "."
      else:
-@@ -367,7 +376,8 @@ def _torque_initializers_impl(ctx):
+@@ -355,7 +364,8 @@ def _torque_initializers_impl(ctx):
      args += [f.path for f in ctx.files.srcs]
  
      # Generate/declare output files
@@ -194,7 +194,7 @@ index 9fe9a78fd777eabdff8db2555b0cb212630fb319..6808b167eafeb8700d075808b9979b63
      for src in ctx.files.srcs:
          root, _period, _ext = src.path.rpartition(".")
  
-@@ -375,134 +385,68 @@ def _torque_initializers_impl(ctx):
+@@ -363,134 +373,68 @@ def _torque_initializers_impl(ctx):
          if root[:len(v8root)] == v8root:
              root = root[len(v8root):]
          file = ctx.attr.prefix + "/torque-generated/" + root
@@ -358,7 +358,7 @@ index 9fe9a78fd777eabdff8db2555b0cb212630fb319..6808b167eafeb8700d075808b9979b63
          tool = select({
              "@v8//bazel/config:v8_target_is_32_bits": ":icu/torque_non_pointer_compression",
              "//conditions:default": ":icu/torque",
-@@ -578,16 +522,19 @@ _v8_mksnapshot = rule(
+@@ -566,16 +510,19 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -383,7 +383,7 @@ index 9fe9a78fd777eabdff8db2555b0cb212630fb319..6808b167eafeb8700d075808b9979b63
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -708,3 +655,34 @@ def v8_build_config(name):
+@@ -696,3 +643,34 @@ def v8_build_config(name):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )

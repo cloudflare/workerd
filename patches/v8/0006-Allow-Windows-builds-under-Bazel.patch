@@ -1,4 +1,4 @@
-From b770088ebb9f7da03b598f386f25913772254705 Mon Sep 17 00:00:00 2001
+From 29c35c6848cd9e3a7e6d5e570dc62131aaab5baf Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
@@ -183,7 +183,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 0be041c35bd3a1967800d2cf30d82369c11c51ed..9fe9a78fd777eabdff8db2555b0cb212630fb319 100644
+index 9651a31e062b2739e01bce1e8259030564dad9d8..9badf25f9ac9473c0636dfecf14a279f633f58d4 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -117,6 +117,24 @@ def _default_args():
@@ -211,7 +211,7 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..9fe9a78fd777eabdff8db2555b0cb212
              "//conditions:default": [],
          }) + select({
              "@v8//bazel/config:is_clang": [
-@@ -175,13 +193,23 @@ def _default_args():
+@@ -163,13 +181,23 @@ def _default_args():
              ],
              "//conditions:default": [
              ],
@@ -235,7 +235,7 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..9fe9a78fd777eabdff8db2555b0cb212
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],
              "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
-@@ -571,6 +599,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -559,6 +587,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
@@ -243,7 +243,7 @@ index 0be041c35bd3a1967800d2cf30d82369c11c51ed..9fe9a78fd777eabdff8db2555b0cb212
              "//conditions:default": "",
          }),
      )
-@@ -582,6 +611,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -570,6 +599,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
