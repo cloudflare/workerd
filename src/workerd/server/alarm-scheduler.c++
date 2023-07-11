@@ -171,25 +171,26 @@ AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(
   return ScheduledAlarm { kj::mv(actor), scheduledTime, kj::mv(task) };
 }
 
-kj::Promise<void> AlarmScheduler::checkTimestamp(kj::Date now, kj::Date scheduledTime) {
-  // Since we are waiting on timer.afterDelay, it's possible that clock.now() was behind the real time
-  // by a few ms, leading to premature alarm() execution. This checks it the current time is >= than
-  // scheduledTime to ensure we run alarms only on or after their scheduled time.
-  if (now >= scheduledTime) {
-    return kj::READY_NOW;
-  }
-  // If it's not yet time to trigger the alarm, we shall wait a while longer until we can trigger it.
-  // This repeats until it's time for the alarm to run.
-  kj::Duration delay = scheduledTime - clock.now();
-  return timer.afterDelay(delay).then([this,scheduledTime]() mutable
+kj::Promise<void> AlarmScheduler::checkTimestamp(kj::Duration delay, kj::Date scheduledTime) {
+  return timer.afterDelay(delay).then([this, scheduledTime]() mutable
       -> kj::Promise<void> {
-    return checkTimestamp(clock.now(), scheduledTime);
+    // Since we are waiting on timer.afterDelay, it's possible that timer.now() was behind
+    // the real time by a few ms, leading to premature alarm() execution. This checks it the current
+    // time is >= than scheduledTime to ensure we run alarms only on or after their scheduled time.
+    auto now = clock.now();
+    if (now >= scheduledTime) {
+      return kj::READY_NOW;
+    }
+    // If it's not yet time to trigger the alarm, we shall wait a while longer until we can trigger it.
+    // This repeats until it's time for the alarm to run.
+    kj::Duration additionalDelay = scheduledTime - now;
+    return checkTimestamp(additionalDelay, scheduledTime);
   });
 }
 
 kj::Promise<void> AlarmScheduler::makeAlarmTask(
     kj::Duration delay, const ActorKey& actorRef, kj::Date scheduledTime) {
-  return checkTimestamp(clock.now(), scheduledTime)
+  return checkTimestamp(delay, scheduledTime)
       .then([this, actor = actorRef.clone(), scheduledTime]() mutable -> kj::Promise<RetryInfo> {
     {
       auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(*actor));
