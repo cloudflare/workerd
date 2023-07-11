@@ -3,9 +3,15 @@ FROM node:bullseye AS builder
 WORKDIR /workerd
 
 RUN apt-get update
-RUN apt-get install -y curl clang libc++-dev libc++abi-dev
+RUN apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev curl build-essential git lsb-release wget software-properties-common gnupg
 
+RUN wget https://apt.llvm.org/llvm.sh
+RUN chmod +x llvm.sh
+RUN ./llvm.sh 14
 COPY . .
+
+RUN echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+RUN echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
 COPY .bazel-cache /bazel-disk-cache
 RUN npm install -g pnpm@latest-7
 RUN pnpm install
