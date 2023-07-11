@@ -59,6 +59,13 @@ http_archive(
     url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
 )
 
+http_archive(
+    name = "rules_python",
+    sha256 = "84aec9e21cc56fbc7f1335035a71c850d1b9b5cc6ff497306f84cced9a769841",
+    strip_prefix = "rules_python-0.23.1",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.23.1/rules_python-0.23.1.tar.gz",
+)
+
 # Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
 # release version later.
 http_archive(
@@ -67,6 +74,44 @@ http_archive(
     strip_prefix = "google-brotli-ec107cf",
     type = "tgz",
     urls = ["https://github.com/google/brotli/tarball/ec107cf015139c791f79afac0f96c3a2c45e157f"],
+)
+
+# ========================================================================================
+# Dawn
+#
+# WebGPU implementation
+
+git_repository(
+    name = "dawn",
+    build_file = "//:build/BUILD.dawn",
+    commit = "fd61f6244fb00ea42390f5a77267a4c195d90a06",
+    remote = "https://dawn.googlesource.com/dawn.git",
+)
+
+git_repository(
+    name = "vulkan_tools",
+    build_file = "//:build/BUILD.vulkan_tools",
+    commit = "ca8bb4ee3cc9afdeca4b49c5ef758bad7cce2c72",
+    remote = "https://github.com/KhronosGroup/Vulkan-Tools.git",
+)
+
+git_repository(
+    name = "vulkan_headers",
+    build_file = "//:build/BUILD.vulkan_headers",
+    commit = "c1a8560c5cf5e7bd6dbc71fe69b1a317411c36b8",
+    remote = "https://github.com/KhronosGroup/Vulkan-Headers.git",
+)
+
+git_repository(
+    name = "spirv_tools",
+    commit = "a63ac9f73d29cd27cdb6e3388d98d1d934e512bb",
+    remote = "https://github.com/KhronosGroup/SPIRV-Tools.git",
+)
+
+git_repository(
+    name = "spirv_headers",
+    commit = "6e09e44cd88a5297433411b2ee52f4cf9f50fa90",
+    remote = "https://github.com/KhronosGroup/SPIRV-Headers.git",
 )
 
 # ========================================================================================
@@ -299,20 +344,38 @@ new_git_repository(
     shallow_since = "1676317690 -0800",
 )
 
-http_archive(
-    name = "rules_python",
-    sha256 = "a30abdfc7126d497a7698c29c46ea9901c6392d6ed315171a6df5ce433aa4502",
-    strip_prefix = "rules_python-0.6.0",
-    url = "https://github.com/bazelbuild/rules_python/archive/0.6.0.tar.gz",
+# This sets up a hermetic python3, rather than depending on what is installed.
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
+python_register_toolchains(
+    name = "python3_11",
+    # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
+    python_version = "3.11",
 )
 
-load("@rules_python//python:pip.bzl", "pip_install")
+load("@python3_11//:defs.bzl", "interpreter")
+load("@rules_python//python:pip.bzl", "pip_parse")
 
-pip_install(
+pip_parse(
     name = "v8_python_deps",
     extra_pip_args = ["--require-hashes"],
+    python_interpreter_target = interpreter,
     requirements = "@v8//:bazel/requirements.txt",
 )
+
+load("@v8_python_deps//:requirements.bzl", v8_python_deps_install = "install_deps")
+
+v8_python_deps_install()
+
+pip_parse(
+    name = "py_deps",
+    python_interpreter_target = interpreter,
+    requirements = "//build/deps:requirements.txt",
+)
+
+load("@py_deps//:requirements.bzl", py_deps_install = "install_deps")
+
+py_deps_install()
 
 bind(
     name = "icu",
