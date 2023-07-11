@@ -52,11 +52,11 @@ http_archive(
 
 http_archive(
     name = "sqlite3",
-    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
+    build_file = "//:build/BUILD.sqlite3",
+    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
     strip_prefix = "sqlite-amalgamation-3400100",
     type = "zip",
-    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
-    build_file = "//:build/BUILD.sqlite3",
+    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
 )
 
 # Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
@@ -81,9 +81,9 @@ http_archive(
 #   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
 http_archive(
     name = "com_google_absl",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/b3162b1da62711c663d0025e2eabeb83fd1f2728.zip"],
-    strip_prefix = "abseil-cpp-b3162b1da62711c663d0025e2eabeb83fd1f2728",
     sha256 = "d5c91248c33269fcc7ab35897315a45cfa2c37abb4c6d4ed36cb5c82f366367a",
+    strip_prefix = "abseil-cpp-b3162b1da62711c663d0025e2eabeb83fd1f2728",
+    urls = ["https://github.com/abseil/abseil-cpp/archive/b3162b1da62711c663d0025e2eabeb83fd1f2728.zip"],
 )
 
 # tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
@@ -106,10 +106,10 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+    sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
     strip_prefix = "google-tcmalloc-ca82471",
     type = "tgz",
-    sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
+    url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
 )
 
 # ========================================================================================
@@ -158,12 +158,12 @@ http_file(
 
 http_file(
     name = "cargo_bazel_win_x64",
+    downloaded_file_path = "downloaded.exe",  # .exe extension required for Windows to recognise as executable
     executable = True,
     sha256 = "a57c496e8ff9d1b2dcd4f6a3a43c41ed0c54e9f3d48183ed411097c3590176d3",
     urls = [
         "https://github.com/bazelbuild/rules_rust/releases/download/0.10.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
     ],
-    downloaded_file_path = "downloaded.exe" # .exe extension required for Windows to recognise as executable
 )
 
 http_archive(
@@ -225,7 +225,7 @@ nodejs_register_toolchains(
     node_version = "18.10.0",
 )
 
-load("@aspect_rules_ts//ts:repositories.bzl", TS_LATEST_VERSION = "LATEST_VERSION", "rules_ts_dependencies")
+load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_VERSION")
 
 rules_ts_dependencies(ts_version = TS_LATEST_VERSION)
 
@@ -233,14 +233,14 @@ load("@aspect_rules_js//npm:npm_import.bzl", "npm_translate_lock")
 
 npm_translate_lock(
     name = "npm",
-    pnpm_lock = "//:pnpm-lock.yaml",
+    patch_args = {
+        "capnp-ts@0.7.0": ["-p1"],
+    },
     # Patches required for `capnp-ts` to type-check
     patches = {
         "capnp-ts@0.7.0": ["//:patches/capnp-ts@0.7.0.patch"],
     },
-    patch_args = {
-        "capnp-ts@0.7.0": ["-p1"],
-    },
+    pnpm_lock = "//:pnpm-lock.yaml",
 )
 
 load("@npm//:repositories.bzl", "npm_repositories")
@@ -262,10 +262,8 @@ npm_repositories()
 
 git_repository(
     name = "v8",
-    remote = "https://chromium.googlesource.com/v8/v8.git",
     commit = "84b0aff45ebe07dce522d2c90b42074b25b60927",
-    shallow_since = "1685722300 +0000",
-    patch_args = [ "-p1" ],
+    patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
@@ -277,26 +275,28 @@ git_repository(
         "//:patches/v8/0008-Make-v8-Locker-automatically-call-isolate-Enter.patch",
         "//:patches/v8/0009-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
         "//:patches/v8/0010-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0011-Implement-Promise-Context-Tagging.patch"
+        "//:patches/v8/0011-Implement-Promise-Context-Tagging.patch",
     ],
+    remote = "https://chromium.googlesource.com/v8/v8.git",
+    shallow_since = "1685722300 +0000",
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
-    remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    commit = "a2961dc659b4ae847a9c6120718cc2517ee57d9e",
-    shallow_since = "1683080067 +0000",
     build_file = "@v8//:bazel/BUILD.icu",
-    patch_cmds = [ "find source -name BUILD.bazel | xargs rm" ],
-    patch_cmds_win = [ "Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item" ],
+    commit = "a2961dc659b4ae847a9c6120718cc2517ee57d9e",
+    patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
+    patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
+    remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
+    shallow_since = "1683080067 +0000",
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
-    remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    commit = "147f65333c38ddd1ebf554e89965c243c8ce50b3",
-    shallow_since = "1676317690 -0800",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
+    commit = "147f65333c38ddd1ebf554e89965c243c8ce50b3",
+    remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
+    shallow_since = "1676317690 -0800",
 )
 
 http_archive(

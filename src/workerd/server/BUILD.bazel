@@ -16,31 +16,36 @@ bool_flag(
     name = "use_tcmalloc",
     build_setting_default = True,
 )
+
 config_setting(
     name = "set_use_tcmalloc",
     flag_values = {"use_tcmalloc": "True"},
 )
+
 selects.config_setting_group(
     name = "really_use_tcmalloc",
-    match_all = [":set_use_tcmalloc", ":is_linux"],
+    match_all = [
+        ":set_use_tcmalloc",
+        ":is_linux",
+    ],
 )
 
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
+    malloc = select({
+        ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
+        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
+    }),
     tags = ["no-arm64"],
     visibility = ["//visibility:public"],
     deps = [
         ":server",
-        ":workerd_capnp",
         ":workerd-meta_capnp",
+        ":workerd_capnp",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
-    }),
-    malloc = select({
-        ":really_use_tcmalloc": "@com_google_tcmalloc//tcmalloc",
-        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
     }),
 )
 
@@ -54,8 +59,8 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/io",
         "//src/workerd/util:sqlite",
-        "//src/workerd/io:io",
         "@capnp-cpp//src/kj:kj",
         "@capnp-cpp//src/kj:kj-async",
     ],
@@ -65,21 +70,21 @@ wd_cc_library(
     name = "server",
     srcs = [
         "server.c++",
-        "workerd-api.c++",
         "v8-platform-impl.c++",
+        "workerd-api.c++",
     ],
     hdrs = [
         "server.h",
-        "workerd-api.h",
         "v8-platform-impl.h",
+        "workerd-api.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":workerd_capnp",
         ":alarm-scheduler",
-        "@capnp-cpp//src/capnp:capnpc",
+        ":workerd_capnp",
         "//src/workerd/io",
         "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 
