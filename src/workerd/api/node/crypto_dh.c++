@@ -72,8 +72,8 @@ CryptoImpl::DiffieHellmanHandle::DiffieHellmanHandle(kj::String& name) : verifyE
 
 bool CryptoImpl::DiffieHellmanHandle::InitGroup(kj::String& name) {
   auto group = FindDiffieHellmanGroup(name.begin());
-  JSG_REQUIRE(group != nullptr, Error, "Failed to init DiffieHellmanGroup: invalid group. At "
-              "this time, only group 'modp5' is supported.");
+  JSG_REQUIRE(group != nullptr, Error, "Failed to init DiffieHellmanGroup: invalid group. Only "
+              "groups {modp14, modp15, modp16, modp17, modp18} are supported.");
   auto groupKey = group(nullptr);
   KJ_ASSERT(groupKey != nullptr);
 
