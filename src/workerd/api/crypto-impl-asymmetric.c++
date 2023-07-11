@@ -1332,7 +1332,7 @@ public:
 
     JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
         "Base ", getAlgorithmName(), " private key cannot be used to derive a "
-        "key from a peer ", getAlgorithmName(), " public key");
+        "key from a peer ", publicKey->getAlgorithmName(), " public key");
 
     JSG_REQUIRE(getAlgorithmName() == publicKey->getAlgorithmName(), DOMInvalidAccessError,
         "Private key for derivation is using \"", getAlgorithmName(),
@@ -2055,7 +2055,7 @@ public:
 
     JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
         "Base ", getAlgorithmName(), " private key cannot be used to derive a "
-        "key from a peer ", getAlgorithmName(), " public key");
+        "key from a peer ", publicKey->getAlgorithmName(), " public key");
 
     JSG_REQUIRE(getAlgorithmName() == publicKey->getAlgorithmName(), DOMInvalidAccessError,
         "Private key for derivation is using \"", getAlgorithmName(),
