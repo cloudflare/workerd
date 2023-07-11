@@ -115,6 +115,18 @@ export {
   createSecretKey,
 }
 
+export function getCiphers() {
+  return ["aes-128-cbc", "aes-192-cbc", "aes-256-cbc", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",
+  "aes-128-ecb", "aes-192-ecb", "aes-256-ecb", "aes-128-gcm", "aes-192-gcm", "aes-256-gcm",
+  "aes-128-ofb", "aes-192-ofb", "aes-256-ofb", "des-ecb", "des-ede", "des-ede-cbc", "rc2-cbc"];
+}
+
+export function getCurves() {
+  // Hardcoded list of supported curves. Note that prime256v1 is equivalent to secp256r1, we follow
+  // OpenSSL's and bssl's nomenclature here.
+  return ['secp224r1', 'prime256v1', 'secp384r1', 'secp521r1'];
+}
+
 export function getHashes() {
   // Hardcoded list of hashes supported in boringssl, node's approach looks pretty clunky. This is
   // expected to change infrequently based of bssl's stability-focused approach.
@@ -187,6 +199,8 @@ export default {
   pbkdf2,
   pbkdf2Sync,
   // Misc
+  getCiphers,
+  getCurves,
   secureHeapUsed,
   setEngine,
   timingSafeEqual,
@@ -255,8 +269,8 @@ export default {
 //   * [ ] crypto.verify(algorithm, data, key, signature[, callback])
 // * Misc
 //   * [ ] crypto.getCipherInfo(nameOrNid[, options])
-//   * [ ] crypto.getCiphers()
-//   * [ ] crypto.getCurves()
+//   * [x] crypto.getCiphers()
+//   * [x] crypto.getCurves()
 //   * [x] crypto.secureHeapUsed()
 //   * [x] crypto.setEngine(engine[, flags])
 //   * [x] crypto.timingSafeEqual(a, b)
