@@ -4,6 +4,8 @@ build --verbose_failures
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
 build --host_per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
+build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration'
+build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration'
 
 # Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
 # https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
@@ -45,7 +47,7 @@ build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units
 #
 # Linux and macOS
 #
-build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20' --force_pic
+build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20'
 build:unix --cxxopt='-fcoroutines-ts' --host_cxxopt='-fcoroutines-ts'
 build:unix --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:unix --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
@@ -82,6 +84,11 @@ build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 build:linux --action_env=BAZEL_LINKLIBS='-l%:libc++.a -lm -static-libgcc'
+
+# On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
+# correctly if we use this flag since it will not find the object files to include
+# https://github.com/bazelbuild/bazel/issues/12439#issuecomment-914449079
+build:linux --force_pic
 
 #
 # Windows
