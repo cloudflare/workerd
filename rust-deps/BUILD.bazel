@@ -1,6 +1,7 @@
 load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("packages.bzl", "PACKAGES")
 
 selects.config_setting_group(
     name = "linux_x64",
@@ -60,34 +61,7 @@ crates_vendor(
     },
     cargo_bazel = CARGO_BAZEL,
     mode = "remote",
-    packages = {
-        "lolhtml": crate.spec(
-            git = "https://github.com/cloudflare/lol-html.git",
-            rev = "2681dcf0b3e6907111565199df8c43cc9aab7fe8",
-        ),
-        # Crates used for RTTI parameter extraction
-        "anyhow": crate.spec(
-            features = ["default"],
-            version = "1",
-        ),
-        "clang-ast": crate.spec(
-            version = "0.1",
-        ),
-        "flate2": crate.spec(
-            version = "1.0.26",
-        ),
-        "serde": crate.spec(
-            version = "1.0",
-            features = ["default", "derive"],
-        ),
-        "serde_json": crate.spec(
-            version = "1.0",
-            features = ["default"]
-        ),
-        "pico-args": crate.spec(
-            version = "0.5",
-        )
-    },
+    packages = PACKAGES,
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
