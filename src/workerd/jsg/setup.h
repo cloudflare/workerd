@@ -12,6 +12,7 @@
 #include <workerd/util/batch-queue.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
+#include <workerd/jsg/observer.h>
 
 namespace workerd::jsg {
 
@@ -105,6 +106,8 @@ public:
   kj::StringPtr getUuid();
   // Returns a random UUID for this isolate instance.
 
+  IsolateObserver& getObserver() { return *observer; }
+
 private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -182,7 +185,8 @@ private:
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
   // Maps instructions to source code locations.
 
-  explicit IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams);
+  explicit IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams,
+    kj::Own<IsolateObserver> observer);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
@@ -212,6 +216,7 @@ private:
 
   HeapTracer heapTracer;
   std::unique_ptr<v8::CppHeap> cppgcHeap;
+  kj::Own<IsolateObserver> observer;
 
   friend class Data;
   friend class Wrappable;
@@ -279,8 +284,9 @@ public:
   template <typename MetaConfiguration>
   explicit Isolate(const V8System& system,
       MetaConfiguration&& configuration,
+      kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
-      : IsolateBase(system, kj::mv(createParams)),
+      : IsolateBase(system, kj::mv(createParams), kj::mv(observer)),
         wrapper(wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration))) {
           wrapper->initTypeWrapper();
         }
@@ -291,9 +297,12 @@ public:
   // inherits or defines conversion operators to each required type -- or the individual
   // configuration types must declare constructors from `MetaConfiguration`.
 
-  explicit Isolate(const V8System& system,
+  explicit
+
+  Isolate(const V8System& system,
+      kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
-      : Isolate(system, nullptr, kj::mv(createParams)) {}
+      : Isolate(system, nullptr, kj::mv(observer), kj::mv(createParams)) {}
   // Use this constructor when no wrappers have any required configuration.
 
   ~Isolate() noexcept(false) { dropWrappers(kj::mv(wrapper)); }
@@ -391,7 +400,7 @@ public:
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
 
-      return jsgIsolate.wrapper->newContext(v8Isolate, (T*)nullptr, kj::fwd<Args>(args)...);
+      return jsgIsolate.wrapper->newContext(v8Isolate, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
     }
 
   private:

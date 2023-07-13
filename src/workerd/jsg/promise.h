@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/async.h>
+#include <kj/table.h>
 #include "jsg.h"
 #include "util.h"
 #include "wrappable.h"

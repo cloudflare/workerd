@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "modules.h"
+#include "jsg.h"
 #include "promise.h"
 #include <kj/mutex.h>
 #include <set>
@@ -342,6 +342,15 @@ void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
 // ===================================================================================
 
 namespace {
+
+static CompilationObserver::Option convertOption(ModuleInfoCompileOption option) {
+  switch (option) {
+    case ModuleInfoCompileOption::BUILTIN: return CompilationObserver::Option::BUILTIN;
+    case ModuleInfoCompileOption::BUNDLE: return CompilationObserver::Option::BUNDLE;
+  }
+  KJ_UNREACHABLE;
+}
+
 v8::Local<v8::Module> compileEsmModule(
     jsg::Lock& js,
     kj::StringPtr name,
@@ -349,7 +358,7 @@ v8::Local<v8::Module> compileEsmModule(
     ModuleInfoCompileOption option,
     const CompilationObserver& observer) {
   // destroy the observer after compilation finished to indicate the end of the process.
-  auto compilationObserver = observer.onEsmCompilationStart(js.v8Isolate, name, option);
+  auto compilationObserver = observer.onEsmCompilationStart(js.v8Isolate, name, convertOption(option));
 
   // Must pass true for `is_module`, but we can skip everything else.
   const int resourceLineOffset = 0;

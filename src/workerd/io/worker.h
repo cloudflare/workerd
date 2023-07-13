@@ -180,7 +180,7 @@ public:
   inline kj::StringPtr getId() const { return id; }
   const Isolate& getIsolate() const { return *isolate; }
 
-  bool isModular() const;
+  bool isModular() const { return modular; }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -196,7 +196,7 @@ public:
     // Name of the script, used as the script origin for stack traces. Pointer is valid only until
     // the Script constructor returns.
 
-    kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
+    kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer)>
         compileGlobals;
     // Callback which will compile the script-level globals, returning a list of them.
   };
@@ -205,8 +205,7 @@ public:
     // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
 
-    kj::Function<kj::Own<jsg::ModuleRegistry>(jsg::Lock& lock, const ApiIsolate& apiIsolate)>
-        compileModules;
+    kj::Function<void(jsg::Lock& lock, const ApiIsolate& apiIsolate)> compileModules;
     // Callback which will construct the module registry and load all the modules into it.
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
@@ -214,6 +213,7 @@ public:
 private:
   kj::Own<const Isolate> isolate;
   kj::String id;
+  bool modular;
 
   struct Impl;
   kj::Own<Impl> impl;

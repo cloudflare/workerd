@@ -271,10 +271,11 @@ namespace {
   }
 }
 
-IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams)
+IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& createParams, kj::Own<IsolateObserver> observer)
     : system(system),
       ptr(newIsolate(kj::mv(createParams))),
-      heapTracer(ptr) {
+      heapTracer(ptr),
+      observer(kj::mv(observer)) {
   V8StackScope stackScope;
 
   v8::CppHeapCreateParams params {

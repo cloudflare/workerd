@@ -17,6 +17,7 @@ wd_cc_library(
         ["*.h"],
         exclude = [
             "exception.h",
+            "observer.h",
             "rtti.h",
         ],
     ),
@@ -24,6 +25,7 @@ wd_cc_library(
     deps = [
         ":exception",
         ":modules_capnp",
+        ":observer",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
@@ -83,6 +85,16 @@ wd_cc_capnp_library(
     name = "modules_capnp",
     srcs = ["modules.capnp"],
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "observer",
+    hdrs = ["observer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
 )
 
 [kj_test(

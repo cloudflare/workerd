@@ -840,21 +840,13 @@ struct Worker::Script::Impl {
   kj::Maybe<kj::Exception> permanentException;
   // If set, then any attempt to use this script shall throw this exception.
 
-  kj::Maybe<const jsg::ModuleRegistry&> getModuleRegistry() const {
-    return moduleRegistry;
-  }
-
-  kj::Maybe<jsg::ModuleRegistry&> getModuleRegistry() {
-    return moduleRegistry;
-  }
-
-  void setModuleRegistry(jsg::Lock& js, kj::Own<jsg::ModuleRegistry> modules) {
+  void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
     struct DynamicImportResult {
       jsg::Value value;
       bool isException = false;
     };
 
-    modules->setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
+    modules.setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
       if (IoContext::hasCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
@@ -919,12 +911,7 @@ struct Worker::Script::Impl {
       // already be covered by the startup resource limiter.
       return js.resolvedPromise(handler());
     });
-
-    moduleRegistry = kj::mv(modules);
   }
-
-private:
-  kj::Maybe<kj::Own<jsg::ModuleRegistry>> moduleRegistry;
 };
 
 namespace {
@@ -1136,7 +1123,10 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
 Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
                        Script::Source source, IsolateObserver::StartType startType,
                        bool logNewScript, kj::Maybe<ValidationErrorReporter&> errorReporter)
-    : isolate(kj::mv(isolateParam)), id(kj::str(id)), impl(kj::heap<Impl>()) {
+    : isolate(kj::mv(isolateParam)),
+      id(kj::str(id)),
+      modular(source.is<ModulesSource>()),
+      impl(kj::heap<Impl>()) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1162,7 +1152,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
   }
 
   v8::Local<v8::Context> context;
-  if (source.is<ModulesSource>()) {
+  if (modular) {
     // Modules can't be compiled for multiple contexts. We need to create the real context now.
     auto& mContext = impl->moduleContext.emplace(isolate->apiIsolate->newContext(lock));
     mContext->enableWarningOnSpecialEvents();
@@ -1217,7 +1207,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
     try {
       KJ_SWITCH_ONEOF(source) {
         KJ_CASE_ONEOF(script, ScriptSource) {
-          impl->globals = script.compileGlobals(lock, *isolate->apiIsolate);
+          impl->globals = script.compileGlobals(lock, *isolate->apiIsolate, isolate->impl->metrics);
 
           {
             // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
@@ -1231,11 +1221,12 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
           break;
         }
 
-        KJ_CASE_ONEOF(modules, ModulesSource) {
+        KJ_CASE_ONEOF(modulesSource, ModulesSource) {
           auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-          impl->setModuleRegistry(lock, modules.compileModules(lock, *isolate->apiIsolate));
-
-          impl->unboundScriptOrMainModule = kj::Path::parse(modules.mainModule);
+          auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext).getModuleRegistry();
+          impl->configureDynamicImports(lock, modules);
+          modulesSource.compileModules(lock, *isolate->apiIsolate);
+          impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
           break;
         }
       }
@@ -1292,10 +1283,6 @@ Worker::Script::~Script() noexcept(false) {
     recordedLock.disposeContext(kj::mv(*c));
   }
   impl = nullptr;
-}
-
-bool Worker::Script::isModular() const {
-  return impl->getModuleRegistry() != nullptr;
 }
 
 bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isolate) {
@@ -1367,17 +1354,20 @@ Worker::Worker(kj::Own<const Script> scriptParam,
   // Create a stack-allocated handle scope.
   v8::HandleScope handleScope(lock.v8Isolate);
 
-  v8::Local<v8::Context> context;
+  jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext;
+
   KJ_IF_MAYBE(c, script->impl->moduleContext) {
     // Use the shared context from the script.
     // const_cast OK because guarded by `lock`.
-    context = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(c)
-        ->getHandle(lock.v8Isolate);
+    jsContext = const_cast<jsg::JsContext<api::ServiceWorkerGlobalScope>*>(c);
     currentSpan.setTag("module_context"_kjc, true);
   } else {
     // Create a new context.
-    context = this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock))
-        .getHandle(lock.v8Isolate);
+    jsContext = &this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock));
+  }
+
+  v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock.v8Isolate);
+  if (!script->modular) {
     recordedLock.setupContext(context);
   }
 
@@ -1433,7 +1423,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         }
         KJ_CASE_ONEOF(mainModule, kj::Path) {
           // const_cast OK because we hold the lock.
-          auto& registry = KJ_ASSERT_NONNULL(const_cast<Script&>(*script).impl->getModuleRegistry());
+          auto& registry = jsContext->getModuleRegistry();
           KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");

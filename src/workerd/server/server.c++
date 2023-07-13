@@ -1999,12 +1999,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     void reportMetrics(IsolateObserver& isolateMetrics) const override {}
   };
 
+  auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
-      featureFlags.asReader(), *limitEnforcer);
+      featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
-      kj::atomicRefcounted<IsolateObserver>(),
+      kj::mv(observer),
       name,
       kj::mv(limitEnforcer),
       // For workerd, if the inspector is enabled, it is always fully trusted.

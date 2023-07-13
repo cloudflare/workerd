@@ -311,7 +311,7 @@ struct LockLogContext: public Object {
 JSG_DECLARE_ISOLATE_TYPE(LockLogIsolate, LockLogContext);
 
 KJ_TEST("jsg::Lock logWarning") {
-  LockLogIsolate isolate(v8System);
+  LockLogIsolate isolate(v8System, kj::heap<IsolateObserver>());
   bool called = false;
   V8StackScope stackScope;
   LockLogIsolate::Lock lock(isolate, stackScope);
@@ -369,7 +369,7 @@ struct IsolateUuidContext: public Object {
 JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
 KJ_TEST("jsg::Lock getUuid") {
-  IsolateUuidIsolate isolate(v8System);
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
   V8StackScope stackScope;
   IsolateUuidIsolate::Lock lock(isolate, stackScope);
   // Returns the same value

@@ -108,9 +108,10 @@ struct WorkerdApiIsolate::Impl {
 
   Impl(jsg::V8System& v8System,
        CompatibilityFlags::Reader featuresParam,
-       IsolateLimitEnforcer& limitEnforcer)
+       IsolateLimitEnforcer& limitEnforcer,
+       kj::Own<jsg::IsolateObserver> observer)
       : features(capnp::clone(featuresParam)),
-        jsgIsolate(v8System, Configuration(*this), limitEnforcer.getCreateParams()) {}
+        jsgIsolate(v8System, Configuration(*this), kj::mv(observer), limitEnforcer.getCreateParams()) {}
 
   static v8::Local<v8::String> compileTextGlobal(JsgWorkerdIsolate::Lock& lock,
       capnp::Text::Reader reader) {
@@ -148,8 +149,9 @@ struct WorkerdApiIsolate::Impl {
 
 WorkerdApiIsolate::WorkerdApiIsolate(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
-    IsolateLimitEnforcer& limitEnforcer)
-    : impl(kj::heap<Impl>(v8System, features, limitEnforcer)) {}
+    IsolateLimitEnforcer& limitEnforcer,
+    kj::Own<jsg::IsolateObserver> observer)
+    : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer))) {}
 WorkerdApiIsolate::~WorkerdApiIsolate() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApiIsolate::lock(jsg::V8StackScope& stackScope) const {
@@ -178,17 +180,6 @@ const jsg::TypeHandler<api::QueueExportedHandler>&
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
-struct NoopCompilationObserver final : public jsg::CompilationObserver {
-  kj::Own<void> onEsmCompilationStart(v8::Isolate* isolate,
-      kj::StringPtr name, jsg::ModuleInfoCompileOption option) const override {
-    return kj::Own<void>();
-  }
-
-  kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const override {
-    return kj::Own<void>();
-  }
-};
-
 Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
@@ -213,9 +204,9 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
       return Worker::Script::ScriptSource {
         conf.getServiceWorkerScript(),
         name,
-        [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
+        [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
-              .compileScriptGlobals(lock, conf, errorReporter);
+              .compileScriptGlobals(lock, conf, errorReporter, observer);
         }
       };
     case config::Worker::INHERIT:
@@ -229,7 +220,7 @@ invalid:
   return Worker::Script::ScriptSource {
     ""_kj,
     name,
-    [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate)
+    [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer)
         -> kj::Array<Worker::Script::CompiledGlobal> {
       return nullptr;
     }
@@ -238,7 +229,8 @@ invalid:
 
 kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobals(
       jsg::Lock& lockParam, config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter) const {
+      Worker::ValidationErrorReporter& errorReporter,
+      const jsg::CompilationObserver& observer) const {
   // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
   // at script load time.
 
@@ -249,12 +241,11 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
     if (binding.isWasmModule()) ++wasmCount;
   }
 
-  auto observer = kj::refcounted<NoopCompilationObserver>();
   auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(wasmCount);
   for (auto binding: conf.getBindings()) {
     if (binding.isWasmModule()) {
       auto name = jsg::v8StrIntern(lock.v8Isolate, binding.getName());
-      auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), *observer);
+      auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), observer);
 
       compiledGlobals.add(Worker::Script::CompiledGlobal {
         { lock.v8Isolate, name },
@@ -266,16 +257,14 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   return compiledGlobals.finish();
 }
 
-kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
+void WorkerdApiIsolate::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
 
-  auto observer = kj::refcounted<NoopCompilationObserver>();
-  auto modules = kj::heap<jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>>(
-      kj::addRef(*observer));
+  auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
   for (auto module: conf.getModules()) {
     auto path = kj::Path::parse(module.getName());
@@ -312,7 +301,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
                 module.getName(),
                 nullptr,
                 jsg::ModuleRegistry::WasmModuleInfo(lock,
-                    Impl::compileWasmGlobal(lock, module.getWasm(), *observer))));
+                    Impl::compileWasmGlobal(lock, module.getWasm(), modules->getObserver()))));
         break;
       }
       case config::Worker::Module::JSON: {
@@ -334,7 +323,7 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
                 module.getName(),
                 module.getEsModule(),
                 jsg::ModuleInfoCompileOption::BUNDLE,
-                *observer));
+                modules->getObserver()));
         break;
       }
       case config::Worker::Module::COMMON_JS_MODULE: {
@@ -373,8 +362,6 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
 
   api::registerModules(*modules, getFeatureFlags());
 
-  jsg::setModulesForResolveCallback<JsgWorkerdIsolate_TypeWrapper>(lock, modules);
-
   // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
   // cloning for faster worker creation.
   for (auto extension: extensions) {
@@ -383,8 +370,6 @@ kj::Own<jsg::ModuleRegistry> WorkerdApiIsolate::compileModules(
           module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL : jsg::ModuleRegistry::Type::BUILTIN);
     }
   }
-
-  return modules;
 }
 
 class ActorIdFactoryImpl final: public ActorIdFactory {
