@@ -20,10 +20,6 @@
 #include <openssl/rand.h>
 #include <workerd/io/compatibility-date.capnp.h>
 
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/server/gpu.h>
-#endif
-
 #if _WIN32
 #include <iostream>
 #include <kj/async-win32.h>
@@ -1307,10 +1303,5 @@ int main(int argc, char* argv[]) {
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::server::CliMain mainObject(context, argv);
-
-#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  workerd::gpu::initialize();
-#endif
-
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }
