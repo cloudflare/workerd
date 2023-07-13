@@ -48,11 +48,13 @@ public:
   struct GetWithMetadataResult {
     GetResult value;
     kj::Maybe<jsg::Value> metadata;
+    kj::Maybe<jsg::Value> cacheStatus;
 
-    JSG_STRUCT(value, metadata);
+    JSG_STRUCT(value, metadata, cacheStatus);
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceGetWithMetadataResult<Value, Metadata> {
       value: Value | null;
       metadata: Metadata | null;
+      cacheStatus: string | null;
     });
   };
 

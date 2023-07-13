@@ -157,10 +157,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
           -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
 
+    auto cacheStatus = response.headers->get(context.getHeaderIds().cfCacheStatus)
+        .map([&](kj::StringPtr cs) {
+          auto value = jsg::v8StrIntern(js.v8Isolate, cs);
+          return jsg::Value(js.v8Isolate, kj::mv(value));
+        });
+
     if (response.statusCode == 404 || response.statusCode == 410) {
       return js.resolvedPromise(KvNamespace::GetWithMetadataResult {
         .value = nullptr,
         .metadata = nullptr,
+        .cacheStatus = kj::mv(cacheStatus),
       });
     }
 
@@ -215,14 +222,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           "Unknown response type. Possible types are \"text\", \"arrayBuffer\", "
           "\"json\", and \"stream\".");
     }
-    return result.then(js,
-        [maybeMeta = kj::mv(maybeMeta)](jsg::Lock& js, KvNamespace::GetResult result)
-            -> KvNamespace::GetWithMetadataResult {
+    return result.then(js, [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)]
+        (jsg::Lock& js, KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
       kj::Maybe<jsg::Value> meta;
       KJ_IF_MAYBE (metaStr, maybeMeta) {
         meta = js.parseJson(*metaStr);
       }
-      return KvNamespace::GetWithMetadataResult{kj::mv(result), kj::mv(meta)};
+      return KvNamespace::GetWithMetadataResult{
+        kj::mv(result),
+        kj::mv(meta),
+        kj::mv(cacheStatus),
+      };
     });
   });
 }
