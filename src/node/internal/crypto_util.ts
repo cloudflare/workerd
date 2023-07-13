@@ -1,11 +1,8 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2017-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 //
-// Adapted from Deno and Node.js:
-// Copyright 2018-2022 the Deno authors. All rights reserved. MIT license.
-//
-// Adapted from Node.js. Copyright Joyent, Inc. and other Node contributors.
+// Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the
@@ -48,6 +45,9 @@ import {
   validateString,
 } from 'node-internal:validators';
 
+import { default as cryptoImpl } from 'node-internal:crypto';
+type ArrayLike = cryptoImpl.ArrayLike;
+
 export const kHandle = Symbol('kHandle');
 export const kFinalized = Symbol('kFinalized');
 export const kState = Symbol('kFinalized');
@@ -63,8 +63,9 @@ export function getArrayBufferOrView(buffer: Buffer | ArrayBuffer | ArrayBufferV
   if (isAnyArrayBuffer(buffer))
     return buffer as ArrayBuffer;
   if (typeof buffer === 'string') {
-    if (encoding === undefined || encoding === 'buffer')
+    if (encoding === undefined || encoding === 'buffer') {
       encoding = 'utf8';
+    }
     return Buffer.from(buffer, encoding);
   }
   if (!isArrayBufferView(buffer)) {
@@ -112,11 +113,32 @@ export function arrayBufferToUnsignedBigInt(buf: ArrayBuffer): bigint {
 // This is here because many functions accepted binary strings without
 // any explicit encoding in older versions of node, and we don't want
 // to break them unnecessarily.
-export function toBuf(val: string | ArrayBuffer | Buffer | ArrayBufferView, encoding: string): string | ArrayBuffer | Buffer | ArrayBufferView {
+export function toBuf(val: ArrayLike, encoding?: string): Buffer|ArrayBuffer|ArrayBufferView {
   if (typeof val === 'string') {
-    if (encoding === 'buffer')
+    if (encoding === 'buffer') {
       encoding = 'utf8';
+    }
     return Buffer.from(val, encoding);
   }
   return val;
+}
+
+export function validateByteSource(val: ArrayLike,
+                                   name: string): Buffer|ArrayBuffer|ArrayBufferView {
+  val = toBuf(val);
+
+  if (isAnyArrayBuffer(val) || isArrayBufferView(val)) {
+    return val;
+  }
+
+  throw new ERR_INVALID_ARG_TYPE(
+    name,
+    [
+      'string',
+      'ArrayBuffer',
+      'TypedArray',
+      'DataView',
+      'Buffer',
+    ],
+    val);
 }

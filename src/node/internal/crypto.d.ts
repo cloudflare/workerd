@@ -19,14 +19,19 @@ export class HashHandle {
   public copy(xofLen: number): HashHandle;
 }
 
+export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
+
 export class HmacHandle {
   public constructor(algorithm: string, key: ArrayLike | CryptoKey);
   public update(data: Buffer | ArrayBufferView): number;
   public digest(): ArrayBuffer;
 }
 
+// hkdf
+export function getHkdf(hash: string, key: ArrayLike, salt: ArrayLike, info: ArrayLike,
+                        length: number): ArrayBuffer;
+
 // pbkdf2
-export type ArrayLike = ArrayBuffer|string|Buffer|ArrayBufferView;
 export function getPbkdf(password: ArrayLike, salt: ArrayLike, iterations: number, keylen: number,
                          digest: string): ArrayBuffer;
 
