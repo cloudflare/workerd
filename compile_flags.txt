@@ -5,9 +5,7 @@
 -Ibazel-bin
 -Ibazel-bin/external/capnp-cpp/src
 -Ibazel-bin/external/com_googlesource_chromium_base_trace_event_common/_virtual_includes/trace_event_common
--Ibazel-bin/external/dawn/include
 -Iexternal/capnp-cpp/src
--Iexternal/dawn/include
 -Isrc
 -isystem/usr/include
 -isystem/usr/include/x86_64-linux-gnu
