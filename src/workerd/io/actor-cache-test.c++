@@ -3497,8 +3497,9 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
+constexpr size_t ENTRY_SIZE = 128;
 KJ_TEST("ActorCache LRU purge") {
-  ActorCacheTest test({.softLimit = 128});  // big enough for one entry with small key/value
+  ActorCacheTest test({.softLimit = 1 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3527,7 +3528,7 @@ KJ_TEST("ActorCache LRU purge") {
 }
 
 KJ_TEST("ActorCache LRU purge ordering") {
-  ActorCacheTest test({.softLimit = 512});  // big enough for four entries
+  ActorCacheTest test({.softLimit = 4 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3562,7 +3563,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
 }
 
 KJ_TEST("ActorCache LRU purge larger") {
-  ActorCacheTest test({.softLimit = 4096});
+  ActorCacheTest test({.softLimit = 32 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3699,8 +3700,7 @@ KJ_TEST("ActorCache evict on timeout") {
 }
 
 KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
-  // Each Entry below ends up being about ~126 bytes, so a limit of 256 allows for 2 entries.
-  ActorCacheTest test({.dirtyListByteLimit = 256});
+  ActorCacheTest test({.dirtyListByteLimit = 2 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3754,7 +3754,7 @@ KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
 }
 
 KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3807,7 +3807,7 @@ KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
 }
 
 KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by END_GAP)") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3859,7 +3859,7 @@ KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by E
 }
 
 KJ_TEST("ActorCache timeout entry with known-empty gaps") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3974,7 +3974,11 @@ KJ_TEST("ActorCache purge everything while listing; has previous entry") {
 }
 
 KJ_TEST("ActorCache exceed hard limit on read") {
-  ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
+  ActorCacheTest test({
+    .monitorOutputGate = false,
+    .softLimit = 2 * ENTRY_SIZE,
+    .hardLimit = 2 * ENTRY_SIZE
+  });
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -4019,7 +4023,11 @@ KJ_TEST("ActorCache exceed hard limit on read") {
 }
 
 KJ_TEST("ActorCache exceed hard limit on write") {
-  ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
+  ActorCacheTest test({
+    .monitorOutputGate = false,
+    .softLimit = 2 * ENTRY_SIZE,
+    .hardLimit = 2 * ENTRY_SIZE
+  });
   auto& ws = test.ws;
 
   auto brokenPromise = test.gate.onBroken();
