@@ -105,6 +105,10 @@ public:
       kj::Own<HMAC_CTX> hmac_ctx;
   };
 
+  // Hkdf
+  kj::Array<kj::byte> getHkdf(kj::String hash, kj::Array<kj::byte> key, kj::Array<kj::byte> salt,
+                              kj::Array<kj::byte> info, uint32_t length);
+
   // Pbkdf2
   kj::Array<kj::byte> getPbkdf(kj::Array<kj::byte> password, kj::Array<kj::byte> salt,
                                uint32_t num_iterations, uint32_t keylen, kj::String name);
@@ -187,6 +191,8 @@ public:
     // Hash and Hmac
     JSG_NESTED_TYPE(HashHandle);
     JSG_NESTED_TYPE(HmacHandle);
+    // Hkdf
+    JSG_METHOD(getHkdf);
     // Pbkdf2
     JSG_METHOD(getPbkdf);
     // Keys

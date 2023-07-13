@@ -1,11 +1,8 @@
-// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Copyright (c) 2017-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 //
-// Adapted from Deno and Node.js:
-// Copyright 2018-2022 the Deno authors. All rights reserved. MIT license.
-//
-// Adapted from Node.js. Copyright Joyent, Inc. and other Node contributors.
+// Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
 // copy of this software and associated documentation files (the

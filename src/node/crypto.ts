@@ -51,6 +51,11 @@ import {
 } from 'node-internal:crypto_hash';
 
 import {
+  hkdf,
+  hkdfSync,
+} from 'node-internal:crypto_hkdf';
+
+import {
   pbkdf2,
   pbkdf2Sync,
   ArrayLike,
@@ -97,6 +102,9 @@ export {
   Hash,
   HashOptions,
   Hmac,
+  // Hkdf
+  hkdf,
+  hkdfSync,
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
@@ -195,6 +203,9 @@ export default {
   createHash,
   createHmac,
   getHashes,
+  // Hkdf
+  hkdf,
+  hkdfSync,
   // Pbkdf2
   pbkdf2,
   pbkdf2Sync,
@@ -286,8 +297,8 @@ export default {
 //   * [x] crypto.randomInt([min, ]max[, callback])
 //   * [x] crypto.randomUUID([options])
 // * Key Derivation
-//   * [ ] crypto.hkdf(digest, ikm, salt, info, keylen, callback)
-//   * [ ] crypto.hkdfSync(digest, ikm, salt, info, keylen)
+//   * [.] crypto.hkdf(digest, ikm, salt, info, keylen, callback) (* still needs KeyObject support)
+//   * [.] crypto.hkdfSync(digest, ikm, salt, info, keylen) (* still needs KeyObject support)
 //   * [x] crypto.pbkdf2(password, salt, iterations, keylen, digest, callback)
 //   * [x] crypto.pbkdf2Sync(password, salt, iterations, keylen, digest)
 //   * [ ] crypto.scrypt(password, salt, keylen[, options], callback)
