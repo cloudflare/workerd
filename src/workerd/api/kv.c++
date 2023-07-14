@@ -36,7 +36,8 @@ static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
       414, " UTF-8 encoded length of ", name.size(), " exceeds key length limit of ", kMaxKeyLength, ".");
 }
 
-static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) {
+static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse,
+    kj::Maybe<v8::Local<v8::Value>> cacheStatus) {
   auto isolate = js.v8Isolate;
   v8::HandleScope handleScope(isolate);
   KJ_ASSERT(listResponse->IsObject());
@@ -60,6 +61,13 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse) 
         jsg::check(key->Set(context, metaName, json));
       }
     }
+  }
+
+  auto cacheStatusName = jsg::v8StrIntern(isolate, "cacheStatus"_kj);
+  KJ_IF_MAYBE(cs, cacheStatus) {
+    jsg::check(obj->Set(context, cacheStatusName, *cs));
+  } else {
+    jsg::check(obj->Set(context, cacheStatusName, v8::Null(isolate)));
   }
 }
 
@@ -157,10 +165,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
           -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
 
+    auto cacheStatus = response.headers->get(context.getHeaderIds().cfCacheStatus)
+        .map([&](kj::StringPtr cs) {
+          auto value = jsg::v8StrIntern(js.v8Isolate, cs);
+          return jsg::Value(js.v8Isolate, kj::mv(value));
+        });
+
     if (response.statusCode == 404 || response.statusCode == 410) {
       return js.resolvedPromise(KvNamespace::GetWithMetadataResult {
         .value = nullptr,
         .metadata = nullptr,
+        .cacheStatus = kj::mv(cacheStatus),
       });
     }
 
@@ -215,14 +230,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           "Unknown response type. Possible types are \"text\", \"arrayBuffer\", "
           "\"json\", and \"stream\".");
     }
-    return result.then(js,
-        [maybeMeta = kj::mv(maybeMeta)](jsg::Lock& js, KvNamespace::GetResult result)
-            -> KvNamespace::GetWithMetadataResult {
+    return result.then(js, [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)]
+        (jsg::Lock& js, KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
       kj::Maybe<jsg::Value> meta;
       KJ_IF_MAYBE (metaStr, maybeMeta) {
         meta = js.parseJson(*metaStr);
       }
-      return KvNamespace::GetWithMetadataResult{kj::mv(result), kj::mv(meta)};
+      return KvNamespace::GetWithMetadataResult{
+        kj::mv(result),
+        kj::mv(meta),
+        kj::mv(cacheStatus),
+      };
     });
   });
 }
@@ -266,6 +284,13 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
 
       checkForErrorStatus("GET", response);
 
+      kj::Maybe<jsg::Value> cacheStatus = [&]()-> kj::Maybe<jsg::Value> {
+        KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
+          return jsg::Value(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, *cs));
+        }
+        return nullptr;
+      }();
+
       auto stream = newSystemStream(
           response.body.attach(kj::mv(client)), getContentEncoding(context, *response.headers,
               Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
@@ -273,9 +298,12 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [](jsg::Lock& js, kj::String text) {
+          [cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js, kj::String text) mutable {
         auto result = js.parseJson(text);
-        parseListMetadata(js, result.getHandle(js.v8Isolate));
+        parseListMetadata(js, result.getHandle(js.v8Isolate),
+            cacheStatus.map([&](jsg::Value& cs) -> v8::Local<v8::Value> {
+          return cs.getHandle((js.v8Isolate));
+        }));
         return result;
       });
     });

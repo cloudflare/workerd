@@ -48,11 +48,13 @@ public:
   struct GetWithMetadataResult {
     GetResult value;
     kj::Maybe<jsg::Value> metadata;
+    kj::Maybe<jsg::Value> cacheStatus;
 
-    JSG_STRUCT(value, metadata);
+    JSG_STRUCT(value, metadata, cacheStatus);
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceGetWithMetadataResult<Value, Metadata> {
       value: Value | null;
       metadata: Metadata | null;
+      cacheStatus: string | null;
     });
   };
 
@@ -117,8 +119,8 @@ public:
         metadata?: Metadata;
       }
       type KVNamespaceListResult<Metadata, Key extends string = string> =
-        | { list_complete: false; keys: KVNamespaceListKey<Metadata, Key>[]; cursor: string; }
-        | { list_complete: true; keys: KVNamespaceListKey<Metadata, Key>[]; };
+        | { list_complete: false; keys: KVNamespaceListKey<Metadata, Key>[]; cursor: string; cacheStatus: string | null; }
+        | { list_complete: true; keys: KVNamespaceListKey<Metadata, Key>[]; cacheStatus: string | null; };
     );
     // `Metadata` before `Key` type parameter for backwards-compatibility with `workers-types@3`.
     // `Key` is also an optional type parameter, which must come after required parameters.
