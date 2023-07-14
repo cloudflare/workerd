@@ -18,6 +18,7 @@
 #include "wrappable.h"
 #include <typeindex>
 #include "meta.h"
+#include <workerd/jsg/modules.capnp.h>
 
 namespace std {
   inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -784,6 +785,10 @@ struct ResourceTypeBuilder {
   template<const char* tsDefine>
   inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
 
+  inline void registerJsBootstrapModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
+    // do nothing, this will happen in the second phase once v8 context exists.
+  }
+
 private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
@@ -791,6 +796,103 @@ private:
   v8::Local<v8::ObjectTemplate> instance;
   v8::Local<v8::ObjectTemplate> prototype;
   v8::Local<v8::Signature> signature;
+};
+
+void instantiateModule(v8::Isolate*, v8::Local<v8::Context>, v8::Local<v8::Module>& module);
+
+template<typename TypeWrapper, typename Self>
+struct JsBootstrap {
+  JsBootstrap(jsg::Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Object> target)
+  : js(js), context(context) {}
+
+  template<typename Type>
+  inline void registerInherit() { }
+
+  template<const char* name>
+  inline void registerInheritIntrinsic(v8::Intrinsic intrinsic) { }
+
+  template <typename Method, Method method>
+  inline void registerCallable() { }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerMethod() { }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerStaticMethod() { }
+
+  template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
+  inline void registerInstanceProperty() { }
+
+  template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
+  inline void registerPrototypeProperty() { }
+
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerReadonlyInstanceProperty() { }
+
+  template<typename T>
+  inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) { }
+
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerReadonlyPrototypeProperty() { }
+
+
+  template<const char* name, typename Getter, Getter getter, bool readOnly>
+  inline void registerLazyInstanceProperty() { }
+
+
+  template<const char* name, typename T>
+  inline void registerStaticConstant(T value) { }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerIterable() { }
+
+  template<const char* name, typename Method, Method method>
+  inline void registerAsyncIterable() { }
+
+  template<typename Type, const char* name>
+  inline void registerNestedType() { }
+
+  kj::ArrayPtr<const char> findModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
+    for (auto module: bundle.getModules()) {
+      if (module.getName() == moduleName) {
+        KJ_DBG(module.getName(), moduleName);
+        return module.getSrc().asChars();
+      }
+    }
+
+    KJ_FAIL_REQUIRE("Module not found", moduleName);
+  }
+
+  // template<typename SymbolTableType, SymbolTableType symbolTableField>
+  inline void registerJsBootstrapModule(Bundle::Reader bundle, kj::StringPtr moduleName) {
+    auto modules = ModuleRegistryImpl<TypeWrapper>::fromContext(context);
+
+    modules->addBuiltinBundle(bundle);
+    auto& moduleInfo = KJ_REQUIRE_NONNULL(
+      modules->resolve(js, kj::Path::parse(moduleName), jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)
+    );
+    auto module = moduleInfo.module.getHandle(js);
+    jsg::instantiateModule(js, module);
+
+    auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
+    auto bootstrapValue = check(moduleNs->Get(context, v8Str(js.v8Isolate, "bootstrap"_kj)));
+    KJ_ASSERT(bootstrapValue->IsFunction());
+
+    auto args = kj::arr(context->Global().As<v8::Value>());
+    check(v8::Function::Cast(*bootstrapValue)-> Call(context, context->Global(), args.size(), args.begin()));
+  }
+
+  inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
+
+  template<const char* tsOverride>
+  inline void registerTypeScriptOverride() { /* only needed for RTTI */ }
+
+  template<const char* tsDefine>
+  inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
+
+private:
+  jsg::Lock& js;
+  v8::Local<v8::Context> context;
 };
 
 template <typename TypeWrapper, typename T>
@@ -861,7 +963,8 @@ public:
   }
 
   template <typename... Args>
-  JsContext<T> newContext(v8::Isolate* isolate,
+  JsContext<T> newContext(
+      jsg::Lock& js,
       CompilationObserver& compilationObserver,
       T*, Args&&... args) {
     // Construct an instance of this type to be used as the Javascript global object, creating
@@ -877,6 +980,7 @@ public:
     // Fortunately, for types that are never used as the global object, we never have to
     // instantiate the `isContext = true` branch.
 
+    auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
     v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
     auto global = context->Global();
@@ -909,6 +1013,10 @@ public:
     exposeGlobalScopeType(isolate, context);
 
     auto moduleManager = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+
+    v8::Context::Scope context_scope(context);
+    bootstrap(js, context);
+
     return JsContext<T>(context, kj::mv(ptr), kj::mv(moduleManager));
   }
 
@@ -996,6 +1104,16 @@ private:
     }
 
     return scope.Escape(constructor);
+  }
+
+  void bootstrap(jsg::Lock& js, v8::Local<v8::Context> context) {
+    JsBootstrap<TypeWrapper, T> boot(js, context, context->Global());
+
+    if constexpr (isDetected<GetConfiguration, T>()) {
+      T::template registerMembers<decltype(boot), T>(boot, configuration);
+    } else {
+      T::template registerMembers<decltype(boot), T>(boot);
+    }
   }
 
   template <typename, typename, typename, typename>

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg-test.h"
+#include <workerd/jsg/resource-test.capnp.h>
 
 namespace workerd::jsg::test {
 namespace {
@@ -622,6 +623,18 @@ JSG_DECLARE_ISOLATE_TYPE(InjectLockIsolate, InjectLockContext, InjectLockContext
 KJ_TEST("Methods can take Lock& as first parameter") {
   Evaluator<InjectLockContext, InjectLockIsolate> e(v8System);
   e.expectEval("let t = new Thingy(123); t.val", "number", "123");
+}
+
+struct JsBootstrap: public Object {
+  JSG_RESOURCE_TYPE(JsBootstrap) {
+    JSG_JS_BOOTSTRAP_CONTEXT(BOOTSTRAP_BUNDLE, "bootstrap:main");
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsBootstrapIsolate, JsBootstrap);
+
+KJ_TEST("js bootstrap is executed during context creation") {
+  Evaluator<JsBootstrap, JsBootstrapIsolate> e(v8System);
+  e.expectEval("new BootstrapClass().foo()", "string", "foo");
 }
 
 }  // namespace

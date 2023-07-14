@@ -430,6 +430,12 @@ using HasGetTemplateOverload = decltype(
   }
 // Adds reflection to a resource type. See PropertyReflection<T> for usage.
 
+#define JSG_JS_BOOTSTRAP_CONTEXT(Bundle, ModuleName) \
+  do { \
+    registry.registerJsBootstrapModule(Bundle, ModuleName); \
+  } while (false)
+// TODO
+
 #define JSG_TS_ROOT() \
   registry.registerTypeScriptRoot()
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type should be considered a "root" for

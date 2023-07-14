@@ -388,6 +388,10 @@ public:
         js.v8Context()->GetAlignedPointerFromEmbedderData(2));
   }
 
+  static inline ModuleRegistryImpl* fromContext(v8::Local<v8::Context> context) {
+    return static_cast<ModuleRegistryImpl*>(
+        context->GetAlignedPointerFromEmbedderData(2));
+  }
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
     dynamicImportHandler = kj::mv(func);
