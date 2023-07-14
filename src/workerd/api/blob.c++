@@ -159,20 +159,18 @@ public:
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (unread.size() == 0) {
-      return addNoopDeferredProxy(kj::READY_NOW);
-    }
+    if (unread.size() != 0) {
+      auto promise = output.write(unread.begin(), unread.size());
+      unread = nullptr;
 
-    auto promise = output.write(unread.begin(), unread.size());
-    unread = nullptr;
+      co_await promise;
 
-    if (end) {
-      promise = promise.then([&output]() { return output.end(); });
+      if (end) co_await output.end();
     }
 
     // We can't defer the write to the proxy stage since it depends on `blob` which lives in the
     // isolate.
-    return addNoopDeferredProxy(kj::mv(promise));
+    co_return newNoopDeferredProxy();
   }
 
 private:
