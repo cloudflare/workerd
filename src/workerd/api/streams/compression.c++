@@ -165,7 +165,7 @@ public:
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
-        kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error, "Write after close."));
+        JSG_FAIL_REQUIRE(Error, "Write after close");
       }
       KJ_CASE_ONEOF(exception, kj::Exception) { kj::throwFatalException(kj::cp(exception)); }
       KJ_CASE_ONEOF(open, Open) {
