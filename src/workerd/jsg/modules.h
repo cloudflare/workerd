@@ -178,19 +178,8 @@ public:
 
   ModuleRegistry() { }
 
-  enum class Type {
-    // BUNDLE is for modules provided by the worker bundle.
-    // BUILTIN is for modules that are provided by the runtime and can be
-    // imported by the worker bundle. These can be overridden by modules
-    // in the worker bundle.
-    // INTERNAL is for BUILTIN modules that can only be imported by other
-    // BUILTIN modules. These cannot be overriden by modules in the worker
-    // bundle.
+  using Type = ModuleType;
 
-    BUNDLE,
-    BUILTIN,
-    INTERNAL,
-  };
 
   enum class ResolveOption {
     // Default resolution. Check the worker bundle first, then builtins.
@@ -199,6 +188,8 @@ public:
     BUILTIN_ONLY,
     // Internal resolution. Check only internal builtins.
     INTERNAL_ONLY,
+    // Bootstrap phase resolution. Check only bootstrap modules.
+    BOOTSTRAP_ONLY,
   };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
@@ -404,8 +395,7 @@ public:
   void addBuiltinBundle(Bundle::Reader bundle) {
     for (auto module: bundle.getModules()) {
       // TODO: asChars() might be wrong for wide characters
-      addBuiltinModule(module.getName(), module.getSrc().asChars(),
-          module.getInternal() ? Type::INTERNAL : Type::BUILTIN);
+      addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType());
     }
   }
 
@@ -463,6 +453,10 @@ public:
     using Key = typename Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
       KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
+        return entry->module(js, observer);
+      }
+    } else if (option == ResolveOption::BOOTSTRAP_ONLY) {
+      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BOOTSTRAP))) {
         return entry->module(js, observer);
       }
     } else {

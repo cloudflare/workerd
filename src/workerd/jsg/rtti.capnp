@@ -5,6 +5,7 @@
 @0xb042d6da9e1721ad;
 # Runtime information about jsg types and definitions
 
+using Modules = import "/workerd/jsg/modules.capnp";
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::jsg::rtti");
 $Cxx.allowCancellation;
@@ -277,7 +278,7 @@ struct Constructor {
 
 struct Module {
   specifier @0 :Text;
-  internal @1 :Bool;
+  type @1 :Modules.ModuleType;
   union {
     structureName @2 :Text;
     tsDeclarations @3 :Text;

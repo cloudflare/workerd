@@ -869,7 +869,8 @@ struct JsBootstrap {
 
     modules->addBuiltinBundle(bundle);
     auto& moduleInfo = KJ_REQUIRE_NONNULL(
-      modules->resolve(js, kj::Path::parse(moduleName), jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)
+      modules->resolve(js, kj::Path::parse(moduleName),
+          jsg::ModuleRegistry::ResolveOption::BOOTSTRAP_ONLY)
     );
     auto module = moduleInfo.module.getHandle(js);
     jsg::instantiateModule(js, module);

@@ -48,6 +48,7 @@ wd_cc_capnp_library(
     name = "rtti_capnp",
     srcs = ["rtti.capnp"],
     visibility = ["//visibility:public"],
+    deps = [":modules_capnp"],
 )
 
 js_capnp_library(
@@ -58,6 +59,7 @@ js_capnp_library(
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
+    deps = [":modules_capnp_js"],
 )
 
 npm_package(
@@ -87,6 +89,12 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
+js_capnp_library(
+    name = "modules_capnp_js",
+    srcs = ["modules.capnp"],
+    src_prefix = "src",
+)
+
 wd_cc_library(
     name = "observer",
     hdrs = ["observer.h"],
@@ -101,7 +109,7 @@ wd_cc_capnp_library(
     name = "resource_test_capnp",
     srcs = ["resource-test.capnp"],
     data = [":resource-test-bootstrap.js"],
-    deps = ["modules_capnp"],
+    deps = [":modules_capnp"],
 )
 
 [kj_test(
