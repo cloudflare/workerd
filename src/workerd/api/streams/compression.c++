@@ -165,16 +165,15 @@ public:
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
-        return JSG_KJ_EXCEPTION(FAILED, Error, "Write after close.");
+        JSG_FAIL_REQUIRE(Error, "Write after close");
       }
-      KJ_CASE_ONEOF(exception, kj::Exception) {
-        return kj::cp(exception);
-      }
+      KJ_CASE_ONEOF(exception, kj::Exception) { kj::throwFatalException(kj::cp(exception)); }
       KJ_CASE_ONEOF(open, Open) {
-        if (pieces.size() == 0) return kj::READY_NOW;
-        return write(pieces[0].begin(), pieces[0].size()).then([this, pieces]() {
-          return write(pieces.slice(1, pieces.size()));
-        });
+        if (pieces.size() != 0) {
+          co_await write(pieces[0].begin(), pieces[0].size());
+          co_await write(pieces.slice(1, pieces.size()));
+        }
+        co_return;
       }
     }
     KJ_UNREACHABLE;
