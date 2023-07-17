@@ -164,6 +164,10 @@ public:
 private:
   WorkerInterface& worker;
   kj::ForkedPromise<void> revokeProm;
+  kj::Promise<void> cancelProm;
+  kj::Canceler canceler;
+
+  kj::Promise<void> handleRevokePromise(kj::Promise<void> promise);
 };
 
 kj::Own<RevocableWorkerInterface> newRevocableWorkerInterface(kj::Own<WorkerInterface> worker,

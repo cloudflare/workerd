@@ -210,8 +210,8 @@ kj::Promise<void> RevocableWorkerInterface::request(
     kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) {
   auto wrappedResponse = kj::heap<RevocableHttpResponse>(response, revokeProm.addBranch());
-  return worker.request(method, url, headers, requestBody, *wrappedResponse)
-      .attach(kj::mv(wrappedResponse));
+  return canceler.wrap(worker.request(method, url, headers, requestBody, *wrappedResponse)
+      .attach(kj::mv(wrappedResponse)));
 }
 
 kj::Promise<void> RevocableWorkerInterface::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
@@ -221,9 +221,20 @@ kj::Promise<void> RevocableWorkerInterface::connect(kj::StringPtr host, const kj
       "disconnect long-lived connections similar to how it treats WebSockets");
 }
 
+kj::Promise<void> RevocableWorkerInterface::handleRevokePromise(kj::Promise<void> promise) {
+  try {
+    co_await promise;
+  } catch (kj::Exception &e) {
+    if (e.getType() == kj::Exception::Type::OVERLOADED) {
+      canceler.cancel(kj::cp(e));
+    }
+  }
+}
+
 RevocableWorkerInterface::RevocableWorkerInterface(WorkerInterface& worker,
-    kj::Promise<void> revokeProm)
-    : worker(worker), revokeProm(revokeProm.fork()) {}
+    kj::Promise<void> revoker)
+    : worker(worker), revokeProm(revoker.fork()),
+        cancelProm(handleRevokePromise(revokeProm.addBranch()).eagerlyEvaluate(nullptr)) {}
 
 void RevocableWorkerInterface::prewarm(kj::StringPtr url) {
   worker.prewarm(url);
