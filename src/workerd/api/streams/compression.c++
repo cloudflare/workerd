@@ -169,10 +169,10 @@ public:
       }
       KJ_CASE_ONEOF(exception, kj::Exception) { kj::throwFatalException(kj::cp(exception)); }
       KJ_CASE_ONEOF(open, Open) {
-        if (pieces.size() == 0)
-          co_return;
-        co_await write(pieces[0].begin(), pieces[0].size());
-        co_await write(pieces.slice(1, pieces.size()));
+        if (pieces.size() != 0) {
+          co_await write(pieces[0].begin(), pieces[0].size());
+          co_await write(pieces.slice(1, pieces.size()));
+        }
         co_return;
       }
     }
