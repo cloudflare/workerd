@@ -549,15 +549,25 @@ async function test(storage) {
     RENAME TO afterrename;
   `)
 
-  // Can rename columns within a table
   sql.exec(`
-    CREATE TABLE renamecolumn (
+    CREATE TABLE altercolumns (
       meta TEXT
      );
   `);
+  // Can add columns
   sql.exec(`
-    ALTER TABLE renamecolumn
+    ALTER TABLE altercolumns
+    ADD COLUMN tobedeleted TEXT;
+  `);
+  // Can rename columns within a table
+  sql.exec(`
+    ALTER TABLE altercolumns
     RENAME COLUMN meta TO metadata
+  `);
+  // Can drop columns
+  sql.exec(`
+    ALTER TABLE altercolumns
+    DROP COLUMN tobedeleted
   `);
 
   // Can't create another temp table

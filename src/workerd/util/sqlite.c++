@@ -457,6 +457,21 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     }
   }
 
+  // For some reason, for these two operations, SQLite sends the DB Name through as param1, with
+  // the table name (for ALTER_TABLE) in param2 instead of param1 like all other table operations.
+  // For simplicity, and because the following comment precedes sqlite3_set_authorizer in sqlite.h:
+  //
+  //     > The 5th parameter to the authorizer callback is the name of the database
+  //     > ("main", "temp", etc.) if applicable.
+  //
+  // we are treating this as an SQLite bug and swapping the values around.
+  if (actionCode == SQLITE_ALTER_TABLE || actionCode == SQLITE_DETACH) {
+    auto swap = param1; // contains dbName
+    param1 = param2; // contains table name (for SQLITE_ALTER_TABLE, null otherwise)
+    param2 = dbName; // should always be null
+    dbName = swap;
+  }
+
   KJ_IF_MAYBE(d, dbName) {
     if (*d == "temp"_kj) {
       return isAuthorizedTemp(actionCode, param1, param2, regulator);
@@ -495,10 +510,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       KJ_ASSERT(param2 == nullptr);
       return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
 
-    case SQLITE_ALTER_TABLE        :   /* Database Name   Table Name      */
-      // Why is the database name passed redundantly here? Weird.
-      KJ_ASSERT(KJ_ASSERT_NONNULL(param1) == "main"_kj);
-      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param2));
+    case SQLITE_ALTER_TABLE        :   /* Table Name      NULL (modified) */
+      return regulator.isAllowedName(KJ_ASSERT_NONNULL(param1));
 
     case SQLITE_READ               :   /* Table Name      Column Name     */
     case SQLITE_UPDATE             :   /* Table Name      Column Name     */
@@ -624,7 +637,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
       }
 
     case SQLITE_ATTACH             :   /* Filename        NULL            */
-    case SQLITE_DETACH             :   /* Database Name   NULL            */
+    case SQLITE_DETACH             :   /* Table Name      NULL (modified) */
       // We do not support attached databases. It seems unlikely that we ever will.
       return false;
 
