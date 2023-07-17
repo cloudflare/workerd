@@ -132,15 +132,24 @@ struct DeferredProxy {
   kj::Promise<T> proxyTask;
 };
 
+inline DeferredProxy<void> newNoopDeferredProxy() {
+  return DeferredProxy<void> { kj::READY_NOW };
+}
+
+template <typename T>
+inline DeferredProxy<T> newNoopDeferredProxy(T&& value) {
+  return DeferredProxy<T> { kj::mv(value) };
+}
+
 template <typename T>
 inline kj::Promise<DeferredProxy<T>> addNoopDeferredProxy(kj::Promise<T> promise) {
   // Helper method to use when you need to return `Promise<DeferredProxy<T>>` but no part of the
   // operation you are returning is eligible to be deferred past the IoContext lifetime.
-
-  return promise.then([](T&& value) { return DeferredProxy<T> { kj::mv(value) }; });
+  co_return newNoopDeferredProxy(co_await promise);
 }
 inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> promise) {
-  return promise.then([]() { return DeferredProxy<void> { kj::READY_NOW }; });
+  co_await promise;
+  co_return newNoopDeferredProxy();
 }
 
 kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
