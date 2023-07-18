@@ -1,6 +1,18 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+# Flag to enable WebGPU support via the Dawn library
+bool_flag(
+    name = "enable_experimental_webgpu",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "set_enable_experimental_webgpu",
+    flag_values = {"enable_experimental_webgpu": "True"},
+)
 
 wd_cc_library(
     name = "io",
@@ -38,6 +50,10 @@ wd_cc_library(
             "worker-interface.h",
         ],
     ) + ["//src/workerd/api:hdrs"],
+    defines = select({
+        ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":capnp",
@@ -57,7 +73,10 @@ wd_cc_library(
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@com_cloudflare_lol_html//:lolhtml",
-    ],
+    ] + select({
+        ":set_enable_experimental_webgpu": ["@dawn"],
+        "//conditions:default": [],
+    }),
 )
 
 wd_cc_library(
