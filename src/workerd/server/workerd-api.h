@@ -142,12 +142,12 @@ public:
       }
     };
     struct AnalyticsEngine {
-      uint logfwdrChannel;
+      uint subrequestChannel;
       kj::String dataset;
       int64_t version;
       AnalyticsEngine clone() const {
         return AnalyticsEngine {
-          .logfwdrChannel = logfwdrChannel,
+          .subrequestChannel = subrequestChannel,
           .dataset = kj::str(dataset),
           .version = version
         };
@@ -155,7 +155,8 @@ public:
     };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped, AnalyticsEngine> value;
+              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
+              AnalyticsEngine> value;
 
     Global clone() const;
   };

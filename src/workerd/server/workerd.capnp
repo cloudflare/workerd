@@ -339,7 +339,6 @@ struct Worker {
 
       wrapped @14 :WrappedBinding;
       # Wraps a collection of inner bindings in a common api functionality.
-      
 
       queue @15 :ServiceDesignator;
       # A Queue binding, implemented by the named service. Requests to the
@@ -352,7 +351,10 @@ struct Worker {
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
       # `null`.
 
-      analyticsEngine @17 :ServiceDesignator; 
+      analyticsEngine @17 :ServiceDesignator;
+      # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.
+      # workerd will forward AnalyticsEngineEvents to designated service in the body of HTTP requests
+      # This binding is subject to change and requires the `--experimental` flag
 
       # TODO(someday): dispatch, other new features
     }

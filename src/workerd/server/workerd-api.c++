@@ -562,8 +562,10 @@ static v8::Local<v8::Value> createBindingValue(
           kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
     }
 
-    KJ_CASE_ONEOF(ns, Global::AnalyticsEngine) {
-        value = lock.wrap(context, jsg::alloc<api::AnalyticsEngine>(ns.logfwdrChannel, kj::str(ns.dataset), ns.version, ownerId));
+    KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
+        // Use subrequestChannel as logfwdrChannel
+        value = lock.wrap(context, jsg::alloc<api::AnalyticsEngine>(ae.subrequestChannel,
+                    kj::str(ae.dataset), ae.version, ownerId));
     }
 
     KJ_CASE_ONEOF(text, kj::String) {
@@ -671,8 +673,8 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       result.value = ns.clone();
     }
-    KJ_CASE_ONEOF(ns, Global::AnalyticsEngine) {
-      result.value = ns.clone();
+    KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
+      result.value = ae.clone();
     }
     KJ_CASE_ONEOF(text, kj::String) {
       result.value = kj::str(text);
