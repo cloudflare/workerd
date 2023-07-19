@@ -74,20 +74,18 @@ public:
   }
 
   kj::Promise<kj::Array<byte>> readAllBytes() {
-    return loop().then([this](PartList&& partPtrs) {
-      auto out = kj::heapArray<byte>(runningTotal);
-      copyInto(out, kj::mv(partPtrs));
-      return kj::mv(out);
-    });
+    auto parts = co_await readParts();
+    auto out = kj::heapArray<byte>(runningTotal);
+    copyInto(out, kj::mv(parts));
+    co_return out;
   }
 
   kj::Promise<kj::String> readAllText() {
-    return loop().then([this](PartList&& partPtrs) {
-      auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(out.slice(0, out.size() - 1).asBytes(), kj::mv(partPtrs));
-      out.back() = '\0';
-      return kj::String(kj::mv(out));
-    });
+    auto parts = co_await readParts();
+    auto out = kj::heapArray<char>(runningTotal + 1);
+    copyInto(out.slice(0, out.size() - 1).asBytes(), kj::mv(parts));
+    out.back() = '\0';
+    co_return kj::String(kj::mv(out));
   }
 
 private:
@@ -96,23 +94,24 @@ private:
   kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
 
-  kj::Promise<PartList> loop() {
-    auto bytes = kj::heapArray<kj::byte>(4096);
+  kj::Promise<PartList> readParts() {
+    auto buffer = kj::heapArray<kj::byte>(4096);
 
-    return input.tryRead(bytes.begin(), 1, bytes.size())
-        .then([this, bytes = kj::mv(bytes)](size_t amount) mutable
-        -> kj::Promise<PartList> {
+    while (true) {
+      auto amount = co_await input.tryRead(buffer.begin(), 1, buffer.size());
+
       if (amount == 0) {
-        return KJ_MAP(p, parts) { return p.asPtr(); };
+        co_return KJ_MAP(p, parts) { return p.asPtr(); };
       }
 
       runningTotal += amount;
       if (runningTotal >= limit) {
-        return JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
+        throw JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
       }
-      parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
-      return loop();
-    });
+      auto part = kj::heapArray<kj::byte>(amount);
+      memcpy(part.begin(), buffer.begin(), amount);
+      parts.add(kj::mv(part));
+    }
   }
 
   void copyInto(kj::ArrayPtr<byte> out, PartList in) {
