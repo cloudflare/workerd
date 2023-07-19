@@ -29,10 +29,10 @@ namespace {
 }
 
 kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
-  auto buffer = kj::heapArray<kj::byte>(4096);
+  kj::byte buffer[4096];
 
   while (true) {
-    auto amount = co_await input.tryRead(buffer.begin(), 1, buffer.size());
+    auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
 
     if (amount == 0) {
       if (end) {
@@ -41,7 +41,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
       co_return;
     }
 
-    co_await output.write(buffer.begin(), amount);
+    co_await output.write(buffer, amount);
   }
 }
 
