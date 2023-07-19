@@ -27,7 +27,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: capnp-cache
+          key: capnp-cache-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          # Use cache from older version.
+          restore-keys: |
+            capnp-cache-${{ runner.os }}-
       - name: build capnp
         run: |
           bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
@@ -46,7 +49,12 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache-types
+          # The types cache is significantly smaller than the whole cache (350MB as of writing), so
+          # we can probably afford for it to have its own cache key.
+          key: bazel-disk-cache-types-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          restore-keys: |
+            bazel-disk-cache-types-${{ runner.os }}-
+
       - name: install dependencies
         if: runner.os == 'Linux'
         run: |

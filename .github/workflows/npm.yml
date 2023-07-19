@@ -27,7 +27,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: capnp-cache
+          key: capnp-cache-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          restore-keys: |
+            capnp-cache-${{ runner.os }}-
       - name: build capnp
         run: |
           bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool

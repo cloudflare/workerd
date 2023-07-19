@@ -31,7 +31,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: ${{ runner.os }}-${{ runner.arch }}-bazel-disk-cache
+          key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          # Use an older cache key, if available.
+          restore-keys: |
+            bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Setup Linux
         if: runner.os == 'Linux'
         # Install dependencies, including clang via through LLVM APT repository. Note that this
@@ -54,13 +57,15 @@ jobs:
         run: |
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
       - name: Bazel build
+        # timestamps are no longer being added here, the GitHub logs include timestamps (Use
+        # 'Show timestamps' on the web interface)
         run: |
             bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
       - name: Bazel tests
         run: |
-            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --show_timestamps --keep_going --test_output=errors //...
+            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
       - name: Report disk usage
-        if: success() || failure()
+        if: always()
         shell: bash
         run: |
             BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
