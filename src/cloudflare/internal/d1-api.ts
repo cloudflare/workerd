@@ -75,10 +75,10 @@ class D1Database {
     return exec as D1Result<T>[]
   }
 
-  public async exec<T = unknown>(query: string): Promise<D1ExecResult> {
+  public async exec(query: string): Promise<D1ExecResult> {
     // should be /execute - see CFSQL-52
     const lines = query.trim().split('\n')
-    const _exec = await this._send<T>('/query', lines, [])
+    const _exec = await this._send('/query', lines, [])
     const exec = Array.isArray(_exec) ? _exec : [_exec]
     const error = exec
       .map((r) => {
@@ -227,7 +227,7 @@ class D1PreparedStatement {
   }
 
   public async first<T = unknown>(colName: string): Promise<T | null>
-  public async first<T = unknown>(): Promise<Record<string, T> | null>
+  public async first<T = Record<string, unknown>>(): Promise<T | null>
   public async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
@@ -256,7 +256,7 @@ class D1PreparedStatement {
     }
   }
 
-  public async run<T = unknown>(): Promise<D1Result<T>> {
+  public async run<T = Record<string, unknown>>(): Promise<D1Result<T>> {
     return firstIfArray(
       await this.database._sendOrThrow<T>(
         '/execute',
@@ -266,7 +266,7 @@ class D1PreparedStatement {
     )
   }
 
-  public async all<T = unknown>(): Promise<D1Result<T[]>> {
+  public async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
     return firstIfArray(
       await this.database._sendOrThrow<T[]>(
         '/query',
@@ -276,7 +276,7 @@ class D1PreparedStatement {
     )
   }
 
-  public async raw<T = unknown>(): Promise<T[]> {
+  public async raw<T = unknown[]>(): Promise<T[]> {
     const s = firstIfArray(
       await this.database._sendOrThrow<Record<string, unknown>>(
         '/query',

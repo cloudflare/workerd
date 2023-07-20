@@ -1,0 +1,76 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+function expectType<T>(_value: T) {}
+
+type Row = { col1: string; col2: string };
+
+export const handler: ExportedHandler<{ DB: D1Database }> = {
+  async fetch(request, env) {
+    const stmt = env.DB.prepare(`SELECT * FROM tbl WHERE id = ?`);
+
+    // ALL
+    {
+      const { results } = await stmt.bind(1).all();
+      expectType<Record<string, unknown>[]>(results);
+    }
+    {
+      const { results } = await stmt.bind(1).all<Row>();
+      expectType<Row[]>(results);
+    }
+
+    // RAW
+    {
+      const results = await stmt.bind(1).raw();
+      expectType<unknown[][]>(results);
+    }
+    {
+      const results = await stmt.bind(1).raw<[string, string]>();
+      expectType<[string, string][]>(results);
+    }
+
+    // FIRST
+    {
+      const result = await stmt.bind(1).first();
+      expectType<Record<string, unknown> | null>(result);
+    }
+    {
+      const result = await stmt.bind(1).first<Row>();
+      expectType<Row | null>(result);
+    }
+
+    // FIRST (col)
+    {
+      const result = await stmt.bind(1).first("col1");
+      expectType<unknown | null>(result);
+    }
+    {
+      const result = await stmt.bind(1).first<string>("col1");
+      expectType<string | null>(result);
+    }
+
+    // BATCH
+    {
+      const results = await env.DB.batch([stmt.bind(1), stmt.bind(2)]);
+      expectType<D1Result[]>(results);
+      expectType<unknown[]>(results[0].results);
+    }
+    {
+      const results = await env.DB.batch<Row>([stmt.bind(1), stmt.bind(2)]);
+      expectType<D1Result<Row>[]>(results);
+      expectType<Row[]>(results[0].results);
+    }
+
+    // EXEC
+    {
+      const response = await env.DB.exec(`
+       select 1;
+       select * from tbl;
+     `);
+      expectType<{ count: number; duration: number }>(response);
+    }
+
+    return new Response();
+  },
+};
