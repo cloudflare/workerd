@@ -95,10 +95,10 @@ private:
   uint64_t runningTotal = 0;
 
   kj::Promise<PartList> readParts() {
-    kj::byte buffer[4096];
-
     while (true) {
-      auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
+      constexpr size_t bufferSize = 4096;
+      auto part = kj::heapArray<kj::byte>(bufferSize);
+      auto amount = co_await input.tryRead(part.begin(), bufferSize, bufferSize);
 
       if (amount == 0) {
         co_return KJ_MAP(p, parts) { return p.asPtr(); };
@@ -109,7 +109,7 @@ private:
         throw JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
       }
 
-      parts.add(kj::heapArray<kj::byte>(buffer, amount));
+      parts.add(part.slice(0, amount).attach(kj::mv(part)));
     }
   }
 
