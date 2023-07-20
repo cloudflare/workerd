@@ -37,7 +37,7 @@ public:
 
     JSG_STRUCT(contentType);
     JSG_STRUCT_TS_OVERRIDE(QueueSendOptions {
-      contentType: never;
+      contentType?: QueueContentType;
     });
     // NOTE: Any new fields added here should also be added to MessageSendRequest below.
   };
@@ -51,7 +51,7 @@ public:
     JSG_STRUCT(body, contentType);
     JSG_STRUCT_TS_OVERRIDE(MessageSendRequest<Body = unknown> {
       body: Body;
-      contentType: never;
+      contentType?: QueueContentType;
     });
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
@@ -67,9 +67,10 @@ public:
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE(Queue<Body> {
-      send(message: Body): Promise<void>;
+      send(message: Body, options?: QueueSendOptions): Promise<void>;
       sendBatch(messages: Iterable<MessageSendRequest<Body>>): Promise<void>;
     });
+    JSG_TS_DEFINE(type QueueContentType = "text" | "bytes" | "json" | "v8");
   }
 
 private:
