@@ -61,7 +61,7 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
 class AllReader {
   // Modified from AllReader in kj/async-io.c++.
 
-  using PartList = kj::Array<kj::ArrayPtr<byte>>;
+  using PartList = kj::Vector<kj::Array<byte>>;
 
 public:
   explicit AllReader(ReadableStreamSource& input, uint64_t limit)
@@ -91,29 +91,31 @@ public:
 private:
   ReadableStreamSource& input;
   uint64_t limit;
-  kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
 
   kj::Promise<PartList> readParts() {
+    PartList parts;
+
     while (true) {
       constexpr size_t bufferSize = 4096;
       auto part = kj::heapArray<kj::byte>(bufferSize);
       auto amount = co_await input.tryRead(part.begin(), bufferSize, bufferSize);
-
-      if (amount == 0) {
-        co_return KJ_MAP(p, parts) { return p.asPtr(); };
-      }
-
       runningTotal += amount;
       if (runningTotal >= limit) {
         throw JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
       }
 
-      parts.add(part.slice(0, amount).attach(kj::mv(part)));
+      if (amount > 0) {
+        parts.add(part.slice(0, amount).attach(kj::mv(part)));
+      }
+
+      if (amount < bufferSize) {
+        co_return kj::mv(parts);
+      }
     }
   }
 
-  void copyInto(kj::ArrayPtr<byte> out, PartList in) {
+  void copyInto(kj::ArrayPtr<byte> out, PartList&& in) {
     size_t pos = 0;
     for (auto& part: in) {
       KJ_ASSERT(part.size() <= out.size() - pos);
