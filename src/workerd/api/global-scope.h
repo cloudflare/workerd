@@ -313,9 +313,9 @@ public:
   };
 
   v8::Local<v8::Value> structuredClone(
+      jsg::Lock& js,
       v8::Local<v8::Value> value,
-      jsg::Optional<StructuredCloneOptions> options,
-      v8::Isolate* isolate);
+      jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
                                    jsg::V8Ref<v8::Function> function,

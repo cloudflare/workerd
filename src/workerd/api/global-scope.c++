@@ -667,16 +667,16 @@ void ServiceWorkerGlobalScope::queueMicrotask(
 }
 
 v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
+    jsg::Lock& js,
     v8::Local<v8::Value> value,
-    jsg::Optional<StructuredCloneOptions> maybeOptions,
-    v8::Isolate* isolate) {
+    jsg::Optional<StructuredCloneOptions> maybeOptions) {
   kj::Maybe<kj::ArrayPtr<jsg::Value>> transfers;
   KJ_IF_MAYBE(options, maybeOptions) {
     transfers = options->transfer.map([&](kj::Array<jsg::Value>& transfer) {
       return transfer.asPtr();
     });
   }
-  return jsg::structuredClone(value, isolate, transfers);
+  return jsg::structuredClone(value, js.v8Isolate, transfers);
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
