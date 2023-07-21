@@ -174,7 +174,7 @@ public:
 
   void waitUntil(kj::Promise<void> promise);
 
-  jsg::Optional<jsg::Ref<ActorState>> getActorState(v8::Isolate* isolate);
+  jsg::Optional<jsg::Ref<ActorState>> getActorState();
 
   JSG_RESOURCE_TYPE(ExtendableEvent) {
     JSG_INHERIT(Event);
