@@ -28,34 +28,21 @@ namespace {
           kj::str(JSG_EXCEPTION(TypeError) ": ", message)));
 }
 
-kj::Promise<void> pumpToHelper(
-    ReadableStreamSource& input, WritableStreamSink& output, bool end,
-    kj::Array<kj::byte> bytes) {
-  auto promise = input.tryRead(bytes.begin(), 1, bytes.size());
+kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
+  kj::byte buffer[4096];
 
-  return promise.then(
-      [&input, &output, end, bytes = kj::mv(bytes)]
-      (size_t amount) mutable
-      -> kj::Promise<void> {
+  while (true) {
+    auto amount = co_await input.tryRead(buffer, 1, kj::size(buffer));
+
     if (amount == 0) {
       if (end) {
-        return output.end();
-      } else {
-        return kj::READY_NOW;
+        co_await output.end();
       }
+      co_return;
     }
 
-    auto promise = output.write(bytes.begin(), amount);
-
-    return promise.then(
-        [&input, &output, end, bytes = kj::mv(bytes)]() mutable {
-      return pumpToHelper(input, output, end, kj::mv(bytes));
-    });
-  });
-}
-
-kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output, bool end) {
-  return pumpToHelper(input, output, end, kj::heapArray<kj::byte>(4096));
+    co_await output.write(buffer, amount);
+  }
 }
 
 class AllReader {

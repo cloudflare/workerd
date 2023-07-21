@@ -155,24 +155,21 @@ kj::Promise<void> WorkerQueue::send(
   // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/message") to send a single message.
-  kj::StringPtr url = "https://fake-host/message"_kj;
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
-  auto req = client->request(kj::HttpMethod::POST, url, headers, serialized.data.size());
-  return req.body->write(serialized.data.begin(), serialized.data.size())
-      .attach(kj::mv(serialized.own), kj::mv(req.body), context.registerPendingEvent())
-      .then([resp = kj::mv(req.response), &context]() mutable {
-    return resp.then([](kj::HttpClient::Response&& response) mutable {
-      if (response.statusCode != 200) {
-        // Manually construct exception so that we can include the status text.
-        kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-              kj::str(JSG_EXCEPTION(Error) ": Queue send failed: ", response.statusText)));
-      }
+  auto req = client->request(kj::HttpMethod::POST,
+                             "https://fake-host/message"_kjc,
+                             headers, serialized.data.size());
 
-      // Read and discard response body, otherwise we might burn the HTTP connection.
-      return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
-    }).attach(context.registerPendingEvent());
-  }).attach(kj::mv(client));
+  auto pending = context.registerPendingEvent();
+  co_await req.body->write(serialized.data.begin(), serialized.data.size());
+  auto response = co_await req.response;
+
+  JSG_REQUIRE(response.statusCode == 200, Error,
+              kj::str("Queue send failed: ", response.statusText));
+
+  // Read and discard response body, otherwise we might burn the HTTP connection.
+  co_await response.body->readAllBytes().ignoreResult();
 };
 
 struct SerializedWithContentType {
@@ -243,11 +240,6 @@ kj::Promise<void> WorkerQueue::sendBatch(
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
 
-  // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
-  // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
-  // we have to do is provide the end of the path (which is "/batch") to send a message batch.
-  kj::StringPtr url = "https://fake-host/batch"_kj;
-
   // We add info about the size of the batch to the headers so that the queue implementation can
   // decide whether it's too large.
   // TODO(someday): Enforce the size limits here instead for very slightly better performance.
@@ -257,22 +249,23 @@ kj::Promise<void> WorkerQueue::sendBatch(
   headers.add("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
-  auto req = client->request(kj::HttpMethod::POST, url, headers, body.size());
+  // The stage that we're sending a subrequest to provides a base URL that includes a scheme, the
+  // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
+  // we have to do is provide the end of the path (which is "/batch") to send a message batch.
 
-  return req.body->write(body.begin(), body.size())
-      .attach(kj::mv(body), kj::mv(req.body), context.registerPendingEvent())
-      .then([resp = kj::mv(req.response), &context]() mutable {
-    return resp.then([](kj::HttpClient::Response&& response) mutable {
-      if (response.statusCode != 200) {
-        // Manually construct exception so that we can include the status text.
-        kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-              kj::str(JSG_EXCEPTION(Error) ": Queue sendBatch failed: ", response.statusText)));
-      }
+  auto req = client->request(kj::HttpMethod::POST,
+                             "https://fake-host/batch"_kjc,
+                             headers, body.size());
 
-      // Read and discard response body, otherwise we might burn the HTTP connection.
-      return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
-    }).attach(context.registerPendingEvent());
-  }).attach(kj::mv(client));
+  auto pendingEvent = context.registerPendingEvent();
+  co_await req.body->write(body.begin(), body.size());
+  auto response = co_await req.response;
+
+  JSG_REQUIRE(response.statusCode == 200, Error,
+              kj::str("Queue sendBatch failed: ", response.statusText));
+
+  // Read and discard response body, otherwise we might burn the HTTP connection.
+  co_await response.body->readAllBytes().ignoreResult();
 };
 
 jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::StringPtr> contentType) {

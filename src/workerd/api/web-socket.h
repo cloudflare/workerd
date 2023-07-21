@@ -277,16 +277,7 @@ public:
         "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
   }
 
-  inline void tryReleaseNative(jsg::Lock& js) {
-    // If the native WebSocket is no longer needed (the connection closed) and there are no more
-    // messages to send, we can discard the underlying connection.
-    auto& native = *farNative;
-    if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
-      // Native WebSocket no longer needed; release.
-      KJ_ASSERT(native.state.is<Accepted>());
-      native.state.init<Released>();
-    }
-  }
+  void tryReleaseNative(jsg::Lock& js);
 
   enum class HibernatableReleaseState {
     // The way we release Hibernatable WebSockets slightly differs from regular WebSockets.
@@ -661,7 +652,7 @@ private:
   // objects so are safe to access from the thread without the isolate lock. The whole task is
   // owned by the `IoContext` so it'll be canceled if the `IoContext` is destroyed.
 
-  kj::Promise<void> readLoop(kj::WebSocket& ws);
+  kj::Promise<kj::Maybe<kj::Exception>> readLoop();
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::Value err);
