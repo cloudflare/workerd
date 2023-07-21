@@ -106,6 +106,20 @@ build:windows --enable_runfiles
 # used by some KJ macros, and understands the `.c++` extension by default.
 build:windows --compiler=clang-cl
 
+# The Windows fastbuild bazel configuration is broken in that it necessarily generates PDB debug
+# information while the Linux and macOS toolchains only compile with debug information in the dbg
+# configuration or when requested with the -g flag. This causes huge increases in compile time and
+# disk/cache space usage – a single test may come with a 490MB PDB file.
+# In an optional configuration, use the opt configuration and manually disable optimizations as a
+# workaround.
+
+build:windows_no_dbg -c opt
+build:windows_no_dbg --copt='-O0' --host_copt='-O0'
+build:windows_no_dbg --copt='/Od' --host_copt='/Od'
+build:windows_no_dbg --copt='/INCREMENTAL:NO' --host_copt='/INCREMENTAL:NO'
+build:windows_no_dbg --noincompatible_use_host_features
+build:windows_no_dbg --features=-smaller_binary --features=-disable_assertions_feature
+
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --cxxopt='/await' --host_cxxopt='/await'
 build:windows --cxxopt='/wo4503' --host_cxxopt='/wo4503'

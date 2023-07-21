@@ -54,8 +54,12 @@ jobs:
             echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
       - name: Setup Windows
         if: runner.os == 'Windows'
+        # Set a custom output dir and disable generating debug information on Windows. By default,
+        # bazel generates huge amounts of debug information on Windows which slows down the build
+        # and takes up an excessive amount of cache space.
         run: |
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+            [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
