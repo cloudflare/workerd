@@ -296,7 +296,7 @@ kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ign
 }
 
 kj::Maybe<v8::Local<v8::String>> IcuDecoder::decode(
-    v8::Isolate* isolate,
+    jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> buffer,
     bool flush) {
   UErrorCode status = U_ZERO_ERROR;
@@ -333,7 +333,7 @@ kj::Maybe<v8::Local<v8::String>> IcuDecoder::decode(
       // Note also that in this case we'll interpret as Latin1 since UTF-8 bytes
       // within this range are identical to Latin1 and v8 allocates these more
       // efficiently.
-      return jsg::v8StrFromLatin1(isolate, buffer);
+      return jsg::v8StrFromLatin1(js.v8Isolate, buffer);
     }
 
     if (encoding == Encoding::Utf16le && buffer.size() % sizeof(char16_t) == 0) {
@@ -353,7 +353,7 @@ kj::Maybe<v8::Local<v8::String>> IcuDecoder::decode(
           omitInitialBom = data[0] == 0xfeff;
           bomSeen = true;
         }
-        return jsg::v8Str(isolate, data.slice(omitInitialBom ? 1 : 0, data.size()));
+        return jsg::v8Str(js.v8Isolate, data.slice(omitInitialBom ? 1 : 0, data.size()));
       }
     }
   }
@@ -388,14 +388,14 @@ kj::Maybe<v8::Local<v8::String>> IcuDecoder::decode(
     bomSeen = true;
   }
 
-  return jsg::v8Str(isolate, result.slice(omitInitialBom ? 1 : 0, length));
+  return jsg::v8Str(js.v8Isolate, result.slice(omitInitialBom ? 1 : 0, length));
 }
 
 kj::Maybe<v8::Local<v8::String>> AsciiDecoder::decode(
-    v8::Isolate* isolate,
+    jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> buffer,
     bool flush) {
-  return jsg::v8StrFromLatin1(isolate, buffer);
+  return jsg::v8StrFromLatin1(js.v8Isolate, buffer);
 }
 
 void IcuDecoder::reset() {
@@ -447,27 +447,27 @@ kj::StringPtr TextDecoder::getEncoding() {
 }
 
 v8::Local<v8::String> TextDecoder::decode(
+    jsg::Lock& js,
     jsg::Optional<kj::Array<const kj::byte>> maybeInput,
-    jsg::Optional<DecodeOptions> maybeOptions,
-    v8::Isolate* isolate) {
+    jsg::Optional<DecodeOptions> maybeOptions) {
   auto options = maybeOptions.orDefault(DEFAULT_OPTIONS);
   auto& input = maybeInput.orDefault(EMPTY);
   return JSG_REQUIRE_NONNULL(
-      getImpl().decode(isolate, input, !options.stream),
+      getImpl().decode(js, input, !options.stream),
       TypeError,
       "Failed to decode input.");
 }
 
 kj::Maybe<v8::Local<v8::String>> TextDecoder::decodePtr(
-    v8::Isolate* isolate,
+    jsg::Lock& js,
     kj::ArrayPtr<const kj::byte> buffer,
     bool flush) {
   KJ_SWITCH_ONEOF(decoder) {
     KJ_CASE_ONEOF(dec, AsciiDecoder) {
-      return dec.decode(isolate, buffer, flush);
+      return dec.decode(js, buffer, flush);
     }
     KJ_CASE_ONEOF(dec, IcuDecoder) {
-      return dec.decode(isolate, buffer, flush);
+      return dec.decode(js, buffer, flush);
     }
   }
   KJ_UNREACHABLE;
@@ -480,24 +480,25 @@ jsg::Ref<TextEncoder> TextEncoder::constructor() {
   return jsg::alloc<TextEncoder>();
 }
 
-v8::Local<v8::Uint8Array> TextEncoder::encode(jsg::Optional<v8::Local<v8::String>> input,
-    v8::Isolate* isolate) {
-  auto str = input.orDefault(v8::String::Empty(isolate));
-  auto maybeBuffer = v8::ArrayBuffer::MaybeNew(isolate, str->Utf8Length(isolate));
+v8::Local<v8::Uint8Array> TextEncoder::encode(jsg::Lock& js,
+                                              jsg::Optional<v8::Local<v8::String>> input) {
+  auto str = input.orDefault(v8::String::Empty(js.v8Isolate));
+  auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8Length(js.v8Isolate));
   JSG_ASSERT(!maybeBuffer.IsEmpty(), RangeError, "Cannot allocate space for TextEncoder.encode");
   auto buffer = maybeBuffer.ToLocalChecked();
   auto view = v8::Uint8Array::New(buffer, 0, buffer->ByteLength());
-  [[maybe_unused]] auto result = encodeInto(str, view, isolate);
+  [[maybe_unused]] auto result = encodeInto(js, str, view);
   KJ_DASSERT(result.written == buffer->ByteLength());
   KJ_DASSERT(result.read == str->Length());
   return view;
 }
 
-TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
-    v8::Local<v8::String> input, v8::Local<v8::Uint8Array> buffer, v8::Isolate* isolate) {
+TextEncoder::EncodeIntoResult TextEncoder::encodeInto(jsg::Lock& js,
+                                                      v8::Local<v8::String> input,
+                                                      v8::Local<v8::Uint8Array> buffer) {
   EncodeIntoResult result{0,0};
   auto bytes = jsg::asBytes(buffer.As<v8::ArrayBufferView>()).releaseAsChars();
-  result.written = input->WriteUtf8(isolate, bytes.begin(), bytes.size(), &result.read,
+  result.written = input->WriteUtf8(js.v8Isolate, bytes.begin(), bytes.size(), &result.read,
       v8::String::NO_NULL_TERMINATION | v8::String::REPLACE_INVALID_UTF8);
   return result;
 }

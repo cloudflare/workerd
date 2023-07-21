@@ -70,7 +70,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                                 (jsg::Lock& js, auto chunk, auto controller) {
         jsg::BufferSource source(js, chunk);
         controller->enqueue(js, JSG_REQUIRE_NONNULL(
-            decoder->decodePtr(js.v8Isolate, source.asArrayPtr(), false),
+            decoder->decodePtr(js, source.asArrayPtr(), false),
             TypeError,
             "Failed to decode input."));
         return js.resolvedPromise();
@@ -80,7 +80,7 @@ jsg::Ref<TextDecoderStream> TextDecoderStream::constructor(
                                 (decoder),
                                 (jsg::Lock& js, auto controller) {
         controller->enqueue(js, JSG_REQUIRE_NONNULL(
-            decoder->decodePtr(js.v8Isolate, kj::ArrayPtr<kj::byte>(), true),
+            decoder->decodePtr(js, kj::ArrayPtr<kj::byte>(), true),
             TypeError,
             "Failed to decode input."));
         return js.resolvedPromise();

@@ -68,7 +68,7 @@ public:
   virtual ~Decoder() noexcept(true) {}
   virtual Encoding getEncoding() = 0;
   virtual kj::Maybe<v8::Local<v8::String>> decode(
-      v8::Isolate* isolate,
+      jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) = 0;
 
@@ -86,7 +86,7 @@ public:
   Encoding getEncoding() override { return Encoding::Windows_1252; }
 
   kj::Maybe<v8::Local<v8::String>> decode(
-      v8::Isolate* isolate,
+      jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) override;
 };
@@ -106,7 +106,7 @@ public:
   Encoding getEncoding() override { return encoding; }
 
   kj::Maybe<v8::Local<v8::String>> decode(
-      v8::Isolate* isolate,
+      jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) override;
 
@@ -147,9 +147,9 @@ public:
       jsg::Optional<kj::String> label,
       jsg::Optional<ConstructorOptions> options);
 
-  v8::Local<v8::String> decode(jsg::Optional<kj::Array<const kj::byte>> input,
-                               jsg::Optional<DecodeOptions> options,
-                               v8::Isolate* isolate);
+  v8::Local<v8::String> decode(jsg::Lock& js,
+                               jsg::Optional<kj::Array<const kj::byte>> input,
+                               jsg::Optional<DecodeOptions> options);
 
   kj::StringPtr getEncoding();
 
@@ -175,7 +175,7 @@ public:
       : decoder(kj::mv(decoder)), ctorOptions(options) {}
 
   kj::Maybe<v8::Local<v8::String>> decodePtr(
-      v8::Isolate* isolate,
+      jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush);
 
@@ -205,11 +205,11 @@ public:
 
   static jsg::Ref<TextEncoder> constructor();
 
-  v8::Local<v8::Uint8Array> encode(
-      jsg::Optional<v8::Local<v8::String>> input, v8::Isolate* isolate);
+  v8::Local<v8::Uint8Array> encode(jsg::Lock& js, jsg::Optional<v8::Local<v8::String>> input);
 
-  EncodeIntoResult encodeInto(
-      v8::Local<v8::String> input, v8::Local<v8::Uint8Array> buffer, v8::Isolate* isolate);
+  EncodeIntoResult encodeInto(jsg::Lock& js,
+                              v8::Local<v8::String> input,
+                              v8::Local<v8::Uint8Array> buffer);
 
   kj::StringPtr getEncoding() { return "utf-8"; }
   // UTF-8 is the only encoding type supported by the WHATWG spec.
