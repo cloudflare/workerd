@@ -81,16 +81,14 @@ private:
   uint64_t runningTotal = 0;
 
   kj::Promise<PartList> readParts() {
+    static constexpr size_t bufferSize = 4096;
     PartList parts;
 
     while (true) {
-      constexpr size_t bufferSize = 4096;
       auto part = kj::heapArray<kj::byte>(bufferSize);
       auto amount = co_await input.tryRead(part.begin(), bufferSize, bufferSize);
       runningTotal += amount;
-      if (runningTotal >= limit) {
-        throw JSG_KJ_EXCEPTION(FAILED, TypeError, "Memory limit exceeded before EOF.");
-      }
+      JSG_REQUIRE(runningTotal < limit, TypeError, "Memory limit exceeded before EOF.");
 
       if (amount > 0) {
         parts.add(part.slice(0, amount).attach(kj::mv(part)));
