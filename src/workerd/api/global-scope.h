@@ -75,15 +75,12 @@ public:
   PromiseRejectionEvent(
       v8::PromiseRejectEvent type,
       jsg::V8Ref<v8::Promise> promise,
-      jsg::Value reason)
-      : Event(getEventName(type)),
-        promise(kj::mv(promise)),
-        reason(kj::mv(reason)) {}
+      jsg::Value reason);
 
   static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
 
-  jsg::V8Ref<v8::Promise> getPromise(v8::Isolate* isolate) { return promise.addRef(isolate); }
-  jsg::Value getReason(v8::Isolate* isolate) { return reason.addRef(isolate); }
+  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) { return promise.addRef(js); }
+  jsg::Value getReason(jsg::Lock& js) { return reason.addRef(js); }
 
   JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
     JSG_INHERIT(Event);
@@ -92,23 +89,10 @@ public:
   }
 
 private:
-  static kj::String getEventName(v8::PromiseRejectEvent type) {
-    switch (type) {
-      case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
-        return kj::str("unhandledrejection");
-      case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
-        return kj::str("rejectionhandled");
-      default:
-        // Events are not emitted for the other reject types.
-        KJ_UNREACHABLE;
-    }
-  }
   jsg::V8Ref<v8::Promise> promise;
   jsg::Value reason;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(promise, reason);
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 class WorkerGlobalScope: public EventTarget {
