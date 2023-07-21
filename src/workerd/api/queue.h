@@ -66,7 +66,7 @@ public:
     JSG_METHOD(sendBatch);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE(Queue<Body> {
+    JSG_TS_OVERRIDE(Queue<Body = unknown> {
       send(message: Body, options?: QueueSendOptions): Promise<void>;
       sendBatch(messages: Iterable<MessageSendRequest<Body>>): Promise<void>;
     });
