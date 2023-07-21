@@ -242,9 +242,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
-  auto prom = client->openWebSocket(connUrl, headers)
-      .then([client = kj::mv(client), &context, wsErr = kj::mv(wsErr)]
-            (kj::HttpClient::WebSocketResponse response) mutable -> kj::Promise<PackedWebSocket> {
+  auto prom = ([](auto& context, auto connUrl, auto headers, auto client)
+      -> kj::Promise<PackedWebSocket> {
+    auto response = co_await client->openWebSocket(connUrl, headers);
 
     JSG_REQUIRE(response.statusCode == 101, TypeError,
         "Failed to establish the WebSocket connection: expected server to reply with HTTP "
@@ -266,7 +266,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
           maybeExtensions = kj::str(*extensions);
         }
 
-        return PackedWebSocket{
+        co_return PackedWebSocket{
           .ws = webSocket.attach(kj::mv(client)),
           .proto = kj::mv(maybeProto),
           .extensions = kj::mv(maybeExtensions)
@@ -278,8 +278,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
       }
     }
     KJ_UNREACHABLE
-  });
-
+  })(context, kj::mv(connUrl), kj::mv(headers), kj::mv(client));
 
   ws->initConnection(js, kj::mv(prom));
 
@@ -328,12 +327,13 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
   if (locality == LOCAL) {
     // Since the WebSocket is terminated locally, we need the IoContext to stay live while
     // it is active.
-    return promise.then([]() { return DeferredProxy<void> { kj::READY_NOW }; });
+    co_await promise;
+    co_return DeferredProxy<void> { kj::READY_NOW };
   } else {
     // Since the WebSocket is just proxying through, we can do the pump in a deferred proxy task.
     // Note that we don't need to (and can't) register any pending events in this case since the
     // IoContext is free to go away at this point.
-    return DeferredProxy<void> { kj::mv(promise) };
+    co_return DeferredProxy<void> { kj::mv(promise) };
   }
 }
 
@@ -390,16 +390,13 @@ WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& c
 }
 
 kj::Promise<void> WebSocket::Accepted::createAbortTask(Native& native, IoContext& context) {
-  return kj::evalNow([&]() { return ws->whenAborted(); })
-      .catch_([](kj::Exception&& e) {
+  try {
     // whenAborted() is theoretically not supposed to throw, but some code paths, like
     // AbortableWebSocket and Cap'n Proto disconnects, may end up throwing DISCONNECTED. Treat
-    // exceptions the same as if `whenAborted()` finished normally -- but log if it's not
-    // DISCONNECTED.
-    if (e.getType() != kj::Exception::Type::DISCONNECTED) {
-      LOG_EXCEPTION("webSocketWhenAborted", e);
-    }
-  }).then([this, &native]() {
+    // exceptions the same as if `whenAborted()` finished normally -- but log in catch catch
+    // block if it's not DISCONNECTED.
+    co_await ws->whenAborted();
+
     // Other end disconnected prematurely. We may be able to clean up our state.
     native.outgoingAborted = true;
     if (!native.isPumping && native.closedIncoming) {
@@ -415,9 +412,12 @@ kj::Promise<void> WebSocket::Accepted::createAbortTask(Native& native, IoContext
       // underlying object, or we might have a UAF situation. Those other operations should
       // fail shortly and notice the `outgoingAborted` flag when they do.
     }
-  }).eagerlyEvaluate([](kj::Exception&& e) {
-    LOG_EXCEPTION("webSocketWhenAborted", e);
-  });
+  } catch (...) {
+    auto ex = kj::getCaughtExceptionAsKj();
+    if (ex.getType() != kj::Exception::Type::DISCONNECTED) {
+      LOG_EXCEPTION("webSocketWhenAborted", ex);
+    }
+  }
 }
 
 WebSocket::Accepted::~Accepted() noexcept(false) {
@@ -427,7 +427,6 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
 }
 
 void WebSocket::startReadLoop(jsg::Lock& js) {
-
   // If the kj::WebSocket happens to be an AbortableWebSocket (see util/abortable.h), then
   // calling readLoop here could throw synchronously if the canceler has already been tripped.
   // Using kj::evalNow() here let's us capture that and handle correctly.
@@ -435,13 +434,7 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
   // We catch exceptions and return Maybe<Exception> instead since we want to handle the exceptions
   // in awaitIo() below, but we don't want the KJ exception converted to JavaScript before we can
   // examine it.
-  kj::Promise<kj::Maybe<kj::Exception>> promise = kj::evalNow([&] {
-    // Note that we'll throw if the websocket has enabled hibernation.
-    auto& ws = *KJ_REQUIRE_NONNULL(
-        KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
-    return readLoop(ws);
-  }).then([]() -> kj::Maybe<kj::Exception> { return nullptr; },
-          [](kj::Exception&& e) -> kj::Maybe<kj::Exception> { return kj::mv(e); });
+  kj::Promise<kj::Maybe<kj::Exception>> promise = readLoop();
 
   auto& context = IoContext::current();
 
@@ -794,47 +787,70 @@ kj::Promise<void> WebSocket::pump(
   }
 }
 
-kj::Promise<void> WebSocket::readLoop(kj::WebSocket& ws) {
-  return ws.receive()
-      .then([this, &ws, &context = IoContext::current()](kj::WebSocket::Message&& message) {
-    // We can't top up the CPU and subrequest limits while the context is active, so we have to do
-    // it before run().
-    context.getLimitEnforcer().topUpActor();
+void WebSocket::tryReleaseNative(jsg::Lock& js) {
+  // If the native WebSocket is no longer needed (the connection closed) and there are no more
+  // messages to send, we can discard the underlying connection.
+  auto& native = *farNative;
+  if ((native.closedOutgoing || native.outgoingAborted) && !native.isPumping) {
+    // Native WebSocket no longer needed; release.
+    KJ_ASSERT(native.state.is<Accepted>());
+    native.state.init<Released>();
+  }
+}
 
-    KJ_IF_MAYBE(a, context.getActor()) {
-      auto size = countBytesFromMessage(message);
-      a->getMetrics().receivedWebSocketMessage(size);
-    }
+kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
+  try {
+    // Note that we'll throw if the websocket has enabled hibernation.
+    auto& ws = *KJ_REQUIRE_NONNULL(
+        KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
+    auto& context = IoContext::current();
+    while (true) {
+      auto message = co_await ws.receive();
 
-    // Re-enter the context with context.run(). This is arguably a bit unusual compared to other
-    // I/O which is delivered by return from context.awaitIo(), but the difference here is that we
-    // have a long stream of events over time. It makes sense to use context.run() each time a new
-    // event arrives.
-    return context.run([this,&ws,message=kj::mv(message)](Worker::Lock& wLock) mutable
-        -> kj::Promise<void> {
-      jsg::Lock& lock = wLock;
-      auto isolate = lock.v8Isolate;
-      auto& native = *farNative;
-      KJ_SWITCH_ONEOF(message) {
-        KJ_CASE_ONEOF(text, kj::String) {
-          dispatchEventImpl(lock, jsg::alloc<MessageEvent>(isolate, lock.wrapString(text)));
-        }
-        KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          dispatchEventImpl(lock,
-              jsg::alloc<MessageEvent>(isolate, lock.wrapBytes(kj::mv(data))));
-        }
-        KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
-          native.closedIncoming = true;
-          dispatchEventImpl(lock, jsg::alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
-          // Native WebSocket no longer needed; release.
-          tryReleaseNative(lock);
-          return kj::READY_NOW;
-        }
+      context.getLimitEnforcer().topUpActor();
+      KJ_IF_MAYBE(a, context.getActor()) {
+        auto size = countBytesFromMessage(message);
+        a->getMetrics().receivedWebSocketMessage(size);
       }
 
-      return readLoop(ws);
-    });
-  });
+      // Re-enter the context with context.run(). This is arguably a bit unusual compared to other
+      // I/O which is delivered by return from context.awaitIo(), but the difference here is that we
+      // have a long stream of events over time. It makes sense to use context.run() each time a new
+      // event arrives.
+      // TODO(cleanup): The way context.run is defined, a capturing lambda is required here, which
+      // is a bit unfortunate. We could simply things somewhat with a variation that would allow
+      // something like context.run(handleMessage, *this, kj::mv(message)) where the acquired lock,
+      // and the additional arguments are passed into handleMessage, avoiding the need for the
+      // lambda here entirely.
+      auto result = co_await context.run([this, message=kj::mv(message)](auto& wLock) mutable {
+        auto& native = *farNative;
+        jsg::Lock& js = wLock;
+        KJ_SWITCH_ONEOF(message) {
+          KJ_CASE_ONEOF(text, kj::String) {
+            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js.v8Isolate, js.wrapString(text)));
+          }
+          KJ_CASE_ONEOF(data, kj::Array<byte>) {
+            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js.v8Isolate,
+                                                           js.wrapBytes(kj::mv(data))));
+          }
+          KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
+            native.closedIncoming = true;
+            dispatchEventImpl(js, jsg::alloc<CloseEvent>(close.code, kj::mv(close.reason), true));
+            // Native WebSocket no longer needed; release.
+            tryReleaseNative(js);
+            return false;
+          }
+        }
+
+        return true;
+      });
+
+      if (!result) co_return nullptr;
+    }
+    KJ_UNREACHABLE;
+  } catch (...) {
+    co_return kj::getCaughtExceptionAsKj();
+  }
 }
 
 jsg::Ref<WebSocketPair> WebSocketPair::constructor() {
