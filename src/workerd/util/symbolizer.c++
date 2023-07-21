@@ -23,11 +23,10 @@ namespace kj {
 
 namespace {
 
+// A simple subprocess wrapper with in/out pipes.
 struct Subprocess {
-  // A simple subprocess wrapper with in/out pipes.
-
+  // Execute command with a shell.
   static kj::Maybe<Subprocess> exec(const char* argv[]) noexcept {
-    // Execute command with a shell.
     // Since this is used during error handling we do not to try to free resources in
     // case of errors.
 

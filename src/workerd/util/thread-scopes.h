@@ -17,13 +17,12 @@
 
 namespace workerd {
 
+// Normally, we prohibit V8 worker threads, but in some cases it's useful to temporarily allow
+// them. Create this on the stack to temporarily allow V8 code running in the current thread to
+// spawn worker threads.
+//
+// In particular this is used when loading Wasm modules, to properly enable Liftoff and Tier-up.
 class AllowV8BackgroundThreadsScope {
-  // Normally, we prohibit V8 worker threads, but in some cases it's useful to temporarily allow
-  // them. Create this on the stack to temporarily allow V8 code running in the current thread to
-  // spawn worker threads.
-  //
-  // In particular this is used when loading Wasm modules, to properly enable Liftoff and Tier-up.
-
 public:
   AllowV8BackgroundThreadsScope();
   ~AllowV8BackgroundThreadsScope() noexcept(false);
@@ -33,10 +32,9 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(AllowV8BackgroundThreadsScope);
 };
 
+// Create this on the stack when tearing down isolates. This hints to the PageAllocator that all
+// page discards should be deferred until the whole cage is destroyed.
 class IsolateShutdownScope {
-  // Create this on the stack when tearing down isolates. This hints to the PageAllocator that all
-  // page discards should be deferred until the whole cage is destroyed.
-
 public:
   IsolateShutdownScope();
   ~IsolateShutdownScope() noexcept(false);
@@ -46,8 +44,6 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(IsolateShutdownScope);
 };
 
-bool isMultiTenantProcess();
-void setMultiTenantProcess();
 // Tracks whether the process hosts isolates from multiple parties that don't know about each
 // other. In such a case, we must take additional precautions against Spectre, and prohibit
 // functionality which cannot be made spectre-safe.
@@ -57,20 +53,34 @@ void setMultiTenantProcess();
 //
 // This is actually a process-level flag rather than thread-level. Once a process becomes
 // multi-tenant it cannot go back, since secrets could persist in memory.
+bool isMultiTenantProcess();
 
-bool isPredictableModeForTest();
-void setPredictableModeForTest();
+// Tracks whether the process hosts isolates from multiple parties that don't know about each
+// other. In such a case, we must take additional precautions against Spectre, and prohibit
+// functionality which cannot be made spectre-safe.
+//
+// (Note that simply turning this on is NOT sufficient to enable spectre protection. Instead, this
+// is mostly used as a safeguard to *disable* functionality that is known not to be spectre-safe.)
+//
+// This is actually a process-level flag rather than thread-level. Once a process becomes
+// multi-tenant it cannot go back, since secrets could persist in memory.
+void setMultiTenantProcess();
+
 // Tracks whether the process should run in "predictable mode" for testing purposes. This causes
 // random number generators to return static results instead, changes some timers to return zero,
 // etc. This should only be used in tests.
+bool isPredictableModeForTest();
 
+// Tracks whether the process should run in "predictable mode" for testing purposes. This causes
+// random number generators to return static results instead, changes some timers to return zero,
+// etc. This should only be used in tests.
+void setPredictableModeForTest();
+
+// RAII class which allows the thread's active watchdog to observe forward progress through
+// changes in a uint64_t. Use this in places where your code cannot call Watchdog::checkIn() and
+// may block for longer than the watchdog timeout, but can still observe forward progress.
 class ThreadProgressCounter {
-  // RAII class which allows the thread's active watchdog to observe forward progress through
-  // changes in a uint64_t. Use this in places where your code cannot call Watchdog::checkIn() and
-  // may block for longer than the watchdog timeout, but can still observe forward progress.
-
 public:
-  explicit ThreadProgressCounter(uint64_t& counter);
   // When a ProgressCounter is instantiated, it saves the current value of `counter`. When
   // Watchdog::tryHandleSignal() is called with an active ProgressCounter on the thread, the
   // function compares this saved value with the (possibly updated) current value. If they differ,
@@ -81,16 +91,17 @@ public:
   // It is expected that all read/write operations to `counter` are atomic.
   //
   // ProgressCounters are reentrant, like v8::Lockers.
+  explicit ThreadProgressCounter(uint64_t& counter);
 
   ~ThreadProgressCounter() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(ThreadProgressCounter);
 
-  static bool hasProgress();
   // Returns true if progress has been made since the last call to update().
+  static bool hasProgress();
 
-  static void acknowledgeProgress();
   // Updates the saved progress value so that hasProgress() now returns false until the next time
   // the counter is updated.
+  static void acknowledgeProgress();
 
 private:
   uint64_t savedValue;

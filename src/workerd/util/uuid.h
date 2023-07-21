@@ -9,9 +9,9 @@
 
 namespace workerd {
 
-kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource);
 // Generates a random version 4 UUID using the given entropy source or a default
 // secure random number generator. Unless you pass in a predictable entropy
 // source, it is safe to assume that the output of this function is unique.
+kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource);
 
 }

@@ -19,15 +19,14 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
+// C++/KJ API for SQLite.
+//
+// In addition to providing a more modern C++ interface vs. the classic C API, this API layers
+// SQLite on top of KJ's filesystem API. This means that you can use KJ's in-memory filesystem
+// implementation in unit tests. Meanwhile, though, if you do actually give it a `kj::Directory`
+// representing a true disk directory, the real SQLite disk implementation will be used with
+// all of its features.
 class SqliteDatabase {
-  // C++/KJ API for SQLite.
-  //
-  // In addition to providing a more modern C++ interface vs. the classic C API, this API layers
-  // SQLite on top of KJ's filesystem API. This means that you can use KJ's in-memory filesystem
-  // implementation in unit tests. Meanwhile, though, if you do actually give it a `kj::Directory`
-  // representing a true disk directory, the real SQLite disk implementation will be used with
-  // all of its features.
-
 public:
   class Vfs;
   class Query;
@@ -42,40 +41,40 @@ public:
   ~SqliteDatabase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(SqliteDatabase);
 
-  operator sqlite3*() { return db; }
   // Allows a SqliteDatabase to be passed directly into SQLite API functions where `sqlite*` is
   // expected.
+  operator sqlite3*() { return db; }
 
-  static Regulator TRUSTED;
   // Use as the `Regulator&` for queries that are fully trusted. As a general rule, this should
   // be used if and only if the SQL query is a string literal.
+  static Regulator TRUSTED;
 
-  Statement prepare(Regulator& regulator, kj::StringPtr sqlCode);
   // Prepares the given SQL code as a persistent statement that can be used across several queries.
   // Don't use this for one-off queries; pass the code to the Query constructor.
+  Statement prepare(Regulator& regulator, kj::StringPtr sqlCode);
 
-  template <typename... Params>
-  Query run(Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
   // Convenience method to start a query. This is equivalent to `prepare(sqlCode).run(bindings...)`
   // except:
   // - It may be more efficient for one-off use caes.
   // - The code can include multiple statements, separated by semicolons. The bindings and returned
   //   `Query` object are both associated with the last statement. This is particulary convenient
   //   for doing database initialization such as creating several tables at once.
+  template <typename... Params>
+  Query run(Regulator& regulator, kj::StringPtr sqlCode, Params&&... bindings);
 
   template <size_t size>
   Statement prepare(const char (&sqlCode)[size]);
+
+  // When the input is a string literal, we automatically use the TRUSTED regulator.
   template <size_t size, typename... Params>
   Query run(const char (&sqlCode)[size], Params&&... bindings);
-  // When the input is a string literal, we automatically use the TRUSTED regulator.
 
-  void onWrite(kj::Function<void()> callback) { onWriteCallback = kj::mv(callback); }
   // Invokes the given callback whenever a query begins which may write to the database. The
   // callback is called just before executing the query.
   //
   // Durable Objects uses this to automatically begin a transaction and close the output gate.
+  void onWrite(kj::Function<void()> callback) { onWriteCallback = kj::mv(callback); }
 
-  void notifyWrite();
   // Invoke the onWrite() callback.
   //
   // This is useful when the caller is about to execute a statement which SQLite considers
@@ -84,20 +83,21 @@ public:
   // implement explicit transactions. For synchronous transactions, the explicit transaction needs
   // to be nested inside the automatic transaction, so we need to force an auto-transaction to
   // start before the SAVEPOINT.
+  void notifyWrite();
 
-  kj::StringPtr getCurrentQueryForDebug();
   // Get the currently-executing SQL query for debug purposes. The query is normalized to hide
   // any literal values that might contain sensitive information. This is intended to be safe for
   // debug logs.
+  kj::StringPtr getCurrentQueryForDebug();
 
 private:
   sqlite3* db;
 
-  kj::Maybe<Regulator&> currentRegulator;
   // Set while a query is compiling.
+  kj::Maybe<Regulator&> currentRegulator;
 
-  kj::Maybe<sqlite3_stmt&> currentStatement;
   // Set while a statement is executing.
+  kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
 
@@ -105,42 +105,41 @@ private:
 
   enum Multi { SINGLE, MULTI };
 
-  kj::Own<sqlite3_stmt> prepareSql(
-      Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
   // Helper to call sqlite3_prepare_v3().
   //
   // In SINGLE mode, an exception is thrown if `sqlCode` contains multiple statements.
   //
   // In MULTI mode, if `sqlCode` contains multiple statements, each statement before the last one
   // is executed immediately. The returned object represents the last statement.
+  kj::Own<sqlite3_stmt> prepareSql(
+      Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi);
 
+  // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
   bool isAuthorized(int actionCode,
       kj::Maybe<kj::StringPtr> param1, kj::Maybe<kj::StringPtr> param2,
       kj::Maybe<kj::StringPtr> dbName, kj::Maybe<kj::StringPtr> triggerName);
-  // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
 
+  // Implements SQLite authorizer for 'temp' DB
   bool isAuthorizedTemp(int actionCode,
       const kj::Maybe <kj::StringPtr> &param1, const kj::Maybe <kj::StringPtr> &param2,
       Regulator &regulator);
-  // Implements SQLite authorizer for 'temp' DB
 
   void setupSecurity();
 };
 
+// Class which regulates a SQL query, especially to control how queries created in JavaScript
+// application code are handled.
 class SqliteDatabase::Regulator {
-  // Class which regulates a SQL query, especially to control how queries created in JavaScript
-  // application code are handled.
 
 public:
-  virtual bool isAllowedName(kj::StringPtr name) { return true; }
   // Returns whether the given name (which may be a table, index, view, etc.) is allowed to be
   // accessed. Typically, this is used to deny access to names containing special prefixes
   // indicating that they are privileged, like `_cf_`.
   //
   // This only applies to global names. Scoped names, such as column names, are not subject to
   // authorization.
+  virtual bool isAllowedName(kj::StringPtr name) { return true; }
 
-  virtual bool isAllowedTrigger(kj::StringPtr name) { return false; }
   // Returns whether a given trigger or view name should be permitted to run as a side effect of a
   // query running under this Regulator. This is a precaution to prevent application-defined
   // triggers from executing under a privileged regulator.
@@ -148,8 +147,8 @@ public:
   // TODO(someday): In theory a trigger should run with the authority level under which it was
   //   created, but how do we track that? In practice we probably never expect triggers to run on
   //   trusted queries.
+  virtual bool isAllowedTrigger(kj::StringPtr name) { return false; }
 
-  virtual void onError(kj::StringPtr message) {}
   // Report that an error occurred. `message` is the detail message constructed by SQLite. This
   // function should typically throw an exception. If no exception is thrown, a simple KJ exception
   // will be thrown after `onError()` returns.
@@ -160,8 +159,8 @@ public:
   // KJ exceptions in all cases. This is because SQLITE_MISUSE indicates a bug that could lead to
   // undefined behavior. Such bugs are always in C++ code; JavaScript application code must be
   // prohibited from causing such errors in the first place.
+  virtual void onError(kj::StringPtr message) {}
 
-  virtual bool allowTransactions() { return true; }
   // Are BEGIN TRANSACTION and SAVEPOINT statements allowed? Note that if allowed, SAVEPOINT will
   // also be subject to `isAllowedName()` for the savepoint name. If denied, the application will
   // not be able to create any sort of transaction.
@@ -169,14 +168,12 @@ public:
   // In Durable Objects, we disallow these statements because the platform provides an explicit
   // API for transactions that is safer (e.g. it automatically rolls back on throw). Also, the
   // platform automatically wraps every entry into the isolate lock in a transaction.
+  virtual bool allowTransactions() { return true; }
 };
 
+// Represents a prepared SQL statement, which can be executed many times.
 class SqliteDatabase::Statement {
-  // Represents a prepared SQL statement, which can be executed many times.
-
 public:
-  template <typename... Params>
-  Query run(Params&&... bindings);
   // Convenience method to start a query. This is equivalent to:
   //
   //     SqliteDatabase::Query(db, statement, bindings...);
@@ -188,6 +185,8 @@ public:
   // Any strings or byte blobs in the bindings must remain valid until the `Query` is destroyed.
   // However, when passing `bindings` as an array, the outer array need only remain valid until
   // this method returns.
+  template <typename... Params>
+  Query run(Params&&... bindings);
 
   operator sqlite3_stmt*() { return stmt; }
 
@@ -202,12 +201,11 @@ private:
   friend class SqliteDatabase;
 };
 
+// Represents one SQLite query.
+//
+// Only one Query can exist at a time, for a given database. It should probably be allocated on
+// the stack.
 class SqliteDatabase::Query {
-  // Represents one SQLite query.
-  //
-  // Only one Query can exist at a time, for a given database. It should probably be allocated on
-  // the stack.
-
 public:
   using ValuePtr = kj::OneOf<kj::ArrayPtr<const byte>, kj::StringPtr, int64_t, double,
                              decltype(nullptr)>;
@@ -217,39 +215,50 @@ public:
   ~Query() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Query);
 
+  // Row IO counter.
   uint64_t getRowsRead();
+  // Row IO counter.
   uint64_t getRowsWritten();
-  // Row IO counters.
 
-  bool isDone() { return done; }
   // If true, there are no more rows. (When true, the methods below must not be called.)
+  bool isDone() { return done; }
 
-  uint changeCount();
   // For INSERT, UPDATE, or DELETE queries, returns the number of rows changed. For other query
   // types the result is undefined.
+  uint changeCount();
 
-  void nextRow();
   // Advance to the next row.
+  void nextRow();
 
-  uint columnCount();
   // How many columns does each row of the result have?
+  uint columnCount();
 
-  ValuePtr getValue(uint column);
   // Get the value at the given column, as whatever type was actually returned.
   //
   // Returned pointers (strings and blobs) remain valid only until either (a) nextRow() is called,
   // or (b) a different get method is called on the same column but with a different type.
+  ValuePtr getValue(uint column);
 
-  kj::StringPtr getColumnName(uint column);
   // Get the name of a specific column.
+  kj::StringPtr getColumnName(uint column);
 
-  kj::ArrayPtr<const byte> getBlob(uint column);
-  kj::StringPtr getText(uint column);
-  int getInt(uint column);
-  int64_t getInt64(uint column);
-  double getDouble(uint column);
-  bool isNull(uint column);
   // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  kj::ArrayPtr<const byte> getBlob(uint column);
+
+  // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  kj::StringPtr getText(uint column);
+
+  // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  int getInt(uint column);
+
+  // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  int64_t getInt64(uint column);
+
+  // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  double getDouble(uint column);
+
+  // Get the value at the given column, coercing it to the desired type according to SQLite rules.
+  bool isNull(uint column);
 
   kj::Maybe<kj::ArrayPtr<const byte>> getMaybeBlob(uint column) {
     if (isNull(column)) { return nullptr; } else { return getBlob(column); }
@@ -305,11 +314,12 @@ private:
   void bind(uint column, double value);
   void bind(uint column, decltype(nullptr));
 
+  // Some reasonable automatic conversions.
+
   inline void bind(uint column, int value) { bind(column, static_cast<long long>(value)); }
   inline void bind(uint column, uint value) { bind(column, static_cast<long long>(value)); }
   inline void bind(uint column, long value) { bind(column, static_cast<long long>(value)); }
   inline void bind(uint column, float value) { bind(column, static_cast<double>(value)); }
-  // Some reasonable automatic conversions.
 
   template <typename... T, size_t... i>
   void bindAll(std::index_sequence<i...>, T&&... value) {
@@ -319,10 +329,9 @@ private:
   }
 };
 
+// Options affecting SqliteDatabase::Vfs onstructor.
 struct SqliteDatabase::VfsOptions {
-  // Options affecting SqliteDatabase::Vfs constructor.
 
-  int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
   // Value that should be returned by the SQLite VFS's xDeviceCharacteristics method. This is
   // a combination of SQLITE_IOCAP_* flags which can improve performance if the device is known
   // to provide certain guarantees.
@@ -338,27 +347,26 @@ struct SqliteDatabase::VfsOptions {
   // Note that when the underlying directory is a real disk directory, then this implementation
   // will fall back to the native VFS implementation. In that case, the options you set here will
   // be ORed with the ones set by the underlying VFS.
+  int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
 };
 
+// Implements a SQLite VFS based on a KJ directory.
+//
+// If the directory is detected to be a disk directory (i.e. getFd() or getWin32Handle() returns
+// non-null), this VFS implementation will actually delegate to the built-in one. This ensures
+// feature-parity for production use.
+//
+// If the directory is not a disk directory, then the VFS will actually use the KJ APIs, but
+// some features will be missing. Most importantly, as of this writing, KJ filesystem APIs do
+// not support locks, so all locking will be ignored.
+//
+// An instance of `Vfs` can safely be used across multiple threads.
 class SqliteDatabase::Vfs {
-  // Implements a SQLite VFS based on a KJ directory.
-  //
-  // If the directory is detected to be a disk directory (i.e. getFd() or getWin32Handle() returns
-  // non-null), this VFS implementation will actually delegate to the built-in one. This ensures
-  // feature-parity for production use.
-  //
-  // If the directory is not a disk directory, then the VFS will actually use the KJ APIs, but
-  // some features will be missing. Most importantly, as of this writing, KJ filesystem APIs do
-  // not support locks, so all locking will be ignored.
-  //
-  // An instance of `Vfs` can safely be used across multiple threads.
-
 public:
-  using Options = VfsOptions;
   // Pretend `Options` is declared nested here. Due to a C++ quirk, we cannot actually declare it
   // nested while having default-initialized parameters of this type.
+  using Options = VfsOptions;
 
-  explicit Vfs(const kj::Directory& directory, Options options = {});
   // Create a VFS backed by the given kj::Directory.
   //
   // If the directory is a real disk directory (i.e. getFd() returns non-null), then this will
@@ -371,18 +379,18 @@ public:
   // filesystems and other cases where the application can ensure all clients are using the same
   // Vfs. If, somehow, the same database file is opened for write via two different `Vfs` instances,
   // it will likely become corrupted.
+  explicit Vfs(const kj::Directory& directory, Options options = {});
 
-  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager,
-               Options options = {});
   // Create a VFS with custom lock management.
   //
   // Unlike the other constructor, this version never uses SQLite's native VFS implementation.
   // `lockManager` will be responsible for coordinating access between multiple concurrent clients
   // of the same database.
+  explicit Vfs(const kj::Directory& directory, const LockManager& lockManager,
+               Options options = {});
 
   ~Vfs() noexcept(false);
 
-  kj::StringPtr getName() const { return name; }
   // Unfortunately, all SQLite VFSes must be registered in a global list with unique names, and
   // then the _name_ must be passed to sqlite3_open_v2() to use it when opening a database. This is
   // dumb, you should instead be able to simply pass the sqlite3_vfs* when opening the database,
@@ -390,6 +398,7 @@ public:
   // name.
   //
   // TODO(cleanup): Patch SQLite to allow passing the pointer in?
+  kj::StringPtr getName() const { return name; }
 
   KJ_DISALLOW_COPY_AND_MOVE(Vfs);
 
@@ -399,39 +408,39 @@ private:
   const LockManager& lockManager;
   Options options;
 
-  kj::String name = makeName();
   // Value returned by getName();
+  kj::String name = makeName();
 
   sqlite3_vfs& native;  // the system's default VFS implementation
   kj::Own<sqlite3_vfs> vfs;  // our VFS
 
-  int rootFd = -1;
   // Result of `directory.getFd()`, if it returns non-null. Cached here for convenience.
+  int rootFd = -1;
 
   template <typename T, T slot>
   struct MethodWrapperHack;
 
   struct WrappedNativeFileImpl;
-  sqlite3_vfs makeWrappedNativeVfs();
   // Create a VFS definition that wraps the native VFS implementation except that it treats our
   // `directory` as the root. Requires that the directory is a real disk directory (and `rootFd`
   // is filled in).
+  sqlite3_vfs makeWrappedNativeVfs();
 
   struct FileImpl;
-  sqlite3_vfs makeKjVfs();
   // Create a VFS definition that actually delegates to the KJ filesystem.
+  sqlite3_vfs makeKjVfs();
 
-  kj::String makeName();
   // Create the value returned by `getName()`. Called once at construction time and cached in
   // `name`.
+  kj::String makeName();
 
-  kj::Maybe<kj::Path> tryAppend(kj::PathPtr suffix) const;
   // Tries to create a new path by appending the given path to this VFS's root directory path.
   // This allows us to use the system's default VFS implementation, without wrapping, by passing
   // the result of this function to sqlite3_open_v2().
   //
   // Unfortunately, this requires getting a file path from a kj::Directory. On Windows, we can use
   // the GetFinalPathNameByHandleW() API. On Unix, there's no portable way to do this.
+  kj::Maybe<kj::Path> tryAppend(kj::PathPtr suffix) const;
 
   friend class SqliteDatabase;
   class DefaultLockManager;
@@ -439,7 +448,6 @@ private:
 
 class SqliteDatabase::LockManager {
 public:
-  virtual kj::Own<Lock> lock(kj::PathPtr path, const kj::ReadableFile& mainDatabaseFile) const = 0;
   // Obtain a lock for the given database path. The main database file is also provided in case
   // it is useful. This method only creates the `Lock` object; it's level starts out as UNLOCKED,
   // meaning no actual lock is held yet.
@@ -452,32 +460,31 @@ public:
   // same process. Since typically these databases would be in separate threads, the `lock()`
   // method is thread-safe (hence `const`). However, a `Lock` instance itself is only accessed
   // from the calling thread.
+  virtual kj::Own<Lock> lock(kj::PathPtr path, const kj::ReadableFile& mainDatabaseFile) const = 0;
 };
 
+// Implements file locks and shared memory space used to coordination between clients of a
+// particular database. It is expected that if the database is accessible from other processes,
+// this object will coordinate with them.
+//
+// When using a Vfs based on a regular disk directory, this class isn't used; instead, SQLite's
+// native implementation kicks in, which is based on advisory file locks at the OS level, as well
+// as mmaped shared memory from a file next to the database with suffix `-shm`.
 class SqliteDatabase::Lock {
-  // Implements file locks and shared memory space used to coordination between clients of a
-  // particular database. It is expected that if the database is accessible from other processes,
-  // this object will coordinate with them.
-  //
-  // When using a Vfs based on a regular disk directory, this class isn't used; instead, SQLite's
-  // native implementation kicks in, which is based on advisory file locks at the OS level, as well
-  // as mmaped shared memory from a file next to the database with suffix `-shm`.
-
 public:
+  // The main database can be locked at one of these levels.
+  //
+  // See the SQLite documentation for an explanation of lock levels:
+  //     https://www.sqlite.org/lockingv3.html
+  //
+  // Note, however, that this locking scheme is mostly unused in WAL mode, which everyone should
+  // be using now. In WAL mode, clients almost always have only a `SHARED` lock. It is inreased
+  // to `EXCLUSIVE` only when shutting down the database, in order to safely delete the WAL and
+  // WAL-index (-shm) files.
+  //
+  // (The values of this enum correspond to the SQLITE_LOCK_* constants, but we're trying to
+  // avoid including sqlite's header here.)
   enum Level {
-    // The main database can be locked at one of these levels.
-    //
-    // See the SQLite documentation for an explanation of lock levels:
-    //     https://www.sqlite.org/lockingv3.html
-    //
-    // Note, however, that this locking scheme is mostly unused in WAL mode, which everyone should
-    // be using now. In WAL mode, clients almost always have only a `SHARED` lock. It is inreased
-    // to `EXCLUSIVE` only when shutting down the database, in order to safely delete the WAL and
-    // WAL-index (-shm) files.
-    //
-    // (The values of this enum correspond to the SQLITE_LOCK_* constants, but we're trying to
-    // avoid including sqlite's header here.)
-
     UNLOCKED,
     SHARED,
     RESERVED,
@@ -485,7 +492,6 @@ public:
     EXCLUSIVE
   };
 
-  virtual bool tryIncreaseLevel(Level level) = 0;
   // Increase the lock's level. Returns false if the requested level is not available. This
   // method never blocks; SQLite takes care of retrying if needed. Per SQLite docs, if an attempt
   // to request an EXCLUSIVE lock fails because of other shared locks (but not other exclusive
@@ -493,22 +499,22 @@ public:
   // locks from being taken.
   //
   // The Lock starts an level UNLOCKED.
+  virtual bool tryIncreaseLevel(Level level) = 0;
 
-  virtual void decreaseLevel(Level level) = 0;
   // Reduce the lock's level. `level` is either UNLOCKED or SHARED.
+  virtual void decreaseLevel(Level level) = 0;
 
-  virtual bool checkReservedLock() = 0;
   // Check if any client has a RESERVED lock on the database.
+  virtual bool checkReservedLock() = 0;
 
-  virtual kj::ArrayPtr<byte> getSharedMemoryRegion(uint index, uint size, bool extend) = 0;
   // Get a shared memory region. All regions have the same size, so `size` will be the same for
   // every call. If `index` exceeds the number of regions that exist so far, and `extend` is false,
   // this returns an empty array, but if `extend` is true, all regions through the given index are
   // created (containing zeros).
   //
   // The returned array is valid until the object is destroyed, or clearSharedMemory() is called.
+  virtual kj::ArrayPtr<byte> getSharedMemoryRegion(uint index, uint size, bool extend) = 0;
 
-  virtual void clearSharedMemory() = 0;
   // Deletes all shared memory regions.
   //
   // Called when shutting down the last database client or converting away from WAL mode. The
@@ -516,9 +522,8 @@ public:
   //
   // The LockManager is also allowed to discard shared memory automatically any time it knows for
   // sure that there are no clients.
+  virtual void clearSharedMemory() = 0;
 
-  virtual bool tryLockWalShared(uint start, uint count) = 0;
-  virtual bool tryLockWalExclusive(uint start, uint count) = 0;
   // Attempt to obtain shared or exclusive locks for the given WAL-mode lock indices, which are in
   // the range [0, WAL_LOCK_COUNT). Returns true if the locks were successfully obtained (for all
   // of them), false if at least one lock wasn't available (in which case no change was made). A
@@ -527,15 +532,27 @@ public:
   //
   // The caller may request a shared lock multiple times, in which case it is expected to unlock
   // the same number of times.
+  virtual bool tryLockWalShared(uint start, uint count) = 0;
 
-  virtual void unlockWalShared(uint start, uint count) = 0;
-  virtual void unlockWalExclusive(uint start, uint count) = 0;
+  // Attempt to obtain shared or exclusive locks for the given WAL-mode lock indices, which are in
+  // the range [0, WAL_LOCK_COUNT). Returns true if the locks were successfully obtained (for all
+  // of them), false if at least one lock wasn't available (in which case no change was made). A
+  // shared lock can be obtained as long as there are no exclusive locks. An exclusive lock can be
+  // obtained as long as there are no other locks of any kind.
+  //
+  // The caller may request a shared lock multiple times, in which case it is expected to unlock
+  // the same number of times.
+  virtual bool tryLockWalExclusive(uint start, uint count) = 0;
+
   // Release a previously-obtained WAL-mode lock.
+  virtual void unlockWalShared(uint start, uint count) = 0;
 
-  static constexpr uint WAL_LOCK_COUNT = 8;
+  // Release a previously-obtained WAL-mode lock.
+  virtual void unlockWalExclusive(uint start, uint count) = 0;
+
   // There are exactly this many WAL-mode locks.
+  static constexpr uint WAL_LOCK_COUNT = 8;
 
-  static constexpr uint RESERVED_LOCK_BYTES_OFFSET = 120;
   // SQLite sets aside bytes [120, 128) of the first shared memory region for use by the WAL locking
   // implementation. SQLite will never touch these bytes. This may or may not be needed by your
   // implementation. SQLite's native implementation on Windows acquires locks on these specific
@@ -543,6 +560,7 @@ public:
   // and writes. SQLite really wants "advisory" locks which block other locks but don't actually
   // block reads and writes. So, it applies the mandatory locks to these bytes which are never
   // otherwise read nor written.
+  static constexpr uint RESERVED_LOCK_BYTES_OFFSET = 120;
 };
 
 template <typename... Params>

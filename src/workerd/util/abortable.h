@@ -42,16 +42,16 @@ private:
   RefcountedCanceler::Listener onCancel;
 };
 
+// An InputStream that can be disconnected in response to RefcountedCanceler.
+// This is similar to NeuterableInputStream in global-scope.c++ but uses an
+// external kj::Canceler to trigger the disconnect.
+// This is currently only used in fetch() requests that use an AbortSignal.
+// The AbortableInputStream is created using a RefcountedCanceler,
+// which will be triggered when the AbortSignal is triggered.
+// TODO(later): It would be good to see if both this and NeuterableInputStream
+// could be combined into a single utility.
 class AbortableInputStream final: public kj::AsyncInputStream,
                                   public kj::Refcounted {
-  // An InputStream that can be disconnected in response to RefcountedCanceler.
-  // This is similar to NeuterableInputStream in global-scope.c++ but uses an
-  // external kj::Canceler to trigger the disconnect.
-  // This is currently only used in fetch() requests that use an AbortSignal.
-  // The AbortableInputStream is created using a RefcountedCanceler,
-  // which will be triggered when the AbortSignal is triggered.
-  // TODO(later): It would be good to see if both this and NeuterableInputStream
-  // could be combined into a single utility.
 public:
   AbortableInputStream(kj::Own<kj::AsyncInputStream> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}
@@ -76,12 +76,12 @@ private:
   AbortableImpl<kj::AsyncInputStream> impl;
 };
 
+// A WebSocket wrapper that can be disconnected in response to a RefcountedCanceler.
+// This is currently only used when opening a WebSocket with a fetch() request that
+// is using an AbortSignal. The AbortableWebSocket is created using the AbortSignal's
+// RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
 class AbortableWebSocket final: public kj::WebSocket,
                                 public kj::Refcounted {
-  // A WebSocket wrapper that can be disconnected in response to a RefcountedCanceler.
-  // This is currently only used when opening a WebSocket with a fetch() request that
-  // is using an AbortSignal. The AbortableWebSocket is created using the AbortSignal's
-  // RefcountedCanceler, which will be triggered when the AbortSignal is triggered.
 public:
   AbortableWebSocket(kj::Own<kj::WebSocket> inner, RefcountedCanceler& canceler)
       : impl(kj::mv(inner), canceler) {}

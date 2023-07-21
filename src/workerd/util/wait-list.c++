@@ -8,9 +8,9 @@
 namespace workerd {
 
 namespace {
-thread_local CrossThreadWaitList::WaiterMap threadLocalWaiters;
 // Optimization: If the same wait list is waited multiple times in the same thread, we want to
 // share the signal rather than send two cross-thread signals.
+thread_local CrossThreadWaitList::WaiterMap threadLocalWaiters;
 
 void END_WAIT_LIST_CANCELER_STACK_START_CANCELEE_STACK() {}
 }  // namespace

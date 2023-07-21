@@ -11,14 +11,14 @@
 
 namespace workerd {
 
+// A simple wrapper around kj::Canceler that can be safely
+// shared by multiple objects. This is used, for instance,
+// to support fetch() requests that use an AbortSignal.
+// The AbortSignal (see api/basics.h) creates an instance
+// of RefcountedCanceler then passes references to it out
+// to various other objects that will use it to wrap their
+// Promises.
 class RefcountedCanceler: public kj::Refcounted {
-  // A simple wrapper around kj::Canceler that can be safely
-  // shared by multiple objects. This is used, for instance,
-  // to support fetch() requests that use an AbortSignal.
-  // The AbortSignal (see api/basics.h) creates an instance
-  // of RefcountedCanceler then passes references to it out
-  // to various other objects that will use it to wrap their
-  // Promises.
 public:
   class Listener {
   public:
