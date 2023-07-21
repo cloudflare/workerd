@@ -289,7 +289,7 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
   return builder.releaseAsArray().releaseAsBytes();
 }
 
-FormData::EntryType FormData::clone(v8::Isolate* isolate, FormData::EntryType& value) {
+FormData::EntryType FormData::clone(FormData::EntryType& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(file, jsg::Ref<File>) {
       return file.addRef();
@@ -356,22 +356,20 @@ void FormData::delete_(kj::String name) {
   data.truncate(pivot - data.begin());
 }
 
-kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(
-    kj::String name, v8::Isolate* isolate) {
+kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(kj::String name) {
   for (auto& [k, v]: data) {
     if (k == name) {
-      return clone(isolate, v);
+      return clone(v);
     }
   }
   return nullptr;
 }
 
-kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(
-    kj::String name, v8::Isolate* isolate) {
+kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(kj::String name) {
   kj::Vector<kj::OneOf<jsg::Ref<File>, kj::String>> result;
   for (auto& [k, v]: data) {
     if (k == name) {
-      result.add(clone(isolate, v));
+      result.add(clone(v));
     }
   }
   return result.releaseAsArray();
@@ -418,15 +416,12 @@ void FormData::forEach(
     jsg::V8Ref<v8::Function> callback,
     jsg::Optional<jsg::Value> thisArg,
     const jsg::TypeHandler<EntryType>& handler) {
-  auto isolate = js.v8Isolate;
-  auto localCallback = callback.getHandle(isolate);
-  auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(isolate); })
-      .orDefault(v8::Undefined(isolate));
+  auto localCallback = callback.getHandle(js);
+  auto localThisArg = thisArg.map([&js](jsg::Value& v) { return v.getHandle(js); })
+      .orDefault(js.v8Undefined());
   // JSG_THIS.tryGetHandle() is guaranteed safe because `forEach()` is only called
   // from JavaScript, which means a Headers JS wrapper object must already exist.
-  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
-
-  auto context = js.v8Context();  // Needed later for Call().
+  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
 
   // On each iteration of the for loop, a JavaScript callback is invokved. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick
@@ -438,13 +433,13 @@ void FormData::forEach(
     static constexpr auto ARG_COUNT = 3;
 
     v8::Local<v8::Value> args[ARG_COUNT] = {
-      handler.wrap(js, clone(isolate, value)),
-      jsg::v8Str(isolate, key),
+      handler.wrap(js, clone(value)),
+      jsg::v8Str(js.v8Isolate, key),
       localParams,
     };
     // Call jsg::check() to propagate exceptions, but we don't expect any
     // particular return value.
-    jsg::check(localCallback->Call(context, localThisArg, ARG_COUNT, args));
+    jsg::check(localCallback->Call(js.v8Context(), localThisArg, ARG_COUNT, args));
   }
 }
 
