@@ -118,7 +118,7 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
-    return resp.then([](KvNamespace::GetWithMetadataResult result) {
+    return resp.then(js, [](jsg::Lock&, KvNamespace::GetWithMetadataResult result) {
       return kj::mv(result.value);
     });
   });
@@ -310,6 +310,62 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
   });
 }
 
+namespace {
+kj::Promise<void> handlePut(auto& context,
+                            auto client,
+                            auto urlStr,
+                            auto headers,
+                            auto expectedBodySize,
+                            auto supportedBody) {
+  co_await context.waitForOutputLocks();
+  auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
+
+  struct RefcountedWrapper: public kj::Refcounted {
+    explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
+    kj::Own<kj::HttpClient> client;
+  };
+  auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
+  // TODO(perf): More efficient to explicitly attach rcClient below?
+  // TODO(cleanup): Is attaching here necessary in the coroutine?
+  auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+
+  kj::Promise<void> writePromise = nullptr;
+  KJ_SWITCH_ONEOF(supportedBody) {
+    KJ_CASE_ONEOF(text, kj::String) {
+      writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
+    }
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
+    }
+    KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+      writePromise = context.run([
+          dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
+          stream = kj::mv(stream)](jsg::Lock& js) mutable {
+        return IoContext::current().waitForDeferredProxy(
+            stream->pumpTo(js, kj::mv(dest), true));
+      });
+    }
+  }
+
+  co_await writePromise;
+  auto response = co_await req.response;
+  checkForErrorStatus("PUT", response);
+
+  // Read and discard response body, otherwise we might burn the HTTP connection.
+  co_await response.body->readAllBytes().ignoreResult();
+}
+
+kj::Promise<void> handleDelete(auto& context,
+                               auto client,
+                               auto urlStr,
+                               auto headers) {
+  co_await context.waitForOutputLocks();
+  auto req = client->request(kj::HttpMethod::DELETE, urlStr, headers, uint64_t(0));
+  auto response = co_await req.response;
+  checkForErrorStatus("DELETE", response);
+}
+}  // namespace
+
 jsg::Promise<void> KvNamespace::put(
     jsg::Lock& js,
     kj::String name,
@@ -382,51 +438,9 @@ jsg::Promise<void> KvNamespace::put(
 
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr);
 
-    auto promise = context.waitForOutputLocks()
-        .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
-               headers = kj::mv(headers), expectedBodySize,
-               supportedBody = kj::mv(supportedBody)]() mutable {
-      auto innerReq = client->request(
-          kj::HttpMethod::PUT, urlStr,
-          headers, expectedBodySize);
-      struct RefcountedWrapper: public kj::Refcounted {
-        explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-        kj::Own<kj::HttpClient> client;
-      };
-      auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-      // TODO(perf): More efficient to explicitly attach rcClient below?
-      auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
-
-      kj::Promise<void> writePromise = nullptr;
-      KJ_SWITCH_ONEOF(supportedBody) {
-        KJ_CASE_ONEOF(text, kj::String) {
-          writePromise = req.body->write(text.begin(), text.size()).attach(kj::mv(text));
-        }
-        KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          writePromise = req.body->write(data.begin(), data.size()).attach(kj::mv(data));
-        }
-        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-          writePromise = context.run([
-              dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
-              stream = kj::mv(stream)](jsg::Lock& js) mutable {
-            return IoContext::current().waitForDeferredProxy(
-                stream->pumpTo(js, kj::mv(dest), true));
-          });
-        }
-      }
-
-      return writePromise.attach(kj::mv(req.body))
-          .then([resp = kj::mv(req.response)]() mutable {
-        return resp.then([](kj::HttpClient::Response&& response) mutable {
-          checkForErrorStatus("PUT", response);
-
-          // Read and discard response body, otherwise we might burn the HTTP connection.
-          return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
-        });
-      });
-    });
-
-    return context.awaitIo(js, kj::mv(promise));
+    return context.awaitIo(js,
+        handlePut(context, kj::mv(client), kj::mv(urlStr), kj::mv(headers),
+                  expectedBodySize, kj::mv(supportedBody)));
   });
 }
 
@@ -442,16 +456,8 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     auto client = getHttpClient(context, headers, LimitEnforcer::KvOpType::DELETE, urlStr);
 
-    auto promise = context.waitForOutputLocks()
-        .then([headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
-      return client->request(kj::HttpMethod::DELETE, urlStr, headers,
-                            uint64_t(0))
-          .response.then([](kj::HttpClient::Response&& response) mutable {
-        checkForErrorStatus("DELETE", response);
-      }).attach(kj::mv(client));
-    });
-
-    return context.awaitIo(js, kj::mv(promise));
+    return context.awaitIo(js,
+        handleDelete(context, kj::mv(client), kj::mv(urlStr), kj::mv(headers)));
   });
 }
 
