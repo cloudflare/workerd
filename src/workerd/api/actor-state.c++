@@ -193,6 +193,25 @@ kj::Function<jsg::Value(v8::Isolate*, ActorCacheOps::GetResultList)> getMultiple
   };
 }
 
+kj::Promise<void> updateStorageWriteUnit(IoContext& context,
+                                         ActorObserver& metrics,
+                                         uint32_t units) {
+  // The ActorObserver& reference here is guaranteed to outlive this task, so
+  // accessing it after the co_await here is safe.
+  co_await context.waitForOutputLocks();
+  metrics.addStorageWriteUnits(units);
+}
+
+kj::Promise<void> updateStorageDeletes(IoContext& context,
+                                       ActorObserver& metrics,
+                                       kj::Promise<uint> promise) {
+  // The ActorObserver& reference here is guaranteed to outlive this task, so
+  // accessing it after the co_await here is safe.
+  auto deleted = co_await promise;
+  if (deleted == 0) deleted = 1;
+  metrics.addStorageDeletes(deleted);
+};
+
 }  // namespace
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
@@ -399,11 +418,12 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
   JSG_REQUIRE(scheduledTime > kj::origin<kj::Date>(), TypeError,
     "setAlarm() cannot be called with an alarm time <= 0");
 
+  auto& context = IoContext::current();
   // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
   // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
   // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
   // is better than throwing even if we do have an alarm handler.
-  IoContext::current().getActorOrThrow().assertCanSetAlarm();
+  context.getActorOrThrow().assertCanSetAlarm();
 
   auto options = configureOptions(maybeOptions.map([](auto& o) {
     return PutOptions {
@@ -424,12 +444,8 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
   auto maybeBackpressure = transformMaybeBackpressure(isolate, options,
       getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options));
 
-  auto& context = IoContext::current();
-  auto billProm = context.waitForOutputLocks().then([&metrics = currentActorMetrics()]() {
-    // setAlarm() is billed as a single write unit.
-    metrics.addStorageWriteUnits(1);
-  });
-  context.addTask(kj::mv(billProm));
+  // setAlarm() is billed as a single write unit.
+  context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
 
   return kj::mv(maybeBackpressure);
 }
@@ -447,10 +463,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putOne(
       getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options));
 
   auto& context = IoContext::current();
-  auto billProm = context.waitForOutputLocks().then([&metrics = currentActorMetrics(), units]() {
-    metrics.addStorageWriteUnits(units);
-  });
-  context.addTask(kj::mv(billProm));
+  context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
 
   return maybeBackpressure;
 }
@@ -493,10 +506,7 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto deleteAll = cache->deleteAll(options);
 
   auto& context = IoContext::current();
-  context.addTask(deleteAll.count.then([&metrics = currentActorMetrics()](uint deleted) {
-    if (deleted == 0) deleted = 1;
-    metrics.addStorageDeletes(deleted);
-  }));
+  context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
   return transformMaybeBackpressure(js.v8Isolate, options, kj::mv(deleteAll.backpressure));
 }
@@ -551,10 +561,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
       getCache(OP_PUT).put(kvs.releaseAsArray(), options));
 
   auto& context = IoContext::current();
-  auto billProm = context.waitForOutputLocks().then([&metrics = currentActorMetrics(), units](){
-    metrics.addStorageWriteUnits(units);
-  });
-  context.addTask(kj::mv(billProm));
+  context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), units));
 
   return maybeBackpressure;
 }
