@@ -267,7 +267,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   bool useDefaultHandling;
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->fetch) {
-      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
@@ -374,11 +374,11 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->tail) {
       auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
-      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_MAYBE(f, h->trace) {
       auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
-      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -413,7 +413,7 @@ void ServiceWorkerGlobalScope::startScheduled(
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->scheduled) {
       auto promise = (*f)(lock, jsg::alloc<ScheduledController>(event.addRef()),
-                          h->env.addRef(isolate), h->getCtx(isolate));
+                          h->env.addRef(isolate), h->getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -529,8 +529,7 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler = JSG_REQUIRE_NONNULL(eh.test, Error,
       "Entrypoint does not export a test() function.");
 
-  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock),
-                     eh.getCtx(lock.getIsolate()));
+  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
