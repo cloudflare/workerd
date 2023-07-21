@@ -301,8 +301,8 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::String btoa(v8::Local<v8::Value> data, v8::Isolate* isolate);
-  v8::Local<v8::String> atob(kj::String data, v8::Isolate* isolate);
+  kj::String btoa(jsg::Lock& js, v8::Local<v8::Value> data);
+  v8::Local<v8::String> atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 

@@ -621,8 +621,8 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(
   }
 }
 
-kj::String ServiceWorkerGlobalScope::btoa(v8::Local<v8::Value> data, v8::Isolate* isolate) {
-  auto str = jsg::check(data->ToString(isolate->GetCurrentContext()));
+kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, v8::Local<v8::Value> data) {
+  auto str = jsg::check(data->ToString(js.v8Context()));
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
@@ -635,11 +635,11 @@ kj::String ServiceWorkerGlobalScope::btoa(v8::Local<v8::Value> data, v8::Isolate
   //   negatives. Conceivably we could take advantage of this fact to completely avoid the later
   //   WriteOneByte() call in some cases!
   auto buf = kj::heapArray<kj::byte>(str->Length());
-  str->WriteOneByte(isolate, buf.begin(), 0, buf.size());
+  str->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size());
 
   return kj::encodeBase64(buf);
 }
-v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolate* isolate) {
+v8::Local<v8::String> ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
 
   JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
@@ -650,7 +650,7 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
   // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
   // making a copy purely to append a nul byte.
-  return jsg::v8StrFromLatin1(isolate, decoded.asBytes());
+  return jsg::v8StrFromLatin1(js.v8Isolate, decoded.asBytes());
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(
