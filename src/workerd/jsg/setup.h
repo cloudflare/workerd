@@ -45,7 +45,7 @@ public:
 
   explicit V8System(v8::Platform& platform);
   // Use a possibly-custom v8::Platform implementation. Use this if you need to override any
-  // funtionality provided by the v8::Platform API.
+  // functionality provided by the v8::Platform API.
 
   explicit V8System(v8::Platform& platform, kj::ArrayPtr<const kj::StringPtr> flags);
   // Use a possibly-custom v8::Platform implementation, and apply flags.
@@ -297,9 +297,7 @@ public:
   // inherits or defines conversion operators to each required type -- or the individual
   // configuration types must declare constructors from `MetaConfiguration`.
 
-  explicit
-
-  Isolate(const V8System& system,
+  explicit Isolate(const V8System& system,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
       : Isolate(system, nullptr, kj::mv(observer), kj::mv(createParams)) {}
@@ -326,7 +324,7 @@ public:
     Lock(const Isolate& isolate, V8StackScope&)
         : jsg::Lock(isolate.ptr), jsgIsolate(const_cast<Isolate&>(isolate)) {
       // `V8StackScope` must be provided to prove that one has been created on the stack before
-      // taking a lock. Any GC'dp ointers stored on the stack must be kept within this scope in
+      // taking a lock. Any GC'd pointers stored on the stack must be kept within this scope in
       // order for V8's stack-scanning GC to find them.
 
       jsgIsolate.clearDestructionQueue();

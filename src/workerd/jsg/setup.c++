@@ -86,7 +86,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // Note that v8::V8::SetFlagsFromString() simply ignores flags it doesn't recognize, which means
   // typos don't generate any error. SetFlagsFromCommandLine() has the `remove_flags` option which
   // leaves behind the flags V8 didn't recognize, so we'd like to use that for error checking
-  // purposes. Unfortuntaely, the interface is rather awkward, since it assumes you're going to
+  // purposes. Unfortunately, the interface is rather awkward, since it assumes you're going to
   // run it on the raw argv array.
   //
   // Especially annoying is that V8 expects an array of `char*` -- not `const`. It won't actually
@@ -97,7 +97,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   for (auto i: kj::zeroTo(flags.size())) {
     argv[i + 1] = const_cast<char*>(flags[i].cStr());
   }
-  argv[argc] = nullptr;  // V8 probably doesn't need this but technically argv is NULL-teminated.
+  argv[argc] = nullptr;  // V8 probably doesn't need this but technically argv is NULL-terminated.
 
   v8::V8::SetFlagsFromCommandLine(&argc, argv.begin(), true);
 
@@ -247,7 +247,7 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   KJ_ASSERT_NONNULL(wrappable.wrapper).Reset();
 
   // We don't want to call `detachWrapper()` now because it may create new handles (specifically,
-  // if the wrapable has strong references, which means that its outgoing references need to be
+  // if the wrappable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
   detachLater.add(&wrappable);
 }
@@ -321,7 +321,7 @@ IsolateBase::IsolateBase(const V8System& system, v8::Isolate::CreateParams&& cre
   ptr->SetJitCodeEventHandler(v8::kJitCodeEventDefault, &jitCodeEvent);
 
   // V8 10.5 introduced this API which is used to resolve the promise returned by
-  // WebAssembly.compile(). For some reason, the default implemnetation of the callback does not
+  // WebAssembly.compile(). For some reason, the default implementation of the callback does not
   // work -- the promise is never resolved. The only thing the default version does differently
   // is it creates a `MicrotasksScope` with `kDoNotRunMicrotasks`. I do not understand what that
   // is even supposed to do, but it seems related to `MicrotasksPolicy::kScoped`, which we don't
@@ -575,7 +575,7 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
   state.fp = reinterpret_cast<void*>(mcontext.regs[29]);
   state.lr = reinterpret_cast<void*>(mcontext.regs[30]);
 #else
-  #error "Please add architecture support. See FillRegisterState() in v8/src/libsampler/sambler.cc"
+  #error "Please add architecture support. See FillRegisterState() in v8/src/libsampler/sampler.cc"
 #endif
 
   v8::SampleInfo sampleInfo;
