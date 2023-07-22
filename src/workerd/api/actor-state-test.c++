@@ -41,7 +41,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
   v8::Context::Scope contextScope(v8Context);
 
   auto trueVal = v8::True(isolate);
-  auto buf = serializeV8Value(trueVal, isolate);
+  auto buf = serializeV8Value(isolateLock, trueVal);
 
   // Confirm that a version header is appropriately written and that it contains the expected
   // current version. When the version increases, we need to write a v8 patch that allows it to
@@ -57,7 +57,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
   KJ_EXPECT(deserializer.GetWireFormatVersion() == 15);
 
   // Just for kicks, make sure it deserializes properly too.
-  KJ_EXPECT(deserializeV8Value("some-key"_kj, buf, isolate)->IsTrue());
+  KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, buf)->IsTrue());
 }
 
 KJ_TEST("we support deserializing up to v15") {
@@ -78,7 +78,7 @@ KJ_TEST("we support deserializing up to v15") {
 
   for (const auto& hexStr : testCases) {
     auto dataIn = kj::decodeHex(hexStr.asArray());
-		KJ_EXPECT(deserializeV8Value("some-key"_kj, dataIn, isolate)->IsTrue());
+		KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, dataIn)->IsTrue());
   }
 }
 
@@ -90,9 +90,9 @@ KJ_TEST("we support deserializing up to v15") {
 // JS arrays and write them back out as "dense" JS arrays, which breaks the equality check after
 // round-tripping a value.
 v8::Local<v8::Value> oldDeserializeV8Value(
-    kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf, v8::Isolate* isolate) {
-  v8::ValueDeserializer deserializer(isolate, buf.begin(), buf.size());
-  auto maybeValue = deserializer.ReadValue(isolate->GetCurrentContext());
+    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf) {
+  v8::ValueDeserializer deserializer(js.v8Isolate, buf.begin(), buf.size());
+  auto maybeValue = deserializer.ReadValue(js.v8Context());
   v8::Local<v8::Value> value;
   KJ_ASSERT(maybeValue.ToLocal(&value));
   return kj::mv(value);
@@ -127,11 +127,11 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
     auto dataIn = kj::decodeHex(kj::ArrayPtr(hexStr.c_str(), hexStr.size()));
     KJ_EXPECT(!dataIn.hadErrors, hexStr);
 
-    auto oldVal = oldDeserializeV8Value(key, dataIn, isolate);
-    auto oldOutput = serializeV8Value(oldVal, isolate);
+    auto oldVal = oldDeserializeV8Value(isolateLock, key, dataIn);
+    auto oldOutput = serializeV8Value(isolateLock, oldVal);
 
-    auto newVal = deserializeV8Value(key, dataIn, isolate);
-    auto newOutput = serializeV8Value(newVal, isolate);
+    auto newVal = deserializeV8Value(isolateLock, key, dataIn);
+    auto newOutput = serializeV8Value(isolateLock, newVal);
     KJ_EXPECT(oldOutput == newOutput, hexStr);
   }
 }
