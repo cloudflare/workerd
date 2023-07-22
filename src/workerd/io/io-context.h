@@ -544,6 +544,11 @@ public:
   // Waits for the given I/O while holding the input lock, so that all other I/O is blocked from
   // completing in the meantime (unless it is also holding the same input lock).
 
+  template <typename T, typename Func>
+  jsg::PromiseForResult<Func, T, true> awaitIoWithInputLock(jsg::Lock& js,
+                                                             kj::Promise<T> promise,
+                                                             Func&& func);
+
   template <typename T>
   jsg::Promise<T> awaitIoLegacy(kj::Promise<T> promise);
   template <typename T>
@@ -1274,6 +1279,18 @@ jsg::PromiseForResult<Func, T, false> IoContext::awaitIoWithInputLock(
   } else {
     return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getInputLock())
         .then(addFunctorIoOwnParam<T, false>(kj::fwd<Func>(func)));
+  }
+}
+
+template <typename T, typename Func>
+jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
+    jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
+  if constexpr (jsg::isVoid<T>()) {
+    return awaitIoImpl<false>(promise.attach(registerPendingEvent()), getInputLock())
+        .then(js, addFunctor(kj::fwd<Func>(func)));
+  } else {
+    return awaitIoImpl<true>(promise.attach(registerPendingEvent()), getInputLock())
+        .then(js, addFunctorIoOwnParam<T, true>(kj::fwd<Func>(func)));
   }
 }
 

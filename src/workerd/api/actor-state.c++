@@ -58,11 +58,9 @@ auto transformCacheResult(jsg::Lock& js,
           return func(js, kj::mv(value));
         });
       } else {
-        return context.awaitIoWithInputLock(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate=js.v8Isolate](T&& value) mutable {
-          // TODO(cleanup): We need a variation on awaitIoWithInputLock that takes
-          // a jsg::Lock like awaitIo
-          return func(jsg::Lock::from(isolate), kj::mv(value));
+        return context.awaitIoWithInputLock(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value));
         });
       }
     }
@@ -86,11 +84,9 @@ auto transformCacheResultWithCacheStatus(
           return func(js, kj::mv(value), false);
         });
       } else {
-        return context.awaitIoWithInputLock(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate=js.v8Isolate](T&& value) mutable {
-          // TODO(cleanup): We need a variation on awaitIoWithInputLock that takes
-          // a jsg::Lock like awaitIo
-          return func(jsg::Lock::from(isolate), kj::mv(value), false);
+        return context.awaitIoWithInputLock(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value), false);
         });
       }
     }
