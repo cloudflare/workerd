@@ -97,10 +97,13 @@ public:
         cachedColumnNames(cachedColumnNames) {}
   ~Cursor() noexcept(false);
 
+  kj::Array<jsg::V8Ref<v8::String>> getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
+    JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
   }
+
 
   using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
   // One value returned from SQL. Note that we intentionally return StringPtr instead of String

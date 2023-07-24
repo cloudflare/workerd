@@ -510,20 +510,11 @@ async function test(storage) {
     sql.exec(`CREATE TABLE cde (c INT, d INT, e INT);`)
     sql.exec(`INSERT INTO abc VALUES (1,2,3),(4,5,6);`)
     sql.exec(`INSERT INTO cde VALUES (7,8,9),(1,2,3);`)
-    const fullJoin = sql.prepare(`SELECT * FROM abc, cde`)
 
-    // Raw results include both 'c' columns
-    const rawResults = Array.from(fullJoin().raw())
-    assert.equal(rawResults.length, 4)
-    assert.equal(rawResults[0].length, 6)
-    assert.equal(rawResults[1].length, 6)
-    assert.equal(rawResults[2].length, 6)
-    assert.equal(rawResults[3].length, 6)
+    const stmt = sql.prepare(`SELECT * FROM abc, cde`)
 
-    // TODO: how to get column names from .raw() iterator?
-
-    // Without .raw(), data is lost
-    const objResults = Array.from(fullJoin())
+    // In normal iteration, data is lost
+    const objResults = Array.from(stmt())
     assert.equal(Object.values(objResults[0]).length, 5) // duplicate column 'c' dropped
     assert.equal(Object.values(objResults[1]).length, 5) // duplicate column 'c' dropped
     assert.equal(Object.values(objResults[2]).length, 5) // duplicate column 'c' dropped
@@ -533,6 +524,24 @@ async function test(storage) {
     assert.equal(objResults[1].c, 1) // Value of 'c' is the second in the join
     assert.equal(objResults[2].c, 7) // Value of 'c' is the second in the join
     assert.equal(objResults[3].c, 1) // Value of 'c' is the second in the join
+
+    // Iterator has a 'columnNames' property, with .raw() that lets us get the full data
+    const iterator = stmt();
+    assert.deepEqual(iterator.columnNames, ["a","b","c","c","d","e"])
+    const rawResults = Array.from(iterator.raw())
+    assert.equal(rawResults.length, 4)
+    assert.deepEqual(rawResults[0], [1,2,3,7,8,9])
+    assert.deepEqual(rawResults[1], [1,2,3,1,2,3])
+    assert.deepEqual(rawResults[2], [4,5,6,7,8,9])
+    assert.deepEqual(rawResults[3], [4,5,6,1,2,3])
+
+    // Once an iterator is consumed, it can no longer access the columnNames.
+    assert.deepEqual(iterator.columnNames, [])
+
+    // Also works with cursors returned from .exec
+    const execIterator = sql.exec(`SELECT * FROM abc, cde`)
+    assert.deepEqual(execIterator.columnNames, ["a","b","c","c","d","e"])
+    assert.equal(Array.from(execIterator.raw())[0].length, 6);
   }
 
   await scheduler.wait(1);
