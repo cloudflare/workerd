@@ -348,14 +348,15 @@ public:
 
     JSG_TS_ROOT();
     JSG_TS_OVERRIDE({
+      // The order of these matters, since typescript tries to match function signatures in order
       get(key: string, options: R2GetOptions & { onlyIf: R2BucketConditional | Headers }): Promise<R2ObjectBody | R2Object | null>;
       get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null>;
 
-      put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
       put(
         key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
         options?: R2PutOptions & { onlyIf: R2BucketConditional | Headers }
       ): Promise<R2Object | null>;
+      put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
     });
     // Exclude `R2Object` from `get` return type if `onlyIf` not specified, and exclude `null` from `put` return type
 
