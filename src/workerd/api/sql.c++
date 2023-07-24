@@ -118,6 +118,17 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
   return jsg::alloc<RawIterator>(JSG_THIS);
 }
 
+kj::Array<jsg::V8Ref<v8::String>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
+  KJ_IF_MAYBE(s, state) {
+    cachedColumnNames.ensureInitialized(js, (*s)->query);
+    return KJ_MAP(name, this->cachedColumnNames.get()) {
+      return name.addRef(js);
+    };
+  } else {
+    return kj::Array<jsg::V8Ref<v8::String>>();
+  }
+}
+
 kj::Maybe<kj::Array<SqlStorage::Cursor::Value>> SqlStorage::Cursor::rawIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   return iteratorImpl(js, obj,
