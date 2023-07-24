@@ -117,9 +117,9 @@ public:
                valueIteratorNext)
 
   void forEach(
+      jsg::Lock& js,
       jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg,
-      v8::Isolate* isolate);
+      jsg::Optional<jsg::Value> thisArg);
 
   jsg::UsvString toString();
 
@@ -287,14 +287,7 @@ public:
   jsg::UsvString getHash();
   void setHash(jsg::UsvString value);
 
-  inline jsg::Ref<URLSearchParams> getSearchParams(v8::Isolate* isolate) {
-    KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-      return searchParams->addRef();
-    }
-    auto searchParams = jsg::alloc<URLSearchParams>(inner.query, *this);
-    maybeSearchParams = searchParams.addRef();
-    return kj::mv(searchParams);
-  }
+  jsg::Ref<URLSearchParams> getSearchParams();
 
   UrlRecord& getRecord() KJ_LIFETIMEBOUND { return inner; }
 
