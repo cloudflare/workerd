@@ -1584,26 +1584,24 @@ private:
     capnp::JsonCodec json;
     auto requestJson = json.encode(requestBuilder.getAs<api::AnalyticsEngineEvent>());
 
-    return context.waitForOutputLocks().then([client = kj::mv(client), urlStr = kj::mv(urlStr),
-        requestJson = kj::mv(requestJson), headers = kj::mv(headers)]() mutable {
-      auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
+    co_await context.waitForOutputLocks();
 
-      struct RefcountedWrapper: public kj::Refcounted {
-        explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-        kj::Own<kj::HttpClient> client;
-      };
-      auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-      auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+    auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
 
-      return req.body->write(requestJson.begin(), requestJson.size())
-          .attach(kj::mv(requestJson), kj::mv(req.body))
-          .then([resp = kj::mv(req.response)]() mutable {
-        return resp.then([](kj::HttpClient::Response&& response) mutable {
-          KJ_REQUIRE(response.statusCode >= 200 && response.statusCode < 300, "writeLogfwdr request returned an error");
-          return response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
-        });
-      });
-    });
+    struct RefcountedWrapper: public kj::Refcounted {
+      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
+      kj::Own<kj::HttpClient> client;
+    };
+    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
+    auto request = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+
+    co_await request.body->write(requestJson.begin(), requestJson.size())
+          .attach(kj::mv(requestJson), kj::mv(request.body));
+    auto response = co_await request.response;
+
+    KJ_REQUIRE(response.statusCode >= 200 && response.statusCode < 300, "writeLogfwdr request returned an error");
+    co_await response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
+    co_return;
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
