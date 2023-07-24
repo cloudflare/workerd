@@ -34,34 +34,33 @@ uint32_t billingUnits(size_t bytes, BillAtLeastOne billAtLeastOne = BillAtLeastO
 }
 
 v8::Local<v8::Value> deserializeMaybeV8Value(
-    kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf,
-    v8::Isolate* isolate) {
+    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
   KJ_IF_MAYBE(b, buf) {
-    return deserializeV8Value(key, *b, isolate);
+    return deserializeV8Value(js, key, *b);
   } else {
-    return v8::Undefined(isolate);
+    return js.v8Undefined();
   }
 }
 
 template <typename T, typename Options, typename Func>
-auto transformCacheResult(
-    v8::Isolate* isolate, kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
-    -> jsg::Promise<decltype(func(isolate, kj::instance<T>()))> {
+auto transformCacheResult(jsg::Lock& js,
+    kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
+    -> jsg::Promise<decltype(func(js, kj::instance<T>()))> {
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(value, T) {
-      return jsg::resolvedPromise(isolate, func(isolate, kj::mv(value)));
+      return js.resolvedPromise(func(js, kj::mv(value)));
     }
     KJ_CASE_ONEOF(promise, kj::Promise<T>) {
       auto& context = IoContext::current();
       if (options.allowConcurrency.orDefault(false)) {
-        return context.awaitIo(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate](T&& value) mutable {
-          return func(isolate, kj::mv(value));
+        return context.awaitIo(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value));
         });
       } else {
-        return context.awaitIoWithInputLock(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate](T&& value) mutable {
-          return func(isolate, kj::mv(value));
+        return context.awaitIoWithInputLock(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value));
         });
       }
     }
@@ -71,23 +70,23 @@ auto transformCacheResult(
 
 template <typename T, typename Options, typename Func>
 auto transformCacheResultWithCacheStatus(
-    v8::Isolate* isolate, kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
-    -> jsg::Promise<decltype(func(isolate, kj::instance<T>(), kj::instance<bool>()))> {
+    jsg::Lock& js, kj::OneOf<T, kj::Promise<T>> input, const Options& options, Func&& func)
+    -> jsg::Promise<decltype(func(js, kj::instance<T>(), kj::instance<bool>()))> {
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(value, T) {
-      return jsg::resolvedPromise(isolate, func(isolate, kj::mv(value), true));
+      return js.resolvedPromise(func(js, kj::mv(value), true));
     }
     KJ_CASE_ONEOF(promise, kj::Promise<T>) {
       auto& context = IoContext::current();
       if (options.allowConcurrency.orDefault(false)) {
-        return context.awaitIo(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate](T&& value) mutable {
-          return func(isolate, kj::mv(value), false);
+        return context.awaitIo(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value), false);
         });
       } else {
-        return context.awaitIoWithInputLock(kj::mv(promise),
-            [func = kj::fwd<Func>(func), isolate](T&& value) mutable {
-          return func(isolate, kj::mv(value), false);
+        return context.awaitIoWithInputLock(js, kj::mv(promise),
+            [func = kj::fwd<Func>(func)](jsg::Lock& js, T&& value) mutable {
+          return func(js, kj::mv(value), false);
         });
       }
     }
@@ -97,7 +96,7 @@ auto transformCacheResultWithCacheStatus(
 
 template <typename Options>
 jsg::Promise<void> transformMaybeBackpressure(
-    v8::Isolate* isolate, const Options& options,
+    jsg::Lock& js, const Options& options,
     kj::Maybe<kj::Promise<void>> maybeBackpressure) {
   KJ_IF_MAYBE(backpressure, maybeBackpressure) {
     // Note: In practice `allowConcurrency` will have no effect on a backpressure promise since
@@ -110,7 +109,7 @@ jsg::Promise<void> transformMaybeBackpressure(
       return context.awaitIoWithInputLock(kj::mv(*backpressure));
     }
   } else {
-    return jsg::resolvedPromise(isolate);
+    return js.resolvedPromise();
   }
 }
 
@@ -118,19 +117,21 @@ ActorObserver& currentActorMetrics() {
   return IoContext::current().getActorOrThrow().getMetrics();
 }
 
-jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCacheOps::GetResultList value, bool completelyCached) {
-  v8::HandleScope scope(isolate);
-  auto context = isolate->GetCurrentContext();
+jsg::Value listResultsToMap(jsg::Lock& js,
+                            ActorCacheOps::GetResultList value,
+                            bool completelyCached) {
+  v8::HandleScope scope(js.v8Isolate);
+  auto context = js.v8Context();
 
-  auto map = v8::Map::New(isolate);
+  auto map = v8::Map::New(js.v8Isolate);
   size_t cachedReadBytes = 0;
   size_t uncachedReadBytes = 0;
   for (auto entry: value) {
     auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                    ? cachedReadBytes : uncachedReadBytes;
     bytesRef += entry.key.size() + entry.value.size();
-    jsg::check(map->Set(context, jsg::v8Str(isolate, entry.key),
-        deserializeV8Value(entry.key, entry.value, isolate)));
+    jsg::check(map->Set(context, jsg::v8Str(js.v8Isolate, entry.key),
+        deserializeV8Value(js, entry.key, entry.value)));
   }
   auto& actorMetrics = currentActorMetrics();
   if (cachedReadBytes || uncachedReadBytes) {
@@ -151,24 +152,24 @@ jsg::Value listResultsToMap(v8::Isolate* isolate, ActorCacheOps::GetResultList v
     actorMetrics.addUncachedStorageReadUnits(1);
   }
 
-  return jsg::Value(isolate, map);
+  return js.v8Ref(map.As<v8::Value>());
 }
 
-kj::Function<jsg::Value(v8::Isolate*, ActorCacheOps::GetResultList)> getMultipleResultsToMap(
+kj::Function<jsg::Value(jsg::Lock&, ActorCacheOps::GetResultList)> getMultipleResultsToMap(
     size_t numInputKeys) {
-  return [numInputKeys](v8::Isolate* isolate, ActorCacheOps::GetResultList value) mutable {
-    v8::HandleScope scope(isolate);
-    auto context = isolate->GetCurrentContext();
+  return [numInputKeys](jsg::Lock& js, ActorCacheOps::GetResultList value) mutable {
+    v8::HandleScope scope(js.v8Isolate);
+    auto context = js.v8Context();
 
-    auto map = v8::Map::New(isolate);
+    auto map = v8::Map::New(js.v8Isolate);
     uint32_t cachedUnits = 0;
     uint32_t uncachedUnits = 0;
     for (auto entry: value) {
       auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                     ? cachedUnits : uncachedUnits;
       unitsRef += billingUnits(entry.key.size() + entry.value.size());
-      jsg::check(map->Set(context, jsg::v8Str(isolate, entry.key),
-          deserializeV8Value(entry.key, entry.value, isolate)));
+      jsg::check(map->Set(context, jsg::v8Str(js.v8Isolate, entry.key),
+          deserializeV8Value(js, entry.key, entry.value)));
     }
     auto& actorMetrics = currentActorMetrics();
     actorMetrics.addCachedStorageReadUnits(cachedUnits);
@@ -189,7 +190,7 @@ kj::Function<jsg::Value(v8::Isolate*, ActorCacheOps::GetResultList)> getMultiple
     // only for uncached reads, we'll need to address this.
     actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
 
-    return jsg::Value(isolate, map);
+    return js.v8Ref(map.As<v8::Value>());
   };
 }
 
@@ -215,27 +216,28 @@ kj::Promise<void> updateStorageDeletes(IoContext& context,
 }  // namespace
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
-    kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<GetOptions> maybeOptions,
-    v8::Isolate* isolate) {
+    jsg::Lock& js,
+    kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+    jsg::Optional<GetOptions> maybeOptions) {
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
-      return getOne(kj::mv(s), options, isolate);
+      return getOne(js, kj::mv(s), options);
     }
     KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return getMultiple(kj::mv(a), options, isolate);
+      return getMultiple(js, kj::mv(a), options);
     }
   }
   KJ_UNREACHABLE
 }
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
-    kj::String key, const GetOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, kj::String key, const GetOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
   auto result = getCache(OP_GET).get(kj::str(key), options);
-  return transformCacheResultWithCacheStatus(isolate, kj::mv(result), options,
-      [key = kj::mv(key)](v8::Isolate* isolate, kj::Maybe<ActorCacheOps::Value> value, bool cached) {
+  return transformCacheResultWithCacheStatus(js, kj::mv(result), options,
+      [key = kj::mv(key)](jsg::Lock& js, kj::Maybe<ActorCacheOps::Value> value, bool cached) {
     uint32_t units = 1;
     KJ_IF_MAYBE(v, value) {
       units = billingUnits(v->size());
@@ -246,12 +248,12 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
     } else {
       actorMetrics.addUncachedStorageReadUnits(units);
     }
-    return jsg::Value { isolate, deserializeMaybeV8Value(key, value, isolate) };
+    return js.v8Ref(deserializeMaybeV8Value(js, key, value));
   });
 }
 
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
-    jsg::Optional<GetAlarmOptions> maybeOptions, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Optional<GetAlarmOptions> maybeOptions) {
   // Even if we do not have an alarm handler, we might once have had one. It's fine to return
   // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions.map([](auto& o) {
@@ -262,8 +264,8 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   }).orDefault(GetOptions{}));
   auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
-  return transformCacheResult(isolate, kj::mv(result), options,
-      [](v8::Isolate* isolate, kj::Maybe<kj::Date> date) {
+  return transformCacheResult(js, kj::mv(result), options,
+      [](jsg::Lock&, kj::Maybe<kj::Date> date) {
     return date.map([](auto& date) {
       return static_cast<double>((date - kj::UNIX_EPOCH) / kj::MILLISECONDS);
     });
@@ -271,14 +273,14 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
 }
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
-    jsg::Optional<ListOptions> maybeOptions, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
   kj::String start;
   kj::Maybe<kj::String> end;
   bool reverse = false;
   kj::Maybe<uint> limit;
 
   auto makeEmptyResult = [&]() {
-    return jsg::resolvedPromise(isolate, jsg::Value(isolate, v8::Map::New(isolate)));
+    return js.resolvedPromise(js.v8Ref(v8::Map::New(js.v8Isolate).As<v8::Value>()));
   };
 
   KJ_IF_MAYBE(o, maybeOptions) {
@@ -376,13 +378,14 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
   auto result = reverse
       ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
       : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
-  return transformCacheResultWithCacheStatus(isolate, kj::mv(result), options, &listResultsToMap);
+  return transformCacheResultWithCacheStatus(js, kj::mv(result),
+                                             options, &listResultsToMap);
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
     kj::OneOf<kj::String, jsg::Dict<v8::Local<v8::Value>>> keyOrEntries,
     jsg::Optional<v8::Local<v8::Value>> value, jsg::Optional<PutOptions> maybeOptions,
-    v8::Isolate* isolate, const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
+    const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
   // TODO(soon): Add tests of data generated at current versions to ensure we'll
   // know before releasing any backwards-incompatible serializer changes,
   // potentially checking the header in addition to the value.
@@ -390,7 +393,7 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
   KJ_SWITCH_ONEOF(keyOrEntries) {
     KJ_CASE_ONEOF(k, kj::String) {
       KJ_IF_MAYBE(v, value) {
-        return putOne(kj::mv(k), *v, options, isolate);
+        return putOne(js, kj::mv(k), *v, options);
       } else {
         JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
       }
@@ -398,14 +401,14 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
     KJ_CASE_ONEOF(o, jsg::Dict<v8::Local<v8::Value>>) {
       KJ_IF_MAYBE(v, value) {
         KJ_IF_MAYBE(opt, optionsTypeHandler.tryUnwrap(js, *v)) {
-          return putMultiple(kj::mv(o), configureOptions(kj::mv(*opt)), isolate);
+          return putMultiple(js, kj::mv(o), configureOptions(kj::mv(*opt)));
         } else {
           JSG_FAIL_REQUIRE(
               TypeError,
               "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
         }
       } else {
-        return putMultiple(kj::mv(o), options, isolate);
+        return putMultiple(js, kj::mv(o), options);
       }
     }
   }
@@ -413,8 +416,10 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
 }
 
 
-jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTime,
-    jsg::Optional<SetAlarmOptions> maybeOptions, v8::Isolate* isolate) {
+jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
+    jsg::Lock& js,
+    kj::Date scheduledTime,
+    jsg::Optional<SetAlarmOptions> maybeOptions) {
   JSG_REQUIRE(scheduledTime > kj::origin<kj::Date>(), TypeError,
     "setAlarm() cannot be called with an alarm time <= 0");
 
@@ -441,7 +446,7 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
   kj::Date dateNowKjDate =
       static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
 
-  auto maybeBackpressure = transformMaybeBackpressure(isolate, options,
+  auto maybeBackpressure = transformMaybeBackpressure(js, options,
       getCache(OP_PUT_ALARM).setAlarm(kj::max(scheduledTime, dateNowKjDate), options));
 
   // setAlarm() is billed as a single write unit.
@@ -451,15 +456,15 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(kj::Date scheduledTi
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
-    kj::String key, v8::Local<v8::Value> value, const PutOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, kj::String key, v8::Local<v8::Value> value, const PutOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
-  kj::Array<byte> buffer = serializeV8Value(value, isolate);
+  kj::Array<byte> buffer = serializeV8Value(js, value);
   ActorStorageLimits::checkMaxValueSize(key, buffer);
 
   auto units = billingUnits(key.size() + buffer.size());
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(isolate, options,
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
       getCache(OP_PUT).put(kj::mv(key), kj::mv(buffer), options));
 
   auto& context = IoContext::current();
@@ -469,22 +474,23 @@ jsg::Promise<void> DurableObjectStorageOperations::putOne(
 }
 
 kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations::delete_(
-    kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<PutOptions> maybeOptions,
-    v8::Isolate* isolate) {
+    jsg::Lock& js,
+    kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+    jsg::Optional<PutOptions> maybeOptions) {
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
-      return deleteOne(kj::mv(s), options, isolate);
+      return deleteOne(js, kj::mv(s), options);
     }
     KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return deleteMultiple(kj::mv(a), options, isolate);
+      return deleteMultiple(js, kj::mv(a), options);
     }
   }
   KJ_UNREACHABLE
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
-    jsg::Optional<SetAlarmOptions> maybeOptions, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Optional<SetAlarmOptions> maybeOptions) {
   // Even if we do not have an alarm handler, we might once have had one. It's fine to remove that
   // alarm or noop on the absence of one.
   auto options = configureOptions(maybeOptions.map([](auto& o) {
@@ -495,7 +501,7 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
     };
   }).orDefault(PutOptions{}));
 
-  return transformMaybeBackpressure(isolate, options,
+  return transformMaybeBackpressure(js, options,
       getCache(OP_DELETE_ALARM).setAlarm(nullptr, options));
 }
 
@@ -508,7 +514,7 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto& context = IoContext::current();
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
-  return transformMaybeBackpressure(js.v8Isolate, options, kj::mv(deleteAll.backpressure));
+  return transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
 }
 
 void DurableObjectTransaction::deleteAll() {
@@ -516,28 +522,28 @@ void DurableObjectTransaction::deleteAll() {
 }
 
 jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
-    kj::String key, const PutOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, kj::String key, const PutOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
-  return transformCacheResult(isolate, getCache(OP_DELETE).delete_(kj::mv(key), options), options,
-      [](v8::Isolate* isolate, bool value) {
+  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(key), options), options,
+      [](jsg::Lock&, bool value) {
     currentActorMetrics().addStorageDeletes(1);
     return value;
   });
 }
 
 jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
-    kj::Array<kj::String> keys, const GetOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, kj::Array<kj::String> keys, const GetOptions& options) {
   ActorStorageLimits::checkMaxPairsCount(keys.size());
 
   auto numKeys = keys.size();
 
-  return transformCacheResult(isolate, getCache(OP_GET).get(kj::mv(keys), options),
+  return transformCacheResult(js, getCache(OP_GET).get(kj::mv(keys), options),
                               options, getMultipleResultsToMap(numKeys));
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
-    jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options) {
   kj::Vector<ActorCacheOps::KeyValuePair> kvs(entries.fields.size());
 
   uint32_t units = 0;
@@ -549,7 +555,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 
     ActorStorageLimits::checkMaxKeySize(field.name);
 
-    kj::Array<byte> buffer = serializeV8Value(field.value, isolate);
+    kj::Array<byte> buffer = serializeV8Value(js, field.value);
     ActorStorageLimits::checkMaxValueSize(field.name, buffer);
 
     units += billingUnits(field.name.size() + buffer.size());
@@ -557,7 +563,7 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
     kvs.add(ActorCacheOps::KeyValuePair { kj::mv(field.name), kj::mv(buffer) });
   }
 
-  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(isolate, options,
+  jsg::Promise<void> maybeBackpressure = transformMaybeBackpressure(js, options,
       getCache(OP_PUT).put(kvs.releaseAsArray(), options));
 
   auto& context = IoContext::current();
@@ -567,15 +573,15 @@ jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
 }
 
 jsg::Promise<int> DurableObjectStorageOperations::deleteMultiple(
-    kj::Array<kj::String> keys, const PutOptions& options, v8::Isolate* isolate) {
+    jsg::Lock& js, kj::Array<kj::String> keys, const PutOptions& options) {
   for (auto& key: keys) {
     ActorStorageLimits::checkMaxKeySize(key);
   }
 
   auto numKeys = keys.size();
 
-  return transformCacheResult(isolate, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
-      [numKeys](v8::Isolate*, uint count) -> int {
+  return transformCacheResult(js, getCache(OP_DELETE).delete_(kj::mv(keys), options), options,
+      [numKeys](jsg::Lock&, uint count) -> int {
     currentActorMetrics().addStorageDeletes(numKeys);
     return count;
   });
@@ -896,8 +902,8 @@ kj::Maybe<kj::Date> DurableObjectState::getWebSocketAutoResponseTimestamp(jsg::R
   return ws->getAutoResponseTimestamp();
 }
 
-kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate) {
-  jsg::Serializer serializer(isolate, jsg::Serializer::Options {
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value) {
+  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
@@ -906,10 +912,11 @@ kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* is
   return kj::mv(released.data);
 }
 
-v8::Local<v8::Value> deserializeV8Value(
-    kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf, v8::Isolate* isolate) {
+v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
+                                        kj::ArrayPtr<const char> key,
+                                        kj::ArrayPtr<const kj::byte> buf) {
 
-  v8::TryCatch tryCatch(isolate);
+  v8::TryCatch tryCatch(js.v8Isolate);
 
   // We explicitly check and assert on the results of v8 method calls instead of using jsg::check so
   // that it will be logged, since exceptions thrown by v8 are typically not logged but we obviously
@@ -952,7 +959,7 @@ v8::Local<v8::Value> deserializeV8Value(
     options.readHeader = false;
   }
 
-  jsg::Deserializer deserializer(isolate, buf, nullptr, nullptr, options);
+  jsg::Deserializer deserializer(js.v8Isolate, buf, nullptr, nullptr, options);
 
   v8::Local<v8::Value> value;
   try {

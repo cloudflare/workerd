@@ -21,10 +21,10 @@ class SqlStorage;
 class DurableObjectId;
 class WebSocket;
 
-kj::Array<kj::byte> serializeV8Value(v8::Local<v8::Value> value, v8::Isolate* isolate);
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value);
 
 v8::Local<v8::Value> deserializeV8Value(
-    kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf, v8::Isolate* isolate);
+    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
 
 class DurableObjectStorageOperations {
   // Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
@@ -45,9 +45,9 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectGetOptions); // Rename from DurableObjectStorageOperationsGetOptions
   };
 
-  jsg::Promise<jsg::Value> get(
-      kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<GetOptions> options,
-      v8::Isolate* isolate);
+  jsg::Promise<jsg::Value> get(jsg::Lock& js,
+                               kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+                              jsg::Optional<GetOptions> options);
 
   struct GetAlarmOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -56,7 +56,7 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectGetAlarmOptions); // Rename from DurableObjectStorageOperationsGetAlarmOptions
   };
 
-  jsg::Promise<kj::Maybe<double>> getAlarm(jsg::Optional<GetAlarmOptions> options, v8::Isolate* isolate);
+  jsg::Promise<kj::Maybe<double>> getAlarm(jsg::Lock& js, jsg::Optional<GetAlarmOptions> options);
 
   struct ListOptions {
     jsg::Optional<kj::String> start;
@@ -79,7 +79,7 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions); // Rename from DurableObjectStorageOperationsListOptions
   };
 
-  jsg::Promise<jsg::Value> list(jsg::Optional<ListOptions> options, v8::Isolate* isolate);
+  jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   struct PutOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -100,11 +100,12 @@ public:
   jsg::Promise<void> put(jsg::Lock& js,
       kj::OneOf<kj::String, jsg::Dict<v8::Local<v8::Value>>> keyOrEntries,
       jsg::Optional<v8::Local<v8::Value>> value, jsg::Optional<PutOptions> options,
-      v8::Isolate* isolate, const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
+      const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
 
   kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> delete_(
-      kj::OneOf<kj::String, kj::Array<kj::String>> keys, jsg::Optional<PutOptions> options,
-      v8::Isolate* isolate);
+      jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      jsg::Optional<PutOptions> options);
 
   struct SetAlarmOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -121,9 +122,10 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectSetAlarmOptions); // Rename from DurableObjectStorageOperationsSetAlarmOptions
   };
 
-  jsg::Promise<void> setAlarm(kj::Date scheduledTime, jsg::Optional<SetAlarmOptions> options,
-      v8::Isolate* isolate);
-  jsg::Promise<void> deleteAlarm(jsg::Optional<SetAlarmOptions> options, v8::Isolate* isolate);
+  jsg::Promise<void> setAlarm(jsg::Lock& js,
+                              kj::Date scheduledTime,
+                              jsg::Optional<SetAlarmOptions> options);
+  jsg::Promise<void> deleteAlarm(jsg::Lock& js, jsg::Optional<SetAlarmOptions> options);
 
 protected:
   typedef kj::StringPtr OpName;
@@ -158,18 +160,22 @@ protected:
   }
 
 private:
-  jsg::Promise<jsg::Value> getOne(kj::String key, const GetOptions& options, v8::Isolate* isolate);
-  jsg::Promise<jsg::Value> getMultiple(kj::Array<kj::String> keys, const GetOptions& options,
-                                         v8::Isolate* isolate);
+  jsg::Promise<jsg::Value> getOne(jsg::Lock& js, kj::String key, const GetOptions& options);
+  jsg::Promise<jsg::Value> getMultiple(jsg::Lock& js,
+                                       kj::Array<kj::String> keys,
+                                       const GetOptions& options);
 
-  jsg::Promise<void> putOne(kj::String key, v8::Local<v8::Value> value, const PutOptions& options,
-                             v8::Isolate* isolate);
-  jsg::Promise<void> putMultiple(jsg::Dict<v8::Local<v8::Value>> entries,
-                                  const PutOptions& options, v8::Isolate* isolate);
+  jsg::Promise<void> putOne(jsg::Lock& js,
+                            kj::String key,
+                            v8::Local<v8::Value> value,
+                            const PutOptions& options);
+  jsg::Promise<void> putMultiple(jsg::Lock& js, jsg::Dict<v8::Local<v8::Value>> entries,
+                                 const PutOptions& options);
 
-  jsg::Promise<bool> deleteOne(kj::String key, const PutOptions& options, v8::Isolate* isolate);
-  jsg::Promise<int> deleteMultiple(kj::Array<kj::String> keys, const PutOptions& options,
-                                    v8::Isolate* isolate);
+  jsg::Promise<bool> deleteOne(jsg::Lock& js, kj::String key, const PutOptions& options);
+  jsg::Promise<int> deleteMultiple(jsg::Lock& js,
+                                   kj::Array<kj::String> keys,
+                                   const PutOptions& options);
 };
 
 class DurableObjectTransaction;
@@ -342,8 +348,8 @@ public:
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
 
-  jsg::Optional<v8::Local<v8::Value>> getTransient(v8::Isolate* isolate) {
-    return transient.map([&](jsg::Value& v) { return v.getHandle(isolate); });
+  jsg::Optional<v8::Local<v8::Value>> getTransient(jsg::Lock& js) {
+    return transient.map([&](jsg::Value& v) { return v.getHandle(js); });
   }
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getPersistent() {
