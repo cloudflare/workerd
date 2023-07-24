@@ -163,15 +163,20 @@ public:
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    // We check for Ended, Exception here so that we catch
+    // these even if pieces is empty.
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         JSG_FAIL_REQUIRE(Error, "Write after close");
       }
-      KJ_CASE_ONEOF(exception, kj::Exception) { kj::throwFatalException(kj::cp(exception)); }
+      KJ_CASE_ONEOF(exception, kj::Exception) {
+        kj::throwFatalException(kj::cp(exception));
+      }
       KJ_CASE_ONEOF(open, Open) {
-        if (pieces.size() != 0) {
-          co_await write(pieces[0].begin(), pieces[0].size());
-          co_await write(pieces.slice(1, pieces.size()));
+        for (auto &piece : pieces) {
+          if (piece.size() != 0) {
+            co_await write(piece.begin(), piece.size());
+          }
         }
         co_return;
       }
