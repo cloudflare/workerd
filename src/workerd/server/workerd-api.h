@@ -141,9 +141,22 @@ public:
         };
       }
     };
+    struct AnalyticsEngine {
+      uint subrequestChannel;
+      kj::String dataset;
+      int64_t version;
+      AnalyticsEngine clone() const {
+        return AnalyticsEngine {
+          .subrequestChannel = subrequestChannel,
+          .dataset = kj::str(dataset),
+          .version = version
+        };
+      }
+    };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
-              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped> value;
+              DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
+              AnalyticsEngine> value;
 
     Global clone() const;
   };

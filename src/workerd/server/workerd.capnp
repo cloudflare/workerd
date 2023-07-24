@@ -351,7 +351,12 @@ struct Worker {
       # `getenv()` with that name. If the environment variable isn't set, the binding value is
       # `null`.
 
-      # TODO(someday): dispatch, analyticsEngine, other new features
+      analyticsEngine @17 :ServiceDesignator;
+      # A binding for Analytics Engine. Allows workers to store information through Analytics Engine Events.
+      # workerd will forward AnalyticsEngineEvents to designated service in the body of HTTP requests
+      # This binding is subject to change and requires the `--experimental` flag
+
+      # TODO(someday): dispatch, other new features
     }
 
     struct Type {
@@ -372,6 +377,7 @@ struct Worker {
         r2Bucket @9 :Void;
         r2Admin @10 :Void;
         queue @11 :Void;
+        analyticsEngine @12 : Void;
       }
     }
 

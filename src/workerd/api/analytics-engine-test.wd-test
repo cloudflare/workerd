@@ -1,0 +1,37 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const analyticsWorker :Workerd.Worker = (
+  modules  = [
+    (name = "worker", esModule =
+      `import * as assert from 'node:assert';
+      `export default {
+      `  async fetch(request, env, ctx) {
+      `    let val = await request.json();
+      `    console.log(JSON.stringify(val));
+      `    assert.deepStrictEqual(val['dataset'], [97,110,97,108,121,116,105,99,115]);
+      `    assert.deepStrictEqual(val['double1'], 25);
+      `    assert.deepStrictEqual(val['blob1'], [84,101,115,116,66,108,111,98]);
+      `    await env.main.fetch("http://w/");
+      `    return new Response('');
+      `  },
+      `};
+      ),
+    ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityDate = "2023-02-28",
+  bindings = [ ( name = "main", service = "main" ) ]
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "analytics-engine-test.js"),
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityDate = "2023-02-28",
+
+  bindings = [ ( name = "aebinding", analyticsEngine = "analytics") ]
+);
+
+const unitTests :Workerd.Config = (
+    services = [ (name = "main", worker = .mainWorker), (name = "analytics", worker = .analyticsWorker) ],
+);
