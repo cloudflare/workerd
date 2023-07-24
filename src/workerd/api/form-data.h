@@ -73,9 +73,9 @@ public:
 
   void delete_(kj::String name);
 
-  kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> get(kj::String name, v8::Isolate* isolate);
+  kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> get(kj::String name);
 
-  kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> getAll(kj::String name, v8::Isolate* isolate);
+  kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> getAll(kj::String name);
 
   bool has(kj::String name);
 
@@ -151,7 +151,7 @@ public:
 private:
   kj::Vector<Entry> data;
 
-  static EntryType clone(v8::Isolate* isolate, EntryType& value);
+  static EntryType clone(EntryType& value);
 
   template <typename Type>
   static kj::Maybe<Type> iteratorNext(jsg::Lock& js, IteratorState& state) {
@@ -160,11 +160,11 @@ private:
     }
     auto& [key, value] = state.parent->data[state.index++];
     if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr<EntryType>(kj::str(key), clone(js.v8Isolate, value));
+      return kj::arr<EntryType>(kj::str(key), clone(value));
     } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
       return kj::str(key);
     } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return clone(js.v8Isolate, value);
+      return clone(value);
     } else {
       KJ_UNREACHABLE;
     }
