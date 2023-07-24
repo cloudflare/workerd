@@ -40,9 +40,9 @@ public:
   jsg::Ref<Blob> slice(jsg::Optional<int> start, jsg::Optional<int> end,
                         jsg::Optional<kj::String> type);
 
-  jsg::Promise<kj::Array<kj::byte>> arrayBuffer(v8::Isolate* isolate);
-  jsg::Promise<kj::String> text(v8::Isolate* isolate);
-  jsg::Ref<ReadableStream> stream(v8::Isolate* isolate);
+  jsg::Promise<kj::Array<kj::byte>> arrayBuffer(jsg::Lock& js);
+  jsg::Promise<kj::String> text(jsg::Lock& js);
+  jsg::Ref<ReadableStream> stream();
 
   JSG_RESOURCE_TYPE(Blob, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {

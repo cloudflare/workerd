@@ -129,12 +129,12 @@ jsg::Ref<Blob> Blob::slice(jsg::Optional<int> maybeStart, jsg::Optional<int> may
       normalizeType(kj::mv(type).orDefault(nullptr)));
 }
 
-jsg::Promise<kj::Array<kj::byte>> Blob::arrayBuffer(v8::Isolate* isolate) {
+jsg::Promise<kj::Array<kj::byte>> Blob::arrayBuffer(jsg::Lock& js) {
   // TODO(perf): Find a way to avoid the copy.
-  return jsg::resolvedPromise(isolate, kj::heapArray<byte>(data));
+  return js.resolvedPromise(kj::heapArray<byte>(data));
 }
-jsg::Promise<kj::String> Blob::text(v8::Isolate* isolate) {
-  return jsg::resolvedPromise(isolate, kj::str(data.asChars()));
+jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
+  return js.resolvedPromise(kj::str(data.asChars()));
 }
 
 class Blob::BlobInputStream final: public ReadableStreamSource {
@@ -192,7 +192,7 @@ private:
   jsg::Ref<Blob> blob;
 };
 
-jsg::Ref<ReadableStream> Blob::stream(v8::Isolate* isolate) {
+jsg::Ref<ReadableStream> Blob::stream() {
   return jsg::alloc<ReadableStream>(
       IoContext::current(),
       kj::heap<BlobInputStream>(JSG_THIS));
