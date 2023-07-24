@@ -79,7 +79,7 @@ public:
     : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
       id(kj::mv(id)) {}
 
-  jsg::Ref<DurableObjectId> getId(v8::Isolate* isolate) { return id.addRef(); };
+  jsg::Ref<DurableObjectId> getId() { return id.addRef(); };
   jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
 
   JSG_RESOURCE_TYPE(DurableObject) {

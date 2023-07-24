@@ -558,7 +558,7 @@ void ExtendableEvent::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(v8::Isolate* isolate) {
+jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState() {
   IoContext& context = IoContext::current();
   return context.getActor().map([&](Worker::Actor& actor) {
     auto& lock = context.getCurrentLock();

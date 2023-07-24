@@ -9,6 +9,9 @@
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
 #include <kj/map.h>
+#include <capnp/message.h>
+#include <capnp/compat/json.h>
+#include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
@@ -19,6 +22,7 @@
 #include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/util/mimetype.h>
 #include "workerd-api.h"
@@ -1566,7 +1570,38 @@ private:
 
   kj::Promise<void> writeLogfwdr(uint channel,
       kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
-    KJ_FAIL_REQUIRE("no logging channels");
+    auto& context = IoContext::current();
+
+    auto headers = kj::HttpHeaders(context.getHeaderTable());
+    auto client = context.getHttpClient(channel, true, nullptr, "writeLogfwdr"_kjc);
+
+    auto urlStr = kj::str("https://fake-host");
+ 
+    capnp::MallocMessageBuilder requestMessage;
+    auto requestBuilder = requestMessage.initRoot<capnp::AnyPointer>();
+  
+    buildMessage(requestBuilder);
+    capnp::JsonCodec json;
+    auto requestJson = json.encode(requestBuilder.getAs<api::AnalyticsEngineEvent>());
+
+    co_await context.waitForOutputLocks();
+
+    auto innerReq = client->request(kj::HttpMethod::POST, urlStr, headers, requestJson.size());
+
+    struct RefcountedWrapper: public kj::Refcounted {
+      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
+      kj::Own<kj::HttpClient> client;
+    };
+    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
+    auto request = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+
+    co_await request.body->write(requestJson.begin(), requestJson.size())
+          .attach(kj::mv(requestJson), kj::mv(request.body));
+    auto response = co_await request.response;
+
+    KJ_REQUIRE(response.statusCode >= 200 && response.statusCode < 300, "writeLogfwdr request returned an error");
+    co_await response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
+    co_return;
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
@@ -1649,7 +1684,8 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
     Worker::ValidationErrorReporter& errorReporter,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
-    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs) {
+    kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
+    bool experimental) {
   // creates binding object or returns null and reports an error
   using Global = WorkerdApiIsolate::Global;
   kj::StringPtr bindingName = binding.getName();
@@ -1883,7 +1919,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       kj::Vector<Global> innerGlobals;
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_MAYBE(global, createBinding(workerName, conf, innerBinding,
-            errorReporter, subrequestChannels, actorChannels, actorConfigs)) {
+            errorReporter, subrequestChannels, actorChannels, actorConfigs, experimental)) {
           innerGlobals.add(kj::mv(*global));
         } else {
           // we've already communicated the error
@@ -1908,6 +1944,25 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       }
     }
 
+    case config::Worker::Binding::ANALYTICS_ENGINE: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+          "AnalyticsEngine bindings are an experimental feature which may change or go away in the future."
+          "You must run workerd with `--experimental` to use this feature."));
+      }
+
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getAnalyticsEngine(),
+        kj::mv(errorContext)
+      });
+
+      return makeGlobal(Global::AnalyticsEngine{
+        .subrequestChannel = channel,
+        .dataset = kj::str(binding.getAnalyticsEngine().getName()),
+        .version = 0,
+      });
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "
@@ -2031,7 +2086,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_MAYBE(global, createBinding(name, conf, binding, errorReporter,
-                                     subrequestChannels, actorChannels, actorConfigs)) {
+                                     subrequestChannels, actorChannels, actorConfigs,
+                                     experimental)) {
       globals.add(kj::mv(*global));
     }
   }
