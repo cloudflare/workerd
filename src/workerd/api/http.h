@@ -468,8 +468,34 @@ public:
     });
   };
 
-  jsg::Promise<QueueResponse> queue(
+  struct QueueResult {
+    kj::String outcome;
+    bool retryAll;
+    bool ackAll;
+    kj::Array<kj::String> explicitRetries;
+    kj::Array<kj::String> explicitAcks;
+
+    JSG_STRUCT(outcome, retryAll, ackAll, explicitRetries, explicitAcks);
+  };
+
+  jsg::Promise<QueueResult> queue(
       jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
+
+  struct ScheduledOptions {
+    jsg::Optional<kj::Date> scheduledTime;
+    jsg::Optional<kj::String> cron;
+
+    JSG_STRUCT(scheduledTime, cron);
+  };
+
+  struct ScheduledResult {
+    kj::String outcome;
+    bool noRetry;
+
+    JSG_STRUCT(outcome, noRetry);
+  };
+
+  jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
     JSG_METHOD(fetch);
@@ -477,6 +503,7 @@ public:
 
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
+      JSG_METHOD(scheduled);
     }
 
     JSG_METHOD(get);
@@ -1075,6 +1102,9 @@ kj::String makeRandomBoundaryCharacters();
   api::Request::InitializerDict,      \
   api::Fetcher,                       \
   api::Fetcher::PutOptions,           \
+  api::Fetcher::ScheduledOptions,     \
+  api::Fetcher::ScheduledResult,      \
+  api::Fetcher::QueueResult,          \
   api::Fetcher::ServiceBindingQueueMessage
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

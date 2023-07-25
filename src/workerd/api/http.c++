@@ -2015,7 +2015,7 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   return throwOnError(js, "DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
 
-jsg::Promise<QueueResponse> Fetcher::queue(
+jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages) {
   auto& ioContext = IoContext::current();
   auto worker = getClient(ioContext, nullptr, "queue"_kjc);
@@ -2042,12 +2042,38 @@ jsg::Promise<QueueResponse> Fetcher::queue(
   auto eventRef = kj::addRef(*event); // attempt to work around windows-specific null pointer deref.
   return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
       [event=kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
-    return QueueResponse{
-        .outcome=static_cast<uint16_t>(result.outcome),
+    return Fetcher::QueueResult{
+        .outcome=kj::str(result.outcome),
         .retryAll=event->getRetryAll(),
         .ackAll=event->getAckAll(),
         .explicitRetries=event->getExplicitRetries(),
         .explicitAcks=event->getExplicitAcks(),
+    };
+  });
+}
+
+jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
+      jsg::Lock& js, jsg::Optional<ScheduledOptions> options) {
+  auto& ioContext = IoContext::current();
+  auto worker = getClient(ioContext, nullptr, "scheduled"_kjc);
+
+  auto scheduledTime = ioContext.now();
+  auto cron = kj::String();
+  KJ_IF_MAYBE(o, options) {
+    KJ_IF_MAYBE(t, o->scheduledTime) {
+      scheduledTime = *t;
+    }
+    KJ_IF_MAYBE(c, o->cron) {
+      cron = kj::mv(*c);
+    }
+  }
+
+  return ioContext.awaitIo(js, worker->runScheduled(scheduledTime, cron)
+      .attach(kj::mv(worker), kj::mv(cron)),
+      [](jsg::Lock& js, WorkerInterface::ScheduledResult result) {
+    return Fetcher::ScheduledResult{
+      .outcome=kj::str(result.outcome),
+      .noRetry=!result.retry,
     };
   });
 }

@@ -92,7 +92,7 @@ export default {
       { id: "#2", timestamp, body: { c: { d: 10 } } },
       { id: "#3", timestamp, body: timestamp },
     ]);
-    assert.strictEqual(response.outcome, /* OK */ 1);
+    assert.strictEqual(response.outcome, "ok");
     assert(!response.retryAll);
     assert(response.ackAll);
     assert.deepStrictEqual(response.explicitRetries, ["#2"]);
