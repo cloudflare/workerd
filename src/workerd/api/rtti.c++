@@ -180,7 +180,7 @@ public:
     for (auto moduleBuilder: modulesBuilder) {
       auto& module = registry.modules[i++];
       moduleBuilder.setSpecifier(module.specifier);
-      moduleBuilder.setType(module.type);
+      // moduleBuilder.setType(module.type);
       KJ_SWITCH_ONEOF(module.contents) {
         KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
           moduleBuilder.setStructureName(contents.structureName);

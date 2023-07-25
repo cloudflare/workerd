@@ -60,6 +60,7 @@ js_capnp_library(
     }),
     visibility = ["//visibility:public"],
     deps = [":modules_capnp_js"],
+    src_prefix = "src/",
 )
 
 npm_package(
