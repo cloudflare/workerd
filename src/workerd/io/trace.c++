@@ -418,7 +418,7 @@ void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(
         timestamp, LogLevel::WARN,
-        kj::str("[\"Trace resource limit exceeded; subsequent logs not recorded.\"]"));
+        kj::str("[\"Log size limit exceeded: You tried to log more than 128KB of data during a single request. Subsequent logs for this request will not be recorded, or appear when tailing this Worker's logs.\"]"));
     return;
   }
   trace->bytesUsed = newSize;
