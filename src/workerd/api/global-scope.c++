@@ -126,7 +126,31 @@ void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) 
   }
 }
 
+kj::String getEventName(v8::PromiseRejectEvent type) {
+  switch (type) {
+    case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
+      return kj::str("unhandledrejection");
+    case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
+      return kj::str("rejectionhandled");
+    default:
+      // Events are not emitted for the other reject types.
+      KJ_UNREACHABLE;
+  }
+}
+
 }  // namespace
+
+PromiseRejectionEvent::PromiseRejectionEvent(
+    v8::PromiseRejectEvent type,
+    jsg::V8Ref<v8::Promise> promise,
+    jsg::Value reason)
+    : Event(getEventName(type)),
+      promise(kj::mv(promise)),
+      reason(kj::mv(reason)) {}
+
+void PromiseRejectionEvent::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(promise, reason);
+}
 
 void ExecutionContext::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
@@ -243,7 +267,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   bool useDefaultHandling;
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->fetch) {
-      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
@@ -350,11 +374,11 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->tail) {
       auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
-      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_MAYBE(f, h->trace) {
       auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
-      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx(isolate));
+      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -389,7 +413,7 @@ void ServiceWorkerGlobalScope::startScheduled(
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->scheduled) {
       auto promise = (*f)(lock, jsg::alloc<ScheduledController>(event.addRef()),
-                          h->env.addRef(isolate), h->getCtx(isolate));
+                          h->env.addRef(isolate), h->getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -505,8 +529,7 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler = JSG_REQUIRE_NONNULL(eh.test, Error,
       "Entrypoint does not export a test() function.");
 
-  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock),
-                     eh.getCtx(lock.getIsolate()));
+  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
@@ -597,8 +620,8 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(
   }
 }
 
-kj::String ServiceWorkerGlobalScope::btoa(v8::Local<v8::Value> data, v8::Isolate* isolate) {
-  auto str = jsg::check(data->ToString(isolate->GetCurrentContext()));
+kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, v8::Local<v8::Value> data) {
+  auto str = jsg::check(data->ToString(js.v8Context()));
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
@@ -611,11 +634,11 @@ kj::String ServiceWorkerGlobalScope::btoa(v8::Local<v8::Value> data, v8::Isolate
   //   negatives. Conceivably we could take advantage of this fact to completely avoid the later
   //   WriteOneByte() call in some cases!
   auto buf = kj::heapArray<kj::byte>(str->Length());
-  str->WriteOneByte(isolate, buf.begin(), 0, buf.size());
+  str->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size());
 
   return kj::encodeBase64(buf);
 }
-v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolate* isolate) {
+v8::Local<v8::String> ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
 
   JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
@@ -626,7 +649,7 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(kj::String data, v8::Isolat
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
   // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
   // making a copy purely to append a nul byte.
-  return jsg::v8StrFromLatin1(isolate, decoded.asBytes());
+  return jsg::v8StrFromLatin1(js.v8Isolate, decoded.asBytes());
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(
@@ -643,16 +666,16 @@ void ServiceWorkerGlobalScope::queueMicrotask(
 }
 
 v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
+    jsg::Lock& js,
     v8::Local<v8::Value> value,
-    jsg::Optional<StructuredCloneOptions> maybeOptions,
-    v8::Isolate* isolate) {
+    jsg::Optional<StructuredCloneOptions> maybeOptions) {
   kj::Maybe<kj::ArrayPtr<jsg::Value>> transfers;
   KJ_IF_MAYBE(options, maybeOptions) {
     transfers = options->transfer.map([&](kj::Array<jsg::Value>& transfer) {
       return transfer.asPtr();
     });
   }
-  return jsg::structuredClone(value, isolate, transfers);
+  return jsg::structuredClone(value, js.v8Isolate, transfers);
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(

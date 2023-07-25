@@ -75,15 +75,12 @@ public:
   PromiseRejectionEvent(
       v8::PromiseRejectEvent type,
       jsg::V8Ref<v8::Promise> promise,
-      jsg::Value reason)
-      : Event(getEventName(type)),
-        promise(kj::mv(promise)),
-        reason(kj::mv(reason)) {}
+      jsg::Value reason);
 
   static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
 
-  jsg::V8Ref<v8::Promise> getPromise(v8::Isolate* isolate) { return promise.addRef(isolate); }
-  jsg::Value getReason(v8::Isolate* isolate) { return reason.addRef(isolate); }
+  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) { return promise.addRef(js); }
+  jsg::Value getReason(jsg::Lock& js) { return reason.addRef(js); }
 
   JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
     JSG_INHERIT(Event);
@@ -92,23 +89,10 @@ public:
   }
 
 private:
-  static kj::String getEventName(v8::PromiseRejectEvent type) {
-    switch (type) {
-      case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
-        return kj::str("unhandledrejection");
-      case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
-        return kj::str("rejectionhandled");
-      default:
-        // Events are not emitted for the other reject types.
-        KJ_UNREACHABLE;
-    }
-  }
   jsg::V8Ref<v8::Promise> promise;
   jsg::Value reason;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(promise, reason);
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 };
 
 class WorkerGlobalScope: public EventTarget {
@@ -237,7 +221,7 @@ struct ExportedHandler {
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
 
-  jsg::Optional<jsg::Ref<ExecutionContext>> getCtx(v8::Isolate* isolate) {
+  jsg::Optional<jsg::Ref<ExecutionContext>> getCtx() {
     return ctx.map([&](jsg::Ref<ExecutionContext>& p) { return p.addRef(); });
   }
 };
@@ -317,8 +301,8 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::String btoa(v8::Local<v8::Value> data, v8::Isolate* isolate);
-  v8::Local<v8::String> atob(kj::String data, v8::Isolate* isolate);
+  kj::String btoa(jsg::Lock& js, v8::Local<v8::Value> data);
+  v8::Local<v8::String> atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 
@@ -329,9 +313,9 @@ public:
   };
 
   v8::Local<v8::Value> structuredClone(
+      jsg::Lock& js,
       v8::Local<v8::Value> value,
-      jsg::Optional<StructuredCloneOptions> options,
-      v8::Isolate* isolate);
+      jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
                                    jsg::V8Ref<v8::Function> function,

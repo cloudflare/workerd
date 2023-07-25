@@ -437,7 +437,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
         lock, h->self.getHandle(lock.getIsolate())));
     KJ_IF_MAYBE(f, queueHandler.queue) {
       auto promise = (*f)(lock, jsg::alloc<QueueController>(event.addRef()),
-                          h->env.addRef(js), h->getCtx(js.v8Isolate));
+                          h->env.addRef(js), h->getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
