@@ -1326,6 +1326,22 @@ using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>
 
 class ModuleRegistry;
 
+class ContextGlobal {
+public:
+  ContextGlobal() {}
+
+  KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
+
+  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
+    moduleRegistry = kj::mv(registry);
+  }
+
+  ModuleRegistry& getModuleRegistry() { return *moduleRegistry; }
+
+private:
+  kj::Own<ModuleRegistry> moduleRegistry;
+};
+
 template <typename T>
 class JsContext {
   // Reference to a JavaScript context whose global object wraps a C++ object of type T. This is
@@ -1333,10 +1349,9 @@ class JsContext {
   // which is more than just the global object.
 
 public:
-  JsContext(v8::Local<v8::Context> handle, Ref<T> object, kj::Own<ModuleRegistry> moduleRegistry)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(handle->GetIsolate(), handle),
-        object(kj::mv(object)),
-        moduleRegistry(kj::mv(moduleRegistry)) {}
+        object(kj::mv(object)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1348,12 +1363,9 @@ public:
     return handle.Get(isolate);
   }
 
-  ModuleRegistry& getModuleRegistry() { return *moduleRegistry; }
-
 private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
-  kj::Own<ModuleRegistry> moduleRegistry;
 };
 
 class BufferSource;

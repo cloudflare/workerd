@@ -14,7 +14,7 @@ namespace {
 
 jsg::V8System v8System;
 
-struct CaptureThrowContext: public jsg::Object {
+struct CaptureThrowContext: public jsg::Object, public ContextGlobal {
   kj::Promise<int> test1() {
     JSG_FAIL_REQUIRE(TypeError, "boom");
   }

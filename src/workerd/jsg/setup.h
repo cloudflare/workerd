@@ -400,6 +400,8 @@ public:
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
 
+      static_assert(std::is_base_of_v<ContextGlobal, T>, "context global type must extends jsg::ContextGlobal");
+
       return jsgIsolate.wrapper->newContext(v8Isolate, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
     }
 

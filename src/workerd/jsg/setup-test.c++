@@ -9,7 +9,7 @@ namespace {
 
 V8System v8System;
 
-struct EvalContext: public Object {
+struct EvalContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(EvalContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(EvalIsolate, EvalContext);
@@ -46,7 +46,7 @@ KJ_TEST("eval() is blocked") {
 
 // ========================================================================================
 
-struct ConfigContext: public Object {
+struct ConfigContext: public Object, public ContextGlobal {
   struct Nested: public Object {
     JSG_RESOURCE_TYPE(Nested, int configuration) {
       KJ_EXPECT(configuration == 123, configuration);

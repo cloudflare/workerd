@@ -31,7 +31,7 @@ static_assert(isGcVisitable<kj::Maybe<TestStruct>>());
 
 V8System v8System;
 
-struct TestContext: public Object {
+struct TestContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(TestContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
@@ -56,7 +56,7 @@ KJ_TEST("context type is exposed in the global scope") {
 
 // ========================================================================================
 
-struct InheritContext: public Object {
+struct InheritContext: public Object, public ContextGlobal {
   struct Other: public Object {
     JSG_RESOURCE_TYPE(Other) {}
   };
@@ -119,7 +119,7 @@ KJ_TEST("inheritance") {
 
 // ========================================================================================
 
-struct Utf8Context: public Object {
+struct Utf8Context: public Object, public ContextGlobal {
   bool callWithBmpUnicode(Lock& js, jsg::Function<bool(kj::StringPtr)> function) {
     return function(js, "中国网络");
   }
@@ -149,7 +149,7 @@ KJ_TEST("utf-8 scripts") {
 
 // ========================================================================================
 
-struct RefContext: public Object {
+struct RefContext: public Object, public ContextGlobal {
   Ref<NumberBox> addAndReturnCopy(NumberBox& box, double value) {
     auto copy = jsg::alloc<NumberBox>(box.value);
     copy->value += value;
@@ -185,7 +185,7 @@ KJ_TEST("Ref") {
 
 // ========================================================================================
 
-struct ProtoContext: public Object {
+struct ProtoContext: public Object, public ContextGlobal {
   ProtoContext(): contextProperty(kj::str("default-context-property-value")) {}
 
   kj::StringPtr getContextProperty() { return contextProperty; }
@@ -264,7 +264,7 @@ KJ_TEST("can't use builtin as prototype") {
 
 // ========================================================================================
 
-struct IcuContext: public Object {
+struct IcuContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(IcuContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(IcuIsolate, IcuContext);
@@ -305,7 +305,7 @@ KJ_TEST("Uncaught JsExceptionThrown reports stack") {
 
 // ========================================================================================
 
-struct LockLogContext: public Object {
+struct LockLogContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(LockLogContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(LockLogIsolate, LockLogContext);
@@ -325,7 +325,7 @@ KJ_TEST("jsg::Lock logWarning") {
 
 // ========================================================================================
 // JSG_CALLABLE Test
-struct CallableContext: public Object {
+struct CallableContext: public Object, public ContextGlobal {
   struct MyCallable: public Object {
   public:
     static Ref<MyCallable> constructor() { return alloc<MyCallable>(); }
@@ -363,7 +363,7 @@ KJ_TEST("Test JSG_CALLABLE") {
 
 // ========================================================================================
 
-struct IsolateUuidContext: public Object {
+struct IsolateUuidContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(IsolateUuidContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);

@@ -908,8 +908,9 @@ public:
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    auto moduleManager = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
-    return JsContext<T>(context, kj::mv(ptr), kj::mv(moduleManager));
+    auto moduleRegistry = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+    ptr->setModuleRegistry(kj::mv(moduleRegistry));
+    return JsContext<T>(context, kj::mv(ptr));
   }
 
   kj::Maybe<T&> tryUnwrap(
