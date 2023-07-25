@@ -8,6 +8,7 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::jsg::rtti");
 $Cxx.allowCancellation;
+using Modules = import "/workerd/jsg/modules.capnp";
 
 struct Type {
   # A description of the C++ type.
@@ -277,7 +278,7 @@ struct Constructor {
 
 struct Module {
   specifier @0 :Text;
-  internal @1 :Bool;
+  type @1 :Modules.ModuleType;
   union {
     structureName @2 :Text;
     tsDeclarations @3 :Text;
