@@ -1327,8 +1327,11 @@ using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>
 class ModuleRegistry;
 
 class ContextGlobal {
-  // All jsg resources that are used as context globals must eventually extend this type.
-  // The lifecycle of this object is tied to a v8 context.
+  // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
+  // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
+  // (or a subclass of jsg::Object).
+  // jsg::Object should always be the first inherited class, and jsg::ContextGlobal second.
+  // The lifetime of the global object matches the lifetime of the JavaScript context.
 
 public:
   ContextGlobal() {}
@@ -1347,9 +1350,6 @@ private:
   template <typename, typename>
   friend class ResourceWrapper;
 };
-
-class ContextGlobalObject: public Object, public ContextGlobal { };
-// Convenient shortcut
 
 template <typename T>
 class JsContext {

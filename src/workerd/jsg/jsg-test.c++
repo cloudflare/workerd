@@ -30,6 +30,7 @@ static_assert(isGcVisitable<kj::Maybe<TestStruct>>());
 // ========================================================================================
 
 V8System v8System;
+class ContextGlobalObject: public Object, public ContextGlobal { };
 
 struct TestContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(TestContext) {}
