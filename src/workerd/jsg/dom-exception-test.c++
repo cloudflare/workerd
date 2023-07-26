@@ -11,7 +11,7 @@ namespace {
 
 V8System v8System;
 
-struct DOMExceptionContext: public Object, public ContextGlobal {
+struct DOMExceptionContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(DOMExceptionContext) {
     JSG_NESTED_TYPE(DOMException);
   }

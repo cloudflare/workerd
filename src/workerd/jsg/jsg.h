@@ -1327,20 +1327,29 @@ using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>
 class ModuleRegistry;
 
 class ContextGlobal {
+  // All jsg resources that are used as context globals must eventually extend this type.
+  // The lifecycle of this object is tied to a v8 context.
+
 public:
   ContextGlobal() {}
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
-  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
-    moduleRegistry = kj::mv(registry);
-  }
-
   ModuleRegistry& getModuleRegistry() { return *moduleRegistry; }
 
 private:
   kj::Own<ModuleRegistry> moduleRegistry;
+
+  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
+    moduleRegistry = kj::mv(registry);
+  }
+
+  template <typename, typename>
+  friend class ResourceWrapper;
 };
+
+class ContextGlobalObject: public Object, public ContextGlobal { };
+// Convenient shortcut
 
 template <typename T>
 class JsContext {
@@ -1349,6 +1358,9 @@ class JsContext {
   // which is more than just the global object.
 
 public:
+  static_assert(std::is_base_of_v<ContextGlobal, T>,
+      "context global type must extend jsg::ContextGlobal");
+
   JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(handle->GetIsolate(), handle),
         object(kj::mv(object)) {}

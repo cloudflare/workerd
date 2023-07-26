@@ -9,7 +9,7 @@ namespace {
 
 V8System v8System;
 
-struct BoolContext: public Object, public ContextGlobal {
+struct BoolContext: public ContextGlobalObject {
   kj::String takeBool(bool b) {
     return kj::str(b);
   }
@@ -36,7 +36,7 @@ KJ_TEST("bool") {
 
 // ========================================================================================
 
-struct OptionalContext: public Object, public ContextGlobal {
+struct OptionalContext: public ContextGlobalObject {
   struct TestOptionalFields {
     Optional<kj::String> optional;
     LenientOptional<kj::String> lenient;
@@ -175,7 +175,7 @@ KJ_TEST("optionals and maybes") {
 }
 
 // ========================================================================================
-struct MaybeContext: public Object, public ContextGlobal {
+struct MaybeContext: public ContextGlobalObject {
 
   void test(kj::Maybe<kj::OneOf<NonCoercible<kj::String>>> arg) {}
 
@@ -208,7 +208,7 @@ KJ_TEST("maybes - don't substitute null") {
 
 // ========================================================================================
 
-struct OneOfContext: public Object, public ContextGlobal {
+struct OneOfContext: public ContextGlobalObject {
   kj::String takeOneOf(kj::OneOf<double, kj::String, Ref<NumberBox>> value) {
     if (value.is<double>()) {
       return kj::str("double: ", value.get<double>());
@@ -338,7 +338,7 @@ KJ_TEST("OneOf") {
 
 // ========================================================================================
 
-struct DictContext: public Object, public ContextGlobal {
+struct DictContext: public ContextGlobalObject {
   kj::String takeDict(Dict<Ref<NumberBox>> dict) {
     return kj::strArray(
         KJ_MAP(f, dict.fields) { return kj::str(f.name, ": ", f.value->value); }, ", ");
@@ -390,7 +390,7 @@ KJ_TEST("dicts") {
 
 // ========================================================================================
 
-struct IntContext: public Object, public ContextGlobal {
+struct IntContext: public ContextGlobalObject {
   kj::String takeInt(int i) {
     return kj::str("int: ", i);
   }
@@ -437,7 +437,7 @@ KJ_TEST("integers") {
 }
 
 // ========================================================================================
-struct Uint32Context: public Object, public ContextGlobal {
+struct Uint32Context: public ContextGlobalObject {
   kj::String takeUint32(uint32_t i) {
     return kj::str("uint32_t: ", i);
   }
@@ -503,7 +503,7 @@ KJ_TEST("unsigned integers") {
 }
 
 // ========================================================================================
-struct Uint64Context: public Object, public ContextGlobal {
+struct Uint64Context: public ContextGlobalObject {
   kj::String takeUint64(uint64_t i) {
     return kj::str("uint64_t: ", i);
   }
@@ -639,7 +639,7 @@ KJ_TEST("bigints") {
 
 // ========================================================================================
 
-struct Int8Context: public Object, public ContextGlobal {
+struct Int8Context: public ContextGlobalObject {
   kj::String takeInt8(int8_t i) {
     return kj::str("int8_t: ", i);
   }
@@ -695,7 +695,7 @@ KJ_TEST("int8 integers") {
 
 // ========================================================================================
 
-struct Int16Context: public Object, public ContextGlobal {
+struct Int16Context: public ContextGlobalObject {
   kj::String takeInt16(int16_t i) {
     return kj::str("int16_t: ", i);
   }
@@ -751,7 +751,7 @@ KJ_TEST("int16 integers") {
 
 // ========================================================================================
 
-struct DoubleContext: public Object, public ContextGlobal {
+struct DoubleContext: public ContextGlobalObject {
   kj::String takeDouble(double d) {
     return kj::str("double: ", d);
   }
@@ -794,7 +794,7 @@ KJ_TEST("floating points") {
 
 // ========================================================================================
 
-struct StringContext: public Object, public ContextGlobal {
+struct StringContext: public ContextGlobalObject {
   kj::String takeString(kj::String s) {
     return kj::mv(s);
   }
@@ -820,7 +820,7 @@ KJ_TEST("kj::Strings") {
 
 // ========================================================================================
 
-struct ByteStringContext: public Object, public ContextGlobal {
+struct ByteStringContext: public ContextGlobalObject {
   ByteString takeByteString(ByteString s) {
     return kj::mv(s);
   }
@@ -841,7 +841,7 @@ KJ_TEST("ByteStrings") {
 
 // ========================================================================================
 
-struct RawContext: public Object, public ContextGlobal {
+struct RawContext: public ContextGlobalObject {
   struct TwoValues {
     Value $foo;
     Value $bar;
@@ -867,7 +867,7 @@ KJ_TEST("Raw Values") {
 
 // ========================================================================================
 
-struct DateContext: public Object, public ContextGlobal {
+struct DateContext: public ContextGlobalObject {
   kj::Date takeDate(kj::Date date) {
     return date;
   }
@@ -908,7 +908,7 @@ KJ_TEST("Date Values") {
 
 // ========================================================================================
 
-struct ArrayContext: public Object, public ContextGlobal {
+struct ArrayContext: public ContextGlobalObject {
   kj::Array<int> takeArray(kj::Array<int> array) {
     // The ArrayWrapper uses a stack array with a max size of 64. This is just a
     // quick test to ensure that arrays larger than that are properly supported.
@@ -936,7 +936,7 @@ KJ_TEST("Array Values") {
 
 // ========================================================================================
 
-struct SequenceContext: public Object, public ContextGlobal {
+struct SequenceContext: public ContextGlobalObject {
   Sequence<kj::String> testSequence(Sequence<kj::String> sequence) {
     KJ_ASSERT(sequence.size() == 2);
     KJ_ASSERT(sequence[0] == "a");
@@ -1049,7 +1049,7 @@ KJ_TEST("Sequence Values") {
 
 // ========================================================================================
 
-struct NonCoercibleContext: public Object, public ContextGlobal {
+struct NonCoercibleContext: public ContextGlobalObject {
   template <CoercibleType T>
   bool test(NonCoercible<T>) {
     return true;
@@ -1143,7 +1143,7 @@ KJ_TEST("NonCoercible Values") {
 
 // ========================================================================================
 
-struct MemoizedIdentityContext: public Object, public ContextGlobal {
+struct MemoizedIdentityContext: public ContextGlobalObject {
   static constexpr kj::Date DATE = kj::UNIX_EPOCH + 123 * kj::MILLISECONDS;
   MemoizedIdentity<kj::Date> date = DATE;
 
@@ -1170,7 +1170,7 @@ KJ_TEST("MemoizedIdentity Values") {
 
 // ========================================================================================
 
-struct IdentifiedContext: public Object, public ContextGlobal {
+struct IdentifiedContext: public ContextGlobalObject {
   kj::String compare(Identified<kj::Date> a, Identified<kj::Date> b, v8::Isolate* isolate) {
     bool result = a.identity == b.identity;
     KJ_EXPECT(a.identity.hashCode() != 0);
@@ -1200,7 +1200,7 @@ KJ_TEST("Identified values") {
 
 // ========================================================================================
 
-struct ExceptionContext: public Object, public ContextGlobal {
+struct ExceptionContext: public ContextGlobalObject {
 
   kj::String testToException(kj::Exception exception) {
     return kj::str(exception.getDescription());
@@ -1241,7 +1241,7 @@ KJ_TEST("kj::Exception wrapper works") {
 }
 
 // ========================================================================================
-struct NameContext: public Object, public ContextGlobal {
+struct NameContext: public ContextGlobalObject {
   Name name(Name value) {
     return kj::mv(value);
   }

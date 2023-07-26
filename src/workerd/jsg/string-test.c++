@@ -350,7 +350,7 @@ KJ_TEST("UsvString from kj::String") {
 
 V8System v8System;
 
-struct UsvStringContext: public Object, public ContextGlobal {
+struct UsvStringContext: public ContextGlobalObject {
   UsvString testUsv(jsg::Optional<UsvString> str) {
     return kj::mv(str).orDefault(usv("undefined"));
   }

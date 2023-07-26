@@ -11,7 +11,7 @@ namespace {
 
 jsg::V8System v8System;
 
-struct QueueContext: public jsg::Object, public jsg::ContextGlobal {
+struct QueueContext: public jsg::ContextGlobalObject {
   JSG_RESOURCE_TYPE(QueueContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(QueueIsolate, QueueContext);

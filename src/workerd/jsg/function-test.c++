@@ -9,7 +9,7 @@ namespace {
 
 V8System v8System;
 
-struct CallbackContext: public Object, public ContextGlobal {
+struct CallbackContext: public ContextGlobalObject {
   kj::String callCallback(Lock& js, jsg::Function<kj::String(kj::StringPtr, double)> function) {
     return kj::str(function(js, "foo", 123), ", abc");
   }
@@ -84,7 +84,7 @@ KJ_TEST("callbacks") {
 
 // ========================================================================================
 
-struct WrapContext: public Object, public ContextGlobal {
+struct WrapContext: public ContextGlobalObject {
   auto returnFunction(double value) {
     return [value](Lock&, double value2) {
       return value + value2;
@@ -141,7 +141,7 @@ KJ_TEST("wrap functions") {
 
 // ========================================================================================
 
-struct FunctionContext: public Object, public ContextGlobal {
+struct FunctionContext: public ContextGlobalObject {
   auto test(Lock& js, Function<bool(int)> fn) {
     return fn(js, 1);
   }

@@ -12,7 +12,7 @@ namespace {
 
 V8System v8System;
 
-struct FreezeContext: public Object, public ContextGlobal {
+struct FreezeContext: public ContextGlobalObject {
   void recursivelyFreeze(v8::Local<v8::Value> value, v8::Isolate* isolate) {
     jsg::recursivelyFreeze(isolate->GetCurrentContext(), value);
   }
@@ -38,7 +38,7 @@ KJ_TEST("recursive freezing") {
 
 // ========================================================================================
 
-struct CloneContext: public Object, public ContextGlobal {
+struct CloneContext: public ContextGlobalObject {
   v8::Local<v8::Value> deepClone(v8::Local<v8::Value> value, v8::Isolate* isolate) {
     return jsg::deepClone(isolate->GetCurrentContext(), value);
   }
@@ -63,7 +63,7 @@ KJ_TEST("deep clone") {
 
 // ========================================================================================
 
-struct TypeErrorContext: public Object, public ContextGlobal {
+struct TypeErrorContext: public ContextGlobalObject {
   auto returnFunctionTakingBox(double value) {
     return [value](Lock&, Ref<NumberBox> value2) mutable {
       return value + value2->value;
@@ -98,7 +98,7 @@ KJ_TEST("throw TypeError") {
 
 // ========================================================================================
 
-struct ThrowContext: public Object, public ContextGlobal {
+struct ThrowContext: public ContextGlobalObject {
   auto returnFunctionThatThrows(double value) {
     return [](Lock&, double) -> double {
       KJ_FAIL_ASSERT("thrown from returnFunctionThatThrows");
@@ -146,7 +146,7 @@ KJ_TEST("throw internal error") {
 
 // ========================================================================================
 
-struct TunneledContext: public Object, public ContextGlobal {
+struct TunneledContext: public ContextGlobalObject {
   void throwTunneledTypeError() {
     JSG_FAIL_REQUIRE(TypeError, "thrown from throwTunneledTypeError");
   }

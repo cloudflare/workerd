@@ -17,7 +17,7 @@ namespace {
 
 jsg::V8System v8System;
 
-struct CryptoContext : public jsg::Object, public jsg::ContextGlobal {
+struct CryptoContext : public jsg::ContextGlobalObject {
   JSG_RESOURCE_TYPE(CryptoContext) {
   }
 };

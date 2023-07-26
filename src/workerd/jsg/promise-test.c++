@@ -13,7 +13,7 @@ V8System v8System;
 int promiseTestResult = 0;
 kj::String catchTestResult;
 
-struct PromiseContext: public Object, public ContextGlobal {
+struct PromiseContext: public ContextGlobalObject {
   Promise<kj::String> makePromise(Lock& js) {
     auto [ p, r ] = js.newPromiseAndResolver<int>();
     resolver = kj::mv(r);
