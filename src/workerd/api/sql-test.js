@@ -536,7 +536,9 @@ async function test(storage) {
     assert.deepEqual(rawResults[3], [4,5,6,1,2,3])
 
     // Once an iterator is consumed, it can no longer access the columnNames.
-    assert.deepEqual(iterator.columnNames, [])
+    requireException(() => {
+      iterator.columnNames
+    }, "Error: Cannot call .getColumnNames after Cursor iterator has been consumed.")
 
     // Also works with cursors returned from .exec
     const execIterator = sql.exec(`SELECT * FROM abc, cde`)
