@@ -40,6 +40,6 @@ rust_library(
     ],
     version = "0.3.4",
     deps = [
-        "@crates_vendor__dtoa-1.0.8//:dtoa",
+        "@crates_vendor__dtoa-1.0.9//:dtoa",
     ],
 )
