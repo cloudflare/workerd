@@ -296,34 +296,34 @@ npm_repositories()
 
 git_repository(
     name = "v8",
-    commit = "84b0aff45ebe07dce522d2c90b42074b25b60927",
+    commit = "578812b037096e4026447ee449786b60333b00d3",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
         "//:patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
         "//:patches/v8/0003-Make-icudata-target-public.patch",
         "//:patches/v8/0004-Add-ArrayBuffer-MaybeNew.patch",
-        "//:patches/v8/0005-Fix-v8-code_generator-imports.patch",
-        "//:patches/v8/0006-Allow-Windows-builds-under-Bazel.patch",
-        "//:patches/v8/0007-Disable-bazel-whole-archive-build.patch",
-        "//:patches/v8/0008-Make-v8-Locker-automatically-call-isolate-Enter.patch",
-        "//:patches/v8/0009-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
-        "//:patches/v8/0010-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
-        "//:patches/v8/0011-Implement-Promise-Context-Tagging.patch",
-        "//:patches/v8/0012-Enable-V8-shared-linkage.patch",
+        "//:patches/v8/0005-Allow-Windows-builds-under-Bazel.patch",
+        "//:patches/v8/0006-Disable-bazel-whole-archive-build.patch",
+        "//:patches/v8/0007-Make-v8-Locker-automatically-call-isolate-Enter.patch",
+        "//:patches/v8/0008-Add-an-API-to-capture-and-restore-the-cage-base-poin.patch",
+        "//:patches/v8/0009-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
+        "//:patches/v8/0010-Implement-Promise-Context-Tagging.patch",
+        "//:patches/v8/0011-Enable-V8-shared-linkage.patch",
+        "//:patches/v8/0012-Fix-ICU-build.patch",
     ],
     remote = "https://chromium.googlesource.com/v8/v8.git",
-    shallow_since = "1685722300 +0000",
+    shallow_since = "1690276460 +0000",
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "a2961dc659b4ae847a9c6120718cc2517ee57d9e",
+    commit = "e8c3bc9ea97d4423ad0515e5f1c064f486dae8b1",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    shallow_since = "1683080067 +0000",
+    shallow_since = "1686777134 +0000"
 )
 
 new_git_repository(
