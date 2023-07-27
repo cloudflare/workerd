@@ -17,6 +17,18 @@ struct Module {
   src @1 :Data;
   tsDeclaration @3 :Text;
 
-  internal @2 :Bool;
-  # internal modules can't be imported by user's code
+  type @2 :ModuleType;
+}
+
+
+enum ModuleType {
+  bundle @0;
+  # Provided by the worker bundle.
+
+  builtin @1;
+  # Provided by the runtime and can be imported by the worker bundle.
+  # Can be overridden by modules in the worker bundle.
+
+  internal @2;
+  # Provided by runtime but can only imported by builtin modules.
 }

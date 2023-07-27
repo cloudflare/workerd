@@ -94,31 +94,30 @@ struct EncoderModuleRegistryImpl {
     kj::StringPtr tsDeclarations;
   };
   struct ModuleInfo {
-    ModuleInfo(kj::StringPtr specifier, bool internal, kj::OneOf<CppModuleContents,
+    ModuleInfo(kj::StringPtr specifier, jsg::ModuleType type, kj::OneOf<CppModuleContents,
                 TypeScriptModuleContents> contents)
         : specifier(specifier),
-          internal(internal),
+          type(type),
           contents(kj::mv(contents)) {}
 
     kj::StringPtr specifier;
-    bool internal;
+    jsg::ModuleType type;
     kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
   };
 
   void addBuiltinBundle(jsg::Bundle::Reader bundle) {
     for (auto module: bundle.getModules()) {
       TypeScriptModuleContents contents (module.getTsDeclaration());
-      ModuleInfo info (module.getName(), module.getInternal(), kj::mv(contents));
+      ModuleInfo info (module.getName(), module.getType(), kj::mv(contents));
       modules.add(kj::mv(info));
     }
   }
 
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier, jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
-    auto internal = type == jsg::ModuleRegistry::Type::INTERNAL;
     auto structureName = jsg::fullyQualifiedTypeName(typeid(T));
     CppModuleContents contents (kj::mv(structureName));
-    ModuleInfo info (specifier, internal, kj::mv(contents));
+    ModuleInfo info (specifier, type, kj::mv(contents));
     modules.add(kj::mv(info));
   }
 
@@ -188,7 +187,6 @@ public:
     for (auto moduleBuilder: modulesBuilder) {
       auto& module = registry.modules[i++];
       moduleBuilder.setSpecifier(module.specifier);
-      moduleBuilder.setInternal(module.internal);
       KJ_SWITCH_ONEOF(module.contents) {
         KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
           moduleBuilder.setStructureName(contents.structureName);
