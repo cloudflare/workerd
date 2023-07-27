@@ -33,6 +33,11 @@
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+#include <workerd/api/gpu/gpu.h>
+#else
+#define EW_WEBGPU_ISOLATE_TYPES_LIST
+#endif
 
 namespace workerd::server {
 
@@ -78,6 +83,9 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_SQL_ISOLATE_TYPES,
   EW_NODE_ISOLATE_TYPES,
   EW_RTTI_ISOLATE_TYPES,
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+  EW_WEBGPU_ISOLATE_TYPES,
+#endif
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
