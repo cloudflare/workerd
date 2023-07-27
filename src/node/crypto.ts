@@ -4,12 +4,6 @@
 //
 /* eslint-disable */
 
-// TODO(soon): Remove this once assert is out of experimental
-import { default as CompatibilityFlags } from 'workerd:compatibility-flags';
-if (!CompatibilityFlags.workerdExperimental) {
-  throw new Error('node:crypto is experimental.');
-}
-
 import {
   ERR_METHOD_NOT_IMPLEMENTED
 } from 'node-internal:internal_errors';
