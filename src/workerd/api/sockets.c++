@@ -277,7 +277,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   //
   // Detach the AsyncIoStream from the Writable/Readable streams and make them unusable.
   auto& context = IoContext::current();
-  auto secureStreamPromise = context.awaitJs(writable->flush(js).then(js,
+  auto secureStreamPromise = context.awaitJs(js, writable->flush(js).then(js,
       [this, domain = kj::heapString(domain), tlsOptions = kj::mv(tlsOptions),
       tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
     writable->removeSink(js);

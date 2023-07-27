@@ -1081,7 +1081,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
     // Notice here that, per the spec, the reason given in this call of abort is
     // intentionally ignored if there is already an abort pending.
-    return pendingAbort->whenResolved();
+    return pendingAbort->whenResolved(js);
   }
 
   bool wasAlreadyErroring = false;
@@ -2869,7 +2869,7 @@ public:
         // that the PumpToReader, and the sink it owns, are always accessed from the right
         // IoContext. Thw WeakRef ensures that if the PumpToReader is freed while
         // the JS continuation is pending, there won't be a dangling reference.
-        return ioContext.awaitJs(
+        return ioContext.awaitJs(js,
             pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(addWeakRef())));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
@@ -3357,7 +3357,7 @@ jsg::Promise<void> WritableStreamJsController::abort(
   // promise each time. That's a bit cumbersome here with jsg::Promise so we intentionally just
   // return a continuation branch off the same promise.
   KJ_IF_MAYBE(abortPromise, maybeAbortPromise) {
-    return abortPromise->whenResolved();
+    return abortPromise->whenResolved(js);
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {

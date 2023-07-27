@@ -205,17 +205,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
       // NOTE: In theory we should be using awaitIoLegacy() here since ReadableStreamSource is
       //   supposed to handle pending events on its own, but we also know that the HTTP client
       //   backing a KV namepsace is never implemented in local JavaScript, so whatever.
-      result = context.awaitIo(
+      result = context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [](kj::String text) {
+          [](jsg::Lock&, kj::String text) {
         return KvNamespace::GetResult(kj::mv(text));
       });
     } else if (typeName == "arrayBuffer") {
-      result = context.awaitIo(
+      result = context.awaitIo(js,
           stream->readAllBytes(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [](kj::Array<byte> text) {
+          [](jsg::Lock&, kj::Array<byte> text) {
         return KvNamespace::GetResult(kj::mv(text));
       });
     } else if (typeName == "json") {

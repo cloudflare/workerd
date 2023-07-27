@@ -842,7 +842,7 @@ private:
         };
 
         KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          auto promise = current->whenResolved().then(js, kj::mv(callNext));
+          auto promise = current->whenResolved(js).then(js, kj::mv(callNext));
           pushCurrent(js, promise.whenResolved(js));
           return kj::mv(promise);
         }
@@ -898,7 +898,7 @@ private:
         // If there is something on the pending stack, we are going to wait for that promise
         // to resolve then call callReturn.
         KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          return current->whenResolved().then(js, kj::mv(callReturn));
+          return current->whenResolved(js).then(js, kj::mv(callReturn));
         }
 
         // Otherwise, we call callReturn immediately.

@@ -40,7 +40,8 @@ public:
     auto& wrapper = static_cast<Self&>(*this);
     auto jsPromise = KJ_UNWRAP_OR_RETURN(wrapper.tryUnwrap(
         context, handle, (jsg::Promise<T>*)nullptr, parentObject), nullptr);
-    return IoContext::current().awaitJs(kj::mv(jsPromise));
+    auto& js = jsg::Lock::from(context->GetIsolate());
+    return IoContext::current().awaitJs(js, kj::mv(jsPromise));
   }
 
   template <typename T>

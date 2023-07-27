@@ -668,7 +668,8 @@ public:
     auto then = check(v8::Function::New(context,
         &thenWrap<TypeWrapper, T>, creator.orDefault({}), 1, v8::ConstructorBehavior::kThrow));
 
-    auto ret = check(promise.consumeHandle(context->GetIsolate())->Then(context, then));
+    auto& js = jsg::Lock::from(context->GetIsolate());
+    auto ret = check(promise.consumeHandle(js)->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
     // particular, if the C++ code marked the Promise handled, then the derived JavaScript promise

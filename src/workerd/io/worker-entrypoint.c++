@@ -476,7 +476,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       (Worker::Lock& lock) mutable -> kj::Promise<void> {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-    return context.awaitJs(lock.getGlobalScope()
+    return context.awaitJs(lock, lock.getGlobalScope()
         .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
   }));
 
