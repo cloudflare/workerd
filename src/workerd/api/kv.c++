@@ -118,7 +118,7 @@ jsg::Promise<KvNamespace::GetResult> KvNamespace::get(
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto resp = getWithMetadata(js, kj::mv(name), kj::mv(options));
-    return resp.then([](KvNamespace::GetWithMetadataResult result) {
+    return resp.then(js, [](jsg::Lock&, KvNamespace::GetWithMetadataResult result) {
       return kj::mv(result.value);
     });
   });

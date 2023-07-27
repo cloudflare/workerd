@@ -137,14 +137,14 @@ KJ_TEST("AES-CTR key wrap") {
       kj::heapArray(unwrappedKeyMaterial.asPtr()),
       kj::mv(importAlgorithm),
       true, kj::arr(kj::str("decrypt")))
-          .then([&] (jsg::Ref<CryptoKey> toWrap) {
+          .then(js, [&] (jsg::Lock&, jsg::Ref<CryptoKey> toWrap) {
     SubtleCrypto::EncryptAlgorithm enc;
     enc.name = kj::str("AES-CTR");
     enc.counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
     enc.length = 5;
     return subtle.wrapKey(isolateLock, kj::str("raw"), *toWrap, *wrappingKey,
                           kj::mv(enc), *jwkHandler);
-  }).then([&] (kj::Array<kj::byte> wrapped) {
+  }).then(js, [&] (jsg::Lock&, kj::Array<kj::byte> wrapped) {
     SubtleCrypto::EncryptAlgorithm enc;
     enc.name = kj::str("AES-CTR");
     enc.counter = kj::arr<uint8_t>(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
@@ -159,7 +159,7 @@ KJ_TEST("AES-CTR key wrap") {
                      kj::arr(kj::str("encrypt")), *jwkHandler);
   }).then(js, [&] (jsg::Lock& js, jsg::Ref<CryptoKey> unwrapped) {
     return subtle.exportKey(js, kj::str("raw"), *unwrapped);
-  }).then([&] (api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
+  }).then(js, [&] (jsg::Lock&, api::SubtleCrypto::ExportKeyData roundTrippedKeyMaterial) {
     KJ_ASSERT(roundTrippedKeyMaterial.get<kj::Array<kj::byte>>() == unwrappedKeyMaterial);
     completed = true;
   });
