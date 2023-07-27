@@ -12,16 +12,14 @@ jobs:
   test:
     strategy:
       matrix:
-        # TODO(soon): Using windows-2019 as build is broken on windows-latest runner due to another
-        # bazel bug https://github.com/bazelbuild/bazel/issues/18592
-        os: [ubuntu-20.04, macos-latest, windows-2019]
+        os: [ubuntu-20.04, macos-latest, windows-2022]
         include:
           - os-name: linux
             os: ubuntu-20.04
           - os-name: macOS
             os: macos-latest
           - os-name: windows
-            os: windows-2019
+            os: windows-2022
     runs-on: ${{ matrix.os }}
     name: test (${{ matrix.os-name }})
     steps:
