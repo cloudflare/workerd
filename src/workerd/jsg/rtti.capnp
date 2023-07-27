@@ -8,6 +8,10 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::jsg::rtti");
 $Cxx.allowCancellation;
+# TODO: I can't figure out how to make both capnpc-ts and capnpc-cpp generators to see this import
+# without code changes. capnpc-ts code is weird:
+# https://github.com/jdiaz5513/capnp-ts/blob/master/packages/capnpc-ts/src/generators.ts#L92
+# using Modules = import "/workerd/jsg/modules.capnp";
 
 struct Type {
   # A description of the C++ type.
@@ -277,10 +281,12 @@ struct Constructor {
 
 struct Module {
   specifier @0 :Text;
-  internal @1 :Bool;
+  # if anyone ever needs module type, it can be implemented by either fixing the Modules reference
+  # problem above or copying the original enum.
+  # type @1 :Modules.ModuleType;
   union {
-    structureName @2 :Text;
-    tsDeclarations @3 :Text;
+    structureName @1 :Text;
+    tsDeclarations @2 :Text;
   }
 }
 

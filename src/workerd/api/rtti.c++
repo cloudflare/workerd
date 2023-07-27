@@ -31,6 +31,12 @@
 
 #include <cloudflare/cloudflare.capnp.h>
 
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+#include <workerd/api/gpu/gpu.h>
+#else
+#define EW_WEBGPU_ISOLATE_TYPES
+#endif
+
 #define EW_TYPE_GROUP_FOR_EACH(F)                                              \
   F("dom-exception", jsg::DOMException)                                        \
   F("global-scope", EW_GLOBAL_SCOPE_ISOLATE_TYPES)                             \
@@ -59,7 +65,8 @@
   F("sql", EW_SQL_ISOLATE_TYPES)                                               \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
   F("node", EW_NODE_ISOLATE_TYPES)                                             \
-  F("rtti", EW_RTTI_ISOLATE_TYPES)
+  F("rtti", EW_RTTI_ISOLATE_TYPES)                                             \
+  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
 
 namespace workerd::api {
 
@@ -87,31 +94,30 @@ struct EncoderModuleRegistryImpl {
     kj::StringPtr tsDeclarations;
   };
   struct ModuleInfo {
-    ModuleInfo(kj::StringPtr specifier, bool internal, kj::OneOf<CppModuleContents,
+    ModuleInfo(kj::StringPtr specifier, jsg::ModuleType type, kj::OneOf<CppModuleContents,
                 TypeScriptModuleContents> contents)
         : specifier(specifier),
-          internal(internal),
+          type(type),
           contents(kj::mv(contents)) {}
 
     kj::StringPtr specifier;
-    bool internal;
+    jsg::ModuleType type;
     kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
   };
 
   void addBuiltinBundle(jsg::Bundle::Reader bundle) {
     for (auto module: bundle.getModules()) {
       TypeScriptModuleContents contents (module.getTsDeclaration());
-      ModuleInfo info (module.getName(), module.getInternal(), kj::mv(contents));
+      ModuleInfo info (module.getName(), module.getType(), kj::mv(contents));
       modules.add(kj::mv(info));
     }
   }
 
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier, jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
-    auto internal = type == jsg::ModuleRegistry::Type::INTERNAL;
     auto structureName = jsg::fullyQualifiedTypeName(typeid(T));
     CppModuleContents contents (kj::mv(structureName));
-    ModuleInfo info (specifier, internal, kj::mv(contents));
+    ModuleInfo info (specifier, type, kj::mv(contents));
     modules.add(kj::mv(info));
   }
 
@@ -181,7 +187,6 @@ public:
     for (auto moduleBuilder: modulesBuilder) {
       auto& module = registry.modules[i++];
       moduleBuilder.setSpecifier(module.specifier);
-      moduleBuilder.setInternal(module.internal);
       KJ_SWITCH_ONEOF(module.contents) {
         KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
           moduleBuilder.setStructureName(contents.structureName);
