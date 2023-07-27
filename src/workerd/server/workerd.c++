@@ -21,7 +21,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-#include <workerd/server/gpu.h>
+#include <workerd/api/gpu/gpu.h>
 #endif
 
 #if _WIN32
@@ -1309,7 +1309,7 @@ int main(int argc, char* argv[]) {
   workerd::server::CliMain mainObject(context, argv);
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  workerd::gpu::initialize();
+  workerd::api::gpu::initialize();
 #endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);

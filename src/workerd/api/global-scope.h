@@ -14,6 +14,9 @@
 #include "hibernation-event-params.h"
 #include "blob.h"
 #include "streams.h"
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+#include <workerd/api/gpu/gpu.h>
+#endif
 
 namespace workerd::api {
 
@@ -40,9 +43,15 @@ class Navigator: public jsg::Object {
   // A subset of the standard Navigator API.
 public:
   kj::StringPtr getUserAgent() { return "Cloudflare-Workers"_kj; }
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+  jsg::Ref<api::gpu::GPU> getGPU() { return jsg::alloc<api::gpu::GPU>(); }
+#endif
 
   JSG_RESOURCE_TYPE(Navigator) {
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+    JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
+#endif
   }
 };
 
@@ -479,6 +488,12 @@ public:
     JSG_NESTED_TYPE(FixedLengthStream);
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
+
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+    // WebGPU
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
+#endif
 
     JSG_TS_ROOT();
     JSG_TS_DEFINE(

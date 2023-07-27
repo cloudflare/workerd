@@ -30,17 +30,6 @@ selects.config_setting_group(
     ],
 )
 
-# Flag to enable WebGPU support via the Dawn library
-bool_flag(
-    name = "enable_experimental_webgpu",
-    build_setting_default = False,
-)
-
-config_setting(
-    name = "set_enable_experimental_webgpu",
-    flag_values = {"enable_experimental_webgpu": "True"},
-)
-
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
@@ -78,24 +67,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "webgpu",
-    srcs = [
-        "gpu.c++",
-    ],
-    hdrs = [
-        "gpu.h",
-    ],
-    target_compatible_with = select({
-        ":set_enable_experimental_webgpu": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    visibility = ["//visibility:public"],
-    deps = [
-        "@dawn",
-    ],
-)
-
-wd_cc_library(
     name = "server",
     srcs = [
         "server.c++",
@@ -108,7 +79,7 @@ wd_cc_library(
         "workerd-api.h",
     ],
     defines = select({
-        ":set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
+        "//src/workerd/io:set_enable_experimental_webgpu": ["WORKERD_EXPERIMENTAL_ENABLE_WEBGPU"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
@@ -118,10 +89,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp:capnpc",
-    ] + select({
-        ":set_enable_experimental_webgpu": [":webgpu"],
-        "//conditions:default": [],
-    }),
+    ],
 )
 
 wd_cc_capnp_library(

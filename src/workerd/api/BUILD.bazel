@@ -4,21 +4,41 @@ load("//:build/wd_test.bzl", "wd_test")
 
 filegroup(
     name = "srcs",
-    srcs = glob(
-        ["**/*.c++"],
-        exclude = [
-            "**/*test*.c++",
-        ],
-    ),
+    srcs = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": glob(
+            ["**/*.c++"],
+            exclude = [
+                "**/*test*.c++",
+            ],
+        ),
+        "//conditions:default": glob(
+            ["**/*.c++"],
+            exclude = [
+                "**/*test*.c++",
+                "gpu/*.c++",
+            ],
+        ),
+    }),
     visibility = ["//visibility:public"],
 )
 
 filegroup(
     name = "hdrs",
-    srcs = glob(
-        ["**/*.h"],
-        exclude = ["*test*.h"],
-    ),
+    srcs = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": glob(
+            ["**/*.h"],
+            exclude = [
+                "**/*test*.h",
+            ],
+        ),
+        "//conditions:default": glob(
+            ["**/*.h"],
+            exclude = [
+                "**/*test*.h",
+                "gpu/*.h",
+            ],
+        ),
+    }),
     visibility = ["//visibility:public"],
 )
 
