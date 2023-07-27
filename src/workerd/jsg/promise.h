@@ -299,7 +299,7 @@ public:
     // returned by whenResolved().
     auto promise = Promise<void>(js.v8Isolate, getInner(js));
     if (markedAsHandled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -412,11 +412,6 @@ public:
   //   require a lock. These versions also do not pass a `Lock` to the callback.
   // TODO(clenaup): Update all call sites to the version that passes locks. Then, remove these and
   //   also remove the `isolate` parameter from this class.
-
-
-  void markAsHandled() KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    markAsHandled(Lock::from(deprecatedIsolate));
-  }
 
   template <typename Func, typename ErrorFunc>
   auto then(Func&& func, ErrorFunc&& errorFunc)

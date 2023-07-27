@@ -392,7 +392,7 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
     return js.resolvedPromise();
   }), JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
     return js.rejectedPromise<void>(kj::mv(exception));
-  })).markAsHandled();
+  })).markAsHandled(js);
   return kj::mv(transform.readable);
 }
 

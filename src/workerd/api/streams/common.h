@@ -797,7 +797,7 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
     bool handled) {
   auto prp = js.newPromiseAndResolver<T>();
   if (handled) {
-    prp.promise.markAsHandled();
+    prp.promise.markAsHandled(js);
   }
   prp.resolver.reject(reason);
   return kj::mv(prp.promise);

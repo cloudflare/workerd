@@ -116,7 +116,7 @@ jsg::Ref<Socket> setupSocket(
   });
 
   auto closedPrPair = js.newPromiseAndResolver<void>();
-  closedPrPair.promise.markAsHandled();
+  closedPrPair.promise.markAsHandled(js);
 
   ioContext.awaitIo(js, kj::mv(disconnectedPaf.promise),
       [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, bool canceled) mutable {
@@ -322,11 +322,11 @@ void Socket::handleProxyStatus(
       auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
         kj::str(JSG_EXCEPTION(Error), msg));
       resolveFulfiller(js, exc);
-      readable->getController().cancel(js, nullptr).markAsHandled();
-      writable->getController().abort(js, nullptr).markAsHandled();
+      readable->getController().cancel(js, nullptr).markAsHandled(js);
+      writable->getController().abort(js, nullptr).markAsHandled(js);
     }
   });
-  result.markAsHandled();
+  result.markAsHandled(js);
 }
 
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
@@ -335,7 +335,7 @@ void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
   onEof.then(js,
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
     return ref->maybeCloseWriteSide(js);
-  })).markAsHandled();
+  })).markAsHandled(js);
 }
 
 jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {

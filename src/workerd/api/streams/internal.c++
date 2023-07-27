@@ -641,7 +641,7 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   }
 
   auto prp = js.newPromiseAndResolver<void>();
-  prp.promise.markAsHandled();
+  prp.promise.markAsHandled(js);
 
   auto lock = ReaderLocked(reader, kj::mv(prp.resolver),
       IoContext::current().addObject(kj::heap<kj::Canceler>()));
@@ -796,7 +796,7 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       writerLock->setReadyFulfiller(prp);
       return;
     }
@@ -830,7 +830,7 @@ jsg::Promise<void> WritableStreamInternalController::close(
     KJ_CASE_ONEOF(writable, Writable) {
       auto prp = js.newPromiseAndResolver<void>();
       if (markAsHandled) {
-        prp.promise.markAsHandled();
+        prp.promise.markAsHandled(js);
       }
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -864,7 +864,7 @@ jsg::Promise<void> WritableStreamInternalController::flush(
     KJ_CASE_ONEOF(writable, Writable) {
       auto prp = js.newPromiseAndResolver<void>();
       if (markAsHandled) {
-        prp.promise.markAsHandled();
+        prp.promise.markAsHandled(js);
       }
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -898,7 +898,7 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     pendingAbort->reject = options.reject;
     auto promise = pendingAbort->whenResolved();
     if (options.handled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -916,7 +916,7 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     maybePendingAbort = PendingAbort(js, reason, options.reject);
     auto promise = KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
     if (options.handled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -1031,7 +1031,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // pending Pipe event we queue below.
   auto prp = js.newPromiseAndResolver<void>();
   if (pipeThrough) {
-    prp.promise.markAsHandled();
+    prp.promise.markAsHandled(js);
   }
   queue.push_back(WriteEvent {
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -1096,10 +1096,10 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   auto closedPrp = js.newPromiseAndResolver<void>();
-  closedPrp.promise.markAsHandled();
+  closedPrp.promise.markAsHandled(js);
 
   auto readyPrp = js.newPromiseAndResolver<void>();
-  readyPrp.promise.markAsHandled();
+  readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 

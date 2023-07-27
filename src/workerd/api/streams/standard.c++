@@ -184,7 +184,7 @@ bool ReadableLockImpl<Controller>::lockReader(
   }
 
   auto prp = js.newPromiseAndResolver<void>();
-  prp.promise.markAsHandled();
+  prp.promise.markAsHandled(js);
 
   auto lock = ReaderLocked(reader, kj::mv(prp.resolver));
 
@@ -317,9 +317,9 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   auto closedPrp = js.newPromiseAndResolver<void>();
-  closedPrp.promise.markAsHandled();
+  closedPrp.promise.markAsHandled(js);
   auto readyPrp = js.newPromiseAndResolver<void>();
-  readyPrp.promise.markAsHandled();
+  readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 
@@ -3486,7 +3486,7 @@ void WritableStreamJsController::maybeRejectReadyPromise(
       maybeRejectPromise<void>(writerLock->getReadyFulfiller(), reason);
     } else {
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       prp.resolver.reject(reason);
       writerLock->setReadyFulfiller(prp);
     }
@@ -3609,7 +3609,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     if (!preventClose) {
       auto promise = close(js);
       if (pipeThrough) {
-        promise.markAsHandled();
+        promise.markAsHandled(js);
       }
       return kj::mv(promise);
     }
@@ -3690,7 +3690,7 @@ void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpres
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       return writerLock->setReadyFulfiller(prp);
     }
 
@@ -3887,7 +3887,7 @@ void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBa
     prp->resolver.resolve();
   }
   maybeBackpressureChange = js.newPromiseAndResolver<void>();
-  KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled();
+  KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled(js);
   backpressure = newBackpressure;
 }
 
