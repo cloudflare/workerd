@@ -124,7 +124,7 @@ jsg::Ref<Socket> setupSocket(
     // if the application actually fetches the `closed` promise, then the JSG glue will prevent
     // the socket from being GC'd until that promise resolves, so it won't be canceled.
     if (!canceled) {
-      resolver.resolve();
+      resolver.resolve(js);
     }
   }, [resolver = closedPrPair.resolver.addRef(js)](jsg::Lock& js, jsg::Value exception) mutable {
     resolver.reject(js, exception.getHandle(js));
@@ -282,7 +282,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       tlsStarter = kj::mv(tlsStarter)](jsg::Lock& js) mutable {
     writable->removeSink(js);
     readable = readable->detach(js, true);
-    closedResolver.resolve();
+    closedResolver.resolve(js);
 
     auto acceptedHostname = domain.asPtr();
     KJ_IF_MAYBE(s, tlsOptions) {
@@ -358,7 +358,7 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
       JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js, jsg::Value&& exc) {
     ref->closedResolver.reject(js, exc.getHandle(js.v8Isolate));
   })).then(js, JSG_VISITABLE_LAMBDA((ref=JSG_THIS), (ref), (jsg::Lock& js) {
-    ref->closedResolver.resolve();
+    ref->closedResolver.resolve(js);
   }));
 }
 

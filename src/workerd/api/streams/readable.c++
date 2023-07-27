@@ -319,9 +319,9 @@ jsg::Promise<void> ReadableStream::onEof(jsg::Lock& js) {
   return kj::mv(KJ_ASSERT_NONNULL(eofResolverPair).promise);
 }
 
-void ReadableStream::signalEof() {
+void ReadableStream::signalEof(jsg::Lock& js) {
   KJ_IF_MAYBE(pair, eofResolverPair) {
-    pair->resolver.resolve();
+    pair->resolver.resolve(js);
   }
 }
 

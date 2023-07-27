@@ -99,7 +99,7 @@ public:
 
 private:
   void doCancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
-  void doClose();
+  void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   class PipeLocked : public PipeController {
@@ -116,7 +116,7 @@ private:
 
     void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) override;
 
-    void close() override;
+    void close(jsg::Lock& js) override;
 
     void error(jsg::Lock& js, v8::Local<v8::Value> reason) override;
 
@@ -217,7 +217,7 @@ private:
                                 .reject = false,
                                 .handled = false
                               });
-  void doClose();
+  void doClose(jsg::Lock& js);
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
   void ensureWriting(jsg::Lock& js);
   jsg::Promise<void> writeLoop(jsg::Lock& js, IoContext& ioContext);

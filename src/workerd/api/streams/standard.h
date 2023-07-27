@@ -285,7 +285,7 @@ public:
 
   WriteRequest dequeueWriteRequest();
 
-  void doClose();
+  void doClose(jsg::Lock& js);
 
   void doError(jsg::Lock& js, v8::Local<v8::Value> reason);
 

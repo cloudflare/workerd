@@ -22,7 +22,7 @@ void ValueQueue::ReadRequest::resolve(jsg::Lock&, jsg::Value value) {
 }
 
 void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
-  resolver.reject(value.getHandle(js));
+  resolver.reject(js, value.getHandle(js));
 }
 
 #pragma endregion ValueQueue::ReadRequest
@@ -287,7 +287,7 @@ void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
 }
 
 void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
-  resolver.reject(value.getHandle(js));
+  resolver.reject(js, value.getHandle(js));
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
