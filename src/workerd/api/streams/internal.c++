@@ -914,7 +914,7 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     }
 
     maybePendingAbort = PendingAbort(js, reason, options.reject);
-    auto promise = KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
+    auto promise = KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved(js);
     if (options.handled) {
       promise.markAsHandled(js);
     }

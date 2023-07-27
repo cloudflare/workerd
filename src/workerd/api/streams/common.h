@@ -584,8 +584,8 @@ public:
 
     void fail(v8::Local<v8::Value> reason);
 
-    inline jsg::Promise<void> whenResolved() {
-      return promise.whenResolved();
+    inline jsg::Promise<void> whenResolved(jsg::Lock& js) {
+      return promise.whenResolved(js);
     }
 
     inline jsg::Promise<void> whenResolved(auto&& func) {

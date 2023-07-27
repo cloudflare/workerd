@@ -208,7 +208,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
       // special handling of promises, where it tries to catch exceptions and merge them into the
       // promise. We don't need to do this, because this is being called as a .then() which already
       // catches exceptions and does the right thing.
-      return v8::Local<v8::Value>(callFunc().consumeHandle(isolate));
+      return v8::Local<v8::Value>(callFunc().consumeHandle(Lock::from(isolate)));
     } else if constexpr (isV8Ref<Output>()) {
       return callFunc().getHandle(isolate);
     } else {
@@ -360,7 +360,7 @@ public:
       // Resolve to another Promise.
       auto isolate = js.v8Isolate;
       check(v8Resolver.getHandle(isolate)->Resolve(
-          js.v8Context(), promise.consumeHandle(isolate)));
+          js.v8Context(), promise.consumeHandle(js)));
     }
 
     void reject(Lock& js, v8::Local<v8::Value> exception) {
@@ -428,18 +428,6 @@ public:
   auto catch_(ErrorFunc&& errorFunc)
       KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return catch_<false>(Lock::from(deprecatedIsolate), kj::fwd<ErrorFunc>(errorFunc));
-  }
-  Promise<void> whenResolved()
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return whenResolved(Lock::from(deprecatedIsolate));
-  }
-  v8::Local<v8::Promise> consumeHandle(v8::Isolate* isolate)
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return consumeHandle(Lock::from(isolate));
-  }
-  kj::Maybe<T> tryConsumeResolved()
-      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
-    return tryConsumeResolved(Lock::from(deprecatedIsolate));
   }
 
 private:

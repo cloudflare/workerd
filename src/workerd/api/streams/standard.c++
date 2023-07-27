@@ -862,7 +862,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
         // If we're already waiting for cancel to complete, just return the
         // already existing pending promise.
         // This shouldn't happen but we handle the case anyway, just to be safe.
-        return pendingCancel->promise.whenResolved();
+        return pendingCancel->promise.whenResolved(js);
       }
 
       auto prp = js.newPromiseAndResolver<void>();
@@ -870,7 +870,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
         .fulfiller = kj::mv(prp.resolver),
         .promise = kj::mv(prp.promise),
       };
-      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved();
+      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
       doCancel(js, kj::mv(self), reason);
       return kj::mv(promise);
     }
@@ -1097,7 +1097,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   );
 
   maybePendingAbort = PendingAbort(js, reason, wasAlreadyErroring);
-  return KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
+  return KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved(js);
 }
 
 template <typename Self>
@@ -3362,16 +3362,16 @@ jsg::Promise<void> WritableStreamJsController::abort(
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       maybeAbortPromise = js.resolvedPromise();
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       // Per the spec, if the stream is errored, we are to return a resolved promise.
       maybeAbortPromise = js.resolvedPromise();
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
     KJ_CASE_ONEOF(controller, Controller) {
       maybeAbortPromise = controller->abort(js, reason.orDefault(js.v8Undefined()));
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
   }
   KJ_UNREACHABLE;
@@ -3792,7 +3792,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(
 
     if (backpressure) {
       auto chunkRef = js.v8Ref(chunk);
-      return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved().then(js,
+      return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
           JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref=JSG_THIS),
                               (chunkRef, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
         KJ_IF_MAYBE(writableController, ref->tryGetWritableController()) {
@@ -3842,7 +3842,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
   KJ_ASSERT(backpressure);
   setBackpressure(js, false);
-  return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved();
+  return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::cancel(

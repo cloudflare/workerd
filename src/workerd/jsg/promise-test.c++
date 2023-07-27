@@ -14,36 +14,36 @@ int promiseTestResult = 0;
 kj::String catchTestResult;
 
 struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
-  Promise<kj::String> makePromise(Lock& js) {
+  Promise<kj::String> makePromise(jsg::Lock& js) {
     auto [ p, r ] = js.newPromiseAndResolver<int>();
     resolver = kj::mv(r);
-    return p.then([](int i) { return i * 2; })
-        .then(js, [](Lock& js, int i) { return js.resolvedPromise(i + 2); })
-        .then([](int i) { return kj::str(i); });
+    return p.then(js, [](jsg::Lock&, int i) { return i * 2; })
+        .then(js, [](jsg::Lock& js, int i) { return js.resolvedPromise(i + 2); })
+        .then(js, [](jsg::Lock& js, int i) { return kj::str(i); });
   }
 
   void resolvePromise(int i) {
     KJ_ASSERT_NONNULL(resolver).resolve(kj::mv(i));
   }
 
-  void setResult(Promise<kj::String> promise) {
+  void setResult(jsg::Lock& js, Promise<kj::String> promise) {
     // Throwing away the result of `.then()` dosen't cancel it!
-    promise.then([](kj::String str) {
+    promise.then(js, [](jsg::Lock&, kj::String str) {
       promiseTestResult = str.parseAs<int>();
-    }).then([]() {
+    }).then(js, [](jsg::Lock&) {
       promiseTestResult += 60000;
     });
   }
 
-  void catchIt(Lock& js, Promise<int> promise) {
-    promise.catch_(js, [](Lock& js, Value value) -> int {
+  void catchIt(jsg::Lock& js, Promise<int> promise) {
+    promise.catch_(js, [](jsg::Lock& js, Value value) -> int {
       JSG_FAIL_REQUIRE(Error, kj::str(value.getHandle(js.v8Isolate)));
-    }).then(js, [](Lock& js, int i) {
+    }).then(js, [](jsg::Lock& js, int i) {
       KJ_FAIL_REQUIRE("shouldn't get here");
       return kj::str("nope");
-    }, [](Lock& js, Value value) {
+    }, [](jsg::Lock& js, Value value) {
       return kj::str(value.getHandle(js.v8Isolate));
-    }).then([](kj::String s) {
+    }).then(js, [](jsg::Lock&, kj::String s) {
       catchTestResult = kj::mv(s);
     });
   }
@@ -52,35 +52,35 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     return rejectedPromise<kj::String>(isolate, kj::mv(exception));
   }
 
-  Promise<kj::String> makeRejectedKj(Lock& js) {
+  Promise<kj::String> makeRejectedKj(jsg::Lock& js) {
     return js.rejectedPromise<kj::String>(JSG_KJ_EXCEPTION(FAILED, TypeError, "bar"));
   }
 
-  void testConsumeResolved(Lock& js) {
+  void testConsumeResolved(jsg::Lock& js) {
     auto [ promise, resolver ] = js.newPromiseAndResolver<int>();
-    KJ_EXPECT(promise.tryConsumeResolved() == nullptr);
+    KJ_EXPECT(promise.tryConsumeResolved(js) == nullptr);
     resolver.resolve(123);
-    KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved()) == 123);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved(js)) == 123);
 
     KJ_EXPECT(js.rejectedPromise<kj::String>(v8Str(js.v8Isolate, "foo"))
-        .tryConsumeResolved() == nullptr);
+        .tryConsumeResolved(js) == nullptr);
   }
 
-  void whenResolved(jsg::Promise<int> promise, v8::Isolate* isolate) {
+  void whenResolved(jsg::Lock& js, jsg::Promise<int> promise) {
     // The returned promise should resolve to undefined.
 
     uint resolved = 0;
 
-    auto handle = promise.whenResolved().then([&resolved]() {
+    auto handle = promise.whenResolved(js).then(js, [&resolved](jsg::Lock&) {
       resolved++;
-    }).consumeHandle(isolate);
+    }).consumeHandle(js);
 
-    promise.then([&resolved](int v) {
+    promise.then(js, [&resolved](jsg::Lock&, int v) {
       KJ_ASSERT(v == 1);
       resolved++;
     });
 
-    isolate->PerformMicrotaskCheckpoint();
+    js.v8Isolate->PerformMicrotaskCheckpoint();
     KJ_ASSERT(resolved == 2);
 
     {
