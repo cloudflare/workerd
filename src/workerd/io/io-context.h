@@ -563,7 +563,7 @@ public:
   // refactored to use `awaitIo()`.
 
   template <typename T>
-  kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Promise<T> promise);
+  kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
   // Returns a KJ promise that resolves when a particular JavaScript promise completes.
   //
   // The JS promise must complete within this IoContext. The KJ promise will reject
@@ -1379,7 +1379,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 }
 
 template <typename T>
-kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Promise<T> jsPromise) {
+kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
   struct RefcountedFulfiller: public IoContext::Finalizeable, public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
@@ -1416,7 +1416,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Promise<T> jsPromi
 
   auto errorHandler =
       [fulfiller = addObject(kj::addRef(*fulfiller))]
-      (jsg::Value jsExceptionRef) mutable {
+      (jsg::Lock&, jsg::Value jsExceptionRef) mutable {
     // Note: `context` can possibly be different than the one that started the wait, if the
     // promise resolved from a different context. In that case the use of `fulfiller` will
     // throw later on. But it's OK to use the wrong context up until that point.
@@ -1439,13 +1439,13 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Promise<T> jsPromi
   };
 
   if constexpr (jsg::isVoid<T>()) {
-    jsPromise.then([fulfiller = addObject(kj::mv(fulfiller))]() mutable {
+    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&) mutable {
       fulfiller->fulfiller->fulfill();
       fulfiller->isDone = true;
     }, kj::mv(errorHandler));
   } else {
-    jsPromise.then([fulfiller = addObject(kj::mv(fulfiller))]
-                    (T&& result) mutable {
+    jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))]
+                    (jsg::Lock&, T&& result) mutable {
       if constexpr (isIoOwn<T>()) {
         fulfiller->fulfiller->fulfill(kj::mv(*result));
       } else {
@@ -1629,7 +1629,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
               "too long. The call was canceled and the Durable Object was reset."));
       });
 
-      return awaitJs(kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
+      return awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
     }, kj::mv(inputLock));
   }).then([this, cs = kj::mv(cs), resolver = kj::mv(resolver),
            maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
