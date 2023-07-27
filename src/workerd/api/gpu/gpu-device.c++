@@ -6,8 +6,10 @@
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
 #include "gpu-buffer.h"
+#include "gpu-command-encoder.h"
 #include "gpu-sampler.h"
 #include "gpu-utils.h"
+#include "workerd/jsg/exception.h"
 
 namespace workerd::api::gpu {
 
@@ -225,7 +227,7 @@ GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor descriptor) {
   }
 
   kj::Vector<wgpu::BindGroupLayout> bindGroupLayouts;
-  for (auto &l: descriptor.bindGroupLayouts) {
+  for (auto &l : descriptor.bindGroupLayouts) {
     bindGroupLayouts.add(*l);
   }
 
@@ -234,6 +236,59 @@ GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor descriptor) {
 
   auto layout = device_.CreatePipelineLayout(&desc);
   return jsg::alloc<GPUPipelineLayout>(kj::mv(layout));
+}
+
+jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
+    jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
+  wgpu::CommandEncoderDescriptor desc{};
+
+  KJ_IF_MAYBE (d, descriptor) {
+    KJ_IF_MAYBE (label, d->label) {
+      desc.label = label->cStr();
+    }
+  }
+
+  auto encoder = device_.CreateCommandEncoder(&desc);
+  return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder));
+}
+
+jsg::Ref<GPUComputePipeline>
+GPUDevice::createComputePipeline(GPUComputePipelineDescriptor descriptor) {
+  wgpu::ComputePipelineDescriptor desc{};
+
+  KJ_IF_MAYBE (label, descriptor.label) {
+    desc.label = label->cStr();
+  }
+
+  desc.compute.module = *descriptor.compute.module;
+  desc.compute.entryPoint = descriptor.compute.entryPoint.cStr();
+
+  kj::Vector<wgpu::ConstantEntry> constants;
+  KJ_IF_MAYBE (cDict, descriptor.compute.constants) {
+    for (auto &f : cDict->fields) {
+      wgpu::ConstantEntry e;
+      e.key = f.name.cStr();
+      e.value = f.value;
+      constants.add(kj::mv(e));
+    }
+  }
+
+  desc.compute.constants = constants.begin();
+  desc.compute.constantCount = constants.size();
+
+  KJ_SWITCH_ONEOF(descriptor.layout) {
+    KJ_CASE_ONEOF(autoLayoutMode, kj::String) {
+      JSG_REQUIRE(autoLayoutMode == "auto", TypeError,
+                  "unknown auto layout mode", autoLayoutMode);
+      desc.layout = nullptr;
+    }
+    KJ_CASE_ONEOF(layout, jsg::Ref<GPUPipelineLayout>) {
+      desc.layout = *layout;
+    }
+  }
+
+  auto pipeline = device_.CreateComputePipeline(&desc);
+  return jsg::alloc<GPUComputePipeline>(kj::mv(pipeline));
 }
 
 } // namespace workerd::api::gpu
