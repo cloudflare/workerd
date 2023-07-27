@@ -104,16 +104,20 @@ jsg::Ref<Socket> setupSocket(
     fulfiller->fulfill(true);
   });
 
-  auto watchForDisconnectTask = connection->whenWriteDisconnected()
-      .then([&disconnectedFulfiller]() {
-    disconnectedFulfiller.fulfill(false);
-  }, [&disconnectedFulfiller](kj::Exception&& e) {
-    disconnectedFulfiller.reject(kj::mv(e));
-  }).eagerlyEvaluate(
-        [deferredCancelDisconnected = kj::mv(deferredCancelDisconnected)](kj::Exception&& e) {
-    // Should never get here because we caught exceptions above.
-    LOG_EXCEPTION("socketWatchForDisconnectTask", e);
-  });
+  static auto constexpr handleDisconnected =
+      [](kj::AsyncIoStream& connection, kj::PromiseFulfiller<bool>& fulfiller)
+          -> kj::Promise<void> {
+    try {
+      co_await connection.whenWriteDisconnected();
+      fulfiller.fulfill(false);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      fulfiller.reject(kj::mv(exception));
+    }
+  };
+
+  auto watchForDisconnectTask = handleDisconnected(*connection, disconnectedFulfiller)
+      .attach(kj::mv(deferredCancelDisconnected));
 
   auto closedPrPair = js.newPromiseAndResolver<void>();
   closedPrPair.promise.markAsHandled(js);
