@@ -809,12 +809,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__proc-macro-hack-0.5.20-deprecated",
-        sha256 = "dc375e1527247fe1a97d8b7156678dfe7c1af2fc075c9a4db3690ecd2a148068",
+        name = "crates_vendor__proc-macro-hack-0.5.19",
+        sha256 = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5",
         type = "tar.gz",
-        urls = ["https://crates.io/api/v1/crates/proc-macro-hack/0.5.20+deprecated/download"],
-        strip_prefix = "proc-macro-hack-0.5.20+deprecated",
-        build_file = Label("@workerd//rust-deps/crates:BUILD.proc-macro-hack-0.5.20+deprecated.bazel"),
+        urls = ["https://crates.io/api/v1/crates/proc-macro-hack/0.5.19/download"],
+        strip_prefix = "proc-macro-hack-0.5.19",
+        build_file = Label("@workerd//rust-deps/crates:BUILD.proc-macro-hack-0.5.19.bazel"),
     )
 
     maybe(
