@@ -413,27 +413,37 @@ public:
   // TODO(clenaup): Update all call sites to the version that passes locks. Then, remove these and
   //   also remove the `isolate` parameter from this class.
 
-  void markAsHandled() { markAsHandled(Lock::from(deprecatedIsolate)); }
+
+  void markAsHandled() KJ_DEPRECATED("Use variant that takes Lock as the first param") {
+    markAsHandled(Lock::from(deprecatedIsolate));
+  }
+
   template <typename Func, typename ErrorFunc>
-  auto then(Func&& func, ErrorFunc&& errorFunc) {
+  auto then(Func&& func, ErrorFunc&& errorFunc)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return then<false>(Lock::from(deprecatedIsolate),
         kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc));
   }
   template <typename Func>
-  auto then(Func&& func) {
+  auto then(Func&& func)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return then<false>(Lock::from(deprecatedIsolate), kj::fwd<Func>(func));
   }
   template <typename ErrorFunc>
-  auto catch_(ErrorFunc&& errorFunc) {
+  auto catch_(ErrorFunc&& errorFunc)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return catch_<false>(Lock::from(deprecatedIsolate), kj::fwd<ErrorFunc>(errorFunc));
   }
-  Promise<void> whenResolved() {
+  Promise<void> whenResolved()
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return whenResolved(Lock::from(deprecatedIsolate));
   }
-  v8::Local<v8::Promise> consumeHandle(v8::Isolate* isolate) {
+  v8::Local<v8::Promise> consumeHandle(v8::Isolate* isolate)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return consumeHandle(Lock::from(isolate));
   }
-  kj::Maybe<T> tryConsumeResolved() {
+  kj::Maybe<T> tryConsumeResolved()
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return tryConsumeResolved(Lock::from(deprecatedIsolate));
   }
 
