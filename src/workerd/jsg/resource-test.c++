@@ -8,8 +8,9 @@ namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
+class ContextGlobalObject: public Object, public ContextGlobal { };
 
-struct BoxContext: public Object {
+struct BoxContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(BoxContext) {
     JSG_NESTED_TYPE(NumberBox);
     JSG_NESTED_TYPE(BoxBox);
@@ -86,7 +87,7 @@ struct InheritsMixin: public Object, public Mixin {
     JSG_METHOD(getValue);
   }
 };
-struct InheritsMixinContext: public Object {
+struct InheritsMixinContext: public ContextGlobalObject {
   Ref<InheritsMixin> makeInheritsMixin(int i) {
     return jsg::alloc<InheritsMixin>(i);
   }
@@ -122,7 +123,7 @@ struct PrototypePropertyObject: public Object {
   }
 };
 
-struct PropContext: public Object {
+struct PropContext: public ContextGlobalObject {
   PropContext(): contextProperty(kj::str("default-context-property-value")) {}
 
   kj::StringPtr getContextProperty() { return contextProperty; }
@@ -190,7 +191,7 @@ KJ_TEST("context methods and properties") {
 
 // ========================================================================================
 
-struct NonConstructibleContext: public Object {
+struct NonConstructibleContext: public ContextGlobalObject {
   struct NonConstructible: public Object {
     NonConstructible(double x): x(x) {}
 
@@ -234,7 +235,7 @@ KJ_TEST("non-constructible types can't be constructed") {
 
 // ========================================================================================
 
-struct IterableContext: public Object {
+struct IterableContext: public ContextGlobalObject {
   class Iterable: public Object {
   public:
     static Ref<Iterable> constructor() { return jsg::alloc<Iterable>(); }
@@ -324,7 +325,7 @@ KJ_TEST("Iterables can be iterated") {
 
 // ========================================================================================
 
-struct StaticContext: public Object {
+struct StaticContext: public ContextGlobalObject {
   struct StaticConstants: public Object {
     static Ref<StaticConstants> constructor() { return jsg::alloc<StaticConstants>(); }
 
@@ -511,7 +512,7 @@ KJ_TEST("Static methods can be monkey-patched") {
 
 // ========================================================================================
 
-struct ReflectionContext: public Object {
+struct ReflectionContext: public ContextGlobalObject {
   struct Super: public Object {
     JSG_RESOURCE_TYPE(Super) {}
   };
@@ -574,7 +575,7 @@ KJ_TEST("PropertyReflection works") {
 
 // ========================================================================================
 
-struct InjectLockContext: public Object {
+struct InjectLockContext: public ContextGlobalObject {
   struct Thingy: public Object {
     Thingy(int val, v8::Isolate* v8Isolate): val(val), v8Isolate(v8Isolate) {}
     int val;

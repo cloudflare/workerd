@@ -24,7 +24,7 @@ namespace {
 
 jsg::V8System v8System;
 
-struct ActorStateContext : public jsg::Object {
+struct ActorStateContext: public jsg::Object, public jsg::ContextGlobal {
   JSG_RESOURCE_TYPE(ActorStateContext) {
   }
 };

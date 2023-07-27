@@ -16,7 +16,7 @@ struct SelfStruct {
   JSG_STRUCT(self, i);
 };
 
-struct StructContext: public Object {
+struct StructContext: public Object, public ContextGlobal {
   kj::String readTestStruct(TestStruct s) {
     return kj::str(s.str, ", ", s.num, ", ", s.box->value);
   }

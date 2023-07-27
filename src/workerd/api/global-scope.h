@@ -104,7 +104,7 @@ private:
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
-class WorkerGlobalScope: public EventTarget {
+class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
 public:
   jsg::Unimplemented importScripts(kj::String s) { return {}; };
 

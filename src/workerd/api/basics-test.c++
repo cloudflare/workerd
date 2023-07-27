@@ -20,7 +20,7 @@ namespace {
 
 jsg::V8System v8System;
 
-struct BasicsContext: public jsg::Object {
+struct BasicsContext: public jsg::Object, public jsg::ContextGlobal {
 
   bool test(jsg::Lock& js) {
 

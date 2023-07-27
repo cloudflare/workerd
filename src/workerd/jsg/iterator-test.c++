@@ -9,7 +9,7 @@ namespace {
 
 V8System v8System;
 
-struct GeneratorContext: public Object {
+struct GeneratorContext: public Object, public ContextGlobal {
   uint generatorTest(Lock& js, Generator<kj::String> generator) {
 
     KJ_DEFER(generator.forEach(js, [](auto& js, auto, auto&) {

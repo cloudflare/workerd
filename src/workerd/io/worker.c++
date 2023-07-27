@@ -1223,7 +1223,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
 
         KJ_CASE_ONEOF(modulesSource, ModulesSource) {
           auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-          auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext).getModuleRegistry();
+          auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
           impl->configureDynamicImports(lock, modules);
           modulesSource.compileModules(lock, *isolate->apiIsolate);
           impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
@@ -1422,8 +1422,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           unboundScript.run(lock.v8Context());
         }
         KJ_CASE_ONEOF(mainModule, kj::Path) {
-          // const_cast OK because we hold the lock.
-          auto& registry = jsContext->getModuleRegistry();
+          auto& registry = (*jsContext)->getModuleRegistry();
           KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");
