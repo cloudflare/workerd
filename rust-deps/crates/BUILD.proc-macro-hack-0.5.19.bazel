@@ -39,9 +39,9 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "0.5.19",
     deps = [
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:build_script_build",
+        "@crates_vendor__proc-macro-hack-0.5.19//:build_script_build",
     ],
 )
 
@@ -72,7 +72,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.5.20+deprecated",
+    version = "0.5.19",
     visibility = ["//visibility:private"],
 )
 

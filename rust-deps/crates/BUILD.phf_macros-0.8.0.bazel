@@ -31,7 +31,7 @@ rust_proc_macro(
     crate_root = "src/lib.rs",
     edition = "2018",
     proc_macro_deps = [
-        "@crates_vendor__proc-macro-hack-0.5.20-deprecated//:proc_macro_hack",
+        "@crates_vendor__proc-macro-hack-0.5.19//:proc_macro_hack",
     ],
     rustc_flags = ["--cap-lints=allow"],
     tags = [
