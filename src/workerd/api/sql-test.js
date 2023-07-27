@@ -504,6 +504,48 @@ async function test(storage) {
     assert.equal(getI(), 2);
   }
 
+  // Test joining two tables with overlapping names
+  {
+    sql.exec(`CREATE TABLE abc (a INT, b INT, c INT);`)
+    sql.exec(`CREATE TABLE cde (c INT, d INT, e INT);`)
+    sql.exec(`INSERT INTO abc VALUES (1,2,3),(4,5,6);`)
+    sql.exec(`INSERT INTO cde VALUES (7,8,9),(1,2,3);`)
+
+    const stmt = sql.prepare(`SELECT * FROM abc, cde`)
+
+    // In normal iteration, data is lost
+    const objResults = Array.from(stmt())
+    assert.equal(Object.values(objResults[0]).length, 5) // duplicate column 'c' dropped
+    assert.equal(Object.values(objResults[1]).length, 5) // duplicate column 'c' dropped
+    assert.equal(Object.values(objResults[2]).length, 5) // duplicate column 'c' dropped
+    assert.equal(Object.values(objResults[3]).length, 5) // duplicate column 'c' dropped
+
+    assert.equal(objResults[0].c, 7) // Value of 'c' is the second in the join
+    assert.equal(objResults[1].c, 1) // Value of 'c' is the second in the join
+    assert.equal(objResults[2].c, 7) // Value of 'c' is the second in the join
+    assert.equal(objResults[3].c, 1) // Value of 'c' is the second in the join
+
+    // Iterator has a 'columnNames' property, with .raw() that lets us get the full data
+    const iterator = stmt();
+    assert.deepEqual(iterator.columnNames, ["a","b","c","c","d","e"])
+    const rawResults = Array.from(iterator.raw())
+    assert.equal(rawResults.length, 4)
+    assert.deepEqual(rawResults[0], [1,2,3,7,8,9])
+    assert.deepEqual(rawResults[1], [1,2,3,1,2,3])
+    assert.deepEqual(rawResults[2], [4,5,6,7,8,9])
+    assert.deepEqual(rawResults[3], [4,5,6,1,2,3])
+
+    // Once an iterator is consumed, it can no longer access the columnNames.
+    requireException(() => {
+      iterator.columnNames
+    }, "Error: Cannot call .getColumnNames after Cursor iterator has been consumed.")
+
+    // Also works with cursors returned from .exec
+    const execIterator = sql.exec(`SELECT * FROM abc, cde`)
+    assert.deepEqual(execIterator.columnNames, ["a","b","c","c","d","e"])
+    assert.equal(Array.from(execIterator.raw())[0].length, 6);
+  }
+
   await scheduler.wait(1);
 
   // Test for bug where a cursor constructed from a prepared statement didn't have a strong ref

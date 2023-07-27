@@ -118,6 +118,20 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
   return jsg::alloc<RawIterator>(JSG_THIS);
 }
 
+// Returns the set of column names for the current Cursor. An exception will be thrown if the
+// iterator has already been fully consumed. The resulting columns may contain duplicate entries,
+// for instance a `SELECT *` across a join of two tables that share a column name.
+kj::Array<jsg::V8Ref<v8::String>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
+  KJ_IF_MAYBE(s, state) {
+    cachedColumnNames.ensureInitialized(js, (*s)->query);
+    return KJ_MAP(name, this->cachedColumnNames.get()) {
+      return name.addRef(js);
+    };
+  } else {
+    JSG_FAIL_REQUIRE(Error, "Cannot call .getColumnNames after Cursor iterator has been consumed.");
+  }
+}
+
 kj::Maybe<kj::Array<SqlStorage::Cursor::Value>> SqlStorage::Cursor::rawIteratorNext(
     jsg::Lock& js, jsg::Ref<Cursor>& obj) {
   return iteratorImpl(js, obj,
