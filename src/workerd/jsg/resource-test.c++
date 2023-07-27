@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg-test.h"
+#include <workerd/jsg/resource-test.capnp.h>
 
 namespace workerd::jsg::test {
 namespace {
@@ -623,6 +624,28 @@ JSG_DECLARE_ISOLATE_TYPE(InjectLockIsolate, InjectLockContext, InjectLockContext
 KJ_TEST("Methods can take Lock& as first parameter") {
   Evaluator<InjectLockContext, InjectLockIsolate> e(v8System);
   e.expectEval("let t = new Thingy(123); t.val", "number", "123");
+}
+
+// ========================================================================================
+
+struct JsBundleContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(JsBundleContext) {
+    JSG_CONTEXT_JS_BUNDLE(BUILTIN_BUNDLE);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
+
+KJ_TEST("expectEvalModule function works") {
+  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  e.expectEvalModule("export function run() { return 123; }", "number", "123");
+}
+
+KJ_TEST("bundle installed works") {
+  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  e.expectEvalModule(R"(
+    import * as b from "test:resource-test-builtin";
+    export function run() { return b.builtinFunction(); }
+  )", "string", "THIS_IS_BUILTIN_FUNCTION");
 }
 
 }  // namespace
