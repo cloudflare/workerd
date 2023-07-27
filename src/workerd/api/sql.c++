@@ -128,7 +128,7 @@ kj::Array<jsg::V8Ref<v8::String>> SqlStorage::Cursor::getColumnNames(jsg::Lock& 
       return name.addRef(js);
     };
   } else {
-    kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error, "Cannot call .getColumnNames after Cursor iterator has been consumed."));
+    JSG_FAIL_REQUIRE(Error, "Cannot call .getColumnNames after Cursor iterator has been consumed.");
   }
 }
 
