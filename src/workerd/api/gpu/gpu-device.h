@@ -7,6 +7,8 @@
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
 #include "gpu-buffer.h"
+#include "gpu-command-encoder.h"
+#include "gpu-compute-pipeline.h"
 #include "gpu-pipeline-layout.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
@@ -26,6 +28,8 @@ public:
     JSG_METHOD(createSampler);
     JSG_METHOD(createShaderModule);
     JSG_METHOD(createPipelineLayout);
+    JSG_METHOD(createComputePipeline);
+    JSG_METHOD(createCommandEncoder);
   }
 
 private:
@@ -39,6 +43,10 @@ private:
   createShaderModule(GPUShaderModuleDescriptor descriptor);
   jsg::Ref<GPUPipelineLayout>
   createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
+  jsg::Ref<GPUComputePipeline>
+  createComputePipeline(GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPUCommandEncoder>
+  createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descriptor);
 };
 
 struct GPUQueueDescriptor {

@@ -168,5 +168,9 @@ export const read_sync_stack = {
       },
     });
     ok(computePipeline);
+
+    // Commands submission
+    const commandEncoder = device.createCommandEncoder();
+    ok(commandEncoder);
   },
 };

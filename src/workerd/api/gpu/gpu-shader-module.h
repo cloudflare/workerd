@@ -11,6 +11,8 @@ namespace workerd::api::gpu {
 
 class GPUShaderModule : public jsg::Object {
 public:
+  // Implicit cast operator to Dawn GPU object
+  inline operator const wgpu::ShaderModule &() const { return shader_; }
   explicit GPUShaderModule(wgpu::ShaderModule s) : shader_(kj::mv(s)){};
   JSG_RESOURCE_TYPE(GPUShaderModule) {}
 
