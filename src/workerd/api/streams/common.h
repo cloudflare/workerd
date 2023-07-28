@@ -357,7 +357,7 @@ public:
     public:
       virtual ~Branch() noexcept(false) {}
 
-      virtual void doClose() = 0;
+      virtual void doClose(jsg::Lock& js) = 0;
       virtual void doError(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
       virtual void handleData(jsg::Lock& js, ReadResult result) = 0;
     };
@@ -372,7 +372,7 @@ public:
       BranchPtr(BranchPtr& other) = default;
       BranchPtr& operator=(BranchPtr&) = default;
 
-      inline void doClose() { inner->doClose(); }
+      inline void doClose(jsg::Lock& js) { inner->doClose(js); }
 
       inline void doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
         inner->doError(js, reason);
@@ -394,7 +394,7 @@ public:
 
     virtual void addBranch(Branch* branch) = 0;
 
-    virtual void close() = 0;
+    virtual void close(jsg::Lock& js) = 0;
 
     virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
 
@@ -414,7 +414,7 @@ public:
     virtual bool isClosed() = 0;
     virtual kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) = 0;
     virtual void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
-    virtual void close() = 0;
+    virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
     virtual void release(jsg::Lock& js,
                          kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) = 0;
@@ -582,7 +582,7 @@ public:
 
     void complete(jsg::Lock& js);
 
-    void fail(v8::Local<v8::Value> reason);
+    void fail(jsg::Lock& js, v8::Local<v8::Value> reason);
 
     inline jsg::Promise<void> whenResolved(jsg::Lock& js) {
       return promise.whenResolved(js);
@@ -764,28 +764,31 @@ private:
 
 template <typename T>
 void maybeResolvePromise(
+    jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     T&& t) {
   KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve(kj::fwd<T>(t));
+    resolver->resolve(js, kj::fwd<T>(t));
     maybeResolver = nullptr;
   }
 }
 
 inline void maybeResolvePromise(
+    jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
   KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve();
+    resolver->resolve(js);
     maybeResolver = nullptr;
   }
 }
 
 template <typename T>
 void maybeRejectPromise(
+    jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     v8::Local<v8::Value> reason) {
   KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->reject(reason);
+    resolver->reject(js, reason);
     maybeResolver = nullptr;
   }
 }
@@ -799,7 +802,7 @@ jsg::Promise<T> rejectedMaybeHandledPromise(
   if (handled) {
     prp.promise.markAsHandled(js);
   }
-  prp.resolver.reject(reason);
+  prp.resolver.reject(js, reason);
   return kj::mv(prp.promise);
 }
 

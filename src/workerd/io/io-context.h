@@ -1341,7 +1341,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
         KJ_IF_MAYBE(exception, maybeException) {
           resolver.reject(lock, kj::mv(*exception));
         } else {
-          resolver.resolve();
+          resolver.resolve(lock);
         }
       }, kj::mv(ilOrCs));
     }));

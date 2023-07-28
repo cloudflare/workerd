@@ -369,10 +369,13 @@ public:
       check(v8Resolver.getHandle(isolate)->Reject(js.v8Context(), exception));
     }
 
+    void reject(Lock& js, kj::Exception exception) {
+      reject(js, makeInternalError(deprecatedIsolate, kj::mv(exception)));
+    }
+
     Resolver addRef(Lock& js) {
       return { js.v8Isolate, v8Resolver.getHandle(js.v8Isolate) };
     }
-
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(v8Resolver);
     }
@@ -383,19 +386,17 @@ public:
       resolve(Lock::from(deprecatedIsolate), kj::mv(value));
     }
     template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
-    void resolve() {
+    void resolve() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       resolve(Lock::from(deprecatedIsolate));
     }
-    void resolve(Promise&& promise) {
+    void resolve(Promise&& promise) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       resolve(Lock::from(deprecatedIsolate), kj::mv(promise));
     }
-    void reject(v8::Local<v8::Value> exception) {
+    void reject(v8::Local<v8::Value> exception) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       reject(Lock::from(deprecatedIsolate), kj::mv(exception));
     }
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(deprecatedIsolate, kj::mv(exception)));
-    }
-    Resolver addRef() {
+
+    Resolver addRef() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       return addRef(Lock::from(deprecatedIsolate));
     }
 
@@ -537,7 +538,7 @@ inline Promise<void> Lock::resolvedPromise() {
 template <typename T>
 Promise<T> Lock::rejectedPromise(v8::Local<v8::Value> exception) {
   auto [ promise, resolver ] = newPromiseAndResolver<T>();
-  resolver.reject(exception);
+  resolver.reject(*this, exception);
   return kj::mv(promise);
 }
 

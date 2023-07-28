@@ -114,7 +114,7 @@ private:
     KJ_IF_MAYBE(err, maybeErr) {
       closedResolver.reject(js, kj::cp(*err));
     } else {
-      closedResolver.resolve();
+      closedResolver.resolve(js);
     }
   };
 
