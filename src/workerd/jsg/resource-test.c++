@@ -648,5 +648,31 @@ KJ_TEST("bundle installed works") {
   )", "string", "THIS_IS_BUILTIN_FUNCTION");
 }
 
+// ========================================================================================
+
+struct JsLazyPropertyContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(JsLazyPropertyContext) {
+    JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
+
+    JSG_LAZY_JS_INSTANCE_PROPERTY(bootstrapFunction, "test:resource-test-bootstrap");
+    JSG_LAZY_JS_INSTANCE_PROPERTY(BootstrapClass, "test:resource-test-bootstrap");
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
+
+KJ_TEST("lazy js global function works") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  e.expectEvalModule(R"(
+    export function run() { return bootstrapFunction(); }
+  )", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+}
+
+KJ_TEST("lazy js global class works") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  e.expectEvalModule(R"(
+    export function run() { return new BootstrapClass().run(); }
+  )", "string", "THIS_IS_BOOTSTRAP_CLASS");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

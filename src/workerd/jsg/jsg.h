@@ -348,6 +348,17 @@ namespace workerd::jsg {
         NAME, decltype(&Self::getter), &Self::getter, true>(); \
   } while (false)
 
+#define JSG_LAZY_JS_INSTANCE_PROPERTY(name, moduleName) \
+  do { \
+    static const char NAME[] = #name; \
+    static const char MODULE_NAME[] = moduleName; \
+    registry.template registerLazyJsInstanceProperty<NAME, MODULE_NAME>(); \
+  } while (false)
+// A lazy property which value will be supplied by javascript implementation.
+// On first property access given module name is instantiated and its export with a
+// given property name is used for the value.
+// Common use-case is to supply class or function implementations.
+
 #define JSG_STATIC_CONSTANT(name) \
   do { \
     static const char NAME[] = #name; \

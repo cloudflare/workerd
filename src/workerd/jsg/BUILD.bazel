@@ -120,7 +120,7 @@ kj_test(
 wd_cc_capnp_library(
     name = "resource_test_capnp",
     srcs = ["resource-test.capnp"],
-    data = [":resource-test-builtin.js"],
+    data = glob(["resource-test-*.js"]),
     deps = [":modules_capnp"],
 )
 
