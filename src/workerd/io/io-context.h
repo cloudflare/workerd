@@ -1317,9 +1317,9 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
   typedef MaybeIoOwn<addIoOwn, T> Result;
 
   auto& lock = getCurrentLock();
-  v8::Isolate* isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
 
-  auto [ jsPromise, resolver ] = jsg::newPromiseAndResolver<Result>(isolate);
+  auto [ jsPromise, resolver ] = js.newPromiseAndResolver<Result>();
 
   // It is necessary for us to grab a reference to the jsg::AsyncContextFrame here
   // and pass it into the then(). If the promise is rejected, and there is no rejection
@@ -1605,7 +1605,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   auto cs2 = kj::addRef(*cs);
 
   typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
-  auto [result, resolver] = jsg::newPromiseAndResolver<T>(js.v8Isolate);
+  auto [result, resolver] = js.newPromiseAndResolver<T>();
 
   addTask(cs->wait().then([this, callback = kj::mv(callback),
                            maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)]

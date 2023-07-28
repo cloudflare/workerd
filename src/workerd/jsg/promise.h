@@ -584,10 +584,6 @@ PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
 
 // DEPRECATED: These global functions should be replaced with the equivalent methods of `Lock`.
 template <typename T>
-inline PromiseResolverPair<T> newPromiseAndResolver(v8::Isolate* isolate) {
-  return Lock::from(isolate).newPromiseAndResolver<T>();
-}
-template <typename T>
 inline Promise<T> resolvedPromise(v8::Isolate* isolate, T&& value) {
   return Lock::from(isolate).resolvedPromise(kj::fwd<T>(value));
 }
