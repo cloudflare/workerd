@@ -447,18 +447,14 @@ public:
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (unread == nullptr) {
-      return addNoopDeferredProxy(kj::READY_NOW);
+    if (unread != nullptr) {
+      auto data = unread;
+      unread = nullptr;
+      co_await output.write(data.begin(), data.size());
+      if (end) co_await output.end();
     }
 
-    auto promise = output.write(unread.begin(), unread.size());
-    unread = nullptr;
-
-    if (end) {
-      promise = promise.then([&output]() { return output.end(); });
-    }
-
-    return addNoopDeferredProxy(kj::mv(promise));
+    co_return newNoopDeferredProxy();
   }
 
 private:
@@ -707,7 +703,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
-  return arrayBuffer(js).then([this](kj::Array<byte> buffer) {
+  return arrayBuffer(js).then(js, [this](jsg::Lock&, kj::Array<byte> buffer) {
     kj::String contentType =
         headersRef.get(jsg::ByteString(kj::str("Content-Type")))
             .map([](jsg::ByteString&& b) -> kj::String { return kj::mv(b); })
@@ -1617,18 +1613,30 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
 
       // We want to support bidirectional streaming, so we actually don't want to wait for the
       // request to finish before we deliver the response to the app.
-      // TODO(someday): Allow deferred proxying for bidirectional streaming.
-      ioContext.addWaitUntil(AbortSignal::maybeCancelWrap(signal,
-          ioContext.waitForDeferredProxy((*jsBody)->pumpTo(js, kj::mv(stream), true)))
-          .catch_([](kj::Exception&& e) {
-        if (e.getType() == kj::Exception::Type::DISCONNECTED) {
-          // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always return the
-          // server's response, which should identify if any issue occurred with the body stream
-          // anyway.
-        } else {
-          kj::throwFatalException(kj::mv(e));
+
+      static auto const handleCancelablePump =
+          [](jsg::Lock& js,
+             IoContext& ioContext,
+             kj::Maybe<jsg::Ref<AbortSignal>>& signal,
+             jsg::Ref<ReadableStream>& jsBody,
+             kj::Own<WritableStreamSink> stream) -> kj::Promise<void> {
+        try {
+          // Note that it is not safe to access any of the captures after the co_await.
+          co_await AbortSignal::maybeCancelWrap(signal,
+              ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true)));
+        } catch (...) {
+          auto exception = kj::getCaughtExceptionAsKj();
+          if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+            kj::throwFatalException(kj::mv(exception));
+          }
+          // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
+          // return the server's response, which should identify if any issue occurred with
+          // the body stream anyway.
         }
-      }));
+      };
+
+      // TODO(someday): Allow deferred proxying for bidirectional streaming.
+      ioContext.addWaitUntil(handleCancelablePump(js, ioContext, signal, *jsBody, kj::mv(stream)));
 
     } else {
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
@@ -1893,19 +1901,15 @@ jsg::Promise<jsg::Ref<Response>> Fetcher::fetch(
   return fetchImpl(js, JSG_THIS, kj::mv(requestOrUrl), kj::mv(requestInit));
 }
 
-static jsg::Promise<void> throwOnError(
-    kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
-  return promise.then([method](jsg::Ref<Response> response) {
+static jsg::Promise<void> throwOnError(jsg::Lock& js,
+                                       kj::StringPtr method,
+                                       jsg::Promise<jsg::Ref<Response>> promise) {
+  return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {
     uint status = response->getStatus();
-    if (status < 200 || status >= 300) {
-      // Manually construct exception so that we can incorporate method and status into the text
-      // that JavaScript sees.
-      // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
-      //   should people really use fetch() if they want to inspect error responses?
-      kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-          kj::str(JSG_EXCEPTION(Error) ": HTTP ", method, " request failed: ",
-              response->getStatus(), ' ', response->getStatusText())));
-    }
+    // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
+    //   should people really use fetch() if they want to inspect error responses?
+    JSG_REQUIRE(status >= 200 && status < 300, Error,
+                kj::str("HTTP ", method, " request failed: ", response->getStatus(), " ", response->getStatusText()));
   });
 }
 
@@ -1928,17 +1932,17 @@ static jsg::Promise<Fetcher::GetResult> parseResponse(
 
   if (typeName == "text") {
     return response->text(js)
-        .then([response = kj::mv(response)](auto x) {
+        .then(js, [response = kj::mv(response)](jsg::Lock&, auto x) {
       return Fetcher::GetResult(kj::mv(x));
     });
   } else if (typeName == "arrayBuffer") {
     return response->arrayBuffer(js)
-        .then([response = kj::mv(response)](auto x) {
+        .then(js, [response = kj::mv(response)](jsg::Lock&, auto x) {
       return Fetcher::GetResult(kj::mv(x));
     });
   } else if (typeName == "json") {
     return response->json(js)
-        .then([response = kj::mv(response)](auto x) {
+        .then(js, [response = kj::mv(response)](jsg::Lock&, auto x) {
       return Fetcher::GetResult(kj::mv(x));
     });
   } else {
@@ -1965,9 +1969,9 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
       // that JavaScript sees.
       // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
       //   should people really use fetch() if they want to inspect error responses?
-      kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
-          kj::str(JSG_EXCEPTION(Error) ": HTTP GET request failed: ",
-              response->getStatus(), ' ', response->getStatusText())));
+      JSG_FAIL_REQUIRE(Error,
+          kj::str("HTTP GET request failed: ", response->getStatus(), " ",
+                  response->getStatusText()));
     } else {
       return parseResponse(js, kj::mv(response), kj::mv(type));
     }
@@ -1980,7 +1984,7 @@ jsg::Promise<void> Fetcher::put(
   // Note that this borrows liberally from fetchImpl(fetcher, request, init, isolate).
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
-  return throwOnError("PUT", js.evalNow([&] {
+  return throwOnError(js, "PUT", js.evalNow([&] {
     RequestInitializerDict subInit;
     subInit.method = kj::str("PUT");
     subInit.body = kj::mv(body);
@@ -2008,7 +2012,7 @@ jsg::Promise<void> Fetcher::put(
 jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
   RequestInitializerDict subInit;
   subInit.method = kj::str("DELETE");
-  return throwOnError("DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
+  return throwOnError(js, "DELETE", fetchImpl(js, JSG_THIS, kj::mv(url), kj::mv(subInit)));
 }
 
 jsg::Promise<QueueResponse> Fetcher::queue(
