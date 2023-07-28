@@ -1214,8 +1214,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
             // excessively-expensive computation requiring a time limit. We'll go ahead and apply a time
             // limit just to be safe. Don't add it to the rollover bank, though.
             auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-            impl->unboundScriptOrMainModule =
-                jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
+            impl->unboundScriptOrMainModule = jsg::NonModuleScript::compile(
+                script.mainScript, lock, script.mainScriptName, isolate->impl->metrics);
           }
 
           break;

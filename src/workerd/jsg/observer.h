@@ -28,6 +28,13 @@ struct CompilationObserver {
   // Called at the start of wasm compilation.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during both invocations.
+
+  virtual kj::Own<void> onScriptCompilationStart(
+      v8::Isolate* isolate, kj::StringPtr name, size_t codeSize) const { return kj::Own<void>(); }
+  // Called at the start of a script compilation.
+  // Returned value will be destroyed when module compilation finishes.
+  // It is guaranteed that isolate lock is held during both invocations.
+
 };
 
 
