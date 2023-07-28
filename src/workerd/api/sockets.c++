@@ -257,7 +257,7 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     return abortPromise.then(js, [this](jsg::Lock& js) {
       resolveFulfiller(js, nullptr);
       return js.resolvedPromise();
-    });
+    }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
   }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
 }
 
