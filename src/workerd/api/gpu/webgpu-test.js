@@ -172,5 +172,10 @@ export const read_sync_stack = {
     // Commands submission
     const commandEncoder = device.createCommandEncoder();
     ok(commandEncoder);
+
+    const passEncoder = commandEncoder.beginComputePass();
+    ok(passEncoder);
+    passEncoder.setPipeline(computePipeline);
+    passEncoder.setBindGroup(0, bindGroup);
   },
 };
