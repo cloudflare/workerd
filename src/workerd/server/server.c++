@@ -888,7 +888,7 @@ private:
         return response.sendError(405, "Method Not Allowed", headerTable);
       });
 
-      if (blockedPath) {
+      if (blockedPath || path.size() == 0) {
         return response.sendError(403, "Unauthorized", headerTable);
       }
 
@@ -902,6 +902,24 @@ private:
         kj::HttpHeaders headers(headerTable);
         response.send(204, "No Content", headers);
       });
+    } else if (method == kj::HttpMethod::DELETE) {
+      auto& w = KJ_UNWRAP_OR(writable, {
+        return response.sendError(405, "Method Not Allowed", headerTable);
+      });
+
+      if (blockedPath || path.size() == 0) {
+        return response.sendError(403, "Unauthorized", headerTable);
+      }
+
+      auto found = w.tryRemove(path);
+
+      kj::HttpHeaders headers(headerTable);
+      if (found) {
+        response.send(204, "No Content", headers);
+        return kj::READY_NOW;
+      } else {
+        return response.sendError(404, "Not Found", headers);
+      }
     } else {
       return response.sendError(501, "Not Implemented", headerTable);
     }
@@ -1576,10 +1594,10 @@ private:
     auto client = context.getHttpClient(channel, true, nullptr, "writeLogfwdr"_kjc);
 
     auto urlStr = kj::str("https://fake-host");
- 
+
     capnp::MallocMessageBuilder requestMessage;
     auto requestBuilder = requestMessage.initRoot<capnp::AnyPointer>();
-  
+
     buildMessage(requestBuilder);
     capnp::JsonCodec json;
     auto requestJson = json.encode(requestBuilder.getAs<api::AnalyticsEngineEvent>());

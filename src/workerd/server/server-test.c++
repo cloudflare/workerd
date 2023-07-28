@@ -2216,6 +2216,18 @@ KJ_TEST("Server: disk service") {
 
     Method Not Allowed)"_blockquote);
 
+  // DELETE is denied because not writable.
+  conn.send(R"(
+    DELETE /corge.txt HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 405 Method Not Allowed
+    Content-Length: 18
+
+    Method Not Allowed)"_blockquote);
+
   // POST is denied because invalid method.
   conn.send(R"(
     POST /corge.txt HTTP/1.1
@@ -2281,6 +2293,30 @@ KJ_TEST("Server: disk service writable") {
   // Read it back.
   KJ_EXPECT(dir->openFile(kj::Path({"newfile.txt"}))->readAllText() == "corge\n");
 
+  // Delete it.
+  conn.send(R"(
+    DELETE /newfile.txt HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 204 No Content
+
+    )"_blockquote);
+  KJ_EXPECT(!dir->exists(kj::Path({"newfile.txt"})));
+
+  // Delete a non-existent file.
+  conn.send(R"(
+    DELETE /notfound.txt HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 404 Not Found
+    Content-Length: 9
+
+    Not Found)"_blockquote);
+
   // Replace a file.
   conn.send(R"(
     PUT /existing.txt HTTP/1.1
@@ -2312,6 +2348,18 @@ KJ_TEST("Server: disk service writable") {
 
   // Read it back.
   KJ_EXPECT(dir->openFile(kj::Path({"newdir", "newfile.txt"}))->readAllText() == "garply\n");
+
+  // Delete the new directory.
+  conn.send(R"(
+    DELETE /newdir/ HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 204 No Content
+
+    )"_blockquote);
+  KJ_EXPECT(!dir->exists(kj::Path({"newdir"})));
 
   // POST is denied because invalid method.
   conn.send(R"(
@@ -2348,6 +2396,44 @@ KJ_TEST("Server: disk service writable") {
     Content-Length: 6
 
     waldo
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 403 Unauthorized
+    Content-Length: 12
+
+    Unauthorized)"_blockquote);
+
+  // Dotfile delete access is denied.
+  conn.send(R"(
+    DELETE /.dot HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 403 Unauthorized
+    Content-Length: 12
+
+    Unauthorized)"_blockquote);
+
+  // Root write is denied.
+  conn.send(R"(
+    PUT / HTTP/1.1
+    Host: foo
+    Content-Length: 6
+
+    corge
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 403 Unauthorized
+    Content-Length: 12
+
+    Unauthorized)"_blockquote);
+
+  // Root delete is denied.
+  conn.send(R"(
+    DELETE / HTTP/1.1
+    Host: foo
+
   )"_blockquote);
   conn.recv(R"(
     HTTP/1.1 403 Unauthorized
