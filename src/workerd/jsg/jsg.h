@@ -477,6 +477,14 @@ using HasGetTemplateOverload = decltype(
 // declaration, inside the same `struct` definition. See the `## TypeScript`section of the JSG README.md
 // for more details.
 
+#define JSG_CONTEXT_JS_BUNDLE(bundle) \
+  do { \
+    registry.registerJsBundle(bundle); \
+  } while (false)
+// Adds a group of javascript modules to the module registry when context is instantiated.
+// bundle is of a Bundle type from workerd/jsg/modules.capnp.
+// Modules will be resolved according to their type and module registry normal resolve rules.
+
 namespace {
   template <typename T, typename = int>
   struct HasStructTypeScriptRoot : std::false_type {};
