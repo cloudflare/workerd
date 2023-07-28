@@ -184,7 +184,7 @@ bool ReadableLockImpl<Controller>::lockReader(
   }
 
   auto prp = js.newPromiseAndResolver<void>();
-  prp.promise.markAsHandled();
+  prp.promise.markAsHandled(js);
 
   auto lock = ReaderLocked(reader, kj::mv(prp.resolver));
 
@@ -317,9 +317,9 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   auto closedPrp = js.newPromiseAndResolver<void>();
-  closedPrp.promise.markAsHandled();
+  closedPrp.promise.markAsHandled(js);
   auto readyPrp = js.newPromiseAndResolver<void>();
-  readyPrp.promise.markAsHandled();
+  readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 
@@ -862,7 +862,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
         // If we're already waiting for cancel to complete, just return the
         // already existing pending promise.
         // This shouldn't happen but we handle the case anyway, just to be safe.
-        return pendingCancel->promise.whenResolved();
+        return pendingCancel->promise.whenResolved(js);
       }
 
       auto prp = js.newPromiseAndResolver<void>();
@@ -870,7 +870,7 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
         .fulfiller = kj::mv(prp.resolver),
         .promise = kj::mv(prp.promise),
       };
-      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved();
+      auto promise = KJ_ASSERT_NONNULL(maybePendingCancel).promise.whenResolved(js);
       doCancel(js, kj::mv(self), reason);
       return kj::mv(promise);
     }
@@ -1081,7 +1081,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
     // Notice here that, per the spec, the reason given in this call of abort is
     // intentionally ignored if there is already an abort pending.
-    return pendingAbort->whenResolved();
+    return pendingAbort->whenResolved(js);
   }
 
   bool wasAlreadyErroring = false;
@@ -1097,7 +1097,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
   );
 
   maybePendingAbort = PendingAbort(js, reason, wasAlreadyErroring);
-  return KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
+  return KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved(js);
 }
 
 template <typename Self>
@@ -2869,7 +2869,7 @@ public:
         // that the PumpToReader, and the sink it owns, are always accessed from the right
         // IoContext. Thw WeakRef ensures that if the PumpToReader is freed while
         // the JS continuation is pending, there won't be a dangling reference.
-        return ioContext.awaitJs(
+        return ioContext.awaitJs(js,
             pumpLoop(js, ioContext, kj::mv(readable), ioContext.addObject(addWeakRef())));
       }
       KJ_CASE_ONEOF(pumping, Pumping) {
@@ -3357,21 +3357,21 @@ jsg::Promise<void> WritableStreamJsController::abort(
   // promise each time. That's a bit cumbersome here with jsg::Promise so we intentionally just
   // return a continuation branch off the same promise.
   KJ_IF_MAYBE(abortPromise, maybeAbortPromise) {
-    return abortPromise->whenResolved();
+    return abortPromise->whenResolved(js);
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       maybeAbortPromise = js.resolvedPromise();
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       // Per the spec, if the stream is errored, we are to return a resolved promise.
       maybeAbortPromise = js.resolvedPromise();
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
     KJ_CASE_ONEOF(controller, Controller) {
       maybeAbortPromise = controller->abort(js, reason.orDefault(js.v8Undefined()));
-      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved();
+      return KJ_ASSERT_NONNULL(maybeAbortPromise).whenResolved(js);
     }
   }
   KJ_UNREACHABLE;
@@ -3486,7 +3486,7 @@ void WritableStreamJsController::maybeRejectReadyPromise(
       maybeRejectPromise<void>(writerLock->getReadyFulfiller(), reason);
     } else {
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       prp.resolver.reject(reason);
       writerLock->setReadyFulfiller(prp);
     }
@@ -3609,7 +3609,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     if (!preventClose) {
       auto promise = close(js);
       if (pipeThrough) {
-        promise.markAsHandled();
+        promise.markAsHandled(js);
       }
       return kj::mv(promise);
     }
@@ -3690,7 +3690,7 @@ void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpres
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       return writerLock->setReadyFulfiller(prp);
     }
 
@@ -3792,7 +3792,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(
 
     if (backpressure) {
       auto chunkRef = js.v8Ref(chunk);
-      return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved().then(js,
+      return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
           JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref=JSG_THIS),
                               (chunkRef, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
         KJ_IF_MAYBE(writableController, ref->tryGetWritableController()) {
@@ -3842,7 +3842,7 @@ jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
   KJ_ASSERT(backpressure);
   setBackpressure(js, false);
-  return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved();
+  return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js);
 }
 
 jsg::Promise<void> TransformStreamDefaultController::cancel(
@@ -3887,7 +3887,7 @@ void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBa
     prp->resolver.resolve();
   }
   maybeBackpressureChange = js.newPromiseAndResolver<void>();
-  KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled();
+  KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled(js);
   backpressure = newBackpressure;
 }
 

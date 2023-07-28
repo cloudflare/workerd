@@ -641,7 +641,7 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, Reader& reader)
   }
 
   auto prp = js.newPromiseAndResolver<void>();
-  prp.promise.markAsHandled();
+  prp.promise.markAsHandled(js);
 
   auto lock = ReaderLocked(reader, kj::mv(prp.resolver),
       IoContext::current().addObject(kj::heap<kj::Canceler>()));
@@ -796,7 +796,7 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
-      prp.promise.markAsHandled();
+      prp.promise.markAsHandled(js);
       writerLock->setReadyFulfiller(prp);
       return;
     }
@@ -830,7 +830,7 @@ jsg::Promise<void> WritableStreamInternalController::close(
     KJ_CASE_ONEOF(writable, Writable) {
       auto prp = js.newPromiseAndResolver<void>();
       if (markAsHandled) {
-        prp.promise.markAsHandled();
+        prp.promise.markAsHandled(js);
       }
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -864,7 +864,7 @@ jsg::Promise<void> WritableStreamInternalController::flush(
     KJ_CASE_ONEOF(writable, Writable) {
       auto prp = js.newPromiseAndResolver<void>();
       if (markAsHandled) {
-        prp.promise.markAsHandled();
+        prp.promise.markAsHandled(js);
       }
       queue.push_back(WriteEvent {
         .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -896,9 +896,9 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
   // instead of trying to schedule another.
   KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
     pendingAbort->reject = options.reject;
-    auto promise = pendingAbort->whenResolved();
+    auto promise = pendingAbort->whenResolved(js);
     if (options.handled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -914,9 +914,9 @@ jsg::Promise<void> WritableStreamInternalController::doAbort(
     }
 
     maybePendingAbort = PendingAbort(js, reason, options.reject);
-    auto promise = KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved();
+    auto promise = KJ_ASSERT_NONNULL(maybePendingAbort).whenResolved(js);
     if (options.handled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -1031,7 +1031,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
   // pending Pipe event we queue below.
   auto prp = js.newPromiseAndResolver<void>();
   if (pipeThrough) {
-    prp.promise.markAsHandled();
+    prp.promise.markAsHandled(js);
   }
   queue.push_back(WriteEvent {
     .outputLock = IoContext::current().waitForOutputLocksIfNecessaryIoOwn(),
@@ -1096,10 +1096,10 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   auto closedPrp = js.newPromiseAndResolver<void>();
-  closedPrp.promise.markAsHandled();
+  closedPrp.promise.markAsHandled(js);
 
   auto readyPrp = js.newPromiseAndResolver<void>();
-  readyPrp.promise.markAsHandled();
+  readyPrp.promise.markAsHandled(js);
 
   auto lock = WriterLocked(writer, kj::mv(closedPrp.resolver), kj::mv(readyPrp.resolver));
 
@@ -1179,8 +1179,7 @@ void WritableStreamInternalController::doError(jsg::Lock& js, v8::Local<v8::Valu
 void WritableStreamInternalController::ensureWriting(jsg::Lock& js) {
   auto& ioContext = IoContext::current();
   if (queue.size() == 1) {
-    ioContext.addTask(ioContext.awaitJs(
-        writeLoop(js, ioContext)).attach(addRef()));
+    ioContext.addTask(ioContext.awaitJs(js, writeLoop(js, ioContext)).attach(addRef()));
   }
 }
 
@@ -1428,7 +1427,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       };
 
       KJ_IF_MAYBE(promise, request.source.tryPumpTo(*writable, !request.preventClose)) {
-        return handlePromise(js, ioContext.awaitIo(
+        return handlePromise(js, ioContext.awaitIo(js,
             AbortSignal::maybeCancelWrap(request.maybeSignal, kj::mv(*promise))));
       }
 
@@ -1444,7 +1443,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       auto& writable = state.get<Writable>();
       auto check = makeChecker(request);
 
-      return ioContext.awaitIo(writable->end()).then(js,
+      return ioContext.awaitIo(js, writable->end()).then(js,
           ioContext.addFunctor([this, check](jsg::Lock& js) {
         auto& request = check();
         maybeResolvePromise(request.promise);
@@ -1521,8 +1520,11 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(v8::Local<v8::V
     byteOffset = view->ByteOffset();
   }
   kj::byte* data = reinterpret_cast<kj::byte*>(store->Data()) + byteOffset;
-  return IoContext::current().awaitIo(
-      writable->write(data, byteLength).attach(kj::mv(store)), []{});
+  // TODO(cleanup): Have this method accept a jsg::Lock& from the caller instead of using
+  // v8::Isolate::GetCurrent();
+  jsg::Lock& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  return IoContext::current().awaitIo(js,
+      writable->write(data, byteLength).attach(kj::mv(store)), [](jsg::Lock&){});
 }
 
 jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& js) {
@@ -1581,7 +1583,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
       if (!parent.isClosedOrClosing()) {
         // We'll only be here if the sink is in the Writable state.
         auto& ioContext = IoContext::current();
-        return ioContext.awaitIo(parent.state.get<Writable>()->end(), []{}).then(js,
+        return ioContext.awaitIo(js, parent.state.get<Writable>()->end(), [](jsg::Lock&){}).then(js,
             ioContext.addFunctor([this](jsg::Lock& js) { parent.finishClose(js); }),
             ioContext.addFunctor([this](jsg::Lock& js, jsg::Value reason) {
               parent.finishError(js, reason.getHandle(js));

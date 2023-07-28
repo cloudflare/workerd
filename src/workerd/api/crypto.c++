@@ -767,11 +767,11 @@ DigestStream::DigestStream(
         kj::heap<DigestStreamSink>(kj::mv(algorithm), kj::mv(fulfiller))),
       promise(kj::mv(promise)) {}
 
-jsg::Ref<DigestStream> DigestStream::constructor(Algorithm algorithm) {
+jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algorithm) {
   auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::byte>>();
 
   auto jsPromise = IoContext::current().awaitIoLegacy(kj::mv(paf.promise));
-  jsPromise.markAsHandled();
+  jsPromise.markAsHandled(js);
 
   return jsg::alloc<DigestStream>(
       interpretAlgorithmParam(kj::mv(algorithm)),

@@ -324,7 +324,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     };
     auto canceled = kj::refcounted<RefcountedBool>(false);
 
-    return ioContext.awaitJs(promise->then(kj::implicitCast<jsg::Lock&>(lock),
+    return ioContext.awaitJs(lock ,promise->then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
              canceled = kj::addRef(*canceled), &headers]

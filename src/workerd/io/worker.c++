@@ -854,7 +854,7 @@ struct Worker::Script::Impl {
         auto& ioContext = IoContext::current();
         auto& worker = ioContext.getWorker();
 
-        return ioContext.awaitIo(
+        return ioContext.awaitIo(js,
             kj::evalLater([&worker, handler = kj::mv(handler),
                            asyncContext = jsg::AsyncContextFrame::currentRef(js)]() mutable {
           return worker.takeAsyncLockWithoutRequest(nullptr)
@@ -894,7 +894,7 @@ struct Worker::Script::Impl {
             }
             return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
           });
-        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](auto result) {
+        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](jsg::Lock&, auto result) {
           if (result.isException) {
             return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
           }

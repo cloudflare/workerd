@@ -104,9 +104,9 @@ jsg::Promise<void> transformMaybeBackpressure(
     //   case of future changes.
     auto& context = IoContext::current();
     if (options.allowConcurrency.orDefault(false)) {
-      return context.awaitIo(kj::mv(*backpressure));
+      return context.awaitIo(js, kj::mv(*backpressure));
     } else {
-      return context.awaitIoWithInputLock(kj::mv(*backpressure));
+      return context.awaitIoWithInputLock(js, kj::mv(*backpressure), [](jsg::Lock&) {});
     }
   } else {
     return js.resolvedPromise();
@@ -623,7 +623,8 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
       // custom Promise and then resolved in from some other context). So let's be safe and grab
       // IoContext::current() again here, rather than capture it in the lambda.
       auto& context = IoContext::current();
-      return context.awaitIoWithInputLock(txn->maybeCommit(), [value = kj::mv(value)]() mutable {
+      return context.awaitIoWithInputLock(js, txn->maybeCommit(),
+          [value = kj::mv(value)](jsg::Lock&) mutable {
         return TxnResult { kj::mv(value), false };
       });
     }, [txn = txn.addRef()](jsg::Lock& js, jsg::Value exception) mutable {
@@ -674,7 +675,7 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
     // output gate will be broken first and the isolate will not resume synchronous execution.
 
     auto& context = IoContext::current();
-    return context.awaitIo(kj::mv(*p));
+    return context.awaitIo(js, kj::mv(*p));
   } else {
     return js.resolvedPromise();
   }

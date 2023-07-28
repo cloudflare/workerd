@@ -52,7 +52,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto c) mutable {
-            return controller->getStartPromise();
+            return controller->getStartPromise(js);
           })),
           .pull = maybeAddFunctor<UnderlyingSource::PullAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
@@ -77,7 +77,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
                   (controller = controller.addRef()),
                   (controller),
                   (jsg::Lock& js, auto c) mutable {
-            return controller->getStartPromise();
+            return controller->getStartPromise(js);
           })),
           .write = maybeAddFunctor<UnderlyingSink::WriteAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),

@@ -1444,7 +1444,7 @@ void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> pro
     auto& context = IoContext::current();
 
     KJ_IF_MAYBE(p, context.waitForOutputLocksIfNecessary()) {
-      return context.awaitIo(kj::mv(*p), [response = kj::mv(response)]() mutable {
+      return context.awaitIo(js, kj::mv(*p), [response = kj::mv(response)](jsg::Lock&) mutable {
         return kj::mv(response);
       });
     } else {

@@ -630,11 +630,11 @@ public:
             jsg::Ref<WritableStream>& writable,
             jsg::Optional<Transformer> maybeTransformer);
 
-  inline jsg::Promise<void> getStartPromise() {
+  inline jsg::Promise<void> getStartPromise(jsg::Lock& js) {
     // The startPromise is used by both the readable and writable sides in their respective
     // start algorithms. The promise itself is resolved within the init function when the
     // transformers own start algorithm completes.
-    return startPromise.promise.whenResolved();
+    return startPromise.promise.whenResolved(js);
   }
 
   kj::Maybe<int> getDesiredSize();
