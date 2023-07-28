@@ -8,9 +8,11 @@
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
 #include "gpu-command-encoder.h"
+#include "gpu-compute-pass-encoder.h"
 #include "gpu-compute-pipeline.h"
 #include "gpu-device.h"
 #include "gpu-pipeline-layout.h"
+#include "gpu-query-set.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
 #include "gpu-utils.h"
@@ -49,6 +51,8 @@ private:
       api::gpu::GPUPipelineLayout, api::gpu::GPUPipelineLayoutDescriptor,      \
       api::gpu::GPUComputePipeline, api::gpu::GPUComputePipelineDescriptor,    \
       api::gpu::GPUProgrammableStage, api::gpu::GPUCommandEncoder,             \
-      api::gpu::GPUCommandEncoderDescriptor
+      api::gpu::GPUCommandEncoderDescriptor, api::gpu::GPUComputePassEncoder,  \
+      api::gpu::GPUComputePassDescriptor, api::gpu::GPUQuerySet,               \
+      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite
 
 }; // namespace workerd::api::gpu
