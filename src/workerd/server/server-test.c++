@@ -2139,6 +2139,7 @@ KJ_TEST("Server: disk service") {
   test.fakeDate = kj::UNIX_EPOCH + 2 * kj::DAYS + 5 * kj::HOURS +
                   18 * kj::MINUTES + 23 * kj::SECONDS;
   dir->openFile(kj::Path({"foo.txt"}), mode)->writeAll("hello from foo.txt\n");
+  dir->openFile(kj::Path({"numbers.txt"}), mode)->writeAll("0123456789\n");
   test.fakeDate = kj::UNIX_EPOCH + 400 * kj::DAYS + 2 * kj::HOURS +
                   52 * kj::MINUTES + 9 * kj::SECONDS + 163 * kj::MILLISECONDS;
   dir->openFile(kj::Path({"bar.txt"}), mode)->writeAll("hello from bar.txt\n");
@@ -2185,6 +2186,82 @@ KJ_TEST("Server: disk service") {
   //   filesystem right now.
   //
   // conn.sendHttpGet("/");
+
+  // HEAD returns no content.
+  conn.send(R"(
+    HEAD /numbers.txt HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+    Content-Type: application/octet-stream
+    Last-Modified: Sat, 03 Jan 1970 05:18:23 GMT
+
+  )"_blockquote);
+
+  // GET with single range returns partial content.
+  conn.send(R"(
+    GET /numbers.txt HTTP/1.1
+    Host: foo
+    Range: bytes=3-5
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 206 Partial Content
+    Content-Length: 3
+    Content-Type: application/octet-stream
+    Content-Range: bytes 3-5/11
+    Last-Modified: Sat, 03 Jan 1970 05:18:23 GMT
+
+    345)"_blockquote);
+
+  // GET with single covering range returns full content.
+  conn.send(R"(
+    GET /numbers.txt HTTP/1.1
+    Host: foo
+    Range: bytes=-50
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+    Content-Type: application/octet-stream
+    Last-Modified: Sat, 03 Jan 1970 05:18:23 GMT
+
+    0123456789
+  )"_blockquote);
+
+  // GET with many ranges returns full content.
+  conn.send(R"(
+    GET /numbers.txt HTTP/1.1
+    Host: foo
+    Range: bytes=1-3, 6-8
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 11
+    Content-Type: application/octet-stream
+    Last-Modified: Sat, 03 Jan 1970 05:18:23 GMT
+
+    0123456789
+  )"_blockquote);
+
+  // GET with unsatisfiable range.
+  conn.send(R"(
+    GET /numbers.txt HTTP/1.1
+    Host: foo
+    Range: bytes=20-30
+
+  )"_blockquote);
+  conn.recv(R"(
+    HTTP/1.1 416 Range Not Satisfiable
+    Content-Length: 21
+    Content-Range: bytes */11
+
+    Range Not Satisfiable)"_blockquote);
 
   // File not found...
   conn.sendHttpGet("/no-such-file.txt");

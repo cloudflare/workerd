@@ -773,7 +773,7 @@ private:
   bool allowDotfiles;
 
   kj::Promise<void> request(
-      kj::HttpMethod method, kj::StringPtr urlStr, const kj::HttpHeaders& headers,
+      kj::HttpMethod method, kj::StringPtr urlStr, const kj::HttpHeaders& requestHeaders,
       kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
     auto url = kj::Url::parse(urlStr);
 
@@ -808,6 +808,27 @@ private:
 
       switch (meta.type) {
         case kj::FsNode::Type::FILE: {
+          // If this is a GET request with a Range header, return partial content if a single
+          // satisfiable range is specified.
+          // TODO(someday): consider supporting multiple ranges with multipart/byteranges
+          kj::Maybe<kj::HttpByteRange> range;
+          if (method == kj::HttpMethod::GET) {
+            KJ_IF_MAYBE(header, requestHeaders.get(kj::HttpHeaderId::RANGE)) {
+              KJ_SWITCH_ONEOF(kj::tryParseHttpRangeHeader(header->asArray(), meta.size)) {
+                KJ_CASE_ONEOF(ranges, kj::Array<kj::HttpByteRange>) {
+                  KJ_ASSERT(ranges.size() > 0);
+                  if (ranges.size() == 1) range = ranges[0];
+                }
+                KJ_CASE_ONEOF(_, kj::HttpEverythingRange) {}
+                KJ_CASE_ONEOF(_, kj::HttpUnsatisfiableRange) {
+                  kj::HttpHeaders headers(headerTable);
+                  headers.set(kj::HttpHeaderId::CONTENT_RANGE, kj::str("bytes */", meta.size));
+                  return response.sendError(416, "Range Not Satisfiable", headers);
+                }
+              }
+            }
+          }
+
           kj::HttpHeaders headers(headerTable);
           headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
           headers.set(hLastModified, httpTime(meta.lastModified));
@@ -820,15 +841,28 @@ private:
           //   if no `Content-Length` header is returned, but the body size is known via the KJ
           //   HTTP API, then the header shoud be filled in automatically. Unclear if this is safe
           //   to change without a compat flag.
-          headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
-
-          auto out = response.send(200, "OK", headers, meta.size);
 
           if (method == kj::HttpMethod::HEAD) {
+            headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
+            response.send(200, "OK", headers, meta.size);
             return kj::READY_NOW;
-          } else {
-            auto in = kj::heap<kj::FileInputStream>(*file);
+          } else KJ_IF_MAYBE(r, range) {
+            KJ_ASSERT(r->start <= r->end);
+            auto rangeSize = r->end - r->start + 1;
+            headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(rangeSize));
+            headers.set(kj::HttpHeaderId::CONTENT_RANGE,
+              kj::str("bytes ", r->start, "-", r->end, "/", meta.size));
+            auto out = response.send(206, "Partial Content", headers, rangeSize);
 
+            auto in = kj::heap<kj::FileInputStream>(*file, r->start);
+            return in->pumpTo(*out, rangeSize)
+                .ignoreResult()
+                .attach(kj::mv(in), kj::mv(out), kj::mv(file));
+          } else {
+            headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
+            auto out = response.send(200, "OK", headers, meta.size);
+
+            auto in = kj::heap<kj::FileInputStream>(*file);
             return in->pumpTo(*out, meta.size)
                 .ignoreResult()
                 .attach(kj::mv(in), kj::mv(out), kj::mv(file));
