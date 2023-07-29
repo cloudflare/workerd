@@ -209,12 +209,15 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       // which will have to be awaited separately.
       auto payloadPipe = kj::newOneWayPipe(expectedPayloadSize);
 
-      auto headersPromises =
-          payloadPipe.out->write(serializedHeaders.begin(), serializedHeaders.size())
-          .then([serializedHeaders = kj::mv(serializedHeaders),
-                 payloadOut = kj::mv(payloadPipe.out)]() mutable {
-        return kj::tuple(kj::mv(payloadOut), false);
-      }).split();
+      static auto constexpr handleHeaders = [](kj::Own<kj::AsyncOutputStream> out,
+                                               kj::String serializedHeaders)
+          -> kj::Promise<kj::Tuple<kj::Own<kj::AsyncOutputStream>, bool>> {
+        co_await out->write(serializedHeaders.begin(), serializedHeaders.size());
+        co_return kj::tuple(kj::mv(out), false);
+      };
+
+      auto headersPromises = handleHeaders(kj::mv(payloadPipe.out),
+                                           kj::mv(serializedHeaders)).split();
 
       payload = Payload {
         .stream = kj::mv(payloadPipe.in),
@@ -324,14 +327,17 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
           requestHeaders, payloadStream->tryGetLength());
 
       auto pumpRequestBodyPromise = payloadStream->pumpTo(*nativeRequest.body)
-          .ignoreResult()
+          .ignoreResult();
           // NOTE: We don't attach nativeRequest.body here because we want to control its
           //   destruction timing in the event of an error; see below.
-          .attach(kj::mv(payloadStream));
 
-      // Weird: It's important that these objects be torn down in the right order (specifically,
-      // reverse order). Lambda captures do not specify destruction ordering, so let's wrap them
-      // into a struct.
+      // The next step is a bit complicated as it occurs in two separate async flows.
+      // First, we await the serialization promise, then construct a DeferredProxy.
+      // That DeferredProxy contains the second async flow that actually handles the
+      // request and response.
+      //
+      // Weird: It's important that these objects be torn down in the right order and that the
+      // DeferredProxy promise is handled separately from the inner promise.
       //
       // Moreover, there is an interesting property: In the event that `httpClient` is destroyed
       // immediately after `bodyStream` (i.e. without returning to the KJ event loop in between),
@@ -346,23 +352,6 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       // important to us that we don't write incomplete cache entries, so we rely on this hack for
       // now. See EW-812 for the broader problem.
       //
-      // In short: If the PutInfo is destroyed all at once, then no terminal chunk will be written,
-      // and the cache will know not to commit the entry. If we destroy `bodyStream` and then
-      // actually wait for `responsePromise` to complete before destroying `httpClient`, then the
-      // terminal chunk is written.
-      struct PutInfo {
-        kj::Own<kj::HttpClient> httpClient;
-        kj::Promise<kj::HttpClient::Response> responsePromise;
-        kj::Own<kj::AsyncOutputStream> bodyStream;
-        kj::Promise<void> pumpRequestBodyPromise;
-      };
-      PutInfo putInfo {
-        kj::mv(httpClient),
-        kj::mv(nativeRequest.response),
-        kj::mv(nativeRequest.body),
-        kj::mv(pumpRequestBodyPromise)
-      };
-
       // A little funky: The process of "serializing" the cache entry payload means reading all the
       // data from the payload body stream and writing it to cache. But, the payload body might
       // originate from the app's own JavaScript, rather than being the response to some remote
@@ -396,51 +385,121 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       // will properly treat it as pending I/O, but only *after* the outer promise completes. This
       // gets us everything we want.
       //
-      // Hence, what you see here: we do serializePromise.then() and, inside there, add all our
+      // Hence, what you see here: we first await the serializePromise then add all our
       // additional work onto the inner "deferred proxy" promise. Then we `awaitDeferredProxy()`
       // the whole thing.
-      return context.awaitDeferredProxy(serializePromise
-          .then([putInfo = kj::mv(putInfo),
-                 writePayloadHeadersPromise = kj::mv(writePayloadHeadersPromise)]
-                (DeferredProxy<void> deferred) mutable {
-        return DeferredProxy<void> { deferred.proxyTask
-            .then([writePayloadHeadersPromise = kj::mv(writePayloadHeadersPromise)]() mutable {
+
+      // We use the same exception handling logic for both the promise for the DeferredProxy
+      // and the inner promise handling the request/response.
+      static auto constexpr handleException = [](kj::Exception&& exception) {
+        if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+          kj::throwFatalException(kj::mv(exception));
+        }
+        // If the origin or the cache disconnected, we don't treat this as an error, as put()
+        // doesn't guarantee that it stores anything anyway.
+        //
+        // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
+        //   error, even though hiding it is technically not a violation of the contract. To me
+        //   this seems undesirable, especially when it was the origin that failed. The caller
+        //   can always choose to ignore errors if they want (and many do, by passing to
+        //   waitUntil()). However, there is at least one test which depends on this behavior,
+        //   and probably production Workers in the wild, so I'm not changing it for now.
+      };
+
+      // Here we handle the inner promise -- the one held by the DeferredProxy that is
+      // returned below by the handleSerialize() method.
+      static auto constexpr handleResponse =
+          [](DeferredProxy<void>& deferred,
+             kj::Promise<void> writePayloadHeadersPromise,
+             kj::Promise<void> pumpRequestBodyPromise,
+             kj::Own<kj::AsyncOutputStream> bodyStream,
+             kj::Promise<kj::HttpClient::Response> responsePromise,
+             kj::Own<kj::HttpClient> client,
+             kj::Own<kj::AsyncInputStream> payloadStream) -> kj::Promise<void> {
+        try {
+          co_await deferred.proxyTask;
           // Make sure headers get written even if the body was empty -- see comments earlier.
-          return kj::mv(writePayloadHeadersPromise);
-        }).then([pumpRequestBodyPromise = kj::mv(putInfo.pumpRequestBodyPromise)]() mutable {
+          co_await writePayloadHeadersPromise;
           // Make sure the request body is done being pumped and had no errors. If serialization
           // completed successfully, then this should also complete immediately thereafter.
-          return kj::mv(pumpRequestBodyPromise);
-        }).then([putInfo = kj::mv(putInfo)]() mutable -> kj::Promise<void> {
-          // Wait for the response from the cache.
-          return putInfo.responsePromise
-              .then([httpClient = kj::mv(putInfo.httpClient)]
-                    (kj::HttpClient::Response putResponse) {
-            // We expect to see either 204 (success) or 413 (failure). Any other status code is a
-            // violation of the contract between us and the cache, and is an internal
-            // error, which we log. However, there's no need to throw, since the Cache API is an
-            // ephemeral K/V store, and we never guaranteed the script we'd actually cache anything.
-            if (putResponse.statusCode != 204 && putResponse.statusCode != 413) {
-              LOG_CACHE_ERROR_ONCE(
-                  "Response to Cache API PUT was neither 204 nor 413: ", putResponse);
-            }
-          });
-        }).catch_([](kj::Exception&& e) {
-          if (e.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(e));
-          } else {
-            // If the origin or the cache disconnected, we don't treat this as an error, as put()
-            // doesn't guarantee that it stores anything anyway.
-            //
-            // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
-            //   error, even though hiding it is technically not a violation of the contract. To me
-            //   this seems undesirable, especially when it was the origin that failed. The caller
-            //   can always choose to ignore errors if they want (and many do, by passing to
-            //   waitUntil()). However, there is at least one test which depends on this behavior,
-            //   and probably production Workers in the wild, so I'm not changing it for now.
+          co_await pumpRequestBodyPromise;
+          // It is important to destroy the bodyStream before actually waiting on the
+          // responsePromise to ensure that the terminal chunk is written since the bodyStream
+          // may only write the terminal chunk in the streams destructor.
+          bodyStream = nullptr;
+          payloadStream = nullptr;
+          auto response = co_await responsePromise;
+          // We expect to see either 204 (success) or 413 (failure). Any other status code is a
+          // violation of the contract between us and the cache, and is an internal
+          // error, which we log. However, there's no need to throw, since the Cache API is an
+          // ephemeral K/V store, and we never guaranteed the script we'd actually cache anything.
+          if (response.statusCode != 204 && response.statusCode != 413) {
+            LOG_CACHE_ERROR_ONCE(
+                "Response to Cache API PUT was neither 204 nor 413: ", response);
           }
-        })};
-      }));
+        } catch (...) {
+          handleException(kj::getCaughtExceptionAsKj());
+        }
+      };
+
+      // Here we handle the promise for the DeferredProxy itself.
+      static auto constexpr handleSerialize = [](
+          kj::Promise<DeferredProxy<void>> serialize,
+          kj::Own<kj::HttpClient> httpClient,
+          kj::Promise<kj::HttpClient::Response> responsePromise,
+          kj::Own<kj::AsyncOutputStream> bodyStream,
+          kj::Promise<void> pumpRequestBodyPromise,
+          kj::Promise<void> writePayloadHeadersPromise,
+          kj::Own<kj::AsyncInputStream> payloadStream)
+              -> kj::Promise<DeferredProxy<void>> {
+        // This is extremely odd and a bit annoying but we have to make sure
+        // these are destroyed in a particular order due to cross-dependencies
+        // for each. If the kj::Promise returned by handleSerialize is dropped
+        // before the co_await serialize completes, then these won't ever be
+        // moved away into the handleResponse method (which ensures proper
+        // cleanup order). In such a case, we explicitly layout a cleanup order
+        // here to make it clear.
+        // Note: we could do this by ordering the arguments in a particular way,
+        // or by doing what a previous iteration of this code did and put everything
+        // into a struct in a particular order but pulling things out like this makes
+        // what is going on here much more intentional and explicit.
+        //
+        // If these are not cleaned up in the right order, there can be subtle
+        // use-after-free issues reported by asan and certain flows can end up
+        // hanging.
+        KJ_DEFER({
+          pumpRequestBodyPromise = nullptr;
+          payloadStream = nullptr;
+          bodyStream = nullptr;
+          responsePromise = nullptr;
+          writePayloadHeadersPromise = nullptr;
+          httpClient = nullptr;
+        });
+        try {
+          auto deferred = co_await serialize;
+          co_return DeferredProxy<void> {
+            handleResponse(deferred,
+                           kj::mv(writePayloadHeadersPromise),
+                           kj::mv(pumpRequestBodyPromise),
+                           kj::mv(bodyStream),
+                           kj::mv(responsePromise),
+                           kj::mv(httpClient),
+                           kj::mv(payloadStream))
+          };
+        } catch (...) {
+          handleException(kj::getCaughtExceptionAsKj());
+          co_return newNoopDeferredProxy();
+        }
+      };
+
+      return context.awaitDeferredProxy(handleSerialize(
+          kj::mv(serializePromise),
+          kj::mv(httpClient),
+          kj::mv(nativeRequest.response),
+          kj::mv(nativeRequest.body),
+          kj::mv(pumpRequestBodyPromise),
+          kj::mv(writePayloadHeadersPromise),
+          kj::mv(payloadStream)));
     }));
   });
 }
