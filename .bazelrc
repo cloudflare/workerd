@@ -48,8 +48,10 @@ build --@capnp-cpp//src/kj:deprecate_empty_maybe_from_nullptr=False
 # rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
 # improvement to build speed and rust-deps code size.
 build --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
+build --@rules_rust//:extra_exec_rustc_flags=-C,panic=abort,-C,debug-assertions=n,-C,embed-bitcode=n
 
 build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
+build:fastdbg --@rules_rust//:extra_exec_rustc_flags=-C,panic=unwind,-C,debug-assertions=y,-C,debuginfo=1,-C,embed-bitcode=n
 
 # TODO(later): -C codegen-units=1 improves code size and quality, should be enabled in a future
 # release configuration even if lto is off. Similarly, adding -C lto=thin would improve binary size
@@ -118,6 +120,13 @@ build:linux --action_env=BAZEL_LINKLIBS='-l%:libc++.a -lm -static-libgcc'
 # https://github.com/bazelbuild/bazel/issues/12439#issuecomment-914449079
 build:linux --force_pic
 
+# TODO(later): rustc's -C,codegen-units=1 and ld/lld's -Wl,-O2 on Linux/possibly Windows should
+# bring an additional binary size improvement. These should only be enabled in opt mode which won't
+# be possible in bazelrc without establishing a release configuration, but it can be done using the
+# extra_rustc_flags parameter in rust_register_toolchains() and by modifying linkopts in kj_test()
+# and wd_cc_binary() similar to how the use_dead_strip flag is used. The binary size improvement is
+# modest (~ 300kb), but if we encounter size concerns again this would be a good place to start.
+
 #
 # Windows
 #
@@ -151,12 +160,15 @@ build:windows_no_dbg --features=-smaller_binary --features=-disable_assertions_f
 
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --cxxopt='/await' --host_cxxopt='/await'
-build:windows --cxxopt='/wo4503' --host_cxxopt='/wo4503'
-build:windows --cxxopt='/DWINDOWS_LEAN_AND_MEAN' --host_cxxopt='/DWINDOWS_LEAN_AND_MEAN'
-build:windows --cxxopt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_cxxopt='/D_CRT_USE_BUILTIN_OFFSETOF'
-# The `/std:c++14` argument is unused during boringssl compilation and we don't
+build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
+build:windows --copt='/DWINDOWS_LEAN_AND_MEAN' --host_copt='/DWINDOWS_LEAN_AND_MEAN'
+# The `/std:c++20` argument is unused during boringssl compilation and we don't
 # want a warning when compiling each file.
-build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-unused-command-line-argument'
+build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
+
+# MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
+# set the correct value. We currently don't check __cplusplus, but some dependencies do.
+build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # The following are required on github runners temporarily due to
 # https://github.com/actions/runner-images/issues/8125
