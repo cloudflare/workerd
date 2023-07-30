@@ -32,6 +32,14 @@ wd_cc_binary(
     name = "api_encoder_bin",
     srcs = [api_encoder_src],
     deps = [":api_encoder_lib"],
+    # Use dynamic linkage where possible to reduce binary size – unlike the workerd binary, we
+    # shouldn't need to distribute the api encoder.
+    linkstatic = 0,
+    # The dependent targets are not Windows-compatible, no need to compile this.
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 # All compatibility dates that changed public facing types.
@@ -133,12 +141,11 @@ rust_binary(
     ],
 )
 
-# Deliberately not marking this run_binary_target(): The exec configuration appears to use
-# different optimization settings, causing it to run markedly faster than the target configuration,
-# where param_extractor would otherwise take several minutes to run. The rules_rust documentation
-# does not indicate any reason why exec would use different settings. A different approach would be
-# to set `rustc_flags	= ["-C", "opt-level=3"],` for param_extractor_bin, although in this case
-# the binary dependencies shared with the rust-deps target would still need to be compiled twice.
+# Deliberately not marking this run_binary_target(): The exec configuration compiles with
+# optimization by default, causing it to run markedly faster than the (non-opt) target
+# configuration, where param_extractor would otherwise take several minutes to run. A different
+# approach would be to set `rustc_flags = ["-C", "opt-level=3"],` here, although in this case any
+# dependencies shared with the rust-deps target would still need to be compiled twice.
 run_binary(
     name = "param_extractor",
     srcs = [
