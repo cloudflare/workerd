@@ -16,10 +16,11 @@ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::ComputePipeline &() const { return pipeline_; }
   explicit GPUComputePipeline(wgpu::ComputePipeline p) : pipeline_(kj::mv(p)){};
-  JSG_RESOURCE_TYPE(GPUComputePipeline) {}
+  JSG_RESOURCE_TYPE(GPUComputePipeline) { JSG_METHOD(getBindGroupLayout); }
 
 private:
   wgpu::ComputePipeline pipeline_;
+  jsg::Ref<GPUBindGroupLayout> getBindGroupLayout(uint32_t index);
 };
 
 using GPUPipelineConstantValue = double;
@@ -32,7 +33,8 @@ struct GPUProgrammableStage {
   JSG_STRUCT(module, entryPoint, constants);
 };
 
-using GPUComputePipelineLayout = kj::OneOf<kj::String, jsg::Ref<GPUPipelineLayout>>;
+using GPUComputePipelineLayout =
+    kj::OneOf<kj::String, jsg::Ref<GPUPipelineLayout>>;
 
 struct GPUComputePipelineDescriptor {
   jsg::Optional<kj::String> label;

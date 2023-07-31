@@ -493,6 +493,7 @@ public:
     // WebGPU
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
 #endif
 
     JSG_TS_ROOT();

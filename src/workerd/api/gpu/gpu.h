@@ -4,17 +4,23 @@
 
 #pragma once
 
+#include "gpu-adapter-info.h"
 #include "gpu-adapter.h"
 #include "gpu-bindgroup-layout.h"
 #include "gpu-bindgroup.h"
+#include "gpu-command-buffer.h"
 #include "gpu-command-encoder.h"
 #include "gpu-compute-pass-encoder.h"
 #include "gpu-compute-pipeline.h"
 #include "gpu-device.h"
+#include "gpu-errors.h"
 #include "gpu-pipeline-layout.h"
 #include "gpu-query-set.h"
+#include "gpu-queue.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
+#include "gpu-supported-features.h"
+#include "gpu-supported-limits.h"
 #include "gpu-utils.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -24,13 +30,21 @@
 namespace workerd::api::gpu {
 void initialize();
 
+struct GPURequestAdapterOptions {
+  GPUPowerPreference powerPreference;
+  jsg::Optional<bool> forceFallbackAdapter;
+
+  JSG_STRUCT(powerPreference, forceFallbackAdapter);
+};
+
 class GPU : public jsg::Object {
 public:
   explicit GPU();
   JSG_RESOURCE_TYPE(GPU) { JSG_METHOD(requestAdapter); }
 
 private:
-  jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>> requestAdapter(jsg::Lock &);
+  jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
+  requestAdapter(jsg::Lock &, jsg::Optional<GPURequestAdapterOptions>);
   dawn::native::Instance instance_;
 };
 
@@ -53,6 +67,12 @@ private:
       api::gpu::GPUProgrammableStage, api::gpu::GPUCommandEncoder,             \
       api::gpu::GPUCommandEncoderDescriptor, api::gpu::GPUComputePassEncoder,  \
       api::gpu::GPUComputePassDescriptor, api::gpu::GPUQuerySet,               \
-      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite
+      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite, \
+      api::gpu::GPUCommandBufferDescriptor, api::gpu::GPUCommandBuffer,        \
+      api::gpu::GPUQueue, api::gpu::GPUMapMode,                                \
+      api::gpu::GPURequestAdapterOptions, api::gpu::GPUAdapterInfo,            \
+      api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits,            \
+      api::gpu::GPUError, api::gpu::GPUOOMError, api::gpu::GPUValidationError, \
+      api::gpu::GPUDeviceLostInfo
 
 }; // namespace workerd::api::gpu

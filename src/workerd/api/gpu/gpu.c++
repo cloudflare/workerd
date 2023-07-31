@@ -23,9 +23,22 @@ void initialize() {
 
 GPU::GPU() { instance_.DiscoverDefaultAdapters(); }
 
-// TODO(soon): support options parameter
+kj::String parseAdapterType(wgpu::AdapterType type) {
+  switch (type) {
+  case wgpu::AdapterType::DiscreteGPU:
+    return kj::str("Discrete GPU");
+  case wgpu::AdapterType::IntegratedGPU:
+    return kj::str("Integrated GPU");
+  case wgpu::AdapterType::CPU:
+    return kj::str("CPU");
+  case wgpu::AdapterType::Unknown:
+    return kj::str("Unknown");
+  }
+}
+
 jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-GPU::requestAdapter(jsg::Lock &js) {
+GPU::requestAdapter(jsg::Lock &js,
+                    jsg::Optional<GPURequestAdapterOptions> options) {
 
 #if defined(_WIN32)
   constexpr auto defaultBackendType = wgpu::BackendType::D3D12;
@@ -50,6 +63,8 @@ GPU::requestAdapter(jsg::Lock &js) {
       continue;
     }
 
+    KJ_LOG(INFO, kj::str("found webgpu device '", props.name, "' of type ",
+                         parseAdapterType(props.adapterType)));
     adapter = a;
     break;
   }

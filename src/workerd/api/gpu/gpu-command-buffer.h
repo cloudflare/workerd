@@ -4,32 +4,26 @@
 
 #pragma once
 
-#include "gpu-utils.h"
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUQuerySet : public jsg::Object {
+class GPUCommandBuffer : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::QuerySet &() const { return querySet_; }
-  explicit GPUQuerySet(wgpu::QuerySet q) : querySet_(kj::mv(q)){};
-  JSG_RESOURCE_TYPE(GPUQuerySet) {}
+  inline operator const wgpu::CommandBuffer &() const { return cmd_buf_; }
+  explicit GPUCommandBuffer(wgpu::CommandBuffer b) : cmd_buf_(kj::mv(b)){};
+  JSG_RESOURCE_TYPE(GPUCommandBuffer) {}
 
 private:
-  wgpu::QuerySet querySet_;
+  wgpu::CommandBuffer cmd_buf_;
 };
 
-struct GPUQuerySetDescriptor {
+struct GPUCommandBufferDescriptor {
   jsg::Optional<kj::String> label;
-
-  kj::String type;
-  GPUSize32 count;
 
   JSG_STRUCT(label);
 };
-
-wgpu::QueryType parseQueryType(kj::StringPtr type);
 
 } // namespace workerd::api::gpu

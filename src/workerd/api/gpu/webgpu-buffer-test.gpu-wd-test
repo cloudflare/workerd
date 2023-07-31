@@ -5,7 +5,7 @@ const unitTests :Workerd.Config = (
     ( name = "webgpu-test",
       worker = (
         modules = [
-          (name = "worker", esModule = embed "webgpu-test.js")
+          (name = "worker", esModule = embed "webgpu-buffer-test.js")
         ],
         compatibilityDate = "2023-01-15",
         compatibilityFlags = ["experimental", "nodejs_compat"],

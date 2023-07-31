@@ -19,27 +19,17 @@ wgpu::BufferBindingType parseBufferBindingType(kj::StringPtr bType) {
     return wgpu::BufferBindingType::ReadOnlyStorage;
   }
 
-  KJ_FAIL_REQUIRE("unknown buffer binding type", bType);
+  JSG_FAIL_REQUIRE(TypeError, "unknown buffer binding type", bType);
 }
 
 wgpu::BufferBindingLayout
-parseBufferBindingLayout(GPUBufferBindingLayout &buffer) {
+parseBufferBindingLayout(GPUBufferBindingLayout& buffer) {
   wgpu::BufferBindingLayout l;
-  l.type = wgpu::BufferBindingType::Uniform;
-  l.hasDynamicOffset = false;
-  l.minBindingSize = 0;
 
-  KJ_IF_MAYBE (type, buffer.type) {
-    l.type = parseBufferBindingType(*type);
-  }
-
-  KJ_IF_MAYBE (offset, buffer.hasDynamicOffset) {
-    l.hasDynamicOffset = *offset;
-  }
-
-  KJ_IF_MAYBE (minSize, buffer.minBindingSize) {
-    l.minBindingSize = *minSize;
-  }
+  l.type = parseBufferBindingType(
+      buffer.type.orDefault([] { return "uniform"_kj; }));
+  l.hasDynamicOffset = buffer.hasDynamicOffset.orDefault(false);
+  l.minBindingSize = buffer.minBindingSize.orDefault(0);
 
   return kj::mv(l);
 }
@@ -57,17 +47,14 @@ wgpu::SamplerBindingType parseSamplerBindingType(kj::StringPtr bType) {
     return wgpu::SamplerBindingType::Comparison;
   }
 
-  KJ_FAIL_REQUIRE("unknown sampler binding type", bType);
+  JSG_FAIL_REQUIRE(TypeError, "unknown sampler binding type", bType);
 }
 
 wgpu::SamplerBindingLayout
-parseSamplerBindingLayout(GPUSamplerBindingLayout &sampler) {
+parseSamplerBindingLayout(GPUSamplerBindingLayout& sampler) {
   wgpu::SamplerBindingLayout s;
-  s.type = wgpu::SamplerBindingType::Filtering;
-
-  KJ_IF_MAYBE (sType, sampler.type) {
-    s.type = parseSamplerBindingType(*sType);
-  }
+  s.type = parseSamplerBindingType(
+      sampler.type.orDefault([] { return "filtering"_kj; }));
 
   return kj::mv(s);
 }
@@ -93,7 +80,7 @@ wgpu::TextureSampleType parseTextureSampleType(kj::StringPtr sType) {
     return wgpu::TextureSampleType::Uint;
   }
 
-  KJ_FAIL_REQUIRE("unknown texture sample type", sType);
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture sample type", sType);
 }
 
 wgpu::TextureViewDimension parseTextureViewDimension(kj::StringPtr dim) {
@@ -122,27 +109,17 @@ wgpu::TextureViewDimension parseTextureViewDimension(kj::StringPtr dim) {
     return wgpu::TextureViewDimension::e3D;
   }
 
-  KJ_FAIL_REQUIRE("unknown texture view dimension", dim);
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture view dimension", dim);
 }
 
 wgpu::TextureBindingLayout
-parseTextureBindingLayout(GPUTextureBindingLayout &texture) {
+parseTextureBindingLayout(GPUTextureBindingLayout& texture) {
   wgpu::TextureBindingLayout t;
-  t.sampleType = wgpu::TextureSampleType::Float;
-  t.viewDimension = wgpu::TextureViewDimension::e2D;
-  t.multisampled = false;
-
-  KJ_IF_MAYBE (sType, texture.sampleType) {
-    t.sampleType = parseTextureSampleType(*sType);
-  }
-
-  KJ_IF_MAYBE (dim, texture.viewDimension) {
-    t.viewDimension = parseTextureViewDimension(*dim);
-  }
-
-  KJ_IF_MAYBE (ms, texture.multisampled) {
-    t.multisampled = *ms;
-  }
+  t.sampleType = parseTextureSampleType(
+      texture.sampleType.orDefault([] { return "float"_kj; }));
+  t.viewDimension = parseTextureViewDimension(
+      texture.viewDimension.orDefault([] { return "2d"_kj; }));
+  t.multisampled = texture.multisampled.orDefault(false);
 
   return kj::mv(t);
 }
@@ -525,7 +502,7 @@ wgpu::TextureFormat parseTextureFormat(kj::StringPtr format) {
     return wgpu::TextureFormat::ASTC12x12UnormSrgb;
   }
 
-  KJ_FAIL_REQUIRE("unknown texture format", format);
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture format", format);
 }
 
 wgpu::StorageTextureAccess parseStorageAccess(kj::StringPtr access) {
@@ -533,30 +510,24 @@ wgpu::StorageTextureAccess parseStorageAccess(kj::StringPtr access) {
     return wgpu::StorageTextureAccess::WriteOnly;
   }
 
-  KJ_FAIL_REQUIRE("unknown storage access", access);
+  JSG_FAIL_REQUIRE(TypeError, "unknown storage access", access);
 }
 
 wgpu::StorageTextureBindingLayout
-parseStorageTextureBindingLayout(GPUStorageTextureBindingLayout &storage) {
+parseStorageTextureBindingLayout(GPUStorageTextureBindingLayout& storage) {
 
   wgpu::StorageTextureBindingLayout s;
-  s.access = wgpu::StorageTextureAccess::WriteOnly;
+  s.access = parseStorageAccess(
+      storage.access.orDefault([] { return "write-only"_kj; }));
   s.format = parseTextureFormat(storage.format);
-  s.viewDimension = wgpu::TextureViewDimension::e2D;
-
-  KJ_IF_MAYBE (access, storage.access) {
-    s.access = parseStorageAccess(*access);
-  }
-
-  KJ_IF_MAYBE (dimension, storage.viewDimension) {
-    s.viewDimension = parseTextureViewDimension(*dimension);
-  }
+  s.viewDimension = parseTextureViewDimension(
+      storage.viewDimension.orDefault([] { return "2d"_kj; }));
 
   return kj::mv(s);
 }
 
 wgpu::BindGroupLayoutEntry
-parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry &entry) {
+parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry& entry) {
   wgpu::BindGroupLayoutEntry e;
   e.binding = entry.binding;
   e.visibility = static_cast<wgpu::ShaderStage>(entry.visibility);

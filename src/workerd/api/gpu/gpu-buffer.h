@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "gpu-async-runner.h"
 #include "gpu-utils.h"
 #include <workerd/jsg/jsg.h>
 
@@ -12,12 +13,15 @@ namespace workerd::api::gpu {
 class GPUBuffer : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::Buffer &() const { return buffer_; }
-  explicit GPUBuffer(wgpu::Buffer, wgpu::BufferDescriptor);
+  inline operator const wgpu::Buffer&() const { return buffer_; }
+  explicit GPUBuffer(jsg::Lock& js, wgpu::Buffer, wgpu::BufferDescriptor,
+                     wgpu::Device, kj::Own<AsyncRunner>);
 
   JSG_RESOURCE_TYPE(GPUBuffer) {
     JSG_METHOD(getMappedRange);
     JSG_METHOD(unmap);
+    JSG_METHOD(destroy);
+    JSG_METHOD(mapAsync);
   }
 
 private:
@@ -36,17 +40,26 @@ private:
     inline bool Intersects(uint64_t s, uint64_t e) const {
       return s < end && e > start;
     }
-    kj::ArrayPtr<kj::byte> buffer;
+    std::unique_ptr<jsg::V8Ref<v8::ArrayBuffer>> buffer;
   };
 
   wgpu::Buffer buffer_;
+  wgpu::Device device_;
   wgpu::BufferDescriptor desc_;
+  kj::Own<AsyncRunner> async_;
   State state_ = State::Unmapped;
   kj::Vector<Mapping> mapped_;
+  v8::Local<v8::Object> detachKey_;
 
-  kj::ArrayPtr<kj::byte> getMappedRange(jsg::Optional<GPUSize64> offset,
-                                        jsg::Optional<GPUSize64> size);
-  void unmap();
+  v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&,
+                                            jsg::Optional<GPUSize64> offset,
+                                            jsg::Optional<GPUSize64> size);
+  void unmap(jsg::Lock& js);
+  void destroy(jsg::Lock& js);
+  jsg::Promise<void> mapAsync(GPUFlagsConstant mode,
+                              jsg::Optional<GPUSize64> offset,
+                              jsg::Optional<GPUSize64> size);
+  void DetachMappings(jsg::Lock& js);
 };
 
 struct GPUBufferDescriptor {

@@ -20,11 +20,17 @@ public:
   JSG_RESOURCE_TYPE(GPUComputePassEncoder) {
     JSG_METHOD(setPipeline);
     JSG_METHOD(setBindGroup);
+    JSG_METHOD(dispatchWorkgroups);
+    JSG_METHOD(end);
   }
 
 private:
   wgpu::ComputePassEncoder encoder_;
   void setPipeline(jsg::Ref<GPUComputePipeline> pipeline);
+  void dispatchWorkgroups(GPUSize32 workgroupCountX,
+                          jsg::Optional<GPUSize32> workgroupCountY,
+                          jsg::Optional<GPUSize32> workgroupCountZ);
+  void end();
   void
   setBindGroup(GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
                jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets);

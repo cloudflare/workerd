@@ -380,6 +380,7 @@ struct BuildRtti<Configuration, T> { \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE) \
   F(kj::Date, BuiltinType::Type::KJ_DATE) \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW) \
+  F(v8::ArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER) \
   F(v8::Function, BuiltinType::Type::V8_FUNCTION) \
   F(v8::Uint8Array, BuiltinType::Type::V8_UINT8_ARRAY)
 
