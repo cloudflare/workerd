@@ -790,7 +790,7 @@ private:
 
   void pushCurrent(jsg::Lock& js, jsg::Promise<void> promise) {
     auto& inner = state.template get<InnerState>();
-    inner.impl.pushCurrent(promise.whenResolved().then(js,
+    inner.impl.pushCurrent(promise.whenResolved(js).then(js,
         [this, self = JSG_THIS](jsg::Lock& js) {
       // If state is Finished, then there's nothing we need to do here.
       KJ_IF_MAYBE(inner, state.template tryGet<InnerState>()) {
@@ -826,7 +826,7 @@ private:
             }
             KJ_CASE_ONEOF(inner, InnerState) {
               auto promise = nextFunc(js, inner.state);
-              pushCurrent(js, promise.whenResolved());
+              pushCurrent(js, promise.whenResolved(js));
               return promise.then(js,
                   [this, self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
                 KJ_IF_MAYBE(result, maybeResult) {
@@ -842,8 +842,8 @@ private:
         };
 
         KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          auto promise = current->whenResolved().then(js, kj::mv(callNext));
-          pushCurrent(js, promise.whenResolved());
+          auto promise = current->whenResolved(js).then(js, kj::mv(callNext));
+          pushCurrent(js, promise.whenResolved(js));
           return kj::mv(promise);
         }
 
@@ -898,7 +898,7 @@ private:
         // If there is something on the pending stack, we are going to wait for that promise
         // to resolve then call callReturn.
         KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          return current->whenResolved().then(js, kj::mv(callReturn));
+          return current->whenResolved(js).then(js, kj::mv(callReturn));
         }
 
         // Otherwise, we call callReturn immediately.

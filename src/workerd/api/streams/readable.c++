@@ -319,9 +319,9 @@ jsg::Promise<void> ReadableStream::onEof(jsg::Lock& js) {
   return kj::mv(KJ_ASSERT_NONNULL(eofResolverPair).promise);
 }
 
-void ReadableStream::signalEof() {
+void ReadableStream::signalEof(jsg::Lock& js) {
   KJ_IF_MAYBE(pair, eofResolverPair) {
-    pair->resolver.resolve();
+    pair->resolver.resolve(js);
   }
 }
 
@@ -392,7 +392,7 @@ jsg::Ref<ReadableStream> ReadableStream::pipeThrough(
     return js.resolvedPromise();
   }), JSG_VISITABLE_LAMBDA((self = JSG_THIS), (self), (jsg::Lock& js, auto&& exception) {
     return js.rejectedPromise<void>(kj::mv(exception));
-  })).markAsHandled();
+  })).markAsHandled(js);
   return kj::mv(transform.readable);
 }
 
@@ -472,7 +472,6 @@ kj::Promise<DeferredProxy<void>> ReadableStream::pumpTo(
     bool end) {
   JSG_REQUIRE(IoContext::hasCurrent(), Error,
       "Unable to consume this ReadableStream outside of a request");
-  JSG_REQUIRE(!isDisturbed(), TypeError, "The ReadableStream has already been read.");
   JSG_REQUIRE(!isLocked(), TypeError, "The ReadableStream has been locked to a reader.");
   return getController().pumpTo(js, kj::mv(sink), end);
 }

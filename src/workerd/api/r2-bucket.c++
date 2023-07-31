@@ -336,7 +336,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt,
         flags);
 
-    return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) {
+    return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) {
       return parseObjectMetadata<HeadResult>("head", r2Result, errorType);
     });
   });
@@ -373,7 +373,8 @@ R2Bucket::get(jsg::Lock& js, kj::String name, jsg::Optional<GetOptions> options,
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt,
         flags);
 
-    return context.awaitIo(kj::mv(promise), [&context, &errorType](R2Result r2Result)
+    return context.awaitIo(js, kj::mv(promise),
+        [&context, &errorType](jsg::Lock&, R2Result r2Result)
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
@@ -805,9 +806,9 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt,
         flags);
 
-    return context.awaitIo(kj::mv(promise),
+    return context.awaitIo(js, kj::mv(promise),
         [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType]
-        (R2Result r2Result) {
+        (jsg::Lock&, R2Result r2Result) {
       r2Result.throwIfError("list", errorType);
 
       R2Bucket::ListResult result;

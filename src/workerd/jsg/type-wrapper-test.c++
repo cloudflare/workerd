@@ -8,8 +8,9 @@ namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
+class ContextGlobalObject: public Object, public ContextGlobal { };
 
-struct InfoContext: public Object {
+struct InfoContext: public ContextGlobalObject {
   struct WantInfo: public Object {
     static Ref<WantInfo> constructor() { return jsg::alloc<WantInfo>(); }
 
@@ -66,7 +67,7 @@ struct TestExtensionType {
   int32_t value;
 };
 
-struct ExtensionContext: public Object {
+struct ExtensionContext: public ContextGlobalObject {
   TestExtensionType toExtensionType(double value) {
     return { static_cast<int32_t>(value) };
   }
@@ -116,7 +117,7 @@ KJ_TEST("extensions") {
 
 // ========================================================================================
 
-struct TypeHandlerContext: public Object {
+struct TypeHandlerContext: public ContextGlobalObject {
   v8::Local<v8::Value> newNumberBox(jsg::Lock& js,
       double value, const TypeHandler<Ref<NumberBox>>& handler) {
     return handler.wrap(js, alloc<NumberBox>(value));
@@ -155,7 +156,7 @@ KJ_TEST("type handlers") {
 
 // ========================================================================================
 
-struct ArrayContext: public Object {
+struct ArrayContext: public ContextGlobalObject {
   double sumArray(kj::Array<double> array) {
     double result = 0;
     for (auto d: array) result += d;
@@ -190,7 +191,7 @@ KJ_TEST("arrays") {
 
 // ========================================================================================
 
-struct Uint8Context: public Object {
+struct Uint8Context: public ContextGlobalObject {
   kj::Array<byte> encodeUtf8(kj::String str) {
     return kj::heapArray(str.asBytes());
   }
@@ -232,7 +233,7 @@ KJ_TEST("Uint8Arrays") {
 
 // ========================================================================================
 
-struct UnwrappingContext: public Object {
+struct UnwrappingContext: public ContextGlobalObject {
   v8::Local<v8::ArrayBufferView> mutateArrayBufferView(v8::Local<v8::ArrayBufferView> value) {
     if (value->ByteLength() > 0) {
       auto backing = value->Buffer()->GetBackingStore();
@@ -257,7 +258,7 @@ KJ_TEST("v8::Value subclass unwrapping") {
 
 // ========================================================================================
 
-struct UnimplementedContext: public Object {
+struct UnimplementedContext: public ContextGlobalObject {
   class UnimplementedConstructor: public Object {
   public:
     static Unimplemented constructor() { return Unimplemented(); }

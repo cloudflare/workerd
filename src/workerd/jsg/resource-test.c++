@@ -3,13 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "jsg-test.h"
+#include <workerd/jsg/resource-test.capnp.h>
 
 namespace workerd::jsg::test {
 namespace {
 
 V8System v8System;
+class ContextGlobalObject: public Object, public ContextGlobal { };
 
-struct BoxContext: public Object {
+struct BoxContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(BoxContext) {
     JSG_NESTED_TYPE(NumberBox);
     JSG_NESTED_TYPE(BoxBox);
@@ -86,7 +88,7 @@ struct InheritsMixin: public Object, public Mixin {
     JSG_METHOD(getValue);
   }
 };
-struct InheritsMixinContext: public Object {
+struct InheritsMixinContext: public ContextGlobalObject {
   Ref<InheritsMixin> makeInheritsMixin(int i) {
     return jsg::alloc<InheritsMixin>(i);
   }
@@ -122,7 +124,7 @@ struct PrototypePropertyObject: public Object {
   }
 };
 
-struct PropContext: public Object {
+struct PropContext: public ContextGlobalObject {
   PropContext(): contextProperty(kj::str("default-context-property-value")) {}
 
   kj::StringPtr getContextProperty() { return contextProperty; }
@@ -190,7 +192,7 @@ KJ_TEST("context methods and properties") {
 
 // ========================================================================================
 
-struct NonConstructibleContext: public Object {
+struct NonConstructibleContext: public ContextGlobalObject {
   struct NonConstructible: public Object {
     NonConstructible(double x): x(x) {}
 
@@ -234,7 +236,7 @@ KJ_TEST("non-constructible types can't be constructed") {
 
 // ========================================================================================
 
-struct IterableContext: public Object {
+struct IterableContext: public ContextGlobalObject {
   class Iterable: public Object {
   public:
     static Ref<Iterable> constructor() { return jsg::alloc<Iterable>(); }
@@ -324,7 +326,7 @@ KJ_TEST("Iterables can be iterated") {
 
 // ========================================================================================
 
-struct StaticContext: public Object {
+struct StaticContext: public ContextGlobalObject {
   struct StaticConstants: public Object {
     static Ref<StaticConstants> constructor() { return jsg::alloc<StaticConstants>(); }
 
@@ -511,7 +513,7 @@ KJ_TEST("Static methods can be monkey-patched") {
 
 // ========================================================================================
 
-struct ReflectionContext: public Object {
+struct ReflectionContext: public ContextGlobalObject {
   struct Super: public Object {
     JSG_RESOURCE_TYPE(Super) {}
   };
@@ -574,7 +576,7 @@ KJ_TEST("PropertyReflection works") {
 
 // ========================================================================================
 
-struct InjectLockContext: public Object {
+struct InjectLockContext: public ContextGlobalObject {
   struct Thingy: public Object {
     Thingy(int val, v8::Isolate* v8Isolate): val(val), v8Isolate(v8Isolate) {}
     int val;
@@ -622,6 +624,28 @@ JSG_DECLARE_ISOLATE_TYPE(InjectLockIsolate, InjectLockContext, InjectLockContext
 KJ_TEST("Methods can take Lock& as first parameter") {
   Evaluator<InjectLockContext, InjectLockIsolate> e(v8System);
   e.expectEval("let t = new Thingy(123); t.val", "number", "123");
+}
+
+// ========================================================================================
+
+struct JsBundleContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(JsBundleContext) {
+    JSG_CONTEXT_JS_BUNDLE(BUILTIN_BUNDLE);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
+
+KJ_TEST("expectEvalModule function works") {
+  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  e.expectEvalModule("export function run() { return 123; }", "number", "123");
+}
+
+KJ_TEST("bundle installed works") {
+  Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
+  e.expectEvalModule(R"(
+    import * as b from "test:resource-test-builtin";
+    export function run() { return b.builtinFunction(); }
+  )", "string", "THIS_IS_BUILTIN_FUNCTION");
 }
 
 }  // namespace

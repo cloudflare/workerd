@@ -278,7 +278,7 @@ jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::St
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return js.parseJson(jsg::v8Str(js.v8Isolate, body.asChars()));
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, kj::mv(body)).readValue());
+    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, body.asPtr()).readValue());
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }

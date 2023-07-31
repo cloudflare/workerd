@@ -1283,10 +1283,16 @@ private:
     kj::StringPtr message = "Noticed configuration change, reloading shortly...\r";
     kj::FdOutputStream(STDERR_FILENO).write(message.begin(), message.size());
 
+    static auto const waitForResult = [](kj::Promise<void> promise,
+                                         bool result = false) -> kj::Promise<bool> {
+      co_await promise;
+      co_return result;
+    };
+
     for (;;) {
-      auto nextChange = watcher.onChange().then([]() { return false; });
-      auto timeout = io.provider->getTimer()
-          .afterDelay(500 * kj::MILLISECONDS).then([]() { return true; });
+      auto nextChange = waitForResult(watcher.onChange());
+      auto timeout = waitForResult(
+          io.provider->getTimer().afterDelay(500 * kj::MILLISECONDS), true);
       bool sawTimeout = co_await nextChange.exclusiveJoin(kj::mv(timeout));
 
       // If we timed out, we end the loop. If we didn't time out, then we must have seen yet

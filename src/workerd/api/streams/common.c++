@@ -27,14 +27,14 @@ WritableStreamController::PendingAbort::PendingAbort(
 
 void WritableStreamController::PendingAbort::complete(jsg::Lock& js) {
   if (reject) {
-    fail(reason.getHandle(js));
+    fail(js, reason.getHandle(js));
   } else {
-    maybeResolvePromise(resolver);
+    maybeResolvePromise(js, resolver);
   }
 }
 
-void WritableStreamController::PendingAbort::fail(v8::Local<v8::Value> reason) {
-  maybeRejectPromise<void>(resolver, reason);
+void WritableStreamController::PendingAbort::fail(jsg::Lock& js, v8::Local<v8::Value> reason) {
+  maybeRejectPromise<void>(js, resolver, reason);
 }
 
 kj::Maybe<WritableStreamController::PendingAbort>

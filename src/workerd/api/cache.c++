@@ -480,9 +480,9 @@ jsg::Promise<bool> Cache::delete_(
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::PURGE, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
-    return context.awaitIo(kj::mv(nativeRequest.response),
+    return context.awaitIo(js, kj::mv(nativeRequest.response),
         [httpClient = kj::mv(httpClient)]
-        (kj::HttpClient::Response&& response) -> bool {
+        (jsg::Lock&, kj::HttpClient::Response&& response) -> bool {
       if (response.statusCode == 200) {
         return true;
       } else if (response.statusCode == 404) {

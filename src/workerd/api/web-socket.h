@@ -20,10 +20,10 @@ template <typename T> struct DeferredProxy;
 
 class MessageEvent: public Event {
 public:
-  MessageEvent(v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event("message"), data(isolate, data) {}
-  MessageEvent(kj::String type, v8::Isolate* isolate, v8::Local<v8::Value> data)
-      : Event(kj::mv(type)), data(isolate, data) {}
+  MessageEvent(jsg::Lock& js, v8::Local<v8::Value> data)
+      : Event("message"), data(js.v8Isolate, data) {}
+  MessageEvent(jsg::Lock& js, kj::String type, v8::Local<v8::Value> data)
+      : Event(kj::mv(type)), data(js.v8Isolate, data) {}
 
   struct Initializer {
     v8::Local<v8::Value> data;
@@ -33,12 +33,13 @@ public:
       data: ArrayBuffer | string;
     });
   };
-  static jsg::Ref<MessageEvent> constructor(
-      kj::String type, Initializer initializer, v8::Isolate* isolate) {
-    return jsg::alloc<MessageEvent>(kj::mv(type), isolate, initializer.data);
+  static jsg::Ref<MessageEvent> constructor(jsg::Lock& js,
+                                            kj::String type,
+                                            Initializer initializer) {
+    return jsg::alloc<MessageEvent>(js, kj::mv(type), initializer.data);
   }
 
-  v8::Local<v8::Value> getData(v8::Isolate* isolate) { return data.getHandle(isolate); }
+  v8::Local<v8::Value> getData(jsg::Lock& js) { return data.getHandle(js); }
 
   jsg::Unimplemented getOrigin() { return jsg::Unimplemented(); }
   jsg::Unimplemented getLastEventId() { return jsg::Unimplemented(); }
@@ -111,8 +112,8 @@ private:
 
 class ErrorEvent: public Event {
 public:
-  ErrorEvent(kj::String&& message, jsg::Value error, v8::Isolate* isolate)
-      : Event("error"), message(kj::mv(message)), error(kj::mv(error)), isolate(isolate){}
+  ErrorEvent(jsg::Lock& js, kj::String&& message, jsg::Value error)
+      : Event("error"), message(kj::mv(message)), error(kj::mv(error)) {}
 
   static jsg::Ref<ErrorEvent> constructor() = delete;
 
@@ -122,7 +123,7 @@ public:
   kj::StringPtr getMessage() { return message; }
   int getLineno() { return 0; }
   int getColno() { return 0; }
-  v8::Local<v8::Value> getError() { return error.getHandle(isolate); }
+  v8::Local<v8::Value> getError(jsg::Lock& js) { return error.getHandle(js); }
 
 
   JSG_RESOURCE_TYPE(ErrorEvent) {
@@ -141,7 +142,6 @@ public:
 private:
   kj::String message;
   jsg::Value error;
-  v8::Isolate* isolate;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };

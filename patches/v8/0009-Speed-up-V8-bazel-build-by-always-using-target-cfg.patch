@@ -1,4 +1,4 @@
-From 3a11c0c287505a74d0ad028b55db2a696729a80e Mon Sep 17 00:00:00 2001
+From 6535d61fbad30298d8276e5587ebf08cf656b4a2 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -16,7 +16,7 @@ this also improves build times.
  2 files changed, 130 insertions(+), 135 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331fe9b810c 100644
+index daca711d846c00059492f8cf56ac813b708a4501..8fdd538768efb73498542f523fe3bbf12610bd78 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -16,8 +16,8 @@ load(
@@ -30,7 +30,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -3531,10 +3531,42 @@ filegroup(
+@@ -3559,10 +3559,42 @@ filegroup(
  # Generated files
  # =================================================
  
@@ -75,7 +75,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
      args = select({
          ":is_v8_annotate_torque_ir": ["-annotate-ir"],
          "//conditions:default": [],
-@@ -3542,7 +3574,13 @@ v8_torque_definitions(
+@@ -3570,7 +3602,13 @@ v8_torque_definitions(
          "@v8//bazel/config:v8_target_is_32_bits": ["-m32"],
          "//conditions:default": [],
      }),
@@ -90,7 +90,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
          "bit-fields.h",
          "builtin-definitions.h",
          # "class-debug-readers.cc",
-@@ -3559,25 +3597,7 @@ v8_torque_definitions(
+@@ -3587,25 +3625,7 @@ v8_torque_definitions(
          "objects-body-descriptors-inl.inc",
          "objects-printer.cc",
          "visitor-lists.h",
@@ -116,7 +116,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
      ],
      icu_srcs = [":icu/torque_files"],
      noicu_srcs = [":noicu/torque_files"],
-@@ -3681,22 +3701,20 @@ filegroup(
+@@ -3705,22 +3725,20 @@ filegroup(
      }),
  )
  
@@ -145,7 +145,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
  )
  
  v8_mksnapshot(
-@@ -3873,8 +3891,6 @@ v8_binary(
+@@ -3897,8 +3915,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -154,7 +154,7 @@ index 68480f5461d3afa1c826ca8cd929cdc7d44882b0..f1a0121373eae1102e057252d5048331
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -3885,6 +3901,7 @@ v8_binary(
+@@ -3909,6 +3925,7 @@ v8_binary(
          "UNISTR_FROM_CHAR_EXPLICIT=",
      ],
      deps = [

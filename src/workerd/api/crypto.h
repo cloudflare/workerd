@@ -614,7 +614,7 @@ public:
       kj::Own<kj::PromiseFulfiller<kj::Array<kj::byte>>> fulfiller,
       jsg::Promise<kj::Array<kj::byte>> promise);
 
-  static jsg::Ref<DigestStream> constructor(Algorithm algorithm);
+  static jsg::Ref<DigestStream> constructor(jsg::Lock& js, Algorithm algorithm);
 
   jsg::MemoizedIdentity<jsg::Promise<kj::Array<kj::byte>>>& getDigest() { return promise; }
 

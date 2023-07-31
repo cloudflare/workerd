@@ -25,7 +25,7 @@ public:
   uint getV4Code() const { return v4Code; }
   kj::StringPtr getMessage() const { return message; }
   kj::StringPtr getAction() const { return KJ_ASSERT_NONNULL(action); }
-  v8::Local<v8::Value> getStack(v8::Isolate* isolate);
+  v8::Local<v8::Value> getStack(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(R2Error) {
     JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);

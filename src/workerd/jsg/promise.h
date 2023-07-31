@@ -208,7 +208,7 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
       // special handling of promises, where it tries to catch exceptions and merge them into the
       // promise. We don't need to do this, because this is being called as a .then() which already
       // catches exceptions and does the right thing.
-      return v8::Local<v8::Value>(callFunc().consumeHandle(isolate));
+      return v8::Local<v8::Value>(callFunc().consumeHandle(Lock::from(isolate)));
     } else if constexpr (isV8Ref<Output>()) {
       return callFunc().getHandle(isolate);
     } else {
@@ -299,7 +299,7 @@ public:
     // returned by whenResolved().
     auto promise = Promise<void>(js.v8Isolate, getInner(js));
     if (markedAsHandled) {
-      promise.markAsHandled();
+      promise.markAsHandled(js);
     }
     return kj::mv(promise);
   }
@@ -360,7 +360,7 @@ public:
       // Resolve to another Promise.
       auto isolate = js.v8Isolate;
       check(v8Resolver.getHandle(isolate)->Resolve(
-          js.v8Context(), promise.consumeHandle(isolate)));
+          js.v8Context(), promise.consumeHandle(js)));
     }
 
     void reject(Lock& js, v8::Local<v8::Value> exception) {
@@ -369,10 +369,13 @@ public:
       check(v8Resolver.getHandle(isolate)->Reject(js.v8Context(), exception));
     }
 
+    void reject(Lock& js, kj::Exception exception) {
+      reject(js, makeInternalError(deprecatedIsolate, kj::mv(exception)));
+    }
+
     Resolver addRef(Lock& js) {
       return { js.v8Isolate, v8Resolver.getHandle(js.v8Isolate) };
     }
-
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(v8Resolver);
     }
@@ -383,19 +386,17 @@ public:
       resolve(Lock::from(deprecatedIsolate), kj::mv(value));
     }
     template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
-    void resolve() {
+    void resolve() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       resolve(Lock::from(deprecatedIsolate));
     }
-    void resolve(Promise&& promise) {
+    void resolve(Promise&& promise) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       resolve(Lock::from(deprecatedIsolate), kj::mv(promise));
     }
-    void reject(v8::Local<v8::Value> exception) {
+    void reject(v8::Local<v8::Value> exception) KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       reject(Lock::from(deprecatedIsolate), kj::mv(exception));
     }
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(deprecatedIsolate, kj::mv(exception)));
-    }
-    Resolver addRef() {
+
+    Resolver addRef() KJ_DEPRECATED("Use the jsg::Lock& taking variant instead") {
       return addRef(Lock::from(deprecatedIsolate));
     }
 
@@ -413,28 +414,21 @@ public:
   // TODO(clenaup): Update all call sites to the version that passes locks. Then, remove these and
   //   also remove the `isolate` parameter from this class.
 
-  void markAsHandled() { markAsHandled(Lock::from(deprecatedIsolate)); }
   template <typename Func, typename ErrorFunc>
-  auto then(Func&& func, ErrorFunc&& errorFunc) {
+  auto then(Func&& func, ErrorFunc&& errorFunc)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return then<false>(Lock::from(deprecatedIsolate),
         kj::fwd<Func>(func), kj::fwd<ErrorFunc>(errorFunc));
   }
   template <typename Func>
-  auto then(Func&& func) {
+  auto then(Func&& func)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return then<false>(Lock::from(deprecatedIsolate), kj::fwd<Func>(func));
   }
   template <typename ErrorFunc>
-  auto catch_(ErrorFunc&& errorFunc) {
+  auto catch_(ErrorFunc&& errorFunc)
+      KJ_DEPRECATED("Use variant that takes Lock as the first param") {
     return catch_<false>(Lock::from(deprecatedIsolate), kj::fwd<ErrorFunc>(errorFunc));
-  }
-  Promise<void> whenResolved() {
-    return whenResolved(Lock::from(deprecatedIsolate));
-  }
-  v8::Local<v8::Promise> consumeHandle(v8::Isolate* isolate) {
-    return consumeHandle(Lock::from(isolate));
-  }
-  kj::Maybe<T> tryConsumeResolved() {
-    return tryConsumeResolved(Lock::from(deprecatedIsolate));
   }
 
 private:
@@ -544,7 +538,7 @@ inline Promise<void> Lock::resolvedPromise() {
 template <typename T>
 Promise<T> Lock::rejectedPromise(v8::Local<v8::Value> exception) {
   auto [ promise, resolver ] = newPromiseAndResolver<T>();
-  resolver.reject(exception);
+  resolver.reject(*this, exception);
   return kj::mv(promise);
 }
 
@@ -589,10 +583,6 @@ PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
 }
 
 // DEPRECATED: These global functions should be replaced with the equivalent methods of `Lock`.
-template <typename T>
-inline PromiseResolverPair<T> newPromiseAndResolver(v8::Isolate* isolate) {
-  return Lock::from(isolate).newPromiseAndResolver<T>();
-}
 template <typename T>
 inline Promise<T> resolvedPromise(v8::Isolate* isolate, T&& value) {
   return Lock::from(isolate).resolvedPromise(kj::fwd<T>(value));
@@ -675,7 +665,8 @@ public:
     auto then = check(v8::Function::New(context,
         &thenWrap<TypeWrapper, T>, creator.orDefault({}), 1, v8::ConstructorBehavior::kThrow));
 
-    auto ret = check(promise.consumeHandle(context->GetIsolate())->Then(context, then));
+    auto& js = jsg::Lock::from(context->GetIsolate());
+    auto ret = check(promise.consumeHandle(js)->Then(context, then));
     // Although we added a .then() to the promise to translate the value to JavaScript, we would
     // like things to behave as if the C++ code returned this Promise directly to JavaScript. In
     // particular, if the C++ code marked the Promise handled, then the derived JavaScript promise

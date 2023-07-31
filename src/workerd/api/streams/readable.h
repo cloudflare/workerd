@@ -358,7 +358,7 @@ public:
   //
   // This method should only be called once.
 
-  void signalEof();
+  void signalEof(jsg::Lock& js);
   // Used by ReadableStreamInternalController to signal EOF being reached. Can be called even if
   // `onEof` wasn't called.
 private:

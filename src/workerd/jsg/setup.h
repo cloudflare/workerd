@@ -400,7 +400,7 @@ public:
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
 
-      return jsgIsolate.wrapper->newContext(v8Isolate, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
+      return jsgIsolate.wrapper->newContext(*this, jsgIsolate.getObserver(), (T*)nullptr, kj::fwd<Args>(args)...);
     }
 
   private:

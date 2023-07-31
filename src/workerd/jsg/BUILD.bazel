@@ -104,11 +104,30 @@ wd_cc_library(
     ],
 ) for f in glob(
     ["*-test.c++"],
-    exclude = ["rtti-test.c++"],
+    exclude = [
+        # defined below
+        "resource-test.c++",
+        "rtti-test.c++",
+    ],
 )]
 
 kj_test(
     src = "rtti-test.c++",
     tags = ["no-arm64"],
     deps = [":rtti"],
+)
+
+wd_cc_capnp_library(
+    name = "resource_test_capnp",
+    srcs = ["resource-test.capnp"],
+    data = [":resource-test-builtin.js"],
+    deps = [":modules_capnp"],
+)
+
+kj_test(
+    src = "resource-test.c++",
+    deps = [
+        ":jsg",
+        ":resource_test_capnp",
+    ],
 )

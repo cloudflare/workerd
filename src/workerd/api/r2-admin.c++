@@ -37,9 +37,9 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(jsg::Lock& js, kj::String name,
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
                                     kj::mv(requestJson), nullptr, jwt);
 
-  return context.awaitIo(kj::mv(promise),
+  return context.awaitIo(js, kj::mv(promise),
       [this, subrequestChannel = subrequestChannel, name = kj::mv(name), &errorType]
-      (R2Result r2Result) mutable {
+      (jsg::Lock&, R2Result r2Result) mutable {
     r2Result.throwIfError("createBucket", errorType);
     return jsg::alloc<R2Bucket>(featureFlags, subrequestChannel, kj::mv(name),
         R2Bucket::friend_tag_t{});
@@ -128,7 +128,7 @@ jsg::Promise<void> R2Admin::delete_(jsg::Lock& js, kj::String name,
   auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr,
                                     kj::mv(requestJson), nullptr, jwt);
 
-  return context.awaitIo(kj::mv(promise), [&errorType](R2Result r2Result) mutable {
+  return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock&, R2Result r2Result) mutable {
     r2Result.throwIfError("deleteBucket", errorType);
   });
 }

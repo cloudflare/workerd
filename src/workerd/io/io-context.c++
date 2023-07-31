@@ -1362,7 +1362,7 @@ jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStre
 
   KJ_DEFER(cachePutQuota = kj::mv(paf.promise));
 
-  return awaitIo(cachePutQuota.then(
+  return awaitIo(js, cachePutQuota.then(
       [fulfiller = kj::mv(paf.fulfiller), stream = kj::mv(stream)](size_t quota) mutable
           -> kj::Maybe<kj::Own<kj::AsyncInputStream>> {
     if (quota == 0) {
@@ -1394,7 +1394,7 @@ jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStre
       // will refuse to allow the initiation of any further PUT requests.
       return kj::heap<CacheQuotaInputStream>(kj::mv(stream), quota, kj::mv(fulfiller));
     }
-  }), [this](kj::Maybe<kj::Own<kj::AsyncInputStream>> result) {
+  }), [this](jsg::Lock&, kj::Maybe<kj::Own<kj::AsyncInputStream>> result) {
     return kj::mv(result).map(
         [&](kj::Own<kj::AsyncInputStream>&& obj) { return addObject(kj::mv(obj)); });
   });

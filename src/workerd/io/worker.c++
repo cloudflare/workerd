@@ -854,7 +854,7 @@ struct Worker::Script::Impl {
         auto& ioContext = IoContext::current();
         auto& worker = ioContext.getWorker();
 
-        return ioContext.awaitIo(
+        return ioContext.awaitIo(js,
             kj::evalLater([&worker, handler = kj::mv(handler),
                            asyncContext = jsg::AsyncContextFrame::currentRef(js)]() mutable {
           return worker.takeAsyncLockWithoutRequest(nullptr)
@@ -894,7 +894,7 @@ struct Worker::Script::Impl {
             }
             return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
           });
-        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](auto result) {
+        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](jsg::Lock&, auto result) {
           if (result.isException) {
             return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
           }
@@ -1223,7 +1223,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
 
         KJ_CASE_ONEOF(modulesSource, ModulesSource) {
           auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-          auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext).getModuleRegistry();
+          auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
           impl->configureDynamicImports(lock, modules);
           modulesSource.compileModules(lock, *isolate->apiIsolate);
           impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
@@ -1422,8 +1422,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           unboundScript.run(lock.v8Context());
         }
         KJ_CASE_ONEOF(mainModule, kj::Path) {
-          // const_cast OK because we hold the lock.
-          auto& registry = jsContext->getModuleRegistry();
+          auto& registry = (*jsContext)->getModuleRegistry();
           KJ_IF_MAYBE(entry, registry.resolve(lock, mainModule)) {
             JSG_REQUIRE(entry->maybeSynthetic == nullptr, TypeError,
                         "Main module must be an ES module.");
