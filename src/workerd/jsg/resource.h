@@ -814,20 +814,22 @@ struct JsSetup {
   struct LazyJsInstancePropertyCallback {
     static void callback(v8::Local<v8::Name> property,
                          const v8::PropertyCallbackInfo<v8::Value>& info) {
-      static auto path = kj::Path::parse(moduleName);
+      liftKj(args, [&]() {
+        static auto path = kj::Path::parse(moduleName);
 
-      auto& js = Lock::from(info.GetIsolate());
-      auto context = js.v8Context();
-      auto& moduleInfo = KJ_REQUIRE_NONNULL(
-          ModuleRegistry::from(js)->resolve(js, path, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
-          "Could not resolve bootstrap module", moduleName);
-      auto module = moduleInfo.module.getHandle(js);
-      jsg::instantiateModule(js, module);
+        auto& js = Lock::from(info.GetIsolate());
+        auto context = js.v8Context();
+        auto& moduleInfo = KJ_REQUIRE_NONNULL(
+            ModuleRegistry::from(js)->resolve(js, path, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
+            "Could not resolve bootstrap module", moduleName);
+        auto module = moduleInfo.module.getHandle(js);
+        jsg::instantiateModule(js, module);
 
-      auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-      auto result = check(moduleNs->Get(context, property));
-      info.GetReturnValue().Set(result);
-    }
+        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
+        auto result = check(moduleNs->Get(context, property));
+        info.GetReturnValue().Set(result);
+      }
+    });
   };
 
   template<const char* propertyName, const char* moduleName, bool readonly>
