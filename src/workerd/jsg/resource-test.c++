@@ -662,17 +662,30 @@ JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
 
 KJ_TEST("lazy js global function works") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  // both for module
   e.expectEvalModule(R"(
     export function run() { return bootstrapFunction(); }
   )", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+  // and script syntax
+  e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
 }
 
 KJ_TEST("lazy js global class works") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  // for module syntax
   e.expectEvalModule(R"(
     export function run() { return new BootstrapClass().run(); }
   )", "string", "THIS_IS_BOOTSTRAP_CLASS");
+  // and for script syntax
+  e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
 }
+
+KJ_TEST("lazy js property can not be overriden") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  e.expectEval("globalThis.bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+  e.expectEval("bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+}
+
 
 }  // namespace
 }  // namespace workerd::jsg::test
