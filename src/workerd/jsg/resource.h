@@ -814,7 +814,7 @@ struct JsSetup {
   struct LazyJsInstancePropertyCallback {
     static void callback(v8::Local<v8::Name> property,
                          const v8::PropertyCallbackInfo<v8::Value>& info) {
-      liftKj(args, [&]() {
+      liftKj(info, [&]() {
         static auto path = kj::Path::parse(moduleName);
 
         auto& js = Lock::from(info.GetIsolate());
@@ -827,9 +827,9 @@ struct JsSetup {
 
         auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
         auto result = check(moduleNs->Get(context, property));
-        info.GetReturnValue().Set(result);
-      }
-    });
+        return result;
+      });
+    }
   };
 
   template<const char* propertyName, const char* moduleName, bool readonly>
