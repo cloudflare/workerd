@@ -1576,10 +1576,10 @@ private:
     auto client = context.getHttpClient(channel, true, nullptr, "writeLogfwdr"_kjc);
 
     auto urlStr = kj::str("https://fake-host");
- 
+
     capnp::MallocMessageBuilder requestMessage;
     auto requestBuilder = requestMessage.initRoot<capnp::AnyPointer>();
-  
+
     buildMessage(requestBuilder);
     capnp::JsonCodec json;
     auto requestJson = json.encode(requestBuilder.getAs<api::AnalyticsEngineEvent>());
@@ -2485,6 +2485,17 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
                            kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure inspector.
+  static constexpr uint DEFAULT_PORT = 9229;
+
+  static auto constexpr listen = [](kj::Network& network,
+                                    kj::StringPtr address,
+                                    InspectorService& inspectorService)
+      -> kj::Promise<void> {
+    auto parsed = co_await network.parseAddress(address, DEFAULT_PORT);
+    auto listener = parsed->listen();
+    KJ_LOG(INFO, "Inspector is listening");
+    co_await inspectorService.listen(kj::mv(listener));
+  };
 
   KJ_IF_MAYBE(inspector, inspectorOverride) {
     // Create the special inspector service.
@@ -2492,18 +2503,8 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
         makeInspectorService(headerTableBuilder));
 
     // Configure and start the inspector socket.
-    static constexpr uint DEFAULT_PORT = 9229;
-
-    auto inspectorListener = network.parseAddress(*inspector, DEFAULT_PORT)
-        .then([](kj::Own<kj::NetworkAddress> parsed) {
-      return parsed->listen();
-    });
-
-    tasks.add(inspectorListener.then(
-        [&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
-      KJ_LOG(INFO, "Inspector is listening");
-      return inspectorService.listen(kj::mv(listener));
-    }).exclusiveJoin(forkedDrainWhen.addBranch()));
+    tasks.add(listen(network, *inspector, inspectorService)
+        .exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   // ---------------------------------------------------------------------------
@@ -2668,29 +2669,35 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     continue;
 
   validSocket:
-    kj::Promise<kj::Own<kj::ConnectionReceiver>> listener = nullptr;
+    using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
+    PromisedReceived listener = nullptr;
     KJ_IF_MAYBE(l, listenerOverride) {
       listener = kj::mv(*l);
     } else {
-      listener = network.parseAddress(addrStr, defaultPort)
-          .then([](kj::Own<kj::NetworkAddress> parsed) {
-        return parsed->listen();
-      });
+      listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
+        auto parsed = co_await promise;
+        co_return parsed->listen();
+      })(network.parseAddress(addrStr, defaultPort));
     }
 
     KJ_IF_MAYBE(t, tls) {
-      listener = listener.then([tls = kj::mv(*t)](kj::Own<kj::ConnectionReceiver> port) mutable {
-        return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
-      });
+      listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
+                     kj::Own<kj::TlsContext> tls)
+          -> PromisedReceived {
+        auto port = co_await promise;
+        co_return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
+      })(kj::mv(listener), kj::mv(*t));
     }
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
     // be available later.
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
-    tasks.add(listener
-        .then([this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
-              (kj::Own<kj::ConnectionReceiver> listener) mutable {
+    auto handle = kj::coCapture(
+        [this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
+        (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
+            mutable -> kj::Promise<void> {
+      auto listener = co_await promise;
       KJ_IF_MAYBE(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
         try {
@@ -2699,8 +2706,9 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           KJ_LOG(ERROR, e);
         }
       }
-      return listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
-    }).exclusiveJoin(forkedDrainWhen.addBranch()));
+      co_await listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
+    });
+    tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
   }
 
   for (auto& unmatched: socketOverrides) {
@@ -2721,7 +2729,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         "override provided on the command line."));
   }
 
-  return tasks.onEmpty();
+  co_await tasks.onEmpty();
 }
 
 // =======================================================================================
