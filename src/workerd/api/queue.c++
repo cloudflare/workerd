@@ -235,8 +235,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
   bodyBuilder.add('\0');
   KJ_DASSERT(bodyBuilder.size() <= estimatedSize);
   kj::String body(bodyBuilder.releaseAsArray());
-  KJ_DASSERT(jsg::check(
-        v8::JSON::Parse(js.v8Isolate->GetCurrentContext(), jsg::v8Str(js.v8Isolate, body)))->IsObject());
+  KJ_DASSERT(js.parseJson(body).getHandle(js)->IsObject());
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
 

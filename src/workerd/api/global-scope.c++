@@ -15,6 +15,7 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/features.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/hibernatable-web-socket.h>
@@ -99,17 +100,17 @@ static constexpr auto kDefaultBotManagementValue = R"DATA({
   "score": 99
 })DATA";
 
-void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) {
+void handleDefaultBotManagement(jsg::Lock& js, jsg::Value& cf) {
   // When the cfBotManagementNoOp compatibility flag is set, we'll check the
   // request cf blob to see if it contains a botManagement field. If it does
   // *not* we will add it using the following default fields.
   // Note that if the botManagement team changes any of the fields they provide,
   // this default value may need to be changed also.
-
-  auto context = isolate->GetCurrentContext();
-  auto name = jsg::v8StrIntern(isolate, "botManagement"_kj);
-  if (!jsg::check(cf->Has(context, name))) {
-    auto sym = v8::Private::ForApi(isolate, name);
+  auto context = js.v8Context();
+  auto name = jsg::v8StrIntern(js.v8Isolate, "botManagement"_kj);
+  auto handle = cf.getHandle(js).As<v8::Object>();
+  if (!jsg::check(handle->Has(context, name))) {
+    auto sym = v8::Private::ForApi(js.v8Isolate, name);
     // For performance reasons, we only want to construct the default values
     // once per isolate so we cache the constructed value using an internal
     // private field on the global scope. Whenever we need to use it again we
@@ -117,12 +118,12 @@ void handleDefaultBotManagement(v8::Isolate* isolate, v8::Local<v8::Object> cf) 
     auto defaultBm = jsg::check(context->Global()->GetPrivate(context, sym));
     if (defaultBm->IsUndefined()) {
       defaultBm = jsg::check(v8::JSON::Parse(context,
-          jsg::v8StrIntern(isolate, kDefaultBotManagementValue)));
+          jsg::v8StrIntern(js.v8Isolate, kDefaultBotManagementValue)));
       KJ_ASSERT(defaultBm->IsObject());
       jsg::recursivelyFreeze(context, defaultBm);
       jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));
     }
-    jsg::check(cf->Set(context, name, defaultBm));
+    jsg::check(handle->Set(context, name, defaultBm));
   }
 }
 
@@ -196,26 +197,22 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(NeuterableInputStream::THREW_EXCEPTION));
 
   auto& ioContext = IoContext::current();
-  auto isolate = lock.getIsolate();
+  jsg::Lock& js = lock;
 
   kj::Maybe<jsg::V8Ref<v8::Object>> cf;
 
-  auto flags = lock.getWorker().getIsolate().getApiIsolate().getFeatureFlags();
   KJ_IF_MAYBE(c, cfBlobJson) {
-    auto jsonString = jsg::v8Str(isolate, *c);
-    auto context = isolate->GetCurrentContext();
+    auto handle = js.parseJson(*c);
+    KJ_ASSERT(handle.getHandle(js)->IsObject());
 
-    auto handle = jsg::check(v8::JSON::Parse(context, jsonString));
-    KJ_ASSERT(handle->IsObject());
-
-    if (!flags.getNoCfBotManagementDefault()) {
-      handleDefaultBotManagement(isolate, handle.As<v8::Object>());
+    if (!FeatureFlags::get(js).getNoCfBotManagementDefault()) {
+      handleDefaultBotManagement(js, handle);
     }
 
     // For the inbound request, we make the `cf` blob immutable.
-    jsg::recursivelyFreeze(isolate->GetCurrentContext(), handle);
+    js.recursivelyFreeze(handle);
 
-    cf = jsg::V8Ref(isolate, handle.As<v8::Object>());
+    cf = handle.cast<v8::Object>(js);
   }
 
   auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
@@ -267,7 +264,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   bool useDefaultHandling;
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->fetch) {
-      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(isolate), h->getCtx());
+      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(js), h->getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {

@@ -729,6 +729,9 @@ public:
     return Data::operator==(other);
   }
 
+  template <typename U>
+  V8Ref<U> cast(jsg::Lock& js);
+
 private:
   friend class GcVisitor;
 };
@@ -1788,6 +1791,8 @@ public:
   template <typename T>
   kj::String serializeJson(V8Ref<T>&& value) { return serializeJson(value.getHandle(*this)); }
 
+  void recursivelyFreeze(Value& value);
+
   // ---------------------------------------------------------------------------
   // Exception-related stuff
 
@@ -2024,6 +2029,12 @@ private:
 
 // =======================================================================================
 // inline implementation details
+
+template <typename T>
+template <typename U>
+V8Ref<U> V8Ref<T>::cast(jsg::Lock& js) {
+  return js.v8Ref(getHandle(js).template As<U>());
+}
 
 template <typename T>
 inline kj::Maybe<T> PropertyReflection<T>::get(Lock& js, kj::StringPtr name) {
