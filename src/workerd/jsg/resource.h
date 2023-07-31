@@ -733,7 +733,7 @@ struct ResourceTypeBuilder {
         attributes);
   }
 
-  template<const char* name, const char* moduleName>
+  template<const char* name, const char* moduleName, bool readonly>
   inline void registerLazyJsInstanceProperty() { /* implemented in second stage */ }
 
   template<const char* name, typename T>
@@ -830,7 +830,7 @@ struct JsSetup {
     }
   };
 
-  template<const char* propertyName, const char* moduleName>
+  template<const char* propertyName, const char* moduleName, bool readonly>
   inline void registerLazyJsInstanceProperty() {
     using Callback = LazyJsInstancePropertyCallback<propertyName, moduleName>;
     check(context->Global()->SetLazyDataProperty(
@@ -838,7 +838,7 @@ struct JsSetup {
         v8StrIntern(js.v8Isolate, propertyName),
         Callback::callback,
         v8::Local<v8::Value>(),
-        v8::PropertyAttribute::ReadOnly));
+        readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
   }
 
   // the rest of the callbacks are empty
