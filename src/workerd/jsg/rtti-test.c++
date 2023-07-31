@@ -234,6 +234,21 @@ KJ_TEST("constant members") {
     "tsRoot = false)");
 }
 
+
+struct TestLazyJsProperty : jsg::Object {
+  JSG_RESOURCE_TYPE(TestLazyJsProperty) {
+    JSG_LAZY_JS_INSTANCE_PROPERTY(JsProperty, "js-module");
+    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(JsReadonlyProperty, "js-readonly-module");
+  };
+};
+
+KJ_TEST("lazyJsProperty") {
+  KJ_EXPECT(tStructure<TestLazyJsProperty>() == "(name = \"TestLazyJsProperty\", members = ["
+  "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false)), "
+  "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false))], "
+  "iterable = false, asyncIterable = false, fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestLazyJsProperty\", tsRoot = false)");
+}
+
 struct TestStruct {
   int a;
   bool b;

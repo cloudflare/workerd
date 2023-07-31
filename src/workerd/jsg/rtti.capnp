@@ -65,6 +65,8 @@ struct Type {
 
     jsgImpl @15 :JsgImplType;
     # jsg implementation type
+
+    jsBuiltin @16: JsBuiltinType;
   }
 }
 
@@ -304,4 +306,14 @@ struct StructureGroups {
   groups @0 :List(StructureGroup);
 
   modules @1 :List(Module);
+}
+
+struct JsBuiltinType {
+  # special type for properties whose value is supplied by built-in javascript
+
+  module @0 :Text;
+  # module from which the property is imported
+
+  export @1 :Text;
+  # export name of the property
 }
