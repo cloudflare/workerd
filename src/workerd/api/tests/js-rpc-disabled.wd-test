@@ -9,10 +9,10 @@ const config :Workerd.Config = (
 
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2022-09-16",
-  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 
   modules = [
-    (name = "worker", esModule = embed "actor-stub-test.js"),
+    (name = "worker", esModule = embed "js-rpc-disabled.js"),
   ],
 
   durableObjectNamespaces = [
@@ -25,3 +25,4 @@ const mainWorker :Workerd.Worker = (
     (name = "ns", durableObjectNamespace = "DurableObjectExample"),
   ],
 );
+

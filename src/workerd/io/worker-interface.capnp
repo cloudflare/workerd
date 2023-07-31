@@ -170,6 +170,19 @@ interface HibernatableWebSocketEventDispatcher {
   # Run a hibernatable websocket event
 }
 
+struct JsValue {
+  v8Serialized @0 :Data;
+  # JS value that has been serialized for network transport.
+}
+
+interface JsRpcTarget {
+  call @0 (methodName :Text, serializedArgs :JsValue) -> (result :JsValue);
+  # Runs a Worker/DO's RPC method.
+  #
+  # `methodName` is the name of the method to run, and
+  # `serializedArgs` is an array of arguments that have been serialized by the v8 serializer.
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -203,6 +216,14 @@ interface EventDispatcher @0xf20697475ec1752d {
   # Delivers a batch of queue messages to a worker's queue event handler. Returns information about
   # the success of the batch, including which messages should be considered acknowledged and which
   # should be retried.
+
+  getJsRpcTarget @9 () -> (server :JsRpcTarget);
+  # Starts a JS rpc "session" (for now, a session is one request/response).
+  # The returned JsRpcTarget capability allows us to invoke remote methods on the destination
+  # Worker/Durable Object.
+  #
+  # We use customEvent() to dispatch this event.
+  # In the future, we can add an argument to pass a capability to the server.
 
   obsolete5 @5();
   obsolete6 @6();
