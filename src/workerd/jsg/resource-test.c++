@@ -648,5 +648,93 @@ KJ_TEST("bundle installed works") {
   )", "string", "THIS_IS_BUILTIN_FUNCTION");
 }
 
+// ========================================================================================
+
+struct JsLazyReadonlyPropertyContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(JsLazyReadonlyPropertyContext) {
+    JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
+
+    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(bootstrapFunction, "test:resource-test-bootstrap");
+    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(BootstrapClass, "test:resource-test-bootstrap");
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsLazyReadonlyPropertyIsolate, JsLazyReadonlyPropertyContext);
+
+KJ_TEST("lazy js global function works") {
+  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
+  // both for module
+  e.expectEvalModule(R"(
+    export function run() { return bootstrapFunction(); }
+  )", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+  // and script syntax
+  e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+}
+
+KJ_TEST("lazy js global class works") {
+  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
+  // for module syntax
+  e.expectEvalModule(R"(
+    export function run() { return new BootstrapClass().run(); }
+  )", "string", "THIS_IS_BOOTSTRAP_CLASS");
+  // and for script syntax
+  e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
+}
+
+KJ_TEST("lazy js readonly property can not be overriden") {
+  Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
+  e.expectEval("globalThis.bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+  e.expectEval("bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+}
+
+
+// ========================================================================================
+
+struct JsLazyPropertyContext: public ContextGlobalObject {
+  JSG_RESOURCE_TYPE(JsLazyPropertyContext) {
+    JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
+
+    JSG_LAZY_JS_INSTANCE_PROPERTY(bootstrapFunction, "test:resource-test-bootstrap");
+    JSG_LAZY_JS_INSTANCE_PROPERTY(BootstrapClass, "test:resource-test-bootstrap");
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
+
+KJ_TEST("lazy js global function works") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  // both for module
+  e.expectEvalModule(R"(
+    export function run() { return bootstrapFunction(); }
+  )", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+  // and script syntax
+  e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
+}
+
+KJ_TEST("lazy js global class works") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  // for module syntax
+  e.expectEvalModule(R"(
+    export function run() { return new BootstrapClass().run(); }
+  )", "string", "THIS_IS_BOOTSTRAP_CLASS");
+  // and for script syntax
+  e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
+}
+
+KJ_TEST("lazy js property can be overriden") {
+  Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
+  // for module syntax
+  e.expectEvalModule(R"(
+    globalThis.bootstrapFunction = function(){return 'boo'}
+    export function run() { return bootstrapFunction(); }
+  )", "string", "boo");
+  e.expectEvalModule(R"(
+    bootstrapFunction = function(){return 'boo'}
+    export function run() { return bootstrapFunction(); }
+  )", "string", "boo");
+  // for script syntax
+  e.expectEval("globalThis.bootstrapFunction = function(){return 'boo';}; bootstrapFunction()", "string", "boo");
+  e.expectEval("bootstrapFunction = function(){return 'boo';}; bootstrapFunction()", "string", "boo");
+}
+
+
 }  // namespace
 }  // namespace workerd::jsg::test

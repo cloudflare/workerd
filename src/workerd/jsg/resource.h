@@ -733,6 +733,8 @@ struct ResourceTypeBuilder {
         attributes);
   }
 
+  template<const char* name, const char* moduleName, bool readonly>
+  inline void registerLazyJsInstanceProperty() { /* implemented in second stage */ }
 
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) {
@@ -802,10 +804,43 @@ struct JsSetup {
 
   KJ_DISALLOW_COPY_AND_MOVE(JsSetup);
 
-  JsSetup(jsg::Lock& js): js(js) {}
+  JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
 
   inline void registerJsBundle(Bundle::Reader bundle) {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
+  }
+
+  template<const char* propertyName, const char* moduleName>
+  struct LazyJsInstancePropertyCallback {
+    static void callback(v8::Local<v8::Name> property,
+                         const v8::PropertyCallbackInfo<v8::Value>& info) {
+      liftKj(info, [&]() {
+        static auto path = kj::Path::parse(moduleName);
+
+        auto& js = Lock::from(info.GetIsolate());
+        auto context = js.v8Context();
+        auto& moduleInfo = KJ_REQUIRE_NONNULL(
+            ModuleRegistry::from(js)->resolve(js, path, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
+            "Could not resolve bootstrap module", moduleName);
+        auto module = moduleInfo.module.getHandle(js);
+        jsg::instantiateModule(js, module);
+
+        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
+        auto result = check(moduleNs->Get(context, property));
+        return result;
+      });
+    }
+  };
+
+  template<const char* propertyName, const char* moduleName, bool readonly>
+  inline void registerLazyJsInstanceProperty() {
+    using Callback = LazyJsInstancePropertyCallback<propertyName, moduleName>;
+    check(context->Global()->SetLazyDataProperty(
+        context,
+        v8StrIntern(js.v8Isolate, propertyName),
+        Callback::callback,
+        v8::Local<v8::Value>(),
+        readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
   }
 
   // the rest of the callbacks are empty
@@ -866,6 +901,7 @@ struct JsSetup {
 
 private:
   jsg::Lock& js;
+  v8::Local<v8::Context> context;
 };
 
 
@@ -1083,7 +1119,7 @@ private:
 
   void setupJavascript(jsg::Lock& js, v8::Local<v8::Context> context) {
     v8::Context::Scope context_scope(context);
-    JsSetup<TypeWrapper, T> setup(js);
+    JsSetup<TypeWrapper, T> setup(js, context);
 
     if constexpr (isDetected<GetConfiguration, T>()) {
       T::template registerMembers<decltype(setup), T>(setup, configuration);
