@@ -10,12 +10,8 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
-# licenses([
-#     "TODO",  # MIT OR Apache-2.0
-# ])
-
 rust_library(
-    name = "dtoa",
+    name = "lolhtml",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,14 +25,20 @@ rust_library(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=dtoa",
+        "crate-name=lolhtml",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.8",
+    version = "1.1.1",
+    deps = [
+        "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
+        "@crates_vendor__libc-0.2.147//:libc",
+        "@crates_vendor__lol_html-1.1.1//:lol_html",
+        "@crates_vendor__thiserror-1.0.44//:thiserror",
+    ],
 )

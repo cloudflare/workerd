@@ -11,11 +11,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # (MIT OR Apache-2.0) AND Unicode-DFS-2016
 # ])
 
 rust_library(
-    name = "itoa",
+    name = "unicode_ident",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -33,10 +33,10 @@ rust_library(
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=itoa",
+        "crate-name=unicode-ident",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.8",
+    version = "1.0.11",
 )

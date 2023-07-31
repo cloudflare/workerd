@@ -53,10 +53,10 @@ crates_vendor(
     name = "crates_vendor",
     annotations = {
         "lolhtml": [crate.annotation(
-            shallow_since = "1686149015 +0100",
+            shallow_since = "1690827348 +0100",
         )],
         "lol_html": [crate.annotation(
-            shallow_since = "1686149015 +0100",
+            shallow_since = "1690827348 +0100",
         )],
     },
     cargo_bazel = CARGO_BAZEL,
@@ -95,7 +95,7 @@ rust_static_library(
 # repository twice.
 alias(
     name = "lol_html_api",
-    actual = "@crates_vendor__lol_html-1.0.1//:c-api/include/lol_html.h",
+    actual = "@crates_vendor__lol_html-1.1.1//:c-api/include/lol_html.h",
     tags = ["manual"],
     visibility = ["//visibility:public"],
 )

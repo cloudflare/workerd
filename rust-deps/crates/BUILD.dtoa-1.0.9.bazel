@@ -15,7 +15,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "clang_ast",
+    name = "dtoa",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -33,13 +33,10 @@ rust_library(
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=dtoa",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.18",
-    deps = [
-        "@crates_vendor__serde-1.0.171//:serde",
-    ],
+    version = "1.0.9",
 )

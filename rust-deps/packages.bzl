@@ -13,7 +13,9 @@ RTTI_PACKAGES = {
         version = "1.0.26",
     ),
     "serde": crate.spec(
-        version = "1.0",
+        # TODO: Restore to "1.0" when https://github.com/bazelbuild/rules_rust/issues/2071
+        # is resolved
+        version = "=1.0.171",
         features = ["default", "derive"],
     ),
     "serde_json": crate.spec(
@@ -23,11 +25,16 @@ RTTI_PACKAGES = {
     "pico-args": crate.spec(
         version = "0.5",
     ),
+    # TODO: Unpinning this breaks on windows for unknown reasons
+    # because the output command is too long.
+    "proc-macro-hack": crate.spec(
+        version = "=0.5.19"
+    )
 }
 
 PACKAGES = RTTI_PACKAGES | {
     "lolhtml": crate.spec(
         git = "https://github.com/cloudflare/lol-html.git",
-        rev = "2681dcf0b3e6907111565199df8c43cc9aab7fe8",
+        rev = "7967765ff8db27000845ba0a0a9a025ac908a043",
     ),
 }
