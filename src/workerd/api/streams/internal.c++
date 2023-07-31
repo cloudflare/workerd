@@ -336,13 +336,13 @@ kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) 
 }
 
 kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) {
-  auto allReader = kj::heap<AllReader>(*this, limit);
-  co_return co_await allReader->readAllBytes();
+  AllReader allReader(*this, limit);
+  co_return co_await allReader.readAllBytes();
 }
 
 kj::Promise<kj::String> ReadableStreamSource::readAllText(uint64_t limit) {
-  auto allReader = kj::heap<AllReader>(*this, limit);
-  co_return co_await allReader->readAllText();
+  AllReader allReader(*this, limit);
+  co_return co_await allReader.readAllText();
 }
 
 void ReadableStreamSource::cancel(kj::Exception reason) {}
