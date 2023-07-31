@@ -94,8 +94,10 @@ namespace {
 
 template <typename Func>
 auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
-  return kj::evalNow(kj::fwd<Func>(f))
-      .catch_([](kj::Exception&& exception) -> decltype(kj::fwd<Func>(f)()) {
+  try {
+    co_return co_await f();
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
     KJ_IF_MAYBE(e, translateKjException(exception, {
       { "tee buffer size limit exceeded"_kj,
         "ReadableStream.tee() buffer limit exceeded. This error usually occurs when a Request or "
@@ -104,11 +106,10 @@ auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
         "unnecessary calls to Request/Response.clone() and ReadableStream.tee(), and always read "
         "clones/tees in parallel."_kj },
     })) {
-      return kj::mv(*e);
+      kj::throwFatalException(kj::mv(*e));
     }
-
-    return kj::mv(exception);
-  });
+    kj::throwFatalException(kj::mv(exception));
+  }
 }
 
 }
