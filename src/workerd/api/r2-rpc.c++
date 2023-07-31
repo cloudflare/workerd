@@ -57,17 +57,25 @@ void R2Result::throwIfError(kj::StringPtr action,
   }
 }
 
-kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
-    kj::String metadataPayload, kj::ArrayPtr<kj::StringPtr> path, kj::Maybe<kj::StringPtr> jwt, CompatibilityFlags::Reader flags) {
-  auto& context = IoContext::current();
+namespace {
+kj::String getFakeUrl(kj::ArrayPtr<kj::StringPtr> path) {
   kj::Url url;
-
-
   url.scheme = kj::str("https");
   url.host = kj::str("fake-host");
-  for (const auto &p : path) {
+  for (const auto& p : path) {
     url.path.add(kj::str(p));
   }
+  return url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+}
+}  // namespace
+
+kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
+                                         kj::String metadataPayload,
+                                         kj::ArrayPtr<kj::StringPtr> path,
+                                         kj::Maybe<kj::StringPtr> jwt,
+                                         CompatibilityFlags::Reader flags) {
+  auto& context = IoContext::current();
+  auto url = getFakeUrl(path);
 
   auto& headerIds = context.getHeaderIds();
 
@@ -76,84 +84,83 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
   KJ_IF_MAYBE(j, jwt) {
     requestHeaders.set(headerIds.authorization, kj::str("Bearer ", *j));
   }
-  return client->request(
-      kj::HttpMethod::GET, url.toString(kj::Url::Context::HTTP_PROXY_REQUEST),
-      requestHeaders)
-      .response.then([client = kj::mv(client), &context, &headerIds, flags]
-                     (kj::HttpClient::Response&& response) mutable -> kj::Promise<R2Result> {
-    auto processStream = [&](kj::StringPtr metadata) -> kj::Promise<R2Result> {
-      auto stream = newSystemStream(
+
+  static auto constexpr processStream = [](kj::StringPtr metadata,
+                                           kj::HttpClient::Response& response,
+                                           kj::Own<kj::HttpClient> client,
+                                           CompatibilityFlags::Reader flags,
+                                           IoContext& context) -> kj::Promise<R2Result> {
+    auto stream = newSystemStream(
         response.body.attach(kj::mv(client)),
         getContentEncoding(context, *response.headers, Response::BodyEncoding::AUTO, flags),
         context);
-      auto metadataSize = atoi((metadata).cStr());
-      // R2 itself will try to stick to a cap of 256 KiB of response here. However for listing
-      // sometimes our heuristics have corner cases. This way we're more lenient in case someone
-      // finds a corner case for the heuristic so that we don't fail the GET with an opaque
-      // internal error.
-      KJ_REQUIRE(metadataSize <= 1024 * 1024, "R2 metadata size seems way too large");
-      auto metadataBuffer = kj::heapArray<char>(metadataSize);
-      auto promise = stream->tryRead((void*)metadataBuffer.begin(),
-          metadataBuffer.size(), metadataBuffer.size());
-      return promise.then([metadataBuffer = kj::mv(metadataBuffer),
-          stream = kj::mv(stream), response = kj::mv(response)]
-          (size_t metadataReadLength) mutable -> kj::Promise<R2Result> {
-        KJ_ASSERT(metadataReadLength == metadataBuffer.size(),
-            "R2 metadata buffer not read fully/overflow?");
-        return R2Result {
-          .httpStatus = response.statusCode,
-          .metadataPayload = kj::mv(metadataBuffer),
-          .stream = kj::mv(stream)
-        };
-      });
+    auto metadataSize = atoi((metadata).cStr());
+    // R2 itself will try to stick to a cap of 256 KiB of response here. However for listing
+    // sometimes our heuristics have corner cases. This way we're more lenient in case someone
+    // finds a corner case for the heuristic so that we don't fail the GET with an opaque
+    // internal error.
+    KJ_REQUIRE(metadataSize <= 1024 * 1024, "R2 metadata size seems way too large");
+
+    auto metadataBuffer = kj::heapArray<char>(metadataSize);
+    co_await stream->tryRead(metadataBuffer.begin(), metadataSize, metadataSize);
+
+    KJ_ASSERT(metadataSize == metadataBuffer.size(),
+              "R2 metadata buffer not read fully/overflow?");
+
+    co_return R2Result {
+      .httpStatus = response.statusCode,
+      .metadataPayload = kj::mv(metadataBuffer),
+      .stream = kj::mv(stream)
+    };
+  };
+
+  auto request = client->request(kj::HttpMethod::GET, url, requestHeaders, (uint64_t)0);
+
+  auto response = co_await request.response;
+
+  if (response.statusCode >= 400) {
+    // Error responses should have a cfR2ErrorHeader but don't always. If there
+    // isn't one, we'll use a generic error.
+    if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+      LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
+                        response.statusCode);
+    }
+    auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
+        "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
+
+    R2Result result = {
+      .httpStatus = response.statusCode,
+      .toThrow = toError(response.statusCode, error),
     };
 
-    if (response.statusCode >= 400) {
-      // Error responses should have a cfR2ErrorHeader but don't always. If there
-      // isn't one, we'll use a generic error.
-      if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
-        LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
-                         response.statusCode);
-      }
-      auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
-          "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
-      R2Result result = {
-        .httpStatus = response.statusCode,
-        .toThrow = toError(response.statusCode, error),
-      };
-
-      KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
-        return processStream(*m).then([result = kj::mv(result)](R2Result processed) mutable {
-          result.metadataPayload = kj::mv(processed.metadataPayload);
-          result.stream = kj::mv(processed.stream);
-          return kj::mv(result);
-        });
-      }
-
-      return kj::mv(result);
-    }
-
     KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
-      return processStream(*m);
-    } else {
-      return R2Result { .httpStatus = response.statusCode };
+      auto processed = co_await processStream(*m, response, kj::mv(client), flags, context);
+      result.metadataPayload = kj::mv(processed.metadataPayload);
+      result.stream = kj::mv(processed.stream);
     }
-  });
+
+    co_return kj::mv(result);
+  }
+
+  KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
+    co_return co_await processStream(*m, response, kj::mv(client), flags, context);
+  } else {
+    co_return R2Result { .httpStatus = response.statusCode };
+  }
 }
 
-kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> client,
-    kj::Maybe<R2PutValue> supportedBody, kj::Maybe<uint64_t> streamSize, kj::String metadataPayload,
-    kj::ArrayPtr<kj::StringPtr> path, kj::Maybe<kj::StringPtr> jwt) {
+kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
+                                         kj::Own<kj::HttpClient> client,
+                                         kj::Maybe<R2PutValue> supportedBody,
+                                         kj::Maybe<uint64_t> streamSize,
+                                         kj::String metadataPayload,
+                                         kj::ArrayPtr<kj::StringPtr> path,
+                                         kj::Maybe<kj::StringPtr> jwt) {
   // NOTE: A lot of code here is duplicated with kv.c++. Maybe it can be refactored to be more
   // reusable?
   auto& context = IoContext::current();
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  kj::Url url;
-  url.scheme = kj::str("https");
-  url.host = kj::str("fake-host");
-  for (const auto &p : path) {
-    url.path.add(kj::str(p));
-  }
+  auto url = getFakeUrl(path);
 
   kj::Maybe<uint64_t> expectedBodySize;
 
@@ -194,88 +201,63 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js, kj::Own<kj::HttpClient> 
     headers.set(context.getHeaderIds().authorization, kj::str("Bearer ", *j));
   }
 
-  auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
+  uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
 
-  return context.waitForOutputLocks()
-      .then([&context, client = kj::mv(client), urlStr = kj::mv(urlStr),
-      metadataPayload = kj::mv(metadataPayload), headers = kj::mv(headers),
-      expectedBodySize, supportedBody = kj::mv(supportedBody)]
-      () mutable {
-    uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
-    auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, combinedSize);
+  co_await context.waitForOutputLocks();
 
-    struct RefcountedWrapper: public kj::Refcounted {
-      explicit RefcountedWrapper(kj::Own<kj::HttpClient> client): client(kj::mv(client)) {}
-      kj::Own<kj::HttpClient> client;
-    };
-    auto rcClient = kj::refcounted<RefcountedWrapper>(kj::mv(client));
-    // TODO(perf): More efficient to explicitly attach rcClient below?
-    auto req = attachToRequest(kj::mv(innerReq), kj::mv(rcClient));
+  auto request = client->request(kj::HttpMethod::PUT, url, headers, combinedSize);
 
-    return req.body->write(metadataPayload.begin(), metadataPayload.size())
-        .attach(kj::mv(metadataPayload))
-        .then([&context, supportedBody = kj::mv(supportedBody),
-               reqBody = kj::mv(req.body)]() mutable -> kj::Promise<void> {
-      KJ_IF_MAYBE(b, supportedBody) {
-        KJ_SWITCH_ONEOF(*b) {
-          KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
-            return reqBody->write(text.value.begin(), text.value.size())
-                .attach(kj::mv(text.value), kj::mv(reqBody));
-          }
-          KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            return reqBody->write(data.begin(), data.size())
-                .attach(kj::mv(data), kj::mv(reqBody));
-          }
-          KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-            auto data = blob->getData();
-            return reqBody->write(data.begin(), data.size());
-          }
-          KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
-            // Because the ReadableStream might be a fully JavaScript-backed stream, we must
-            // start running the pump within the IoContex/isolate lock.
-            return context.run(
-                [dest = newSystemStream(kj::mv(reqBody), StreamEncoding::IDENTITY, context),
-                 stream = kj::mv(stream)](jsg::Lock& js) mutable {
-              return IoContext::current().waitForDeferredProxy(
-                  stream->pumpTo(js, kj::mv(dest), true));
-            });
-          }
-        }
+  co_await request.body->write(metadataPayload.begin(), metadataPayload.size());
 
-        KJ_UNREACHABLE;
+  KJ_IF_MAYBE(b, supportedBody) {
+    KJ_SWITCH_ONEOF(*b) {
+      KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+        co_await request.body->write(text.value.begin(), text.value.size());
       }
-
-      return kj::READY_NOW;
-    }).then([resp = kj::mv(req.response),&context]() mutable {
-      return resp.then([&context](kj::HttpClient::Response&& response) mutable
-        -> kj::Promise<R2Result> {
-        if (response.statusCode >= 400) {
-          // Error responses should have a cfR2ErrorHeader but don't always. If there
-          // isn't one, we'll use a generic error.
-          auto& headerIds = context.getHeaderIds();
-          if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
-            LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
-                            response.statusCode);
-          }
-          auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
-              "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
-
-          return R2Result {
-            .httpStatus = response.statusCode,
-            .toThrow = toError(response.statusCode, error),
-          };
-        }
-
-        return response.body->readAllText().attach(kj::mv(response.body)).then(
-            [statusCode = response.statusCode, statusText = kj::str(response.statusText)]
-            (kj::String responseBody) mutable -> R2Result {
-          return R2Result{
-            .httpStatus = statusCode,
-            .metadataPayload = responseBody.releaseArray(),
-          };
+      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+        co_await request.body->write(data.begin(), data.size());
+      }
+      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+        auto data = blob->getData();
+        co_await request.body->write(data.begin(), data.size());
+      }
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        // Because the ReadableStream might be a fully JavaScript-backed stream, we must
+        // start running the pump within the IoContex/isolate lock.
+        co_await context.run(
+            [dest = newSystemStream(kj::mv(request.body), StreamEncoding::IDENTITY, context),
+             stream = kj::mv(stream)](jsg::Lock& js) mutable {
+          return IoContext::current().waitForDeferredProxy(
+              stream->pumpTo(js, kj::mv(dest), true));
         });
-      });
-    });
-  });
+      }
+    }
+  }
+
+  auto response = co_await request.response;
+
+  if (response.statusCode >= 400) {
+    // Error responses should have a cfR2ErrorHeader but don't always. If there
+    // isn't one, we'll use a generic error.
+    auto& headerIds = context.getHeaderIds();
+    if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+      LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
+                       response.statusCode);
+    }
+    auto error = response.headers->get(headerIds.cfR2ErrorHeader).orDefault(
+        "{\"version\":0,\"v4code\":0,\"message\":\"Unspecified error\"}"_kj);
+
+    co_return R2Result {
+      .httpStatus = response.statusCode,
+      .toThrow = toError(response.statusCode, error),
+    };
+  }
+
+  auto responseBody = co_await response.body->readAllText();
+
+  co_return R2Result{
+    .httpStatus = response.statusCode,
+    .metadataPayload = responseBody.releaseArray(),
+  };
 }
 }  // namespace workerd::api
