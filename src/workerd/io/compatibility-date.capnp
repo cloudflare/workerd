@@ -337,4 +337,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("rtti_api")
       $experimental;
   # Enables the `workerd:rtti` module for querying runtime-type-information from JavaScript.
+
+  jsUrlPattern @35 :Bool
+      $compatEnableFlag("js_url_pattern")
+      $compatDisableFlag("no_js_url_pattern")
+      $experimental;
+  # Use new javascript implementation of UrlPatter
 }

@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": [ "ESNext", "DOM" ],
+    "alwaysStrict": true,
+    "strict": true,
+    "allowJs": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strictNullChecks": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "types": [
+    ],
+    "paths": {
+      "bootstrap:*": ["./bootstrap/*"],
+    }
+  },
+  "include": [ "**/*.ts" ],
+}

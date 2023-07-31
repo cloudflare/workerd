@@ -1,0 +1,13 @@
+load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
+
+wd_ts_bundle(
+    name = "bootstrap",
+    eslintrc_json = ".eslintrc.json",
+    import_name = "bootstrap",
+    internal_modules = glob([
+        "bootstrap/*.ts",
+    ]),
+    modules = [],
+    schema_id = "0xf57c63814006bcc8",
+    tsconfig_json = "tsconfig.json",
+)

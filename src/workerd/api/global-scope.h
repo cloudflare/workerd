@@ -14,6 +14,8 @@
 #include "hibernation-event-params.h"
 #include "blob.h"
 #include "streams.h"
+#include <bootstrap/bootstrap.capnp.h>
+
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif
@@ -471,7 +473,14 @@ public:
       JSG_NESTED_TYPE(URL);
       JSG_NESTED_TYPE(URLSearchParams);
     }
-    JSG_NESTED_TYPE(URLPattern);
+
+    if (flags.getJsUrlPattern()) {
+      JSG_CONTEXT_JS_BUNDLE(BOOTSTRAP_BUNDLE);
+
+      JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(URLPattern, "bootstrap-internal:bootstrap/url-pattern");
+    } else {
+      JSG_NESTED_TYPE(URLPattern);
+    }
 
     JSG_NESTED_TYPE(Blob);
     JSG_NESTED_TYPE(File);

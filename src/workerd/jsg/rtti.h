@@ -543,6 +543,8 @@ struct MemberCounter {
   template<const char* tsDefine>
   inline void registerTypeScriptDefine() { /* not a member */ }
 
+  inline void registerJsBundle(Bundle::Reader bundle) { /* not a member */ }
+
   size_t count = 0;
 };
 
@@ -725,6 +727,10 @@ struct MembersBuilder {
   template<const char* tsDefine>
   inline void registerTypeScriptDefine() {
     structure.setTsDefine(tsDefine);
+  }
+
+  inline void registerJsBundle(Bundle::Reader bundle) {
+    /* todo */
   }
 };
 
