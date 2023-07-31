@@ -175,18 +175,18 @@ public:
     // pump operation's backpressure. So we can't use the default `ReadableStreamSource::pumpTo()`
     // implementation, and have to implement our own.
 
-    auto outputAdapter = kj::heap<PumpAdapter>(output);
-    auto promise = inner->pumpTo(*outputAdapter).attach(kj::mv(outputAdapter)).ignoreResult();
+    PumpAdapter outputAdapter(output);
+    co_await inner->pumpTo(outputAdapter);
 
     if (end) {
-      promise = promise.then([&output]() { return output.end(); });
+      co_await output.end();
     }
 
     // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
     // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
     // none of the pump can be performed without the IoContext active, and thus
     // `DeferredProxy` has to be a noop.
-    return addNoopDeferredProxy(kj::mv(promise));
+    co_return newNoopDeferredProxy();
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -336,13 +336,13 @@ kj::Maybe<uint64_t> ReadableStreamSource::tryGetLength(StreamEncoding encoding) 
 }
 
 kj::Promise<kj::Array<byte>> ReadableStreamSource::readAllBytes(uint64_t limit) {
-  auto allReader = kj::heap<AllReader>(*this, limit);
-  return allReader->readAllBytes().attach(kj::mv(allReader));
+  AllReader allReader(*this, limit);
+  co_return co_await allReader.readAllBytes();
 }
 
 kj::Promise<kj::String> ReadableStreamSource::readAllText(uint64_t limit) {
-  auto allReader = kj::heap<AllReader>(*this, limit);
-  return allReader->readAllText().attach(kj::mv(allReader));
+  AllReader allReader(*this, limit);
+  co_return co_await allReader.readAllText();
 }
 
 void ReadableStreamSource::cancel(kj::Exception reason) {}
