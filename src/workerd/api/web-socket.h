@@ -253,7 +253,7 @@ public:
   // response once it's available. This includes assigning the native websocket and dispatching the
   // relevant `open`/`error` events.
 
-  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other);
+  DeferredProxyPromise<void> couple(kj::Own<kj::WebSocket> other);
   // Pumps messages from this WebSocket to `other`, and from `other` to this, making sure to
   // register pending events as appropriate. Used to implement FetchEvent.respondWith().
   //

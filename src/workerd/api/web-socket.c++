@@ -291,7 +291,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   return ws;
 }
 
-kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other) {
+DeferredProxyPromise<void> WebSocket::couple(kj::Own<kj::WebSocket> other) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
@@ -333,13 +333,18 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
   if (locality == LOCAL) {
     // Since the WebSocket is terminated locally, we need the IoContext to stay live while
     // it is active.
-    co_await promise;
-    co_return DeferredProxy<void> { kj::READY_NOW };
+    co_return co_await promise;
   } else {
     // Since the WebSocket is just proxying through, we can do the pump in a deferred proxy task.
     // Note that we don't need to (and can't) register any pending events in this case since the
     // IoContext is free to go away at this point.
-    co_return DeferredProxy<void> { kj::mv(promise) };
+
+    // To begin deferred proxying, we can use this magic `KJ_CO_MAGIC` expression, which fulfills
+    // our outer promise for a DeferredProxy<void>, which wraps a promise for the rest of this
+    // coroutine.
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+
+    co_return co_await promise;
   }
 }
 
