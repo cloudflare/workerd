@@ -56,7 +56,7 @@ public:
 
     // Module has to export "run" function
     auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-    auto runValue = check(moduleNs->Get(context, v8Str(lock.v8Isolate, "run"_kj)));
+    auto runValue = check(moduleNs->Get(context, v8StrIntern(lock.v8Isolate, "run"_kj)));
 
     v8::TryCatch catcher(lock.v8Isolate);
 

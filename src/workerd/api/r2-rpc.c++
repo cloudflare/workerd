@@ -47,7 +47,7 @@ void R2Result::throwIfError(kj::StringPtr action,
     auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);
     (*e)->errorForStack = v8::Global<v8::Object>(
-        isolate, v8::Exception::Error(jsg::v8Str(isolate, "")).As<v8::Object>());
+        isolate, v8::Exception::Error(v8::String::Empty(isolate)).As<v8::Object>());
     isolate->ThrowException(errorType.wrapRef(kj::mv(*e)));
     throw jsg::JsExceptionThrown();
 #else

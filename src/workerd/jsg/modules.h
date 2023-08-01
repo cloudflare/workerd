@@ -513,7 +513,7 @@ public:
     }
 
     return rejectedPromise<Value>(js.v8Isolate,
-        v8::Exception::Error(v8Str(js.v8Isolate,
+        v8::Exception::Error(v8StrIntern(js.v8Isolate,
             kj::str("No such module \"", specifier.toString(), "\"."))));
   }
 

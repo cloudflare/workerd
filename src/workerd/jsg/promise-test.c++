@@ -62,7 +62,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     resolver.resolve(123);
     KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved(js)) == 123);
 
-    KJ_EXPECT(js.rejectedPromise<kj::String>(v8Str(js.v8Isolate, "foo"))
+    KJ_EXPECT(js.rejectedPromise<kj::String>(v8StrIntern(js.v8Isolate, "foo"))
         .tryConsumeResolved(js) == nullptr);
   }
 
