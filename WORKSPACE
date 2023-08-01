@@ -46,6 +46,10 @@ http_archive(
     strip_prefix = "sqlite-amalgamation-3400100",
     type = "zip",
     url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
+    patches = [
+        "//:patches/sqlite/0001-row-counts-amalgamation.patch",
+    ],
+    patch_args = ["-p1"],
 )
 
 http_archive(
