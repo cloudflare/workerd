@@ -91,6 +91,22 @@ void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
   }
 }
 
+double SqlStorage::Cursor::getRowsRead() {
+  KJ_IF_MAYBE(st, state) {
+    return static_cast<double>((**st).query.getRowsRead());
+  } else {
+    return static_cast<double>(rowsRead);
+  }
+}
+
+double SqlStorage::Cursor::getRowsWritten() {
+  KJ_IF_MAYBE(st, state) {
+    return static_cast<double>((**st).query.getRowsWritten());
+  } else {
+    return static_cast<double>(rowsWritten);
+  }
+}
+
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
   KJ_IF_MAYBE(s, state) {
     cachedColumnNames.ensureInitialized(js, (*s)->query);
@@ -168,7 +184,11 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
   }
 
   auto& query = state.query;
+
   if (query.isDone()) {
+    // Save off row counts before the query goes away.
+    obj->rowsRead = query.getRowsRead();
+    obj->rowsWritten = query.getRowsWritten();
     // Clean up the query proactively.
     obj->state = nullptr;
     return nullptr;
