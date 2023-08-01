@@ -860,6 +860,8 @@ void SqliteDatabase::Query::nextRow() {
 
   int err = sqlite3_step(statement);
   if (err == SQLITE_DONE) {
+    db.addRowsRead(sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_READ, 0));
+    db.addRowsWritten(sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 0));
     done = true;
   } else if (err != SQLITE_ROW) {
     SQLITE_CALL_FAILED("sqlite3_step()", err);

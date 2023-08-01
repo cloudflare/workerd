@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <kj/filesystem.h>
 #include <kj/one-of.h>
 #include <utility>
@@ -90,8 +91,15 @@ public:
   // any literal values that might contain sensitive information. This is intended to be safe for
   // debug logs.
 
+  int64_t getRowsRead() const { return rowsRead.load(); }
+  int64_t getRowsWritten() const { return rowsWritten.load(); }
+  // These count rows accessed by this object.
+
 private:
   sqlite3* db;
+
+  std::atomic<int64_t> rowsRead = 0;
+  std::atomic<int64_t> rowsWritten = 0;
 
   kj::Maybe<Regulator&> currentRegulator;
   // Set while a query is compiling.
@@ -125,6 +133,10 @@ private:
   // Implements SQLite authorizer for 'temp' DB
 
   void setupSecurity();
+
+  void addRowsRead(int64_t amount) { rowsRead += amount; }
+  void addRowsWritten(int64_t amount) { rowsWritten += amount; }
+  // Used to tally additional rows.
 };
 
 class SqliteDatabase::Regulator {

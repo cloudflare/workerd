@@ -28,12 +28,16 @@ public:
   jsg::Ref<Statement> prepare(jsg::Lock& js, kj::String query);
 
   double getDatabaseSize();
+  double getRowsRead();
+  double getRowsWritten();
 
   JSG_RESOURCE_TYPE(SqlStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(exec);
     JSG_METHOD(prepare);
 
     JSG_READONLY_PROTOTYPE_PROPERTY(databaseSize, getDatabaseSize);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
 
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);

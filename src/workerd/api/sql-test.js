@@ -670,6 +670,32 @@ async function test(storage) {
   )
 }
 
+async function testIoStats(storage) {
+  const sql = storage.sql;
+
+  sql.exec(`CREATE TABLE tbl (id INTEGER PRIMARY KEY, value TEXT)`);
+  sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 100000, "arbitrary-initial-value");
+  await scheduler.wait(1);
+
+  // When writing, the rowsWritten count goes up.
+  {
+    const startingRowCount = sql.rowsWritten;
+    sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 1, "arbitrary-value");
+
+    await scheduler.wait(1);
+    const endingRowCount = sql.rowsWritten;
+    assert.equal(endingRowCount - startingRowCount, 1);
+  }
+
+  // When reading, the rowsRead count goes up.
+  {
+    const startingRowCount = sql.rowsRead;
+    Array.from(sql.exec(`SELECT * FROM tbl`));
+    const endingRowCount = sql.rowsRead;
+    assert.equal(endingRowCount - startingRowCount, 2);
+  }
+}
+
 async function testForeignKeys(storage) {
   const sql = storage.sql
 
@@ -763,6 +789,9 @@ export class DurableObjectExample {
 
       // abort() always throws.
       throw new Error("can't get here")
+    } else if (req.url.endsWith('/sql-test-io-stats')) {
+      await testIoStats(this.state.storage)
+      return Response.json({ ok: true })
     }
 
     throw new Error('unknown url: ' + req.url)
@@ -782,6 +811,9 @@ export default {
 
     // Test SQL API
     assert.deepEqual(await doReq('sql-test'), { ok: true })
+
+    // Test SQL IO stats
+    assert.deepEqual(await doReq("sql-test-io-stats"), {ok: true});
 
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {

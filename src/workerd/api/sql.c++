@@ -31,6 +31,14 @@ double SqlStorage::getDatabaseSize() {
   return pages * getPageSize();
 }
 
+double SqlStorage::getRowsRead() {
+  return static_cast<double>(sqlite->getRowsRead());
+}
+
+double SqlStorage::getRowsWritten() {
+  return static_cast<double>(sqlite->getRowsWritten());
+}
+
 bool SqlStorage::isAllowedName(kj::StringPtr name) {
   return !name.startsWith("_cf_");
 }
