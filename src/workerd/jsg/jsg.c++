@@ -4,6 +4,7 @@
 
 #include "jsg.h"
 #include "setup.h"
+#include "workerd/jsg/util.h"
 #include <workerd/util/thread-scopes.h>
 
 namespace workerd::jsg {
@@ -155,6 +156,10 @@ kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
   v8::HandleScope scope(v8Isolate);
   return toString(jsg::check(
       v8::JSON::Stringify(v8Isolate->GetCurrentContext(), value)));
+}
+
+void Lock::recursivelyFreeze(Value& value) {
+  jsg::recursivelyFreeze(v8Context(), value.getHandle(*this));
 }
 
 v8::Local<v8::String> Lock::wrapString(kj::StringPtr text) {
