@@ -6,7 +6,6 @@
 #include "streams.h"
 #include "util.h"
 #include "c-api/include/lol_html.h"
-#include "workerd/util/sentry.h"
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
@@ -447,10 +446,7 @@ kj::Promise<void> Rewriter::write(
 
 kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == nullptr);
-  // We use kj::coCapture here to ensure that the `this` capture is maintained
-  // appropriately after the co_await finishWrite()
-  return getFiberPool().startFiber(
-      kj::coCapture([this](kj::WaitScope& scope) -> kj::Promise<void> {
+  return getFiberPool().startFiber([this](kj::WaitScope& scope) {
     maybeWaitScope = scope;
     if (!isPoisoned()) {
       // Cannot use `check()` because `finishWrite()` implements the error path.
@@ -460,9 +456,8 @@ kj::Promise<void> Rewriter::end() {
         maybePoison(getLastError());
       }
     }
-    co_await finishWrite();
-    co_await inner->end();
-  }));
+    return finishWrite().then([this]() { return inner->end(); });
+  });
 }
 
 void Rewriter::abort(kj::Exception reason) {
@@ -474,19 +469,25 @@ void Rewriter::abort(kj::Exception reason) {
 
 kj::Promise<void> Rewriter::finishWrite() {
   maybeWaitScope = nullptr;
+  auto checkException = [this]() -> kj::Promise<void> {
+    KJ_ASSERT(writePromise == nullptr);
+
+    KJ_IF_MAYBE(exception, maybeException) {
+      inner->abort(kj::cp(*exception));
+      return kj::cp(*exception);
+    }
+
+    return kj::READY_NOW;
+  };
 
   KJ_IF_MAYBE(wp, writePromise) {
-    auto promise = kj::mv(*wp);
-    writePromise = nullptr;
-    co_await promise;
+    KJ_DEFER(writePromise = nullptr);
+    return wp->then([checkException]() {
+      return checkException();
+    });
   }
 
-  KJ_ASSERT(writePromise == nullptr);
-
-  KJ_IF_MAYBE(exception, maybeException) {
-    inner->abort(kj::cp(*exception));
-    kj::throwFatalException(kj::cp(*exception));
-  }
+  return checkException();
 }
 
 template <typename T, typename CType>
@@ -601,20 +602,14 @@ void Rewriter::outputImpl(const char* buffer, size_t size) {
     return;
   }
 
-  // Performs the write, optionally queueing it up behind a previous write.
-  // It is critical that the destination WritableStreamSink be kept alive while
-  // the promise is pending.
-  static auto constexpr enqueueWrite = [](kj::Maybe<kj::Promise<void>> maybePending,
-                                          WritableStreamSink& dest,
-                                          kj::Array<char> buffer) -> kj::Promise<void> {
-    KJ_IF_MAYBE(promise, maybePending) {
-      co_await *promise;
-    }
-    co_await dest.write(buffer.begin(), buffer.size());
-  };
-
   auto bufferCopy = kj::heapArray(buffer, size);
-  writePromise = enqueueWrite(kj::mv(writePromise), *inner, kj::mv(bufferCopy));
+  KJ_IF_MAYBE(wp, writePromise) {
+    *wp = wp->then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
+      return inner->write(bufferCopy.begin(), bufferCopy.size()).attach(kj::mv(bufferCopy));
+    });
+  } else {
+    writePromise = inner->write(bufferCopy.begin(), bufferCopy.size()).attach(kj::mv(bufferCopy));
+  }
 }
 
 // =======================================================================================
