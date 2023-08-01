@@ -69,8 +69,8 @@ rust_proc_macro(
     version = "0.99.17",
     deps = [
         "@crates_vendor__convert_case-0.4.0//:convert_case",
-        "@crates_vendor__proc-macro2-1.0.64//:proc_macro2",
-        "@crates_vendor__quote-1.0.29//:quote",
+        "@crates_vendor__proc-macro2-1.0.66//:proc_macro2",
+        "@crates_vendor__quote-1.0.32//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )

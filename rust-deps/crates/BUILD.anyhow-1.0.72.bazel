@@ -16,7 +16,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "quote",
+    name = "anyhow",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -31,31 +31,30 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=quote",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.29",
+    version = "1.0.72",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.64//:proc_macro2",
-        "@crates_vendor__quote-1.0.29//:build_script_build",
+        "@crates_vendor__anyhow-1.0.72//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "quote_build_script",
+    name = "anyhow_build_script",
     srcs = glob(["**/*.rs"]),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -76,17 +75,17 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=quote",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.29",
+    version = "1.0.72",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "quote_build_script",
+    actual = "anyhow_build_script",
     tags = ["manual"],
 )

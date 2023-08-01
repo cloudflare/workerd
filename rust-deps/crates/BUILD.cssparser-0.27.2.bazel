@@ -83,8 +83,8 @@ cargo_build_script(
     version = "0.27.2",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__proc-macro2-1.0.64//:proc_macro2",
-        "@crates_vendor__quote-1.0.29//:quote",
+        "@crates_vendor__proc-macro2-1.0.66//:proc_macro2",
+        "@crates_vendor__quote-1.0.32//:quote",
         "@crates_vendor__syn-1.0.109//:syn",
     ],
 )
