@@ -469,7 +469,6 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::wrapKey(jsg::Lock& js,
       key.getAlgorithmName());
 
   return js.evalNow([&] {
-//    auto isolate = js.v8Isolate;
     auto algorithm = interpretAlgorithmParam(kj::mv(wrapAlgorithm));
 
     validateOperation(wrappingKey, algorithm.name, CryptoKeyUsageSet::wrapKey());
