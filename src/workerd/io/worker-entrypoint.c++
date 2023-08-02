@@ -362,14 +362,17 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
         lock.getExportedHandler(entrypointName, context.getActor()));
   }));
 
-  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
-    return WorkerInterface::ScheduledResult {
+  static auto constexpr waitForFinished = [](IoContext& context,
+                                             kj::Own<IoContext::IncomingRequest> request)
+      -> kj::Promise<WorkerInterface::ScheduledResult> {
+    bool completed = co_await request->finishScheduled();
+    co_return WorkerInterface::ScheduledResult {
       .retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU
     };
-  }).attach(kj::mv(incomingRequest));
+  };
 
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -475,12 +478,15 @@ kj::Promise<bool> WorkerEntrypoint::test() {
         .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
   }));
 
-  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
+  static auto constexpr waitForFinished = [](IoContext& context,
+                                             kj::Own<IoContext::IncomingRequest> request)
+      -> kj::Promise<bool> {
+    bool completed = co_await request->finishScheduled();
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
-    return outcome == EventOutcome::OK;
-  }).attach(kj::mv(incomingRequest));
+    co_return outcome == EventOutcome::OK;
+  };
 
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
