@@ -152,9 +152,8 @@ public:
 
       if (n < 0) {
         // No more data to read.
-        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
-          return onChange();
-        });
+        co_await observer.whenBecomesReadable();
+        continue;
       }
 
       kj::byte* ptr = buffer;
@@ -172,7 +171,7 @@ public:
           auto& watched = KJ_ASSERT_NONNULL(filesWatched.find(event.wd));
           if (watched.find(kj::StringPtr(event.name)) != nullptr) {
             // HIT! We saw a change.
-            return kj::READY_NOW;
+            co_return;
           }
         }
       }
@@ -245,13 +244,12 @@ public:
       if (n == 0) {
         // No events, wait for the kqueue to become readable indicating an event has been
         // delivered.
-        return observer.whenBecomesReadable().then([this]() -> kj::Promise<void> {
-          return onChange();
-        });
+        co_await observer.whenBecomesReadable();
+        continue;
       } else {
         // We only pay attention to events that indicate changes in the first place, so there's
         // no need to examine the event, it definitely means something changed.
-        return kj::READY_NOW;
+        co_return;
       }
     }
   }
