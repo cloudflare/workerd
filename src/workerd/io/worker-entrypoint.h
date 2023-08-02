@@ -86,7 +86,7 @@ private:
       kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
 
   template <typename T>
-  void maybeAddGcPassForTest(IoContext& context, kj::Promise<T>& promise);
+  kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
 
   kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
       kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime);
