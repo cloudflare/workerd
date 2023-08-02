@@ -2030,19 +2030,19 @@ Worker::AsyncWaiter::~AsyncWaiter() noexcept {
 }
 
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
-  auto waiter = AsyncWaiter::threadCurrentWaiter;
-  if (waiter != nullptr) {
-    return waiter->releasePromise.addBranch().then([]() { return whenThreadIdle(); });
-  }
-
-  return kj::evalLast([]() -> kj::Promise<void> {
-    if (AsyncWaiter::threadCurrentWaiter != nullptr) {
-      // Whoops, a new lock attempt appeared, loop.
-      return whenThreadIdle();
-    } else {
-      return kj::READY_NOW;
+  for (;;) {
+    if (auto waiter = AsyncWaiter::threadCurrentWaiter; waiter != nullptr) {
+      co_await waiter->releasePromise.addBranch();
+      continue;
     }
-  });
+
+    co_await kj::evalLast([] {});
+
+    if (AsyncWaiter::threadCurrentWaiter == nullptr) {
+      co_return;
+    }
+    // Whoops, a new lock attempt appeared, loop.
+  }
 }
 
 // =======================================================================================
