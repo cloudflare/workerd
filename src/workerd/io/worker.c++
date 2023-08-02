@@ -2828,12 +2828,10 @@ struct Worker::Actor::Impl {
 #else
       auto timeout = 10 * kj::SECONDS;
 #endif
-      return timerChannel.afterLimitTimeout(timeout)
-          .then([]() -> kj::Promise<void> {
-        return KJ_EXCEPTION(FAILED,
+      co_await timerChannel.afterLimitTimeout(timeout);
+      kj::throwFatalException(KJ_EXCEPTION(FAILED,
             "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
-            "timeout which caused object to be reset.");
-      });
+            "timeout which caused object to be reset."));
     }
 
     void outputGateLocked() override { metrics.outputGateLocked(); }
@@ -3176,22 +3174,20 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
 
   auto scheduledTime = KJ_ASSERT_NONNULL(newTime);
 
-  auto retry = kj::coCapture([this, originalTime = scheduledTime]()
-      -> kj::Promise<void> {
+  auto retry = kj::coCapture([this, originalTime = scheduledTime]() -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
-    for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
-      auto result = co_await timerChannel.atTime(scheduledTime)
-          .then([this, originalTime]() {
-        return loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
-      });
+    for (auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
+      co_await timerChannel.atTime(scheduledTime);
+      auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
+          ->runAlarm(originalTime);
 
-      if (result.outcome != EventOutcome::OK && result.retry) {
-        auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-        scheduledTime = timerChannel.now() + delay;
-      } else {
+      if (result.outcome == EventOutcome::OK || !result.retry) {
         break;
       }
+
+      auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
+      scheduledTime = timerChannel.now() + delay;
     }
   });
 
@@ -3732,18 +3728,14 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
 
   // For accurate lock metrics, we want to avoid taking a recursive isolate lock, so we postpone
   // the request until a later turn of the event loop.
-  return kj::evalLater(kj::mv(signalRequest))
-      .then([this, method, url, &headers, &requestBody, &response,
-             signalResponse = kj::mv(signalResponse)]
-            (kj::Maybe<kj::String> maybeRequestId) {
-    KJ_IF_MAYBE(rid, maybeRequestId) {
-      auto wrapper = kj::heap<ResponseWrapper>(response, kj::mv(*rid), kj::mv(signalResponse));
-      return inner->request(method, url, headers, requestBody, *wrapper)
-          .attach(kj::mv(wrapper));
-    } else {
-      return inner->request(method, url, headers, requestBody, response);
-    }
-  });
+  auto maybeRequestId = co_await kj::evalLater(kj::mv(signalRequest));
+
+  KJ_IF_MAYBE(rid, maybeRequestId) {
+    ResponseWrapper wrapper(response, kj::mv(*rid), kj::mv(signalResponse));
+    co_await inner->request(method, url, headers, requestBody, wrapper);
+  } else {
+    co_await inner->request(method, url, headers, requestBody, response);
+  }
 }
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::connect(
