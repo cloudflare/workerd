@@ -104,8 +104,17 @@ constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING {};
 // A magic constant which a DeferredProxyPromise<T> coroutine can `KJ_CO_MAGIC` to indicate that the
 // deferred proxying phase of its operation has begun.
 
-template <typename T>
-class DeferredProxyCoroutine: public kj::_::CoroutineMixin<DeferredProxyCoroutine<T>, T> {
+template <typename T, typename C>
+concept CoroutineYieldValue = requires (T&& v, C coroutineAdapter) {
+  // A concept which is true if C is a coroutine adapter which supports the `co_yield` operator for
+  // type T. We could also check that the expression results in an awaitable, but that is already a
+  // compile error in other ways.
+  { coroutineAdapter.yield_value(kj::fwd<T>(v)) };
+};
+
+template <typename T, typename... Args>
+class DeferredProxyCoroutine: public kj::_::PromiseNode,
+                              public kj::_::CoroutineMixin<DeferredProxyCoroutine<T, Args...>, T> {
   // The coroutine adapter type for DeferredProxyPromise<T>. Most of the work is forwarded to the
   // regular kj::Promise<T> coroutine adapter.
 
@@ -122,23 +131,15 @@ public:
     // We need to return a RAII object which will destroy this (as in, `this`) coroutine adapter.
     // The logic which calls `coroutine_handle<>::destroy()` is tucked away in our inner coroutine
     // adapter, however, leading to the weird situation where the `inner.get_return_object()`
-    // Promise owns `this`. So, returning a Promise with `inner.get_return_object()` in a `.then()`
-    // gives transitive ownership of the coroutine to the caller.
+    // Promise owns `this`. And `this` owns `inner.get_return_object()` transitively via `result`!
     //
-    // Note that we must use a `.then()` instead of a coroutine to implement this, because trying to
-    // write a coroutine returning `kj::Promise<DeferredProxy<T>>` will just recurse into this
-    // coroutine adapter class.
-    //
-    // TODO(perf): We could avoid the `newPromiseAndFulfiller()` and `.then()` overhead by having
-    //   DeferredProxyCoroutine<T> implement PromiseNode. `this` could own `proxyTask` temporarily,
-    //   forwarding `PromiseNode::destroy()` calls to `proxyTask`'s PromiseNode (if it still
-    //   exists), which takes care of the ownership reference cycle. `yield_value()`, `fulfill()`,
-    //   and `unhandled_exception()`could arm our OnReadyEvent, and our `get()` implementation would
-    //   return `proxyTask`, or a stored exception.
-    auto proxyTask = inner.get_return_object();
-    return beginDeferredProxying.promise.then([proxyTask=kj::mv(proxyTask)]() mutable {
-      return DeferredProxy<T> { kj::mv(proxyTask) };
-    });
+    // Fortunately, DeferredProxyCoroutine implements the PromiseNode interface, meaning when our
+    // returned Promise is eventually dropped, our `PromiseNode::destroy()` implementation will be
+    // called. This gives us the opportunity (that is, in `destroy()`) to destroy our
+    // `inner.get_return_object()` Promise, breaking the ownership cycle and destroying `this`.
+
+    result.value = DeferredProxy<T> { inner.get_return_object() };
+    return kj::_::PromiseNode::to<kj::Promise<DeferredProxy<T>>>(kj::_::OwnPromiseNode(this));
   }
 
   auto initial_suspend() { return inner.initial_suspend(); }
@@ -146,22 +147,20 @@ public:
   // Just trivially forward these.
 
   void unhandled_exception() {
-    // If the outer promise hasn't yet been fulfilled, it needs to be rejected now.
-    if (beginDeferredProxying.fulfiller->isWaiting()) {
-      beginDeferredProxying.fulfiller->reject(kj::getCaughtExceptionAsKj());
-    }
+    // Reject our outer promise if it hasn't yet been fulfilled, then forward to the inner
+    // implementation.
 
+    rejectOuterPromise();
     inner.unhandled_exception();
   }
 
   kj::_::stdcoro::suspend_never yield_value(decltype(BEGIN_DEFERRED_PROXYING)) {
     // This allows us to write `KJ_CO_MAGIC` within a DeferredProxyPromise<T> coroutine to fulfill
     // the coroutine's outer promise with a DeferredProxy<T>.
-    // This could alternatively be an await_transform() with a magic parameter type.
-    if (beginDeferredProxying.fulfiller->isWaiting()) {
-      beginDeferredProxying.fulfiller->fulfill();
-    }
+    //
+    // This could alternatively be implemented as an await_transform() with a magic parameter type.
 
+    fulfillOuterPromise();
     return {};
   }
 
@@ -175,11 +174,7 @@ public:
   void fulfill(kj::_::FixVoid<T>&& value) {
     // Required by CoroutineMixin implementation to implement `co_return`.
 
-    // Fulfill the outer promise if it hasn't already been fulfilled.
-    if (beginDeferredProxying.fulfiller->isWaiting()) {
-      beginDeferredProxying.fulfiller->fulfill();
-    }
-
+    fulfillOuterPromise();
     inner.fulfill(kj::mv(value));
   }
 
@@ -193,13 +188,71 @@ public:
   // Required by Awaiter<T>::await_suspend() to support awaiting Promises.
 
 private:
-  typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>>::promise_type inner;
+  void fulfillOuterPromise() {
+    // Fulfill the outer promise if it hasn't already settled.
+
+    if (!deferredProxyingHasBegun) {
+      // Our `result` is put in place already by `get_return_object()`, so all we have to do is arm
+      // the event.
+      onReadyEvent.arm();
+      deferredProxyingHasBegun = true;
+    }
+  }
+
+  void rejectOuterPromise() {
+    // Reject the outer promise if it hasn't already settled.
+
+    if (!deferredProxyingHasBegun) {
+      result.addException(kj::getCaughtExceptionAsKj());
+      onReadyEvent.arm();
+      deferredProxyingHasBegun = true;
+    }
+  }
+
+  // PromiseNode implementation
+
+  void destroy() override {
+    // The promise returned by `inner.get_return_object()` is what actually owns this coroutine
+    // frame. We temporarily store that in `result` until our outer promise is fulfilled. So, to
+    // destroy ourselves, we must manually drop `result`.
+    //
+    // On the other hand, if our outer promise has already been fulfilled, and `result` delivered to
+    // wherever it is going, then someone else directly owns the coroutine now, not us, and it's
+    // okay for this drop to be a no-op.
+
+    auto drop = kj::mv(result);
+  }
+
+  void onReady(kj::_::Event* event) noexcept override {
+    onReadyEvent.init(event);
+  }
+
+  void get(kj::_::ExceptionOrValue& output) noexcept override {
+    static_cast<decltype(result)&>(output) = kj::mv(result);
+  }
+
+  void tracePromise(kj::_::TraceBuilder& builder, bool stopAtNextEvent) override {
+    // The PromiseNode we're waiting on is whatever the coroutine is waiting on.
+    static_cast<kj::_::PromiseNode&>(inner).tracePromise(builder, stopAtNextEvent);
+
+    // Maybe returning the address of get() will give us a function name with meaningful type
+    // information.
+    builder.add(getMethodStartAddress(implicitCast<PromiseNode&>(*this), &PromiseNode::get));
+  }
+
+  InnerCoroutineAdapter inner;
   // We defer the majority of the implementation to the regular kj::Promise<T> coroutine adapter.
 
-  kj::PromiseFulfillerPair<void> beginDeferredProxying = kj::newPromiseAndFulfiller<void>();
-  // Our `get_return_object()` function returns a kj::Promise<DeferredProxy<T>>, waits on this
-  // `beginDeferredProxying.promise`, then fulfills its Promise with the result of
-  // `inner.get_return_object()`.
+  OnReadyEvent onReadyEvent;
+  // Helper to arm the event which fires when the outer promise (that is, `this` PromiseNode) for
+  // the DeferredProxy<T> is ready.
+
+  kj::_::ExceptionOr<DeferredProxy<T>> result;
+  // Stores the result for the outer promise.
+
+  bool deferredProxyingHasBegun = false;
+  // Set to true when deferred proxying has begun -- that is, when the outer DeferredProxy<T>
+  // promise is fulfilled by calling `onReadyEvent.arm()`.
 };
 
 }  // namespace workerd::api
