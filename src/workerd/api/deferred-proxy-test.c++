@@ -4,13 +4,13 @@
 namespace workerd::api {
 namespace {
 
-KJ_TEST("DeferredProxyPromise<T>: early co_return implicitly fulfills outer promise") {
+KJ_TEST("kj::Promise<DeferredProxy<T>>: early co_return implicitly fulfills outer promise") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   {
     // Implicit void co_return.
-    auto coro = []() -> DeferredProxyPromise<void> {
+    auto coro = []() -> kj::Promise<DeferredProxy<void>> {
       co_await kj::Promise<void>(kj::READY_NOW);
     };
     auto promise = coro();
@@ -21,7 +21,7 @@ KJ_TEST("DeferredProxyPromise<T>: early co_return implicitly fulfills outer prom
   }
   {
     // Explicit void co_return.
-    auto coro = []() -> DeferredProxyPromise<void> {
+    auto coro = []() -> kj::Promise<DeferredProxy<void>> {
       co_return;
     };
     auto promise = coro();
@@ -32,7 +32,7 @@ KJ_TEST("DeferredProxyPromise<T>: early co_return implicitly fulfills outer prom
   }
   {
     // Valueful co_return.
-    auto coro = []() -> DeferredProxyPromise<int> {
+    auto coro = []() -> kj::Promise<DeferredProxy<int>> {
       co_return 123;
     };
     auto promise = coro();
@@ -43,14 +43,15 @@ KJ_TEST("DeferredProxyPromise<T>: early co_return implicitly fulfills outer prom
   }
 }
 
-KJ_TEST("DeferredProxyPromise<T>: `co_yield BEGIN_DEFERRED_PROXYING` fulfills outer promise") {
+KJ_TEST("kj::Promise<DeferredProxy<T>>: `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING` fulfills outer "
+    "promise") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto paf2 = kj::newPromiseAndFulfiller<int>();
 
-  auto coro = [&]() -> DeferredProxyPromise<int> {
+  auto coro = [&]() -> kj::Promise<DeferredProxy<int>> {
     co_await paf1.promise;
     KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
     co_return co_await paf2.promise;
@@ -75,13 +76,14 @@ KJ_TEST("DeferredProxyPromise<T>: `co_yield BEGIN_DEFERRED_PROXYING` fulfills ou
   KJ_EXPECT(proxyTask.wait(waitScope) == 123);
 }
 
-KJ_TEST("DeferredProxyPromise<T>: unhandled exception before `co_yield BEGIN_DEFERRED_PROXYING`") {
+KJ_TEST("kj::Promise<DeferredProxy<T>>: unhandled exception before "
+    "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   auto paf = kj::newPromiseAndFulfiller<void>();
 
-  auto coro = [&]() -> DeferredProxyPromise<int> {
+  auto coro = [&]() -> kj::Promise<DeferredProxy<int>> {
     co_await paf.promise;
     KJ_FAIL_ASSERT("promise should have been rejected");
   };
@@ -97,14 +99,15 @@ KJ_TEST("DeferredProxyPromise<T>: unhandled exception before `co_yield BEGIN_DEF
   KJ_EXPECT_THROW_MESSAGE("test error", promise.wait(waitScope));
 }
 
-KJ_TEST("DeferredProxyPromise<T>: unhandled exception after `co_yield BEGIN_DEFERRED_PROXYING`") {
+KJ_TEST("kj::Promise<DeferredProxy<T>>: unhandled exception after "
+    "`KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto paf2 = kj::newPromiseAndFulfiller<int>();
 
-  auto coro = [&]() -> DeferredProxyPromise<int> {
+  auto coro = [&]() -> kj::Promise<DeferredProxy<int>> {
     co_await paf1.promise;
     KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
     co_return co_await paf2.promise;
@@ -129,20 +132,20 @@ KJ_TEST("DeferredProxyPromise<T>: unhandled exception after `co_yield BEGIN_DEFE
   KJ_EXPECT_THROW_MESSAGE("test error", proxyTask.wait(waitScope));
 }
 
-KJ_TEST("DeferredProxyPromise<T>: can be `co_await`ed from another coroutine") {
+KJ_TEST("kj::Promise<DeferredProxy<T>>: can be `co_await`ed from another coroutine") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
   auto paf1 = kj::newPromiseAndFulfiller<void>();
   auto paf2 = kj::newPromiseAndFulfiller<int>();
 
-  auto nestedCoro = [&]() -> DeferredProxyPromise<int> {
+  auto nestedCoro = [&]() -> kj::Promise<DeferredProxy<int>> {
     co_await paf1.promise;
     KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
     co_return co_await paf2.promise;
   };
 
-  auto coro = [&]() -> DeferredProxyPromise<int> {
+  auto coro = [&]() -> kj::Promise<DeferredProxy<int>> {
     auto deferred = co_await nestedCoro();
     KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
     co_return co_await deferred.proxyTask;

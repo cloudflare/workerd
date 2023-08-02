@@ -291,7 +291,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
   return ws;
 }
 
-DeferredProxyPromise<void> WebSocket::couple(kj::Own<kj::WebSocket> other) {
+kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other) {
   auto& native = *farNative;
   JSG_REQUIRE(!native.state.is<AwaitingConnection>(), TypeError,
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");

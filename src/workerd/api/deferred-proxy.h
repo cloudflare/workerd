@@ -61,44 +61,51 @@ inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> p
 // ---------------------------------------------------------
 // Deferred proxy coroutine integration
 
+// If a coroutine returns a kj::Promise<DeferredProxy<T>>, the coroutine implementation gains the
+// following features:
+//
+// - `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING` fulfills the outer kj::Promise<DeferredProxy<T>>. The
+//   resulting DeferredProxy<T> object contains a `proxyTask` Promise which owns the coroutine.
+//
+// - `co_return` implicitly fulfills the outer Promise for the DeferredProxy<T> (if it has not
+//   already been fulfilled by the magic `KJ_CO_MAGIC` described above), then fulfills the inner
+//   `proxyTask`.
+//
+// - Unhandled exceptions reject the outer kj::Promise<DeferredProxy<T>> (if it has not already
+//   been fulfilled by the magic `KJ_CO_MAGIC` described above), then reject the inner `proxyTask`.
+//
+// It is not possible to write a "regular" coroutine which returns kj::Promise<DeferredProxy<T>>;
+// that is, `co_return DeferredProxy<T> { ... }` is a compile error. You must initiate deferred
+// proxying using `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
+
+template <typename T, typename... Args>
+class DeferredProxyCoroutine;
+// The coroutine adapter class, required for the compiler to know how to create coroutines
+// returning kj::Promise<DeferredProxy<T>>. We declare it here so we can name it in our
+// `coroutine_traits` specialization below.
+
+}  // namespace workerd::api
+
+namespace KJ_COROUTINE_STD_NAMESPACE {
+// Enter the `std` or `std::experimental` namespace, depending on whether we're using C++20
+// coroutines or the Coroutines TS.
+
+template <class T, class... Args>
+struct coroutine_traits<kj::Promise<workerd::api::DeferredProxy<T>>, Args...> {
+  using promise_type = workerd::api::DeferredProxyCoroutine<T, Args...>;
+};
+
+}  // namespace KJ_COROUTINE_STD_NAMESPACE
+
+namespace workerd::api {
+
 class BeginDeferredProxyingConstant final {};
 constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING {};
-// A magic constant which a DeferredProxyPromise<T> coroutine can `co_yield` to indicate that the
+// A magic constant which a DeferredProxyPromise<T> coroutine can `KJ_CO_MAGIC` to indicate that the
 // deferred proxying phase of its operation has begun.
 
 template <typename T>
-class DeferredProxyPromise: public kj::Promise<DeferredProxy<T>> {
-  // A "strong typedef" for a kj::Promise<DeferredProxy<T>>. DeferredProxyPromise<T> is intended to
-  // be used as the return type for coroutines, in which case the coroutine implementation gains the
-  // following features:
-  //
-  // - `co_yield BEGIN_DEFERRED_PROXYING` fulfills the outer kj::Promise<DeferredProxy<T>>. The
-  //   resulting DeferredProxy<T> object contains a `proxyTask` Promise which owns the coroutine.
-  //
-  // - `co_return` implicitly fulfills the outer Promise for the DeferredProxy<T> (if it has not
-  //   already been fulfilled by the magic `co_yield` described above), then fulfills the inner
-  //   `proxyTask`.
-  //
-  // - Unhandled exceptions reject the outer kj::Promise<DeferredProxy<T>> (if it has not already
-  //   been fulfilled by the magic `co_yield` described above), then reject the inner `proxyTask`.
-
-public:
-  DeferredProxyPromise(kj::Promise<DeferredProxy<T>> promise)
-      : kj::Promise<DeferredProxy<T>>(kj::mv(promise)) {}
-  // Allow conversion from a regular Promise. This allows our `promise_type::get_return_object()`
-  // implementation to be implemented as a regular Promise-returning coroutine.
-
-  class Coroutine;
-  using promise_type = Coroutine;
-  // The coroutine adapter class, required for the compiler to know how to create coroutines
-  // returning DeferredProxyPromise<T>. Since the whole point of DeferredProxyPromise<T> is to serve
-  // as a coroutine return type, there's not really any point hiding promise_type inside of a
-  // coroutine_traits specialization, like kj::Promise<T> does.
-};
-
-template <typename T>
-class DeferredProxyPromise<T>::Coroutine:
-    public kj::_::CoroutineMixin<DeferredProxyPromise<T>::Coroutine, T> {
+class DeferredProxyCoroutine: public kj::_::CoroutineMixin<DeferredProxyCoroutine<T>, T> {
   // The coroutine adapter type for DeferredProxyPromise<T>. Most of the work is forwarded to the
   // regular kj::Promise<T> coroutine adapter.
 
@@ -106,24 +113,32 @@ class DeferredProxyPromise<T>::Coroutine:
       typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
 
 public:
-  using Handle = kj::_::stdcoro::coroutine_handle<Coroutine>;
+  using Handle = kj::_::stdcoro::coroutine_handle<DeferredProxyCoroutine>;
 
-  Coroutine(kj::SourceLocation location = {}): inner(Handle::from_promise(*this), location) {}
+  DeferredProxyCoroutine(kj::SourceLocation location = {})
+      : inner(Handle::from_promise(*this), location) {}
 
   kj::Promise<DeferredProxy<T>> get_return_object() {
     // We need to return a RAII object which will destroy this (as in, `this`) coroutine adapter.
     // The logic which calls `coroutine_handle<>::destroy()` is tucked away in our inner coroutine
     // adapter, however, leading to the weird situation where the `inner.get_return_object()`
-    // Promise owns `this`. Thus, we cannot store the inner promise in our own coroutine adapter
-    // class, because that would cause a reference cycle. Fortunately, we can implement our own
-    // `get_return_object()` as a regular Promise-returning coroutine and keep the inner Promise in
-    // our coroutine frame, giving the caller transitive ownership of the DeferredProxyPromise<T>
-    // coroutine by way of the kj::Promise<DeferredProxy<T>> coroutine. Later on, when the outer
-    // Promise is fulfilled, the caller will gain direct ownership of the DeferredProxyPromise<T>
-    // coroutine via the `proxyTask` promise.
+    // Promise owns `this`. So, returning a Promise with `inner.get_return_object()` in a `.then()`
+    // gives transitive ownership of the coroutine to the caller.
+    //
+    // Note that we must use a `.then()` instead of a coroutine to implement this, because trying to
+    // write a coroutine returning `kj::Promise<DeferredProxy<T>>` will just recurse into this
+    // coroutine adapter class.
+    //
+    // TODO(perf): We could avoid the `newPromiseAndFulfiller()` and `.then()` overhead by having
+    //   DeferredProxyCoroutine<T> implement PromiseNode. `this` could own `proxyTask` temporarily,
+    //   forwarding `PromiseNode::destroy()` calls to `proxyTask`'s PromiseNode (if it still
+    //   exists), which takes care of the ownership reference cycle. `yield_value()`, `fulfill()`,
+    //   and `unhandled_exception()`could arm our OnReadyEvent, and our `get()` implementation would
+    //   return `proxyTask`, or a stored exception.
     auto proxyTask = inner.get_return_object();
-    co_await beginDeferredProxying.promise;
-    co_return DeferredProxy<T> { kj::mv(proxyTask) };
+    return beginDeferredProxying.promise.then([proxyTask=kj::mv(proxyTask)]() mutable {
+      return DeferredProxy<T> { kj::mv(proxyTask) };
+    });
   }
 
   auto initial_suspend() { return inner.initial_suspend(); }

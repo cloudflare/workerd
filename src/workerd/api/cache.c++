@@ -332,9 +332,10 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
           //   destruction timing in the event of an error; see below.
 
       // The next step is a bit complicated as it occurs in two separate async flows.
-      // First, we await the serialization promise, then construct a DeferredProxy.
-      // That DeferredProxy contains the second async flow that actually handles the
-      // request and response.
+      // First, we await the serialization promise, then enter "deferred proxying" by issuing
+      // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING` from our coroutine. Everything after that
+      // `KJ_CO_MAGIC` constitutes the second async flow that actually handles the request and
+      // response.
       //
       // Weird: It's important that these objects be torn down in the right order and that the
       // DeferredProxy promise is handled separately from the inner promise.
@@ -385,62 +386,9 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       // will properly treat it as pending I/O, but only *after* the outer promise completes. This
       // gets us everything we want.
       //
-      // Hence, what you see here: we first await the serializePromise then add all our
-      // additional work onto the inner "deferred proxy" promise. Then we `awaitDeferredProxy()`
-      // the whole thing.
-
-      // We use the same exception handling logic for both the promise for the DeferredProxy
-      // and the inner promise handling the request/response.
-      static auto constexpr handleException = [](kj::Exception&& exception) {
-        if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-          kj::throwFatalException(kj::mv(exception));
-        }
-        // If the origin or the cache disconnected, we don't treat this as an error, as put()
-        // doesn't guarantee that it stores anything anyway.
-        //
-        // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
-        //   error, even though hiding it is technically not a violation of the contract. To me
-        //   this seems undesirable, especially when it was the origin that failed. The caller
-        //   can always choose to ignore errors if they want (and many do, by passing to
-        //   waitUntil()). However, there is at least one test which depends on this behavior,
-        //   and probably production Workers in the wild, so I'm not changing it for now.
-      };
-
-      // Here we handle the inner promise -- the one held by the DeferredProxy that is
-      // returned below by the handleSerialize() method.
-      static auto constexpr handleResponse =
-          [](DeferredProxy<void>& deferred,
-             kj::Promise<void> writePayloadHeadersPromise,
-             kj::Promise<void> pumpRequestBodyPromise,
-             kj::Own<kj::AsyncOutputStream> bodyStream,
-             kj::Promise<kj::HttpClient::Response> responsePromise,
-             kj::Own<kj::HttpClient> client,
-             kj::Own<kj::AsyncInputStream> payloadStream) -> kj::Promise<void> {
-        try {
-          co_await deferred.proxyTask;
-          // Make sure headers get written even if the body was empty -- see comments earlier.
-          co_await writePayloadHeadersPromise;
-          // Make sure the request body is done being pumped and had no errors. If serialization
-          // completed successfully, then this should also complete immediately thereafter.
-          co_await pumpRequestBodyPromise;
-          // It is important to destroy the bodyStream before actually waiting on the
-          // responsePromise to ensure that the terminal chunk is written since the bodyStream
-          // may only write the terminal chunk in the streams destructor.
-          bodyStream = nullptr;
-          payloadStream = nullptr;
-          auto response = co_await responsePromise;
-          // We expect to see either 204 (success) or 413 (failure). Any other status code is a
-          // violation of the contract between us and the cache, and is an internal
-          // error, which we log. However, there's no need to throw, since the Cache API is an
-          // ephemeral K/V store, and we never guaranteed the script we'd actually cache anything.
-          if (response.statusCode != 204 && response.statusCode != 413) {
-            LOG_CACHE_ERROR_ONCE(
-                "Response to Cache API PUT was neither 204 nor 413: ", response);
-          }
-        } catch (...) {
-          handleException(kj::getCaughtExceptionAsKj());
-        }
-      };
+      // Hence, what you see here: we first await the serializePromise, then enter deferred proxying
+      // with our magic `KJ_CO_MAGIC`, then perform all our additional work. Then we
+      // `awaitDeferredProxy()` the whole thing.
 
       // Here we handle the promise for the DeferredProxy itself.
       static auto constexpr handleSerialize = [](
@@ -477,18 +425,45 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
         });
         try {
           auto deferred = co_await serialize;
-          co_return DeferredProxy<void> {
-            handleResponse(deferred,
-                           kj::mv(writePayloadHeadersPromise),
-                           kj::mv(pumpRequestBodyPromise),
-                           kj::mv(bodyStream),
-                           kj::mv(responsePromise),
-                           kj::mv(httpClient),
-                           kj::mv(payloadStream))
-          };
+
+          // With our `serialize` promise having resolved to a DeferredProxy, we can now enter
+          // deferred proxying ourselves.
+          KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+
+          co_await deferred.proxyTask;
+          // Make sure headers get written even if the body was empty -- see comments earlier.
+          co_await writePayloadHeadersPromise;
+          // Make sure the request body is done being pumped and had no errors. If serialization
+          // completed successfully, then this should also complete immediately thereafter.
+          co_await pumpRequestBodyPromise;
+          // It is important to destroy the bodyStream before actually waiting on the
+          // responsePromise to ensure that the terminal chunk is written since the bodyStream
+          // may only write the terminal chunk in the streams destructor.
+          bodyStream = nullptr;
+          payloadStream = nullptr;
+          auto response = co_await responsePromise;
+          // We expect to see either 204 (success) or 413 (failure). Any other status code is a
+          // violation of the contract between us and the cache, and is an internal
+          // error, which we log. However, there's no need to throw, since the Cache API is an
+          // ephemeral K/V store, and we never guaranteed the script we'd actually cache anything.
+          if (response.statusCode != 204 && response.statusCode != 413) {
+            LOG_CACHE_ERROR_ONCE(
+                "Response to Cache API PUT was neither 204 nor 413: ", response);
+          }
         } catch (...) {
-          handleException(kj::getCaughtExceptionAsKj());
-          co_return newNoopDeferredProxy();
+          auto exception = kj::getCaughtExceptionAsKj();
+          if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+            kj::throwFatalException(kj::mv(exception));
+          }
+          // If the origin or the cache disconnected, we don't treat this as an error, as put()
+          // doesn't guarantee that it stores anything anyway.
+          //
+          // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
+          //   error, even though hiding it is technically not a violation of the contract. To me
+          //   this seems undesirable, especially when it was the origin that failed. The caller
+          //   can always choose to ignore errors if they want (and many do, by passing to
+          //   waitUntil()). However, there is at least one test which depends on this behavior,
+          //   and probably production Workers in the wild, so I'm not changing it for now.
         }
       };
 
