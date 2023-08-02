@@ -485,7 +485,7 @@ struct MemberCounter {
   // count all members in the structure
 
   template<const char* name, typename Method, Method method>
-  inline void registerMethod() { ++count; }
+  inline void registerMethod() { ++members; }
 
   template<typename Method, Method method>
   inline void registerCallable() { /* not a member */ }
@@ -503,37 +503,37 @@ struct MemberCounter {
   inline void registerAsyncIterable() { /* not a member */ }
 
   template<typename Type, const char* name>
-  inline void registerNestedType() { ++count; }
+  inline void registerNestedType() { ++members; }
 
   template<const char* name, typename Property, auto property>
-  inline void registerStructProperty() { ++count; }
+  inline void registerStructProperty() { ++members; }
 
   template<const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyPrototypeProperty() { ++count; }
+  inline void registerReadonlyPrototypeProperty() { ++members; }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerPrototypeProperty() { ++count; }
+  inline void registerPrototypeProperty() { ++members; }
 
   template<const char* name, typename Getter, Getter getter>
-  inline void registerReadonlyInstanceProperty() { ++count; }
+  inline void registerReadonlyInstanceProperty() { ++members; }
 
   template<typename T>
-  inline void registerReadonlyInstanceProperty(kj::StringPtr, T value) { ++count; }
+  inline void registerReadonlyInstanceProperty(kj::StringPtr, T value) { ++members; }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
-  inline void registerInstanceProperty() { ++count; }
+  inline void registerInstanceProperty() { ++members; }
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>
-  inline void registerLazyInstanceProperty() { ++count; }
+  inline void registerLazyInstanceProperty() { ++members; }
 
   template<const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() { ++count; }
+  inline void registerLazyJsInstanceProperty() { ++members; }
 
   template<const char* name, typename T>
-  inline void registerStaticConstant(T value) { ++count; }
+  inline void registerStaticConstant(T value) { ++members; }
 
   template<const char* name, typename Method, Method method>
-  inline void registerStaticMethod() { ++count; }
+  inline void registerStaticMethod() { ++members; }
 
   inline void registerTypeScriptRoot() { /* not a member */ }
 
@@ -543,20 +543,28 @@ struct MemberCounter {
   template<const char* tsDefine>
   inline void registerTypeScriptDefine() { /* not a member */ }
 
-  size_t count = 0;
+  inline void registerJsBundle(Bundle::Reader bundle) {
+    modules += bundle.getModules().size();
+  }
+
+  size_t members = 0;
+  size_t modules = 0;
 };
 
 template<typename Self, typename Configuration>
 struct MembersBuilder {
   Structure::Builder structure;
   capnp::List<Member>::Builder members;
+  capnp::List<Module>::Builder modules;
   Builder<Configuration>& rtti;
-  uint index = 0;
+  uint memberIndex = 0;
+  uint moduleIndex = 0;
 
   MembersBuilder(Structure::Builder structure,
                  capnp::List<Member>::Builder members,
+                 capnp::List<Module>::Builder modules,
                  Builder<Configuration>& rtti)
-    : structure(structure), members(members), rtti(rtti) { }
+    : structure(structure), members(members), modules(modules), rtti(rtti) { }
 
   template<typename Type>
   inline void registerInherit() {
@@ -570,14 +578,14 @@ struct MembersBuilder {
 
   template<typename Type, const char* name>
   inline void registerNestedType() {
-    auto nested = members[index++].initNested();
+    auto nested = members[memberIndex++].initNested();
     nested.setName(name);
     BuildRtti<Configuration, Type>::build(nested.initStructure(), rtti);
   }
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
@@ -585,7 +593,7 @@ struct MembersBuilder {
 
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyInstanceProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(true);
     using GetterTraits = FunctionTraits<Getter>;
@@ -594,7 +602,7 @@ struct MembersBuilder {
 
   template<typename T>
   inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(true);
     BuildRtti<Configuration, T>::build(prop.initType(), rtti);
@@ -602,7 +610,7 @@ struct MembersBuilder {
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>
   inline void registerLazyInstanceProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(readOnly);
     prop.setLazy(true);
@@ -613,7 +621,7 @@ struct MembersBuilder {
 
   template<const char* name, const char* moduleName, bool readOnly>
   inline void registerLazyJsInstanceProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(readOnly);
     prop.setLazy(true);
@@ -624,7 +632,7 @@ struct MembersBuilder {
 
   template<const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerPrototypeProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setPrototype(true);
     using GetterTraits = FunctionTraits<Getter>;
@@ -633,7 +641,7 @@ struct MembersBuilder {
 
   template<const char* name, typename Getter, Getter getter>
   inline void registerReadonlyPrototypeProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setPrototype(true);
     prop.setReadonly(true);
@@ -643,7 +651,7 @@ struct MembersBuilder {
 
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) {
-    auto constant = members[index++].initConstant();
+    auto constant = members[memberIndex++].initConstant();
     constant.setName(name);
     constant.setValue(value);
     // BuildRtti<Configuration, T>::build(constant.initType());
@@ -651,14 +659,14 @@ struct MembersBuilder {
 
   template<const char* name, typename Property, Property Self::*property>
   void registerStructProperty() {
-    auto prop = members[index++].initProperty();
+    auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     BuildRtti<Configuration, Property>::build(prop.initType(), rtti);
   }
 
   template<const char* name, typename Method, Method>
   inline void registerMethod() {
-    auto method = members[index++].initMethod();
+    auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
     using Traits = FunctionTraits<Method>;
@@ -679,7 +687,7 @@ struct MembersBuilder {
 
   template<const char* name, typename Method, Method>
   inline void registerStaticMethod() {
-    auto method = members[index++].initMethod();
+    auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
     method.setStatic(true);
@@ -726,6 +734,14 @@ struct MembersBuilder {
   inline void registerTypeScriptDefine() {
     structure.setTsDefine(tsDefine);
   }
+
+  inline void registerJsBundle(Bundle::Reader bundle) {
+    for (auto module: bundle.getModules()) {
+      auto m = modules[moduleIndex++];
+      m.setSpecifier(module.getName());
+      m.setTsDeclarations(module.getTsDeclaration());
+    }
+   }
 };
 
 template <typename T, typename = int>
@@ -761,14 +777,15 @@ struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value
     } else {
       T::template registerMembers<decltype(counter), T>(counter);
     }
-    auto count = counter.count;
+    auto membersCount = counter.members;
 
     if constexpr (HasConstructor<T>::value) {
-      count++;
+      membersCount++;
     }
 
-    auto members = builder.initMembers(count);
-    MembersBuilder<T, Configuration> membersBuilder(builder, members, rtti);
+    auto members = builder.initMembers(membersCount);
+    auto modules = counter.modules > 0 ? builder.initBuiltinModules(counter.modules) : capnp::List<Module>::Builder();
+    MembersBuilder<T, Configuration> membersBuilder(builder, members, modules, rtti);
     if constexpr (isDetected<GetConfiguration, T>()) {
       T::template registerMembers<decltype(membersBuilder), T>(membersBuilder, rtti.config);
     } else {
@@ -776,7 +793,7 @@ struct BuildRtti<Configuration, T, std::enable_if_t<HasRegisterMembers<T>::value
     }
 
     if constexpr (HasConstructor<T>::value) {
-      auto constructor = members[membersBuilder.index++].initConstructor();
+      auto constructor = members[membersBuilder.memberIndex++].initConstructor();
       using Traits = FunctionTraits<decltype(T::constructor)>;
       using Args = typename Traits::ArgsTuple;
       TupleRttiBuilder<Configuration, Args>::build(constructor.initArgs(std::tuple_size_v<Args>), rtti);

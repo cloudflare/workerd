@@ -2,10 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "workerd/jsg/jsg.h"
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/test.h>
 #include <workerd/jsg/rtti.h>
+#include <workerd/jsg/rtti-test.capnp.h>
 
 struct MockConfig {};
 
@@ -237,6 +239,7 @@ KJ_TEST("constant members") {
 
 struct TestLazyJsProperty : jsg::Object {
   JSG_RESOURCE_TYPE(TestLazyJsProperty) {
+    JSG_CONTEXT_JS_BUNDLE(TEST_BUNDLE);
     JSG_LAZY_JS_INSTANCE_PROPERTY(JsProperty, "js-module");
     JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(JsReadonlyProperty, "js-readonly-module");
   };
@@ -246,7 +249,8 @@ KJ_TEST("lazyJsProperty") {
   KJ_EXPECT(tStructure<TestLazyJsProperty>() == "(name = \"TestLazyJsProperty\", members = ["
   "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false)), "
   "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false))], "
-  "iterable = false, asyncIterable = false, fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestLazyJsProperty\", tsRoot = false)");
+  "iterable = false, asyncIterable = false, fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestLazyJsProperty\", tsRoot = false, "
+  "builtinModules = [(specifier = \"testBundle:internal\", tsDeclarations = \"foo: string\")])");
 }
 
 struct TestStruct {
