@@ -15,7 +15,7 @@
 #include <workerd/jsg/jsg.h>
 #include <v8.h>
 #include <workerd/io/io-gate.h>
-#include <workerd/api/util.h>
+#include <workerd/api/deferred-proxy.h>
 #include <capnp/dynamic.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/io-channels.h>

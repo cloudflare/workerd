@@ -19,6 +19,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/util.h>
 
 namespace workerd::api {
 

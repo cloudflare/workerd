@@ -7,6 +7,7 @@
 #include "writable.h"
 #include <workerd/jsg/jsg.h>
 #include <kj/vector.h>
+#include <workerd/api/util.h>
 
 namespace workerd::api {
 
