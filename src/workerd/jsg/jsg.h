@@ -1742,6 +1742,30 @@ template <typename TypeWrapper>
 class Isolate;
 // Defined in setup.h -- most code doesn't need to use these directly.
 
+template <typename T>
+constexpr bool isV8Ref(T*) { return false; }
+template <typename T>
+constexpr bool isV8Ref(V8Ref<T>*) { return true; }
+
+template <typename T>
+constexpr bool isV8Ref() { return isV8Ref((T*)nullptr); }
+
+template <typename T>
+constexpr bool isV8Local(T*) { return false; }
+template <typename T>
+constexpr bool isV8Local(v8::Local<T>*) { return true; }
+
+template <typename T>
+constexpr bool isV8Local() { return isV8Local((T*)nullptr); }
+
+template <typename T>
+constexpr bool isV8MaybeLocal(T*) { return false; }
+template <typename T>
+constexpr bool isV8MaybeLocal(v8::MaybeLocal<T>*) { return true; }
+
+template <typename T>
+constexpr bool isV8MaybeLocal() { return isV8MaybeLocal((T*)nullptr); }
+
 class AsyncContextFrame;
 
 class Lock {
@@ -1988,6 +2012,39 @@ public:
   kj::StringPtr getUuid() const;
   // Returns a random UUID for this isolate instance. This is largely intended for logging and
   // diagnostic purposes.
+
+  auto withinHandleScope(auto&& fn) {
+    // Runs the given function synchronously with a v8::HandleScope on the stack.
+    // If the fn returns a v8::Local<T> or v8::MaybeLocal<T> type, then
+    // v8::EscapableHandleScope is used ensuring that the v8::Local<T> return
+    // value is properly handled.
+    using Ret = decltype(fn());
+    if constexpr (isV8Local<Ret>()) {
+      v8::EscapableHandleScope scope(v8Isolate);
+      return scope.Escape(fn());
+    } else if constexpr (isV8MaybeLocal<Ret>()) {
+      v8::EscapableHandleScope scope(v8Isolate);
+      return scope.EscapeMaybe(fn());
+    } else {
+      v8::HandleScope scope(v8Isolate);
+      return fn();
+    }
+  }
+
+  class ContextScope {
+    // An opaque RAII type that encapsulates the v8::Context::Scope. The purpose
+    // here is to abstract away (somewhat) direct use of the v8 API.
+  public:
+    ContextScope(v8::Local<v8::Context> context) : scope(context) {}
+    KJ_DISALLOW_COPY_AND_MOVE(ContextScope);
+  private:
+    v8::Context::Scope scope;
+    friend class Lock;
+  };
+
+  ContextScope enterContextScope(kj::Maybe<v8::Local<v8::Context>> maybeContext = nullptr);
+  // Ensures that we are currently within the scope of the given v8::Context or the current
+  // v8::Context if no context is explicitly given.
 
 private:
   friend class IsolateBase;

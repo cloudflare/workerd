@@ -493,9 +493,9 @@ jsg::V8Ref<v8::Boolean> boolRef2 = boolRef1.addRef(js);
 
 KJ_DBG(boolRef1 == boolRef2);  // prints "true"
 
-// Getting the v8::Local<T> from the V8Ref requires a v8::HandleScope.
-v8::HandleScope scope(js.v8Isolate);
-v8::Local<v8::Boolean> boolLocal = boolRef1.getHandle(js);
+// Getting the v8::Local<T> from the V8Ref requires a v8::HandleScope to be
+// on the stack. We provide a convenience method on jsg::Lock to ensure that:
+v8::Local<v8::Boolean> boolLocal = js.withinHandleScope([&] { return boolRef1.getHandle(js); });
 ```
 
 The `jsg::HashableV8Ref<T>` type is a subclass of `jsg::V8Ref<T>` that also implements
@@ -524,10 +524,11 @@ jsg::Ref<Foo> foo = jsg::alloc<Foo>();
 
 jsg::Ref<Foo> foo2 = foo.addRef();
 
-v8::HandleScope scope(js.v8Isolate);
-KJ_IF_MAYBE(handle, foo.tryGetHandle(js.v8Isolate)) {
-  // If handle is non-null, it is the Foo instance's JavaScript wrapper.
-}
+js.withinHandleScope([&] {
+  KJ_IF_MAYBE(handle, foo.tryGetHandle(js.v8Isolate)) {
+    // If handle is non-null, it is the Foo instance's JavaScript wrapper.
+  }
+});
 ```
 
 ### Memoized and Identified types
