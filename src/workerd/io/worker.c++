@@ -9,6 +9,7 @@
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/xthreadnotifier.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
@@ -2332,7 +2333,7 @@ private:
         : webSocket(webSocket) {
       // Assume we are being instantiated on the InspectorService thread, the thread that will do
       // I/O for CDP messages. Messages are delivered to the InspectorChannelImpl on the Isolate thread.
-      outgoingQueueNotifier = kj::atomicRefcounted<XThreadNotifier>(kj::getCurrentThreadExecutor());
+      outgoingQueueNotifier = XThreadNotifier::create();
     }
 
     ~WebSocketIoHandler() noexcept(false) {
@@ -2490,44 +2491,6 @@ private:
         co_await webSocket.send(message);
       }
     }
-
-    class XThreadNotifier final: public kj::AtomicRefcounted {
-      // Class encapsulating the ability to notify the inspector thread from other threads when
-      // messages are pushed to the outgoing queue.
-      //
-      // TODO(cleanup): This could be a lot simpler if only it were possible to cancel
-      //   an executor.executeAsync() promise from an arbitrary thread. Then, if the inspector
-      //   session was destroyed in its thread while a cross-thread notification was in-flight, it
-      //   could cancel that notification directly.
-    public:
-      XThreadNotifier(const kj::Executor& executor) : executor(executor) { }
-
-      void clear() {
-        // Must call in main thread before it drops its reference.
-        paf = nullptr;
-      }
-
-      kj::Promise<void> awaitNotification() {
-        return kj::mv(KJ_ASSERT_NONNULL(paf).promise).then([this]() {
-          paf = kj::newPromiseAndFulfiller<void>();
-        });
-      }
-
-      void notify() const {
-        executor.executeAsync([ref = kj::atomicAddRef(*this)]() {
-          KJ_IF_MAYBE(p, ref->paf) {
-            p->fulfiller->fulfill();
-          }
-        }).detach([](kj::Exception&& exception) {
-          KJ_LOG(ERROR, exception);
-        });
-      }
-
-    private:
-      const kj::Executor& executor;
-      mutable kj::Maybe<kj::PromiseFulfillerPair<void>> paf = kj::newPromiseAndFulfiller<void>();
-      // Accessed only in notifier's owning thread.
-    };
 
     kj::MutexGuarded<MessageQueue> incomingQueue;
     kj::MutexGuarded<MessageQueue> outgoingQueue;
