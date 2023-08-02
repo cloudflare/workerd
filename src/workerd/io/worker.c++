@@ -893,59 +893,67 @@ struct Worker::Script::Impl {
       bool isException = false;
     };
 
-    modules.setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
+    using Handler = kj::Function<jsg::Value()>;
+
+    static auto constexpr handleDynamicImport =
+        [](kj::Own<const Worker> worker,
+           Handler handler,
+           kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext) ->
+               kj::Promise<DynamicImportResult> {
+      co_await kj::evalLater([] {});
+      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
+
+      Worker::Lock lock(*worker, asyncLock);
+      jsg::Lock& js = lock;
+      v8::HandleScope scope(js.v8Isolate);
+      // Cannot use js.v8Context() here because that assumes we've already entered
+      // the v8::Context::Scope...
+      v8::Context::Scope contextScope(lock.getContext());
+      jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
+
+      // We have to wrap the call to handler in a try catch here because
+      // we have to tunnel any jsg::JsExceptionThrown instances back.
+      v8::TryCatch tryCatch(js.v8Isolate);
+      kj::Maybe<kj::Exception> maybeLimitError;
+      try {
+        auto limitScope = worker->getIsolate().getLimitEnforcer()
+            .enterDynamicImportJs(lock, maybeLimitError);
+        co_return { .value = handler() };
+      } catch (jsg::JsExceptionThrown&) {
+        // Handled below...
+      } catch (kj::Exception& ex) {
+        kj::throwFatalException(kj::mv(ex));
+      }
+
+      KJ_ASSERT(tryCatch.HasCaught());
+      if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
+        // There's nothing else we can do here but throw a generic fatal exception.
+        KJ_IF_MAYBE(limitError, maybeLimitError) {
+          kj::throwFatalException(kj::mv(*limitError));
+        } else {
+          kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+              "Failed to load dynamic module."));
+        }
+      }
+      co_return { .value = js.v8Ref(tryCatch.Exception()), .isException = true };
+    };
+
+    modules.setDynamicImportCallback([](jsg::Lock& js, Handler handler) mutable {
       if (IoContext::hasCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
 
-        auto& ioContext = IoContext::current();
-        auto& worker = ioContext.getWorker();
+        auto& context = IoContext::current();
 
-        return ioContext.awaitIo(js,
-            kj::evalLater([&worker, handler = kj::mv(handler),
-                           asyncContext = jsg::AsyncContextFrame::currentRef(js)]() mutable {
-          return worker.takeAsyncLockWithoutRequest(nullptr)
-              .then([&worker, handler = kj::mv(handler), asyncContext = kj::mv(asyncContext)]
-                    (Worker::AsyncLock asyncLock) mutable -> DynamicImportResult {
-            Worker::Lock lock(worker, asyncLock);
-            auto isolate = lock.getIsolate();
-            v8::HandleScope scope(isolate);
-            v8::Context::Scope contextScope(lock.getContext());
-            jsg::AsyncContextFrame::Scope asyncContextScope(lock, asyncContext);
-
-            auto& workerIsolate = worker.getIsolate();
-
-            // We have to wrap the call to handler in a try catch here because
-            // we have to tunnel any jsg::JsExceptionThrown instances back.
-            v8::TryCatch tryCatch(isolate);
-            kj::Maybe<kj::Exception> maybeLimitError;
-            try {
-              auto limitScope = workerIsolate.getLimitEnforcer()
-                  .enterDynamicImportJs(lock, maybeLimitError);
-              return { .value = handler() };
-            } catch (jsg::JsExceptionThrown&) {
-              // Handled below...
-            } catch (kj::Exception& ex) {
-              kj::throwFatalException(kj::mv(ex));
-            }
-
-            KJ_ASSERT(tryCatch.HasCaught());
-            if (!tryCatch.CanContinue()) {
-              // There's nothing else we can do here but throw a generic fatal exception.
-              KJ_IF_MAYBE(limitError, maybeLimitError) {
-                kj::throwFatalException(kj::mv(*limitError));
-              } else {
-                kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
-                    "Failed to load dynamic module."));
-              }
-            }
-            return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
-          });
-        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](jsg::Lock&, auto result) {
+        return context.awaitIo(js,
+            handleDynamicImport(kj::atomicAddRef(context.getWorker()),
+                                kj::mv(handler),
+                                jsg::AsyncContextFrame::currentRef(js)),
+            [](jsg::Lock& js, DynamicImportResult result) {
           if (result.isException) {
-            return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
+            return js.rejectedPromise<jsg::Value>(kj::mv(result.value));
           }
-          return jsg::resolvedPromise(isolate, kj::mv(result.value));
+          return js.resolvedPromise(kj::mv(result.value));
         });
       }
 
