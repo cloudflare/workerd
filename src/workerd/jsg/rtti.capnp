@@ -225,6 +225,9 @@ struct Structure {
 
   callable @11 :FunctionType;
   # If this type is callable as a function, the signature of said function. Otherwise, null.
+
+  builtinModules @12 :List(Module);
+  # List of all builtin modules provided by the context.
 }
 
 struct Member {

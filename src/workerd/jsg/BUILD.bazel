@@ -114,13 +114,23 @@ wd_cc_library(
 kj_test(
     src = "rtti-test.c++",
     tags = ["no-arm64"],
-    deps = [":rtti"],
+    deps = [
+        ":rtti",
+        ":rtti_test_capnp",
+    ],
 )
 
 wd_cc_capnp_library(
     name = "resource_test_capnp",
     srcs = ["resource-test.capnp"],
     data = glob(["resource-test-*.js"]),
+    deps = [":modules_capnp"],
+)
+
+wd_cc_capnp_library(
+    name = "rtti_test_capnp",
+    srcs = ["rtti-test.capnp"],
+    data = glob(["rtti-test-*.js"]),
     deps = [":modules_capnp"],
 )
 
