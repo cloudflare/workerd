@@ -544,7 +544,7 @@ public:
     reflection.unwrapper = [](v8::Isolate* isolate, v8::Local<v8::Object> object,
                               kj::StringPtr name) -> kj::Maybe<U> {
       auto context = isolate->GetCurrentContext();
-      auto value = jsg::check(object->Get(context, v8Str(isolate, name)));
+      auto value = jsg::check(object->Get(context, v8StrIntern(isolate, name)));
       if (value->IsUndefined()) {
         return nullptr;
       } else {

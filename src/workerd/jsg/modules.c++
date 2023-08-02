@@ -131,13 +131,14 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
     };
 
     auto& synthetic = KJ_REQUIRE_NONNULL(ref.module.maybeSynthetic, "Not a synthetic module.");
+    auto defaultStr = v8StrIntern(isolate, "default"_kj);
 
     KJ_SWITCH_ONEOF(synthetic) {
       KJ_CASE_ONEOF(info, ModuleRegistry::CapnpModuleInfo) {
         bool success = true;
         success = success && module->SetSyntheticModuleExport(
             isolate,
-            v8StrIntern(isolate, "default"_kj),
+            defaultStr,
             info.fileScope.getHandle(isolate)).IsJust();
         for (auto& decl: info.topLevelDecls) {
           success = success && module->SetSyntheticModuleExport(
@@ -166,7 +167,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 
         if (module->SetSyntheticModuleExport(
                 isolate,
-                v8StrIntern(isolate, "default"_kj),
+                defaultStr,
                 commonjs.moduleContext->module->getExports(js.v8Isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {
@@ -180,7 +181,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::TextModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
-                                             v8StrIntern(isolate, "default"_kj),
+                                             defaultStr,
                                              info.value.getHandle(isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {
@@ -189,7 +190,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::DataModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
-                                             v8StrIntern(isolate, "default"_kj),
+                                             defaultStr,
                                              info.value.getHandle(isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {
@@ -198,7 +199,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::WasmModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
-                                             v8StrIntern(isolate, "default"_kj),
+                                             defaultStr,
                                              info.value.getHandle(isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {
@@ -207,7 +208,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::JsonModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
-                                             v8StrIntern(isolate, "default"_kj),
+                                             defaultStr,
                                              info.value.getHandle(isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {
@@ -216,7 +217,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
       }
       KJ_CASE_ONEOF(info, ModuleRegistry::ObjectModuleInfo) {
         if (module->SetSyntheticModuleExport(isolate,
-                                             v8StrIntern(isolate, "default"_kj),
+                                             defaultStr,
                                              info.value.getHandle(isolate)).IsJust()) {
           result = makeResolvedPromise();
         } else {

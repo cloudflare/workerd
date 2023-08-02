@@ -333,7 +333,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
   read(js, consumer).then(js, readContinuation, errorContinuation);
   read(js, consumer).then(js, readContinuation, errorContinuation);
 
-  queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8Str(js.v8Isolate, "boom"_kj))));
+  queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8StrIntern(js.v8Isolate, "boom"_kj))));
 
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }

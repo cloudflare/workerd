@@ -278,7 +278,7 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
     }
 
     if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-      auto exception = v8::Exception::Error(v8Str(isolate, "Network connection lost."_kj));
+      auto exception = v8::Exception::Error(v8StrIntern(isolate, "Network connection lost."_kj));
       if (tunneledException.isFromRemote) {
         setRemoteError(isolate, exception);
       }
