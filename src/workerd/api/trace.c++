@@ -64,9 +64,7 @@ kj::String getTraceLogLevel(const Trace::Log& log) {
 }
 
 jsg::V8Ref<v8::Object> getTraceLogMessage(jsg::Lock& js, const Trace::Log& log) {
-  auto jsonString = jsg::v8Str(js.v8Isolate, log.message);
-  auto handle = jsg::check(v8::JSON::Parse(js.v8Context(), jsonString));
-  return js.v8Ref(handle.As<v8::Object>());
+  return js.parseJson(log.message).cast<v8::Object>(js);
 }
 
 kj::Array<jsg::Ref<TraceLog>> getTraceLogs(jsg::Lock& js, const Trace& trace) {
@@ -119,9 +117,7 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
   const auto getCf = [&]() -> jsg::Optional<jsg::V8Ref<v8::Object>> {
     const auto& cfJson = eventInfo.cfJson;
     if (cfJson.size() > 0) {
-      auto jsonString = jsg::v8Str(js.v8Isolate, cfJson);
-      auto handle = jsg::check(v8::JSON::Parse(js.v8Context(), jsonString));
-      return js.v8Ref(handle.As<v8::Object>());
+      return js.parseJson(cfJson).cast<v8::Object>(js);
     }
     return nullptr;
   };

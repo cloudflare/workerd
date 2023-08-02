@@ -117,10 +117,10 @@ void handleDefaultBotManagement(jsg::Lock& js, jsg::Value& cf) {
     // pull the exact same value.
     auto defaultBm = jsg::check(context->Global()->GetPrivate(context, sym));
     if (defaultBm->IsUndefined()) {
-      defaultBm = jsg::check(v8::JSON::Parse(context,
-          jsg::v8StrIntern(js.v8Isolate, kDefaultBotManagementValue)));
-      KJ_ASSERT(defaultBm->IsObject());
-      jsg::recursivelyFreeze(context, defaultBm);
+      auto bm = js.parseJson(kDefaultBotManagementValue);
+      KJ_DASSERT(bm.getHandle(js)->IsObject());
+      js.recursivelyFreeze(bm);
+      defaultBm = bm.getHandle(js);
       jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));
     }
     jsg::check(handle->Set(context, name, defaultBm));
