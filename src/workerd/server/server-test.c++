@@ -1342,7 +1342,7 @@ KJ_TEST("Server: call queue handler on service binding") {
   test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "queue outcome: 1, ackAll: true");
+  conn.httpGet200("/", "queue outcome: ok, ackAll: true");
 }
 
 KJ_TEST("Server: Durable Objects (in memory)") {
