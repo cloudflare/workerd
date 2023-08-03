@@ -1956,19 +1956,37 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
 
 namespace {
 
-// Abstract base class for EDDSA and EDDH. Unfortunately, the legacy NODE-ED25519 identifier has a
-// namedCurve field whereas the algorithms in the Secure Curves spec do not, which requires having
-// a base class implementing most functionality and having classes inherit from it to define the
-// key algorithm struct with or without namedCurve.
-class EdDsaKeyBase : public AsymmetricKey {
+// Abstract base class for EDDSA and EDDH. The legacy NODE-ED25519 identifier for EDDSA has a
+// namedCurve field whereas the algorithms in the Secure Curves spec do not. We handle this by
+// keeping track of the algorithm identifier and returning an algorithm struct based on that.
+class EdDsaKey final: public AsymmetricKey {
 public:
-  explicit EdDsaKeyBase(kj::Own<EVP_PKEY> keyData,
+  explicit EdDsaKey(kj::Own<EVP_PKEY> keyData, kj::StringPtr keyAlgorithm,
                     kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages) {}
+      : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
+        keyAlgorithm(kj::mv(keyAlgorithm)) {}
 
   static kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> generateKey(
       kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
       CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey);
+
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
+    // For legacy node-based keys with NODE-ED25519, algorithm contains a namedCurve field.
+    if (keyAlgorithm == "NODE-ED25519"){
+      return CryptoKey::EllipticKeyAlgorithm {
+        keyAlgorithm,
+        keyAlgorithm,
+      };
+    } else {
+      return CryptoKey::KeyAlgorithm {
+        keyAlgorithm
+      };
+    }
+  }
+
+  kj::StringPtr getAlgorithmName() const override {
+    return keyAlgorithm;
+  }
 
   kj::StringPtr chooseHash(
       const kj::Maybe<kj::OneOf<kj::String,
@@ -2070,7 +2088,7 @@ public:
     // The check above for the algorithm `which` equality ensures that the impl can be downcast to
     // EdDsaKey (assuming we don't accidentally create a class that doesn't inherit this one that
     // for some reason returns an EdDsaKey).
-    auto& publicKeyImpl = kj::downcast<EdDsaKeyBase>(*publicKey->impl);
+    auto& publicKeyImpl = kj::downcast<EdDsaKey>(*publicKey->impl);
 
     // EDDH code derived from https://www.openssl.org/docs/manmaster/man3/EVP_PKEY_derive.html
     auto ctx = OSSL_NEW(EVP_PKEY_CTX, getEvpPkey(), nullptr);
@@ -2110,6 +2128,8 @@ public:
   }
 
 private:
+  kj::StringPtr keyAlgorithm;
+
   SubtleCrypto::JsonWebKey exportJwk() const override final {
     KJ_ASSERT(getAlgorithmName() == "X25519"_kj || getAlgorithmName() == "Ed25519"_kj ||
         getAlgorithmName() == "NODE-ED25519"_kj);
@@ -2169,37 +2189,7 @@ private:
 
 };
 
-class EdDsaKey final : public EdDsaKeyBase {
-public:
-  explicit EdDsaKey(kj::Own<EVP_PKEY> keyData,
-                    CryptoKey::KeyAlgorithm keyAlgorithm,
-                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : EdDsaKeyBase(kj::mv(keyData), keyType, extractable, usages),
-        keyAlgorithm(kj::mv(keyAlgorithm)) {}
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
-
-private:
-  CryptoKey::KeyAlgorithm keyAlgorithm;
-};
-
-// Class for legacy algorithm NODE-ED25519, which includes a namedCurve field in its algorithm
-// unlike Ed25519.
-class EdDsaCurveKey final : public EdDsaKeyBase {
-public:
-  explicit EdDsaCurveKey(kj::Own<EVP_PKEY> keyData,
-                    CryptoKey::EllipticKeyAlgorithm keyAlgorithm,
-                    kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
-      : EdDsaKeyBase(kj::mv(keyData), keyType, extractable, usages),
-        keyAlgorithm(kj::mv(keyAlgorithm)) {}
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
-  kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
-
-private:
-  CryptoKey::EllipticKeyAlgorithm keyAlgorithm;
-};
-
-kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
+kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKey::generateKey(
     kj::StringPtr normalizedName, int nid, CryptoKeyUsageSet privateKeyUsages,
     CryptoKeyUsageSet publicKeyUsages, bool extractablePrivateKey) {
   auto [curveName, keypair, keylen] = [nid, normalizedName] {
@@ -2229,25 +2219,10 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> EdDsaKeyBase::generateKey(
       rawPublicKey, keylen), InternalDOMOperationError, "Internal error construct ", curveName,
       "public key", internalDescribeOpensslErrors());
 
-  if (normalizedName == "NODE-ED25519") {
-    auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
-      normalizedName,
-      normalizedName,
-    };
-    auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaCurveKey>(kj::mv(privateEvpPKey),
-        keyAlgorithm, "private"_kj, extractablePrivateKey, privateKeyUsages));
-    auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaCurveKey>(kj::mv(publicEvpPKey),
-        keyAlgorithm, "public"_kj, true, publicKeyUsages));
-
-    return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
-  }
-  auto keyAlgorithm = CryptoKey::KeyAlgorithm {
-    normalizedName
-  };
   auto privateKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(privateEvpPKey),
-      keyAlgorithm, "private"_kj, extractablePrivateKey, privateKeyUsages));
+      normalizedName, "private"_kj, extractablePrivateKey, privateKeyUsages));
   auto publicKey = jsg::alloc<CryptoKey>(kj::heap<EdDsaKey>(kj::mv(publicEvpPKey),
-      keyAlgorithm, "public"_kj, true, publicKeyUsages));
+      normalizedName, "public"_kj, true, publicKeyUsages));
 
   return CryptoKeyPair {.publicKey =  kj::mv(publicKey), .privateKey = kj::mv(privateKey)};
 }
@@ -2282,11 +2257,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
     SubtleCrypto::ImportKeyData keyData,
     SubtleCrypto::ImportKeyAlgorithm&& algorithm, bool extractable,
     kj::ArrayPtr<const kj::String> keyUsages) {
-  kj::StringPtr namedCurve;
 
   // BoringSSL doesn't support ED448.
   if (normalizedName == "NODE-ED25519") {
-    namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve, TypeError,
+    // TODO: I prefer this style (declaring variables within the scope where they are needed) –
+    // does KJ style want this to be done differently?
+    kj::StringPtr namedCurve = JSG_REQUIRE_NONNULL(algorithm.namedCurve, TypeError,
         "Missing field \"namedCurve\" in \"algorithm\".");
     JSG_REQUIRE(namedCurve == "NODE-ED25519", DOMNotSupportedError,
         "EDDSA curve \"", namedCurve, "\" isn't supported.");
@@ -2308,19 +2284,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
     }
   }();
 
-  if (normalizedName == "NODE-ED25519") {
-    auto keyAlgorithm = CryptoKey::EllipticKeyAlgorithm {
-      normalizedName,
-      normalizedName,
-    };
-    return kj::heap<EdDsaCurveKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable,
-                                   usages);
-  }
-  auto keyAlgorithm = CryptoKey::KeyAlgorithm {
-    normalizedName
-  };
-
   // In X25519 we ignore the id-X25519 identifier, as with id-ecDH above.
-  return kj::heap<EdDsaKey>(kj::mv(evpPkey), kj::mv(keyAlgorithm), keyType, extractable, usages);
+  return kj::heap<EdDsaKey>(kj::mv(evpPkey), normalizedName, keyType, extractable, usages);
 }
 }  // namespace workerd::api
