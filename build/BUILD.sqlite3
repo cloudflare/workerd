@@ -1,3 +1,34 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_files",
+    srcs = glob(["**"]),
+)
+
+# Amalgamates all the source files into the three files given in targets, but does not compile the
+# amalgamated files.
+#
+# configure_make expects to build libraries, binaries, or both. We tell it that our generated
+# source files are binaries.
+configure_make(
+    name = "amalgamation",
+    lib_source = "@sqlite3//:all_files",
+    targets = ["sqlite3.h sqlite3ext.h sqlite3.c"],
+    out_bin_dir = ".",
+    out_binaries = ["sqlite3.h", "sqlite3.c", "sqlite3ext.h"],
+    postfix_script = "cp sqlite3.h sqlite3.c sqlite3ext.h $INSTALLDIR/"
+)
+
+# The binary outputs of the sqlite_amalgamation rule can't be consumed by the cc_library rule below
+# because they're in the wrong place(?). However, if we copy them with this genrule, then
+# they become acceptable to cc_library.
+genrule(
+    name = "amalgamation-in-right-location",
+    outs = ["sqlite3.h", "sqlite3ext.h", "sqlite3.c"],
+    srcs = [":amalgamation"],
+    cmd = "cp -r $(locations :amalgamation) $(RULEDIR)/",
+)
+
 cc_library(
     name = "sqlite3",
     hdrs = ["sqlite3.h", "sqlite3ext.h"],

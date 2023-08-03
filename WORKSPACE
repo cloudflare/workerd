@@ -42,10 +42,10 @@ http_archive(
 http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
-    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
-    strip_prefix = "sqlite-amalgamation-3400100",
+    sha256 = "5064126aa50db20c35578b612b56c3129425c0506ed4d1610efa4a0f01bdf8d0",
+    strip_prefix = "sqlite-src-3400100",
     type = "zip",
-    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
+    url = "https://sqlite.org/2022/sqlite-src-3400100.zip",
 )
 
 http_archive(
@@ -54,6 +54,17 @@ http_archive(
     strip_prefix = "rules_python-0.23.1",
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.23.1/rules_python-0.23.1.tar.gz",
 )
+
+# For building patched SQLite.
+http_archive(
+    name = "rules_foreign_cc",
+    sha256 = "c62873142a36001b3dc0ae72d2df743ee47a223720dbd3c26dc4faf09a284da8",
+    strip_prefix = "bazelbuild-rules_foreign_cc-816905a",
+    type = "tgz",
+    url = "https://github.com/bazelbuild/rules_foreign_cc/tarball/816905a078773405803e86635def78b61d2f782d",
+)
+load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies()
 
 # Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
 # release version later.
