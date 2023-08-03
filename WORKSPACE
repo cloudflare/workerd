@@ -42,6 +42,10 @@ http_archive(
 http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/sqlite/0001-row-counts.patch",
+    ],
     sha256 = "5064126aa50db20c35578b612b56c3129425c0506ed4d1610efa4a0f01bdf8d0",
     strip_prefix = "sqlite-src-3400100",
     type = "zip",
