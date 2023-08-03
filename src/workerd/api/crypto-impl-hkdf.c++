@@ -18,7 +18,8 @@ public:
 
 private:
   kj::Array<kj::byte> deriveBits(
-      SubtleCrypto::DeriveKeyAlgorithm&& algorithm, kj::Maybe<uint32_t> maybeLength) const override {
+      jsg::Lock& js, SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+      kj::Maybe<uint32_t> maybeLength) const override {
     kj::StringPtr hashName = api::getAlgorithmName(JSG_REQUIRE_NONNULL(algorithm.hash, TypeError,
         "Missing field \"hash\" in \"algorithm\"."));
     const EVP_MD* hashType = lookupDigestAlgorithm(hashName).second;
@@ -51,7 +52,7 @@ private:
   }
 
   kj::StringPtr getAlgorithmName() const override { return "HKDF"; }
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));

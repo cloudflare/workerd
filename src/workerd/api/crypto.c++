@@ -272,7 +272,7 @@ template <typename T, typename = kj::EnableIf<kj::isSameType<
 CryptoKey::CryptoKey(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
 CryptoKey::~CryptoKey() noexcept(false) {}
 kj::StringPtr CryptoKey::getAlgorithmName() const { return impl->getAlgorithmName(); }
-CryptoKey::AlgorithmVariant CryptoKey::getAlgorithm() const { return impl->getAlgorithm(); }
+CryptoKey::AlgorithmVariant CryptoKey::getAlgorithm(jsg::Lock& js) const { return impl->getAlgorithm(js); }
 kj::StringPtr CryptoKey::getType() const { return impl->getType(); }
 bool CryptoKey::getExtractable() const { return impl->isExtractable(); }
 kj::Array<kj::StringPtr> CryptoKey::getUsages() const {
@@ -429,7 +429,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::deriveKey(
 
     auto length = getKeyLength(derivedKeyAlgorithm);
 
-    auto secret = baseKey.impl->deriveBits(kj::mv(algorithm), length);
+    auto secret = baseKey.impl->deriveBits(js, kj::mv(algorithm), length);
 
     // TODO(perf): For conformance, importKey() makes a copy of `secret`. In this case we really
     //   don't need to, but rather we ought to call the appropriate CryptoKey::Impl::import*()
@@ -456,7 +456,7 @@ jsg::Promise<kj::Array<kj::byte>> SubtleCrypto::deriveBits(
 
   return js.evalNow([&] {
     validateOperation(baseKey, algorithm.name, CryptoKeyUsageSet::deriveBits());
-    return baseKey.impl->deriveBits(kj::mv(algorithm), length);
+    return baseKey.impl->deriveBits(js, kj::mv(algorithm), length);
   });
 }
 

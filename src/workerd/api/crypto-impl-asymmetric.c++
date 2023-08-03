@@ -649,7 +649,7 @@ public:
                              kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm.clone(); }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
   kj::StringPtr getAlgorithmName() const override { return "RSASSA-PKCS1-v1_5"; }
 
   kj::StringPtr chooseHash(
@@ -675,7 +675,7 @@ public:
                     kj::StringPtr keyType, bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm.clone(); }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
 
   kj::StringPtr chooseHash(
@@ -714,7 +714,7 @@ public:
                       bool extractable, CryptoKeyUsageSet usages)
       : RsaBase(kj::mv(keyData), kj::mv(keyAlgorithm), keyType, extractable, usages) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm.clone(); }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
 
   kj::StringPtr chooseHash(
@@ -873,7 +873,7 @@ public:
     KJ_UNIMPLEMENTED("RawRsa Verification currently unsupported");
   }
 
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm.clone(); }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm.clone(js); }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
 
   kj::StringPtr chooseHash(
@@ -891,10 +891,11 @@ private:
   }
 };
 
-CryptoKeyPair generateRsaPair(kj::StringPtr normalizedName, kj::Own<EVP_PKEY> privateEvpPKey,
-    kj::Own<EVP_PKEY> publicEvpPKey, CryptoKey::RsaKeyAlgorithm&& keyAlgorithm,
-    bool privateKeyExtractable, CryptoKeyUsageSet usages) {
-  auto privateKeyAlgorithm = keyAlgorithm.clone();
+CryptoKeyPair generateRsaPair(jsg::Lock& js, kj::StringPtr normalizedName,
+    kj::Own<EVP_PKEY> privateEvpPKey, kj::Own<EVP_PKEY> publicEvpPKey,
+    CryptoKey::RsaKeyAlgorithm&& keyAlgorithm, bool privateKeyExtractable,
+    CryptoKeyUsageSet usages) {
+  auto privateKeyAlgorithm = keyAlgorithm.clone(js);
 
   CryptoKeyUsageSet publicKeyUsages = usages & CryptoKeyUsageSet::publicKeyMask();
   CryptoKeyUsageSet privateKeyUsages = usages & CryptoKeyUsageSet::privateKeyMask();
@@ -1036,7 +1037,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateRsa(
     .hash = KeyAlgorithm { normalizedHashName }
   };
 
-  return generateRsaPair(normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
+  return generateRsaPair(js, normalizedName, kj::mv(privateEvpPKey), kj::mv(publicEvpPKey),
       kj::mv(keyAlgorithm), extractable, usages);
 }
 
@@ -1292,7 +1293,7 @@ public:
       : AsymmetricKey(kj::mv(keyData), keyType, extractable, usages),
         keyAlgorithm(kj::mv(keyAlgorithm)), rsSize(rsSize) {}
 
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
   kj::StringPtr getAlgorithmName() const override { return keyAlgorithm.name; }
 
   void requireSigningAbility() const {
@@ -1317,7 +1318,7 @@ public:
   }
 
   kj::Array<kj::byte> deriveBits(
-      SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+      jsg::Lock& js, SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> resultBitLength) const override final {
     JSG_REQUIRE(keyAlgorithm.name == "ECDH", DOMNotSupportedError, ""
         "The deriveBits operation is not implemented for \"", keyAlgorithm.name, "\".");
@@ -1331,15 +1332,15 @@ public:
     JSG_REQUIRE(publicKey->getType() == "public"_kj, DOMInvalidAccessError, ""
         "The provided key has type \"", publicKey->getType(), "\", not \"public\"");
 
-    JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
-        "Base ", getAlgorithmName(), " private key cannot be used to derive a "
-        "key from a peer ", publicKey->getAlgorithmName(), " public key");
+    JSG_REQUIRE(getAlgorithm(js).which() == publicKey->getAlgorithm(js).which(),
+        DOMInvalidAccessError, "Base ", getAlgorithmName(), " private key cannot be used to derive"
+        " a key from a peer ", publicKey->getAlgorithmName(), " public key");
 
     JSG_REQUIRE(getAlgorithmName() == publicKey->getAlgorithmName(), DOMInvalidAccessError,
         "Private key for derivation is using \"", getAlgorithmName(),
         "\" while public key is using \"", publicKey->getAlgorithmName(), "\".");
 
-    auto publicCurve = publicKey->getAlgorithm().get<CryptoKey::EllipticKeyAlgorithm>()
+    auto publicCurve = publicKey->getAlgorithm(js).get<CryptoKey::EllipticKeyAlgorithm>()
         .namedCurve;
     JSG_REQUIRE(keyAlgorithm.namedCurve == publicCurve, DOMInvalidAccessError,
         "Private key for derivation is using curve \"", keyAlgorithm.namedCurve,
@@ -2058,7 +2059,7 @@ public:
   }
 
   kj::Array<kj::byte> deriveBits(
-      SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
+      jsg::Lock& js, SubtleCrypto::DeriveKeyAlgorithm&& algorithm,
       kj::Maybe<uint32_t> resultBitLength) const override final {
     JSG_REQUIRE(getAlgorithmName() == "X25519", DOMNotSupportedError, ""
         "The deriveBits operation is not implemented for \"", getAlgorithmName(), "\".");
@@ -2072,9 +2073,9 @@ public:
     JSG_REQUIRE(publicKey->getType() == "public"_kj, DOMInvalidAccessError, ""
         "The provided key has type \"", publicKey->getType(), "\", not \"public\"");
 
-    JSG_REQUIRE(getAlgorithm().which() == publicKey->getAlgorithm().which(), DOMInvalidAccessError,
-        "Base ", getAlgorithmName(), " private key cannot be used to derive a "
-        "key from a peer ", publicKey->getAlgorithmName(), " public key");
+    JSG_REQUIRE(getAlgorithm(js).which() == publicKey->getAlgorithm(js).which(),
+        DOMInvalidAccessError, "Base ", getAlgorithmName(), " private key cannot be used to derive"
+        " a key from a peer ", publicKey->getAlgorithmName(), " public key");
 
     JSG_REQUIRE(getAlgorithmName() == publicKey->getAlgorithmName(), DOMInvalidAccessError,
         "Private key for derivation is using \"", getAlgorithmName(),

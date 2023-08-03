@@ -82,7 +82,7 @@ private:
   }
 
   kj::StringPtr getAlgorithmName() const override { return "HMAC"; }
-  CryptoKey::AlgorithmVariant getAlgorithm() const override { return keyAlgorithm; }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override { return keyAlgorithm; }
 
   bool equals(const CryptoKey::Impl& other) const override final {
     return this == &other || (other.getType() == "secret"_kj && other.equals(keyData));

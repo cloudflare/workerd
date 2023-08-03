@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "crypto-impl-asymmetric-test.js")
         ],
         compatibilityDate = "2023-05-18",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "crypto_preserve_public_exponent"],
       )
     ),
   ],

@@ -6,6 +6,8 @@
 // WebCrypto API
 
 #include <bit>
+#include <workerd/io/features.h>
+#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/buffersource.h>
 #include <openssl/err.h>
@@ -160,14 +162,33 @@ public:
     // The length, in bits, of the RSA modulus. The spec would have this be an unsigned long.
     uint16_t modulusLength;
 
-    // The length, in bits, of the RSA modulus. The spec would have this be an unsigned long.
-    BigInteger publicExponent;
+     // The RSA public exponent (in unsigned big-endian form)
+    kj::OneOf<BigInteger, jsg::BufferSource> publicExponent;
 
     // The hash algorithm that is used with this key.
     jsg::Optional<KeyAlgorithm> hash;
 
-    RsaKeyAlgorithm clone() const {
-      return { name, modulusLength, kj::heapArray(publicExponent.asPtr()), hash };
+    RsaKeyAlgorithm clone(jsg::Lock& js) const {
+      auto fixPublicExp = FeatureFlags::get(js).getCryptoPreservePublicExponent();
+      KJ_SWITCH_ONEOF(publicExponent) {
+        KJ_CASE_ONEOF(array, BigInteger) {
+          if (fixPublicExp) {
+            auto expCopy = kj::heapArray<kj::byte>(array.asPtr());
+            jsg::BackingStore expBack = jsg::BackingStore::from(kj::mv(expCopy));
+            return { name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash };
+          } else {
+            return { name, modulusLength, kj::heapArray(array.asPtr()), hash };
+          }
+        }
+        KJ_CASE_ONEOF(source, jsg::BufferSource) {
+          // Should only happen if the flag is enabled and an algorithm field is cloned twice.
+          KJ_ASSERT(fixPublicExp == true);
+          auto expCopy = kj::heapArray<kj::byte>(source.asArrayPtr());
+          jsg::BackingStore expBack = jsg::BackingStore::from(kj::mv(expCopy));
+          return { name, modulusLength, jsg::BufferSource(js, kj::mv(expBack)), hash };
+        }
+      }
+      KJ_UNREACHABLE;
     }
 
     JSG_STRUCT(name, modulusLength, publicExponent, hash);
@@ -186,7 +207,7 @@ public:
   // Catch-all that can be used for extension algorithms. Combines fields of several known types.
   struct ArbitraryKeyAlgorithm {
     // TODO(cleanup): Should we just replace AlgorithmVariant with this? Note we'd have to add
-    //   `pulicExponent` which is currently a problem because it makes the type non-copyable...
+    //   `publicExponent` which is currently a problem because it makes the type non-copyable...
     //   Alternatively, should we create some better way to abstract this?
 
     kj::StringPtr name;
@@ -205,7 +226,7 @@ public:
     jsg::Optional<kj::Array<kj::byte>> publicExponent;
     jsg::Optional<kj::String> hashAlgorithm;
     jsg::Optional<kj::String> mgf1HashAlgorithm;
-    jsg::Optional<double> saltLength;
+    jsg::Optional<uint32_t> saltLength;
     jsg::Optional<uint32_t> divisorLength;
     jsg::Optional<kj::String> namedCurve;
     JSG_STRUCT(modulusLength,
@@ -229,7 +250,7 @@ public:
       KeyAlgorithm, AesKeyAlgorithm, HmacKeyAlgorithm, RsaKeyAlgorithm,
       EllipticKeyAlgorithm, ArbitraryKeyAlgorithm>;
 
-  AlgorithmVariant getAlgorithm() const;
+  AlgorithmVariant getAlgorithm(jsg::Lock& js) const;
   kj::StringPtr getType() const;
   bool getExtractable() const;
   kj::Array<kj::StringPtr> getUsages() const;
