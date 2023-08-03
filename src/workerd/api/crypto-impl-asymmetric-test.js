@@ -51,3 +51,22 @@ export const eddsa_test = {
     assert.ok(edKey.publicKey.algorithm.name == "NODE-ED25519");
   }
 }
+
+export const publicExponent_type_test = {
+  async test(ctrl, env, ctx) {
+    const key = await crypto.subtle.generateKey(
+      {
+        name: "RSA-PSS",
+        hash: "SHA-256",
+        modulusLength: 1024,
+        publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+      },
+      false,
+      ["sign", "verify"]
+    );
+
+    // Check that a Uint8Array is used for publicExponent. Without the
+    // crypto_preserve_public_exponent feature flag, this would incorrectly return an ArrayBuffer.
+    assert.ok(key.publicKey.algorithm.publicExponent[Symbol.toStringTag] == "Uint8Array");
+  }
+}

@@ -124,7 +124,7 @@ protected:
   }
 
 private:
-  CryptoKey::AlgorithmVariant getAlgorithm() const override final { return keyAlgorithm; }
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override final { return keyAlgorithm; }
 
   SubtleCrypto::ExportKeyData exportKey(kj::StringPtr format) const override final {
     JSG_REQUIRE(format == "raw" || format == "jwk", DOMNotSupportedError,
