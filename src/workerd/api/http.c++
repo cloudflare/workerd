@@ -626,8 +626,8 @@ bool Body::getBodyUsed() {
 jsg::Promise<kj::Array<byte>> Body::arrayBuffer(jsg::Lock& js) {
   KJ_IF_MAYBE(i, impl) {
     return js.evalNow([&] {
-      JSG_REQUIRE(!i->stream->isDisturbed(), TypeError, "Body has already been used. "
-          "It can only be used once. Use tee() first if you need to read it twice.");
+      JSG_REQUIRE(!i->stream->isDisturbed(), TypeError, "The body of this response has already been used."
+          "It can only be used once. Use Response.body.tee() or Response.clone() if you need to read the body twice.");
       return i->stream->getController().readAllBytes(js,
           IoContext::current().getLimitEnforcer().getBufferingLimit());
     });
