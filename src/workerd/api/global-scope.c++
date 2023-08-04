@@ -14,6 +14,7 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
+#include <workerd/jsg/promise.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/features.h>
 #include <workerd/util/sentry.h>
@@ -23,6 +24,7 @@
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/api/actor-destroy.h>
 
 namespace workerd::api {
 
@@ -552,6 +554,45 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(
     }
     // We want to deliver an error, but if no webSocketError handler is exported, we shouldn't fail
   }
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result>
+ServiceWorkerGlobalScope::actorDestroy(Worker::Lock& lock,
+                                       kj::Maybe<ExportedHandler&> exportedHandler) {
+
+  auto& context = IoContext::current();
+  auto& handler = KJ_REQUIRE_NONNULL(exportedHandler);
+
+  if (handler.destroy == kj::none) {
+    lock.logWarningOnce("Calling actor destroy without any destroy() hander");
+    return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::SCRIPT_NOT_FOUND};
+  }
+
+  auto& destroy = KJ_ASSERT_NONNULL(handler.destroy);
+
+  auto fn = context.blockConcurrencyWhile(
+      lock,
+      [&context,
+       &destroy](jsg::Lock& js) mutable -> jsg::Promise<WorkerInterface::CustomEvent::Result> {
+        return destroy(js).then(js, [&context](jsg::Lock& js) -> WorkerInterface::CustomEvent::Result {
+          // TODO(someday): Make actor shutdown reasons available in workerd.
+          // TODO(soon): Add a new shutdown reason. For now it's ok to evict, but destroy could have it's own reason.
+          // 2 is actor shutdown code for eviction.
+          const auto evictionCode = 2;
+
+          // Now that we've completed the handler execution we can do all the necessary cleanup and
+          // prevent anything else to be sent to the destroyed actor. As such, we abort the
+          // current IoContext and shutdown the actor.
+          context.getActorOrThrow().shutdown(
+              evictionCode, KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor was destroyed."));
+          context.abort(KJ_EXCEPTION(DISCONNECTED, "broken.dropped; Actor was destroyed."));
+          return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+        });
+      });
+
+  return context.run([&context, fn = kj::mv(fn)](Worker::Lock& lock) mutable {
+    return context.awaitJs(lock, kj::mv(fn));
+  });
 }
 
 void ServiceWorkerGlobalScope::emitPromiseRejection(

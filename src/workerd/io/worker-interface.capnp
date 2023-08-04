@@ -226,6 +226,9 @@ interface EventDispatcher @0xf20697475ec1752d {
   # We use customEvent() to dispatch this event.
   # In the future, we can add an argument to pass a capability to the server.
 
+  actorDestroy @10 () -> (outcome :EventOutcome);
+  # Runs the actor destroy event.
+
   obsolete5 @5();
   obsolete6 @6();
   obsolete7 @7();

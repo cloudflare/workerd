@@ -170,11 +170,9 @@ public:
   // Creates a subnamespace with the jurisdiction hardcoded.
   jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
 
-  kj::Promise<void> destroy(jsg::Ref<DurableObjectId> id);
-
   // Destroys the durable object identified with id in this namespace including all data associated
   // to it. This variation will get a durable object by ID if it already exists.
-  kj::Promise<void> destroy(jsg::Lock& js, jsg::Ref<DurableObjectId> id);
+  jsg::Promise<void> destroy(jsg::Lock& js, jsg::Ref<DurableObjectId> id);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);

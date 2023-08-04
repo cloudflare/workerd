@@ -147,7 +147,8 @@ private:
         name == "alarm" ||
         name == "webSocketMessage" ||
         name == "webSocketClose" ||
-        name == "webSocketError") {
+        name == "webSocketError" ||
+        name == "destroy") {
       return true;
     }
     return false;
