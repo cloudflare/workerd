@@ -31,8 +31,7 @@ static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
   const auto context = js.v8Context();
   const auto tmp = jsg::check(v8::Date::New(context, 0));
   KJ_REQUIRE(tmp->IsDate());
-  const auto constructor = jsg::check(tmp.template As<v8::Date>()->Get(
-      context, jsg::v8StrIntern(isolate, "constructor")));
+  const auto constructor = js.v8Get(tmp.As<v8::Object>(), "constructor"_kj);
   JSG_REQUIRE(constructor->IsFunction(), TypeError, "Date.constructor is not a function");
   v8::Local<v8::Value> argv = jsg::v8Str(isolate, value);
   const auto converted = jsg::check(
@@ -48,10 +47,9 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
   auto isolate = js.v8Isolate;
   const auto context = js.v8Context();
   const auto converted = jsg::check(v8::Date::New(
-      context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+      context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS)).As<v8::Object>();
   KJ_REQUIRE(converted->IsDate());
-  const auto stringify = jsg::check(converted.template As<v8::Date>()->Get(
-      context, jsg::v8StrIntern(isolate, "toUTCString")));
+  const auto stringify = js.v8Get(converted, "toUTCString"_kj);
   JSG_REQUIRE(stringify->IsFunction(), TypeError, "toUTCString on a Date is not a function");
   const auto stringified = jsg::check(stringify.template As<v8::Function>()->Call(
       context, converted, 0, nullptr));

@@ -42,33 +42,25 @@ static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse,
   v8::HandleScope handleScope(isolate);
   KJ_ASSERT(listResponse->IsObject());
   v8::Local<v8::Object> obj = listResponse.As<v8::Object>();
-  auto context = js.v8Context();
-  auto keyName = jsg::v8StrIntern(isolate, "keys"_kj);
-  auto keys = jsg::check(obj->Get(context, keyName));
+  auto keys = js.v8Get(obj, "keys"_kj);
   if (keys->IsArray()) {
     auto keysArr = keys.As<v8::Array>();
     auto length = keysArr->Length();
-    auto metaName = jsg::v8StrIntern(isolate, "metadata"_kj);
     v8::Local<v8::Object> key;
     for (int i = 0; i < length; i++) {
       v8::HandleScope handleScope(isolate);
-      key = jsg::check(keysArr->Get(context, i)).As<v8::Object>();
-      if (jsg::check(key->HasOwnProperty(context, metaName))) {
-        auto metadata = jsg::check(key->Get(context, metaName));
+      key = js.v8Get(keysArr, i).As<v8::Object>();
+      if (js.v8HasOwn(key, "metadata"_kj)) {
+        auto metadata = js.v8Get(key, "metadata"_kj);
         KJ_ASSERT(metadata->IsString());
         auto metadataStr = metadata.As<v8::String>();
         auto json = js.parseJson(metadataStr);
-        jsg::check(key->Set(context, metaName, json.getHandle(js)));
+        js.v8Set(key, "metadata"_kj, json);
       }
     }
   }
 
-  auto cacheStatusName = jsg::v8StrIntern(isolate, "cacheStatus"_kj);
-  KJ_IF_MAYBE(cs, cacheStatus) {
-    jsg::check(obj->Set(context, cacheStatusName, *cs));
-  } else {
-    jsg::check(obj->Set(context, cacheStatusName, v8::Null(isolate)));
-  }
+  js.v8Set(obj, "cacheStatus"_kj, cacheStatus.orDefault(js.v8Null()));
 }
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;

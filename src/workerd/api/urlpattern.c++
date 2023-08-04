@@ -1854,7 +1854,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
   kj::Vector<Groups::Field> fields(length - 1);
 
   while (index < length) {
-    auto value = jsg::check(resultsArray->Get(context, index));
+    auto value = js.v8Get(resultsArray, index);
     fields.add(Groups::Field {
       .name = jsg::usv(component.nameList[index - 1]),
       .value = value->IsUndefined() ? jsg::usv() : jsg::usv(js.v8Isolate, value),

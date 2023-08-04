@@ -618,15 +618,14 @@ v8::Local<v8::Value> NodeJsModuleContext::require(kj::String specifier, v8::Isol
     jsg::throwTunneledException(isolate, module->GetException());
   }
 
-  return jsg::check(module->GetModuleNamespace().As<v8::Object>()
-      ->Get(context, jsg::v8StrIntern(isolate, "default")));
+  return js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "default"_kj);
 }
 
 v8::Local<v8::Value> NodeJsModuleContext::getBuffer(jsg::Lock& js) {
   auto value = require(kj::str("node:buffer"), js.v8Isolate);
   JSG_REQUIRE(value->IsObject(), TypeError, "Invalid node:buffer implementation");
   auto module = value.As<v8::Object>();
-  auto buffer = jsg::check(module->Get(js.v8Context(), jsg::v8StrIntern(js.v8Isolate, "Buffer")));
+  auto buffer = js.v8Get(module, "Buffer"_kj);
   JSG_REQUIRE(buffer->IsFunction(), TypeError, "Invalid node:buffer implementation");
   return buffer;
 }

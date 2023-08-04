@@ -41,8 +41,7 @@ int DOMException::getCode() {
 }
 
 v8::Local<v8::Value> DOMException::getStack(Lock& js) {
-  return check(errorForStack.getHandle(js)->Get(
-      js.v8Context(), v8StrIntern(js.v8Isolate, "stack")));
+  return js.v8Get(errorForStack.getHandle(js), "stack"_kj);
 }
 
 void DOMException::visitForGc(GcVisitor& visitor) {

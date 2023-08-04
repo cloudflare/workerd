@@ -78,27 +78,24 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
       [this, &retrievedBucketType, &errorType](jsg::Lock& js, R2Result r2Result) mutable {
     r2Result.throwIfError("listBucket", errorType);
 
-    auto isolate = js.v8Isolate;
-    auto context = js.v8Context();
-
     capnp::MallocMessageBuilder responseMessage;
     capnp::JsonCodec json;
     json.handleByAnnotation<R2ListResponse>();
     auto responseBuilder = responseMessage.initRoot<R2ListBucketResponse>();
     json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
 
-    auto buckets = v8::Map::New(isolate);
+    auto buckets = v8::Map::New(js.v8Isolate);
     for(auto b: responseBuilder.getBuckets()) {
       auto bucket = jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel,
           kj::str(b.getName()),
           kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
       jsg::check(buckets->Set(
-          context, jsg::v8Str(isolate, b.getName()),
+          js.v8Context(), jsg::v8Str(js.v8Isolate, b.getName()),
           retrievedBucketType.wrap(js, kj::mv(bucket))));
     }
 
     ListResult result {
-      .buckets = jsg::Value(isolate, kj::mv(buckets)),
+      .buckets = jsg::Value(js.v8Isolate, kj::mv(buckets)),
       .truncated = responseBuilder.getTruncated(),
     };
     if (responseBuilder.hasCursor()) {

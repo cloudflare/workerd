@@ -1962,8 +1962,7 @@ jsg::Promise<Fetcher::GetResult> Fetcher::get(
                 -> jsg::Promise<GetResult> {
     uint status = response->getStatus();
     if (status == 404 || status == 410) {
-      return js.resolvedPromise(GetResult(
-          jsg::Value(js.v8Ref<v8::Value>(v8::Null(js.v8Isolate)))));
+      return js.resolvedPromise(GetResult(js.v8Ref(js.v8Null())));
     } else if (status < 200 || status >= 300) {
       // Manually construct exception so that we can incorporate method and status into the text
       // that JavaScript sees.

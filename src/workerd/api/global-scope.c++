@@ -107,10 +107,10 @@ void handleDefaultBotManagement(jsg::Lock& js, jsg::Value& cf) {
   // Note that if the botManagement team changes any of the fields they provide,
   // this default value may need to be changed also.
   auto context = js.v8Context();
-  auto name = jsg::v8StrIntern(js.v8Isolate, "botManagement"_kj);
   auto handle = cf.getHandle(js).As<v8::Object>();
-  if (!jsg::check(handle->Has(context, name))) {
-    auto sym = v8::Private::ForApi(js.v8Isolate, name);
+  if (!js.v8Has(handle, "botManagement"_kj)) {
+    auto sym = v8::Private::ForApi(js.v8Isolate,
+        jsg::v8StrIntern(js.v8Isolate, "botManagement"_kj));
     // For performance reasons, we only want to construct the default values
     // once per isolate so we cache the constructed value using an internal
     // private field on the global scope. Whenever we need to use it again we
@@ -123,7 +123,7 @@ void handleDefaultBotManagement(jsg::Lock& js, jsg::Value& cf) {
       defaultBm = bm.getHandle(js);
       jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));
     }
-    jsg::check(handle->Set(context, name, defaultBm));
+    js.v8Set(handle, "botManagement"_kj, defaultBm);
   }
 }
 

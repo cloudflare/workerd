@@ -24,9 +24,7 @@ static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
 }
 
 v8::Local<v8::Value> R2Error::getStack(jsg::Lock& js) {
-  auto stackString = jsg::v8StrIntern(js.v8Isolate, "stack");
-  return jsg::check(KJ_ASSERT_NONNULL(errorForStack).Get(js.v8Isolate)->Get(
-      js.v8Context(), stackString));
+  return js.v8Get(KJ_ASSERT_NONNULL(errorForStack).Get(js.v8Isolate), "stack"_kj);
 }
 
 kj::Maybe<uint> R2Result::v4ErrorCode() {
