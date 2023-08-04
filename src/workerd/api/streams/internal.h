@@ -40,7 +40,7 @@ public:
   explicit ReadableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
   explicit ReadableStreamInternalController(Readable readable)
-      : state(kj::mv(readable)) {}
+      : state(kj::mv(readable)) { }
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamInternalController);
 

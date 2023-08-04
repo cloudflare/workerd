@@ -338,22 +338,31 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     };
     auto canceled = kj::refcounted<RefcountedBool>(false);
 
-    return ioContext.awaitJs(lock ,promise->then(kj::implicitCast<jsg::Lock&>(lock),
-        ioContext.addFunctor(
-            [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers]
-            (jsg::Lock& js, jsg::Ref<Response> innerResponse)
-            -> IoOwn<kj::Promise<DeferredProxy<void>>> {
-      auto& context = IoContext::current();
+    kj::Promise<DeferredProxy<void>> p = promise->then([
+        &ioContext,
+        &response,
+        canceled = kj::addRef(*canceled),
+        allowWebSocket = headers.isWebSocket(),
+        &headers
+    ](jsg::Ref<Response>&& innerResponse) {
       if (canceled->value) {
         // Oops, the client disconnected before the response was ready to send. `response` is
         // a dangling reference, let's not use it.
-        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
+        return addNoopDeferredProxy(kj::READY_NOW);
       } else {
-        return context.addObject(kj::heap(innerResponse->send(
-            js, response, { .allowWebSocket = allowWebSocket }, headers)));
+        return ioContext.run([
+            &response,
+            allowWebSocket = headers.isWebSocket(),
+            &headers,
+            innerResponse = kj::mv(innerResponse)
+        ](jsg::Lock&js) mutable {
+          return innerResponse->send(
+              js, response, { .allowWebSocket = allowWebSocket }, headers);
+        });
       }
-    }))).attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+    });
+
+    return p.attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
         .then([ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)]
               (DeferredProxy<void> deferredProxy) mutable {
       // In the case of bidirectional streaming, the request body stream needs to remain valid

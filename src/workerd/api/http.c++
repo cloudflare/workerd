@@ -1418,16 +1418,16 @@ jsg::Ref<Request> FetchEvent::getRequest() {
   return request.addRef();
 }
 
-kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::Lock& js) {
+kj::Maybe<kj::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(_, AwaitingRespondWith) {
       state = ResponseSent();
       return nullptr;
     }
     KJ_CASE_ONEOF(called, RespondWithCalled) {
-      auto result = kj::mv(called.promise);
+      auto p = kj::mv(called.promise);
       state = ResponseSent();
-      return kj::mv(result);
+      return kj::mv(p);
     }
     KJ_CASE_ONEOF(_, ResponseSent) {
       KJ_FAIL_REQUIRE("can only call getResponsePromise() once");
@@ -1438,23 +1438,22 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
   preventDefault();
+  auto& context = IoContext::current();
 
   // Once a Response is returned, we need to apply the output lock.
-  promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
-    auto& context = IoContext::current();
-
+  kj::Promise<jsg::Ref<Response>> p = context.awaitJs(js, kj::mv(promise)).then([&context](jsg::Ref<Response>&& response) {
     KJ_IF_MAYBE(p, context.waitForOutputLocksIfNecessary()) {
-      return context.awaitIo(js, kj::mv(*p), [response = kj::mv(response)](jsg::Lock&) mutable {
+      return p->then([response = kj::mv(response)]() mutable {
         return kj::mv(response);
       });
     } else {
-      return js.resolvedPromise(kj::mv(response));
+      return kj::Promise<jsg::Ref<Response>>(kj::mv(response));
     }
   });
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(_, AwaitingRespondWith) {
-      state = RespondWithCalled { kj::mv(promise) };
+      state = RespondWithCalled { kj::mv(p) };
     }
     KJ_CASE_ONEOF(called, RespondWithCalled) {
       JSG_FAIL_REQUIRE(DOMInvalidStateError,

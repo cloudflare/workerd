@@ -1036,7 +1036,7 @@ public:
       : ExtendableEvent("fetch"), request(kj::mv(request)),
         state(AwaitingRespondWith()) {}
 
-  kj::Maybe<jsg::Promise<jsg::Ref<Response>>> getResponsePromise(jsg::Lock& js);
+  kj::Maybe<kj::Promise<jsg::Ref<Response>>> getResponsePromise(jsg::Lock& js);
 
   static jsg::Ref<FetchEvent> constructor(kj::String type) = delete;
   // TODO(soon): constructor
@@ -1061,7 +1061,7 @@ private:
 
   struct AwaitingRespondWith {};
   struct RespondWithCalled {
-    jsg::Promise<jsg::Ref<Response>> promise;
+    kj::Promise<jsg::Ref<Response>> promise;
   };
   struct ResponseSent {};
 
