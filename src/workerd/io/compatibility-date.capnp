@@ -367,4 +367,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("global_importscripts")
       $compatEnableDate("2024-03-04");
   # Removes the non-implemented importScripts() function from the global scope.
+
+  durableObjectDestroy @41 :Bool
+    $compatEnableFlag("durable_object_destroy")
+    $experimental;
+  # Enables namespace.destroy(id) durable object experimental API.
 }
