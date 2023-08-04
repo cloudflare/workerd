@@ -18,9 +18,9 @@ class CommonJsModuleContext;
 
 class CommonJsModuleObject: public jsg::Object {
 public:
-  CommonJsModuleObject(v8::Isolate* isolate) : exports(isolate, v8::Object::New(isolate)) {}
+  CommonJsModuleObject(jsg::Lock& js) : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
 
-  v8::Local<v8::Value> getExports(v8::Isolate* isolate) { return exports.getHandle(isolate); }
+  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
   void setExports(jsg::Value value) { exports = kj::mv(value); }
 
   JSG_RESOURCE_TYPE(CommonJsModuleObject) {
@@ -32,15 +32,16 @@ private:
 
 class CommonJsModuleContext: public jsg::Object {
 public:
-  CommonJsModuleContext(v8::Isolate* isolate, kj::Path path)
-      : module(jsg::alloc<CommonJsModuleObject>(isolate)), path(kj::mv(path)),
-      exports(isolate, module->getExports(isolate)) {}
+  CommonJsModuleContext(jsg::Lock& js, kj::Path path)
+      : module(jsg::alloc<CommonJsModuleObject>(js)),
+        path(kj::mv(path)),
+        exports(js.v8Isolate, module->getExports(js)) {}
 
-  v8::Local<v8::Value> require(kj::String specifier, v8::Isolate* isolate);
+  v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
 
-  jsg::Ref<CommonJsModuleObject> getModule(v8::Isolate* isolate) { return module.addRef(); }
+  jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js) { return module.addRef(); }
 
-  v8::Local<v8::Value> getExports(v8::Isolate* isolate) { return exports.getHandle(isolate); }
+  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
   void setExports(jsg::Value value) { exports = kj::mv(value); }
 
   JSG_RESOURCE_TYPE(CommonJsModuleContext) {
@@ -67,9 +68,9 @@ private:
 
 class NodeJsModuleObject: public jsg::Object {
 public:
-  NodeJsModuleObject(v8::Isolate* isolate, kj::String path);
+  NodeJsModuleObject(jsg::Lock& js, kj::String path);
 
-  v8::Local<v8::Value> getExports(v8::Isolate* isolate);
+  v8::Local<v8::Value> getExports(jsg::Lock& js);
   void setExports(jsg::Value value);
   kj::StringPtr getPath();
 
@@ -102,17 +103,17 @@ class NodeJsModuleContext: public jsg::Object {
   // (b) The common Node.js globals that we implement are exposed. For instance, `process`
   //     and `Buffer` will be found at the global scope.
 public:
-  NodeJsModuleContext(v8::Isolate* isolate, kj::Path path);
+  NodeJsModuleContext(jsg::Lock& js, kj::Path path);
 
-  v8::Local<v8::Value> require(kj::String specifier, v8::Isolate* isolate);
+  v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
   v8::Local<v8::Value> getBuffer(jsg::Lock& js);
   v8::Local<v8::Value> getProcess(jsg::Lock& js);
 
   // TODO(soon): Implement setImmediate/clearImmediate
 
-  jsg::Ref<NodeJsModuleObject> getModule(v8::Isolate* isolate);
+  jsg::Ref<NodeJsModuleObject> getModule(jsg::Lock& js);
 
-  v8::Local<v8::Value> getExports(v8::Isolate* isolate);
+  v8::Local<v8::Value> getExports(jsg::Lock& js);
   void setExports(jsg::Value value);
 
   kj::String getFilename();
@@ -219,7 +220,7 @@ public:
         jsg::Lock& js,
         kj::StringPtr name);
 
-    static v8::MaybeLocal<v8::Value> evaluate(v8::Isolate* isolate,
+    static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
                                               NodeJsModuleInfo& info,
                                               v8::Local<v8::Module> module);
 
@@ -500,10 +501,10 @@ public:
     KJ_IF_MAYBE(info, resolve(js, specifier, resolveOption)) {
       KJ_IF_MAYBE(func, dynamicImportHandler) {
         auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
-          auto module = info.module.getHandle(isolate);
           auto& js = Lock::from(isolate);
+          auto module = info.module.getHandle(js);
           instantiateModule(js, module);
-          return Value(isolate, module->GetModuleNamespace());
+          return js.v8Ref(module->GetModuleNamespace());
         };
         return (*func)(js, kj::mv(handler));
       }
@@ -512,9 +513,8 @@ public:
       // the module does not exist and fall through to the rejected promise below.
     }
 
-    return rejectedPromise<Value>(js.v8Isolate,
-        v8::Exception::Error(v8StrIntern(js.v8Isolate,
-            kj::str("No such module \"", specifier.toString(), "\"."))));
+    return js.rejectedPromise<Value>(
+        js.v8Error(kj::str("No such module \"", specifier.toString(), "\".")));
   }
 
   CompilationObserver& getObserver() { return observer; }
@@ -612,10 +612,9 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
                                                   v8::Local<v8::Value> resource_name,
                                                   v8::Local<v8::String> specifier,
                                                   v8::Local<v8::FixedArray> import_assertions) {
-  auto isolate = context->GetIsolate();
-  auto& lock = Lock::from(isolate);
-  auto registry = ModuleRegistry::from(lock);
-  auto& wrapper = TypeWrapper::from(isolate);
+  auto& js = Lock::from(context->GetIsolate());
+  auto registry = ModuleRegistry::from(js);
+  auto& wrapper = TypeWrapper::from(js.v8Isolate);
 
   // TODO(cleanup): This could probably be simplified using jsg::Promise
   const auto makeRejected = [&](auto reason) {
@@ -634,8 +633,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   //
   // Importantly, we defensively catch any synchronous errors here and handle them
   // explicitly as rejected Promises.
-  v8::TryCatch tryCatch(isolate);
-  auto& js = jsg::Lock::from(isolate);
+  v8::TryCatch tryCatch(js.v8Isolate);
 
   // TODO(cleanup): If kj::Path::parse or kj::Path::eval fail it is most likely the application's
   // fault. We'll return a "No such module" error. We could handle this more gracefully
@@ -684,7 +682,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
     return makeRejected(tryCatch.Exception());
   } catch (kj::Exception& ex) {
-    return makeRejected(makeInternalError(isolate, kj::mv(ex)));
+    return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
   }
   KJ_UNREACHABLE;
 }
