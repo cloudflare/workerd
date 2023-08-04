@@ -189,8 +189,7 @@ kj::Promise<void> WorkerEntrypoint::request(
                                                              kj::mv(cfBlobJson));
     }
     auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
-    maybeAddGcPassForTest(context, promise);
-    waitUntilTasks.add(kj::mv(promise));
+    waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
   })).then([this]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
@@ -363,16 +362,17 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
         lock.getExportedHandler(entrypointName, context.getActor()));
   }));
 
-  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
-    return WorkerInterface::ScheduledResult {
+  static auto constexpr waitForFinished = [](IoContext& context,
+                                             kj::Own<IoContext::IncomingRequest> request)
+      -> kj::Promise<WorkerInterface::ScheduledResult> {
+    bool completed = co_await request->finishScheduled();
+    co_return WorkerInterface::ScheduledResult {
       .retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU
     };
-  }).attach(kj::mv(incomingRequest));
+  };
 
-  maybeAddGcPassForTest(context, promise);
-
-  return promise;
+  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -458,9 +458,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime);
-  maybeAddGcPassForTest(context, promise);
-
-  return promise;
+  return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -480,13 +478,15 @@ kj::Promise<bool> WorkerEntrypoint::test() {
         .test(lock, lock.getExportedHandler(entrypointName, context.getActor())));
   }));
 
-  auto promise = incomingRequest->finishScheduled().then([&context](bool completed) mutable {
+  static auto constexpr waitForFinished = [](IoContext& context,
+                                             kj::Own<IoContext::IncomingRequest> request)
+      -> kj::Promise<bool> {
+    bool completed = co_await request->finishScheduled();
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
-    return outcome == EventOutcome::OK;
-  }).attach(kj::mv(incomingRequest));
+    co_return outcome == EventOutcome::OK;
+  };
 
-  maybeAddGcPassForTest(context, promise);
-  return promise;
+  return maybeAddGcPassForTest(context, waitForFinished(context, kj::mv(incomingRequest)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
@@ -503,32 +503,39 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   //   maybeAddGcPassForTest() is a no-op outside of tests, so I'm ignoring the theoretical problem
   //   for now. Otherwise we will need to `atomicAddRef()` the `Worker` at some point earlier on
   //   but I'd like to avoid that in the non-test case.
-  maybeAddGcPassForTest(context, promise);
-  return promise;
+  return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 
 template <typename T>
-void WorkerEntrypoint::maybeAddGcPassForTest(
-    IoContext& context, kj::Promise<T>& promise) {
+kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(
+    IoContext& context, kj::Promise<T> promise) {
 #ifdef KJ_DEBUG
+  kj::Maybe<kj::Own<const Worker>> worker;
   if (isPredictableModeForTest()) {
-    auto worker = kj::atomicAddRef(context.getWorker());
-    if constexpr (kj::isSameType<T, void>()) {
-      promise = promise.then([worker = kj::mv(worker)]() {
-        jsg::V8StackScope stackScope;
-        auto lock = worker->getIsolate().getApiIsolate().lock(stackScope);
-        lock->requestGcForTesting();
-      });
-    } else {
-      promise = promise.then([worker = kj::mv(worker)](auto res) {
-        jsg::V8StackScope stackScope;
-        auto lock = worker->getIsolate().getApiIsolate().lock(stackScope);
-        lock->requestGcForTesting();
-        return res;
-      });
-    }
+    worker = kj::atomicAddRef(context.getWorker());
   }
-#endif
+
+  static auto constexpr maybeRequestGc = [](auto& worker) {
+    if (isPredictableModeForTest()) {
+      jsg::V8StackScope stackScope;
+      auto lock = KJ_ASSERT_NONNULL(worker)->getIsolate().getApiIsolate().lock(stackScope);
+      lock->requestGcForTesting();
+    }
+  };
+#endif  // KJ_DEBUG
+
+  if constexpr (kj::isSameType<T, void>()) {
+    co_await promise;
+#ifdef KJ_DEBUG
+    maybeRequestGc(worker);
+#endif  // KJ_DEBUG
+  } else {
+    auto ret = co_await promise;
+#ifdef KJ_DEBUG
+    maybeRequestGc(worker);
+#endif  // KJ_DEBUG
+    co_return kj::mv(ret);
+  }
 }
 
 } // namespace workerd
