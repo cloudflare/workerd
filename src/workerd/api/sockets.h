@@ -72,7 +72,11 @@ public:
 
   void handleProxyStatus(
       jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
+  void handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exception>> status);
   // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
+  // The first variant is useful for connections established using HTTP connect. The latter is for
+  // connections established any other way, where the lack of an exception indicates we connected
+  // successfully.
 
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
@@ -109,6 +113,9 @@ private:
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
+
+  void handleProxyError(jsg::Lock& js, kj::Exception e);
+  // Helper method for handleProxyStatus implementations.
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_MAYBE(err, maybeErr) {
