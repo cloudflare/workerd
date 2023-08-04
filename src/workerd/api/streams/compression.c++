@@ -256,7 +256,9 @@ private:
     // If the output currently contains >= minBytes, then we'll fulfill
     // the read immediately, removing as many bytes as possible from the
     // output queue.
-    if (output.size() >= minBytes) {
+    // If we reached the end, resolve the read immediately as well, since no
+    // new data is expected.
+    if (output.size() >= minBytes || state.template is<Ended>()) {
       return copyIntoBuffer(dest);
     }
 
