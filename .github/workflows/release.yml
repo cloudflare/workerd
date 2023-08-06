@@ -48,7 +48,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          # Use a different cache key than for tests here, otherwise the release cache could end up
+          # being used for test builds, where it provides little benefit.
+          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
           restore-keys: |
             bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Setup Linux
