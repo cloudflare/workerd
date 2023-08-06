@@ -56,10 +56,8 @@ jobs:
             bazel-disk-cache-types-${{ runner.os }}-
 
       - name: install dependencies
-        if: runner.os == 'Linux'
         run: |
             export DEBIAN_FRONTEND=noninteractive
-            sudo apt-get install -y build-essential git clang libc++-dev
       - name: build types
         run: |
             bazel build --disk_cache=~/bazel-disk-cache  --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //types:types

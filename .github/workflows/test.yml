@@ -41,9 +41,10 @@ jobs:
         # limited.
         # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
         # libc++, but this appears to cause errors so they are also being explicitly installed.
+        # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
+        # to use APT much otherwise.
         run: |
             export DEBIAN_FRONTEND=noninteractive
-            sudo apt-get install -y build-essential git lsb-release wget software-properties-common gnupg
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
             sudo ./llvm.sh 14
