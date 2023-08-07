@@ -1076,6 +1076,8 @@ public:
     return inner->tryGetHandle(isolate);
   }
 
+  kj::Maybe<v8::Local<v8::Object>> tryGetHandle(Lock& js);
+
   void attachWrapper(v8::Isolate* isolate, v8::Local<v8::Object> object) {
     // Attach a JavaScript object which implements the JS interface for this C++ object. Normally,
     // this happens automatically the first time the Ref is passed across the FFI barrier into JS.
@@ -2113,6 +2115,11 @@ inline v8::Local<v8::Value> Lock::v8Undefined() {
 
 inline Data Data::addRef(jsg::Lock& js) {
   return Data(js.v8Isolate, getHandle(js.v8Isolate));
+}
+
+template <typename T>
+kj::Maybe<v8::Local<v8::Object>> Ref<T>::tryGetHandle(Lock& js) {
+  return tryGetHandle(js.v8Isolate);
 }
 
 template <typename T>
