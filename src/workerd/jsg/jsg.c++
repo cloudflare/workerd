@@ -14,16 +14,16 @@ kj::String stringifyHandle(v8::Local<v8::Value> value) {
   // hard to avoid since we want `kj::str(handle)` to work, which doesn't give us a chance to
   // pass in a `Lock` or whatever.
   // TODO(cleanup): Perhaps we should require you to call `js.toString(handle)`?
-  auto isolate = v8::Isolate::GetCurrent();
-  v8::HandleScope scope(isolate);
-  v8::Local<v8::String> str =
-      workerd::jsg::check(value->ToDetailString(isolate->GetCurrentContext()));
-  v8::String::Utf8Value utf8(isolate, str);
-  if (*utf8 == nullptr) {
-    return kj::str("(couldn't stringify)");
-  } else {
-    return kj::str(*utf8);
-  }
+  auto& js = jsg::Lock::from(v8::Isolate::GetCurrent());
+  return js.withinHandleScope([&] {
+    v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+    v8::String::Utf8Value utf8(js.v8Isolate, str);
+    if (*utf8 == nullptr) {
+      return kj::str("(couldn't stringify)");
+    } else {
+      return kj::str(*utf8);
+    }
+  });
 }
 
 JsExceptionThrown::JsExceptionThrown() {
@@ -92,11 +92,13 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
   // Verify the handle was not garbage-collected by trying to read it. The intention is for this
   // to crash if the handle was GC'd before being moved away.
   {
-    v8::HandleScope scope(isolate);
-    auto local = handle.Get(isolate);
-    if (local->IsValue()) {
-      local.As<v8::Value>()->IsArrayBufferView();
-    }
+    auto& js = jsg::Lock::from(isolate);
+    js.withinHandleScope([&] {
+      auto local = handle.Get(js.v8Isolate);
+      if (local->IsValue()) {
+        local.As<v8::Value>()->IsArrayBufferView();
+      }
+    });
   }
 
   // `other` is a traced `Data`, but once moved, we don't assume the new location is traced.
@@ -141,21 +143,21 @@ Lock::~Lock() noexcept(false) {
 }
 
 Value Lock::parseJson(kj::StringPtr text) {
-  v8::HandleScope scope(v8Isolate);
-  return jsg::Value(v8Isolate,
-      jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), v8Str(v8Isolate, text))));
+  return withinHandleScope([&] {
+    return jsg::Value(v8Isolate, jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, text))));
+  });
 }
 
 Value Lock::parseJson(v8::Local<v8::String> text) {
-  v8::HandleScope scope(v8Isolate);
-  return jsg::Value(v8Isolate,
-      jsg::check(v8::JSON::Parse(v8Isolate->GetCurrentContext(), text)));
+  return withinHandleScope([&] {
+    return jsg::Value(v8Isolate, jsg::check(v8::JSON::Parse(v8Context(), text)));
+  });
 }
 
 kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
-  v8::HandleScope scope(v8Isolate);
-  return toString(jsg::check(
-      v8::JSON::Stringify(v8Isolate->GetCurrentContext(), value)));
+  return withinHandleScope([&] {
+    return toString(jsg::check(v8::JSON::Stringify(v8Context(), value)));
+  });
 }
 
 void Lock::recursivelyFreeze(Value& value) {
@@ -209,6 +211,15 @@ void Lock::requestGcForTesting() const {
 
 kj::StringPtr Lock::getUuid() const {
   return IsolateBase::from(v8Isolate).getUuid();
+}
+
+Lock::ContextScope Lock::enterContextScope(kj::Maybe<v8::Local<v8::Context>> maybeContext) {
+  v8::Local<v8::Context> context = v8Context();
+  KJ_IF_MAYBE(c, maybeContext) {
+    context = *c;
+  }
+  KJ_ASSERT(!context.IsEmpty(), "unable to enter invalid v8::Context");
+  return ContextScope(context);
 }
 
 Name Lock::newSymbol(kj::StringPtr symbol) {

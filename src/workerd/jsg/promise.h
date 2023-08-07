@@ -18,22 +18,6 @@ namespace workerd::jsg {
 // At present this is used privately in the Promise implementation, but we could consider making
 // wrapOpaque() more public if it is useful.
 
-template <typename T>
-constexpr bool isV8Ref(T*) { return false; }
-template <typename T>
-constexpr bool isV8Ref(V8Ref<T>*) { return true; }
-
-template <typename T>
-constexpr bool isV8Ref() { return isV8Ref((T*)nullptr); }
-
-template <typename T>
-constexpr bool isV8Local(T*) { return false; }
-template <typename T>
-constexpr bool isV8Local(v8::Local<T>*) { return true; }
-
-template <typename T>
-constexpr bool isV8Local() { return isV8Local((T*)nullptr); }
-
 template <typename T, bool = isGcVisitable<T>()>
 struct OpaqueWrappable;
 
