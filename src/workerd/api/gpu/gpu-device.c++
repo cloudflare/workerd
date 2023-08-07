@@ -367,14 +367,38 @@ jsg::Ref<GPUQueue> GPUDevice::getQueue() {
   return jsg::alloc<GPUQueue>(kj::mv(queue));
 }
 
+GPUDevice::~GPUDevice() {
+  if (!destroyed_) {
+    device_.Destroy();
+    destroyed_ = true;
+  }
+}
+
 void GPUDevice::destroy() {
-  // TODO(soon): handle lost device promise when we have it
+  if (lost_promise_fulfiller_->isWaiting()) {
+    auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(
+        kj::str("destroyed"), kj::str("device was destroyed"));
+    lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
+  }
+
   device_.Destroy();
+  destroyed_ = true;
 }
 
 jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>&
 GPUDevice::getLost() {
   return lost_promise_;
+}
+
+kj::String parseDeviceLostReason(WGPUDeviceLostReason reason) {
+  switch (reason) {
+  case WGPUDeviceLostReason_Force32:
+    KJ_UNREACHABLE
+  case WGPUDeviceLostReason_Destroyed:
+    return kj::str("destroyed");
+  case WGPUDeviceLostReason_Undefined:
+    return kj::str("undefined");
+  }
 }
 
 GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
@@ -396,7 +420,17 @@ GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
       },
       nullptr);
 
-  // TODO(soon): handle lost device promise when we have it
+  device_.SetDeviceLostCallback(
+      [](WGPUDeviceLostReason reason, char const* message, void* userdata) {
+        auto r = parseDeviceLostReason(reason);
+        auto* self = static_cast<GPUDevice*>(userdata);
+        if (self->lost_promise_fulfiller_->isWaiting()) {
+          auto lostInfo =
+              jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+          self->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
+        }
+      },
+      this);
 };
 
 jsg::Ref<GPUQuerySet>

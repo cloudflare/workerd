@@ -25,7 +25,8 @@ namespace workerd::api::gpu {
 
 class GPUDevice : public jsg::Object {
 public:
-  explicit GPUDevice(jsg::Lock &js, wgpu::Device d);
+  explicit GPUDevice(jsg::Lock& js, wgpu::Device d);
+  ~GPUDevice();
   JSG_RESOURCE_TYPE(GPUDevice) {
     JSG_METHOD(createBuffer);
     JSG_METHOD(createBindGroupLayout);
@@ -50,7 +51,8 @@ private:
   kj::Own<kj::PromiseFulfiller<jsg::Ref<GPUDeviceLostInfo>>>
       lost_promise_fulfiller_;
   kj::Own<AsyncRunner> async_;
-  jsg::Ref<GPUBuffer> createBuffer(jsg::Lock &, GPUBufferDescriptor);
+  bool destroyed_ = false;
+  jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);
   jsg::Ref<GPUBindGroupLayout>
   createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
   jsg::Ref<GPUBindGroup> createBindGroup(GPUBindGroupDescriptor descriptor);
@@ -70,7 +72,7 @@ private:
   jsg::Ref<GPUQuerySet> createQuerySet(GPUQuerySetDescriptor descriptor);
   void pushErrorScope(GPUErrorFilter filter);
   jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> popErrorScope();
-  jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>> &getLost();
+  jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& getLost();
 };
 
 struct GPUQueueDescriptor {
