@@ -102,9 +102,10 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     KJ_REQUIRE(metadataSize <= 1024 * 1024, "R2 metadata size seems way too large");
 
     auto metadataBuffer = kj::heapArray<char>(metadataSize);
-    co_await stream->tryRead(metadataBuffer.begin(), metadataSize, metadataSize);
+    auto metadataReadLength =
+        co_await stream->tryRead(metadataBuffer.begin(), metadataSize, metadataSize);
 
-    KJ_ASSERT(metadataSize == metadataBuffer.size(),
+    KJ_ASSERT(metadataReadLength == metadataBuffer.size(),
               "R2 metadata buffer not read fully/overflow?");
 
     co_return R2Result {
