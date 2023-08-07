@@ -2385,62 +2385,62 @@ public:
         rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
-    kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+    for (;;) {
+      kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
 
-    kj::Maybe<kj::String> cfBlobJson;
-    if (!rewriter->hasCfBlobHeader()) {
-      // Construct a cf blob describing the client identity.
+      kj::Maybe<kj::String> cfBlobJson;
+      if (!rewriter->hasCfBlobHeader()) {
+        // Construct a cf blob describing the client identity.
 
-      kj::PeerIdentity* peerId;
+        kj::PeerIdentity* peerId;
 
-      KJ_IF_MAYBE(tlsId,
-          kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-        peerId = &tlsId->getNetworkIdentity();
+        KJ_IF_MAYBE(tlsId,
+            kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+          peerId = &tlsId->getNetworkIdentity();
 
-        // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
-        //   supplies the common name, but that doesn't even seem to be one of the fields that
-        //   Cloudflare-hosted Workers receive. We should probably try to match those.
-      } else {
-        peerId = stream.peerIdentity;
-      }
-
-      KJ_IF_MAYBE(remote,
-          kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-        cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote->toString()), "\"}");
-      } else KJ_IF_MAYBE(local,
-          kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
-        auto creds = local->getCredentials();
-
-        kj::Vector<kj::String> parts;
-        KJ_IF_MAYBE(p, creds.pid) {
-          parts.add(kj::str("\"clientPid\":", *p));
-        }
-        KJ_IF_MAYBE(u, creds.uid) {
-          parts.add(kj::str("\"clientUid\":", *u));
+          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
+          //   supplies the common name, but that doesn't even seem to be one of the fields that
+          //   Cloudflare-hosted Workers receive. We should probably try to match those.
+        } else {
+          peerId = stream.peerIdentity;
         }
 
-        cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
+        KJ_IF_MAYBE(remote,
+            kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
+          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote->toString()), "\"}");
+        } else KJ_IF_MAYBE(local,
+            kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
+          auto creds = local->getCredentials();
+
+          kj::Vector<kj::String> parts;
+          KJ_IF_MAYBE(p, creds.pid) {
+            parts.add(kj::str("\"clientPid\":", *p));
+          }
+          KJ_IF_MAYBE(u, creds.uid) {
+            parts.add(kj::str("\"clientUid\":", *u));
+          }
+
+          cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
+        }
       }
+
+      auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
+
+      static auto constexpr listen = [](kj::Own<HttpListener> self,
+                                        kj::Own<Connection> conn,
+                                        kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<void> {
+        try {
+          co_await conn->listedHttp.httpServer.listenHttp(kj::mv(stream));
+        } catch (...) {
+          KJ_LOG(ERROR, kj::getCaughtExceptionAsKj());
+        }
+      };
+
+      // Run the connection handler loop in the global task set, so that run() waits for open
+      // connections to finish before returning, even if the listener loop is canceled. However,
+      // do not consider exceptions from a specific connection to be fatal.
+      owner.tasks.add(listen(kj::addRef(*this), kj::mv(conn), kj::mv(stream.stream)));
     }
-
-    auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
-
-    static auto constexpr listen = [](kj::Own<HttpListener> self,
-                                      kj::Own<Connection> conn,
-                                      kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<void> {
-      try {
-        co_await conn->listedHttp.httpServer.listenHttp(kj::mv(stream));
-      } catch (...) {
-        KJ_LOG(ERROR, kj::getCaughtExceptionAsKj());
-      }
-    };
-
-    // Run the connection handler loop in the global task set, so that run() waits for open
-    // connections to finish before returning, even if the listener loop is canceled. However,
-    // do not consider exceptions from a specific connection to be fatal.
-    owner.tasks.add(listen(kj::addRef(*this), kj::mv(conn), kj::mv(stream.stream)));
-
-    co_await run();
   }
 
 private:
