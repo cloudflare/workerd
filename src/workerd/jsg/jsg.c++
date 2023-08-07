@@ -244,9 +244,11 @@ kj::StringPtr Lock::getUuid() const {
 }
 
 Lock::ContextScope Lock::enterContextScope(kj::Maybe<v8::Local<v8::Context>> maybeContext) {
-  v8::Local<v8::Context> context = v8Context();
+  v8::Local<v8::Context> context;
   KJ_IF_MAYBE(c, maybeContext) {
     context = *c;
+  } else {
+    context = v8Context();
   }
   KJ_ASSERT(!context.IsEmpty(), "unable to enter invalid v8::Context");
   return ContextScope(context);
