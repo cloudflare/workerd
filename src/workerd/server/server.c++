@@ -272,20 +272,15 @@ kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
   auto context = makeTlsContext(conf);
 
   KJ_IF_MAYBE(h, certificateHost) {
-    return network.parseAddress(addrStr, defaultPort)
-        .then([certificateHost = *h, context = kj::mv(context)]
-              (kj::Own<kj::NetworkAddress> addr) mutable {
-      return context->wrapAddress(kj::mv(addr), certificateHost).attach(kj::mv(context));
-    });
-  } else {
-    // Wrap the `Network` itself so we can use the TLS implementation's `parseAddress()` to extract
-    // the authority from the address.
-    auto tlsNetwork = context->wrapNetwork(network);
-    return tlsNetwork->parseAddress(addrStr, defaultPort).attach(kj::mv(tlsNetwork))
-        .then([context = kj::mv(context)](kj::Own<kj::NetworkAddress> addr) mutable {
-      return addr.attach(kj::mv(context));
-    });
+    auto parsed = co_await network.parseAddress(addrStr, defaultPort);
+    co_return context->wrapAddress(kj::mv(parsed), *h).attach(kj::mv(context));
   }
+
+  // Wrap the `Network` itself so we can use the TLS implementation's `parseAddress()` to extract
+  // the authority from the address.
+  auto tlsNetwork = context->wrapNetwork(network);
+  auto parsed = co_await network.parseAddress(addrStr, defaultPort);
+  co_return parsed.attach(kj::mv(context));
 }
 
 // =======================================================================================
@@ -476,21 +471,19 @@ public:
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
     KJ_IF_MAYBE(a, addr) {
-      return a->get()->connect();
+      co_return co_await a->get()->connect();
     } else {
-      return promise.addBranch().then([this]() {
-        return KJ_ASSERT_NONNULL(addr)->connect();
-      });
+      co_await promise.addBranch();
+      co_return co_await KJ_ASSERT_NONNULL(addr)->connect();
     }
   }
 
   kj::Promise<kj::AuthenticatedStream> connectAuthenticated() override {
     KJ_IF_MAYBE(a, addr) {
-      return a->get()->connectAuthenticated();
+      co_return co_await a->get()->connectAuthenticated();
     } else {
-      return promise.addBranch().then([this]() {
-        return KJ_ASSERT_NONNULL(addr)->connectAuthenticated();
-      });
+      co_await promise.addBranch();
+      co_return co_await KJ_ASSERT_NONNULL(addr)->connectAuthenticated();
     }
   }
 
@@ -2392,61 +2385,62 @@ public:
         rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
-    return listener->acceptAuthenticated()
-        .then([this](kj::AuthenticatedStream stream) {
-      kj::Maybe<kj::String> cfBlobJson;
-      if (!rewriter->hasCfBlobHeader()) {
-        // Construct a cf blob describing the client identity.
+    kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
 
-        kj::PeerIdentity* peerId;
+    kj::Maybe<kj::String> cfBlobJson;
+    if (!rewriter->hasCfBlobHeader()) {
+      // Construct a cf blob describing the client identity.
 
-        KJ_IF_MAYBE(tlsId,
-            kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-          peerId = &tlsId->getNetworkIdentity();
+      kj::PeerIdentity* peerId;
 
-          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
-          //   supplies the common name, but that doesn't even seem to be one of the fields that
-          //   Cloudflare-hosted Workers receive. We should probably try to match those.
-        } else {
-          peerId = stream.peerIdentity;
-        }
+      KJ_IF_MAYBE(tlsId,
+          kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+        peerId = &tlsId->getNetworkIdentity();
 
-        KJ_IF_MAYBE(remote,
-            kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote->toString()), "\"}");
-        } else KJ_IF_MAYBE(local,
-            kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
-          auto creds = local->getCredentials();
-
-          kj::Vector<kj::String> parts;
-          KJ_IF_MAYBE(p, creds.pid) {
-            parts.add(kj::str("\"clientPid\":", *p));
-          }
-          KJ_IF_MAYBE(u, creds.uid) {
-            parts.add(kj::str("\"clientUid\":", *u));
-          }
-
-          cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
-        }
+        // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
+        //   supplies the common name, but that doesn't even seem to be one of the fields that
+        //   Cloudflare-hosted Workers receive. We should probably try to match those.
+      } else {
+        peerId = stream.peerIdentity;
       }
 
-      auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
+      KJ_IF_MAYBE(remote,
+          kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
+        cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote->toString()), "\"}");
+      } else KJ_IF_MAYBE(local,
+          kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
+        auto creds = local->getCredentials();
 
-      auto promise = kj::evalNow([&]() {
-        return conn->listedHttp.httpServer.listenHttp(kj::mv(stream.stream))
-          .attach(kj::mv(conn))
-          .attach(kj::addRef(*this));  // two attach()es because `this` must outlive `conn`
-      });
+        kj::Vector<kj::String> parts;
+        KJ_IF_MAYBE(p, creds.pid) {
+          parts.add(kj::str("\"clientPid\":", *p));
+        }
+        KJ_IF_MAYBE(u, creds.uid) {
+          parts.add(kj::str("\"clientUid\":", *u));
+        }
 
-      // Run the connection handler loop in the global task set, so that run() waits for open
-      // connections to finish before returning, even if the listener loop is canceled. However,
-      // do not consider exceptions from a specific connection to be fatal.
-      owner.tasks.add(promise.catch_([](kj::Exception&& exception) {
-        KJ_LOG(ERROR, exception);
-      }));
+        cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
+      }
+    }
 
-      return run();
-    });
+    auto conn = kj::heap<Connection>(*this, kj::mv(cfBlobJson));
+
+    static auto constexpr listen = [](kj::Own<HttpListener> self,
+                                      kj::Own<Connection> conn,
+                                      kj::Own<kj::AsyncIoStream> stream) -> kj::Promise<void> {
+      try {
+        co_await conn->listedHttp.httpServer.listenHttp(kj::mv(stream));
+      } catch (...) {
+        KJ_LOG(ERROR, kj::getCaughtExceptionAsKj());
+      }
+    };
+
+    // Run the connection handler loop in the global task set, so that run() waits for open
+    // connections to finish before returning, even if the listener loop is canceled. However,
+    // do not consider exceptions from a specific connection to be fatal.
+    owner.tasks.add(listen(kj::addRef(*this), kj::mv(conn), kj::mv(stream.stream)));
+
+    co_await run();
   }
 
 private:
@@ -2610,15 +2604,21 @@ void startInspector(kj::StringPtr inspectorAddress,
     static constexpr uint DEFAULT_PORT = 9229;
 
     auto& network = io.provider->getNetwork();
-    auto inspectorListener = network.parseAddress(inspectorAddress, DEFAULT_PORT)
-      .then([](kj::Own<kj::NetworkAddress> parsed) {
-      return parsed->listen();
-    });
 
-    auto listen = inspectorListener.then([&inspectorService](kj::Own<kj::ConnectionReceiver> listener) mutable {
+    // TODO(cleanup): There's an issue here that if listen fails, nothing notices. The
+    // server will continue running but will no longer accept inspector connections.
+    // This should be fixed by:
+    // 1. Replacing the kj::NEVER_DONE with listen
+    // 2. Making the thread's lambda `noexcept` so that if it throws the process crashes
+    // 3. Probably also throw if listen completes without an exception (even if unlikely to
+    //    happen)
+    auto listen = (kj::coCapture([&network, &inspectorAddress, &inspectorService]()
+        -> kj::Promise<void> {
+      auto parsed = co_await network.parseAddress(inspectorAddress, DEFAULT_PORT);
+      auto listener = parsed->listen();
       KJ_LOG(INFO, "Inspector is listening");
-      return inspectorService->listen(kj::mv(listener));
-    });
+      co_await inspectorService->listen(kj::mv(listener));
+    }))();
 
     kj::NEVER_DONE.wait(io.waitScope);
   });
