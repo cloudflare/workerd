@@ -49,7 +49,7 @@ private:
   kj::Own<AsyncRunner> async_;
   State state_ = State::Unmapped;
   kj::Vector<Mapping> mapped_;
-  v8::Local<v8::Object> detachKey_;
+  std::unique_ptr<jsg::V8Ref<v8::Object>> detachKey_;
 
   v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&,
                                             jsg::Optional<GPUSize64> offset,
