@@ -254,7 +254,7 @@ class BufferSource {
   //
   //   class MyAPiObject: public jsg::Object {
   //   public:
-  //     jsg::BufferSource foo(jsg::BufferSource source, v8::Isolate* isolate) {
+  //     jsg::BufferSource foo(jsg::Lock& js, jsg::BufferSource source) {
   //       // While the BufferSource is attached, you can access the data as an
   //       // kj::ArrayPtr...
   //       {
@@ -265,7 +265,7 @@ class BufferSource {
   //       auto backingStore = source.detach();
   //       auto ptr = kj::ArrayPtr<kj::byte>(backingStore);
   //       // Do something with ptr...
-  //       return BufferSource(isolate, kj::mv(backingStore));
+  //       return BufferSource(js, kj::mv(backingStore));
   //     }
   //   };
 
