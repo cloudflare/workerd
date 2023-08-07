@@ -95,6 +95,9 @@ public:
   // is not permitted to be combined into a single instance.
   bool has(jsg::ByteString name);
   void set(jsg::ByteString name, jsg::ByteString value);
+  void setUnguarded(jsg::ByteString name, jsg::ByteString value);
+  // Like set(), but ignores the header guard if set. This can only be called from C++, and may be
+  // used to mutate headers before dispatching a request.
   void append(jsg::ByteString name, jsg::ByteString value);
   void delete_(jsg::ByteString name);
   void forEach(jsg::Lock& js,
