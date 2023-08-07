@@ -37,7 +37,7 @@ kj::String parseAdapterType(wgpu::AdapterType type) {
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-GPU::requestAdapter(jsg::Lock &js,
+GPU::requestAdapter(jsg::Lock& js,
                     jsg::Optional<GPURequestAdapterOptions> options) {
 
 #if defined(_WIN32)
@@ -52,11 +52,12 @@ GPU::requestAdapter(jsg::Lock &js,
 
   auto adapters = instance_.GetAdapters();
   if (adapters.empty()) {
-    return nullptr;
+    KJ_LOG(WARNING, "no webgpu adapters found");
+    return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(nullptr));
   }
 
   kj::Maybe<dawn::native::Adapter> adapter = nullptr;
-  for (auto &a : adapters) {
+  for (auto& a : adapters) {
     wgpu::AdapterProperties props;
     a.GetProperties(&props);
     if (props.backendType != defaultBackendType) {
@@ -74,8 +75,8 @@ GPU::requestAdapter(jsg::Lock &js,
     return js.resolvedPromise(kj::mv(gpuAdapter));
   }
 
-  // We did not find an adapter that matched what we wanted
-  return nullptr;
+  KJ_LOG(WARNING, "did not find an adapter that matched what we wanted");
+  return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(nullptr));
 }
 
 } // namespace workerd::api::gpu
