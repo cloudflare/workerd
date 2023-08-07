@@ -178,8 +178,11 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    # Rust registers wasm targets by default which we don't need, workerd is only built for its native platform.
-    extra_target_triples = [],
+    # Add support macOS cross-compilation, the overhead for this is limited with only a few more
+    # targets being generated for the extra triple as part of the toolchain. Setting this explicitly
+    # also avoids registering support for the wasm32-unknown-unknown and wasm32-wasi targets, which
+    # are otherwise added by default.
+    extra_target_triples = ["x86_64-apple-darwin"],
     versions = ["1.81.0"],  # LLVM 18
 )
 

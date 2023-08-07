@@ -46,6 +46,15 @@ platform(
     ],
 )
 
+# Used for cross-compilation
+platform(
+    name = "macOS_x86",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
 # bazel enables the --ffunction-sections, --gc-sections flags used to remove dead code by default
 # on Linux opt builds. Enable the equivalent macOS flag -Wl,-dead_strip here to work around bazel
 # idiosyncrasies.
