@@ -221,6 +221,19 @@ build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
 # TODO(soon): File a bazel issue for the flag so we can drop this.
 build:macos --experimental_objc_fastbuild_options=""
 
+# Cross-Compilation
+# Only cross-compiling on macOS from Apple Silicon to x86_64 is supported – using apple_support
+# makes this much easier than on other platforms. We could define a configuration for cross-
+# compiling from Intel Mac too, but it lacks a means to run Apple Silicon binaries. We would have to
+# change V8 mksnapshot to build in the host configuration again (effectively compiling much of V8
+# twice) and couldn't run tests, so it would provide little value.
+#
+# Define the target platform
+build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms //:macOS_x86
+# Some cross-compiled tests are slower when run over Rosetta, increase the medium test size timeout.
+# Test performance is still very much satisfactory considering that emulation is being used here.
+build:macos-cross-x86_64 --test_timeout=1,30,60,240
+
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
 # Drop default link flags, which include libstdc++ for Linux
