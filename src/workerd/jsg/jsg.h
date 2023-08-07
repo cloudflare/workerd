@@ -1799,7 +1799,11 @@ public:
   // The underlying V8 isolate, useful for directly calling V8 APIs. Hopefully, this is rarely
   // needed outside JSG itself.
 
-  v8::Local<v8::Context> v8Context() { return v8Isolate->GetCurrentContext(); }
+  v8::Local<v8::Context> v8Context() {
+    auto context = v8Isolate->GetCurrentContext();
+    KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
+    return context;
+  }
 
   static Lock& from(v8::Isolate* v8Isolate) {
     // Get the current Lock for the given V8 isolate. Segfaults if the isolate is not locked.
@@ -1958,9 +1962,18 @@ public:
   // eliminate direct use as much as possible.
 
   v8::Local<v8::Value> v8Undefined();
+  v8::Local<v8::Value> v8Null();
 
   v8::Local<v8::Value> v8Error(kj::StringPtr message);
   v8::Local<v8::Value> v8TypeError(kj::StringPtr message);
+
+  void v8Set(v8::Local<v8::Object> obj, V8Ref<v8::String>& name, Value& value);
+  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, v8::Local<v8::Value> value);
+  void v8Set(v8::Local<v8::Object> obj, kj::StringPtr name, Value& value);
+  v8::Local<v8::Value> v8Get(v8::Local<v8::Object> obj, kj::StringPtr name);
+  v8::Local<v8::Value> v8Get(v8::Local<v8::Array> obj, uint idx);
+  bool v8Has(v8::Local<v8::Object> obj, kj::StringPtr name);
+  bool v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name);
 
   template <typename T>
   V8Ref<T> v8Ref(v8::Local<T> local);
@@ -2111,6 +2124,10 @@ inline Data Lock::v8Data(v8::Local<v8::Data> local) {
 
 inline v8::Local<v8::Value> Lock::v8Undefined() {
   return v8::Undefined(v8Isolate);
+}
+
+inline v8::Local<v8::Value> Lock::v8Null() {
+  return v8::Null(v8Isolate);
 }
 
 inline Data Data::addRef(jsg::Lock& js) {

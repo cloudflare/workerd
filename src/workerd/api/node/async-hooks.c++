@@ -121,9 +121,7 @@ v8::Local<v8::Function> AsyncResource::bind(
   // Per Node.js documentation (https://nodejs.org/dist/latest-v19.x/docs/api/async_context.html#asyncresourcebindfn-thisarg), the returned function "will have an
   // asyncResource property referencing the AsyncResource to which the function
   // is bound".
-  jsg::check(bound->Set(js.v8Context(),
-             jsg::v8StrIntern(js.v8Isolate, "asyncResource"_kj),
-             handler.wrap(js, JSG_THIS)));
+  js.v8Set(bound, "asyncResource"_kj, handler.wrap(js, JSG_THIS));
   return bound;
 }
 

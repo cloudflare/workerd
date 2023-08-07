@@ -1363,6 +1363,7 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       context->Global()->Get(context, jsg::v8StrIntern(lock.v8Isolate, "WebAssembly"))));
   v8::Object* module = v8::Object::Cast(*jsg::check(
       webAssembly->Get(context, jsg::v8StrIntern(lock.v8Isolate, "Module"))));
+
   jsg::check(module->DefineOwnProperty(
       context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
@@ -1456,15 +1457,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // Load globals.
       // const_cast OK because we hold the lock.
       for (auto& global: const_cast<Script&>(*script).impl->globals) {
-        bool setResult = jsg::check(bindingsScope
-            ->Set(context,
-                global.name.getHandle(lock.v8Isolate),
-                global.value.getHandle(lock.v8Isolate)));
-
-        if (!setResult) {
-          // Can this actually happen? What does it mean?
-          KJ_LOG(ERROR, "Set() returned false?");
-        }
+        lock.v8Set(bindingsScope, global.name, global.value);
       }
 
       compileBindings(lock, *script->isolate->apiIsolate, bindingsScope);
@@ -2041,7 +2034,7 @@ kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
     if (AsyncWaiter::threadCurrentWaiter == nullptr) {
       co_return;
     }
-    // Whoops, a new lock attempt appeared, loop.
+    // Whoops, a new lock attempt appeared, loop.
   }
 }
 

@@ -195,7 +195,7 @@ KJ_TEST("compileAndInstantiateModule") {
 
     auto ns = env.compileAndInstantiateModule("testFixtureTest",
         "export function init() { return 42; }"_kj);
-    auto fn = ns->Get(context, jsg::v8StrIntern(env.isolate, "init")).ToLocalChecked();
+    auto fn = env.js.v8Get(ns, "init"_kj);
     KJ_EXPECT(fn->IsFunction());
     auto callResult = v8::Function::Cast(*fn)->
         Call(context, context->Global(), 0, nullptr).ToLocalChecked();

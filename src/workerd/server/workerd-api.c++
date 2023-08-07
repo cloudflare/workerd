@@ -598,14 +598,13 @@ static v8::Local<v8::Value> createBindingValue(
         // build env object with inner bindings
         auto env = v8::Object::New(lock.v8Isolate);
         for (const auto& innerBinding: wrapped.innerBindings) {
-          jsg::check(env->Set(context,
-              lock.wrapString(innerBinding.name),
-              createBindingValue(lock, innerBinding, featureFlags, ownerId)));
+          lock.v8Set(env, innerBinding.name,
+                     createBindingValue(lock, innerBinding, featureFlags, ownerId));
         }
 
         // obtain exported function to call
         auto moduleNs = jsg::check(module->GetModuleNamespace()->ToObject(context));
-        auto fn = jsg::check(moduleNs->Get(context, jsg::v8StrIntern(lock.v8Isolate, wrapped.entrypoint)));
+        auto fn = lock.v8Get(moduleNs, wrapped.entrypoint);
         KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
 
         // invoke the function, its result will be binding value
@@ -627,23 +626,15 @@ void WorkerdApiIsolate::compileGlobals(
     uint32_t ownerId) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   v8::HandleScope scope(lock.v8Isolate);
-  auto context = lock.v8Context();
   auto& featureFlags = *impl->features;
 
   for (auto& global: globals) {
     v8::HandleScope scope(lock.v8Isolate);
 
     // Don't use String's usual TypeHandler here because we want to intern the string.
-    auto name = jsg::v8StrIntern(lock.v8Isolate, global.name);
     auto value = createBindingValue(lock, global, featureFlags, ownerId);
-
     KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
-    bool setResult = jsg::check(target->Set(context, name, value));
-
-    if (!setResult) {
-      // Can this actually happen? What does it mean?
-      KJ_LOG(ERROR, "Set() returned false?", global.name);
-    }
+    lockParam.v8Set(target, global.name, value);
   }
 }
 
