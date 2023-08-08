@@ -12,8 +12,8 @@ namespace workerd::api::gpu {
 GPUBuffer::GPUBuffer(jsg::Lock& js, wgpu::Buffer b, wgpu::BufferDescriptor desc,
                      wgpu::Device device, kj::Own<AsyncRunner> async)
     : buffer_(kj::mv(b)), device_(kj::mv(device)), desc_(kj::mv(desc)),
-      async_(kj::mv(async)), detachKey_(new jsg::V8Ref<v8::Object>(
-                                 js.v8Isolate, v8::Object::New(js.v8Isolate))) {
+      async_(kj::mv(async)),
+      detachKey_(jsg::V8Ref(js.v8Isolate, v8::Object::New(js.v8Isolate))) {
 
   if (desc.mappedAtCreation) {
     state_ = State::MappedAtCreation;
@@ -65,20 +65,18 @@ GPUBuffer::getMappedRange(jsg::Lock& js, jsg::Optional<GPUSize64> offset,
 
   v8::Local<v8::ArrayBuffer> arrayBuffer =
       v8::ArrayBuffer::New(js.v8Isolate, backing);
-  arrayBuffer->SetDetachKey(detachKey_->getHandle(js.v8Isolate));
+  arrayBuffer->SetDetachKey(detachKey_.getHandle(js.v8Isolate));
 
-  mapped_.add(
-      Mapping{start, end,
-              std::unique_ptr<jsg::V8Ref<v8::ArrayBuffer>>(
-                  new jsg::V8Ref<v8::ArrayBuffer>(js.v8Isolate, arrayBuffer))});
+  mapped_.add(Mapping{start, end,
+                      jsg::V8Ref<v8::ArrayBuffer>(js.v8Isolate, arrayBuffer)});
   return arrayBuffer;
 }
 
 void GPUBuffer::DetachMappings(jsg::Lock& js) {
   for (auto& mapping : mapped_) {
-    auto ab = mapping.buffer->getHandle(js.v8Isolate);
+    auto ab = mapping.buffer.getHandle(js.v8Isolate);
 
-    auto res = ab->Detach(detachKey_->getHandle(js.v8Isolate));
+    auto res = ab->Detach(detachKey_.getHandle(js.v8Isolate));
     KJ_ASSERT(res.IsJust());
   }
   mapped_.clear();
@@ -111,6 +109,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode,
                                        jsg::Optional<GPUSize64> size) {
   wgpu::MapMode md = static_cast<wgpu::MapMode>(mode);
 
+  // we can only map unmapped buffers
   if (state_ != State::Unmapped) {
     device_.InjectError(
         wgpu::ErrorType::Validation,

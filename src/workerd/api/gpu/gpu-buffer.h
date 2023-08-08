@@ -40,7 +40,7 @@ private:
     inline bool Intersects(uint64_t s, uint64_t e) const {
       return s < end && e > start;
     }
-    std::unique_ptr<jsg::V8Ref<v8::ArrayBuffer>> buffer;
+    jsg::V8Ref<v8::ArrayBuffer> buffer;
   };
 
   wgpu::Buffer buffer_;
@@ -49,7 +49,7 @@ private:
   kj::Own<AsyncRunner> async_;
   State state_ = State::Unmapped;
   kj::Vector<Mapping> mapped_;
-  std::unique_ptr<jsg::V8Ref<v8::Object>> detachKey_;
+  jsg::V8Ref<v8::Object> detachKey_;
 
   v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&,
                                             jsg::Optional<GPUSize64> offset,
