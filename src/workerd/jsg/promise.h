@@ -299,18 +299,18 @@ public:
     // or rejected, returns null. This can be used as an optimization or in tests, but you must
     // never rely on it for correctness.
 
-    v8::HandleScope scope(js.v8Isolate);
-
-    auto handle = KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
-        .getHandle(js.v8Isolate);
-    switch (handle->State()) {
-      case v8::Promise::kPending:
-      case v8::Promise::kRejected:
-        return nullptr;
-      case v8::Promise::kFulfilled:
-        v8Promise = nullptr;
-        return unwrapOpaque<T>(js.v8Isolate, handle->Result());
-    }
+    return js.withinHandleScope([&]() -> kj::Maybe<T> {
+      auto handle = KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
+          .getHandle(js);
+      switch (handle->State()) {
+        case v8::Promise::kPending:
+        case v8::Promise::kRejected:
+          return nullptr;
+        case v8::Promise::kFulfilled:
+          v8Promise = nullptr;
+          return unwrapOpaque<T>(js.v8Isolate, handle->Result());
+      }
+    });
   }
 
   class Resolver {
@@ -320,37 +320,34 @@ public:
 
     template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>>
     void resolve(Lock& js, kj::NoInfer<U>&& value) {
-      auto isolate = js.v8Isolate;
-      v8::HandleScope scope(isolate);
-      auto context = js.v8Context();
-      v8::Local<v8::Value> handle;
-      if constexpr (isV8Ref<U>()) {
-        handle = value.getHandle(isolate);
-      } else {
-        handle = wrapOpaque(context, kj::mv(value));
-      }
-      check(v8Resolver.getHandle(isolate)->Resolve(context, handle));
+      js.withinHandleScope([&] {
+        auto context = js.v8Context();
+        v8::Local<v8::Value> handle;
+        if constexpr (isV8Ref<U>()) {
+          handle = value.getHandle(js);
+        } else {
+          handle = wrapOpaque(context, kj::mv(value));
+        }
+        check(v8Resolver.getHandle(js)->Resolve(context, handle));
+      });
     }
 
     template <typename U = T, typename = kj::EnableIf<isVoid<U>()>>
     void resolve(Lock& js) {
-      auto isolate = js.v8Isolate;
-      v8::HandleScope scope(isolate);
-      check(v8Resolver.getHandle(isolate)->Resolve(
-          js.v8Context(), v8::Undefined(isolate)));
+      js.withinHandleScope([&] {
+        check(v8Resolver.getHandle(js)->Resolve(js.v8Context(), js.v8Undefined()));
+      });
     }
 
     void resolve(Lock& js, Promise&& promise) {
       // Resolve to another Promise.
-      auto isolate = js.v8Isolate;
-      check(v8Resolver.getHandle(isolate)->Resolve(
-          js.v8Context(), promise.consumeHandle(js)));
+      check(v8Resolver.getHandle(js)->Resolve(js.v8Context(), promise.consumeHandle(js)));
     }
 
     void reject(Lock& js, v8::Local<v8::Value> exception) {
-      auto isolate = js.v8Isolate;
-      v8::HandleScope scope(isolate);
-      check(v8Resolver.getHandle(isolate)->Reject(js.v8Context(), exception));
+      js.withinHandleScope([&] {
+        check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception));
+      });
     }
 
     void reject(Lock& js, kj::Exception exception) {
@@ -431,29 +428,29 @@ private:
   template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>()>
   Promise(Lock& js, kj::NoInfer<U>&& value)
       : deprecatedIsolate(js.v8Isolate) {
-    auto isolate = js.v8Isolate;
-    v8::HandleScope scope(isolate);
-    auto context = js.v8Context();
-    auto resolver = check(v8::Promise::Resolver::New(context));
-    v8::Local<v8::Value> handle;
-    if constexpr (isV8Ref<U>()) {
-      handle = value.getHandle(isolate);
-    } else {
-      handle = wrapOpaque(context, kj::mv(value));
-    };
-    check(resolver->Resolve(context, handle));
-    v8Promise.emplace(isolate, resolver->GetPromise());
+    js.withinHandleScope([&] {
+      auto context = js.v8Context();
+      auto resolver = check(v8::Promise::Resolver::New(context));
+      v8::Local<v8::Value> handle;
+      if constexpr (isV8Ref<U>()) {
+        handle = value.getHandle(js);
+      } else {
+        handle = wrapOpaque(context, kj::mv(value));
+      };
+      check(resolver->Resolve(context, handle));
+      v8Promise.emplace(js.v8Isolate, resolver->GetPromise());
+    });
   }
 
   template <typename U = T, typename = kj::EnableIf<isVoid<U>()>()>
   explicit Promise(Lock& js)
       : deprecatedIsolate(js.v8Isolate) {
-    auto isolate = js.v8Isolate;
-    v8::HandleScope scope(isolate);
-    auto context = js.v8Context();
-    auto resolver = check(v8::Promise::Resolver::New(context));
-    check(resolver->Resolve(context, v8::Undefined(isolate)));
-    v8Promise.emplace(isolate, resolver->GetPromise());
+    js.withinHandleScope([&] {
+      auto context = js.v8Context();
+      auto resolver = check(v8::Promise::Resolver::New(context));
+      check(resolver->Resolve(context, js.v8Undefined()));
+      v8Promise.emplace(js.v8Isolate, resolver->GetPromise());
+    });
   }
 
   template <typename Result, typename FuncPair>
@@ -461,21 +458,22 @@ private:
       Lock& js, FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
-    v8::HandleScope scope(js.v8Isolate);
-    auto context = js.v8Context();
+    return js.withinHandleScope([&] {
+      auto context = js.v8Context();
 
-    auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
+      auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
 
-    auto then = check(v8::Function::New(
-        context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
+      auto then = check(v8::Function::New(
+          context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-    auto errThen = check(v8::Function::New(
-        context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
+      auto errThen = check(v8::Function::New(
+          context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-    using Type = RemovePromise<Result>;
+      using Type = RemovePromise<Result>;
 
-    return Promise<Type>(js.v8Isolate,
-        check(consumeHandle(js)->Then(context, then, errThen)));
+      return Promise<Type>(js.v8Isolate,
+          check(consumeHandle(js)->Then(context, then, errThen)));
+    });
   }
 
   friend class Lock;
@@ -501,14 +499,14 @@ struct PromiseResolverPair {
 
 template <typename T>
 PromiseResolverPair<T> Lock::newPromiseAndResolver() {
-  v8::HandleScope scope(v8Isolate);
-  auto context = v8Context();
-  auto resolver = check(v8::Promise::Resolver::New(context));
-  auto promise = resolver->GetPromise();
-  return {
-    { v8Isolate, promise },
-    { v8Isolate, resolver }
-  };
+  return withinHandleScope([&]() -> PromiseResolverPair<T> {
+    auto resolver = check(v8::Promise::Resolver::New(v8Context()));
+    auto promise = resolver->GetPromise();
+    return {
+      { v8Isolate, promise },
+      { v8Isolate, resolver }
+    };
+  });
 }
 
 template <typename T>
@@ -528,14 +526,16 @@ Promise<T> Lock::rejectedPromise(v8::Local<v8::Value> exception) {
 
 template <typename T>
 Promise<T> Lock::rejectedPromise(jsg::Value exception) {
-  v8::HandleScope scope(v8Isolate);
-  return rejectedPromise<T>(exception.getHandle(v8Isolate));
+  return withinHandleScope([&] {
+    return rejectedPromise<T>(exception.getHandle(*this));
+  });
 }
 
 template <typename T>
 Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
-  v8::HandleScope scope(v8Isolate);
-  return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception)));
+  return withinHandleScope([&] {
+    return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception)));
+  });
 }
 
 template <class Func>

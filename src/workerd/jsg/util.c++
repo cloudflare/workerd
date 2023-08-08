@@ -295,13 +295,15 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
 }
 
 Value Lock::exceptionToJs(kj::Exception&& exception) {
-  v8::HandleScope scope(v8Isolate);
-  return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception)));
+  return withinHandleScope([&] {
+    return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception)));
+  });
 }
 
 void Lock::throwException(Value&& exception) {
-  v8::HandleScope scope(v8Isolate);
-  v8Isolate->ThrowException(exception.getHandle(v8Isolate));
+  withinHandleScope([&] {
+    v8Isolate->ThrowException(exception.getHandle(*this));
+  });
   throw JsExceptionThrown();
 }
 
@@ -460,8 +462,9 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
 }
 
 kj::Exception Lock::exceptionToKj(Value&& exception) {
-  v8::HandleScope scope(v8Isolate);
-  return createTunneledException(v8Isolate, exception.getHandle(v8Isolate));
+  return withinHandleScope([&] {
+    return createTunneledException(v8Isolate, exception.getHandle(*this));
+  });
 }
 
 static kj::byte DUMMY = 0;
