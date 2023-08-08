@@ -2983,7 +2983,7 @@ Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, A
 void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_MAYBE(cls, impl->classInstance.tryGet<DurableObjectConstructor*>()) {
     context.addWaitUntil(context.run([this, &cls = **cls](Worker::Lock& lock) {
-      auto isolate = lock.getIsolate();
+      jsg::Lock& js = lock;
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_MAYBE(c, impl->actorCache) {
@@ -2991,13 +2991,13 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       }
       auto handler = cls(lock,
           jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
-          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(isolate));
+          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
       //   constructor, and we want the handler methods to act like they take just one parameter.
       //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
       //   on the actor's state field instead.
-      handler.env = jsg::Value(isolate, v8::Undefined(isolate));
+      handler.env = js.v8Ref(js.v8Undefined());
       handler.ctx = nullptr;
 
       impl->classInstance = kj::mv(handler);

@@ -488,7 +488,6 @@ v8::MaybeLocal<v8::Value> ModuleRegistry::NodeJsModuleInfo::evaluate(
       jsg::Lock& js,
       ModuleRegistry::NodeJsModuleInfo& info,
       v8::Local<v8::Module> module) {
-
   const auto makeResolvedPromise = [&]() {
     v8::Local<v8::Promise::Resolver> resolver;
     if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver)) {
