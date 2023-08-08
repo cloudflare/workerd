@@ -44,7 +44,7 @@ public:
 
 private:
   jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-  requestAdapter(jsg::Lock &, jsg::Optional<GPURequestAdapterOptions>);
+  requestAdapter(jsg::Lock&, jsg::Optional<GPURequestAdapterOptions>);
   dawn::native::Instance instance_;
 };
 
@@ -73,6 +73,7 @@ private:
       api::gpu::GPURequestAdapterOptions, api::gpu::GPUAdapterInfo,            \
       api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits,            \
       api::gpu::GPUError, api::gpu::GPUOOMError, api::gpu::GPUValidationError, \
-      api::gpu::GPUDeviceLostInfo
+      api::gpu::GPUDeviceLostInfo, api::gpu::GPUCompilationMessage,            \
+      api::gpu::GPUCompilationInfo
 
 }; // namespace workerd::api::gpu

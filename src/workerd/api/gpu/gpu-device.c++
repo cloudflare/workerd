@@ -191,7 +191,7 @@ GPUDevice::createShaderModule(GPUShaderModuleDescriptor descriptor) {
   wgsl_desc.code = descriptor.code.cStr();
 
   auto shader = device_.CreateShaderModule(&desc);
-  return jsg::alloc<GPUShaderModule>(kj::mv(shader));
+  return jsg::alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
 }
 
 jsg::Ref<GPUPipelineLayout>
