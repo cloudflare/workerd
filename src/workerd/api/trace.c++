@@ -378,7 +378,7 @@ kj::StringPtr TraceDiagnosticChannelEvent::getChannel() {
 v8::Local<v8::Value> TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
   // This is a lazy property that is evaluated at most once, so it is ok to move the message here.
   if (message.size() == 0) return js.v8Undefined();
-  jsg::Deserializer des(js.v8Isolate, kj::mv(message));
+  jsg::Deserializer des(js, kj::mv(message));
   return des.readValue();
 }
 

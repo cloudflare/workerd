@@ -40,7 +40,7 @@ struct Serialized {
 Serialized serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
-  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+  jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
@@ -277,7 +277,7 @@ jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::St
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return js.parseJson(jsg::v8Str(js.v8Isolate, body.asChars()));
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, body.asPtr()).readValue());
+    return jsg::Value(js.v8Isolate, jsg::Deserializer(js, body.asPtr()).readValue());
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }
@@ -298,7 +298,7 @@ jsg::Value deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return js.parseJson(jsg::v8Str(js.v8Isolate, message.getData().asChars()));
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::Value(js.v8Isolate, jsg::Deserializer(js.v8Isolate, message.getData()).readValue());
+    return jsg::Value(js.v8Isolate, jsg::Deserializer(js, message.getData()).readValue());
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }

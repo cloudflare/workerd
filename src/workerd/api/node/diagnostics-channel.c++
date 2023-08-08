@@ -24,7 +24,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
 
   auto& context = IoContext::current();
   KJ_IF_MAYBE(tracer, context.getWorkerTracer()) {
-    jsg::Serializer ser(js.v8Isolate, jsg::Serializer::Options {
+    jsg::Serializer ser(js, jsg::Serializer::Options {
       .omitHeader = false,
     });
     ser.write(message.getHandle(js));

@@ -634,7 +634,7 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
 
 kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) {
   return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment) {
-    jsg::Deserializer deserializer(js.v8Isolate, attachment, nullptr, nullptr,
+    jsg::Deserializer deserializer(js, attachment, nullptr, nullptr,
         jsg::Deserializer::Options {
       .version = 15,
       .readHeader = true,
@@ -645,7 +645,7 @@ kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) 
 }
 
 void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment) {
-  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+  jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });

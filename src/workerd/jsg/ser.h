@@ -25,7 +25,7 @@ public:
     kj::Array<std::shared_ptr<v8::BackingStore>> transferedArrayBuffers;
   };
 
-  explicit Serializer(v8::Isolate* isolate, kj::Maybe<Options> maybeOptions = nullptr);
+  explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = nullptr);
 
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
@@ -65,23 +65,23 @@ public:
   };
 
   inline explicit Deserializer(
-      v8::Isolate* isolate,
+      Lock& js,
       auto data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = nullptr,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = nullptr,
       kj::Maybe<Options> maybeOptions = nullptr)
-      : isolate(isolate),
+      : isolate(js.v8Isolate),
         deser(isolate, data.begin(), data.size(), this),
         sharedBackingStores(kj::mv(sharedArrayBuffers)) {
     init(kj::mv(transferedArrayBuffers), kj::mv(maybeOptions));
   }
 
   inline explicit Deserializer(
-      v8::Isolate* isolate,
+      Lock& js,
       Serializer::Released& released,
       kj::Maybe<Options> maybeOptions = nullptr)
       : Deserializer(
-          isolate,
+          js,
           released.data.asPtr(),
           released.transferedArrayBuffers.asPtr(),
           released.sharedArrayBuffers.asPtr(),
@@ -116,8 +116,8 @@ protected:
 constexpr SerializedBufferDisposer SERIALIZED_BUFFER_DISPOSER;
 
 v8::Local<v8::Value> structuredClone(
+    Lock& js,
     v8::Local<v8::Value> value,
-    v8::Isolate* isolate,
     kj::Maybe<kj::ArrayPtr<jsg::Value>> maybeTransfer = nullptr);
 
 }  // namespace workerd::jsg
