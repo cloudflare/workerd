@@ -6,8 +6,8 @@
 
 namespace workerd::jsg {
 
-Serializer::Serializer(v8::Isolate* isolate, kj::Maybe<Options> maybeOptions)
-    : isolate(isolate),
+Serializer::Serializer(Lock& js, kj::Maybe<Options> maybeOptions)
+    : isolate(js.v8Isolate),
       ser(isolate, this) {
   auto options = maybeOptions.orDefault({});
   KJ_IF_MAYBE(version, options.version) {
@@ -116,20 +116,20 @@ void SerializedBufferDisposer::disposeImpl(
 }
 
 v8::Local<v8::Value> structuredClone(
+    Lock& js,
     v8::Local<v8::Value> value,
-    v8::Isolate* isolate,
     kj::Maybe<kj::ArrayPtr<jsg::Value>> maybeTransfer) {
-  Serializer ser(isolate, nullptr);
+  Serializer ser(js, nullptr);
   KJ_IF_MAYBE(transfers, maybeTransfer) {
     for (auto& item : *transfers) {
-      auto val = item.getHandle(isolate);
+      auto val = item.getHandle(js);
       JSG_REQUIRE(val->IsArrayBuffer(), TypeError, "Object is not transferable");
       ser.transfer(val.As<v8::ArrayBuffer>());
     }
   }
   ser.write(value);
   auto released = ser.release();
-  Deserializer des(isolate, released, nullptr);
+  Deserializer des(js, released, nullptr);
   return des.readValue();
 }
 

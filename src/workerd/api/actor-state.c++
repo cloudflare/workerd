@@ -904,7 +904,7 @@ kj::Maybe<kj::Date> DurableObjectState::getWebSocketAutoResponseTimestamp(jsg::R
 }
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value) {
-  jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+  jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
@@ -960,7 +960,7 @@ v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
     options.readHeader = false;
   }
 
-  jsg::Deserializer deserializer(js.v8Isolate, buf, nullptr, nullptr, options);
+  jsg::Deserializer deserializer(js, buf, nullptr, nullptr, options);
 
   v8::Local<v8::Value> value;
   try {

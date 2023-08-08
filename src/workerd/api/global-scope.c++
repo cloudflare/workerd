@@ -672,7 +672,7 @@ v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
       return transfer.asPtr();
     });
   }
-  return jsg::structuredClone(value, js.v8Isolate, transfers);
+  return jsg::structuredClone(js, value, transfers);
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(

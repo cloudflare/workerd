@@ -2021,7 +2021,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
 
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
   for (auto& msg : messages) {
-    jsg::Serializer serializer(js.v8Isolate, jsg::Serializer::Options {
+    jsg::Serializer serializer(js, jsg::Serializer::Options {
         .version = 15,
         .omitHeader = false,
     });
