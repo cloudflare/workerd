@@ -12,7 +12,7 @@ namespace workerd::api::gpu {
 
 class GPUSupportedFeatures : public jsg::Object {
 public:
-  explicit GPUSupportedFeatures(std::vector<wgpu::FeatureName> features);
+  explicit GPUSupportedFeatures(kj::Array<wgpu::FeatureName> features);
   JSG_RESOURCE_TYPE(GPUSupportedFeatures) {
     JSG_METHOD(has);
     JSG_METHOD(keys);

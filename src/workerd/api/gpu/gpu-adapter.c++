@@ -42,7 +42,7 @@
 
 namespace workerd::api::gpu {
 
-void setLimit(wgpu::RequiredLimits &limits, kj::StringPtr name,
+void setLimit(wgpu::RequiredLimits& limits, kj::StringPtr name,
               unsigned long long value) {
 
 #define COPY_LIMIT(LIMIT)                                                      \
@@ -57,7 +57,7 @@ void setLimit(wgpu::RequiredLimits &limits, kj::StringPtr name,
 }
 
 jsg::Promise<jsg::Ref<GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
-    jsg::Lock &js, jsg::Optional<kj::Array<kj::String>> unmaskHints) {
+    jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints) {
 
   WGPUAdapterProperties adapterProperties = {};
   adapter_.GetProperties(&adapterProperties);
@@ -66,7 +66,7 @@ jsg::Promise<jsg::Ref<GPUAdapterInfo>> GPUAdapter::requestAdapterInfo(
 }
 
 jsg::Promise<jsg::Ref<GPUDevice>>
-GPUAdapter::requestDevice(jsg::Lock &js,
+GPUAdapter::requestDevice(jsg::Lock& js,
                           jsg::Optional<GPUDeviceDescriptor> descriptor) {
   wgpu::DeviceDescriptor desc{};
   kj::Vector<wgpu::FeatureName> requiredFeatures;
@@ -77,7 +77,7 @@ GPUAdapter::requestDevice(jsg::Lock &js,
     }
 
     KJ_IF_MAYBE (features, d->requiredFeatures) {
-      for (auto &required : *features) {
+      for (auto& required : *features) {
         requiredFeatures.add(parseFeatureName(required));
       }
 
@@ -86,7 +86,7 @@ GPUAdapter::requestDevice(jsg::Lock &js,
     }
 
     KJ_IF_MAYBE (requiredLimits, d->requiredLimits) {
-      for (auto &f : requiredLimits->fields) {
+      for (auto& f : requiredLimits->fields) {
         setLimit(limits, f.name, f.value);
       }
       desc.requiredLimits = &limits;
@@ -102,14 +102,14 @@ GPUAdapter::requestDevice(jsg::Lock &js,
   adapter_.RequestDevice(
       &desc,
       [](WGPURequestDeviceStatus status, WGPUDevice cDevice,
-         const char *message, void *pUserData) {
+         const char* message, void* pUserData) {
         JSG_REQUIRE(status == WGPURequestDeviceStatus_Success, Error, message);
 
-        UserData &userData = *reinterpret_cast<UserData *>(pUserData);
+        UserData& userData = *reinterpret_cast<UserData*>(pUserData);
         userData.device = wgpu::Device::Acquire(cDevice);
         userData.requestEnded = true;
       },
-      (void *)&userData);
+      (void*)&userData);
 
   KJ_ASSERT(userData.requestEnded);
 
@@ -121,10 +121,8 @@ GPUAdapter::requestDevice(jsg::Lock &js,
 jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
   wgpu::Adapter adapter(adapter_.Get());
   size_t count = adapter.EnumerateFeatures(nullptr);
-  // a std::vector is used instead of a kj::Vector because
-  // we can initialize it with `count`number of default copies
-  // of its value element
-  std::vector<wgpu::FeatureName> features(count);
+  kj::Array<wgpu::FeatureName> features =
+      kj::heapArray<wgpu::FeatureName>(count);
   adapter.EnumerateFeatures(&features[0]);
   return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
 }

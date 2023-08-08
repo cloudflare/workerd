@@ -7,7 +7,7 @@
 namespace workerd::api::gpu {
 
 GPUSupportedFeatures::GPUSupportedFeatures(
-    std::vector<wgpu::FeatureName> features) {
+    kj::Array<wgpu::FeatureName> features) {
   for (wgpu::FeatureName feature : features) {
     // add only known features to the feature list
     KJ_IF_MAYBE (knownF, getFeatureName(feature)) {
