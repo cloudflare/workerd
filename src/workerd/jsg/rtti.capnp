@@ -142,6 +142,9 @@ struct BuiltinType {
 
     v8Function @4;
     # v8::Function
+
+    v8ArrayBuffer @5;
+    # v8::ArrayBuffer
   }
 
   type @0 :Type;

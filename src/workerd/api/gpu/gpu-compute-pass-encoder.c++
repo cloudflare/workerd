@@ -10,6 +10,18 @@ void GPUComputePassEncoder::setPipeline(jsg::Ref<GPUComputePipeline> pipeline) {
   encoder_.SetPipeline(*pipeline);
 }
 
+void GPUComputePassEncoder::dispatchWorkgroups(
+    GPUSize32 workgroupCountX, jsg::Optional<GPUSize32> workgroupCountY,
+    jsg::Optional<GPUSize32> workgroupCountZ) {
+
+  GPUSize32 countY = workgroupCountY.orDefault(1);
+  GPUSize32 countZ = workgroupCountZ.orDefault(1);
+
+  encoder_.DispatchWorkgroups(workgroupCountX, countY, countZ);
+}
+
+void GPUComputePassEncoder::end() { encoder_.End(); }
+
 void GPUComputePassEncoder::setBindGroup(
     GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
     jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets) {
@@ -40,7 +52,8 @@ parseComputePassTimestampLocation(kj::StringPtr location) {
     return wgpu::ComputePassTimestampLocation::End;
   }
 
-  KJ_FAIL_REQUIRE("unknown compute pass timestamp location", location);
+  JSG_FAIL_REQUIRE(TypeError, "unknown compute pass timestamp location",
+                   location);
 }
 
 } // namespace workerd::api::gpu

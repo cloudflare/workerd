@@ -15,7 +15,7 @@ public:
   // Implicit cast operator to Dawn GPU object
   inline operator const wgpu::Sampler &() const { return sampler_; }
 
-  explicit GPUSampler(wgpu::Sampler s) : sampler_(s){};
+  explicit GPUSampler(wgpu::Sampler s) : sampler_(kj::mv(s)){};
   JSG_RESOURCE_TYPE(GPUSampler) {}
 
 private:

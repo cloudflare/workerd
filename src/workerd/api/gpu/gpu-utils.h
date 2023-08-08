@@ -27,6 +27,19 @@ using GPUMipmapFilterMode = kj::String;
 using GPUCompareFunction = kj::String;
 using GPUSize32 = uint32_t;
 using GPUBufferDynamicOffset = uint32_t;
+using GPUPowerPreference = kj::String;
+using GPUErrorFilter = kj::String;
+using GPUDeviceLostReason = kj::String;
+
+struct GPUMapMode : public jsg::Object {
+  static constexpr GPUFlagsConstant READ = 0x0001;
+  static constexpr GPUFlagsConstant WRITE = 0x0002;
+
+  JSG_RESOURCE_TYPE(GPUMapMode) {
+    JSG_STATIC_CONSTANT(READ);
+    JSG_STATIC_CONSTANT(WRITE);
+  }
+};
 
 struct GPUShaderStage : public jsg::Object {
   static constexpr GPUFlagsConstant VERTEX = 0x1;
@@ -67,5 +80,6 @@ struct GPUBufferUsage : public jsg::Object {
 };
 
 wgpu::FeatureName parseFeatureName(GPUFeatureName &);
+kj::Maybe<GPUFeatureName> getFeatureName(wgpu::FeatureName &feature);
 
 } // namespace workerd::api::gpu
