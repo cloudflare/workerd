@@ -120,77 +120,75 @@ ActorObserver& currentActorMetrics() {
 jsg::Value listResultsToMap(jsg::Lock& js,
                             ActorCacheOps::GetResultList value,
                             bool completelyCached) {
-  v8::HandleScope scope(js.v8Isolate);
-  auto context = js.v8Context();
+  return js.withinHandleScope([&] {
+    auto map = v8::Map::New(js.v8Isolate);
+    size_t cachedReadBytes = 0;
+    size_t uncachedReadBytes = 0;
+    for (auto entry: value) {
+      auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
+                    ? cachedReadBytes : uncachedReadBytes;
+      bytesRef += entry.key.size() + entry.value.size();
+      jsg::check(map->Set(js.v8Context(), jsg::v8Str(js.v8Isolate, entry.key),
+          deserializeV8Value(js, entry.key, entry.value)));
+    }
+    auto& actorMetrics = currentActorMetrics();
+    if (cachedReadBytes || uncachedReadBytes) {
+      size_t totalReadBytes = cachedReadBytes + uncachedReadBytes;
+      uint32_t totalUnits = billingUnits(totalReadBytes);
 
-  auto map = v8::Map::New(js.v8Isolate);
-  size_t cachedReadBytes = 0;
-  size_t uncachedReadBytes = 0;
-  for (auto entry: value) {
-    auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
-                   ? cachedReadBytes : uncachedReadBytes;
-    bytesRef += entry.key.size() + entry.value.size();
-    jsg::check(map->Set(context, jsg::v8Str(js.v8Isolate, entry.key),
-        deserializeV8Value(js, entry.key, entry.value)));
-  }
-  auto& actorMetrics = currentActorMetrics();
-  if (cachedReadBytes || uncachedReadBytes) {
-    size_t totalReadBytes = cachedReadBytes + uncachedReadBytes;
-    uint32_t totalUnits = billingUnits(totalReadBytes);
+      // If we went to disk, we want to ensure we bill at least 1 uncached unit.
+      // Otherwise, we disable this behavior, to ensure a fully cached list will have
+      // uncachedUnits == 0.
+      auto billAtLeastOne = completelyCached ? BillAtLeastOne::NO : BillAtLeastOne::YES;
+      uint32_t uncachedUnits = billingUnits(uncachedReadBytes, billAtLeastOne);
+      uint32_t cachedUnits = totalUnits - uncachedUnits;
 
-    // If we went to disk, we want to ensure we bill at least 1 uncached unit.
-    // Otherwise, we disable this behavior, to ensure a fully cached list will have
-    // uncachedUnits == 0.
-    auto billAtLeastOne = completelyCached ? BillAtLeastOne::NO : BillAtLeastOne::YES;
-    uint32_t uncachedUnits = billingUnits(uncachedReadBytes, billAtLeastOne);
-    uint32_t cachedUnits = totalUnits - uncachedUnits;
+      actorMetrics.addUncachedStorageReadUnits(uncachedUnits);
+      actorMetrics.addCachedStorageReadUnits(cachedUnits);
+    } else {
+      // We bill 1 uncached read unit if there was no results from the list.
+      actorMetrics.addUncachedStorageReadUnits(1);
+    }
 
-    actorMetrics.addUncachedStorageReadUnits(uncachedUnits);
-    actorMetrics.addCachedStorageReadUnits(cachedUnits);
-  } else {
-    // We bill 1 uncached read unit if there was no results from the list.
-    actorMetrics.addUncachedStorageReadUnits(1);
-  }
-
-  return js.v8Ref(map.As<v8::Value>());
+    return js.v8Ref(map.As<v8::Value>());
+  });
 }
 
 kj::Function<jsg::Value(jsg::Lock&, ActorCacheOps::GetResultList)> getMultipleResultsToMap(
     size_t numInputKeys) {
   return [numInputKeys](jsg::Lock& js, ActorCacheOps::GetResultList value) mutable {
-    v8::HandleScope scope(js.v8Isolate);
-    auto context = js.v8Context();
+    return js.withinHandleScope([&] {
+      auto map = v8::Map::New(js.v8Isolate);
+      uint32_t cachedUnits = 0;
+      uint32_t uncachedUnits = 0;
+      for (auto entry: value) {
+        auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
+                      ? cachedUnits : uncachedUnits;
+        unitsRef += billingUnits(entry.key.size() + entry.value.size());
+        jsg::check(map->Set(js.v8Context(), jsg::v8Str(js.v8Isolate, entry.key),
+            deserializeV8Value(js, entry.key, entry.value)));
+      }
+      auto& actorMetrics = currentActorMetrics();
+      actorMetrics.addCachedStorageReadUnits(cachedUnits);
 
-    auto map = v8::Map::New(js.v8Isolate);
-    uint32_t cachedUnits = 0;
-    uint32_t uncachedUnits = 0;
-    for (auto entry: value) {
-      auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
-                    ? cachedUnits : uncachedUnits;
-      unitsRef += billingUnits(entry.key.size() + entry.value.size());
-      jsg::check(map->Set(context, jsg::v8Str(js.v8Isolate, entry.key),
-          deserializeV8Value(js, entry.key, entry.value)));
-    }
-    auto& actorMetrics = currentActorMetrics();
-    actorMetrics.addCachedStorageReadUnits(cachedUnits);
+      size_t leftoverKeys = 0;
+      if (numInputKeys >= value.size()) {
+        leftoverKeys = numInputKeys - value.size();
+      } else {
+        KJ_LOG(ERROR, "More returned pairs than provided input keys in getMultipleResultsToMap",
+            numInputKeys, value.size());
+      }
 
-    size_t leftoverKeys = 0;
-    if (numInputKeys >= value.size()) {
-      leftoverKeys = numInputKeys - value.size();
-    } else {
-      KJ_LOG(ERROR, "More returned pairs than provided input keys in getMultipleResultsToMap",
-          numInputKeys, value.size());
-    }
+      // leftover keys weren't in the result set, but potentially still
+      // had to be queried for existence.
+      //
+      // TODO(someday): This isn't quite accurate -- we do cache negative entries.
+      // Billing will still be correct today, but if we do ever start billing
+      // only for uncached reads, we'll need to address this.
+      actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
 
-    // leftover keys weren't in the result set, but potentially still
-    // had to be queried for existence.
-    //
-    // TODO(someday): This isn't quite accurate -- we do cache negative entries.
-    // Billing will still be correct today, but if we do ever start billing
-    // only for uncached reads, we'll need to address this.
-    actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
-
-    return js.v8Ref(map.As<v8::Value>());
+      return js.v8Ref(map.As<v8::Value>());
+    });
   };
 }
 
