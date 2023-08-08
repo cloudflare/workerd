@@ -145,11 +145,11 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface);
 //
 // (Use kj::newHttpClient() if you don't want to take ownership.)
 
-class RevocableWorkerInterface final: public WorkerInterface {
-  // A WorkerInterface that cancels long-running events when revokeProm is rejected.
+class RevocableWebSocketWorkerInterface final: public WorkerInterface {
+  // A WorkerInterface that cancels WebSockets when revokeProm is rejected.
   // Currently only supports cancelling for upgrades.
 public:
-  RevocableWorkerInterface(WorkerInterface& worker, kj::Promise<void> revokeProm);
+  RevocableWebSocketWorkerInterface(WorkerInterface& worker, kj::Promise<void> revokeProm);
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override;
@@ -166,7 +166,7 @@ private:
   kj::ForkedPromise<void> revokeProm;
 };
 
-kj::Own<RevocableWorkerInterface> newRevocableWorkerInterface(kj::Own<WorkerInterface> worker,
+kj::Own<RevocableWebSocketWorkerInterface> newRevocableWebSocketWorkerInterface(kj::Own<WorkerInterface> worker,
     kj::Promise<void> revokeProm);
 
 class RpcWorkerInterface: public WorkerInterface {
