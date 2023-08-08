@@ -119,16 +119,17 @@ void HibernationManagerImpl::setTimerChannel(TimerChannel& timerChannel) {
 
 void HibernationManagerImpl::hibernateWebSockets(Worker::Lock& lock) {
   jsg::Lock& js(lock);
-  v8::HandleScope handleScope(js.v8Isolate);
-  v8::Context::Scope contextScope(lock.getContext());
-  for (auto& ws : allWs) {
-    KJ_IF_MAYBE(active, ws->activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
-      // Transfers ownership of properties from api::WebSocket to HibernatableWebSocket via the
-      // HibernationPackage.
-      ws->activeOrPackage.init<api::WebSocket::HibernationPackage>(
-          active->get()->buildPackageForHibernation());
+  js.withinHandleScope([&] {
+    js.enterContextScope(lock.getContext());
+    for (auto& ws : allWs) {
+      KJ_IF_MAYBE(active, ws->activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
+        // Transfers ownership of properties from api::WebSocket to HibernatableWebSocket via the
+        // HibernationPackage.
+        ws->activeOrPackage.init<api::WebSocket::HibernationPackage>(
+            active->get()->buildPackageForHibernation());
+      }
     }
-  }
+  });
 }
 
 void HibernationManagerImpl::dropHibernatableWebSocket(HibernatableWebSocket& hib) {

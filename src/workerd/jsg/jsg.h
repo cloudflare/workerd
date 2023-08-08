@@ -2057,9 +2057,8 @@ public:
     friend class Lock;
   };
 
-  ContextScope enterContextScope(kj::Maybe<v8::Local<v8::Context>> maybeContext = nullptr);
-  // Ensures that we are currently within the scope of the given v8::Context or the current
-  // v8::Context if no context is explicitly given.
+  ContextScope enterContextScope(v8::Local<v8::Context> context);
+  // Ensures that we are currently within the scope of the given v8::Context
 
 private:
   friend class IsolateBase;
