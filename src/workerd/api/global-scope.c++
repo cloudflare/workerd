@@ -248,6 +248,23 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     body = Body::ExtractedBody(jsStream.addRef());
   }
 
+  // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
+  // to the body length if it's known. This ensures handlers for worker-to-worker requests can
+  // access known body lengths if they're set, without buffering bodies.
+  if (body != nullptr &&
+      headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == nullptr &&
+      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == nullptr) {
+    // We can't use headers.set() here as headers is marked const. Instead, we call set() on the
+    // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
+    KJ_IF_MAYBE(l, requestBody.tryGetLength()) {
+      jsHeaders->setUnguarded(jsg::ByteString(kj::str("Content-Length")),
+                               jsg::ByteString(kj::str(*l)));
+    } else {
+      jsHeaders->setUnguarded(jsg::ByteString(kj::str("Transfer-Encoding")),
+                               jsg::ByteString(kj::str("chunked")));
+    }
+  }
+
   auto jsRequest = jsg::alloc<Request>(
       method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
       jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL,

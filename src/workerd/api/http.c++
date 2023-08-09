@@ -284,6 +284,10 @@ bool Headers::has(jsg::ByteString name) {
 
 void Headers::set(jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
+  setUnguarded(kj::mv(name), kj::mv(value));
+}
+
+void Headers::setUnguarded(jsg::ByteString name, jsg::ByteString value) {
   requireValidHeaderName(name);
   auto key = toLower(name);
   value = normalizeHeaderValue(kj::mv(value));
