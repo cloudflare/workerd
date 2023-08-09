@@ -292,6 +292,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Allows service bindings to call additional event handler methods on the target Worker.
   # Initially only includes support for calling the queue() handler.
+  # WARNING: this flag exposes the V8 deserialiser to users via `Fetcher#queue()` `serializedBody`.
+  # Historically, this has required a trusted environment to be safe. If we decide to make this
+  # flag non-experimental, we must ensure we take appropriate precuations.
 
   noCfBotManagementDefault @29 :Bool
       $compatEnableFlag("no_cf_botmanagement_default")

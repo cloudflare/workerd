@@ -464,11 +464,17 @@ public:
     // worker via a service binding.
     kj::String id;
     kj::Date timestamp;
-    jsg::Value body;
-    JSG_STRUCT(id, timestamp, body);
-    JSG_STRUCT_TS_OVERRIDE(ServiceBindingQueueMessage<Body = unknown> {
-      body: Body;
-    });
+    jsg::Optional<jsg::Value> body;
+    jsg::Optional<kj::Array<kj::byte>> serializedBody;
+
+    JSG_STRUCT(id, timestamp, body, serializedBody);
+    JSG_STRUCT_TS_OVERRIDE(type ServiceBindingQueueMessage<Body = unknown> = {
+      id: string;
+      timestamp: Date;
+    } & (
+      | { body: Body }
+      | { serializedBody: ArrayBuffer | ArrayBufferView }
+    ));
   };
 
   struct QueueResult {
