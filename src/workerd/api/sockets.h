@@ -119,7 +119,7 @@ private:
   };
 
   jsg::Promise<void> errorHandler(jsg::Lock& js, jsg::Value err) {
-    auto jsException = err.getHandle(js.v8Isolate);
+    auto jsException = err.getHandle(js);
     resolveFulfiller(js, jsg::createTunneledException(js.v8Isolate, jsException));
     return js.resolvedPromise();
   };

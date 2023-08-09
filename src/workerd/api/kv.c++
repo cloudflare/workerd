@@ -293,9 +293,9 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
               .attach(kj::mv(stream)),
           [cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js, kj::String text) mutable {
         auto result = js.parseJson(text);
-        parseListMetadata(js, result.getHandle(js.v8Isolate),
+        parseListMetadata(js, result.getHandle(js),
             cacheStatus.map([&](jsg::Value& cs) -> v8::Local<v8::Value> {
-          return cs.getHandle((js.v8Isolate));
+          return cs.getHandle(js);
         }));
         return result;
       });

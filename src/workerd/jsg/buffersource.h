@@ -317,7 +317,7 @@ public:
     if (isDetached()) {
       return nullptr;
     }
-    auto h = handle.getHandle(js.v8Isolate);
+    auto h = getHandle(js);
     if (h->IsArrayBuffer()) {
       return h.As<v8::ArrayBuffer>()->ByteLength();
     } else if (h->IsArrayBufferView()) {

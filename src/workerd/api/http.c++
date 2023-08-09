@@ -1408,7 +1408,7 @@ kj::Maybe<jsg::Ref<WebSocket>> Response::getWebSocket(jsg::Lock& js) {
 jsg::Optional<v8::Local<v8::Object>> Response::getCf(
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   return cf.map([&](jsg::V8Ref<v8::Object>& handle) {
-    return handle.getHandle(info.GetIsolate());
+    return handle.getHandle(jsg::Lock::from(info.GetIsolate()));
   });
 }
 

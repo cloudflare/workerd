@@ -65,18 +65,17 @@ GPUBuffer::getMappedRange(jsg::Lock& js, jsg::Optional<GPUSize64> offset,
 
   v8::Local<v8::ArrayBuffer> arrayBuffer =
       v8::ArrayBuffer::New(js.v8Isolate, backing);
-  arrayBuffer->SetDetachKey(detachKey_.getHandle(js.v8Isolate));
+  arrayBuffer->SetDetachKey(detachKey_.getHandle(js));
 
-  mapped_.add(Mapping{start, end,
-                      jsg::V8Ref<v8::ArrayBuffer>(js.v8Isolate, arrayBuffer)});
+  mapped_.add(Mapping{ start, end, js.v8Ref(arrayBuffer) });
   return arrayBuffer;
 }
 
 void GPUBuffer::DetachMappings(jsg::Lock& js) {
   for (auto& mapping : mapped_) {
-    auto ab = mapping.buffer.getHandle(js.v8Isolate);
+    auto ab = mapping.buffer.getHandle(js);
 
-    auto res = ab->Detach(detachKey_.getHandle(js.v8Isolate));
+    auto res = ab->Detach(detachKey_.getHandle(js));
     KJ_ASSERT(res.IsJust());
   }
   mapped_.clear();

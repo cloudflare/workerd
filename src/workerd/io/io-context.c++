@@ -392,7 +392,7 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
       jsg::Lock& js = lock;
       auto error = js.exceptionToJs(kj::mv(exception));
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, error.getHandle(js.v8Isolate));
+      lock.logUncaughtException(source, error.getHandle(js));
     }
   };
 

@@ -355,7 +355,7 @@ public:
     }
 
     Resolver addRef(Lock& js) {
-      return { js.v8Isolate, v8Resolver.getHandle(js.v8Isolate) };
+      return { js.v8Isolate, v8Resolver.getHandle(js) };
     }
     void visitForGc(GcVisitor& visitor) {
       visitor.visit(v8Resolver);
@@ -422,7 +422,7 @@ private:
 
   v8::Local<v8::Promise> getInner(Lock& js) {
     return KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
-        .getHandle(js.v8Isolate);
+        .getHandle(js);
   }
 
   template <typename U = T, typename = kj::EnableIf<!isVoid<U>()>()>

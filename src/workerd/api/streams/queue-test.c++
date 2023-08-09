@@ -27,7 +27,7 @@ struct Preamble {
     : isolate(v8System, kj::heap<jsg::IsolateObserver>()),
       lock(isolate, stackScope),
       scope(lock.v8Isolate),
-      context(lock.newContext<QueueContext>().getHandle(lock.v8Isolate)),
+      context(lock.newContext<QueueContext>().getHandle(lock)),
       contextScope(context) {}
 
   jsg::Lock& getJs() { return jsg::Lock::from(lock.v8Isolate); }
