@@ -1095,13 +1095,7 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
   if (impl->inspector != nullptr || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
     lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
       if (impl->inspector != nullptr) {
-        // TODO(cleanup): The logger will only ever be called while the isolate lock is
-        // held. However, can we also safely assume there's already a v8::HandleScope
-        // on the stack? Once logMessage is updated to take a jsg::Lock reference we
-        // can remove the v8::HandleScope here.
-        js.withinHandleScope([&] {
-          logMessage(js.v8Context(), static_cast<uint16_t>(cdp::LogType::WARNING), message);
-        });
+        logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), message);
       }
       KJ_LOG(INFO, "console warning", message);
     });
@@ -1239,7 +1233,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
       //   inspector is enabled. We want to do this immediately after the context is created,
       //   before the user gets a chance to modify the behavior of the console, which if they did,
       //   we'd then need to be more careful to apply time limits and such.
-      lockedWorkerIsolate.logMessage(context,
+      lockedWorkerIsolate.logMessage(lock,
           static_cast<uint16_t>(cdp::LogType::WARNING), "Script modified; context reset.");
     }
 
@@ -2724,10 +2718,10 @@ void Worker::Isolate::disconnectInspector() {
 
 void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
   if (impl->inspector != nullptr) {
-    // getContext requires a HandleScope
     jsg::Lock& js = lock;
     js.withinHandleScope([&] {
-      logMessage(lock.getContext(), static_cast<uint16_t>(cdp::LogType::WARNING), description);
+      auto contextScope = js.enterContextScope(lock.getContext());
+      logMessage(js, static_cast<uint16_t>(cdp::LogType::WARNING), description);
     });
   }
 
@@ -2749,7 +2743,7 @@ void Worker::Isolate::logErrorOnce(kj::StringPtr description) {
   });
 }
 
-void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
+void Worker::Isolate::logMessage(jsg::Lock& js,
                                  uint16_t type, kj::StringPtr description) {
   if (impl->inspector != nullptr) {
     // We want to log a warning to the devtools console, as if `console.warn()` were called.
@@ -2772,7 +2766,6 @@ void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
     //   To fix these problems, maybe we should just patch V8 with a direct interface into the
     //   inspector's own log. (Also, how does Chrome handle this?)
 
-    auto& js = jsg::Lock::from(context->GetIsolate());
     js.withinHandleScope([&] {
       capnp::MallocMessageBuilder message;
       auto event = message.initRoot<cdp::Event>();
@@ -2780,7 +2773,7 @@ void Worker::Isolate::logMessage(v8::Local<v8::Context> context,
       auto params = event.initRuntimeConsoleApiCalled();
       params.setType(static_cast<cdp::LogType>(type));
       params.initArgs(1)[0].initString().setValue(description);
-      params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(context));
+      params.setExecutionContextId(v8_inspector::V8ContextInfo::executionContextId(js.v8Context()));
       params.setTimestamp(impl->inspectorClient.currentTimeMS());
       stackTraceToCDP(js, params.initStackTrace());
 
