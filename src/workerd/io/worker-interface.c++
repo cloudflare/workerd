@@ -184,11 +184,11 @@ private:
   kj::Canceler canceler;
 };
 
-class RevocableHttpResponse final : public kj::HttpService::Response {
-  // A HttpResponse that is revokable (including websocket connections started as part of the
-  // response)
+class RevocableWebSocketHttpResponse final : public kj::HttpService::Response {
+  // A HttpResponse that can revoke long-running websocket connections started as part of the
+  // response. Ordinary HTTP requests are not revoked.
 public:
-  RevocableHttpResponse(kj::HttpService::Response& inner, kj::Promise<void> revokeProm)
+  RevocableWebSocketHttpResponse(kj::HttpService::Response& inner, kj::Promise<void> revokeProm)
       : inner(inner), revokeProm(revokeProm.fork()) {}
 
   kj::Own<kj::AsyncOutputStream> send(
@@ -206,47 +206,47 @@ private:
   kj::ForkedPromise<void> revokeProm;
 };
 
-kj::Promise<void> RevocableWorkerInterface::request(
+kj::Promise<void> RevocableWebSocketWorkerInterface::request(
     kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) {
-  auto wrappedResponse = kj::heap<RevocableHttpResponse>(response, revokeProm.addBranch());
+  auto wrappedResponse = kj::heap<RevocableWebSocketHttpResponse>(response, revokeProm.addBranch());
   return worker.request(method, url, headers, requestBody, *wrappedResponse)
       .attach(kj::mv(wrappedResponse));
 }
 
-kj::Promise<void> RevocableWorkerInterface::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection, ConnectResponse& response,
     kj::HttpConnectSettings settings) {
-  KJ_UNIMPLEMENTED("TODO(someday): RevocableWorkerInterface::connect() should be implemented to "
+  KJ_UNIMPLEMENTED("TODO(someday): RevocableWebSocketWorkerInterface::connect() should be implemented to "
       "disconnect long-lived connections similar to how it treats WebSockets");
 }
 
-RevocableWorkerInterface::RevocableWorkerInterface(WorkerInterface& worker,
+RevocableWebSocketWorkerInterface::RevocableWebSocketWorkerInterface(WorkerInterface& worker,
     kj::Promise<void> revokeProm)
     : worker(worker), revokeProm(revokeProm.fork()) {}
 
-void RevocableWorkerInterface::prewarm(kj::StringPtr url) {
+void RevocableWebSocketWorkerInterface::prewarm(kj::StringPtr url) {
   worker.prewarm(url);
 }
 
-kj::Promise<WorkerInterface::ScheduledResult> RevocableWorkerInterface::runScheduled(
+kj::Promise<WorkerInterface::ScheduledResult> RevocableWebSocketWorkerInterface::runScheduled(
     kj::Date scheduledTime,
     kj::StringPtr cron) {
   return worker.runScheduled(scheduledTime, cron);
 }
 
-kj::Promise<WorkerInterface::AlarmResult> RevocableWorkerInterface::runAlarm(kj::Date scheduledTime) {
+kj::Promise<WorkerInterface::AlarmResult> RevocableWebSocketWorkerInterface::runAlarm(kj::Date scheduledTime) {
   return worker.runAlarm(scheduledTime);
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result>
-    RevocableWorkerInterface::customEvent(kj::Own<CustomEvent> event) {
+    RevocableWebSocketWorkerInterface::customEvent(kj::Own<CustomEvent> event) {
   return worker.customEvent(kj::mv(event));
 }
 
-kj::Own<RevocableWorkerInterface> newRevocableWorkerInterface(kj::Own<WorkerInterface> worker,
+kj::Own<RevocableWebSocketWorkerInterface> newRevocableWebSocketWorkerInterface(kj::Own<WorkerInterface> worker,
     kj::Promise<void> revokeProm) {
-  return kj::heap<RevocableWorkerInterface>(*worker, kj::mv(revokeProm)).attach(kj::mv(worker));
+  return kj::heap<RevocableWebSocketWorkerInterface>(*worker, kj::mv(revokeProm)).attach(kj::mv(worker));
 }
 
 // =======================================================================================
