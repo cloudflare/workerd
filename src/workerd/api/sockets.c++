@@ -318,7 +318,7 @@ void Socket::handleProxyStatus(
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsucessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
-      auto msg = kj::str(": proxy request failed, cannot connect to the specified address");
+      auto msg = kj::str("proxy request failed, cannot connect to the specified address");
       if (isDefaultFetchPort) {
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
