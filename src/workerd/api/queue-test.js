@@ -5,6 +5,8 @@
 import assert from "node:assert";
 import { Buffer } from "node:buffer";
 
+let serializedBody;
+
 export default {
   // Producer receiver (from `env.QUEUE`)
   async fetch(request, env, ctx) {
@@ -24,6 +26,7 @@ export default {
         const buffer = Buffer.from(await request.arrayBuffer());
         assert(buffer.includes("key"));
         assert(buffer.includes("value"));
+        serializedBody = buffer;
       } else {
         assert.fail(`Unexpected format: ${JSON.stringify(format)}`);
       }
@@ -54,7 +57,7 @@ export default {
   // Consumer receiver (from `env.SERVICE`)
   async queue(batch, env, ctx) {
     assert.strictEqual(batch.queue, "test-queue");
-    assert.strictEqual(batch.messages.length, 4);
+    assert.strictEqual(batch.messages.length, 5);
 
     assert.strictEqual(batch.messages[0].id, "#0");
     assert.strictEqual(batch.messages[0].body, "ghi");
@@ -68,6 +71,9 @@ export default {
 
     assert.strictEqual(batch.messages[3].id, "#3");
     assert.deepStrictEqual(batch.messages[3].body, batch.messages[3].timestamp);
+
+    assert.strictEqual(batch.messages[4].id, "#4");
+    assert.deepStrictEqual(batch.messages[4].body, new Map([["key", "value"]]));
 
     batch.ackAll();
   },
@@ -91,11 +97,25 @@ export default {
       { id: "#1", timestamp, body: new Uint8Array([7, 8, 9]) },
       { id: "#2", timestamp, body: { c: { d: 10 } } },
       { id: "#3", timestamp, body: timestamp },
+      { id: "#4", timestamp, serializedBody },
     ]);
     assert.strictEqual(response.outcome, "ok");
     assert(!response.retryAll);
     assert(response.ackAll);
     assert.deepStrictEqual(response.explicitRetries, ["#2"]);
     assert.deepStrictEqual(response.explicitAcks, []);
+
+    await assert.rejects(env.SERVICE.queue("test-queue", [
+      { id: "#0", timestamp }
+    ]), {
+      name: "TypeError",
+      message: "Expected one of body or serializedBody for each message"
+    });
+    await assert.rejects(env.SERVICE.queue("test-queue", [
+      { id: "#0", timestamp, body: "", serializedBody }
+    ]), {
+      name: "TypeError",
+      message: "Expected one of body or serializedBody for each message"
+    });
   },
 }

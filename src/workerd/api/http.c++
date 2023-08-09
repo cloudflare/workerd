@@ -2021,16 +2021,28 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
 
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
   for (auto& msg : messages) {
-    jsg::Serializer serializer(js, jsg::Serializer::Options {
-        .version = 15,
-        .omitHeader = false,
-    });
-    serializer.write(msg.body.getHandle(js));
-    encodedMessages.add(IncomingQueueMessage{
-        .id=kj::mv(msg.id),
-        .timestamp=msg.timestamp,
-        .body=serializer.release().data,
-    });
+    KJ_IF_MAYBE(b, msg.body) {
+      JSG_REQUIRE(msg.serializedBody == nullptr, TypeError,
+                   "Expected one of body or serializedBody for each message");
+      jsg::Serializer serializer(js, jsg::Serializer::Options {
+          .version = 15,
+          .omitHeader = false,
+      });
+      serializer.write(b->getHandle(js));
+      encodedMessages.add(IncomingQueueMessage{
+          .id=kj::mv(msg.id),
+          .timestamp=msg.timestamp,
+          .body=serializer.release().data,
+      });
+    } else KJ_IF_MAYBE(b, msg.serializedBody) {
+      encodedMessages.add(IncomingQueueMessage{
+          .id=kj::mv(msg.id),
+          .timestamp=msg.timestamp,
+          .body=kj::mv(*b),
+      });
+    } else {
+      JSG_FAIL_REQUIRE(TypeError, "Expected one of body or serializedBody for each message");
+    }
   }
 
   auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params{
