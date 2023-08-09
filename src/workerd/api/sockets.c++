@@ -323,32 +323,14 @@ void Socket::handleProxyStatus(
         msg = kj::str(msg, ". It looks like you might be trying to connect to a HTTP-based service",
             " — consider using fetch instead");
       }
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
+      auto exc = kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+        kj::str(JSG_EXCEPTION(Error), msg));
+      resolveFulfiller(js, exc);
+      readable->getController().cancel(js, nullptr).markAsHandled(js);
+      writable->getController().abort(js, nullptr).markAsHandled(js);
     }
   });
   result.markAsHandled(js);
-}
-
-void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exception>> connectResult) {
-  // It's kind of weird to take a promise that resolves to a Maybe<Exception> but we can't just use
-  // a Promise<void> and put our logic in the error handler because awaitIo doesn't provide the
-  // jsg::Lock for void promises or to errorFunc implementations, only non-void success callbacks,
-  // but we need the lock in our callback here.
-  // TODO(cleanup): Extend awaitIo to provide the jsg::Lock in more cases.
-  auto& context = IoContext::current();
-  auto result = context.awaitIo(js, kj::mv(connectResult),
-      [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
-    KJ_IF_MAYBE(e, result) {
-      handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
-    }
-  });
-  result.markAsHandled(js);
-}
-
-void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
-  resolveFulfiller(js, kj::mv(e));
-  readable->getController().cancel(js, nullptr).markAsHandled(js);
-  writable->getController().abort(js, nullptr).markAsHandled(js);
 }
 
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
