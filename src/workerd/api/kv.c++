@@ -38,29 +38,30 @@ static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
 
 static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse,
     kj::Maybe<v8::Local<v8::Value>> cacheStatus) {
-  auto isolate = js.v8Isolate;
-  v8::HandleScope handleScope(isolate);
-  KJ_ASSERT(listResponse->IsObject());
-  v8::Local<v8::Object> obj = listResponse.As<v8::Object>();
-  auto keys = js.v8Get(obj, "keys"_kj);
-  if (keys->IsArray()) {
-    auto keysArr = keys.As<v8::Array>();
-    auto length = keysArr->Length();
-    v8::Local<v8::Object> key;
-    for (int i = 0; i < length; i++) {
-      v8::HandleScope handleScope(isolate);
-      key = js.v8Get(keysArr, i).As<v8::Object>();
-      if (js.v8HasOwn(key, "metadata"_kj)) {
-        auto metadata = js.v8Get(key, "metadata"_kj);
-        KJ_ASSERT(metadata->IsString());
-        auto metadataStr = metadata.As<v8::String>();
-        auto json = js.parseJson(metadataStr);
-        js.v8Set(key, "metadata"_kj, json);
+  js.withinHandleScope([&] {
+    KJ_ASSERT(listResponse->IsObject());
+    v8::Local<v8::Object> obj = listResponse.As<v8::Object>();
+    auto keys = js.v8Get(obj, "keys"_kj);
+    if (keys->IsArray()) {
+      auto keysArr = keys.As<v8::Array>();
+      auto length = keysArr->Length();
+      v8::Local<v8::Object> key;
+      for (int i = 0; i < length; i++) {
+        js.withinHandleScope([&] {
+          key = js.v8Get(keysArr, i).As<v8::Object>();
+          if (js.v8HasOwn(key, "metadata"_kj)) {
+            auto metadata = js.v8Get(key, "metadata"_kj);
+            KJ_ASSERT(metadata->IsString());
+            auto metadataStr = metadata.As<v8::String>();
+            auto json = js.parseJson(metadataStr);
+            js.v8Set(key, "metadata"_kj, json);
+          }
+        });
       }
     }
-  }
 
-  js.v8Set(obj, "cacheStatus"_kj, cacheStatus.orDefault(js.v8Null()));
+    js.v8Set(obj, "cacheStatus"_kj, cacheStatus.orDefault(js.v8Null()));
+  });
 }
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;

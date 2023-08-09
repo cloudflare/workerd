@@ -341,15 +341,16 @@ public:
       auto isolate = js.v8Isolate;
       auto& typeWrapper = TypeWrapper::from(isolate);
 
-      v8::HandleScope scope(isolate);
-      auto context = js.v8Context();
-      v8::Local<v8::Value> argv[sizeof...(Args)] {
-        typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
-      };
+      return js.withinHandleScope([&] {
+        auto context = js.v8Context();
+        v8::Local<v8::Value> argv[sizeof...(Args)] {
+          typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
+        };
 
-      v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
-      return typeWrapper.template unwrap<Ret>(
-          context, result, TypeErrorContext::callbackReturn());
+        v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
+        return typeWrapper.template unwrap<Ret>(
+            context, result, TypeErrorContext::callbackReturn());
+      });
     };
 
     return Constructor<Ret(Args...)>(
@@ -377,19 +378,20 @@ public:
       auto isolate = js.v8Isolate;
       auto& typeWrapper = TypeWrapper::from(isolate);
 
-      v8::HandleScope scope(isolate);
-      auto context = js.v8Context();
-      v8::Local<v8::Value> argv[sizeof...(Args)] {
-        typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
-      };
+      return js.withinHandleScope([&] {
+        auto context = js.v8Context();
+        v8::Local<v8::Value> argv[sizeof...(Args)] {
+          typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
+        };
 
-      auto result = check(func->Call(context, receiver, sizeof...(Args), argv));
-      if constexpr(!isVoid<Ret>()) {
-        return typeWrapper.template unwrap<Ret>(
-            context, result, TypeErrorContext::callbackReturn());
-      } else {
-        return;
-      }
+        auto result = check(func->Call(context, receiver, sizeof...(Args), argv));
+        if constexpr(!isVoid<Ret>()) {
+          return typeWrapper.template unwrap<Ret>(
+              context, result, TypeErrorContext::callbackReturn());
+        } else {
+          return;
+        }
+      });
     };
 
     return Function<Ret(Args...)>(

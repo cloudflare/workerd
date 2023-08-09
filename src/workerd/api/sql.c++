@@ -81,12 +81,13 @@ SqlStorage::Cursor::~Cursor() noexcept(false) {
 void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
     jsg::Lock& js, SqliteDatabase::Query& source) {
   if (names == nullptr) {
-    v8::HandleScope scope(js.v8Isolate);
-    auto builder = kj::heapArrayBuilder<jsg::V8Ref<v8::String>>(source.columnCount());
-    for (auto i: kj::zeroTo(builder.capacity())) {
-      builder.add(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, source.getColumnName(i)));
-    }
-    names = builder.finish();
+    js.withinHandleScope([&] {
+      auto builder = kj::heapArrayBuilder<jsg::V8Ref<v8::String>>(source.columnCount());
+      for (auto i: kj::zeroTo(builder.capacity())) {
+        builder.add(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, source.getColumnName(i)));
+      }
+      names = builder.finish();
+    });
   }
 }
 
