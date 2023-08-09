@@ -932,16 +932,20 @@ v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
     // counting it against our internal storage error metrics but also throw a KJ exception rather
     // than a jsExceptionThrown error to avoid confusing the normal termination handling code.
     // We don't expect users to ever actually see this error.
-    JSG_REQUIRE(!tryCatch.HasTerminated(),
-        Error, "isolate terminated while deserializing value from Durable Object storage; "
-        "contact us if you're wondering why you're seeing this");
+    auto jsException = tryCatch.Exception();
+    if (tryCatch.HasTerminated()) {
+      KJ_LOG(ERROR, "actor storage deserialization failed", errorMsg, jsException,
+          key, buf.size(), buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
+      JSG_FAIL_REQUIRE(Error,
+          "isolate terminated while deserializing value from Durable Object storage; "
+          "contact us if you're wondering why you're seeing this");
+    }
     if (tryCatch.Message().IsEmpty()) {
       // This also should never happen, but check for it because otherwise V8 will crash.
       KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??");
       KJ_FAIL_ASSERT("unexpectedly missing JS exception in actor storage deserialization failure",
           errorMsg, key, buf.size(), buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
     }
-    auto jsException = tryCatch.Exception();
     KJ_FAIL_ASSERT("actor storage deserialization failed", errorMsg, jsException,
         key, buf.size(), buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
   };
