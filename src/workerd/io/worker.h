@@ -412,7 +412,7 @@ private:
 
   void disconnectInspector();
 
-  void logMessage(v8::Local<v8::Context> context, uint16_t type, kj::StringPtr description);
+  void logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description);
   // Log a message as if with console.{log,warn,error,etc}. `type` must be one of the cdp::LogType
   // enum, which unfortunately we cannot forward-declare, ugh.
 
