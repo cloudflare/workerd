@@ -2695,14 +2695,13 @@ kj::Promise<void> Worker::Isolate::attachInspector(
   lockedSelf.impl->inspectorClient.setChannel(*channel);
 
   // Send any queued notifications.
-  {
-    lock.withinHandleScope([&] {
-      for (auto& notification: lockedSelf.impl->queuedNotifications) {
-        channel->sendNotification(kj::mv(notification));
-      }
-      lockedSelf.impl->queuedNotifications.clear();
-    });
-  }
+  lock.withinHandleScope([&] {
+    for (auto& notification: lockedSelf.impl->queuedNotifications) {
+      channel->sendNotification(kj::mv(notification));
+    }
+    lockedSelf.impl->queuedNotifications.clear();
+  });
+
   return channel->messagePump().attach(kj::mv(channel));
 }
 
