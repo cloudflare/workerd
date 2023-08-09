@@ -47,8 +47,9 @@ bool determineIsIntegerType(auto& handle) {
 }
 
 Value createHandle(Lock& js, BackingStore& backingStore) {
-  v8::EscapableHandleScope scope(js.v8Isolate);
-  return js.v8Ref(scope.Escape(backingStore.createHandle(js)));
+  return js.withinHandleScope([&] {
+    return js.v8Ref(backingStore.createHandle(js));
+  });
 }
 
 }  // namespace
