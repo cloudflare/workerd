@@ -216,7 +216,7 @@ public:
   static constexpr int READY_STATE_CLOSING = 2;
   static constexpr int READY_STATE_CLOSED = 3;
 
-  IoOwn<Native> initNative(IoContext& ioContext, kj::WebSocket& ws);
+  IoOwn<Native> initNative(IoContext& ioContext, kj::WebSocket& ws, bool closedOutgoingConn);
   // Creates the Native object when we recreate the WebSocket when waking from hibernation.
 
   struct HibernationPackage {
@@ -226,6 +226,8 @@ public:
     kj::Maybe<kj::String> protocol;
     kj::Maybe<kj::String> extensions;
     kj::Maybe<kj::Array<byte>> serializedAttachment;
+    bool closedOutgoingConnection = false;
+    // True forever once the JS WebSocket calls `close()`.
   };
 
   WebSocket(jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package);
@@ -346,6 +348,7 @@ public:
       .protocol = kj::mv(protocol),
       .extensions = kj::mv(extensions),
       .serializedAttachment = kj::mv(serializedAttachment),
+      .closedOutgoingConnection = closedOutgoingForHib,
     };
   }
 
@@ -443,6 +446,10 @@ private:
   // be assigned to any serializable value. The property will survive hibernation.
   // We have to serialize each time we call the setter so we can determine if the size limit
   // has been breached.
+  bool closedOutgoingForHib = false;
+  // Tracks farNative->closedOutgoing, but we need to access it when we trigger Hibernation so it
+  // cannot be `IoOwn`ed as `farNative` is. This informs the HibernatableWebSocket if we called
+  // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
 
   inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
   // Maximum size of a WebSocket attachment.
