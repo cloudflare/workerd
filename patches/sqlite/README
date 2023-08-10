@@ -1,0 +1,69 @@
+The patches for SQLite are a bit weird due to SQLite's idiosyncratic
+build process.
+
+SQLite comes in two forms. First, there's the "plain" form. It looks a
+lot like a typical open-source C project: there's a bunch of .c and .h
+files, a Makefile, a configure script, and various other files.
+
+Second, there's the "amalgamation". This is all of SQLite combined
+into two .c and two .h files. workerd consumes this form.
+
+workerd has to patch SQLite, hence the patches in this directory.
+Patching the amalgamation is painful. The vast majority of the code is
+in a single 250,000-line .c file. Some pieces of code are duplicated
+in the building of the amalgamation, so both spots need patching.
+SQLite's tests are not included in the amalgamation, so testing an
+amalgamation patch is hard.
+
+Making workerd consume the plain form would also be painful. To build
+the amalgamation, SQLite uses a parser generator, a handful of
+utilities written in C, and a whole lot of tclsh scripts all invoked
+by a Makefile. To build all this from Bazel, we would need to either
+rewrite tens of thousands of lines of TCL or include TCL as a build
+dependency of workerd.
+
+Instead, we have this compromise solution. Each patch in here is
+duplicated: one copy for the plain form and one for the amalgamation.
+Bazel downloads the SQLite amalgamation and patches it.
+
+To update to a new SQLite version, obtain the new SQLite in both plain
+and amalgamated forms. Apply the plain-form patch to SQLite, fixing as
+necessary, and replace the plain-form patch with the fixed version.
+
+Then, use the patched SQLite to build an amalgamation. Diff that
+against the downloaded amalgamation to produce a new amalgamated-form
+patch, and replace the existing amalgamated patch with the new one.
+
+
+Example, assuming the new SQLite has been downloaded into the current
+directory:
+
+$ unzip sqlite-src-$VERSION.zip
+$ mv sqlite-src-$VERSION sqlite-src-pristine
+$ unzip sqlite-src-$VERSION.zip  # yes, again
+$ mv sqlite-src-$VERSION sqlite-src-modified
+$ unzip sqlite-amalgamation-$VERSION.zip
+$ mv sqlite-amalgamation-$VERSION.zip sqlite-amalgamation-pristine
+$ mkdir sqlite-amalgamation-modified
+
+Now patch:
+
+$ cd sqlite-src-modified
+$ patch -p1 < /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
+$ ./configure && make test
+
+Make sure the tests pass. If the patch needed any modification, regenerate it:
+
+$ diff -u5 -r sqlite-src-pristine sqlite-src-modified \
+    | grep -v "Only in sqlite-src-modified" \
+    > /path/to/workerd/patches/sqlite/0001-row-counts-plain.patch
+
+Build the amalagamation and the patch:
+
+$ make sqlite3.c sqlite3.h sqlite3ext.h shell.c
+$ cp shell.c sqlite3.c sqlite3.h sqlite3ext.h ../sqlite-amalgamation-modified/
+$ cd ..
+$ diff -u5 -r sqlite-amalgamation-pristine sqlite-amalgamation-modified \
+    > /path/to/workerd/patches/sqlite/0001-row-counts-amalgamation.patch
+
+Repeat for each patch.

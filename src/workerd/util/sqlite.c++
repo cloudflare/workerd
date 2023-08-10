@@ -760,6 +760,9 @@ SqliteDatabase::Statement SqliteDatabase::prepare(Regulator& regulator, kj::Stri
 SqliteDatabase::Query::Query(SqliteDatabase& db, Regulator& regulator, Statement& statement,
                              kj::ArrayPtr<const ValuePtr> bindings)
     : db(db), regulator(regulator), statement(statement) {
+  // If the statement was used for a previous query, then its row counters contain data from that
+  // query's execution. Reset them to zero.
+  resetRowCounters();
   init(bindings);
 }
 
@@ -826,6 +829,22 @@ void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
       SQLITE_CALL(sqlite3_bind_null(statement, i+1));
     }
   }
+}
+
+uint64_t SqliteDatabase::Query::getRowsRead() {
+  KJ_REQUIRE(statement != nullptr);
+  return sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_READ, 0);
+}
+
+uint64_t SqliteDatabase::Query::getRowsWritten() {
+  KJ_REQUIRE(statement != nullptr);
+  return sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 0);
+}
+
+void SqliteDatabase::Query::resetRowCounters() {
+  KJ_REQUIRE(statement != nullptr);
+  sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_READ, 1);
+  sqlite3_stmt_status(statement, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
 }
 
 void SqliteDatabase::Query::bind(uint i, kj::ArrayPtr<const byte> value) {

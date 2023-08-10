@@ -217,6 +217,10 @@ public:
   ~Query() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Query);
 
+  uint64_t getRowsRead();
+  uint64_t getRowsWritten();
+  // Row IO counters.
+
   bool isDone() { return done; }
   // If true, there are no more rows. (When true, the methods below must not be called.)
 
@@ -292,6 +296,7 @@ private:
   void checkRequirements(size_t size);
 
   void init(kj::ArrayPtr<const ValuePtr> bindings);
+  void resetRowCounters();
 
   void bind(uint column, ValuePtr value);
   void bind(uint column, kj::ArrayPtr<const byte> value);

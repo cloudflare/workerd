@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "sqlite.h"
+#include <cstdint>
 #include <kj/test.h>
 #include <kj/thread.h>
 #include <stdlib.h>
@@ -364,6 +365,257 @@ KJ_TEST("SQLite onWrite callback") {
   )");
   KJ_EXPECT(q.getInt(0) == 3);
   KJ_EXPECT(sawWrite);
+}
+
+struct RowCounts {
+  uint64_t found;
+  uint64_t read;
+  uint64_t written;
+};
+
+template<typename ...Params>
+RowCounts countRowsTouched(SqliteDatabase& db, SqliteDatabase::Regulator& regulator, kj::StringPtr sqlCode, Params... bindParams) {
+  uint64_t rowsFound = 0;
+
+  // Runs a query; retrieves and discards all the data.
+  auto query = db.run(regulator, sqlCode, bindParams...);
+  while (!query.isDone()) {
+    rowsFound++;
+    query.nextRow();
+  }
+
+  return {.found = rowsFound,
+          .read = query.getRowsRead(),
+          .written = query.getRowsWritten()};
+}
+
+template<typename ...Params>
+RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
+  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+}
+
+KJ_TEST("SQLite read row counters (basic)") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY,
+      unindexed_int INTEGER,
+      value TEXT
+    );
+  )");
+
+  constexpr int dbRowCount = 1000;
+  auto insertStmt = db.prepare("INSERT INTO things (id, unindexed_int, value) VALUES (?, ?, ?)");
+  for (int i = 0; i < dbRowCount; i++) {
+    insertStmt.run(i, i * 1000, kj::str("value", i));
+  }
+
+  // Sanity check that the inserts worked.
+  {
+    auto getCount = db.prepare("SELECT COUNT(*) FROM things");
+    KJ_EXPECT(getCount.run().getInt(0) == dbRowCount);
+  }
+
+  // Selecting all the rows reads all the rows.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT * FROM things");
+    KJ_EXPECT(stats.found == dbRowCount);
+    KJ_EXPECT(stats.read == dbRowCount);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting one row using an index reads one row.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT * FROM things WHERE id=?", 5);
+    KJ_EXPECT(stats.found == 1);
+    KJ_EXPECT(stats.read == 1);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting one row using an reads one row, even if that row is in the middle of the table.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT * FROM things WHERE id=?", dbRowCount / 2);
+    KJ_EXPECT(stats.found == 1);
+    KJ_EXPECT(stats.read == 1);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting a row by an unindexed value reads the whole table.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT * FROM things WHERE unindexed_int = ?", 5000);
+    KJ_EXPECT(stats.found == 1);
+    KJ_EXPECT(stats.read == dbRowCount);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting an unindexed aggregate scans all the rows, which counts as reading them.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT MAX(unindexed_int) FROM things");
+    KJ_EXPECT(stats.found == 1);
+    KJ_EXPECT(stats.read == dbRowCount);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting an indexed aggregate can use the index, so it only reads the row it found.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT MIN(id) FROM things");
+    KJ_EXPECT(stats.found == 1);
+    KJ_EXPECT(stats.read == 1);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Selecting with a limit only reads the returned rows.
+  {
+    RowCounts stats = countRowsTouched(db, "SELECT * FROM things LIMIT 5");
+    KJ_EXPECT(stats.found == 5);
+    KJ_EXPECT(stats.read == 5);
+    KJ_EXPECT(stats.written == 0);
+  }
+}
+
+KJ_TEST("SQLite write row counters (basic)") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+  )");
+
+  db.run(R"(
+    CREATE TABLE unindexed_things (
+      id INTEGER
+    );
+  )");
+
+  // Inserting a row counts as one row written.
+  {
+    RowCounts stats = countRowsTouched(db, "INSERT INTO unindexed_things (id) VALUES (?)", 1);
+    KJ_EXPECT(stats.read == 0);
+    KJ_EXPECT(stats.written == 1);
+  }
+
+  // Inserting a row into a table with a primary key will also do a read (to ensure there's no
+  // duplicate PK).
+  {
+    RowCounts stats = countRowsTouched(db, "INSERT INTO things (id) VALUES (?)", 1);
+    KJ_EXPECT(stats.read == 1);
+    KJ_EXPECT(stats.written == 1);
+  }
+
+  // Deleting a row counts as a write.
+  {
+    RowCounts stats = countRowsTouched(db, "INSERT INTO things (id) VALUES (?)", 123);
+    KJ_EXPECT(stats.written == 1);
+
+    stats = countRowsTouched(db, "DELETE FROM things WHERE id=?", 123);
+    KJ_EXPECT(stats.read == 1);
+    KJ_EXPECT(stats.written == 1);
+  }
+
+  // Deleting nothing is not a write.
+  {
+    RowCounts stats = countRowsTouched(db, "DELETE FROM things WHERE id=?", 998877112233);
+    KJ_EXPECT(stats.written == 0);
+  }
+
+  // Inserting many things is many writes.
+  {
+    db.run("DELETE FROM things");
+    db.run("INSERT INTO things (id) VALUES (1)");
+    db.run("INSERT INTO things (id) VALUES (3)");
+    db.run("INSERT INTO things (id) VALUES (5)");
+
+    RowCounts stats = countRowsTouched(db, "INSERT INTO unindexed_things (id) SELECT id FROM things");
+    KJ_EXPECT(stats.read == 3);
+    KJ_EXPECT(stats.written == 3);
+  }
+
+  // Each updated row is a write.
+  {
+    db.run("DELETE FROM unindexed_things");
+    db.run("INSERT INTO unindexed_things (id) VALUES (1)");
+    db.run("INSERT INTO unindexed_things (id) VALUES (2)");
+    db.run("INSERT INTO unindexed_things (id) VALUES (3)");
+    db.run("INSERT INTO unindexed_things (id) VALUES (4)");
+
+    RowCounts stats = countRowsTouched(db, "UPDATE unindexed_things SET id = id * 10 WHERE id >= 3");
+    KJ_EXPECT(stats.written == 2);
+  }
+
+  // On an indexed table, each updated row is two writes. This is probably due to the index update.
+  {
+    db.run("DELETE FROM things");
+    db.run("INSERT INTO things (id) VALUES (1)");
+    db.run("INSERT INTO things (id) VALUES (2)");
+    db.run("INSERT INTO things (id) VALUES (3)");
+    db.run("INSERT INTO things (id) VALUES (4)");
+
+    RowCounts stats = countRowsTouched(db, "UPDATE things SET id = id * 10 WHERE id >= 3");
+    KJ_EXPECT(stats.read >= 4);  // At least one read per updated row
+    KJ_EXPECT(stats.written == 4);
+  }
+}
+
+KJ_TEST("SQLite row counters with triggers") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  class RegulatorImpl: public SqliteDatabase::Regulator {
+  public:
+    RegulatorImpl() = default;
+
+    bool isAllowedTrigger(kj::StringPtr name) override {
+      // SqliteDatabase::TRUSTED doesn't let us use triggers at all.
+      return true;
+    }
+  };
+
+  RegulatorImpl regulator;
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+
+    CREATE TABLE log (
+      id INTEGER,
+      verb TEXT
+    );
+
+    CREATE TRIGGER log_inserts AFTER INSERT ON things
+    BEGIN
+      insert into log (id, verb) VALUES (NEW.id, "INSERT");
+    END;
+
+    CREATE TRIGGER log_deletes AFTER DELETE ON things
+    BEGIN
+      insert into log (id, verb) VALUES (OLD.id, "DELETE");
+    END;
+  )");
+
+  // Each insert incurs two writes: one for the row in `things` and one for the row in `log`.
+  {
+    RowCounts stats = countRowsTouched(db, regulator, "INSERT INTO things (id) VALUES (1)");
+    KJ_EXPECT(stats.written == 2);
+  }
+
+  // A deletion incurs two writes: one for the row and one for the log.
+  {
+    db.run(regulator, "DELETE FROM things");
+    db.run(regulator, "INSERT INTO things (id) VALUES (1)");
+    db.run(regulator, "INSERT INTO things (id) VALUES (2)");
+    db.run(regulator, "INSERT INTO things (id) VALUES (3)");
+
+    RowCounts stats = countRowsTouched(db, regulator, "DELETE FROM things");
+    KJ_EXPECT(stats.written == 6);
+  }
 }
 
 }  // namespace

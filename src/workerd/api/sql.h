@@ -97,11 +97,16 @@ public:
         cachedColumnNames(cachedColumnNames) {}
   ~Cursor() noexcept(false);
 
+  double getRowsRead();
+  double getRowsWritten();
+
   kj::Array<jsg::V8Ref<v8::String>> getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
     JSG_READONLY_PROTOTYPE_PROPERTY(columnNames, getColumnNames);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsRead, getRowsRead);
+    JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
   }
 
 
@@ -163,6 +168,11 @@ private:
 
   kj::Maybe<jsg::Ref<Statement>> statement;
   // If this cursor was created from a prepared statement, this keeps the statement object alive.
+
+  uint64_t rowsRead = 0;
+  uint64_t rowsWritten = 0;
+  // Row IO counts. These are updated as the query runs. We keep these outside the State so they
+  // remain available even after the query is done or canceled.
 
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
