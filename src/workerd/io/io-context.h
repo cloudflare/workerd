@@ -1416,14 +1416,14 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
 
   auto errorHandler =
       [fulfiller = addObject(kj::addRef(*fulfiller))]
-      (jsg::Lock&, jsg::Value jsExceptionRef) mutable {
+      (jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
     // Note: `context` can possibly be different than the one that started the wait, if the
     // promise resolved from a different context. In that case the use of `fulfiller` will
     // throw later on. But it's OK to use the wrong context up until that point.
     auto& context = IoContext::current();
 
     auto isolate = context.getCurrentLock().getIsolate();
-    auto jsException = jsExceptionRef.getHandle(isolate);
+    auto jsException = jsExceptionRef.getHandle(js);
 
     // TODO(someday): We log an "uncaught exception" here whenever a promise returned from JS to
     //   C++ rejects. However, the C++ code waiting on the promise may do its own logging (e.g.

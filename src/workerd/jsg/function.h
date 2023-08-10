@@ -155,8 +155,8 @@ public:
         return (*native)(jsl, kj::fwd<Args>(args)...);
       }
       KJ_CASE_ONEOF(js, JsImpl) {
-        return (*js.wrapper)(jsl, js.receiver.getHandle(jsl.v8Isolate),
-                             js.handle.getHandle(jsl.v8Isolate), kj::fwd<Args>(args)...);
+        return (*js.wrapper)(jsl, js.receiver.getHandle(jsl),
+                             js.handle.getHandle(jsl), kj::fwd<Args>(args)...);
       }
     }
     __builtin_unreachable();

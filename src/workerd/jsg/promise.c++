@@ -95,7 +95,7 @@ void UnhandledRejectionHandler::rejectedWithNoHandler(
     jsg::Lock& js,
     jsg::V8Ref<v8::Promise> promise,
     jsg::V8Ref<v8::Value> value) {
-  auto message = v8::Exception::CreateMessage(js.v8Isolate, value.getHandle(js.v8Isolate));
+  auto message = v8::Exception::CreateMessage(js.v8Isolate, value.getHandle(js));
 
   // It's not yet clear under what conditions it happens, but this can be called
   // twice with the same promise. It really shouldn't happen in the regular cases

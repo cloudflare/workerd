@@ -707,7 +707,7 @@ struct Worker::Isolate::Impl {
       lock->withinHandleScope([&] {
         context->clear();
         KJ_IF_MAYBE(i, impl.inspector) {
-          i->get()->contextDestroyed(context.getHandle(lock->v8Isolate));
+          i->get()->contextDestroyed(context.getHandle(*lock));
         }
         { auto drop = kj::mv(context); }
         lock->v8Isolate->ContextDisposedNotification(false);
@@ -1213,7 +1213,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
       // Modules can't be compiled for multiple contexts. We need to create the real context now.
       auto& mContext = impl->moduleContext.emplace(isolate->apiIsolate->newContext(lock));
       mContext->enableWarningOnSpecialEvents();
-      context = mContext.getHandle(lock.v8Isolate);
+      context = mContext.getHandle(lock);
       recordedLock.setupContext(context);
     } else {
       // Although we're going to compile a script independent of context, V8 requires that there be
@@ -1424,7 +1424,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       jsContext = &this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock));
     }
 
-    v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock.v8Isolate);
+    v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
     if (!script->modular) {
       recordedLock.setupContext(context);
     }
@@ -1716,9 +1716,9 @@ v8::Isolate* Worker::Lock::getIsolate() {
 
 v8::Local<v8::Context> Worker::Lock::getContext() {
   KJ_IF_MAYBE(c, worker.impl->context) {
-    return c->getHandle(impl->inner.v8Isolate);
+    return c->getHandle(impl->inner);
   } else KJ_IF_MAYBE(c, const_cast<Script&>(*worker.script).impl->moduleContext) {
-    return c->getHandle(impl->inner.v8Isolate);
+    return c->getHandle(impl->inner);
   } else {
     KJ_UNREACHABLE;
   }

@@ -433,7 +433,7 @@ jsg::Ref<QueueEvent> startQueueEvent(
 
   KJ_IF_MAYBE(h, exportedHandler) {
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(
-        lock, h->self.getHandle(lock.getIsolate())));
+        lock, h->self.getHandle(lock)));
     KJ_IF_MAYBE(f, queueHandler.queue) {
       auto promise = (*f)(lock, jsg::alloc<QueueController>(event.addRef()),
                           h->env.addRef(js), h->getCtx());

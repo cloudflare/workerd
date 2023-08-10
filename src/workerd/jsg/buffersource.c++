@@ -120,7 +120,7 @@ BackingStore BufferSource::detach(Lock& js) {
 
 bool BufferSource::canDetach(Lock& js) {
   if (isDetached()) return false;
-  return isDetachable(handle.getHandle(js.v8Isolate));
+  return isDetachable(handle.getHandle(js));
 }
 
 v8::Local<v8::Value> BufferSource::getHandle(Lock& js) {

@@ -1406,6 +1406,7 @@ public:
   v8::Local<v8::Context> getHandle(v8::Isolate* isolate) {
     return handle.Get(isolate);
   }
+  v8::Local<v8::Context> getHandle(Lock& js);
 
 private:
   v8::Global<v8::Context> handle;
@@ -2130,7 +2131,7 @@ inline v8::Local<v8::Value> Lock::v8Null() {
 }
 
 inline Data Data::addRef(jsg::Lock& js) {
-  return Data(js.v8Isolate, getHandle(js.v8Isolate));
+  return Data(js.v8Isolate, getHandle(js));
 }
 
 template <typename T>
@@ -2140,7 +2141,7 @@ kj::Maybe<v8::Local<v8::Object>> Ref<T>::tryGetHandle(Lock& js) {
 
 template <typename T>
 inline V8Ref<T> V8Ref<T>::addRef(jsg::Lock& js) {
-  return js.v8Ref(getHandle(js.v8Isolate));
+  return js.v8Ref(getHandle(js));
 }
 
 v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
@@ -2154,7 +2155,7 @@ V8Ref<T> V8Ref<T>::deepClone(jsg::Lock& js) {
 
 template <typename T>
 inline HashableV8Ref<T> HashableV8Ref<T>::addRef(jsg::Lock& js) {
-  return HashableV8Ref(js.v8Isolate, this->getHandle(js.v8Isolate), identityHash);
+  return HashableV8Ref(js.v8Isolate, this->getHandle(js), identityHash);
 }
 
 template <typename  T>
@@ -2164,6 +2165,11 @@ inline v8::Local<T> V8Ref<T>::getHandle(jsg::Lock& js) {
 
 inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) {
   return getHandle(js.v8Isolate);
+}
+
+template <typename T>
+inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
+  return handle.Get(js.v8Isolate);
 }
 
 }  // namespace workerd::jsg

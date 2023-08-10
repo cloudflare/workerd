@@ -96,7 +96,7 @@ KJ_TEST("AES-CTR key wrap") {
   auto isolate = isolateLock.v8Isolate;
 
   isolateLock.withinHandleScope([&] {
-    auto context = isolateLock.newContext<CryptoContext>().getHandle(isolate);
+    auto context = isolateLock.newContext<CryptoContext>().getHandle(isolateLock);
     auto contextScope = isolateLock.enterContextScope(context);
 
     auto& js = jsg::Lock::from(isolate);

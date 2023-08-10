@@ -3669,7 +3669,7 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     };
 
     auto promise = write(js, result.value.map([&](jsg::Value& value) {
-      return value.getHandle(js.v8Isolate);
+      return value.getHandle(js);
     }));
 
     return maybeAddFunctor(js, kj::mv(promise), kj::mv(onSuccess), kj::mv(onFailure));

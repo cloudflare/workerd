@@ -70,7 +70,7 @@ KJ_TEST("configuration values reach nested type declarations") {
     V8StackScope stackScope;
     ConfigIsolate::Lock lock(isolate, stackScope);
     v8::HandleScope handleScope(lock.v8Isolate);
-    lock.newContext<ConfigContext>().getHandle(lock.v8Isolate);
+    lock.newContext<ConfigContext>().getHandle(lock);
   }
   {
     KJ_EXPECT_LOG(ERROR, "failed: expected configuration == 123");
@@ -79,7 +79,7 @@ KJ_TEST("configuration values reach nested type declarations") {
     V8StackScope stackScope;
     ConfigIsolate::Lock lock(isolate, stackScope);
     v8::HandleScope handleScope(lock.v8Isolate);
-    lock.newContext<ConfigContext>().getHandle(lock.v8Isolate);
+    lock.newContext<ConfigContext>().getHandle(lock);
   }
 }
 

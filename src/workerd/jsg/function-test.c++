@@ -197,7 +197,7 @@ struct FunctionContext: public ContextGlobalObject {
     return js.tryCatch([&]() {
       return kj::str(thrower(js));
     }, [&](Value exception) {
-      auto handle = exception.getHandle(js.v8Isolate);
+      auto handle = exception.getHandle(js);
       return kj::str("caught: ", handle);
     });
   }

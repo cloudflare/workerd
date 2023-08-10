@@ -37,12 +37,12 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
   void catchIt(jsg::Lock& js, Promise<int> promise) {
     promise.catch_(js, [](jsg::Lock& js, Value value) -> int {
-      JSG_FAIL_REQUIRE(Error, kj::str(value.getHandle(js.v8Isolate)));
+      JSG_FAIL_REQUIRE(Error, kj::str(value.getHandle(js)));
     }).then(js, [](jsg::Lock& js, int i) {
       KJ_FAIL_REQUIRE("shouldn't get here");
       return kj::str("nope");
     }, [](jsg::Lock& js, Value value) {
-      return kj::str(value.getHandle(js.v8Isolate));
+      return kj::str(value.getHandle(js));
     }).then(js, [](jsg::Lock&, kj::String s) {
       catchTestResult = kj::mv(s);
     });
