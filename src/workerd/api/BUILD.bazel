@@ -1,6 +1,7 @@
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_test.bzl", "wd_test")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 
 filegroup(
     name = "srcs",
@@ -9,6 +10,7 @@ filegroup(
             ["**/*.c++"],
             exclude = [
                 "**/*test*.c++",
+                "bench-json.c++",
             ],
         ),
         "//conditions:default": glob(
@@ -16,6 +18,7 @@ filegroup(
             exclude = [
                 "**/*test*.c++",
                 "gpu/*.c++",
+                "bench-json.c++",
             ],
         ),
     }),
@@ -79,3 +82,11 @@ kj_test(
 ) for f in glob(
     ["**/*.wd-test"],
 )]
+
+# Use `bazel run //src/workerd/api:bench-json` to benchmark
+wd_cc_benchmark(
+    name = "bench-json",
+    srcs = ["bench-json.c++"],
+    # TODO: Make this a smaller dependency
+    deps = ["//src/workerd/jsg", "r2-api_capnp"],
+)
