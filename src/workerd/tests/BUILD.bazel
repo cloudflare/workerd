@@ -1,5 +1,16 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+
+wd_cc_library(
+    name = "bench-tools",
+    hdrs = ["bench-tools.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj:kj-test",
+         "@com_google_benchmark//:benchmark",
+    ],
+)
 
 wd_cc_library(
     name = "test-fixture",
@@ -16,4 +27,14 @@ wd_cc_library(
 kj_test(
     src = "test-fixture-test.c++",
     deps = [":test-fixture"],
+)
+
+# Use `bazel run //src/workerd/tests:bench-json` to benchmark
+wd_cc_benchmark(
+    name = "bench-json",
+    srcs = ["bench-json.c++"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "//src/workerd/api:r2-api_capnp",
+    ],
 )

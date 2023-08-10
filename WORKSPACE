@@ -59,6 +59,13 @@ http_archive(
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.23.1/rules_python-0.23.1.tar.gz",
 )
 
+http_archive(
+    name = "com_google_benchmark",
+    sha256 = "2aab2980d0376137f969d92848fbb68216abb07633034534fc8c65cc4e7a0e93",
+    strip_prefix = "benchmark-1.8.2",
+    url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.2.tar.gz",
+)
+
 # Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
 # release version later.
 http_archive(

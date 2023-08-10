@@ -7,6 +7,7 @@
 -Ibazel-bin/external/com_googlesource_chromium_base_trace_event_common/_virtual_includes/trace_event_common
 -Ibazel-bin/external/dawn/include
 -Iexternal/capnp-cpp/src
+-Iexternal/com_google_benchmark/include/
 -Iexternal/dawn/include
 -Isrc
 -isystem/usr/include
