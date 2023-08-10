@@ -25,9 +25,15 @@ kj::StringPtr KJ_STRINGIFY(const WebSocket::NativeState& state) {
   KJ_UNREACHABLE;
 }
 
-IoOwn<WebSocket::Native> WebSocket::initNative(IoContext& ioContext, kj::WebSocket& ws) {
+IoOwn<WebSocket::Native> WebSocket::initNative(
+    IoContext& ioContext,
+    kj::WebSocket& ws,
+    bool closedOutgoingConn) {
   auto nativeObj = kj::heap<Native>();
   nativeObj->state.init<Accepted>(Accepted::Hibernatable{.ws = ws}, *nativeObj, ioContext);
+  // We might have called `close()` when this WebSocket was previously active.
+  // If so, we want to prevent any future calls to `send()`.
+  nativeObj->closedOutgoing = closedOutgoingConn;
   return ioContext.addObject(kj::mv(nativeObj));
 }
 
@@ -39,7 +45,7 @@ WebSocket::WebSocket(jsg::Lock& js,
       protocol(kj::mv(package.protocol)),
       extensions(kj::mv(package.extensions)),
       serializedAttachment(kj::mv(package.serializedAttachment)),
-      farNative(initNative(ioContext, ws)),
+      farNative(initNative(ioContext, ws, package.closedOutgoingConnection)),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
       locality(LOCAL) {}
   // This constructor is used when reinstantiating a websocket that had been hibernating, which is
@@ -577,6 +583,7 @@ void WebSocket::close(
   });
 
   native.closedOutgoing = true;
+  closedOutgoingForHib = true;
   ensurePumping(js);
 }
 
