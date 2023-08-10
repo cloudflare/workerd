@@ -30,6 +30,7 @@ using GPUBufferDynamicOffset = uint32_t;
 using GPUPowerPreference = kj::String;
 using GPUErrorFilter = kj::String;
 using GPUDeviceLostReason = kj::String;
+using GPUCompilationMessageType = kj::String;
 
 struct GPUMapMode : public jsg::Object {
   static constexpr GPUFlagsConstant READ = 0x0001;
@@ -79,7 +80,7 @@ struct GPUBufferUsage : public jsg::Object {
   };
 };
 
-wgpu::FeatureName parseFeatureName(GPUFeatureName &);
-kj::Maybe<GPUFeatureName> getFeatureName(wgpu::FeatureName &feature);
+wgpu::FeatureName parseFeatureName(GPUFeatureName&);
+kj::Maybe<GPUFeatureName> getFeatureName(wgpu::FeatureName& feature);
 
 } // namespace workerd::api::gpu

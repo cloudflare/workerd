@@ -24,7 +24,7 @@ export const read_sync_stack = {
     ok(adapter.features.has("depth-clip-control"));
 
     ok(adapter.limits);
-    ok(adapter.limits.maxBufferSize)
+    ok(adapter.limits.maxBufferSize);
 
     const requiredFeatures = [];
     requiredFeatures.push("texture-compression-astc");
@@ -40,8 +40,8 @@ export const read_sync_stack = {
       2 /* rows */, 4 /* columns */, 1, 2, 3, 4, 5, 6, 7, 8,
     ]);
 
-    device.pushErrorScope('out-of-memory');
-    device.pushErrorScope('validation');
+    device.pushErrorScope("out-of-memory");
+    device.pushErrorScope("validation");
 
     const gpuBufferFirstMatrix = device.createBuffer({
       mappedAtCreation: true,
@@ -50,7 +50,7 @@ export const read_sync_stack = {
     });
     ok(gpuBufferFirstMatrix);
 
-    ok(await device.popErrorScope() === null);
+    ok((await device.popErrorScope()) === null);
 
     const arrayBufferFirstMatrix = gpuBufferFirstMatrix.getMappedRange();
     ok(arrayBufferFirstMatrix);
@@ -173,6 +173,9 @@ export const read_sync_stack = {
     `,
     });
     ok(shaderModule);
+
+    const compilationInfo = await shaderModule.getCompilationInfo();
+    ok(compilationInfo.messages.length == 0);
 
     // Pipeline setup
     const computePipeline = device.createComputePipeline({
