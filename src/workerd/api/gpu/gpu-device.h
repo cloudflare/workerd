@@ -19,15 +19,17 @@
 #include "workerd/jsg/promise.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
+#include <workerd/api/basics.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
 
-class GPUDevice : public jsg::Object {
+class GPUDevice : public EventTarget {
 public:
   explicit GPUDevice(jsg::Lock& js, wgpu::Device d);
   ~GPUDevice();
   JSG_RESOURCE_TYPE(GPUDevice) {
+    JSG_INHERIT(EventTarget);
     JSG_METHOD(createBuffer);
     JSG_METHOD(createBindGroupLayout);
     JSG_METHOD(createBindGroup);
@@ -44,25 +46,23 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(lost, getLost);
   }
 
+  // The GPUDevice explicitly does not expose a constructor(). It is
+  // illegal for user code to create an GPUDevice directly.
+  static jsg::Ref<GPUDevice> constructor() = delete;
+
 private:
   wgpu::Device device_;
-  jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>
-      lost_promise_;
-  kj::Own<kj::PromiseFulfiller<jsg::Ref<GPUDeviceLostInfo>>>
-      lost_promise_fulfiller_;
+  jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>> lost_promise_;
+  kj::Own<kj::PromiseFulfiller<jsg::Ref<GPUDeviceLostInfo>>> lost_promise_fulfiller_;
   kj::Own<AsyncRunner> async_;
   bool destroyed_ = false;
   jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);
-  jsg::Ref<GPUBindGroupLayout>
-  createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
+  jsg::Ref<GPUBindGroupLayout> createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
   jsg::Ref<GPUBindGroup> createBindGroup(GPUBindGroupDescriptor descriptor);
   jsg::Ref<GPUSampler> createSampler(GPUSamplerDescriptor descriptor);
-  jsg::Ref<GPUShaderModule>
-  createShaderModule(GPUShaderModuleDescriptor descriptor);
-  jsg::Ref<GPUPipelineLayout>
-  createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
-  jsg::Ref<GPUComputePipeline>
-  createComputePipeline(GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPUShaderModule> createShaderModule(GPUShaderModuleDescriptor descriptor);
+  jsg::Ref<GPUPipelineLayout> createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
+  jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
   jsg::Promise<jsg::Ref<GPUComputePipeline>>
   createComputePipelineAsync(GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPUCommandEncoder>
@@ -88,6 +88,35 @@ struct GPUDeviceDescriptor {
   jsg::Optional<GPUQueueDescriptor> defaultQueue;
 
   JSG_STRUCT(label, requiredFeatures, requiredLimits, defaultQueue);
+};
+
+struct GPUUncapturedErrorEventInit {
+  jsg::Ref<GPUError> error;
+  JSG_STRUCT(error);
+};
+
+class GPUUncapturedErrorEvent : public Event {
+public:
+  GPUUncapturedErrorEvent(kj::StringPtr type,
+                          GPUUncapturedErrorEventInit gpuUncapturedErrorEventInitDict)
+      : Event(kj::mv(type)), error_(kj::mv(gpuUncapturedErrorEventInitDict.error)){};
+
+  static jsg::Ref<GPUUncapturedErrorEvent> constructor() = delete;
+
+  JSG_RESOURCE_TYPE(GPUUncapturedErrorEvent) {
+    JSG_INHERIT(Event);
+    JSG_READONLY_INSTANCE_PROPERTY(error, getError);
+  }
+
+private:
+  jsg::Ref<GPUError> error_;
+
+  jsg::Ref<GPUError> getError() {
+    return error_.addRef();
+  }
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(error_);
+  }
 };
 
 } // namespace workerd::api::gpu

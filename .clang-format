@@ -7,3 +7,4 @@ WhitespaceSensitiveMacros:
   - JSG_STRUCT_TS_DEFINE
 PointerAlignment: Left
 ColumnLimit: 100
+AllowShortFunctionsOnASingleLine: Empty

@@ -48,32 +48,26 @@ private:
   dawn::native::Instance instance_;
 };
 
-#define EW_WEBGPU_ISOLATE_TYPES                                                \
-  api::gpu::GPU, api::gpu::GPUAdapter, api::gpu::GPUDevice,                    \
-      api::gpu::GPUDeviceDescriptor, api::gpu::GPUBufferDescriptor,            \
-      api::gpu::GPUQueueDescriptor, api::gpu::GPUBufferUsage,                  \
-      api::gpu::GPUBuffer, api::gpu::GPUShaderStage,                           \
-      api::gpu::GPUBindGroupLayoutDescriptor,                                  \
-      api::gpu::GPUBindGroupLayoutEntry,                                       \
-      api::gpu::GPUStorageTextureBindingLayout,                                \
-      api::gpu::GPUTextureBindingLayout, api::gpu::GPUSamplerBindingLayout,    \
-      api::gpu::GPUBufferBindingLayout, api::gpu::GPUBindGroupLayout,          \
-      api::gpu::GPUBindGroup, api::gpu::GPUBindGroupDescriptor,                \
-      api::gpu::GPUBindGroupEntry, api::gpu::GPUBufferBinding,                 \
-      api::gpu::GPUSampler, api::gpu::GPUSamplerDescriptor,                    \
-      api::gpu::GPUShaderModule, api::gpu::GPUShaderModuleDescriptor,          \
-      api::gpu::GPUPipelineLayout, api::gpu::GPUPipelineLayoutDescriptor,      \
-      api::gpu::GPUComputePipeline, api::gpu::GPUComputePipelineDescriptor,    \
-      api::gpu::GPUProgrammableStage, api::gpu::GPUCommandEncoder,             \
-      api::gpu::GPUCommandEncoderDescriptor, api::gpu::GPUComputePassEncoder,  \
-      api::gpu::GPUComputePassDescriptor, api::gpu::GPUQuerySet,               \
-      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite, \
-      api::gpu::GPUCommandBufferDescriptor, api::gpu::GPUCommandBuffer,        \
-      api::gpu::GPUQueue, api::gpu::GPUMapMode,                                \
-      api::gpu::GPURequestAdapterOptions, api::gpu::GPUAdapterInfo,            \
-      api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits,            \
-      api::gpu::GPUError, api::gpu::GPUOOMError, api::gpu::GPUValidationError, \
-      api::gpu::GPUDeviceLostInfo, api::gpu::GPUCompilationMessage,            \
-      api::gpu::GPUCompilationInfo
+#define EW_WEBGPU_ISOLATE_TYPES                                                                    \
+  api::gpu::GPU, api::gpu::GPUAdapter, api::gpu::GPUDevice, api::gpu::GPUDeviceDescriptor,         \
+      api::gpu::GPUBufferDescriptor, api::gpu::GPUQueueDescriptor, api::gpu::GPUBufferUsage,       \
+      api::gpu::GPUBuffer, api::gpu::GPUShaderStage, api::gpu::GPUBindGroupLayoutDescriptor,       \
+      api::gpu::GPUBindGroupLayoutEntry, api::gpu::GPUStorageTextureBindingLayout,                 \
+      api::gpu::GPUTextureBindingLayout, api::gpu::GPUSamplerBindingLayout,                        \
+      api::gpu::GPUBufferBindingLayout, api::gpu::GPUBindGroupLayout, api::gpu::GPUBindGroup,      \
+      api::gpu::GPUBindGroupDescriptor, api::gpu::GPUBindGroupEntry, api::gpu::GPUBufferBinding,   \
+      api::gpu::GPUSampler, api::gpu::GPUSamplerDescriptor, api::gpu::GPUShaderModule,             \
+      api::gpu::GPUShaderModuleDescriptor, api::gpu::GPUPipelineLayout,                            \
+      api::gpu::GPUPipelineLayoutDescriptor, api::gpu::GPUComputePipeline,                         \
+      api::gpu::GPUComputePipelineDescriptor, api::gpu::GPUProgrammableStage,                      \
+      api::gpu::GPUCommandEncoder, api::gpu::GPUCommandEncoderDescriptor,                          \
+      api::gpu::GPUComputePassEncoder, api::gpu::GPUComputePassDescriptor, api::gpu::GPUQuerySet,  \
+      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite,                     \
+      api::gpu::GPUCommandBufferDescriptor, api::gpu::GPUCommandBuffer, api::gpu::GPUQueue,        \
+      api::gpu::GPUMapMode, api::gpu::GPURequestAdapterOptions, api::gpu::GPUAdapterInfo,          \
+      api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits, api::gpu::GPUError,            \
+      api::gpu::GPUOutOfMemoryError, api::gpu::GPUInternalError, api::gpu::GPUValidationError,     \
+      api::gpu::GPUDeviceLostInfo, api::gpu::GPUCompilationMessage, api::gpu::GPUCompilationInfo,  \
+      api::gpu::GPUUncapturedErrorEvent, api::gpu::GPUUncapturedErrorEventInit
 
 }; // namespace workerd::api::gpu

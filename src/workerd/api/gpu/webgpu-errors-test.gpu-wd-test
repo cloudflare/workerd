@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "webgpu-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "webgpu-errors-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      )
+    ),
+  ],
+);
