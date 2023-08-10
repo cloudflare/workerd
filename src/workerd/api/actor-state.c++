@@ -915,59 +915,45 @@ v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
                                         kj::ArrayPtr<const char> key,
                                         kj::ArrayPtr<const kj::byte> buf) {
 
-  v8::TryCatch tryCatch(js.v8Isolate);
+  KJ_ASSERT(buf.size() > 0, "unexpectedly empty value buffer", key);
+  try {
+    // The js.tryCatch will handle the normal exception path. We wrap this in an
+    // additional try/catch in case the js.tryCatch hits an exception that is
+    // terminal for the isolate, causing exception to be rethrown, in which case
+    // we throw a kj::Exception wrapping a jsg.Error.
+    return js.tryCatch([&]() -> v8::Local<v8::Value> {
+      jsg::Deserializer::Options options {};
+      if (buf[0] != 0xFF) {
+        // When Durable Objects was first released, it did not properly write headers when serializing
+        // to storage. If we find that the header is missing (as indicated by the first byte not being
+        // 0xFF), it's safe to assume that the data was written at the only serialization version we
+        // used during that early time period, so we explicitly set that version here.
+        options.version = 13;
+        options.readHeader = false;
+      }
 
-  // We explicitly check and assert on the results of v8 method calls instead of using jsg::check so
-  // that it will be logged, since exceptions thrown by v8 are typically not logged but we obviously
-  // really want to know about any potential data corruption issues. We use v8::TryCatch so that we
-  // can access the error message from v8 and include it in our log message.
-  //
-  // If we do hit a deserialization error, we log information that will be helpful in understanding
-  // the problem but that won't leak too much about the customer's data. We include the key (to help
-  // find the data in the database if it hasn't been deleted), the length of the value, and the
-  // first three bytes of the value (which is just the v8-internal version header and the tag that
-  // indicates the type of the value, but not its contents).
-  auto handleV8Exception = [&](kj::StringPtr errorMsg) {
+      jsg::Deserializer deserializer(js, buf, nullptr, nullptr, options);
+
+      return deserializer.readValue();
+    }, [&](jsg::Value&& exception) mutable -> v8::Local<v8::Value> {
+      // If we do hit a deserialization error, we log information that will be helpful in
+      // understanding the problem but that won't leak too much about the customer's data. We
+      // include the key (to help find the data in the database if it hasn't been deleted), the
+      // length of the value, and the first three bytes of the value (which is just the v8-internal
+      // version header and the tag that indicates the type of the value, but not its contents).
+      KJ_FAIL_ASSERT("actor storage deserialization failed",
+                     "failed to deserialize stored value",
+                     exception.getHandle(js), key, buf.size(),
+                     buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
+    });
+  } catch (jsg::JsExceptionThrown&) {
     // We can occasionally hit an isolate termination here -- we prefix the error with jsg to avoid
     // counting it against our internal storage error metrics but also throw a KJ exception rather
     // than a jsExceptionThrown error to avoid confusing the normal termination handling code.
     // We don't expect users to ever actually see this error.
-    JSG_REQUIRE(!tryCatch.HasTerminated(),
-        Error, "isolate terminated while deserializing value from Durable Object storage; "
-        "contact us if you're wondering why you're seeing this");
-    if (tryCatch.Message().IsEmpty()) {
-      // This also should never happen, but check for it because otherwise V8 will crash.
-      KJ_LOG(ERROR, "tryCatch.Message() was empty even when not HasTerminated()??");
-      KJ_FAIL_ASSERT("unexpectedly missing JS exception in actor storage deserialization failure",
-          errorMsg, key, buf.size(), buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
-    }
-    auto jsException = tryCatch.Exception();
-    KJ_FAIL_ASSERT("actor storage deserialization failed", errorMsg, jsException,
-        key, buf.size(), buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
-  };
-
-  KJ_ASSERT(buf.size() > 0, "unexpectedly empty value buffer", key);
-
-  jsg::Deserializer::Options options {};
-  if (buf[0] != 0xFF) {
-    // When Durable Objects was first released, it did not properly write headers when serializing
-    // to storage. If we find that the header is missing (as indicated by the first byte not being
-    // 0xFF), it's safe to assume that the data was written at the only serialization version we
-    // used during that early time period, so we explicitly set that version here.
-    options.version = 13;
-    options.readHeader = false;
+    JSG_FAIL_REQUIRE(Error, "isolate terminated while deserializing value from Durable Object "
+                            "storage; contact us if you're wondering why you're seeing this");
   }
-
-  jsg::Deserializer deserializer(js, buf, nullptr, nullptr, options);
-
-  v8::Local<v8::Value> value;
-  try {
-    value = deserializer.readValue();
-  } catch (jsg::JsExceptionThrown&) {
-    KJ_ASSERT(tryCatch.HasCaught());
-    handleV8Exception("failed to deserialize stored value");
-  }
-  return value;
 }
 
 }  // namespace workerd::api

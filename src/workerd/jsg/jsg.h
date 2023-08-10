@@ -1879,7 +1879,9 @@ public:
         // same as if `CanContinue()` returned false.
         // TODO(cleanup): Do more investigation, maybe explicitly check for the termination
         // flag or arrange to maintain our own separate termination flag to avoid confusion.
-        if (!tryCatch.CanContinue() || !tryCatch.HasCaught()) {
+        if (!tryCatch.CanContinue() ||
+            !tryCatch.HasCaught() ||
+            tryCatch.Exception().IsEmpty()) {
           throw;
         }
 
