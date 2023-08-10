@@ -190,7 +190,7 @@ public:
   };
 
   virtual kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint, ActorGetMode mode) = 0;
+      kj::Maybe<kj::String> locationHint, ActorGetMode mode, SpanParent parentSpan) = 0;
   // Get an actor stub from the given namespace for the actor with the given ID.
   //
   // `id` must have been constructed using one of the `ActorIdFactory` instances corresponding to
@@ -198,7 +198,8 @@ public:
   // `ActorIdFactory` -- if it's from some other factory, the method will throw an appropriate
   // exception.
 
-  virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id) = 0;
+  virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id,
+      SpanParent parentSpan) = 0;
   // Get an actor stub from the given namespace for the actor with the given name.
 };
 
