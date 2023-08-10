@@ -271,13 +271,13 @@ jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::St
   auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
 
   if (type == IncomingQueueMessage::ContentType::TEXT) {
-    return jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, body.asChars()));
+    return js.v8Ref(jsg::v8Str(js.v8Isolate, body.asChars()).As<v8::Value>());
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(body)));
+    return js.v8Ref(js.wrapBytes(kj::mv(body)).As<v8::Value>());
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    return js.parseJson(jsg::v8Str(js.v8Isolate, body.asChars()));
+    return js.parseJson(body.asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::Value(js.v8Isolate, jsg::Deserializer(js, body.asPtr()).readValue());
+    return js.v8Ref(jsg::Deserializer(js, body.asPtr()).readValue());
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }
@@ -291,14 +291,14 @@ jsg::Value deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   }
 
   if (type == IncomingQueueMessage::ContentType::TEXT) {
-    return jsg::Value(js.v8Isolate, jsg::v8Str(js.v8Isolate, message.getData().asChars()));
+    return js.v8Ref(jsg::v8Str(js.v8Isolate, message.getData().asChars()).As<v8::Value>());
   } else if (type == IncomingQueueMessage::ContentType::BYTES) {
     kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
-    return jsg::Value(js.v8Isolate, js.wrapBytes(kj::mv(bytes)));
+    return js.v8Ref(js.wrapBytes(kj::mv(bytes)).As<v8::Value>());
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    return js.parseJson(jsg::v8Str(js.v8Isolate, message.getData().asChars()));
+    return js.parseJson(message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::Value(js.v8Isolate, jsg::Deserializer(js, message.getData()).readValue());
+    return js.v8Ref(jsg::Deserializer(js, message.getData()).readValue());
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }

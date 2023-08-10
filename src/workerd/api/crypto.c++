@@ -505,7 +505,6 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js, kj::Str
     const jsg::TypeHandler<JsonWebKey>& jwkHandler) {
   auto operation = __func__;
   return js.evalNow([&]() -> jsg::Ref<CryptoKey> {
-    auto isolate = js.v8Isolate;
     auto normalizedAlgorithm = interpretAlgorithmParam(kj::mv(unwrapAlgorithm));
     auto normalizedUnwrapAlgorithm = interpretAlgorithmParam(kj::mv(unwrappedKeyAlgorithm));
 
@@ -522,7 +521,7 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::unwrapKey(jsg::Lock& js, kj::Str
     ImportKeyData importData;
 
     if (format == "jwk") {
-      auto jwkDict = js.parseJson(jsg::v8Str(isolate, bytes.asChars()));
+      auto jwkDict = js.parseJson(bytes.asChars());
 
       importData = JSG_REQUIRE_NONNULL(jwkHandler.tryUnwrap(js, jwkDict.getHandle(js)),
           DOMDataError, "Missing \"kty\" field or corrupt JSON unwrapping key?");

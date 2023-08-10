@@ -95,7 +95,7 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     }
 
     ListResult result {
-      .buckets = jsg::Value(js.v8Isolate, kj::mv(buckets)),
+      .buckets = js.v8Ref(buckets.As<v8::Value>()),
       .truncated = responseBuilder.getTruncated(),
     };
     if (responseBuilder.hasCursor()) {

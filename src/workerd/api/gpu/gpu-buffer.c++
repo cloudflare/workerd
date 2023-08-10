@@ -13,7 +13,7 @@ GPUBuffer::GPUBuffer(jsg::Lock& js, wgpu::Buffer b, wgpu::BufferDescriptor desc,
                      wgpu::Device device, kj::Own<AsyncRunner> async)
     : buffer_(kj::mv(b)), device_(kj::mv(device)), desc_(kj::mv(desc)),
       async_(kj::mv(async)),
-      detachKey_(jsg::V8Ref(js.v8Isolate, v8::Object::New(js.v8Isolate))) {
+      detachKey_(js.v8Ref(v8::Object::New(js.v8Isolate))) {
 
   if (desc.mappedAtCreation) {
     state_ = State::MappedAtCreation;

@@ -1815,7 +1815,7 @@ public:
     return *reinterpret_cast<Lock*>(v8Isolate->GetData(2));
   }
 
-  Value parseJson(kj::StringPtr text);
+  Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);
   template <typename T>
   kj::String serializeJson(V8Ref<T>& value) { return serializeJson(value.getHandle(*this)); }

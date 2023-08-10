@@ -142,15 +142,15 @@ Lock::~Lock() noexcept(false) {
   v8Isolate->SetData(2, previousData);
 }
 
-Value Lock::parseJson(kj::StringPtr text) {
+Value Lock::parseJson(kj::ArrayPtr<const char> data) {
   return withinHandleScope([&] {
-    return jsg::Value(v8Isolate, jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, text))));
+    return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), v8Str(v8Isolate, data))));
   });
 }
 
 Value Lock::parseJson(v8::Local<v8::String> text) {
   return withinHandleScope([&] {
-    return jsg::Value(v8Isolate, jsg::check(v8::JSON::Parse(v8Context(), text)));
+    return v8Ref(jsg::check(v8::JSON::Parse(v8Context(), text)));
   });
 }
 

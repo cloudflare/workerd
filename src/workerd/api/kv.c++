@@ -161,7 +161,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     auto cacheStatus = response.headers->get(context.getHeaderIds().cfCacheStatus)
         .map([&](kj::StringPtr cs) {
           auto value = jsg::v8StrIntern(js.v8Isolate, cs);
-          return jsg::Value(js.v8Isolate, kj::mv(value));
+          return js.v8Ref(kj::mv(value).As<v8::Value>());
         });
 
     if (response.statusCode == 404 || response.statusCode == 410) {
@@ -279,7 +279,7 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
 
       kj::Maybe<jsg::Value> cacheStatus = [&]()-> kj::Maybe<jsg::Value> {
         KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          return jsg::Value(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, *cs));
+          return js.v8Ref(jsg::v8StrIntern(js.v8Isolate, *cs).As<v8::Value>());
         }
         return nullptr;
       }();
