@@ -24,3 +24,5 @@ node_modules
 /.bazel-cache
 
 /workerd-*
+
+.bitrise.bazelrc

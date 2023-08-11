@@ -127,3 +127,6 @@ build:windows --cxxopt='/DWINDOWS_LEAN_AND_MEAN' --host_cxxopt='/DWINDOWS_LEAN_A
 # The `/std:c++14` argument is unused during boringssl compilation and we don't
 # want a warning when compiling each file.
 build:windows --cxxopt='-Wno-unused-command-line-argument' --host_cxxopt='-Wno-unused-command-line-argument'
+
+# Bitrise Build Cache
+try-import %workspace%/.bitrise.bazelrc
