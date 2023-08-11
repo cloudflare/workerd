@@ -78,11 +78,12 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel, const ActorIdFactory::ActorId& id,
-      kj::Maybe<kj::String> locationHint, ActorGetMode mode) override {
+      kj::Maybe<kj::String> locationHint, ActorGetMode mode, SpanParent parentSpan) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
 
-  kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id) override {
+  kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id,
+      SpanParent parentSpan) override {
     KJ_FAIL_REQUIRE("no actor channels");
   }
 

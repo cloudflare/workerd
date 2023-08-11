@@ -809,10 +809,11 @@ public:
   kj::Own<IoChannelFactory::ActorChannel> getGlobalActorChannel(
         uint channel, const ActorIdFactory::ActorId& id, kj::Maybe<kj::String> locationHint,
         ActorGetMode mode) {
-    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode);
+    return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
+        getCurrentTraceSpan());
   }
   kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(uint channel, kj::StringPtr id) {
-    return getIoChannelFactory().getColoLocalActor(channel, id);
+    return getIoChannelFactory().getColoLocalActor(channel, id, getCurrentTraceSpan());
   }
 
   kj::Own<CacheClient> getCacheClient();
