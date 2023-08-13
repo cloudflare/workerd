@@ -40,7 +40,7 @@ rust_library(
     ],
     version = "1.1.1",
     deps = [
-        "@crates_vendor__bitflags-2.3.3//:bitflags",
+        "@crates_vendor__bitflags-2.4.0//:bitflags",
         "@crates_vendor__cfg-if-1.0.0//:cfg_if",
         "@crates_vendor__cssparser-0.27.2//:cssparser",
         "@crates_vendor__encoding_rs-0.8.32//:encoding_rs",
