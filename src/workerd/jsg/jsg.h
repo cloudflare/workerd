@@ -18,6 +18,7 @@
 #include "wrappable.h"
 #include "util.h"
 
+#include <workerd/tests/bench-tools.h>
 #include <workerd/jsg/exception.h>
 
 using kj::byte;

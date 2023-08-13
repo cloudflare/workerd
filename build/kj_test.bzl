@@ -18,3 +18,18 @@ def kj_test(
           "//conditions:default": [""],
         }),
     )
+
+    native.cc_binary(
+        name = test_name.removesuffix("-test") + "-bench",
+        srcs = [src],
+        defines = ["WD_IS_BENCHMARK"],
+        deps = [
+            "@workerd//src/workerd/tests:bench-tools",
+            "@com_google_benchmark//:benchmark_main",
+        ] + deps,
+        linkopts = select({
+          "@//:use_dead_strip": ["-Wl,-dead_strip"],
+          "//conditions:default": [""],
+        }),
+        tags = ["manual"],
+    )
