@@ -3,24 +3,22 @@ load("@rules_rust//crate_universe:defs.bzl", "crate")
 RTTI_PACKAGES = {
     # Crates used for RTTI parameter extraction
     "anyhow": crate.spec(
-        features = ["default"],
         version = "1",
     ),
     "clang-ast": crate.spec(
         version = "0.1",
     ),
     "flate2": crate.spec(
-        version = "1.0.26",
+        version = "1.0",
     ),
     "serde": crate.spec(
         # TODO: Restore to "1.0" when https://github.com/bazelbuild/rules_rust/issues/2071
         # is resolved
         version = "=1.0.171",
-        features = ["default", "derive"],
+        features = ["derive"],
     ),
     "serde_json": crate.spec(
         version = "1.0",
-        features = ["default"],
     ),
     "pico-args": crate.spec(
         version = "0.5",

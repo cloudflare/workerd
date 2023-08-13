@@ -421,12 +421,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__bitflags-2.3.3",
-        sha256 = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42",
+        name = "crates_vendor__bitflags-2.4.0",
+        sha256 = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635",
         type = "tar.gz",
-        urls = ["https://crates.io/api/v1/crates/bitflags/2.3.3/download"],
-        strip_prefix = "bitflags-2.3.3",
-        build_file = Label("@workerd//rust-deps/crates:BUILD.bitflags-2.3.3.bazel"),
+        urls = ["https://crates.io/api/v1/crates/bitflags/2.4.0/download"],
+        strip_prefix = "bitflags-2.4.0",
+        build_file = Label("@workerd//rust-deps/crates:BUILD.bitflags-2.4.0.bazel"),
     )
 
     maybe(
@@ -441,12 +441,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__cc-1.0.79",
-        sha256 = "50d30906286121d95be3d479533b458f87493b30a4b5f79a607db8f5d11aa91f",
+        name = "crates_vendor__cc-1.0.82",
+        sha256 = "305fe645edc1442a0fa8b6726ba61d422798d37a52e12eaecf4b022ebbb88f01",
         type = "tar.gz",
-        urls = ["https://crates.io/api/v1/crates/cc/1.0.79/download"],
-        strip_prefix = "cc-1.0.79",
-        build_file = Label("@workerd//rust-deps/crates:BUILD.cc-1.0.79.bazel"),
+        urls = ["https://crates.io/api/v1/crates/cc/1.0.82/download"],
+        strip_prefix = "cc-1.0.82",
+        build_file = Label("@workerd//rust-deps/crates:BUILD.cc-1.0.82.bazel"),
     )
 
     maybe(
@@ -641,12 +641,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__log-0.4.19",
-        sha256 = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4",
+        name = "crates_vendor__log-0.4.20",
+        sha256 = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f",
         type = "tar.gz",
-        urls = ["https://crates.io/api/v1/crates/log/0.4.19/download"],
-        strip_prefix = "log-0.4.19",
-        build_file = Label("@workerd//rust-deps/crates:BUILD.log-0.4.19.bazel"),
+        urls = ["https://crates.io/api/v1/crates/log/0.4.20/download"],
+        strip_prefix = "log-0.4.20",
+        build_file = Label("@workerd//rust-deps/crates:BUILD.log-0.4.20.bazel"),
     )
 
     maybe(

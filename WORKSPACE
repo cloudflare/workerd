@@ -119,18 +119,19 @@ git_repository(
 #   that ABSL_ATTRIBUTE_PURE_FUNCTION is not defined.
 http_archive(
     name = "com_google_absl",
-    sha256 = "d5c91248c33269fcc7ab35897315a45cfa2c37abb4c6d4ed36cb5c82f366367a",
-    strip_prefix = "abseil-cpp-b3162b1da62711c663d0025e2eabeb83fd1f2728",
-    urls = ["https://github.com/abseil/abseil-cpp/archive/b3162b1da62711c663d0025e2eabeb83fd1f2728.zip"],
+    sha256 = "3a889795d4dede1094572d98a3a85e9484573a83282a72a6491eae853af07d08",
+    strip_prefix = "abseil-abseil-cpp-861e53c",
+    type = "tgz",
+    url = "https://github.com/abseil/abseil-cpp/tarball/861e53c8f075c8c4d67bd4c82217c57239fc97cf",
 )
 
 # tcmalloc requires this "rules_fuzzing" package. Its build files fail analysis without it, even
 # though it is unused for our purposes.
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
+    sha256 = "bc286c36bf40c5447d8e4ee047f471c934fe99d4acba0de7a866f38d2ea83a21",
     strip_prefix = "rules_fuzzing-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.tar.gz"],
 )
 
 load("@rules_fuzzing//fuzzing:repositories.bzl", "rules_fuzzing_dependencies")
@@ -294,13 +295,12 @@ npm_repositories()
 # It would seem that googlesource would rather we use git protocol (ideally with shallow clones).
 # Fine, we can do that.
 #
-# Note that while there is an official mirror of V8 on GitHub, there do not appear to be
-# mirrors of the dependencies: zlib (Chromium fork), icu (Chromium fork), and trace_event. So
-# fetching from GitHub instead wouldn't really solve the problem.
+# There is an official mirror for V8 itself on GitHub, but not for dependencies like zlib (Chromium
+# fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
 
-git_repository(
+http_archive(
     name = "v8",
-    commit = "578812b037096e4026447ee449786b60333b00d3",
+    sha256 = "b2e61fb39cdb6ea25ec0a9bef83717354a9020cdaf7f77e3210f2574d791c4b7",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -316,8 +316,9 @@ git_repository(
         "//:patches/v8/0011-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0012-Fix-ICU-build.patch",
     ],
-    remote = "https://chromium.googlesource.com/v8/v8.git",
-    shallow_since = "1690276460 +0000",
+    strip_prefix = "v8-v8-97c6f93",
+    type = "tgz",
+    url = "https://github.com/v8/v8/tarball/97c6f935aa8ec6b786f7ff7726f86785316f30d0",
 )
 
 new_git_repository(
