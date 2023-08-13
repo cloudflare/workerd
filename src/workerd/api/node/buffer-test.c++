@@ -8,7 +8,7 @@
 namespace workerd::api {
 namespace {
 
-KJ_TEST("node:buffer import without capability") {
+WD_TEST_OR_BENCH("node:buffer import without capability") {
   KJ_EXPECT_LOG(ERROR, "script startup threw exception");
 
   try {
@@ -29,7 +29,7 @@ KJ_TEST("node:buffer import without capability") {
   }
 }
 
-KJ_TEST("Verify maximum Buffer size") {
+WD_TEST_OR_BENCH("Verify maximum Buffer size") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -61,7 +61,7 @@ KJ_TEST("Verify maximum Buffer size") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Create 0-length buffers") {
+WD_TEST_OR_BENCH("Create 0-length buffers") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -94,7 +94,7 @@ KJ_TEST("Create 0-length buffers") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("new Buffer(string)") {
+WD_TEST_OR_BENCH("new Buffer(string)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -118,7 +118,7 @@ KJ_TEST("new Buffer(string)") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.allocUnsafe(), Buffer.alloc(), Buffer.allocUnsafeSlow()") {
+WD_TEST_OR_BENCH("Buffer.allocUnsafe(), Buffer.alloc(), Buffer.allocUnsafeSlow()") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -177,7 +177,7 @@ KJ_TEST("Buffer.allocUnsafe(), Buffer.alloc(), Buffer.allocUnsafeSlow()") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string)") {
+WD_TEST_OR_BENCH("Buffer.from(string)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -201,7 +201,7 @@ KJ_TEST("Buffer.from(string)") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string, 'utf8')") {
+WD_TEST_OR_BENCH("Buffer.from(string, 'utf8')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -225,7 +225,7 @@ KJ_TEST("Buffer.from(string, 'utf8')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string, 'ucs2')") {
+WD_TEST_OR_BENCH("Buffer.from(string, 'ucs2')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -249,7 +249,7 @@ KJ_TEST("Buffer.from(string, 'ucs2')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string, 'hex')") {
+WD_TEST_OR_BENCH("Buffer.from(string, 'hex')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -279,7 +279,7 @@ KJ_TEST("Buffer.from(string, 'hex')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string, 'base64')") {
+WD_TEST_OR_BENCH("Buffer.from(string, 'base64')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -304,7 +304,7 @@ KJ_TEST("Buffer.from(string, 'base64')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("new Buffer(string, 'base64')") {
+WD_TEST_OR_BENCH("new Buffer(string, 'base64')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -328,7 +328,7 @@ KJ_TEST("new Buffer(string, 'base64')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(string, 'base64url')") {
+WD_TEST_OR_BENCH("Buffer.from(string, 'base64url')") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -352,7 +352,7 @@ KJ_TEST("Buffer.from(string, 'base64url')") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("Buffer.from(Uint8Array)") {
+WD_TEST_OR_BENCH("Buffer.from(Uint8Array)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -385,7 +385,7 @@ KJ_TEST("Buffer.from(Uint8Array)") {
   KJ_EXPECT(response.body == "JAIJ");
 }
 
-KJ_TEST("new Buffer(Uint8Array)") {
+WD_TEST_OR_BENCH("new Buffer(Uint8Array)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -418,7 +418,7 @@ KJ_TEST("new Buffer(Uint8Array)") {
   KJ_EXPECT(response.body == "JAIJ");
 }
 
-KJ_TEST("Buffer.from(Uint32Array)") {
+WD_TEST_OR_BENCH("Buffer.from(Uint32Array)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -451,7 +451,7 @@ KJ_TEST("Buffer.from(Uint32Array)") {
   KJ_EXPECT(response.body == "t");
 }
 
-KJ_TEST("Buffer.from(ArrayBuffer)") {
+WD_TEST_OR_BENCH("Buffer.from(ArrayBuffer)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -483,7 +483,7 @@ KJ_TEST("Buffer.from(ArrayBuffer)") {
   KJ_EXPECT(response.body == "test");
 }
 
-KJ_TEST("new Buffer(ArrayBuffer)") {
+WD_TEST_OR_BENCH("new Buffer(ArrayBuffer)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);
@@ -516,7 +516,7 @@ KJ_TEST("new Buffer(ArrayBuffer)") {
 }
 
 
-KJ_TEST("Buffer.prototype.indexOf/lastIndexOf") {
+WD_TEST_OR_BENCH("Buffer.prototype.indexOf/lastIndexOf") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setNodeJsCompat(true);

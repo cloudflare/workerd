@@ -122,7 +122,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(GeneratorIsolate, GeneratorContext, GeneratorContext::Test);
 
-KJ_TEST("Generator works") {
+WD_TEST_OR_BENCH("Generator works") {
   Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
 
   e.expectEval("generatorTest([undefined,2,3])", "number", "2");
@@ -143,7 +143,7 @@ KJ_TEST("Generator works") {
       "TypeError: Incorrect type: the provided value is not of type 'Test'.");
 }
 
-KJ_TEST("AsyncGenerator works") {
+WD_TEST_OR_BENCH("AsyncGenerator works") {
   Evaluator<GeneratorContext, GeneratorIsolate> e(v8System);
 
   e.expectEval("async function* foo() { yield 'a'; yield 'b'; }; asyncGeneratorTest(foo());",

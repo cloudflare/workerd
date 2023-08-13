@@ -64,7 +64,7 @@ struct BufferSourceContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(BufferSourceIsolate, BufferSourceContext);
 
-KJ_TEST("BufferSource works") {
+WD_TEST_OR_BENCH("BufferSource works") {
   Evaluator<BufferSourceContext, BufferSourceIsolate> e(v8System);
 
   // By default, a BufferSource handle is created as a DataView

@@ -94,7 +94,7 @@ void checkSql(SqliteDatabase& db) {
   }
 }
 
-KJ_TEST("SQLite backed by in-memory directory") {
+WD_TEST_OR_BENCH("SQLite backed by in-memory directory") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 
@@ -167,7 +167,7 @@ private:
   }
 };
 
-KJ_TEST("SQLite backed by real disk") {
+WD_TEST_OR_BENCH("SQLite backed by real disk") {
   // Well, I made it possible to use an in-memory directory so that unit tests wouldn't have to
   // use real disk. But now I have to test that it does actually work on real disk. So here we are,
   // in a unit test, using real disk.
@@ -281,15 +281,15 @@ void doLockTest(bool walMode) {
   KJ_EXPECT(db.run(GET_COUNT).getInt(0) == counter.load(std::memory_order_relaxed));
 }
 
-KJ_TEST("SQLite locks: rollback journal mode") {
+WD_TEST_OR_BENCH("SQLite locks: rollback journal mode") {
   doLockTest(false);
 }
 
-KJ_TEST("SQLite locks: WAL mode") {
+WD_TEST_OR_BENCH("SQLite locks: WAL mode") {
   doLockTest(true);
 }
 
-KJ_TEST("SQLite Regulator") {
+WD_TEST_OR_BENCH("SQLite Regulator") {
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -342,7 +342,7 @@ KJ_TEST("SQLite Regulator") {
       KJ_EXPECT(getBar.run().getInt(0) == 456));
 }
 
-KJ_TEST("SQLite onWrite callback") {
+WD_TEST_OR_BENCH("SQLite onWrite callback") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -394,7 +394,7 @@ RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... 
   return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
 }
 
-KJ_TEST("SQLite read row counters (basic)") {
+WD_TEST_OR_BENCH("SQLite read row counters (basic)") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -476,7 +476,7 @@ KJ_TEST("SQLite read row counters (basic)") {
   }
 }
 
-KJ_TEST("SQLite write row counters (basic)") {
+WD_TEST_OR_BENCH("SQLite write row counters (basic)") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
@@ -562,7 +562,7 @@ KJ_TEST("SQLite write row counters (basic)") {
   }
 }
 
-KJ_TEST("SQLite row counters with triggers") {
+WD_TEST_OR_BENCH("SQLite row counters with triggers") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);

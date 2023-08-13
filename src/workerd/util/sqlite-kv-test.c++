@@ -8,7 +8,7 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("SQLite-KV") {
+WD_TEST_OR_BENCH("SQLite-KV") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);

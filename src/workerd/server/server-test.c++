@@ -453,7 +453,7 @@ kj::String singleWorker(kj::StringPtr def) {
 
 }
 
-KJ_TEST("Server: serve basic Service Worker") {
+WD_TEST_OR_BENCH("Server: serve basic Service Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     serviceWorkerScript =
@@ -495,7 +495,7 @@ KJ_TEST("Server: serve basic Service Worker") {
     Bad Request)"_blockquote);
 }
 
-KJ_TEST("Server: use service name as Service Worker origin") {
+WD_TEST_OR_BENCH("Server: use service name as Service Worker origin") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     serviceWorkerScript =
@@ -511,7 +511,7 @@ KJ_TEST("Server: use service name as Service Worker origin") {
         at hello:2:34)"_blockquote);
 }
 
-KJ_TEST("Server: serve basic modular Worker") {
+WD_TEST_OR_BENCH("Server: serve basic modular Worker") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -531,7 +531,7 @@ KJ_TEST("Server: serve basic modular Worker") {
   conn.httpGet200("/", "Hello: http://foo/");
 }
 
-KJ_TEST("Server: serve modular Worker with imports") {
+WD_TEST_OR_BENCH("Server: serve modular Worker with imports") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -592,7 +592,7 @@ KJ_TEST("Server: serve modular Worker with imports") {
       "square.wasm says square(5) = 25");
 }
 
-KJ_TEST("Server: compatibility dates") {
+WD_TEST_OR_BENCH("Server: compatibility dates") {
   // The easiest flag to test is the presence of the global `navigator`.
   auto selfNavigatorCheckerWorker = [](kj::StringPtr compatProperties) {
     return singleWorker(kj::str(R"((
@@ -638,7 +638,7 @@ KJ_TEST("Server: compatibility dates") {
   }
 }
 
-KJ_TEST("Server: compatibility dates are required") {
+WD_TEST_OR_BENCH("Server: compatibility dates are required") {
   TestServer test(singleWorker(R"((
     serviceWorkerScript =
         `addEventListener("fetch", event => {
@@ -651,7 +651,7 @@ KJ_TEST("Server: compatibility dates are required") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: value bindings") {
+WD_TEST_OR_BENCH("Server: value bindings") {
 #if _WIN32
   _putenv("TEST_ENVIRONMENT_VAR=Hello from environment variable");
 #else
@@ -707,7 +707,7 @@ KJ_TEST("Server: value bindings") {
       "GRAULT is null? true");
 }
 
-KJ_TEST("Server: WebCrypto bindings") {
+WD_TEST_OR_BENCH("Server: WebCrypto bindings") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -858,7 +858,7 @@ KJ_TEST("Server: WebCrypto bindings") {
       "ec extractable? false, true");
 }
 
-KJ_TEST("Server: subrequest to default outbound") {
+WD_TEST_OR_BENCH("Server: subrequest to default outbound") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -901,7 +901,7 @@ KJ_TEST("Server: subrequest to default outbound") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: override 'internet' service") {
+WD_TEST_OR_BENCH("Server: override 'internet' service") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -951,7 +951,7 @@ KJ_TEST("Server: override 'internet' service") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: override globalOutbound") {
+WD_TEST_OR_BENCH("Server: override globalOutbound") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1002,7 +1002,7 @@ KJ_TEST("Server: override globalOutbound") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: capability bindings") {
+WD_TEST_OR_BENCH("Server: capability bindings") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1133,7 +1133,7 @@ KJ_TEST("Server: capability bindings") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: cyclic bindings") {
+WD_TEST_OR_BENCH("Server: cyclic bindings") {
   TestServer test(R"((
     services = [
       ( name = "service1",
@@ -1190,7 +1190,7 @@ KJ_TEST("Server: cyclic bindings") {
   conn.httpGet200("/", "Hello World!");
 }
 
-KJ_TEST("Server: named entrypoints") {
+WD_TEST_OR_BENCH("Server: named entrypoints") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1244,7 +1244,7 @@ KJ_TEST("Server: named entrypoints") {
   }
 }
 
-KJ_TEST("Server: invalid entrypoint") {
+WD_TEST_OR_BENCH("Server: invalid entrypoint") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1277,7 +1277,7 @@ KJ_TEST("Server: invalid entrypoint") {
           "has no such named entrypoint.\n");
 }
 
-KJ_TEST("Server: call queue handler on service binding") {
+WD_TEST_OR_BENCH("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
       ( name = "service1",
@@ -1345,7 +1345,7 @@ KJ_TEST("Server: call queue handler on service binding") {
   conn.httpGet200("/", "queue outcome: ok, ackAll: true");
 }
 
-KJ_TEST("Server: Durable Objects (in memory)") {
+WD_TEST_OR_BENCH("Server: Durable Objects (in memory)") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1410,7 +1410,7 @@ KJ_TEST("Server: Durable Objects (in memory)") {
       "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 }
 
-KJ_TEST("Server: Durable Objects (on disk)") {
+WD_TEST_OR_BENCH("Server: Durable Objects (on disk)") {
   kj::StringPtr config = R"((
     services = [
       ( name = "hello",
@@ -1534,7 +1534,7 @@ KJ_TEST("Server: Durable Objects (on disk)") {
   }
 }
 
-KJ_TEST("Server: Ephemeral Objects") {
+WD_TEST_OR_BENCH("Server: Ephemeral Objects") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1601,7 +1601,7 @@ KJ_TEST("Server: Ephemeral Objects") {
 // =======================================================================================
 // Test HttpOptions on receive
 
-KJ_TEST("Server: serve proxy requests") {
+WD_TEST_OR_BENCH("Server: serve proxy requests") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1641,7 +1641,7 @@ KJ_TEST("Server: serve proxy requests") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: forwardedProtoHeader") {
+WD_TEST_OR_BENCH("Server: forwardedProtoHeader") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1697,7 +1697,7 @@ KJ_TEST("Server: forwardedProtoHeader") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: cfBlobHeader") {
+WD_TEST_OR_BENCH("Server: cfBlobHeader") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1757,7 +1757,7 @@ KJ_TEST("Server: cfBlobHeader") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: inject headers on incoming request/response") {
+WD_TEST_OR_BENCH("Server: inject headers on incoming request/response") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -1813,7 +1813,7 @@ KJ_TEST("Server: inject headers on incoming request/response") {
   )"_blockquote);
 }
 
-KJ_TEST("Server: drain incoming HTTP connections") {
+WD_TEST_OR_BENCH("Server: drain incoming HTTP connections") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     serviceWorkerScript =
@@ -1871,7 +1871,7 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 // We're going to stop using JavaScript here because it's not really helping. We can directly
 // connect a socket to a non-Worker service.
 
-KJ_TEST("Server: network outbound with allow/deny") {
+WD_TEST_OR_BENCH("Server: network outbound with allow/deny") {
   TestServer test(R"((
     services = [
       (name = "hello", network = (allow = ["foo", "bar"], deny = ["baz", "qux"]))
@@ -1905,7 +1905,7 @@ KJ_TEST("Server: network outbound with allow/deny") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: external server") {
+WD_TEST_OR_BENCH("Server: external server") {
   TestServer test(R"((
     services = [
       (name = "hello", external = "ext-addr")
@@ -1939,7 +1939,7 @@ KJ_TEST("Server: external server") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: external server proxy style") {
+WD_TEST_OR_BENCH("Server: external server proxy style") {
   TestServer test(R"((
     services = [
       (name = "hello", external = (address = "ext-addr", http = (style = proxy)))
@@ -1973,7 +1973,7 @@ KJ_TEST("Server: external server proxy style") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: external server forwarded-proto") {
+WD_TEST_OR_BENCH("Server: external server forwarded-proto") {
   TestServer test(R"((
     services = [
       (name = "hello", external = (address = "ext-addr", http = (forwardedProtoHeader = "X-Proto")))
@@ -2011,7 +2011,7 @@ KJ_TEST("Server: external server forwarded-proto") {
   conn.recvHttp200("OK");
 }
 
-KJ_TEST("Server: external server inject headers") {
+WD_TEST_OR_BENCH("Server: external server inject headers") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2068,7 +2068,7 @@ KJ_TEST("Server: external server inject headers") {
     OK)"_blockquote);
 }
 
-KJ_TEST("Server: external server cf blob header") {
+WD_TEST_OR_BENCH("Server: external server cf blob header") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2124,7 +2124,7 @@ KJ_TEST("Server: external server cf blob header") {
     OK)"_blockquote);
 }
 
-KJ_TEST("Server: disk service") {
+WD_TEST_OR_BENCH("Server: disk service") {
   TestServer test(R"((
     services = [
       (name = "hello", disk = "../../frob/blah")
@@ -2336,7 +2336,7 @@ KJ_TEST("Server: disk service") {
     Not Found)"_blockquote);
 }
 
-KJ_TEST("Server: disk service writable") {
+WD_TEST_OR_BENCH("Server: disk service writable") {
   TestServer test(R"((
     services = [
       (name = "hello", disk = (path = "../../frob/blah", writable = true))
@@ -2519,7 +2519,7 @@ KJ_TEST("Server: disk service writable") {
     Unauthorized)"_blockquote);
 }
 
-KJ_TEST("Server: disk service allow dotfiles") {
+WD_TEST_OR_BENCH("Server: disk service allow dotfiles") {
   TestServer test(R"((
     services = [
       (name = "hello", disk = (path = "../../frob", writable = true, allowDotfiles = true))
@@ -2610,7 +2610,7 @@ KJ_TEST("Server: disk service allow dotfiles") {
 // =======================================================================================
 // Test Cache API
 
-KJ_TEST("Server: If no cache service is defined, access to the cache API should error") {
+WD_TEST_OR_BENCH("Server: If no cache service is defined, access to the cache API should error") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
     modules = [
@@ -2636,7 +2636,7 @@ KJ_TEST("Server: If no cache service is defined, access to the cache API should 
 
 }
 
-KJ_TEST("Server: cached response") {
+WD_TEST_OR_BENCH("Server: cached response") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2696,7 +2696,7 @@ KJ_TEST("Server: cached response") {
 
 }
 
-KJ_TEST("Server: cache name is passed through to service") {
+WD_TEST_OR_BENCH("Server: cache name is passed through to service") {
   TestServer test(R"((
     services = [
       ( name = "hello",
@@ -2759,7 +2759,7 @@ KJ_TEST("Server: cache name is passed through to service") {
 // =======================================================================================
 // Test the test command
 
-KJ_TEST("Server: cache name is passed through to service") {
+WD_TEST_OR_BENCH("Server: cache name is passed through to service") {
   kj::StringPtr config = R"((
     services = [
       ( name = "hello",

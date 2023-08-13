@@ -20,7 +20,7 @@ struct BoolContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(BoolIsolate, BoolContext);
 
-KJ_TEST("bool") {
+WD_TEST_OR_BENCH("bool") {
   Evaluator<BoolContext, BoolIsolate> e(v8System);
   e.expectEval("takeBool(false)", "string", "false");
   e.expectEval("takeBool(true)", "string", "true");
@@ -104,7 +104,7 @@ struct OptionalContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(OptionalIsolate, OptionalContext, OptionalContext::TestOptionalFields,
     OptionalContext::TestAllOptionalFields, NumberBox);
 
-KJ_TEST("optionals and maybes") {
+WD_TEST_OR_BENCH("optionals and maybes") {
   Evaluator<OptionalContext, OptionalIsolate> e(v8System);
   e.expectEval("takeOptional(new NumberBox(123))", "number", "123");
   e.expectEval("takeOptional()", "number", "321");
@@ -186,7 +186,7 @@ struct MaybeContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(MaybeIsolate, MaybeContext);
 
-KJ_TEST("maybes - don't substitute null") {
+WD_TEST_OR_BENCH("maybes - don't substitute null") {
 
   static const auto config = JsgConfig {
     .noSubstituteNull = true,
@@ -305,7 +305,7 @@ struct OneOfContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(OneOfIsolate, OneOfContext, NumberBox);
 
-KJ_TEST("OneOf") {
+WD_TEST_OR_BENCH("OneOf") {
   Evaluator<OneOfContext, OneOfIsolate> e(v8System);
   e.expectEval("takeOneOf(123)", "string", "double: 123");
   e.expectEval("takeOneOf('foo')", "string", "kj::String: foo");
@@ -365,7 +365,7 @@ struct DictContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(DictIsolate, DictContext, NumberBox);
 
-KJ_TEST("dicts") {
+WD_TEST_OR_BENCH("dicts") {
   Evaluator<DictContext, DictIsolate> e(v8System);
   e.expectEval(
       "takeDict({foo: new NumberBox(123), bar: new NumberBox(456), baz: new NumberBox(789)})",
@@ -405,7 +405,7 @@ struct IntContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IntIsolate, IntContext);
 
-KJ_TEST("integers") {
+WD_TEST_OR_BENCH("integers") {
   Evaluator<IntContext, IntIsolate> e(v8System);
   e.expectEval("takeInt(123)", "string", "int: 123");
   e.expectEval("returnInt()", "number", "123");
@@ -464,7 +464,7 @@ struct Uint32Context: public ContextGlobalObject {
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(Uint32Isolate, Uint32Context);
-KJ_TEST("unsigned integers") {
+WD_TEST_OR_BENCH("unsigned integers") {
   Evaluator<Uint32Context, Uint32Isolate> e(v8System);
   e.expectEval("takeUint32(123)", "string", "uint32_t: 123");
   e.expectEval("returnUint32()", "number", "123");
@@ -549,7 +549,7 @@ struct Uint64Context: public ContextGlobalObject {
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(Uint64Isolate, Uint64Context);
-KJ_TEST("bigints") {
+WD_TEST_OR_BENCH("bigints") {
   Evaluator<Uint64Context, Uint64Isolate> e(v8System);
   e.expectEval("takeUint64(123)", "string", "uint64_t: 123");
   e.expectEval("takeUint64(123n)", "string", "uint64_t: 123");
@@ -662,7 +662,7 @@ struct Int8Context: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(Int8Isolate, Int8Context);
 
-KJ_TEST("int8 integers") {
+WD_TEST_OR_BENCH("int8 integers") {
   Evaluator<Int8Context, Int8Isolate> e(v8System);
   e.expectEval("takeInt8(123)", "string", "int8_t: 123");
   e.expectEval("takeUint8(123)", "string", "uint8_t: 123");
@@ -718,7 +718,7 @@ struct Int16Context: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(Int16Isolate, Int16Context);
 
-KJ_TEST("int16 integers") {
+WD_TEST_OR_BENCH("int16 integers") {
   Evaluator<Int16Context, Int16Isolate> e(v8System);
   e.expectEval("takeInt16(123)", "string", "int16_t: 123");
   e.expectEval("takeUint16(123)", "string", "uint16_t: 123");
@@ -768,7 +768,7 @@ struct DoubleContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(DoubleIsolate, DoubleContext, NumberBox);
 
-KJ_TEST("floating points") {
+WD_TEST_OR_BENCH("floating points") {
   Evaluator<DoubleContext, DoubleIsolate> e(v8System);
   e.expectEval("takeDouble(123)", "string", "double: 123");
   e.expectEval("takeDouble(123.5)", "string", "double: 123.5");
@@ -805,7 +805,7 @@ struct StringContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(StringIsolate, StringContext);
 
-KJ_TEST("kj::Strings") {
+WD_TEST_OR_BENCH("kj::Strings") {
   Evaluator<StringContext, StringIsolate> e(v8System);
   e.expectEval("takeString(false)", "string", "false");
   e.expectEval("takeString(true)", "string", "true");
@@ -831,7 +831,7 @@ struct ByteStringContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ByteStringIsolate, ByteStringContext);
 
-KJ_TEST("ByteStrings") {
+WD_TEST_OR_BENCH("ByteStrings") {
   Evaluator<ByteStringContext, ByteStringIsolate> e(v8System);
   e.expectEval("takeByteString('foo\\0bar') === 'foo\\0bar'", "boolean", "true");
   // ﬃ is 0xEF 0xAC 0x83 in UTF-8.
@@ -857,7 +857,7 @@ struct RawContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(RawIsolate, RawContext, RawContext::TwoValues);
 
-KJ_TEST("Raw Values") {
+WD_TEST_OR_BENCH("Raw Values") {
   Evaluator<RawContext, RawIsolate> e(v8System);
   e.expectEval(
       "JSON.stringify(twoValues({baz: 123}, 'abcd'))",
@@ -878,7 +878,7 @@ struct DateContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(DateIsolate, DateContext);
 
-KJ_TEST("Date Values") {
+WD_TEST_OR_BENCH("Date Values") {
   Evaluator<DateContext, DateIsolate> e(v8System);
   e.expectEval("takeDate(new Date('2022-01-22T00:54:57.893Z')).toUTCString()",
                "string",
@@ -928,7 +928,7 @@ struct ArrayContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ArrayIsolate, ArrayContext);
 
-KJ_TEST("Array Values") {
+WD_TEST_OR_BENCH("Array Values") {
   Evaluator<ArrayContext, ArrayIsolate> e(v8System);
   e.expectEval("m = Array(65); m[64] = 1; takeArray(m)[64]", "number", "1");
 
@@ -1023,7 +1023,7 @@ struct SequenceContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(SequenceIsolate, SequenceContext, SequenceContext::Foo);
 
-KJ_TEST("Sequence Values") {
+WD_TEST_OR_BENCH("Sequence Values") {
   Evaluator<SequenceContext, SequenceIsolate> e(v8System);
   e.expectEval("testSequence(['a', 'b']).join('')", "string", "ab");
   e.expectEval(
@@ -1091,7 +1091,7 @@ struct NonCoercibleContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(NonCoercibleIsolate, NonCoercibleContext);
 
-KJ_TEST("NonCoercible Values") {
+WD_TEST_OR_BENCH("NonCoercible Values") {
   Evaluator<NonCoercibleContext, NonCoercibleIsolate> e(v8System);
   e.expectEval("testString('')", "boolean", "true");
   e.expectEval("testString(null)", "throws",
@@ -1163,7 +1163,7 @@ struct MemoizedIdentityContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(MemoizedIdentityIsolate, MemoizedIdentityContext);
 
-KJ_TEST("MemoizedIdentity Values") {
+WD_TEST_OR_BENCH("MemoizedIdentity Values") {
   Evaluator<MemoizedIdentityContext, MemoizedIdentityIsolate> e(v8System);
   e.expectEval("getDate() === getDate()", "boolean", "false");
   e.expectEval("getDateMemoized() === getDateMemoized()", "boolean", "true");
@@ -1191,7 +1191,7 @@ struct IdentifiedContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IdentifiedIsolate, IdentifiedContext);
 
-KJ_TEST("Identified values") {
+WD_TEST_OR_BENCH("Identified values") {
   Evaluator<IdentifiedContext, IdentifiedIsolate> e(v8System);
 
   e.expectEval("compare(new Date(123), new Date(123))", "string", "false 0ns");
@@ -1225,7 +1225,7 @@ struct ExceptionContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ExceptionIsolate, ExceptionContext);
 
-KJ_TEST("kj::Exception wrapper works") {
+WD_TEST_OR_BENCH("kj::Exception wrapper works") {
   Evaluator<ExceptionContext, ExceptionIsolate> e(v8System);
 
   e.expectEval("testToException(new DOMException('boom', 'AbortError'))", "string",
@@ -1268,7 +1268,7 @@ struct NameContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(NameIsolate, NameContext);
 
-KJ_TEST("jsg::Name works") {
+WD_TEST_OR_BENCH("jsg::Name works") {
   Evaluator<NameContext, NameIsolate> e(v8System);
   e.expectEval("name('hello')", "string", "hello");
   e.expectEval("name(Symbol('foo')).description", "string", "foo");

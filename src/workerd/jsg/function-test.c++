@@ -43,7 +43,7 @@ struct CallbackContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(CallbackIsolate, CallbackContext, CallbackContext::Frobber, NumberBox);
 
-KJ_TEST("callbacks") {
+WD_TEST_OR_BENCH("callbacks") {
   Evaluator<CallbackContext, CallbackIsolate> e(v8System);
   e.expectEval(
       "callCallback((str, num) => {\n"
@@ -125,7 +125,7 @@ struct WrapContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(WrapIsolate, WrapContext, NumberBox);
 
-KJ_TEST("wrap functions") {
+WD_TEST_OR_BENCH("wrap functions") {
   Evaluator<WrapContext, WrapIsolate> e(v8System);
 
   e.expectEval("returnFunction(123)(321)", "number", "444");
@@ -214,7 +214,7 @@ struct FunctionContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(FunctionIsolate, FunctionContext, FunctionContext::Foo);
 
-KJ_TEST("jsg::Function<T>") {
+WD_TEST_OR_BENCH("jsg::Function<T>") {
   Evaluator<FunctionContext, FunctionIsolate> e(v8System);
 
   e.expectEval("test((val) => val === 1)", "boolean", "true");

@@ -44,7 +44,7 @@ struct StructContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(StructIsolate, StructContext, NumberBox, TestStruct, SelfStruct);
 
-KJ_TEST("structs") {
+WD_TEST_OR_BENCH("structs") {
   Evaluator<StructContext, StructIsolate> e(v8System);
   e.expectEval(
       "readTestStruct({str: 'foo', num: 123, box: new NumberBox(456)})",

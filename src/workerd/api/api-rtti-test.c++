@@ -24,14 +24,14 @@
 namespace workerd::api {
 namespace {
 
-KJ_TEST("WorkerGlobalScope") {
+WD_TEST_OR_BENCH("WorkerGlobalScope") {
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<WorkerGlobalScope>();
   KJ_EXPECT(builder.structure("workerd::api::Event"_kj) != nullptr);
   KJ_EXPECT(builder.structure("workerd::api::ObviouslyWrongName"_kj) == nullptr);
 }
 
-KJ_TEST("ServiceWorkerGlobalScope") {
+WD_TEST_OR_BENCH("ServiceWorkerGlobalScope") {
   jsg::rtti::Builder builder((CompatibilityFlags::Reader()));
   builder.structure<ServiceWorkerGlobalScope>();
   KJ_EXPECT(builder.structure("workerd::api::DurableObjectId"_kj) != nullptr);

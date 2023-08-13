@@ -38,7 +38,7 @@ struct InfoContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(InfoIsolate, InfoContext, InfoContext::WantInfo, NumberBox);
 
-KJ_TEST("explicit FunctionCallbackInfo / PropertyCallbackInfo") {
+WD_TEST_OR_BENCH("explicit FunctionCallbackInfo / PropertyCallbackInfo") {
   Evaluator<InfoContext, InfoIsolate> e(v8System);
   e.expectEval(
       "var w = new WantInfo();\n"
@@ -110,7 +110,7 @@ public:
 
 JSG_DECLARE_ISOLATE_TYPE(ExtensionIsolate, ExtensionContext, TypeWrapperExtension<TestExtension>);
 
-KJ_TEST("extensions") {
+WD_TEST_OR_BENCH("extensions") {
   Evaluator<ExtensionContext, ExtensionIsolate> e(v8System);
   e.expectEval("fromExtensionType(toExtensionType(12.3))", "number", "12");
 }
@@ -145,7 +145,7 @@ struct TypeHandlerContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TypeHandlerIsolate, TypeHandlerContext, NumberBox);
 
-KJ_TEST("type handlers") {
+WD_TEST_OR_BENCH("type handlers") {
   Evaluator<TypeHandlerContext, TypeHandlerIsolate> e(v8System);
   e.expectEval("newNumberBox(123).value", "number", "123");
   e.expectEval("openNumberBox(new NumberBox(123))", "number", "123");
@@ -180,7 +180,7 @@ struct ArrayContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ArrayIsolate, ArrayContext);
 
-KJ_TEST("arrays") {
+WD_TEST_OR_BENCH("arrays") {
   Evaluator<ArrayContext, ArrayIsolate> e(v8System);
   e.expectEval("sumArray([123, 321, 33])", "number", "477");
   e.expectEval("returnArray(3).join(', ')", "string", "0, 1, 2");
@@ -209,7 +209,7 @@ struct Uint8Context: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(Uint8Isolate, Uint8Context);
 
-KJ_TEST("Uint8Arrays") {
+WD_TEST_OR_BENCH("Uint8Arrays") {
   Evaluator<Uint8Context, Uint8Isolate> e(v8System);
   uint byteSequence[] = { 'f', 'o', 'o', ' ', 0xf0, 0x9f, 0x98, 0xba };
   auto byteSequenceStr = kj::strArray(kj::ArrayPtr<uint>(byteSequence), ", ");
@@ -247,7 +247,7 @@ struct UnwrappingContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(UnwrappingIsolate, UnwrappingContext);
 
-KJ_TEST("v8::Value subclass unwrapping") {
+WD_TEST_OR_BENCH("v8::Value subclass unwrapping") {
   Evaluator<UnwrappingContext, UnwrappingIsolate> e(v8System);
   e.expectEval(
       "let abv = new Uint8Array([0, 1, 2]);\n"
@@ -341,7 +341,7 @@ JSG_DECLARE_ISOLATE_TYPE(UnimplementedIsolate, UnimplementedContext,
     UnimplementedContext::StructWithUnimplementedMembers
     );
 
-KJ_TEST("unimplemented errors") {
+WD_TEST_OR_BENCH("unimplemented errors") {
   Evaluator<UnimplementedContext, UnimplementedIsolate> e(v8System);
   e.expectEval(
       "new UnimplementedConstructor()",

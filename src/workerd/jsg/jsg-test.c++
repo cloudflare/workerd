@@ -37,17 +37,17 @@ struct TestContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
-KJ_TEST("hello world") {
+WD_TEST_OR_BENCH("hello world") {
   Evaluator<TestContext, TestIsolate> e(v8System);
   e.expectEval("'Hello' + ', World!'", "string", "Hello, World!");
 }
 
-KJ_TEST("throw") {
+WD_TEST_OR_BENCH("throw") {
   Evaluator<TestContext, TestIsolate> e(v8System);
   e.expectEval("throw new Error('some error message')", "throws", "Error: some error message");
 }
 
-KJ_TEST("context type is exposed in the global scope") {
+WD_TEST_OR_BENCH("context type is exposed in the global scope") {
   Evaluator<TestContext, TestIsolate> e(v8System);
   e.expectEval(
       "this instanceof TestContext",
@@ -77,7 +77,7 @@ struct InheritContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(InheritIsolate, InheritContext, NumberBox,
     InheritContext::Other, ExtendedNumberBox);
 
-KJ_TEST("inheritance") {
+WD_TEST_OR_BENCH("inheritance") {
   Evaluator<InheritContext, InheritIsolate> e(v8System);
   e.expectEval(
       "var n = new ExtendedNumberBox(123, 'foo');\n"
@@ -134,7 +134,7 @@ struct Utf8Context: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(Utf8Isolate, Utf8Context);
 
-KJ_TEST("utf-8 scripts") {
+WD_TEST_OR_BENCH("utf-8 scripts") {
   Evaluator<Utf8Context, Utf8Isolate> e(v8System);
 
   // BMP unicode.
@@ -169,7 +169,7 @@ struct RefContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(RefIsolate, RefContext, NumberBox);
 
-KJ_TEST("Ref") {
+WD_TEST_OR_BENCH("Ref") {
   Evaluator<RefContext, RefIsolate> e(v8System);
   // addAndReturnCopy() creates a new object and returns it.
   e.expectEval(
@@ -206,7 +206,7 @@ private:
 };
 JSG_DECLARE_ISOLATE_TYPE(ProtoIsolate, ProtoContext, NumberBox, BoxBox, ExtendedNumberBox);
 
-KJ_TEST("can't invoke builtin methods with alternative 'this'") {
+WD_TEST_OR_BENCH("can't invoke builtin methods with alternative 'this'") {
   Evaluator<ProtoContext, ProtoIsolate> e(v8System);
   e.expectEval(
       "NumberBox.prototype.getValue.call(123)",
@@ -219,7 +219,7 @@ KJ_TEST("can't invoke builtin methods with alternative 'this'") {
       "throws", "TypeError: Illegal invocation");
 }
 
-KJ_TEST("can't use builtin as prototype") {
+WD_TEST_OR_BENCH("can't use builtin as prototype") {
   Evaluator<ProtoContext, ProtoIsolate> e(v8System);
   e.expectEval(
       "function JsType() {}\n"
@@ -270,7 +270,7 @@ struct IcuContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IcuIsolate, IcuContext);
 
-KJ_TEST("ICU is properly initialized") {
+WD_TEST_OR_BENCH("ICU is properly initialized") {
   Evaluator<IcuContext, IcuIsolate> e(v8System);
   e.expectEval(
       "function charCodes(str) {"
@@ -292,7 +292,7 @@ KJ_TEST("ICU is properly initialized") {
 
 // ========================================================================================
 
-KJ_TEST("Uncaught JsExceptionThrown reports stack") {
+WD_TEST_OR_BENCH("Uncaught JsExceptionThrown reports stack") {
   auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
     throw JsExceptionThrown();
   }));
@@ -311,7 +311,7 @@ struct LockLogContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(LockLogIsolate, LockLogContext);
 
-KJ_TEST("jsg::Lock logWarning") {
+WD_TEST_OR_BENCH("jsg::Lock logWarning") {
   LockLogIsolate isolate(v8System, kj::heap<IsolateObserver>());
   bool called = false;
   V8StackScope stackScope;
@@ -348,7 +348,7 @@ struct CallableContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(CallableIsolate, CallableContext, CallableContext::MyCallable);
 
-KJ_TEST("Test JSG_CALLABLE") {
+WD_TEST_OR_BENCH("Test JSG_CALLABLE") {
   Evaluator<CallableContext, CallableIsolate> e(v8System);
 
   e.expectEval("let obj = getCallable(); obj.foo();", "boolean", "true");
@@ -369,7 +369,7 @@ struct IsolateUuidContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(IsolateUuidIsolate, IsolateUuidContext);
 
-KJ_TEST("jsg::Lock getUuid") {
+WD_TEST_OR_BENCH("jsg::Lock getUuid") {
   IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
   V8StackScope stackScope;
   IsolateUuidIsolate::Lock lock(isolate, stackScope);

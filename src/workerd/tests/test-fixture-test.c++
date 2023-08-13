@@ -8,11 +8,11 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("setup/destroy") {
+WD_TEST_OR_BENCH("setup/destroy") {
    TestFixture fixture;
 }
 
-KJ_TEST("single void runInIoContext run") {
+WD_TEST_OR_BENCH("single void runInIoContext run") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -23,7 +23,7 @@ KJ_TEST("single void runInIoContext run") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("single runInIoContext with promise result") {
+WD_TEST_OR_BENCH("single runInIoContext with promise result") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -36,7 +36,7 @@ KJ_TEST("single runInIoContext with promise result") {
   KJ_EXPECT(result == 42);
 }
 
-KJ_TEST("single runInIoContext with immediate result") {
+WD_TEST_OR_BENCH("single runInIoContext with immediate result") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -49,7 +49,7 @@ KJ_TEST("single runInIoContext with immediate result") {
   KJ_EXPECT(result == 42);
 }
 
-KJ_TEST("3 runInIoContext runs") {
+WD_TEST_OR_BENCH("3 runInIoContext runs") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -62,7 +62,7 @@ KJ_TEST("3 runInIoContext runs") {
   }
 }
 
-KJ_TEST("2 fixtures in a row with single runInIoContext run") {
+WD_TEST_OR_BENCH("2 fixtures in a row with single runInIoContext run") {
   uint runCount = 0;
 
   for (uint i = 0; i < 2; i++) {
@@ -75,7 +75,7 @@ KJ_TEST("2 fixtures in a row with single runInIoContext run") {
   }
 }
 
-KJ_TEST("runInIoContext consuming ignored kj::Exception") {
+WD_TEST_OR_BENCH("runInIoContext consuming ignored kj::Exception") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -87,7 +87,7 @@ KJ_TEST("runInIoContext consuming ignored kj::Exception") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("runInIoContext re-throwing kj::Exception") {
+WD_TEST_OR_BENCH("runInIoContext re-throwing kj::Exception") {
   TestFixture fixture;
   uint runCount = 0;
   uint exceptionCount = 0;
@@ -106,7 +106,7 @@ KJ_TEST("runInIoContext re-throwing kj::Exception") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("runInIoContext re-throwing js exception") {
+WD_TEST_OR_BENCH("runInIoContext re-throwing js exception") {
   TestFixture fixture;
   uint runCount = 0;
   uint exceptionCount = 0;
@@ -126,7 +126,7 @@ KJ_TEST("runInIoContext re-throwing js exception") {
   KJ_EXPECT(exceptionCount == 1);
 }
 
-KJ_TEST("runInIoContext consuming ignored js exception") {
+WD_TEST_OR_BENCH("runInIoContext consuming ignored js exception") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -139,7 +139,7 @@ KJ_TEST("runInIoContext consuming ignored js exception") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("compileAndRunScript") {
+WD_TEST_OR_BENCH("compileAndRunScript") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -152,7 +152,7 @@ KJ_TEST("compileAndRunScript") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("compileAndRunScript context access") {
+WD_TEST_OR_BENCH("compileAndRunScript context access") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -165,7 +165,7 @@ KJ_TEST("compileAndRunScript context access") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("compileAndRunScript exception handling") {
+WD_TEST_OR_BENCH("compileAndRunScript exception handling") {
   TestFixture fixture;
   uint runCount = 0;
   uint exceptionCount = 0;
@@ -185,7 +185,7 @@ KJ_TEST("compileAndRunScript exception handling") {
   KJ_EXPECT(exceptionCount == 1);
 }
 
-KJ_TEST("compileAndInstantiateModule") {
+WD_TEST_OR_BENCH("compileAndInstantiateModule") {
   TestFixture fixture;
   uint runCount = 0;
 
@@ -206,7 +206,7 @@ KJ_TEST("compileAndInstantiateModule") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("runRequest") {
+WD_TEST_OR_BENCH("runRequest") {
   TestFixture fixture({
     .mainModuleSource = R"SCRIPT(
       export default {
@@ -222,7 +222,7 @@ KJ_TEST("runRequest") {
   KJ_EXPECT(result.body == "POST http://www.example.com TEST"_kj);
 }
 
-KJ_TEST("module import failure") {
+WD_TEST_OR_BENCH("module import failure") {
   KJ_EXPECT_LOG(ERROR, "script startup threw exception");
 
   try {

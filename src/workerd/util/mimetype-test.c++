@@ -7,7 +7,7 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("Basic MimeType parsing works") {
+WD_TEST_OR_BENCH("Basic MimeType parsing works") {
   struct TestCase {
     kj::StringPtr input;
     kj::StringPtr type;
@@ -108,7 +108,7 @@ KJ_TEST("Basic MimeType parsing works") {
   }
 }
 
-KJ_TEST("Building MimeType works") {
+WD_TEST_OR_BENCH("Building MimeType works") {
   MimeType type("text", "plain");
 
   KJ_ASSERT(!type.addParam(""_kj, ""_kj));
@@ -129,7 +129,7 @@ KJ_TEST("Building MimeType works") {
   KJ_ASSERT(MimeType::PLAINTEXT == type);
 }
 
-KJ_TEST("WHATWG tests") {
+WD_TEST_OR_BENCH("WHATWG tests") {
   struct Test {
     kj::StringPtr input;
     kj::Maybe<kj::StringPtr> output;

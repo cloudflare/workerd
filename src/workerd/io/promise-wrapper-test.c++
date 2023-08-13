@@ -87,7 +87,7 @@ JSG_DECLARE_ISOLATE_TYPE(
     CaptureThrowContext,
     jsg::TypeWrapperExtension<workerd::PromiseWrapper>);
 
-KJ_TEST("Async functions capture sync errors with flag") {
+WD_TEST_OR_BENCH("Async functions capture sync errors with flag") {
   Evaluator<CaptureThrowContext, CaptureThrowIsolate> e(v8System);
   e.setCaptureThrowsAsRejections(true);
   e.expectEval("test1()", "object", "[object Promise]");
@@ -104,7 +104,7 @@ KJ_TEST("Async functions capture sync errors with flag") {
   e.expectEval("test", "object", "[object Promise]");
 }
 
-KJ_TEST("Async functions do not capture sync errors without flag") {
+WD_TEST_OR_BENCH("Async functions do not capture sync errors without flag") {
   Evaluator<CaptureThrowContext, CaptureThrowIsolate> e(v8System);
   e.setCaptureThrowsAsRejections(false);
   e.expectEval("test1()", "throws", "TypeError: boom");

@@ -113,7 +113,7 @@ auto getEntry(jsg::Lock& js, auto size) {
 
 #pragma region ValueQueue Tests
 
-KJ_TEST("ValueQueue basics work") {
+WD_TEST_OR_BENCH("ValueQueue basics work") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -143,7 +143,7 @@ KJ_TEST("ValueQueue basics work") {
   KJ_ASSERT(queue.size() == 0);
 }
 
-KJ_TEST("ValueQueue erroring works") {
+WD_TEST_OR_BENCH("ValueQueue erroring works") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -161,7 +161,7 @@ KJ_TEST("ValueQueue erroring works") {
   }
 }
 
-KJ_TEST("ValueQueue with single consumer") {
+WD_TEST_OR_BENCH("ValueQueue with single consumer") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -200,7 +200,7 @@ KJ_TEST("ValueQueue with single consumer") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ValueQueue with multiple consumers") {
+WD_TEST_OR_BENCH("ValueQueue with multiple consumers") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -279,7 +279,7 @@ KJ_TEST("ValueQueue with multiple consumers") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ValueQueue consumer with multiple-reads") {
+WD_TEST_OR_BENCH("ValueQueue consumer with multiple-reads") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -316,7 +316,7 @@ KJ_TEST("ValueQueue consumer with multiple-reads") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ValueQueue errors consumer with multiple-reads") {
+WD_TEST_OR_BENCH("ValueQueue errors consumer with multiple-reads") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -338,7 +338,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ValueQueue with multiple consumers with pending reads") {
+WD_TEST_OR_BENCH("ValueQueue with multiple consumers with pending reads") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -378,7 +378,7 @@ KJ_TEST("ValueQueue with multiple consumers with pending reads") {
 
 #pragma region ByteQueue Tests
 
-KJ_TEST("ByteQueue basics work") {
+WD_TEST_OR_BENCH("ByteQueue basics work") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -411,7 +411,7 @@ KJ_TEST("ByteQueue basics work") {
   KJ_ASSERT(queue.size() == 0);
 }
 
-KJ_TEST("ByteQueue erroring works") {
+WD_TEST_OR_BENCH("ByteQueue erroring works") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -430,7 +430,7 @@ KJ_TEST("ByteQueue erroring works") {
   }
 }
 
-KJ_TEST("ByteQueue with single consumer") {
+WD_TEST_OR_BENCH("ByteQueue with single consumer") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -484,7 +484,7 @@ KJ_TEST("ByteQueue with single consumer") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with single byob consumer") {
+WD_TEST_OR_BENCH("ByteQueue with single byob consumer") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -539,7 +539,7 @@ KJ_TEST("ByteQueue with single byob consumer") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with byob consumer and default consumer") {
+WD_TEST_OR_BENCH("ByteQueue with byob consumer and default consumer") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -628,7 +628,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple byob consumers") {
+WD_TEST_OR_BENCH("ByteQueue with multiple byob consumers") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -685,7 +685,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple byob consumers") {
+WD_TEST_OR_BENCH("ByteQueue with multiple byob consumers") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -742,7 +742,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
+WD_TEST_OR_BENCH("ByteQueue with multiple byob consumers (multi-reads)") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -825,7 +825,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
+WD_TEST_OR_BENCH("ByteQueue with multiple byob consumers (multi-reads, 2)") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -907,7 +907,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with default consumer with atLeast") {
+WD_TEST_OR_BENCH("ByteQueue with default consumer with atLeast") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -997,7 +997,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
+WD_TEST_OR_BENCH("ByteQueue with multiple default consumers with atLeast (same rate)") {
   Preamble preamble;
   auto& js = preamble.getJs();
 
@@ -1107,7 +1107,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
   js.v8Isolate->PerformMicrotaskCheckpoint();
 }
 
-KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)") {
+WD_TEST_OR_BENCH("ByteQueue with multiple default consumers with atLeast (different rate)") {
   Preamble preamble;
   auto& js = preamble.getJs();
 

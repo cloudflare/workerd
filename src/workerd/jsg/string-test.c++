@@ -9,7 +9,7 @@
 namespace workerd::jsg::test {
 namespace {
 
-KJ_TEST("UsvString from kj::String") {
+WD_TEST_OR_BENCH("UsvString from kj::String") {
   {
     auto kjStr = kj::str(u8"\U0001F607hello");
     auto usvStr = usv(kjStr.asPtr());
@@ -366,7 +366,7 @@ struct UsvStringContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(UsvStringIsolate, UsvStringContext);
 
-KJ_TEST("JavaScript USVStrings") {
+WD_TEST_OR_BENCH("JavaScript USVStrings") {
   Evaluator<UsvStringContext, UsvStringIsolate> e(v8System);
 
   e.expectEval("testUsv('hello')", "string", "hello");

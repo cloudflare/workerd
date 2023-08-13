@@ -30,7 +30,7 @@ struct ActorStateContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(ActorStateIsolate, ActorStateContext);
 
-KJ_TEST("v8 serialization version tag hasn't changed") {
+WD_TEST_OR_BENCH("v8 serialization version tag hasn't changed") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   ActorStateIsolate &actorStateIsolate = e.getIsolate();
   jsg::V8StackScope stackScope;
@@ -60,7 +60,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
   });
 }
 
-KJ_TEST("we support deserializing up to v15") {
+WD_TEST_OR_BENCH("we support deserializing up to v15") {
   jsg::test::Evaluator<ActorStateContext, ActorStateIsolate> e(v8System);
   ActorStateIsolate &actorStateIsolate = e.getIsolate();
   jsg::V8StackScope stackScope;
@@ -98,7 +98,7 @@ v8::Local<v8::Value> oldDeserializeV8Value(
   return kj::mv(value);
 }
 
-KJ_TEST("wire format version does not change deserialization behavior on real data") {
+WD_TEST_OR_BENCH("wire format version does not change deserialization behavior on real data") {
   // This test chceks for the presence of a specially named file in the current working directory
   // that contains lines of hex-encoded v8-serialized data. It processes one line at time,
   // hex-decoding it and then testing deserializing/re-serializing it.

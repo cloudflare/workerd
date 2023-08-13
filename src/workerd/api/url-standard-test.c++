@@ -15,7 +15,7 @@ jsg::V8System v8System;
 // We don't actually use V8 in this test, but we do use ICU, which needs to be initialized.
 // Constructing a V8System will do that for us.
 
-KJ_TEST("Minimal URL Parse") {
+WD_TEST_OR_BENCH("Minimal URL Parse") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -31,7 +31,7 @@ KJ_TEST("Minimal URL Parse") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse 2") {
+WD_TEST_OR_BENCH("Minimal URL Parse 2") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -47,7 +47,7 @@ KJ_TEST("Minimal URL Parse 2") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Username") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Username") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://abc@example.org/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -63,7 +63,7 @@ KJ_TEST("Minimal URL Parse - Username") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Username and Password") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Username and Password") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://abc:xyz@example.org/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -79,7 +79,7 @@ KJ_TEST("Minimal URL Parse - Username and Password") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Password, no Username") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Password, no Username") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://:xyz@example.org/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -95,7 +95,7 @@ KJ_TEST("Minimal URL Parse - Password, no Username") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Port (non-default)") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Port (non-default)") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org:123/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -112,7 +112,7 @@ KJ_TEST("Minimal URL Parse - Port (non-default)") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Port (default)") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Port (default)") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org:443/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -128,7 +128,7 @@ KJ_TEST("Minimal URL Parse - Port (default)") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Port delimiter with no port)") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Port delimiter with no port)") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org:/")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -144,7 +144,7 @@ KJ_TEST("Minimal URL Parse - Port delimiter with no port)") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - One path segment") {
+WD_TEST_OR_BENCH("Minimal URL Parse - One path segment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/abc")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -160,7 +160,7 @@ KJ_TEST("Minimal URL Parse - One path segment") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Leading single dot segment") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Leading single dot segment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/./abc")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -176,7 +176,7 @@ KJ_TEST("Minimal URL Parse - Leading single dot segment") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Multiple single dot segment") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Multiple single dot segment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/././././abc")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -192,7 +192,7 @@ KJ_TEST("Minimal URL Parse - Multiple single dot segment") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Leading double dot segment") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Leading double dot segment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/../abc")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -208,7 +208,7 @@ KJ_TEST("Minimal URL Parse - Leading double dot segment") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Leading mixed dot segment") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Leading mixed dot segment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/../.././.././abc")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -224,7 +224,7 @@ KJ_TEST("Minimal URL Parse - Leading mixed dot segment") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Three path segments") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Three path segments") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/a/b/c")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -242,7 +242,7 @@ KJ_TEST("Minimal URL Parse - Three path segments") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Three path segments with double dot") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Three path segments with double dot") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/a/b/../c")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -259,7 +259,7 @@ KJ_TEST("Minimal URL Parse - Three path segments with double dot") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Three path segments with single dot") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Three path segments with single dot") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org/a/b/./c")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -277,7 +277,7 @@ KJ_TEST("Minimal URL Parse - Three path segments with single dot") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Query present but empty") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Query present but empty") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org?")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -294,7 +294,7 @@ KJ_TEST("Minimal URL Parse - Query present but empty") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Query minimal") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Query minimal") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org?123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -311,7 +311,7 @@ KJ_TEST("Minimal URL Parse - Query minimal") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Query minimal after missing port") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Query minimal after missing port") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org:?123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -328,7 +328,7 @@ KJ_TEST("Minimal URL Parse - Query minimal after missing port") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Query minimal after missing port and empty path") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Query minimal after missing port and empty path") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org:/?123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -345,7 +345,7 @@ KJ_TEST("Minimal URL Parse - Query minimal after missing port and empty path") {
   KJ_ASSERT(record.fragment == nullptr);
 }
 
-KJ_TEST("Minimal URL Parse - Fragment present but empty") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Fragment present but empty") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org#")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -362,7 +362,7 @@ KJ_TEST("Minimal URL Parse - Fragment present but empty") {
   KJ_ASSERT(fragment == jsg::usv());
 }
 
-KJ_TEST("Minimal URL Parse - Fragment minimal") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Fragment minimal") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org#123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -379,7 +379,7 @@ KJ_TEST("Minimal URL Parse - Fragment minimal") {
   KJ_ASSERT(fragment == jsg::usv("123"));
 }
 
-KJ_TEST("Minimal URL Parse - Fragment minimal") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Fragment minimal") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org?#123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -397,7 +397,7 @@ KJ_TEST("Minimal URL Parse - Fragment minimal") {
   KJ_ASSERT(fragment == jsg::usv("123"));
 }
 
-KJ_TEST("Minimal URL Parse - Fragment minimal") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Fragment minimal") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://example.org?abc#123")));
 
   KJ_ASSERT(record.scheme == jsg::usv("https"));
@@ -415,7 +415,7 @@ KJ_TEST("Minimal URL Parse - Fragment minimal") {
   KJ_ASSERT(fragment == jsg::usv("123"));
 }
 
-KJ_TEST("Minimal URL Parse - All together") {
+WD_TEST_OR_BENCH("Minimal URL Parse - All together") {
   auto record =
       KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://abc:xyz@example.org:123/a/b/c?abc#123")));
 
@@ -437,7 +437,7 @@ KJ_TEST("Minimal URL Parse - All together") {
   KJ_ASSERT(fragment == jsg::usv("123"));
 }
 
-KJ_TEST("Minimal URL Parse - Not special (data URL)") {
+WD_TEST_OR_BENCH("Minimal URL Parse - Not special (data URL)") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("data:something")));
 
   KJ_ASSERT(record.scheme == jsg::usv("data"));
@@ -447,7 +447,7 @@ KJ_TEST("Minimal URL Parse - Not special (data URL)") {
   KJ_ASSERT(!record.special);
 }
 
-KJ_TEST("Minimal URL Parse - unknown scheme") {
+WD_TEST_OR_BENCH("Minimal URL Parse - unknown scheme") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("com.tapbots.Ivory.219:/request_token?code=8")));
 
   KJ_ASSERT(record.scheme == jsg::usv("com.tapbots.ivory.219"));
@@ -457,7 +457,7 @@ KJ_TEST("Minimal URL Parse - unknown scheme") {
   KJ_ASSERT(!record.special);
 }
 
-KJ_TEST("Special scheme URLS") {
+WD_TEST_OR_BENCH("Special scheme URLS") {
   jsg::UsvString tests[] = {
     jsg::usv("http://example.org"),
     jsg::usv("https://example.org"),
@@ -473,7 +473,7 @@ KJ_TEST("Special scheme URLS") {
   }
 }
 
-KJ_TEST("Trim leading and trailing control/space") {
+WD_TEST_OR_BENCH("Trim leading and trailing control/space") {
   jsg::UsvStringBuilder builder;
   builder.add(' ', 0x0, 0x1, ' ');
   builder.addAll("http://example.org");
@@ -486,25 +486,25 @@ KJ_TEST("Trim leading and trailing control/space") {
   KJ_ASSERT(record.getPathname() == jsg::usv("/"));
 }
 
-KJ_TEST("Percent encoding in username/password") {
+WD_TEST_OR_BENCH("Percent encoding in username/password") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://%66oo:%66oo@example.com/")));
   KJ_ASSERT(record.username == jsg::usv("%66oo"));
   KJ_ASSERT(record.password == jsg::usv("%66oo"));
 }
 
-KJ_TEST("Percent encoding in hostname") {
+WD_TEST_OR_BENCH("Percent encoding in hostname") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://%66oo")));
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("foo"));
 }
 
-KJ_TEST("Percent encoding in hostname") {
+WD_TEST_OR_BENCH("Percent encoding in hostname") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://%66oo")));
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("foo"));
 }
 
-KJ_TEST("Percent encoding in pathname") {
+WD_TEST_OR_BENCH("Percent encoding in pathname") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org/%2e/%31%32%ZZ")));
     auto path = record.getPathname();
@@ -519,21 +519,21 @@ KJ_TEST("Percent encoding in pathname") {
   }
 }
 
-KJ_TEST("Percent encoding in query") {
+WD_TEST_OR_BENCH("Percent encoding in query") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org?/%2e/%31%32%ZZ")));
   auto& query = KJ_ASSERT_NONNULL(record.query);
   // The invalid percent encoded %ZZ is ignored.
   KJ_ASSERT(query == jsg::usv("/%2e/%31%32%ZZ"));
 }
 
-KJ_TEST("Percent encoding in fragment") {
+WD_TEST_OR_BENCH("Percent encoding in fragment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org#/%2e/%31%32%ZZ")));
   auto& fragment = KJ_ASSERT_NONNULL(record.fragment);
   // The invalid percent encoded %ZZ is ignored.
   KJ_ASSERT(fragment == jsg::usv("/%2e/%31%32%ZZ"));
 }
 
-KJ_TEST("Percent encoding of non-ascii characters in path, query, fragment") {
+WD_TEST_OR_BENCH("Percent encoding of non-ascii characters in path, query, fragment") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org/café?café#café")));
   KJ_ASSERT(record.getPathname() == jsg::usv("/caf%C3%A9"));
   auto& query = KJ_ASSERT_NONNULL(record.query);
@@ -542,13 +542,13 @@ KJ_TEST("Percent encoding of non-ascii characters in path, query, fragment") {
   KJ_ASSERT(fragment == jsg::usv("caf%C3%A9"));
 }
 
-KJ_TEST("IDNA-conversion non-ascii characters in hostname") {
+WD_TEST_OR_BENCH("IDNA-conversion non-ascii characters in hostname") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://café.com")));
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("xn--caf-dma.com"));
 }
 
-KJ_TEST("IPv4 in hostname") {
+WD_TEST_OR_BENCH("IPv4 in hostname") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://123.210.123.121")));
     auto& host = KJ_ASSERT_NONNULL(record.host);
@@ -640,7 +640,7 @@ KJ_TEST("IPv4 in hostname") {
   }
 }
 
-KJ_TEST("IPv6 in hostname") {
+WD_TEST_OR_BENCH("IPv6 in hostname") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("https://[1:1:1:1:1:1:1:1]")));
     auto& host = KJ_ASSERT_NONNULL(record.host);
@@ -678,13 +678,13 @@ KJ_TEST("IPv6 in hostname") {
   KJ_ASSERT(URL::parse(jsg::usv("https://[zz::top]")) == nullptr);
 }
 
-KJ_TEST("javascript: URLS") {
+WD_TEST_OR_BENCH("javascript: URLS") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("jAvAsCrIpT: alert('boo'); ")));
   KJ_ASSERT(record.scheme == jsg::usv("javascript"));
   KJ_ASSERT(record.getPathname() == jsg::usv(" alert('boo');"));
 }
 
-KJ_TEST("data: URLS") {
+WD_TEST_OR_BENCH("data: URLS") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("data:,Hello%2C%20World%21")));
     KJ_ASSERT(record.scheme == jsg::usv("data"));
@@ -711,13 +711,13 @@ KJ_TEST("data: URLS") {
   }
 }
 
-KJ_TEST("blob: URLS") {
+WD_TEST_OR_BENCH("blob: URLS") {
   auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("blob:https://example.org")));
   KJ_ASSERT(record.scheme == jsg::usv("blob"));
   KJ_ASSERT(record.getPathname() == jsg::usv("https://example.org"));
 }
 
-KJ_TEST("Relative URLs") {
+WD_TEST_OR_BENCH("Relative URLs") {
   {
     auto base =
         KJ_ASSERT_NONNULL(URL::parse(
@@ -769,7 +769,7 @@ KJ_TEST("Relative URLs") {
   }
 }
 
-KJ_TEST("Parse protocol with state override") {
+WD_TEST_OR_BENCH("Parse protocol with state override") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org")));
     record = KJ_ASSERT_NONNULL(URL::parse(
@@ -779,7 +779,7 @@ KJ_TEST("Parse protocol with state override") {
 }
 
 
-KJ_TEST("Can parse") {
+WD_TEST_OR_BENCH("Can parse") {
   {
     KJ_ASSERT(URL::canParse(jsg::usv("http://example.org")));
     KJ_ASSERT(URL::canParse(jsg::usv("foo"), jsg::usv("http://example.org")));

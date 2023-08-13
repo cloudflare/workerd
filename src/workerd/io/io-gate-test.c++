@@ -8,7 +8,7 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("InputGate basics") {
+WD_TEST_OR_BENCH("InputGate basics") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -41,7 +41,7 @@ KJ_TEST("InputGate basics") {
   KJ_EXPECT(!gate.onBroken().poll(ws));
 }
 
-KJ_TEST("InputGate critical section") {
+WD_TEST_OR_BENCH("InputGate critical section") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -88,7 +88,7 @@ KJ_TEST("InputGate critical section") {
   outerWait.wait(ws);
 }
 
-KJ_TEST("InputGate multiple critical sections start together") {
+WD_TEST_OR_BENCH("InputGate multiple critical sections start together") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -115,7 +115,7 @@ KJ_TEST("InputGate multiple critical sections start together") {
   cs2Wait.wait(ws);
 }
 
-KJ_TEST("InputGate nested critical sections") {
+WD_TEST_OR_BENCH("InputGate nested critical sections") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -146,7 +146,7 @@ KJ_TEST("InputGate nested critical sections") {
   cs1Wait.wait(ws);
 }
 
-KJ_TEST("InputGate nested critical section outlives parent") {
+WD_TEST_OR_BENCH("InputGate nested critical section outlives parent") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -182,7 +182,7 @@ KJ_TEST("InputGate nested critical section outlives parent") {
   rootWait.wait(ws);
 }
 
-KJ_TEST("InputGate deeply nested critical sections") {
+WD_TEST_OR_BENCH("InputGate deeply nested critical sections") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -271,7 +271,7 @@ KJ_TEST("InputGate deeply nested critical sections") {
   waiter6.wait(ws);
 }
 
-KJ_TEST("InputGate critical section lock outlives critical section") {
+WD_TEST_OR_BENCH("InputGate critical section lock outlives critical section") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -312,7 +312,7 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   KJ_EXPECT(waiter.wait(ws).isFor(gate));
 }
 
-KJ_TEST("InputGate broken") {
+WD_TEST_OR_BENCH("InputGate broken") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -359,7 +359,7 @@ KJ_TEST("InputGate broken") {
 
 // =======================================================================================
 
-KJ_TEST("OutputGate basics") {
+WD_TEST_OR_BENCH("OutputGate basics") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -404,7 +404,7 @@ KJ_TEST("OutputGate basics") {
   KJ_EXPECT(!gate.onBroken().poll(ws));
 }
 
-KJ_TEST("OutputGate out-of-order") {
+WD_TEST_OR_BENCH("OutputGate out-of-order") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -455,7 +455,7 @@ KJ_TEST("OutputGate out-of-order") {
   KJ_EXPECT(!gate.onBroken().poll(ws));
 }
 
-KJ_TEST("OutputGate exception") {
+WD_TEST_OR_BENCH("OutputGate exception") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 
@@ -514,7 +514,7 @@ KJ_TEST("OutputGate exception") {
   KJ_EXPECT_THROW_MESSAGE("foo", onBroken.wait(ws));
 }
 
-KJ_TEST("OutputGate canceled") {
+WD_TEST_OR_BENCH("OutputGate canceled") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);
 

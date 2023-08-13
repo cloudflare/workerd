@@ -69,7 +69,7 @@ JSG_DECLARE_ISOLATE_TYPE(
   EW_BASICS_ISOLATE_TYPES,
   jsg::TypeWrapperExtension<PromiseWrapper>);
 
-KJ_TEST("EventTarget native listeners work") {
+WD_TEST_OR_BENCH("EventTarget native listeners work") {
   jsg::test::Evaluator<BasicsContext, BasicsIsolate,
       CompatibilityFlags::Reader> e(v8System);
   e.expectEval("test()", "boolean", "true");

@@ -23,7 +23,7 @@ struct FreezeContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(FreezeIsolate, FreezeContext);
 
-KJ_TEST("recursive freezing") {
+WD_TEST_OR_BENCH("recursive freezing") {
   Evaluator<FreezeContext, FreezeIsolate> e(v8System);
   e.expectEval(
       "let obj = { foo: [ { bar: 1 } ] };\n"
@@ -49,7 +49,7 @@ struct CloneContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(CloneIsolate, CloneContext);
 
-KJ_TEST("deep clone") {
+WD_TEST_OR_BENCH("deep clone") {
   Evaluator<CloneContext, CloneIsolate> e(v8System);
   e.expectEval(
       "let obj = { foo: [ { bar: 1 } ] };\n"
@@ -78,7 +78,7 @@ struct TypeErrorContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TypeErrorIsolate, TypeErrorContext, NumberBox);
 
-KJ_TEST("throw TypeError") {
+WD_TEST_OR_BENCH("throw TypeError") {
   Evaluator<TypeErrorContext, TypeErrorIsolate> e(v8System);
   e.expectEval(
       "new NumberBox(123).addBox(321)",
@@ -122,7 +122,7 @@ struct ThrowContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(ThrowIsolate, ThrowContext);
 
-KJ_TEST("throw internal error") {
+WD_TEST_OR_BENCH("throw internal error") {
   Evaluator<ThrowContext, ThrowIsolate> e(v8System);
   {
     KJ_EXPECT_LOG(ERROR, "thrown from throwException");
@@ -271,7 +271,7 @@ struct TunneledContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
 
-KJ_TEST("throw tunneled exception") {
+WD_TEST_OR_BENCH("throw tunneled exception") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval(
       "throwTunneledTypeError()",
@@ -370,7 +370,7 @@ KJ_TEST("throw tunneled exception") {
   }
 }
 
-KJ_TEST("runTunnelingExceptions") {
+WD_TEST_OR_BENCH("runTunnelingExceptions") {
   Evaluator<TunneledContext, TunneledIsolate> e(v8System);
   e.expectEval(
       "throwRetunneledTypeError()",
@@ -378,7 +378,7 @@ KJ_TEST("runTunnelingExceptions") {
   );
 }
 
-KJ_TEST("isTunneledException") {
+WD_TEST_OR_BENCH("isTunneledException") {
   TunneledContext context;
   try { context.throwTunneledTypeError(); KJ_UNREACHABLE; } catch (kj::Exception e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());

@@ -148,7 +148,7 @@ struct TraceTestContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(TraceTestIsolate, TraceTestContext, NumberBox,
                          NumberBoxHolder, GcDetector, GcDetectorBox, ValueBox);
 
-KJ_TEST("GC collects objects when expected") {
+WD_TEST_OR_BENCH("GC collects objects when expected") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
 
   // Test that a full GC can collect native objects.
@@ -246,7 +246,7 @@ KJ_TEST("GC collects objects when expected") {
   )", "undefined", "undefined");
 }
 
-KJ_TEST("TracedReference usage does not lead to crashes") {
+WD_TEST_OR_BENCH("TracedReference usage does not lead to crashes") {
   Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
 
   e.expectEval(

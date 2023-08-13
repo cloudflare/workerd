@@ -11,7 +11,7 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("compatibility date parsing") {
+WD_TEST_OR_BENCH("compatibility date parsing") {
   auto expectParseTo = [](kj::StringPtr input, kj::StringPtr expected) {
     KJ_IF_MAYBE(actual, normalizeCompatDate(input)) {
       KJ_EXPECT(*actual == expected);
@@ -60,7 +60,7 @@ KJ_TEST("compatibility date parsing") {
   expectNoParse("202-05-07");
 }
 
-KJ_TEST("compatibility flag parsing") {
+WD_TEST_OR_BENCH("compatibility flag parsing") {
   auto expectCompileCompatibilityFlags = [](kj::StringPtr compatDate,
       kj::ArrayPtr<const kj::StringPtr> featureFlags,
       kj::StringPtr expectedOutput,
@@ -192,7 +192,7 @@ KJ_TEST("compatibility flag parsing") {
       CompatibilityDateValidation::FUTURE_FOR_TEST, true, false);
 }
 
-KJ_TEST("encode to flag list for FL") {
+WD_TEST_OR_BENCH("encode to flag list for FL") {
   capnp::MallocMessageBuilder message;
   auto orphanage = message.getOrphanage();
 

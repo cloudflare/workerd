@@ -108,7 +108,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(PromiseIsolate, PromiseContext);
 
-KJ_TEST("jsg::Promise<T>") {
+WD_TEST_OR_BENCH("jsg::Promise<T>") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   e.expectEval(
@@ -122,7 +122,7 @@ KJ_TEST("jsg::Promise<T>") {
   KJ_EXPECT(promiseTestResult == 62481);
 }
 
-KJ_TEST("jsg::Promise<T> exception catching") {
+WD_TEST_OR_BENCH("jsg::Promise<T> exception catching") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   {
@@ -166,7 +166,7 @@ KJ_TEST("jsg::Promise<T> exception catching") {
   }
 }
 
-KJ_TEST("whenResolved") {
+WD_TEST_OR_BENCH("whenResolved") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   e.expectEval("whenResolved(Promise.resolve(1))", "undefined", "undefined");

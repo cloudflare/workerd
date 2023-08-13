@@ -9,7 +9,7 @@
 namespace workerd {
 namespace {
 
-KJ_TEST("CrossThreadWaitList") {
+WD_TEST_OR_BENCH("CrossThreadWaitList") {
   auto doTest = [](const CrossThreadWaitList& list) {
     kj::MutexGuarded<uint> ready;
 
@@ -52,7 +52,7 @@ KJ_TEST("CrossThreadWaitList") {
   }
 }
 
-KJ_TEST("CrossThreadWaitList exceptions") {
+WD_TEST_OR_BENCH("CrossThreadWaitList exceptions") {
   auto doTest = [](const CrossThreadWaitList& list) {
     kj::MutexGuarded<uint> ready;
 

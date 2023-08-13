@@ -23,7 +23,7 @@ struct CryptoContext: public jsg::Object, public jsg::ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(CryptoIsolate, CryptoContext);
 
-KJ_TEST("AES-KW key wrap") {
+WD_TEST_OR_BENCH("AES-KW key wrap") {
   // Basic test that I wrote when I was seeing heap corruption. Found it easier to iterate on with
   // ASAN/valgrind than using our conformance tests with test-runner.
   jsg::test::Evaluator<CryptoContext, CryptoIsolate> e(v8System);
@@ -85,7 +85,7 @@ KJ_TEST("AES-KW key wrap") {
   }
 }
 
-KJ_TEST("AES-CTR key wrap") {
+WD_TEST_OR_BENCH("AES-CTR key wrap") {
   // Basic test that let me repro an issue where using an AES key that's not AES-KW would fail to
   // wrap if it didn't have "encrypt" in its usages when created.
 

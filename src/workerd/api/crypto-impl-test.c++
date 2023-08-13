@@ -13,7 +13,7 @@
 namespace workerd::api {
 namespace {
 
-KJ_TEST("Crypto error conversion") {
+WD_TEST_OR_BENCH("Crypto error conversion") {
   ERR_clear_error();
   // Intentionally provide an error type not handled in throwOpensslError()
   // (RSA_R_CANNOT_RECOVER_MULTI_PRIME_KEY) that overlaps with an EC error that we do handle

@@ -14,7 +14,7 @@ struct EvalContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(EvalIsolate, EvalContext);
 
-KJ_TEST("eval() is blocked") {
+WD_TEST_OR_BENCH("eval() is blocked") {
   Evaluator<EvalContext, EvalIsolate> e(v8System);
   e.expectEval("eval('123')",
       "throws", "EvalError: Code generation from strings disallowed for this context");
@@ -64,7 +64,7 @@ struct ConfigContext: public Object, public ContextGlobal {
 JSG_DECLARE_ISOLATE_TYPE(ConfigIsolate, ConfigContext, ConfigContext::Nested,
     ConfigContext::OtherNested);
 
-KJ_TEST("configuration values reach nested type declarations") {
+WD_TEST_OR_BENCH("configuration values reach nested type declarations") {
   {
     ConfigIsolate isolate(v8System, 123, kj::heap<IsolateObserver>());
     V8StackScope stackScope;

@@ -10,7 +10,7 @@ namespace {
 
 static constexpr auto INITIAL_CAPACITY = 8, MAX_CAPACITY = 100;
 
-KJ_TEST("BatchQueue basic operations") {
+WD_TEST_OR_BENCH("BatchQueue basic operations") {
   BatchQueue<int> batchQueue { INITIAL_CAPACITY, MAX_CAPACITY };
 
   KJ_EXPECT(batchQueue.empty());
@@ -32,7 +32,7 @@ KJ_TEST("BatchQueue basic operations") {
   }
 }
 
-KJ_TEST("BatchQueue::Batch clears the pop buffer when it is destroyed") {
+WD_TEST_OR_BENCH("BatchQueue::Batch clears the pop buffer when it is destroyed") {
   struct DestructionDetector {
     DestructionDetector(uint& count): count(count) {}
     ~DestructionDetector() noexcept(false) { ++count; }
@@ -51,7 +51,7 @@ KJ_TEST("BatchQueue::Batch clears the pop buffer when it is destroyed") {
   KJ_EXPECT(count == 1);
 }
 
-KJ_TEST("BatchQueue throws if two pop() operations run concurrently") {
+WD_TEST_OR_BENCH("BatchQueue throws if two pop() operations run concurrently") {
   BatchQueue<int> batchQueue { INITIAL_CAPACITY, MAX_CAPACITY };
 
   batchQueue.push(123);
@@ -59,7 +59,7 @@ KJ_TEST("BatchQueue throws if two pop() operations run concurrently") {
   KJ_EXPECT_THROW_MESSAGE("pop()'s previous result not yet destroyed", batchQueue.pop());
 }
 
-KJ_TEST("BatchQueue uses two buffers") {
+WD_TEST_OR_BENCH("BatchQueue uses two buffers") {
   BatchQueue<int> batchQueue { INITIAL_CAPACITY, MAX_CAPACITY };
 
   batchQueue.push(123);
@@ -76,7 +76,7 @@ KJ_TEST("BatchQueue uses two buffers") {
   KJ_EXPECT(buffer1.begin() == buffer3.begin());
 }
 
-KJ_TEST("BatchQueue reconstructs buffers if they grow above maxCapacity") {
+WD_TEST_OR_BENCH("BatchQueue reconstructs buffers if they grow above maxCapacity") {
   BatchQueue<int> batchQueue { INITIAL_CAPACITY, MAX_CAPACITY };
 
   for (auto i = 0; i < MAX_CAPACITY + 1; ++i) {

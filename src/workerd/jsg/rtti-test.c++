@@ -32,13 +32,13 @@ kj::String tStructure() {
   return codec.encode(type);
 }
 
-KJ_TEST("primitive types") {
+WD_TEST_OR_BENCH("primitive types") {
   KJ_EXPECT(tType<void>() == "(voidt = void)");
   KJ_EXPECT(tType<bool>() == "(boolt = void)");
   KJ_EXPECT(tType<v8::Value>() == "(unknown = void)");
 }
 
-KJ_TEST("number types") {
+WD_TEST_OR_BENCH("number types") {
   KJ_EXPECT(tType<char>() == "(number = (name = \"char\"))");
   KJ_EXPECT(tType<signed char>() == "(number = (name = \"signed char\"))");
   KJ_EXPECT(tType<unsigned char>() == "(number = (name = \"unsigned char\"))");
@@ -52,7 +52,7 @@ KJ_TEST("number types") {
   KJ_EXPECT(tType<double>() == "(number = (name = \"double\"))");
 }
 
-KJ_TEST("string types") {
+WD_TEST_OR_BENCH("string types") {
   KJ_EXPECT(tType<kj::String>() == "(string = (name = \"kj::String\"))");
   KJ_EXPECT(tType<kj::StringPtr>() == "(string = (name = \"kj::StringPtr\"))");
   KJ_EXPECT(tType<v8::String>() == "(string = (name = \"v8::String\"))");
@@ -61,12 +61,12 @@ KJ_TEST("string types") {
   KJ_EXPECT(tType<UsvStringPtr>() == "(string = (name = \"UsvStringPtr\"))");
 }
 
-KJ_TEST("object types") {
+WD_TEST_OR_BENCH("object types") {
   KJ_EXPECT(tType<v8::Object>() == "(object = void)");
   KJ_EXPECT(tType<jsg::Object>() == "(object = void)");
 }
 
-KJ_TEST("promises") {
+WD_TEST_OR_BENCH("promises") {
   KJ_EXPECT(tType<kj::Promise<void>>() ==
       "(promise = (value = (voidt = void)))");
   KJ_EXPECT(tType<kj::Promise<int>>() ==
@@ -77,7 +77,7 @@ KJ_TEST("promises") {
       "(promise = (value = (unknown = void)))");
 }
 
-KJ_TEST("generic types") {
+WD_TEST_OR_BENCH("generic types") {
   KJ_EXPECT(tType<Ref<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<V8Ref<v8::Object>>() == "(object = void)");
   KJ_EXPECT(tType<HashableV8Ref<v8::Object>>() == "(object = void)");
@@ -106,7 +106,7 @@ KJ_TEST("generic types") {
       "(string = (name = \"kj::String\"))]))");
 }
 
-KJ_TEST("builtins") {
+WD_TEST_OR_BENCH("builtins") {
   KJ_EXPECT(tType<jsg::BufferSource>() == "(builtin = (type = jsgBufferSource))");
   KJ_EXPECT(tType<v8::Uint8Array>() == "(builtin = (type = v8Uint8Array))");
   KJ_EXPECT(tType<v8::ArrayBufferView>() == "(builtin = (type = v8ArrayBufferView))");
@@ -114,7 +114,7 @@ KJ_TEST("builtins") {
   KJ_EXPECT(tType<kj::Date>() == "(builtin = (type = kjDate))");
 }
 
-KJ_TEST("jsgImpl") {
+WD_TEST_OR_BENCH("jsgImpl") {
   KJ_EXPECT(tType<jsg::Lock>() == "(jsgImpl = (type = jsgLock))");
   KJ_EXPECT(tType<jsg::SelfRef>() == "(jsgImpl = (type = jsgSelfRef))");
   KJ_EXPECT(tType<jsg::Unimplemented>() == "(jsgImpl = (type = jsgUnimplemented))");
@@ -126,14 +126,14 @@ KJ_TEST("jsgImpl") {
   KJ_EXPECT(tType<v8::PropertyCallbackInfo<v8::Value>>() == "(jsgImpl = (type = v8PropertyCallbackInfo))");
 }
 
-KJ_TEST("functions") {
+WD_TEST_OR_BENCH("functions") {
   KJ_EXPECT(tType<jsg::Function<int()>>() ==
       "(function = (returnType = (number = (name = \"int\")), args = []))");
   KJ_EXPECT(tType<jsg::Function<void(int a, double b)>>() ==
       "(function = (returnType = (voidt = void), args = [(number = (name = \"int\")), (number = (name = \"double\"))]))");
 }
 
-KJ_TEST("c++ modifiers") {
+WD_TEST_OR_BENCH("c++ modifiers") {
   KJ_EXPECT(tType<const int>() == "(number = (name = \"int\"))");
   KJ_EXPECT(tType<int&>() == "(number = (name = \"int\"))");
   KJ_EXPECT(tType<int&&>() == "(number = (name = \"int\"))");
@@ -169,11 +169,11 @@ struct TestResource: public Base {
   }
 };
 
-KJ_TEST("resource reference") {
+WD_TEST_OR_BENCH("resource reference") {
   KJ_EXPECT(tType<TestResource>() == "(structure = (name = \"TestResource\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\"))");
 }
 
-KJ_TEST("resource structure") {
+WD_TEST_OR_BENCH("resource structure") {
   KJ_EXPECT(tStructure<Base>() == "(name = \"Base\", members = [], "
       "extends = (intrinsic = (name = \"v8::kIteratorPrototype\")), "
       "iterable = false, asyncIterable = false, "
@@ -198,7 +198,7 @@ struct TestNested : jsg::Object {
   JSG_RESOURCE_TYPE(TestNested) { JSG_NESTED_TYPE(Base); };
 };
 
-KJ_TEST("nested structure") {
+WD_TEST_OR_BENCH("nested structure") {
   KJ_EXPECT(tStructure<TestNested>() == "(name = \"TestNested\", members = [("
     "nested = ("
     "structure = ("
@@ -227,7 +227,7 @@ struct TestConstant : jsg::Object {
   };
 };
 
-KJ_TEST("constant members") {
+WD_TEST_OR_BENCH("constant members") {
   KJ_EXPECT(tStructure<TestConstant>() == "(name = \"TestConstant\", members = ["
     "(constant = (name = \"ENABLED\", value = 1)), "
     "(constant = (name = \"CIRCLE\", value = 2))], "
@@ -245,7 +245,7 @@ struct TestLazyJsProperty : jsg::Object {
   };
 };
 
-KJ_TEST("lazyJsProperty") {
+WD_TEST_OR_BENCH("lazyJsProperty") {
   KJ_EXPECT(tStructure<TestLazyJsProperty>() == "(name = \"TestLazyJsProperty\", members = ["
   "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false)), "
   "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false))], "
@@ -259,11 +259,11 @@ struct TestStruct {
   JSG_STRUCT(a, b);
 };
 
-KJ_TEST("struct reference") {
+WD_TEST_OR_BENCH("struct reference") {
   KJ_EXPECT(tType<TestStruct>() == "(structure = (name = \"TestStruct\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestStruct\"))");
 }
 
-KJ_TEST("struct structure") {
+WD_TEST_OR_BENCH("struct structure") {
   KJ_EXPECT(tStructure<TestStruct>() == "(name = \"TestStruct\", members = ["
       "(property = (name = \"a\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = false)), "
       "(property = (name = \"b\", type = (boolt = void), readonly = false, lazy = false, prototype = false))], "
@@ -282,7 +282,7 @@ struct TestSymbolTable: public jsg::Object {
   };
 };
 
-KJ_TEST("symbol table") {
+WD_TEST_OR_BENCH("symbol table") {
   Builder<MockConfig> builder((MockConfig()));
   auto type = builder.structure<TestSymbolTable>();
   capnp::TextCodec codec;
@@ -320,7 +320,7 @@ struct TestTypeScriptStruct {
   JSG_STRUCT_TS_OVERRIDE(RenamedStructThing { structThing: 42 });
 };
 
-KJ_TEST("typescript macros") {
+WD_TEST_OR_BENCH("typescript macros") {
   KJ_EXPECT(tStructure<TestTypeScriptResourceType>() == "(name = \"TestTypeScriptResourceType\", members = ["
       "(property = (name = \"thing\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = false))], "
       "iterable = false, asyncIterable = false, "

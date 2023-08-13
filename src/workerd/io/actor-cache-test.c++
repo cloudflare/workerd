@@ -242,7 +242,7 @@ struct ActorCacheTest: public ActorCacheConvenienceWrappers {
   }
 };
 
-KJ_TEST("ActorCache single-key basics") {
+WD_TEST_OR_BENCH("ActorCache single-key basics") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -309,7 +309,7 @@ KJ_TEST("ActorCache single-key basics") {
   }
 }
 
-KJ_TEST("ActorCache multi-key basics") {
+WD_TEST_OR_BENCH("ActorCache multi-key basics") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -371,7 +371,7 @@ KJ_TEST("ActorCache multi-key basics") {
 
 // =======================================================================================
 
-KJ_TEST("ActorCache more puts") {
+WD_TEST_OR_BENCH("ActorCache more puts") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -412,7 +412,7 @@ KJ_TEST("ActorCache more puts") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("foo"))) == "baz");
 }
 
-KJ_TEST("ActorCache more deletes") {
+WD_TEST_OR_BENCH("ActorCache more deletes") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -482,7 +482,7 @@ KJ_TEST("ActorCache more deletes") {
   KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
 }
 
-KJ_TEST("ActorCache more multi-puts") {
+WD_TEST_OR_BENCH("ActorCache more multi-puts") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -547,7 +547,7 @@ KJ_TEST("ActorCache more multi-puts") {
   }
 }
 
-KJ_TEST("ActorCache more multi-deletes") {
+WD_TEST_OR_BENCH("ActorCache more multi-deletes") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -618,7 +618,7 @@ KJ_TEST("ActorCache more multi-deletes") {
   }
 }
 
-KJ_TEST("ActorCache batching due to maxKeysPerRpc") {
+WD_TEST_OR_BENCH("ActorCache batching due to maxKeysPerRpc") {
   ActorCacheTest test({.maxKeysPerRpc = 2});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -678,7 +678,7 @@ KJ_TEST("ActorCache batching due to maxKeysPerRpc") {
   KJ_EXPECT(deleteProm3.wait(ws) == 2);
 }
 
-KJ_TEST("ActorCache batching due to max storage RPC words") {
+WD_TEST_OR_BENCH("ActorCache batching due to max storage RPC words") {
   ActorCacheTest test({.hardLimit = 128 * 1024 * 1024});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -700,7 +700,7 @@ KJ_TEST("ActorCache batching due to max storage RPC words") {
   mockTxn->expectDropped(ws);
 }
 
-KJ_TEST("ActorCache deleteAll()") {
+WD_TEST_OR_BENCH("ActorCache deleteAll()") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -793,7 +793,7 @@ KJ_TEST("ActorCache deleteAll()") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("waldo"))) == "99999");
 }
 
-KJ_TEST("ActorCache deleteAll() during transaction commit") {
+WD_TEST_OR_BENCH("ActorCache deleteAll() during transaction commit") {
   // This tests a race condition that existed previously in the code.
 
   ActorCacheTest test;
@@ -826,7 +826,7 @@ KJ_TEST("ActorCache deleteAll() during transaction commit") {
       .thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
+WD_TEST_OR_BENCH("ActorCache deleteAll() again when previous one isn't done yet") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -898,7 +898,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   }
 }
 
-KJ_TEST("ActorCache coalescing") {
+WD_TEST_OR_BENCH("ActorCache coalescing") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -968,7 +968,7 @@ KJ_TEST("ActorCache coalescing") {
   }
 }
 
-KJ_TEST("ActorCache canceled deletes are coalesced") {
+WD_TEST_OR_BENCH("ActorCache canceled deletes are coalesced") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1004,7 +1004,7 @@ KJ_TEST("ActorCache canceled deletes are coalesced") {
   KJ_ASSERT(!promise.wait(ws));
 }
 
-KJ_TEST("ActorCache get-put ordering") {
+WD_TEST_OR_BENCH("ActorCache get-put ordering") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1099,7 +1099,7 @@ KJ_TEST("ActorCache get-put ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
 }
 
-KJ_TEST("ActorCache put during flush") {
+WD_TEST_OR_BENCH("ActorCache put during flush") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1130,7 +1130,7 @@ KJ_TEST("ActorCache put during flush") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "654");
 }
 
-KJ_TEST("ActorCache flush retry") {
+WD_TEST_OR_BENCH("ActorCache flush retry") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1217,7 +1217,7 @@ KJ_TEST("ActorCache flush retry") {
   KJ_ASSERT(promise2.wait(ws) == 2);
 }
 
-KJ_TEST("ActorCache output gate blocked during flush") {
+WD_TEST_OR_BENCH("ActorCache output gate blocked during flush") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1255,7 +1255,7 @@ KJ_TEST("ActorCache output gate blocked during flush") {
   gatePromise.wait(ws);
 }
 
-KJ_TEST("ActorCache output gate bypass") {
+WD_TEST_OR_BENCH("ActorCache output gate bypass") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1279,7 +1279,7 @@ KJ_TEST("ActorCache output gate bypass") {
   test.gate.wait().wait(ws);
 }
 
-KJ_TEST("ActorCache output gate bypass on one put but not the next") {
+WD_TEST_OR_BENCH("ActorCache output gate bypass on one put but not the next") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1311,7 +1311,7 @@ KJ_TEST("ActorCache output gate bypass on one put but not the next") {
   gatePromise.wait(ws);
 }
 
-KJ_TEST("ActorCache flush hard failure") {
+WD_TEST_OR_BENCH("ActorCache flush hard failure") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1334,7 +1334,7 @@ KJ_TEST("ActorCache flush hard failure") {
   test.put("bar", "456");
 }
 
-KJ_TEST("ActorCache flush hard failure with output gate bypass") {
+WD_TEST_OR_BENCH("ActorCache flush hard failure with output gate bypass") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1361,7 +1361,7 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
   test.put("bar", "456");
 }
 
-KJ_TEST("ActorCache read retry") {
+WD_TEST_OR_BENCH("ActorCache read retry") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1405,7 +1405,7 @@ KJ_TEST("ActorCache read retry") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(ws)) == "123");
 }
 
-KJ_TEST("ActorCache read retry on flush containing only puts") {
+WD_TEST_OR_BENCH("ActorCache read retry on flush containing only puts") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1442,7 +1442,7 @@ KJ_TEST("ActorCache read retry on flush containing only puts") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(promise.wait(ws)) == "123");
 }
 
-KJ_TEST("ActorCache read hard fail") {
+WD_TEST_OR_BENCH("ActorCache read hard fail") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1481,7 +1481,7 @@ KJ_TEST("ActorCache read hard fail") {
   mockStorage->expectNoActivity(ws);
 }
 
-KJ_TEST("ActorCache read cancel") {
+WD_TEST_OR_BENCH("ActorCache read cancel") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1514,7 +1514,7 @@ KJ_TEST("ActorCache read cancel") {
   mockTxn->expectDropped(ws);
 }
 
-KJ_TEST("ActorCache get-multiple multiple blocks") {
+WD_TEST_OR_BENCH("ActorCache get-multiple multiple blocks") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1557,7 +1557,7 @@ KJ_TEST("ActorCache get-multiple multiple blocks") {
   KJ_ASSERT(promise.wait(ws) == kvs({{"baz", "456"}, {"foo", "789"}}));
 }
 
-KJ_TEST("ActorCache get-multiple partial retry") {
+WD_TEST_OR_BENCH("ActorCache get-multiple partial retry") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1586,7 +1586,7 @@ KJ_TEST("ActorCache get-multiple partial retry") {
 // =======================================================================================
 // OK... time for hard mode. Let's test list().
 
-KJ_TEST("ActorCache list()") {
+WD_TEST_OR_BENCH("ActorCache list()") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1646,7 +1646,7 @@ KJ_TEST("ActorCache list()") {
   }
 }
 
-KJ_TEST("ActorCache list() all") {
+WD_TEST_OR_BENCH("ActorCache list() all") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1680,7 +1680,7 @@ KJ_TEST("ActorCache list() all") {
       kvs({{"bar", "456"}, {"baz", "789"}}));
 }
 
-KJ_TEST("ActorCache list() with limit") {
+WD_TEST_OR_BENCH("ActorCache list() with limit") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1746,7 +1746,7 @@ KJ_TEST("ActorCache list() with limit") {
       kvs({{"bar", "456"}, {"baz", "789"}, {"foo", "123"}, {"garply", "54321"}}));
 }
 
-KJ_TEST("ActorCache list() with limit around negative entries") {
+WD_TEST_OR_BENCH("ActorCache list() with limit around negative entries") {
   // This checks for a bug where the initial scan through cache for list() applies the limit to
   // the total number of entries seen (positive or negative), when it really needs to apply only
   // to positive entries.
@@ -1790,7 +1790,7 @@ KJ_TEST("ActorCache list() with limit around negative entries") {
   }
 }
 
-KJ_TEST("ActorCache list() start point is not present") {
+WD_TEST_OR_BENCH("ActorCache list() start point is not present") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1820,7 +1820,7 @@ KJ_TEST("ActorCache list() start point is not present") {
   KJ_ASSERT(expectCached(test.get("fooa")) == nullptr);
 }
 
-KJ_TEST("ActorCache list() multiple ranges") {
+WD_TEST_OR_BENCH("ActorCache list() multiple ranges") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1864,7 +1864,7 @@ KJ_TEST("ActorCache list() multiple ranges") {
   expectUncached(test.get("c"));
 }
 
-KJ_TEST("ActorCache list() with some already-cached keys in range") {
+WD_TEST_OR_BENCH("ActorCache list() with some already-cached keys in range") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1920,7 +1920,7 @@ KJ_TEST("ActorCache list() with some already-cached keys in range") {
   KJ_ASSERT(deletePromise.wait(ws) == 1);
 }
 
-KJ_TEST("ActorCache list() with seemingly-redundant dirty entries") {
+WD_TEST_OR_BENCH("ActorCache list() with seemingly-redundant dirty entries") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -1986,7 +1986,7 @@ KJ_TEST("ActorCache list() with seemingly-redundant dirty entries") {
   KJ_ASSERT(expectCached(test.list("aaa", "fff")) == kvs({{"bbb", "bval"}}));
 }
 
-KJ_TEST("ActorCache list() starting from known value") {
+WD_TEST_OR_BENCH("ActorCache list() starting from known value") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2016,7 +2016,7 @@ KJ_TEST("ActorCache list() starting from known value") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"bar", "123"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache list() starting from unknown value") {
+WD_TEST_OR_BENCH("ActorCache list() starting from unknown value") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2047,7 +2047,7 @@ KJ_TEST("ActorCache list() starting from unknown value") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"baz", "456"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() consecutively, absent midpoint") {
+WD_TEST_OR_BENCH("ActorCache list() consecutively, absent midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2083,7 +2083,7 @@ KJ_TEST("ActorCache list() consecutively, absent midpoint") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"baz", "456"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() consecutively reverse, absent midpoint") {
+WD_TEST_OR_BENCH("ActorCache list() consecutively reverse, absent midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2119,7 +2119,7 @@ KJ_TEST("ActorCache list() consecutively reverse, absent midpoint") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"baz", "456"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() consecutively, present midpoint") {
+WD_TEST_OR_BENCH("ActorCache list() consecutively, present midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2157,7 +2157,7 @@ KJ_TEST("ActorCache list() consecutively, present midpoint") {
       kvs({{"baz", "456"}, {"corge", "789"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() consecutively reverse, present midpoint") {
+WD_TEST_OR_BENCH("ActorCache list() consecutively reverse, present midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2195,7 +2195,7 @@ KJ_TEST("ActorCache list() consecutively reverse, present midpoint") {
       kvs({{"baz", "456"}, {"corge", "789"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() starting in known-empty gap") {
+WD_TEST_OR_BENCH("ActorCache list() starting in known-empty gap") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2231,7 +2231,7 @@ KJ_TEST("ActorCache list() starting in known-empty gap") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache list() ending in known-empty gap") {
+WD_TEST_OR_BENCH("ActorCache list() ending in known-empty gap") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2272,7 +2272,7 @@ KJ_TEST("ActorCache list() ending in known-empty gap") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"baz", "123"}}));
 }
 
-KJ_TEST("ActorCache list() with limit and dirty puts that end up past the limit") {
+WD_TEST_OR_BENCH("ActorCache list() with limit and dirty puts that end up past the limit") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2305,7 +2305,7 @@ KJ_TEST("ActorCache list() with limit and dirty puts that end up past the limit"
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache list() overwrite endpoint") {
+WD_TEST_OR_BENCH("ActorCache list() overwrite endpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2334,7 +2334,7 @@ KJ_TEST("ActorCache list() overwrite endpoint") {
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache list() delete endpoint") {
+WD_TEST_OR_BENCH("ActorCache list() delete endpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2383,7 +2383,7 @@ KJ_TEST("ActorCache list() delete endpoint") {
   }
 }
 
-KJ_TEST("ActorCache list() delete endpoint empty range") {
+WD_TEST_OR_BENCH("ActorCache list() delete endpoint empty range") {
   // Same as last test except the listed range is totally empty.
   ActorCacheTest test;
   auto& ws = test.ws;
@@ -2432,7 +2432,7 @@ KJ_TEST("ActorCache list() delete endpoint empty range") {
   }
 }
 
-KJ_TEST("ActorCache list() interleave streaming with other ops") {
+WD_TEST_OR_BENCH("ActorCache list() interleave streaming with other ops") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2485,7 +2485,7 @@ KJ_TEST("ActorCache list() interleave streaming with other ops") {
   }
 }
 
-KJ_TEST("ActorCache list() end of first block deleted at inopportune time") {
+WD_TEST_OR_BENCH("ActorCache list() end of first block deleted at inopportune time") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2520,7 +2520,7 @@ KJ_TEST("ActorCache list() end of first block deleted at inopportune time") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"bar", "123"}}));
 }
 
-KJ_TEST("ActorCache list() retry on failure") {
+WD_TEST_OR_BENCH("ActorCache list() retry on failure") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2555,7 +2555,7 @@ KJ_TEST("ActorCache list() retry on failure") {
       kvs({{"bar", "456"}, {"baz", "789"}, {"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache get() of endpoint of previous list() returning negative is cached correctly") {
+WD_TEST_OR_BENCH("ActorCache get() of endpoint of previous list() returning negative is cached correctly") {
   // This tests for a bug that once existed in ActorCache::addReadResultToCache() where we compared
   // against a moved-away value.
   ActorCacheTest test;
@@ -2588,7 +2588,7 @@ KJ_TEST("ActorCache get() of endpoint of previous list() returning negative is c
 // =======================================================================================
 // And now... listReverse()... needs all its own tests...
 
-KJ_TEST("ActorCache listReverse()") {
+WD_TEST_OR_BENCH("ActorCache listReverse()") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2648,7 +2648,7 @@ KJ_TEST("ActorCache listReverse()") {
   }
 }
 
-KJ_TEST("ActorCache listReverse() all") {
+WD_TEST_OR_BENCH("ActorCache listReverse() all") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2682,7 +2682,7 @@ KJ_TEST("ActorCache listReverse() all") {
       kvs({{"baz", "789"}, {"bar", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() with limit") {
+WD_TEST_OR_BENCH("ActorCache listReverse() with limit") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2748,7 +2748,7 @@ KJ_TEST("ActorCache listReverse() with limit") {
       kvs({{"foo", "123"}, {"baz", "789"}, {"bar", "456"}, {"baa", "xyz"}}));
 }
 
-KJ_TEST("ActorCache listReverse() with limit around negative entries") {
+WD_TEST_OR_BENCH("ActorCache listReverse() with limit around negative entries") {
   // This checks for a bug where the initial scan through cache for list() applies the limit to
   // the total number of entries seen (positive or negative), when it really needs to apply only
   // to positive entries.
@@ -2792,7 +2792,7 @@ KJ_TEST("ActorCache listReverse() with limit around negative entries") {
   }
 }
 
-KJ_TEST("ActorCache listReverse() start point is not present") {
+WD_TEST_OR_BENCH("ActorCache listReverse() start point is not present") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2822,7 +2822,7 @@ KJ_TEST("ActorCache listReverse() start point is not present") {
   KJ_ASSERT(expectCached(test.get("fooa")) == nullptr);
 }
 
-KJ_TEST("ActorCache listReverse() multiple ranges") {
+WD_TEST_OR_BENCH("ActorCache listReverse() multiple ranges") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2866,7 +2866,7 @@ KJ_TEST("ActorCache listReverse() multiple ranges") {
   expectUncached(test.get("c"));
 }
 
-KJ_TEST("ActorCache listReverse() with some already-cached keys in range") {
+WD_TEST_OR_BENCH("ActorCache listReverse() with some already-cached keys in range") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2922,7 +2922,7 @@ KJ_TEST("ActorCache listReverse() with some already-cached keys in range") {
   KJ_ASSERT(deletePromise.wait(ws) == 1);
 }
 
-KJ_TEST("ActorCache listReverse() with seemingly-redundant dirty entries") {
+WD_TEST_OR_BENCH("ActorCache listReverse() with seemingly-redundant dirty entries") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -2987,7 +2987,7 @@ KJ_TEST("ActorCache listReverse() with seemingly-redundant dirty entries") {
   KJ_ASSERT(expectCached(test.listReverse("aaa", "fff")) == kvs({{"bbb", "bval"}}));
 }
 
-KJ_TEST("ActorCache listReverse() starting from known value") {
+WD_TEST_OR_BENCH("ActorCache listReverse() starting from known value") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3015,7 +3015,7 @@ KJ_TEST("ActorCache listReverse() starting from known value") {
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"baz", "456"}, {"bar", "123"}}));
 }
 
-KJ_TEST("ActorCache listReverse() starting from unknown value") {
+WD_TEST_OR_BENCH("ActorCache listReverse() starting from unknown value") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3044,7 +3044,7 @@ KJ_TEST("ActorCache listReverse() starting from unknown value") {
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"foo", "123"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() consecutively, absent midpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() consecutively, absent midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3080,7 +3080,7 @@ KJ_TEST("ActorCache listReverse() consecutively, absent midpoint") {
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"foo", "123"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() consecutively reverse, absent midpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() consecutively reverse, absent midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3116,7 +3116,7 @@ KJ_TEST("ActorCache listReverse() consecutively reverse, absent midpoint") {
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"foo", "123"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() consecutively, present midpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() consecutively, present midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3154,7 +3154,7 @@ KJ_TEST("ActorCache listReverse() consecutively, present midpoint") {
       kvs({{"foo", "123"}, {"corge", "789"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() consecutively reverse, present midpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() consecutively reverse, present midpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3192,7 +3192,7 @@ KJ_TEST("ActorCache listReverse() consecutively reverse, present midpoint") {
       kvs({{"foo", "123"}, {"corge", "789"}, {"baz", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() starting in known-empty gap") {
+WD_TEST_OR_BENCH("ActorCache listReverse() starting in known-empty gap") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3228,7 +3228,7 @@ KJ_TEST("ActorCache listReverse() starting in known-empty gap") {
   KJ_ASSERT(expectCached(test.list("bar", "qux")) == kvs({{"foo", "123"}}));
 }
 
-KJ_TEST("ActorCache listReverse() ending in known-empty gap") {
+WD_TEST_OR_BENCH("ActorCache listReverse() ending in known-empty gap") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3264,7 +3264,7 @@ KJ_TEST("ActorCache listReverse() ending in known-empty gap") {
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"baz", "123"}}));
 }
 
-KJ_TEST("ActorCache listReverse() with limit and dirty puts that end up past the limit") {
+WD_TEST_OR_BENCH("ActorCache listReverse() with limit and dirty puts that end up past the limit") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3297,7 +3297,7 @@ KJ_TEST("ActorCache listReverse() with limit and dirty puts that end up past the
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache listReverse() overwrite endpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() overwrite endpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3326,7 +3326,7 @@ KJ_TEST("ActorCache listReverse() overwrite endpoint") {
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache listReverse() delete endpoint") {
+WD_TEST_OR_BENCH("ActorCache listReverse() delete endpoint") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3370,7 +3370,7 @@ KJ_TEST("ActorCache listReverse() delete endpoint") {
   }
 }
 
-KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
+WD_TEST_OR_BENCH("ActorCache listReverse() interleave streaming with other ops") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3424,7 +3424,7 @@ KJ_TEST("ActorCache listReverse() interleave streaming with other ops") {
   }
 }
 
-KJ_TEST("ActorCache listReverse() end of first block deleted at inopportune time") {
+WD_TEST_OR_BENCH("ActorCache listReverse() end of first block deleted at inopportune time") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3459,7 +3459,7 @@ KJ_TEST("ActorCache listReverse() end of first block deleted at inopportune time
   KJ_ASSERT(expectCached(test.listReverse("bar", "qux")) == kvs({{"foo", "456"}}));
 }
 
-KJ_TEST("ActorCache listReverse() retry on failure") {
+WD_TEST_OR_BENCH("ActorCache listReverse() retry on failure") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3497,7 +3497,7 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
-KJ_TEST("ActorCache LRU purge") {
+WD_TEST_OR_BENCH("ActorCache LRU purge") {
   ActorCacheTest test({.softLimit = 128});  // big enough for one entry with small key/value
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3526,7 +3526,7 @@ KJ_TEST("ActorCache LRU purge") {
   expectUncached(test.get("foo"));
 }
 
-KJ_TEST("ActorCache LRU purge ordering") {
+WD_TEST_OR_BENCH("ActorCache LRU purge ordering") {
   ActorCacheTest test({.softLimit = 512});  // big enough for four entries
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3561,7 +3561,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("yyy"))) == "bbb");
 }
 
-KJ_TEST("ActorCache LRU purge larger") {
+WD_TEST_OR_BENCH("ActorCache LRU purge larger") {
   ActorCacheTest test({.softLimit = 4096});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3622,7 +3622,7 @@ KJ_TEST("ActorCache LRU purge larger") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("garply"))) == kilobyte);
 }
 
-KJ_TEST("ActorCache LRU purge") {
+WD_TEST_OR_BENCH("ActorCache LRU purge") {
   ActorCacheTest test({.softLimit = 1});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3647,7 +3647,7 @@ KJ_TEST("ActorCache LRU purge") {
   expectUncached(test.get("baz"));
 }
 
-KJ_TEST("ActorCache evict on timeout") {
+WD_TEST_OR_BENCH("ActorCache evict on timeout") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3698,7 +3698,7 @@ KJ_TEST("ActorCache evict on timeout") {
   expectUncached(test.get("baz"));
 }
 
-KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
+WD_TEST_OR_BENCH("ActorCache backpressure due to dirtyPressureThreshold") {
   // Each Entry below ends up being about ~126 bytes, so a limit of 256 allows for 2 entries.
   ActorCacheTest test({.dirtyListByteLimit = 256});
   auto& ws = test.ws;
@@ -3753,7 +3753,7 @@ KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
   }
 }
 
-KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
+WD_TEST_OR_BENCH("ActorCache lru evict entry with known-empty gaps") {
   ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3806,7 +3806,7 @@ KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
   expectUncached(test.get("fo"));
 }
 
-KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by END_GAP)") {
+WD_TEST_OR_BENCH("ActorCache lru evict entry with trailing known-empty gap (followed by END_GAP)") {
   ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3858,7 +3858,7 @@ KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by E
   expectUncached(test.get("quy"));
 }
 
-KJ_TEST("ActorCache timeout entry with known-empty gaps") {
+WD_TEST_OR_BENCH("ActorCache timeout entry with known-empty gaps") {
   ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3911,7 +3911,7 @@ KJ_TEST("ActorCache timeout entry with known-empty gaps") {
   expectUncached(test.get("fo"));
 }
 
-KJ_TEST("ActorCache purge everything while listing") {
+WD_TEST_OR_BENCH("ActorCache purge everything while listing") {
   ActorCacheTest test({.softLimit = 1});  // evict everything immediately
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3941,7 +3941,7 @@ KJ_TEST("ActorCache purge everything while listing") {
   expectUncached(test.get("foo"));
 }
 
-KJ_TEST("ActorCache purge everything while listing; has previous entry") {
+WD_TEST_OR_BENCH("ActorCache purge everything while listing; has previous entry") {
   ActorCacheTest test({.softLimit = 1});  // evict everything immediately
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -3973,7 +3973,7 @@ KJ_TEST("ActorCache purge everything while listing; has previous entry") {
   mockStorage->expectCall("put", ws).thenReturn(CAPNP());
 }
 
-KJ_TEST("ActorCache exceed hard limit on read") {
+WD_TEST_OR_BENCH("ActorCache exceed hard limit on read") {
   ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4018,7 +4018,7 @@ KJ_TEST("ActorCache exceed hard limit on read") {
       brokenPromise.wait(ws));
 }
 
-KJ_TEST("ActorCache exceed hard limit on write") {
+WD_TEST_OR_BENCH("ActorCache exceed hard limit on write") {
   ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
   auto& ws = test.ws;
 
@@ -4036,7 +4036,7 @@ KJ_TEST("ActorCache exceed hard limit on write") {
 
 // =======================================================================================
 
-KJ_TEST("ActorCache skip cache") {
+WD_TEST_OR_BENCH("ActorCache skip cache") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4169,7 +4169,7 @@ KJ_TEST("ActorCache skip cache") {
 
 // =======================================================================================
 
-KJ_TEST("ActorCache transaction read-through") {
+WD_TEST_OR_BENCH("ActorCache transaction read-through") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4238,7 +4238,7 @@ KJ_TEST("ActorCache transaction read-through") {
   }
 }
 
-KJ_TEST("ActorCache transaction overlay changes") {
+WD_TEST_OR_BENCH("ActorCache transaction overlay changes") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4333,7 +4333,7 @@ KJ_TEST("ActorCache transaction overlay changes") {
   }
 }
 
-KJ_TEST("ActorCache transaction overlay changes precached") {
+WD_TEST_OR_BENCH("ActorCache transaction overlay changes precached") {
   // Like previous test, but have the range cached in the underlying cache before the transaction
   // touches it.
 
@@ -4398,7 +4398,7 @@ KJ_TEST("ActorCache transaction overlay changes precached") {
   }
 }
 
-KJ_TEST("ActorCache transaction output gate blocked during flush") {
+WD_TEST_OR_BENCH("ActorCache transaction output gate blocked during flush") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4431,7 +4431,7 @@ KJ_TEST("ActorCache transaction output gate blocked during flush") {
   gatePromise.wait(ws);
 }
 
-KJ_TEST("ActorCache transaction output gate bypass") {
+WD_TEST_OR_BENCH("ActorCache transaction output gate bypass") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4456,7 +4456,7 @@ KJ_TEST("ActorCache transaction output gate bypass") {
   test.gate.wait().wait(ws);
 }
 
-KJ_TEST("ActorCache transaction output gate bypass on one put but not the next") {
+WD_TEST_OR_BENCH("ActorCache transaction output gate bypass on one put but not the next") {
   ActorCacheTest test({.monitorOutputGate = false});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4491,7 +4491,7 @@ KJ_TEST("ActorCache transaction output gate bypass on one put but not the next")
   gatePromise.wait(ws);
 }
 
-KJ_TEST("ActorCache transaction multiple put batches") {
+WD_TEST_OR_BENCH("ActorCache transaction multiple put batches") {
   ActorCacheTest test({.maxKeysPerRpc = 2});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4524,7 +4524,7 @@ KJ_TEST("ActorCache transaction multiple put batches") {
 }
 
 
-KJ_TEST("ActorCache transaction multiple counted delete batches") {
+WD_TEST_OR_BENCH("ActorCache transaction multiple counted delete batches") {
   // Do a transaction with a big counted delete. The rpc getMultiple and delete should batch
   // according to maxKeysPerRpc.
 
@@ -4587,7 +4587,7 @@ KJ_TEST("ActorCache transaction multiple counted delete batches") {
   mockTxn->expectDropped(ws);
 }
 
-KJ_TEST("ActorCache transaction negative list range returns nothing") {
+WD_TEST_OR_BENCH("ActorCache transaction negative list range returns nothing") {
   ActorCacheTest test({.monitorOutputGate = false});
 
   ActorCache::Transaction txn(test.cache);
@@ -4601,7 +4601,7 @@ KJ_TEST("ActorCache transaction negative list range returns nothing") {
 
 // =======================================================================================
 
-KJ_TEST("ActorCache list stream cancellation") {
+WD_TEST_OR_BENCH("ActorCache list stream cancellation") {
   // Test for cases where implementations of ListStream might stay alive longer than expected, due
   // to capabilities being held remotely.
   //
@@ -4711,7 +4711,7 @@ KJ_TEST("ActorCache list stream cancellation") {
   KJ_ASSERT_NONNULL(kj::mv(call)).expectCanceled();
 }
 
-KJ_TEST("ActorCache never-flush") {
+WD_TEST_OR_BENCH("ActorCache never-flush") {
   ActorCacheTest test({.neverFlush = true});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4737,7 +4737,7 @@ KJ_TEST("ActorCache never-flush") {
   }
 }
 
-KJ_TEST("ActorCache alarm get/put") {
+WD_TEST_OR_BENCH("ActorCache alarm get/put") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4868,7 +4868,7 @@ KJ_TEST("ActorCache alarm get/put") {
   }
 }
 
-KJ_TEST("ActorCache uncached nonnull alarm get") {
+WD_TEST_OR_BENCH("ActorCache uncached nonnull alarm get") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4882,7 +4882,7 @@ KJ_TEST("ActorCache uncached nonnull alarm get") {
   KJ_ASSERT(time.wait(ws) == oneMs);
 }
 
-KJ_TEST("ActorCache alarm delete when flush fails") {
+WD_TEST_OR_BENCH("ActorCache alarm delete when flush fails") {
   ActorCacheTest test;
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
@@ -4936,7 +4936,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
   }
 }
 
-KJ_TEST("ActorCache can wait for flush") {
+WD_TEST_OR_BENCH("ActorCache can wait for flush") {
   // This test confirms that `onNoPendingFlush()` will return a promise that resolves when any
   // scheduled or in-flight flush completes.
 
@@ -5133,7 +5133,7 @@ KJ_TEST("ActorCache can wait for flush") {
 }
 
 
-KJ_TEST("ActorCache can shutdown") {
+WD_TEST_OR_BENCH("ActorCache can shutdown") {
   // This test confirms that `shutdown()` stops scheduled flushes but does not stop in-flight
   // flushes. It also confirms that `shutdown()` prevents future operations.
 

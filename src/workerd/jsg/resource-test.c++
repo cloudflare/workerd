@@ -19,7 +19,7 @@ struct BoxContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(BoxIsolate, BoxContext, NumberBox, BoxBox);
 
-KJ_TEST("constructors and properties") {
+WD_TEST_OR_BENCH("constructors and properties") {
   Evaluator<BoxContext, BoxIsolate> e(v8System);
   e.expectEval("new NumberBox(123).value", "number", "123");
   e.expectEval("new NumberBox(123).boxed.value", "number", "123");
@@ -36,7 +36,7 @@ KJ_TEST("constructors and properties") {
   e.expectEval("new NumberBox(123) instanceof BoxBox", "boolean", "false");
 }
 
-KJ_TEST("methods") {
+WD_TEST_OR_BENCH("methods") {
   Evaluator<BoxContext, BoxIsolate> e(v8System);
   e.expectEval(
       "var n = new NumberBox(123);\n"
@@ -99,7 +99,7 @@ struct InheritsMixinContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(InheritsMixinIsolate, InheritsMixinContext, InheritsMixin);
 
-KJ_TEST("JSG_METHODs can be implemented by mixins") {
+WD_TEST_OR_BENCH("JSG_METHODs can be implemented by mixins") {
   Evaluator<InheritsMixinContext, InheritsMixinIsolate> e(v8System);
   e.expectEval(
       "makeInheritsMixin(12345).getValue()", "number", "12345");
@@ -143,7 +143,7 @@ private:
 };
 JSG_DECLARE_ISOLATE_TYPE(PropIsolate, PropContext, PrototypePropertyObject);
 
-KJ_TEST("context methods and properties") {
+WD_TEST_OR_BENCH("context methods and properties") {
   Evaluator<PropContext, PropIsolate> e(v8System);
   e.expectEval(
       "getContextProperty()", "string", "default-context-property-value");
@@ -219,7 +219,7 @@ struct NonConstructibleContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(NonConstructibleIsolate, NonConstructibleContext,
     NonConstructibleContext::NonConstructible);
 
-KJ_TEST("non-constructible types can't be constructed") {
+WD_TEST_OR_BENCH("non-constructible types can't be constructed") {
   Evaluator<NonConstructibleContext, NonConstructibleIsolate> e(v8System);
   e.expectEval(
       "new NonConstructible().method()",
@@ -300,7 +300,7 @@ struct IterableContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(IterableIsolate, IterableContext, IterableContext::Iterable,
     IterableContext::Iterable::Iterator, IterableContext::Iterable::Iterator::NextValue);
 
-KJ_TEST("Iterables can be iterated") {
+WD_TEST_OR_BENCH("Iterables can be iterated") {
   Evaluator<IterableContext, IterableIsolate> e(v8System);
   e.expectEval(
       "let results = [];"
@@ -375,7 +375,7 @@ struct StaticContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(StaticIsolate, StaticContext, StaticContext::StaticConstants,
     StaticContext::StaticMethods);
 
-KJ_TEST("Static constants are exposed as constructor properties") {
+WD_TEST_OR_BENCH("Static constants are exposed as constructor properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "StaticConstants.DOUBLE === 1.5",
@@ -394,7 +394,7 @@ KJ_TEST("Static constants are exposed as constructor properties") {
       "boolean", "true"
   );
 }
-KJ_TEST("Static constants are exposed as constructor prototype properties") {
+WD_TEST_OR_BENCH("Static constants are exposed as constructor prototype properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "StaticConstants.prototype.DOUBLE === 1.5",
@@ -413,7 +413,7 @@ KJ_TEST("Static constants are exposed as constructor prototype properties") {
       "boolean", "true"
   );
 }
-KJ_TEST("Static constants are exposed as object instance properties") {
+WD_TEST_OR_BENCH("Static constants are exposed as object instance properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "new StaticConstants().DOUBLE === 1.5",
@@ -432,7 +432,7 @@ KJ_TEST("Static constants are exposed as object instance properties") {
       "boolean", "true"
   );
 }
-KJ_TEST("Static constants are exposed as object instance prototype properties") {
+WD_TEST_OR_BENCH("Static constants are exposed as object instance prototype properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "Object.getPrototypeOf(new StaticConstants()).DOUBLE === 1.5",
@@ -451,7 +451,7 @@ KJ_TEST("Static constants are exposed as object instance prototype properties") 
       "boolean", "true"
   );
 }
-KJ_TEST("Static methods are exposed as constructor properties") {
+WD_TEST_OR_BENCH("Static methods are exposed as constructor properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval("StaticMethods.passThrough(true)", "boolean", "true");
   e.expectEval("StaticMethods.passThroughWithInfo(true)", "boolean", "true");
@@ -464,7 +464,7 @@ KJ_TEST("Static methods are exposed as constructor properties") {
   e.expectEval("new StaticMethods.passThrough(true);",
       "throws", "TypeError: StaticMethods.passThrough is not a constructor");
 }
-KJ_TEST("Static methods are not exposed as constructor prototype properties") {
+WD_TEST_OR_BENCH("Static methods are not exposed as constructor prototype properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "typeof StaticMethods.prototype.passThrough === 'undefined'\n"
@@ -476,7 +476,7 @@ KJ_TEST("Static methods are not exposed as constructor prototype properties") {
       "boolean", "true"
   );
 }
-KJ_TEST("Static methods are not exposed as object instance properties") {
+WD_TEST_OR_BENCH("Static methods are not exposed as object instance properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "let obj = new StaticMethods();\n"
@@ -489,7 +489,7 @@ KJ_TEST("Static methods are not exposed as object instance properties") {
       "boolean", "true"
   );
 }
-KJ_TEST("Static methods are not exposed as object instance prototype properties") {
+WD_TEST_OR_BENCH("Static methods are not exposed as object instance prototype properties") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "let objProto = Object.getPrototypeOf(new StaticMethods());\n"
@@ -502,7 +502,7 @@ KJ_TEST("Static methods are not exposed as object instance prototype properties"
       "boolean", "true"
   );
 }
-KJ_TEST("Static methods can be monkey-patched") {
+WD_TEST_OR_BENCH("Static methods can be monkey-patched") {
   Evaluator<StaticContext, StaticIsolate> e(v8System);
   e.expectEval(
       "StaticMethods.passThrough = function(a) { return false; };\n"
@@ -564,7 +564,7 @@ struct ReflectionContext: public ContextGlobalObject {
 JSG_DECLARE_ISOLATE_TYPE(ReflectionIsolate, ReflectionContext,
                           ReflectionContext::Super, ReflectionContext::Reflector);
 
-KJ_TEST("PropertyReflection works") {
+WD_TEST_OR_BENCH("PropertyReflection works") {
   Evaluator<ReflectionContext, ReflectionIsolate> e(v8System);
   e.expectEval("let r = new Reflector; r.getIntReflection('foo')", "object", "null");
   e.expectEval("let r = new Reflector; r.foo = 123; r.getIntReflection('foo')", "number", "123");
@@ -621,7 +621,7 @@ struct InjectLockContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(InjectLockIsolate, InjectLockContext, InjectLockContext::Thingy);
 
-KJ_TEST("Methods can take Lock& as first parameter") {
+WD_TEST_OR_BENCH("Methods can take Lock& as first parameter") {
   Evaluator<InjectLockContext, InjectLockIsolate> e(v8System);
   e.expectEval("let t = new Thingy(123); t.val", "number", "123");
 }
@@ -635,12 +635,12 @@ struct JsBundleContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(JsBundleIsolate, JsBundleContext);
 
-KJ_TEST("expectEvalModule function works") {
+WD_TEST_OR_BENCH("expectEvalModule function works") {
   Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
   e.expectEvalModule("export function run() { return 123; }", "number", "123");
 }
 
-KJ_TEST("bundle installed works") {
+WD_TEST_OR_BENCH("bundle installed works") {
   Evaluator<JsBundleContext, JsBundleIsolate> e(v8System);
   e.expectEvalModule(R"(
     import * as b from "test:resource-test-builtin";
@@ -660,7 +660,7 @@ struct JsLazyReadonlyPropertyContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(JsLazyReadonlyPropertyIsolate, JsLazyReadonlyPropertyContext);
 
-KJ_TEST("lazy js global function works") {
+WD_TEST_OR_BENCH("lazy js global function works") {
   Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
   // both for module
   e.expectEvalModule(R"(
@@ -670,7 +670,7 @@ KJ_TEST("lazy js global function works") {
   e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
 }
 
-KJ_TEST("lazy js global class works") {
+WD_TEST_OR_BENCH("lazy js global class works") {
   Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(
@@ -680,7 +680,7 @@ KJ_TEST("lazy js global class works") {
   e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
 }
 
-KJ_TEST("lazy js readonly property can not be overriden") {
+WD_TEST_OR_BENCH("lazy js readonly property can not be overriden") {
   Evaluator<JsLazyReadonlyPropertyContext, JsLazyReadonlyPropertyIsolate> e(v8System);
   e.expectEval("globalThis.bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
   e.expectEval("bootstrapFunction = function(){'boo'}; bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
@@ -699,7 +699,7 @@ struct JsLazyPropertyContext: public ContextGlobalObject {
 };
 JSG_DECLARE_ISOLATE_TYPE(JsLazyPropertyIsolate, JsLazyPropertyContext);
 
-KJ_TEST("lazy js global function works") {
+WD_TEST_OR_BENCH("lazy js global function works") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
   // both for module
   e.expectEvalModule(R"(
@@ -709,7 +709,7 @@ KJ_TEST("lazy js global function works") {
   e.expectEval("bootstrapFunction()", "string", "THIS_IS_BOOTSTRAP_FUNCTION");
 }
 
-KJ_TEST("lazy js global class works") {
+WD_TEST_OR_BENCH("lazy js global class works") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(
@@ -719,7 +719,7 @@ KJ_TEST("lazy js global class works") {
   e.expectEval("new BootstrapClass().run()", "string", "THIS_IS_BOOTSTRAP_CLASS");
 }
 
-KJ_TEST("lazy js property can be overriden") {
+WD_TEST_OR_BENCH("lazy js property can be overriden") {
   Evaluator<JsLazyPropertyContext, JsLazyPropertyIsolate> e(v8System);
   // for module syntax
   e.expectEvalModule(R"(

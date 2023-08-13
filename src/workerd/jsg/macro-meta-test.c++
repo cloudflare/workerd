@@ -25,7 +25,7 @@ static_assert(sum(JSG_FOR_EACH(JSG_TEST_FOR_EACH_OP, *,
     1, 2, 3, 4, 5, 6, 7, 8)) == 36*2*4);
 #undef JSG_TEST_FOR_EACH_OP
 
-KJ_TEST("macro meta") {
+WD_TEST_OR_BENCH("macro meta") {
   // Nothing to actually do here; tests are compile-time
 }
 

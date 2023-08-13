@@ -18,7 +18,7 @@ struct DOMExceptionContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(DOMExceptionIsolate, DOMExceptionContext);
 
-KJ_TEST("DOMException's prototype is ErrorPrototype") {
+WD_TEST_OR_BENCH("DOMException's prototype is ErrorPrototype") {
   Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
   e.expectEval(
       "Object.getPrototypeOf(DOMException.prototype) === Error.prototype",
@@ -26,7 +26,7 @@ KJ_TEST("DOMException's prototype is ErrorPrototype") {
   );
 }
 
-KJ_TEST("DOMException has a stack property") {
+WD_TEST_OR_BENCH("DOMException has a stack property") {
   Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
   e.expectEval(
       "function throwError() { throw new DOMException('test error') }\n"
@@ -37,7 +37,7 @@ KJ_TEST("DOMException has a stack property") {
   );
 }
 
-KJ_TEST("DOMException has legacy code constants") {
+WD_TEST_OR_BENCH("DOMException has legacy code constants") {
   Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
   // Test a subset of error codes that commonly appear in web APIs.
   e.expectEval(

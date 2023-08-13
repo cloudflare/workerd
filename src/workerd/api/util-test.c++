@@ -20,7 +20,7 @@ void expectContentTypeParameter(kj::StringPtr input, kj::StringPtr param, kj::St
   KJ_EXPECT(value == expected);
 }
 
-KJ_TEST("redactUrl can detect hex ids") {
+WD_TEST_OR_BENCH("redactUrl can detect hex ids") {
   // no id:
   expectUnredacted(""_kj);
   expectUnredacted("https://domain/path?a=1&b=2"_kj);
@@ -42,7 +42,7 @@ KJ_TEST("redactUrl can detect hex ids") {
   expectUnredacted("https://domain/0123456789abcdef0123456789abcdefg/x"_kj);
 }
 
-KJ_TEST("redactUrl can detect base64 ids") {
+WD_TEST_OR_BENCH("redactUrl can detect base64 ids") {
   expectRedacted("https://domain/01234567890123456azAZ/x"_kj, "https://domain/REDACTED/x"_kj);
 
   // not long enough:
@@ -58,7 +58,7 @@ KJ_TEST("redactUrl can detect base64 ids") {
   expectUnredacted("https://domain/IThinkIShallNeverSee0/x"_kj);
 }
 
-KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
+WD_TEST_OR_BENCH("readContentTypeParameter can fetch boundary parameter") {
 
   // normal
   expectContentTypeParameter(
