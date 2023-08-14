@@ -2522,7 +2522,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
           if (entry.gapIsKnownEmpty && entry.value == nullptr) {
             // This is a negative entry, and is followed by a known-empty gap. If the previous entry
             // also has `gapIsKnownEmpty`, then this entry is entirely redundant.
-            auto& map = KJ_ASSERT_NONNULL(entry.cache).currentValues.get(lock);
+            auto& map = currentValues.get(lock);
             auto iter = map.seek(entry.key);
             KJ_ASSERT(iter->get() == &entry);
 
