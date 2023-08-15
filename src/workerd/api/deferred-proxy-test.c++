@@ -170,5 +170,64 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: can be `co_await`ed from another corouti
   KJ_EXPECT(proxyTask.wait(waitScope) == 123);
 }
 
+struct Counter {
+  size_t& wind;
+  size_t& unwind;
+  Counter(size_t& wind, size_t& unwind): wind(wind), unwind(unwind) { ++wind; }
+  ~Counter() { ++unwind; }
+  KJ_DISALLOW_COPY_AND_MOVE(Counter);
+};
+
+kj::Promise<DeferredProxy<void>> cancellationTester(
+    kj::Promise<void> preDeferredProxying,
+    kj::Promise<void> postDeferredProxying,
+    size_t& wind,
+    size_t& unwind) {
+  Counter preCounter(wind, unwind);
+  co_await preDeferredProxying;
+  KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+  Counter postCounter(wind, unwind);
+  co_await postDeferredProxying;
+};
+
+KJ_TEST("kj::Promise<DeferredProxy<T>>: can be canceled while suspended before deferred proxying") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  size_t wind = 0, unwind = 0;
+
+  {
+    auto neverDone1 = kj::Promise<void>(kj::NEVER_DONE);
+    auto neverDone2 = kj::Promise<void>(kj::NEVER_DONE);
+    neverDone1 = neverDone1.attach(kj::heap<Counter>(wind, unwind));
+    neverDone2 = neverDone2.attach(kj::heap<Counter>(wind, unwind));
+    auto promise = cancellationTester(kj::mv(neverDone1), kj::mv(neverDone2), wind, unwind);
+    KJ_EXPECT(!promise.poll(waitScope));
+  }
+
+  KJ_EXPECT(wind == 3);
+  KJ_EXPECT(unwind == 3);
+}
+
+KJ_TEST("kj::Promise<DeferredProxy<T>>: can be canceled while suspended after deferred proxying") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  size_t wind = 0, unwind = 0;
+
+  {
+    auto readyNow = kj::Promise<void>(kj::READY_NOW);
+    auto neverDone = kj::Promise<void>(kj::NEVER_DONE);
+    readyNow = readyNow.attach(kj::heap<Counter>(wind, unwind));
+    neverDone = neverDone.attach(kj::heap<Counter>(wind, unwind));
+    auto promise = cancellationTester(kj::mv(readyNow), kj::mv(neverDone), wind, unwind);
+    auto proxyTask = promise.wait(waitScope).proxyTask;
+    KJ_EXPECT(!proxyTask.poll(waitScope));
+  }
+
+  KJ_EXPECT(wind == 4);
+  KJ_EXPECT(unwind == 4);
+}
+
 }  // namespace
 }  // namespace workerd::api
