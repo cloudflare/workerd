@@ -739,7 +739,7 @@ jsg::Ref<Request> Request::constructor(
   kj::Maybe<jsg::Ref<Headers>> headers;
   kj::Maybe<jsg::Ref<Fetcher>> fetcher;
   kj::Maybe<jsg::Ref<AbortSignal>> signal;
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  CfProperty cf;
   kj::Maybe<Body::ExtractedBody> body;
   Redirect redirect = Redirect::FOLLOW;
 
@@ -777,9 +777,7 @@ jsg::Ref<Request> Request::constructor(
       url = kj::str(oldRequest->getUrl());
       method = oldRequest->method;
       headers = jsg::alloc<Headers>(*oldRequest->headers);
-      KJ_IF_MAYBE(oldCf, oldRequest->getCf(js)) {
-        cf = cloneRequestCf(js, js.v8Ref(*oldCf));
-      }
+      cf = oldRequest->cf.deepClone(js);
       if (!ignoreInputBody) {
         JSG_REQUIRE(!oldRequest->getBodyUsed(),
             TypeError, "Cannot reconstruct a Request with a used body.");
@@ -850,7 +848,7 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_MAYBE(newCf, initDict.cf) {
-          cf = cloneRequestCf(js, kj::mv(initDict.cf));
+          cf = CfProperty(newCf->deepClone(js));
         }
 
         KJ_IF_MAYBE(b, kj::mv(initDict.body).orDefault(nullptr)) {
@@ -883,8 +881,7 @@ jsg::Ref<Request> Request::constructor(
         fetcher = otherRequest->getFetcher();
         signal = otherRequest->getSignal();
         headers = jsg::alloc<Headers>(*otherRequest->headers);
-        cf = cloneRequestCf(js, otherRequest->cf.map([&](jsg::V8Ref<v8::Object>& ref)
-            -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
+        cf = otherRequest->cf.deepClone(js);
         KJ_IF_MAYBE(b, otherRequest->getBody()) {
           // Note that unlike when `input` (Request ctor's 1st parameter) is a Request object, here
           // we're NOT stealing the other request's body, because we're supposed to pretend that the
@@ -908,10 +905,7 @@ jsg::Ref<Request> Request::constructor(
 jsg::Ref<Request> Request::clone(jsg::Lock& js) {
   auto headersClone = headers->clone();
 
-  auto cfClone = cf.map([&](jsg::V8Ref<v8::Object>& obj) {
-    return obj.deepClone(js);
-  });
-
+  auto cfClone = cf.deepClone(js);
   auto bodyClone = Body::clone(js);
 
   return jsg::alloc<Request>(
@@ -947,9 +941,7 @@ kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal() {
 }
 
 jsg::Optional<v8::Local<v8::Object>> Request::getCf(jsg::Lock& js) {
-  return cf.map([&](jsg::V8Ref<v8::Object>& handle) {
-    return handle.getHandle(js);
-  });
+  return cf.get(js);
 }
 
 jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
@@ -987,16 +979,14 @@ void Request::shallowCopyHeadersTo(kj::HttpHeaders& out) {
 }
 
 kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
-  return cf.map([&](jsg::V8Ref<v8::Object>& obj) {
-    return js.serializeJson(obj);
-  });
+  return cf.serialize(js);
 }
 
 // =======================================================================================
 
 Response::Response(
           jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-          kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+          CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
           kj::Array<kj::String> urlList,
           kj::Maybe<jsg::Ref<WebSocket>> webSocket,
           Response::BodyEncoding bodyEncoding)
@@ -1024,7 +1014,7 @@ jsg::Ref<Response> Response::constructor(
   kj::Maybe<kj::String> statusText;
   kj::Maybe<Body::ExtractedBody> body = nullptr;
   jsg::Ref<Headers> headers = nullptr;
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf = nullptr;
+  CfProperty cf;
   kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr;
 
   KJ_SWITCH_ONEOF(init) {
@@ -1051,7 +1041,9 @@ jsg::Ref<Response> Response::constructor(
         headers = jsg::alloc<Headers>(jsg::Dict<jsg::ByteString, jsg::ByteString>());
       }
 
-      cf = cloneRequestCf(js, kj::mv(initDict.cf));
+      KJ_IF_MAYBE(newCf, initDict.cf) {
+        cf = CfProperty(newCf->deepClone(js));
+      }
 
       KJ_IF_MAYBE(ws, initDict.webSocket) {
         KJ_IF_MAYBE(ws2, *ws) {
@@ -1068,8 +1060,7 @@ jsg::Ref<Response> Response::constructor(
       bodyEncoding = otherResponse->bodyEncoding;
       statusText = kj::str(otherResponse->statusText);
       headers = jsg::alloc<Headers>(*otherResponse->headers);
-      cf = cloneRequestCf(js, otherResponse->cf.map([&](jsg::V8Ref<v8::Object>& ref)
-          -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
+      cf = otherResponse->cf.deepClone(js);
       KJ_IF_MAYBE(otherWs, otherResponse->webSocket) {
         webSocket = otherWs->addRef();
       }
@@ -1232,12 +1223,10 @@ jsg::Ref<Response> Response::json_(
           .status = res->statusCode,
           .statusText = kj::str(res->statusText),
           .headers = maybeSetContentType(Headers::constructor(js, res->headers.addRef())),
+          .cf = res->cf.getRef(js),
           .encodeBody = kj::str(res->bodyEncoding == Response::BodyEncoding::MANUAL
               ? "manual" : "automatic"),
         };
-
-        newInit.cf = cloneRequestCf(js, res->cf.map([&](jsg::V8Ref<v8::Object>& ref)
-            -> jsg::V8Ref<v8::Object> { return ref.addRef(js); }));
 
         KJ_IF_MAYBE(otherWs, res->webSocket) {
           newInit.webSocket = otherWs->addRef();
@@ -1260,10 +1249,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
       TypeError, "Cannot clone a response to a WebSocket handshake.");
 
   auto headersClone = headers->clone();
-
-  auto cfClone = cf.map([&](jsg::V8Ref<v8::Object>& obj) {
-    return obj.deepClone(js);
-  });
+  auto cfClone = cf.deepClone(js);
 
   auto bodyClone = Body::clone(js);
 
@@ -1395,9 +1381,7 @@ kj::Maybe<jsg::Ref<WebSocket>> Response::getWebSocket(jsg::Lock& js) {
 
 jsg::Optional<v8::Local<v8::Object>> Response::getCf(
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  return cf.map([&](jsg::V8Ref<v8::Object>& handle) {
-    return handle.getHandle(jsg::Lock::from(info.GetIsolate()));
-  });
+  return cf.get(jsg::Lock::from(info.GetIsolate()));
 }
 
 // =======================================================================================
