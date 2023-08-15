@@ -9,7 +9,6 @@
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/thread-scopes.h>
-#include <workerd/util/xthreadnotifier.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
@@ -899,69 +898,59 @@ struct Worker::Script::Impl {
       bool isException = false;
     };
 
-    using Handler = kj::Function<jsg::Value()>;
-
-    static auto constexpr handleDynamicImport =
-        [](kj::Own<const Worker> worker,
-           Handler handler,
-           kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext) ->
-               kj::Promise<DynamicImportResult> {
-      co_await kj::evalLater([] {});
-      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
-
-      Worker::Lock lock(*worker, asyncLock);
-      jsg::Lock& js = lock;
-
-      co_return js.withinHandleScope([&]() -> DynamicImportResult {
-        // Cannot use js.v8Context() here because that assumes we've already entered
-        // the v8::Context::Scope...
-        auto contextScope = js.enterContextScope(lock.getContext());
-        jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
-
-        // We have to wrap the call to handler in a try catch here because
-        // we have to tunnel any jsg::JsExceptionThrown instances back.
-        v8::TryCatch tryCatch(js.v8Isolate);
-        kj::Maybe<kj::Exception> maybeLimitError;
-        try {
-          auto limitScope = worker->getIsolate().getLimitEnforcer()
-              .enterDynamicImportJs(lock, maybeLimitError);
-          return { .value = handler() };
-        } catch (jsg::JsExceptionThrown&) {
-          // Handled below...
-        } catch (kj::Exception& ex) {
-          kj::throwFatalException(kj::mv(ex));
-        }
-
-        KJ_ASSERT(tryCatch.HasCaught());
-        if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
-          // There's nothing else we can do here but throw a generic fatal exception.
-          KJ_IF_MAYBE(limitError, maybeLimitError) {
-            kj::throwFatalException(kj::mv(*limitError));
-          } else {
-            kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
-                "Failed to load dynamic module."));
-          }
-        }
-        return { .value = js.v8Ref(tryCatch.Exception()), .isException = true };
-      });
-    };
-
-    modules.setDynamicImportCallback([](jsg::Lock& js, Handler handler) mutable {
+    modules.setDynamicImportCallback([](jsg::Lock& js, auto handler) mutable {
       if (IoContext::hasCurrent()) {
         // If we are within the scope of a IoContext, then we are going to pop
         // out of it to perform the actual module instantiation.
 
-        auto& context = IoContext::current();
+        auto& ioContext = IoContext::current();
+        auto& worker = ioContext.getWorker();
 
-        return context.awaitIo(js,
-            handleDynamicImport(kj::atomicAddRef(context.getWorker()),
-                                kj::mv(handler),
-                                jsg::AsyncContextFrame::currentRef(js)),
-            [](jsg::Lock& js, DynamicImportResult result) {
+        return ioContext.awaitIo(js,
+            kj::evalLater([&worker, handler = kj::mv(handler),
+                           asyncContext = jsg::AsyncContextFrame::currentRef(js)]() mutable {
+          return worker.takeAsyncLockWithoutRequest(nullptr)
+              .then([&worker, handler = kj::mv(handler), asyncContext = kj::mv(asyncContext)]
+                    (Worker::AsyncLock asyncLock) mutable -> DynamicImportResult {
+            Worker::Lock lock(worker, asyncLock);
+            auto isolate = lock.getIsolate();
+            v8::HandleScope scope(isolate);
+            v8::Context::Scope contextScope(lock.getContext());
+            jsg::AsyncContextFrame::Scope asyncContextScope(lock, asyncContext);
+
+            auto& workerIsolate = worker.getIsolate();
+
+            // We have to wrap the call to handler in a try catch here because
+            // we have to tunnel any jsg::JsExceptionThrown instances back.
+            v8::TryCatch tryCatch(isolate);
+            kj::Maybe<kj::Exception> maybeLimitError;
+            try {
+              auto limitScope = workerIsolate.getLimitEnforcer()
+                  .enterDynamicImportJs(lock, maybeLimitError);
+              return { .value = handler() };
+            } catch (jsg::JsExceptionThrown&) {
+              // Handled below...
+            } catch (kj::Exception& ex) {
+              kj::throwFatalException(kj::mv(ex));
+            }
+
+            KJ_ASSERT(tryCatch.HasCaught());
+            if (!tryCatch.CanContinue()) {
+              // There's nothing else we can do here but throw a generic fatal exception.
+              KJ_IF_MAYBE(limitError, maybeLimitError) {
+                kj::throwFatalException(kj::mv(*limitError));
+              } else {
+                kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+                    "Failed to load dynamic module."));
+              }
+            }
+            return { .value = jsg::Value(isolate, tryCatch.Exception()), .isException = true };
+          });
+        }).attach(kj::atomicAddRef(worker)), [isolate=js.v8Isolate](jsg::Lock&, auto result) {
           if (result.isException) {
-            return js.rejectedPromise<jsg::Value>(kj::mv(result.value));
+            return jsg::rejectedPromise<jsg::Value>(isolate, kj::mv(result.value));
           }
-          return js.resolvedPromise(kj::mv(result.value));
+          return jsg::resolvedPromise(isolate, kj::mv(result.value));
         });
       }
 
@@ -2032,19 +2021,19 @@ Worker::AsyncWaiter::~AsyncWaiter() noexcept {
 }
 
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
-  for (;;) {
-    if (auto waiter = AsyncWaiter::threadCurrentWaiter; waiter != nullptr) {
-      co_await waiter->releasePromise.addBranch();
-      continue;
-    }
-
-    co_await kj::evalLast([] {});
-
-    if (AsyncWaiter::threadCurrentWaiter == nullptr) {
-      co_return;
-    }
-    // Whoops, a new lock attempt appeared, loop.
+  auto waiter = AsyncWaiter::threadCurrentWaiter;
+  if (waiter != nullptr) {
+    return waiter->releasePromise.addBranch().then([]() { return whenThreadIdle(); });
   }
+
+  return kj::evalLast([]() -> kj::Promise<void> {
+    if (AsyncWaiter::threadCurrentWaiter != nullptr) {
+      // Whoops, a new lock attempt appeared, loop.
+      return whenThreadIdle();
+    } else {
+      return kj::READY_NOW;
+    }
+  });
 }
 
 // =======================================================================================
@@ -2335,7 +2324,7 @@ private:
         : webSocket(webSocket) {
       // Assume we are being instantiated on the InspectorService thread, the thread that will do
       // I/O for CDP messages. Messages are delivered to the InspectorChannelImpl on the Isolate thread.
-      outgoingQueueNotifier = XThreadNotifier::create();
+      outgoingQueueNotifier = kj::atomicRefcounted<XThreadNotifier>(kj::getCurrentThreadExecutor());
     }
 
     ~WebSocketIoHandler() noexcept(false) {
@@ -2493,6 +2482,44 @@ private:
         co_await webSocket.send(message);
       }
     }
+
+    class XThreadNotifier final: public kj::AtomicRefcounted {
+      // Class encapsulating the ability to notify the inspector thread from other threads when
+      // messages are pushed to the outgoing queue.
+      //
+      // TODO(cleanup): This could be a lot simpler if only it were possible to cancel
+      //   an executor.executeAsync() promise from an arbitrary thread. Then, if the inspector
+      //   session was destroyed in its thread while a cross-thread notification was in-flight, it
+      //   could cancel that notification directly.
+    public:
+      XThreadNotifier(const kj::Executor& executor) : executor(executor) { }
+
+      void clear() {
+        // Must call in main thread before it drops its reference.
+        paf = nullptr;
+      }
+
+      kj::Promise<void> awaitNotification() {
+        return kj::mv(KJ_ASSERT_NONNULL(paf).promise).then([this]() {
+          paf = kj::newPromiseAndFulfiller<void>();
+        });
+      }
+
+      void notify() const {
+        executor.executeAsync([ref = kj::atomicAddRef(*this)]() {
+          KJ_IF_MAYBE(p, ref->paf) {
+            p->fulfiller->fulfill();
+          }
+        }).detach([](kj::Exception&& exception) {
+          KJ_LOG(ERROR, exception);
+        });
+      }
+
+    private:
+      const kj::Executor& executor;
+      mutable kj::Maybe<kj::PromiseFulfillerPair<void>> paf = kj::newPromiseAndFulfiller<void>();
+      // Accessed only in notifier's owning thread.
+    };
 
     kj::MutexGuarded<MessageQueue> incomingQueue;
     kj::MutexGuarded<MessageQueue> outgoingQueue;
@@ -2830,10 +2857,12 @@ struct Worker::Actor::Impl {
 #else
       auto timeout = 10 * kj::SECONDS;
 #endif
-      co_await timerChannel.afterLimitTimeout(timeout);
-      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+      return timerChannel.afterLimitTimeout(timeout)
+          .then([]() -> kj::Promise<void> {
+        return KJ_EXCEPTION(FAILED,
             "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
-            "timeout which caused object to be reset."));
+            "timeout which caused object to be reset.");
+      });
     }
 
     void outputGateLocked() override { metrics.outputGateLocked(); }
@@ -3177,20 +3206,22 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
 
   auto scheduledTime = KJ_ASSERT_NONNULL(newTime);
 
-  auto retry = kj::coCapture([this, originalTime = scheduledTime]() -> kj::Promise<void> {
+  auto retry = kj::coCapture([this, originalTime = scheduledTime]()
+      -> kj::Promise<void> {
     kj::Date scheduledTime = originalTime;
 
-    for (auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
-      co_await timerChannel.atTime(scheduledTime);
-      auto result = co_await loopback->getWorker(IoChannelFactory::SubrequestMetadata{})
-          ->runAlarm(originalTime);
+    for(auto i : kj::zeroTo(WorkerInterface::ALARM_RETRY_MAX_TRIES)) {
+      auto result = co_await timerChannel.atTime(scheduledTime)
+          .then([this, originalTime]() {
+        return loopback->getWorker(IoChannelFactory::SubrequestMetadata{})->runAlarm(originalTime);
+      });
 
-      if (result.outcome == EventOutcome::OK || !result.retry) {
+      if (result.outcome != EventOutcome::OK && result.retry) {
+        auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
+        scheduledTime = timerChannel.now() + delay;
+      } else {
         break;
       }
-
-      auto delay = (WorkerInterface::ALARM_RETRY_START_SECONDS << i++) * kj::SECONDS;
-      scheduledTime = timerChannel.now() + delay;
     }
   });
 
@@ -3732,14 +3763,18 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
 
   // For accurate lock metrics, we want to avoid taking a recursive isolate lock, so we postpone
   // the request until a later turn of the event loop.
-  auto maybeRequestId = co_await kj::evalLater(kj::mv(signalRequest));
-
-  KJ_IF_MAYBE(rid, maybeRequestId) {
-    ResponseWrapper wrapper(response, kj::mv(*rid), kj::mv(signalResponse));
-    co_await inner->request(method, url, headers, requestBody, wrapper);
-  } else {
-    co_await inner->request(method, url, headers, requestBody, response);
-  }
+  return kj::evalLater(kj::mv(signalRequest))
+      .then([this, method, url, &headers, &requestBody, &response,
+             signalResponse = kj::mv(signalResponse)]
+            (kj::Maybe<kj::String> maybeRequestId) {
+    KJ_IF_MAYBE(rid, maybeRequestId) {
+      auto wrapper = kj::heap<ResponseWrapper>(response, kj::mv(*rid), kj::mv(signalResponse));
+      return inner->request(method, url, headers, requestBody, *wrapper)
+          .attach(kj::mv(wrapper));
+    } else {
+      return inner->request(method, url, headers, requestBody, response);
+    }
+  });
 }
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::connect(
