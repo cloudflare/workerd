@@ -152,9 +152,6 @@ inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> p
   co_return newNoopDeferredProxy();
 }
 
-kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
-    jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf);
-
 void maybeWarnIfNotText(kj::StringPtr str);
 
 }  // namespace workerd::api

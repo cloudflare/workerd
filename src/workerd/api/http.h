@@ -632,6 +632,48 @@ struct RequestInitializerDict {
   });
 };
 
+class CfProperty {
+  // A holder for Cf header property value.
+  // The string header is parsed on demand and the parsed value cached.
+
+public:
+  KJ_DISALLOW_COPY(CfProperty);
+
+  explicit CfProperty() {}
+  CfProperty(decltype(nullptr)) {}
+  CfProperty(CfProperty&&) = default;
+  CfProperty& operator=(CfProperty&&) = default;
+
+  explicit CfProperty(kj::Maybe<kj::StringPtr> unparsed) {
+    KJ_IF_MAYBE(str, unparsed) {
+      value = kj::str(*str);
+    }
+  }
+
+  explicit CfProperty(kj::Maybe<jsg::V8Ref<v8::Object>>&& parsed) {
+    KJ_IF_MAYBE(v, parsed) {
+      value = kj::mv(*v);
+    }
+  }
+
+  jsg::Optional<v8::Local<v8::Object>> get(jsg::Lock& js);
+  // Get parsed value
+
+  jsg::Optional<jsg::V8Ref<v8::Object>> getRef(jsg::Lock& js);
+  // Get parsed value as a global ref
+
+  kj::Maybe<kj::String> serialize(jsg::Lock& js);
+  // Serialize to string
+
+  CfProperty deepClone(jsg::Lock& js);
+  // Clone by deep cloning parsed v8 object (if any).
+
+  void visitForGc(jsg::GcVisitor& visitor);
+
+private:
+  kj::Maybe<kj::OneOf<kj::String, jsg::V8Ref<v8::Object>>> value;
+};
+
 class Request: public Body {
 public:
   enum class Redirect {
@@ -643,7 +685,7 @@ public:
 
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-          kj::Maybe<jsg::Ref<AbortSignal>> signal, kj::Maybe<jsg::V8Ref<v8::Object>> cf,
+          kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
           kj::Maybe<Body::ExtractedBody> body)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
@@ -830,7 +872,7 @@ private:
   // an optional AbortSignal passed in with the options), and "this' signal", which is an
   // AbortSignal that is always available via the request.signal accessor. When signal is
   // used explicity, thisSignal will not be.
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  CfProperty cf;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, fetcher, signal, thisSignal, cf);
@@ -845,7 +887,7 @@ public:
   };
 
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+           CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
            Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
@@ -997,7 +1039,7 @@ private:
   int statusCode;
   kj::String statusText;
   jsg::Ref<Headers> headers;
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  CfProperty cf;
 
   kj::Array<kj::String> urlList;
   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
