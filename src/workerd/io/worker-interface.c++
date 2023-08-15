@@ -26,10 +26,12 @@ public:
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override {
     KJ_IF_MAYBE(w, worker) {
-      co_await w->get()->request(method, url, headers, requestBody, response);
+      return w->get()->request(method, url, headers, requestBody, response);
     } else {
-      co_await promise.addBranch();
-      co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
+      return promise.addBranch().then([this,method,url,&headers,&requestBody,&response]() {
+        return KJ_ASSERT_NONNULL(worker)
+            ->request(method, url, headers, requestBody, response);
+      });
     }
   }
 
@@ -37,11 +39,13 @@ public:
       kj::AsyncIoStream& connection, ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     KJ_IF_MAYBE(w, worker) {
-      co_await w->get()->connect(host, headers, connection, response, kj::mv(settings));
+      return w->get()->connect(host, headers, connection, response, kj::mv(settings));
     } else {
-      co_await promise.addBranch();
-      co_await KJ_ASSERT_NONNULL(worker)->connect(
-          host, headers, connection, response, kj::mv(settings));
+      return promise.addBranch().then(
+          [this, host, &headers, &connection, &response, settings]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->connect(
+            host, headers, connection, response, kj::mv(settings));
+      });
     }
   }
 
@@ -49,43 +53,39 @@ public:
     KJ_IF_MAYBE(w, worker) {
       w->get()->prewarm(url);
     } else {
-      static auto constexpr handlePrewarm =
-          [](kj::Promise<void> promise,
-             kj::String url,
-             kj::Own<PromisedWorkerInterface> self)
-          -> kj::Promise<void> {
-        co_await promise;
-        KJ_ASSERT_NONNULL(self->worker)->prewarm(url);
-      };
-
-      waitUntilTasks.add(handlePrewarm(promise.addBranch(), kj::str(url), kj::addRef(*this)));
+      waitUntilTasks.add(promise.addBranch().then([this, url=kj::str(url)]() mutable {
+        KJ_ASSERT_NONNULL(worker)->prewarm(url);
+      }).attach(kj::addRef(*this)));
     }
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->runScheduled(scheduledTime, cron);
+      return w->get()->runScheduled(scheduledTime, cron);
     } else {
-      co_await promise.addBranch();
-      co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
+      return promise.addBranch().then([this, scheduledTime, cron]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
+      });
     }
   }
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
     KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->runAlarm(scheduledTime);
+      return w->get()->runAlarm(scheduledTime);
     } else {
-      co_await promise.addBranch();
-      co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
+      return promise.addBranch().then([this, scheduledTime]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
+      });
     }
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->customEvent(kj::mv(event));
+      return w->get()->customEvent(kj::mv(event));
     } else {
-      co_await promise.addBranch();
-      co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
+      return promise.addBranch().then([this, event = kj::mv(event)]() mutable {
+        return KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
+      });
     }
   }
 
