@@ -262,7 +262,8 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
 enum class PragmaSignature {
   NO_ARG,
   BOOLEAN,
-  OBJECT_NAME
+  OBJECT_NAME,
+  NULL_NUMBER_OR_OBJECT_NAME
 };
 struct PragmaInfo {
   kj::StringPtr name;
@@ -290,6 +291,9 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
   { "index_info"_kj, PragmaSignature::OBJECT_NAME },
   { "index_list"_kj, PragmaSignature::OBJECT_NAME },
   { "index_xinfo"_kj, PragmaSignature::OBJECT_NAME },
+
+  // Takes an argument of table name/index name OR a max number of results, or nothing
+  { "quick_check"_kj, PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME }
 };
 
 }  // namespace
@@ -601,6 +605,14 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           case PragmaSignature::OBJECT_NAME: {
             // Argument is required.
             auto val = KJ_UNWRAP_OR(param2, return false);
+            return regulator.isAllowedName(val);
+          }
+          case PragmaSignature::NULL_NUMBER_OR_OBJECT_NAME: {
+            // Argument is not required
+            auto val = KJ_UNWRAP_OR(param2, return true);
+            // val is allowed if it parses to an integer
+            if (val.tryParseAs<uint>() != nullptr) return true;
+            // Otherwise, val must be the name of an object the user has access to
             return regulator.isAllowedName(val);
           }
         }

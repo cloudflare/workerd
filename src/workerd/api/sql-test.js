@@ -183,6 +183,22 @@ async function test(storage) {
   // Can't get table_info for _cf_KV.
   assert.throws(() => sql.exec('PRAGMA table_info(_cf_KV)'), /not authorized/)
 
+  // Testing the three valid types of inputs for quick_check
+  assert.deepEqual(Array.from(sql.exec('pragma quick_check;')), [
+    { quick_check: 'ok' },
+  ])
+  assert.deepEqual(Array.from(sql.exec('pragma quick_check(1);')), [
+    { quick_check: 'ok' },
+  ])
+  assert.deepEqual(Array.from(sql.exec('pragma quick_check(100);')), [
+    { quick_check: 'ok' },
+  ])
+  assert.deepEqual(Array.from(sql.exec('pragma quick_check(myTable);')), [
+    { quick_check: 'ok' },
+  ])
+  // But that private tables are again restricted
+  assert.throws(() => sql.exec('PRAGMA quick_check(_cf_KV)'), /not authorized/)
+
   // Basic functions like abs() work.
   assert.equal([...sql.exec('SELECT abs(-123)').raw()][0][0], 123)
 
@@ -658,6 +674,70 @@ async function test(storage) {
     ALTER TABLE altercolumns
     DROP COLUMN tobedeleted
   `)
+
+  // Can add columns with a CHECK
+  sql.exec(`
+    ALTER TABLE altercolumns
+    ADD COLUMN checked_col TEXT CHECK(checked_col IN ('A','B'));
+  `)
+
+  // The CHECK is enforced unless `ignore_check_constraints` is on
+  sql.exec(`INSERT INTO altercolumns(checked_col) VALUES ('A')`)
+  assert.throws(
+    () => sql.exec(`INSERT INTO altercolumns(checked_col) VALUES ('C')`),
+    /Error: CHECK constraint failed: checked_col IN \('A','B'\)/
+  )
+
+  // Because there's already a row, adding another column with a CHECK
+  // but no default value will fail
+  assert.throws(
+    () =>
+      sql.exec(`
+        ALTER TABLE altercolumns
+        ADD COLUMN second_col TEXT CHECK(second_col IS NOT NULL);
+      `),
+    /Error: CHECK constraint failed/
+  )
+
+  // ignore_check_constraints lets us bypass this for adding bad data
+  sql.exec(`PRAGMA ignore_check_constraints=ON;`)
+  sql.exec(`INSERT INTO altercolumns(checked_col) VALUES ('C')`)
+  assert.deepEqual(
+    [...sql.exec(`SELECT * FROM altercolumns`)],
+    [
+      { checked_col: 'A', metadata: null },
+      { checked_col: 'C', metadata: null },
+    ]
+  )
+
+  // Or even adding columns that start broken (because second_col is NULL)
+  sql.exec(`
+    ALTER TABLE altercolumns
+    ADD COLUMN second_col TEXT CHECK(second_col IS NOT NULL);
+  `)
+
+  // Turning check constraints back on doesn't actually do any checking, eagerly
+  sql.exec(`PRAGMA ignore_check_constraints=OFF;`)
+
+  // But anything else that CHECKs that table will now fail, like adding another CHECK
+  assert.throws(
+    () =>
+      sql.exec(`
+        ALTER TABLE altercolumns
+        ADD COLUMN third_col TEXT DEFAULT 'E' CHECK(third_col IN ('E','F'));
+      `),
+    /Error: CHECK constraint failed/
+  )
+
+  // And we can use quick_check to list out that there are now errors
+  // (although these messages aren't great):
+  assert.deepEqual(
+    [...sql.exec(`PRAGMA quick_check;`)],
+    [
+      { quick_check: 'CHECK constraint failed in altercolumns' },
+      { quick_check: 'CHECK constraint failed in altercolumns' },
+    ]
+  )
 
   // Can't create another temp table
   assert.throws(
