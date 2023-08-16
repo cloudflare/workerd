@@ -860,7 +860,7 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_MAYBE(newCf, initDict.cf) {
-          cf = CfProperty(kj::mv(*newCf));
+          cf = CfProperty(newCf->deepClone(js));
         }
 
         KJ_IF_MAYBE(b, kj::mv(initDict.body).orDefault(nullptr)) {
@@ -1053,7 +1053,9 @@ jsg::Ref<Response> Response::constructor(
         headers = jsg::alloc<Headers>(jsg::Dict<jsg::ByteString, jsg::ByteString>());
       }
 
-      cf = CfProperty(kj::mv(initDict.cf));
+      KJ_IF_MAYBE(newCf, initDict.cf) {
+        cf = CfProperty(newCf->deepClone(js));
+      }
 
       KJ_IF_MAYBE(ws, initDict.webSocket) {
         KJ_IF_MAYBE(ws2, *ws) {
