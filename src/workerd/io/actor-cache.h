@@ -341,15 +341,6 @@ private:
     // evicted due to memory pressure).
     CLEAN,
 
-    // This entry exists solely to mark the end of a known-empty gap. The value for this entry
-    // is not known, but the previous entry has `gapIsKnownEmpty = true`. Such entries are
-    // created as a result of list() operations, to mark the endpoint of the list range. List
-    // ranges are exclusive of their endpoint, hence the value associated with this key is commonly
-    // unknown.
-    //
-    // Next state: NOT_IN_CACHE, if someone get()s or put()s the real value.
-    END_GAP,
-
     // This entry is not currently in the cache -- it is an orphaned object. This happens e.g. if
     // a put() or delete() overwrote the entry, in which case the `Entry` object is removed from
     // the map and replaced with a new object. The old object may continue to exist if it is still
@@ -360,6 +351,21 @@ private:
     // Next state: deleted (Entry will be destroyed when the refcount reaches zero), or any
     //   other state if the entry is inserted into the cache.
     NOT_IN_CACHE
+  };
+
+  enum class EntryValueStatus : uint8_t {
+    // This entry has a known value. (Note that while there is nothing wrong per say with a value
+    // size of zero, v8 serialized data will always have a greater size.)
+    PRESENT,
+
+    // This entry is known to be absent.
+    ABSENT,
+
+    // This entry has not been fetched into cache yet, but the previous entry has `gapIsKnownEmpty =
+    // true`. Such entries are created as a result of list() operations, to mark the endpoint of the
+    // list range. List ranges are exclusive of their endpoint, hence the value associated with this
+    // key is commonly unknown.
+    UNKNOWN,
   };
 
   struct CountedDelete;
@@ -377,17 +383,19 @@ private:
     // `lru.cleanList`. `key` and `value` are declared `const` so that they can safely be used
     // without a lock.
 
-    Entry(ActorCache& cache, Key key, kj::Maybe<Value> value);
-    Entry(Key key, kj::Maybe<Value> value);
+    Entry(ActorCache& cache, Key key, Value value);
+    Entry(ActorCache& cache, Key key, EntryValueStatus status);
+    Entry(Key key, Value value);
+    Entry(Key key, EntryValueStatus status);
     ~Entry() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
     kj::Maybe<ActorCache&> maybeCache;
     const Key key;
 
-    // The value associated with this key. null means the key is known not to be set -- except in
-    // the END_GAP state, where `value` is always null, and this doesn't indicate any knowledge
-    // about what's on disk.
+  private:
+    // The value associated with this key. If our `valueStatus` below is `ABSENT` or `UNKNOWN`, it
+    // will have size 0.
     //
     // `value` cannot change after the `Entry` is constructed. When a key is overwritten, the
     // existing `Entry` is removed from the map and replaced with a new one, so that `value` does
@@ -395,7 +403,23 @@ private:
     // them instead, especially in the case of a read operation which is only partially fulfilled
     // from cache and needs to remember the original cached values even if they are overwritten
     // before the read completes.
-    const kj::Maybe<Value> value;
+    const Value value;
+  public:
+    EntryValueStatus valueStatus;
+    kj::Maybe<ValuePtr> getValuePtr() const {
+      if (valueStatus == EntryValueStatus::PRESENT) {
+        return value.asPtr();
+      } else {
+        return nullptr;
+      }
+    }
+    kj::Maybe<Value> getValue() const {
+      KJ_IF_MAYBE(ptr, getValuePtr()) {
+        return ptr->attach(kj::atomicAddRef(*this));
+      } else {
+        return nullptr;
+      }
+    }
 
     // State of this key/value pair.
     EntryState state = NOT_IN_CACHE;
@@ -432,9 +456,7 @@ private:
     kj::ListLink<Entry> link;
 
     size_t size() const {
-      size_t result = sizeof(*this) + key.size();
-      KJ_IF_MAYBE(v, value) result += v->size();
-      return result;
+      return sizeof(*this) + key.size() + value.size();
     }
   };
 
@@ -599,15 +621,9 @@ private:
 
   // Look for a key in cache, returning a strong reference on the matching entry.
   //
-  // Returns null if the key isn't in cache, and must be looked up on disk.
-  //
-  // This will never return an entry of type END_GAP -- it'll return null instead.
-  //
-  // In cases where the key doesn't match a specific entry, but does match a gap between entries
-  // which is known to be empty, and thus the key is known not to exist on disk but has no specific
-  // entry in cache, this will return a new temporary object with null `value` instead, so that
-  // the calling code doesn't need to think about this case.
-  kj::Maybe<kj::Own<Entry>> findInCache(Lock& lock, KeyPtr key, const ReadOptions& options);
+  // Note that the returned entry could have `EntryValueStatus::UNKNOWN` which means we do not know
+  // if it is in storage or `EntryValueStatus::ABSENT` which means we know it is not in storage.
+  kj::Own<Entry> findInCache(Lock& lock, KeyPtr key, const ReadOptions& options);
 
   // Add an entry to the cache, where the entry was the result of reading from storage. If another
   // entry with the same key has been inserted in the meantime, then the new entry will not be
@@ -622,12 +638,10 @@ private:
   void markGapsEmpty(Lock& lock, KeyPtr begin, kj::Maybe<KeyPtr> end, const ReadOptions& options);
 
   // Implements put() or delete(). Multi-key variants call this for each key.
-  void putImpl(Lock& lock, Key key, kj::Maybe<Value> value,
-               const WriteOptions& options, kj::Maybe<CountedDelete&> counted);
-
-  // Implements put() or delete(). Multi-key variants call this for each key.
   void putImpl(Lock& lock, kj::Own<Entry> newEntry,
                const WriteOptions& options,  kj::Maybe<CountedDelete&> counted);
+
+  kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
   // Ensure that we will flush dirty entries soon.
   void ensureFlushScheduled(const WriteOptions& options);
@@ -711,8 +725,8 @@ public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
-      KJ_IREQUIRE(ptr->get()->value != nullptr);
-      return { ptr->get()->key, ptr->get()->value.orDefault(nullptr), *statusPtr };
+      KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
+      return { ptr->get()->key, ptr->get()->getValuePtr().orDefault(nullptr), *statusPtr };
     }
     Iterator& operator++() {
       ++ptr;
@@ -903,7 +917,7 @@ private:
   // Adds the given key/value pair to `changes`. If an existing entry is replaced, *count is
   // incremented if it was a positive entry. If no existing entry is replaced, then the key
   // is returned, indicating that if a count is needed, we'll need to inspect cache/disk.
-  kj::Maybe<KeyPtr> putImpl(Lock& lock, Key key, kj::Maybe<Value> value,
+  kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Own<Entry> entry,
                             const WriteOptions& options, kj::Maybe<uint&> count = nullptr);
 };
 
