@@ -31,7 +31,7 @@ void AsyncRunner::QueueTick() {
 
   IoContext::current().setTimeoutImpl(
       timeoutIdGenerator, false,
-      [this](jsg::Lock &js) mutable {
+      [this](jsg::Lock& js) mutable {
         this->tick_queued_ = false;
         if (this->count_ > 0) {
           this->device_.Tick();

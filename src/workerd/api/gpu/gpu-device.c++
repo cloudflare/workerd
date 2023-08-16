@@ -251,7 +251,9 @@ parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
       JSG_REQUIRE(autoLayoutMode == "auto", TypeError, "unknown auto layout mode", autoLayoutMode);
       desc.layout = nullptr;
     }
-    KJ_CASE_ONEOF(layout, jsg::Ref<GPUPipelineLayout>) { desc.layout = *layout; }
+    KJ_CASE_ONEOF(layout, jsg::Ref<GPUPipelineLayout>) {
+      desc.layout = *layout;
+    }
   }
 
   return kj::mv(desc);

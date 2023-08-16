@@ -40,18 +40,19 @@ private:
 // and AsyncRunner::End() on destruction.
 class AsyncTask {
 public:
-  inline AsyncTask(AsyncTask &&) = default;
+  inline AsyncTask(AsyncTask&&) = default;
 
   // Constructor.
   // Calls AsyncRunner::Begin()
-  explicit inline AsyncTask(kj::Own<AsyncRunner> runner)
-      : runner_(std::move(runner)) {
+  explicit inline AsyncTask(kj::Own<AsyncRunner> runner) : runner_(std::move(runner)) {
     runner_->Begin();
   }
 
   // Destructor.
   // Calls AsyncRunner::End()
-  inline ~AsyncTask() { runner_->End(); }
+  inline ~AsyncTask() {
+    runner_->End();
+  }
 
 private:
   KJ_DISALLOW_COPY(AsyncTask);

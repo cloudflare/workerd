@@ -16,7 +16,9 @@ namespace workerd::api::gpu {
 class GPUBindGroup : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::BindGroup &() const { return group_; }
+  inline operator const wgpu::BindGroup&() const {
+    return group_;
+  }
   explicit GPUBindGroup(wgpu::BindGroup g) : group_(kj::mv(g)){};
   JSG_RESOURCE_TYPE(GPUBindGroup) {}
 
@@ -50,6 +52,6 @@ struct GPUBindGroupDescriptor {
   JSG_STRUCT(label, layout, entries);
 };
 
-wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry &);
+wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry&);
 
 } // namespace workerd::api::gpu

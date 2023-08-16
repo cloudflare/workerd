@@ -40,7 +40,9 @@ struct GPURequestAdapterOptions {
 class GPU : public jsg::Object {
 public:
   explicit GPU();
-  JSG_RESOURCE_TYPE(GPU) { JSG_METHOD(requestAdapter); }
+  JSG_RESOURCE_TYPE(GPU) {
+    JSG_METHOD(requestAdapter);
+  }
 
 private:
   jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>

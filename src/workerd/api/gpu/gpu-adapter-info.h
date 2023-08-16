@@ -24,10 +24,18 @@ private:
   kj::String architecture_;
   kj::String device_;
   kj::String description_;
-  kj::StringPtr getVendor() { return vendor_; };
-  kj::StringPtr getArchitecture() { return architecture_; };
-  kj::StringPtr getDevice() { return device_; };
-  kj::StringPtr getDescription() { return description_; };
+  kj::StringPtr getVendor() {
+    return vendor_;
+  };
+  kj::StringPtr getArchitecture() {
+    return architecture_;
+  };
+  kj::StringPtr getDevice() {
+    return device_;
+  };
+  kj::StringPtr getDescription() {
+    return description_;
+  };
 };
 
 } // namespace workerd::api::gpu

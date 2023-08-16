@@ -26,8 +26,8 @@ private:
   beginComputePass(jsg::Optional<GPUComputePassDescriptor> descriptor);
   jsg::Ref<GPUCommandBuffer> finish(jsg::Optional<GPUCommandBufferDescriptor>);
   void copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
-                          jsg::Ref<GPUBuffer> destination,
-                          GPUSize64 destinationOffset, GPUSize64 size);
+                          jsg::Ref<GPUBuffer> destination, GPUSize64 destinationOffset,
+                          GPUSize64 size);
 };
 
 struct GPUCommandEncoderDescriptor {

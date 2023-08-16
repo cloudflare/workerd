@@ -15,8 +15,7 @@ namespace workerd::api::gpu {
 
 class GPUComputePassEncoder : public jsg::Object {
 public:
-  explicit GPUComputePassEncoder(wgpu::ComputePassEncoder e)
-      : encoder_(kj::mv(e)){};
+  explicit GPUComputePassEncoder(wgpu::ComputePassEncoder e) : encoder_(kj::mv(e)){};
   JSG_RESOURCE_TYPE(GPUComputePassEncoder) {
     JSG_METHOD(setPipeline);
     JSG_METHOD(setBindGroup);
@@ -27,13 +26,11 @@ public:
 private:
   wgpu::ComputePassEncoder encoder_;
   void setPipeline(jsg::Ref<GPUComputePipeline> pipeline);
-  void dispatchWorkgroups(GPUSize32 workgroupCountX,
-                          jsg::Optional<GPUSize32> workgroupCountY,
+  void dispatchWorkgroups(GPUSize32 workgroupCountX, jsg::Optional<GPUSize32> workgroupCountY,
                           jsg::Optional<GPUSize32> workgroupCountZ);
   void end();
-  void
-  setBindGroup(GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
-               jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets);
+  void setBindGroup(GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
+                    jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets);
   // TODO(soon): overloads don't seem to be supported
   // void setBindGroup(GPUIndex32 index,
   //                  kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
@@ -58,7 +55,6 @@ struct GPUComputePassDescriptor {
   JSG_STRUCT(label, timestampWrites);
 };
 
-wgpu::ComputePassTimestampLocation
-parseComputePassTimestampLocation(kj::StringPtr location);
+wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location);
 
 } // namespace workerd::api::gpu

@@ -8,9 +8,7 @@
 namespace workerd::api::gpu {
 
 GPUAdapterInfo::GPUAdapterInfo(WGPUAdapterProperties properties)
-    : vendor_(kj::str(properties.vendorName)),
-      architecture_(kj::str(properties.architecture)),
-      device_(kj::str(properties.name)),
-      description_(kj::str(properties.driverDescription)) {}
+    : vendor_(kj::str(properties.vendorName)), architecture_(kj::str(properties.architecture)),
+      device_(kj::str(properties.name)), description_(kj::str(properties.driverDescription)) {}
 
 } // namespace workerd::api::gpu

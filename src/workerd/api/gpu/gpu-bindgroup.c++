@@ -6,7 +6,7 @@
 
 namespace workerd::api::gpu {
 
-wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry &entry) {
+wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry& entry) {
   wgpu::BindGroupEntry e;
   e.binding = entry.binding;
 
@@ -16,7 +16,7 @@ wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry &entry) {
       KJ_IF_MAYBE (offset, buffer.offset) {
         e.offset = *offset;
       }
-      KJ_IF_MAYBE(size, buffer.size) {
+      KJ_IF_MAYBE (size, buffer.size) {
         e.size = *size;
       }
     }

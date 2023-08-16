@@ -15,7 +15,9 @@ public:
   explicit GPUBindGroupLayout(wgpu::BindGroupLayout l) : layout_(kj::mv(l)){};
 
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::BindGroupLayout &() const { return layout_; }
+  inline operator const wgpu::BindGroupLayout&() const {
+    return layout_;
+  }
 
   JSG_RESOURCE_TYPE(GPUBindGroupLayout) {}
 
@@ -73,6 +75,6 @@ struct GPUBindGroupLayoutDescriptor {
   JSG_STRUCT(label, entries);
 };
 
-wgpu::BindGroupLayoutEntry parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry &);
+wgpu::BindGroupLayoutEntry parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry&);
 
 } // namespace workerd::api::gpu

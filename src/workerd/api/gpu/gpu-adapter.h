@@ -26,12 +26,10 @@ public:
   }
 
 private:
-  jsg::Promise<jsg::Ref<GPUDevice>>
-  requestDevice(jsg::Lock &, jsg::Optional<GPUDeviceDescriptor>);
+  jsg::Promise<jsg::Ref<GPUDevice>> requestDevice(jsg::Lock&, jsg::Optional<GPUDeviceDescriptor>);
   dawn::native::Adapter adapter_;
   jsg::Promise<jsg::Ref<GPUAdapterInfo>>
-  requestAdapterInfo(jsg::Lock &js,
-                     jsg::Optional<kj::Array<kj::String>> unmaskHints);
+  requestAdapterInfo(jsg::Lock& js, jsg::Optional<kj::Array<kj::String>> unmaskHints);
   jsg::Ref<GPUSupportedFeatures> getFeatures();
   jsg::Ref<GPUSupportedLimits> getLimits();
 };

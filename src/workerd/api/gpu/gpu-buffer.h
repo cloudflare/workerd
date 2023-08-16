@@ -13,9 +13,11 @@ namespace workerd::api::gpu {
 class GPUBuffer : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::Buffer&() const { return buffer_; }
-  explicit GPUBuffer(jsg::Lock& js, wgpu::Buffer, wgpu::BufferDescriptor,
-                     wgpu::Device, kj::Own<AsyncRunner>);
+  inline operator const wgpu::Buffer&() const {
+    return buffer_;
+  }
+  explicit GPUBuffer(jsg::Lock& js, wgpu::Buffer, wgpu::BufferDescriptor, wgpu::Device,
+                     kj::Own<AsyncRunner>);
 
   JSG_RESOURCE_TYPE(GPUBuffer) {
     JSG_METHOD(getMappedRange);
@@ -51,13 +53,11 @@ private:
   kj::Vector<Mapping> mapped_;
   jsg::V8Ref<v8::Object> detachKey_;
 
-  v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&,
-                                            jsg::Optional<GPUSize64> offset,
+  v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&, jsg::Optional<GPUSize64> offset,
                                             jsg::Optional<GPUSize64> size);
   void unmap(jsg::Lock& js);
   void destroy(jsg::Lock& js);
-  jsg::Promise<void> mapAsync(GPUFlagsConstant mode,
-                              jsg::Optional<GPUSize64> offset,
+  jsg::Promise<void> mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
                               jsg::Optional<GPUSize64> size);
   void DetachMappings(jsg::Lock& js);
 };

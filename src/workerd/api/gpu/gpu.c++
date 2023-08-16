@@ -21,7 +21,9 @@ void initialize() {
   dawnProcSetProcs(&dawn::native::GetProcs());
 }
 
-GPU::GPU() { instance_.DiscoverDefaultAdapters(); }
+GPU::GPU() {
+  instance_.DiscoverDefaultAdapters();
+}
 
 kj::String parseAdapterType(wgpu::AdapterType type) {
   switch (type) {
@@ -37,8 +39,7 @@ kj::String parseAdapterType(wgpu::AdapterType type) {
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
-GPU::requestAdapter(jsg::Lock& js,
-                    jsg::Optional<GPURequestAdapterOptions> options) {
+GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> options) {
 
 #if defined(_WIN32)
   constexpr auto defaultBackendType = wgpu::BackendType::D3D12;

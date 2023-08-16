@@ -7,8 +7,8 @@
 
 namespace workerd::api::gpu {
 
-jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
-    jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
+jsg::Ref<GPUCommandBuffer>
+GPUCommandEncoder::finish(jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
   wgpu::CommandBufferDescriptor desc{};
 
   KJ_IF_MAYBE (d, descriptor) {
@@ -21,18 +21,15 @@ jsg::Ref<GPUCommandBuffer> GPUCommandEncoder::finish(
   return jsg::alloc<GPUCommandBuffer>(kj::mv(buffer));
 };
 
-void GPUCommandEncoder::copyBufferToBuffer(jsg::Ref<GPUBuffer> source,
-                                           GPUSize64 sourceOffset,
+void GPUCommandEncoder::copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
                                            jsg::Ref<GPUBuffer> destination,
-                                           GPUSize64 destinationOffset,
-                                           GPUSize64 size) {
+                                           GPUSize64 destinationOffset, GPUSize64 size) {
 
-  encoder_.CopyBufferToBuffer(*source, sourceOffset, *destination,
-                              destinationOffset, size);
+  encoder_.CopyBufferToBuffer(*source, sourceOffset, *destination, destinationOffset, size);
 };
 
-jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
-    jsg::Optional<GPUComputePassDescriptor> descriptor) {
+jsg::Ref<GPUComputePassEncoder>
+GPUCommandEncoder::beginComputePass(jsg::Optional<GPUComputePassDescriptor> descriptor) {
 
   wgpu::ComputePassDescriptor desc{};
 
@@ -42,7 +39,7 @@ jsg::Ref<GPUComputePassEncoder> GPUCommandEncoder::beginComputePass(
       desc.label = label->cStr();
     }
 
-    for (auto &timestamp : d->timestampWrites) {
+    for (auto& timestamp : d->timestampWrites) {
       wgpu::ComputePassTimestampWrite t{};
       t.querySet = *timestamp.querySet;
       t.queryIndex = timestamp.queryIndex;
