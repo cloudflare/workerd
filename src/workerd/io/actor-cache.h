@@ -371,32 +371,25 @@ private:
 
   struct CountedDelete;
 
-  // A cache entry.
-  //
-  // Entries are refcounted so that an operation which cares about a particular entry can keep
-  // it live even after it has been evicted or overwritten. In particular, because read
-  // operations are consistent with the time when read() was called, they may need to hold
-  // strong references to the entries they are reading, so that if the entries are overwritten,
-  // the read operation still has the original value from when it was called.
-  //
-  // The mutable content of an `Entry` is protected by the same mutex that protects
-  // `lru.cleanList`. `key` and `value` are declared `const` so that they can safely be used
-  // without a lock.
   struct Entry: public kj::AtomicRefcounted {
+    // A cache entry.
+    //
+    // Entries are refcounted so that an operation which cares about a particular entry can keep
+    // it live even after it has been evicted or overwritten. In particular, because read
+    // operations are consistent with the time when read() was called, they may need to hold
+    // strong references to the entries they are reading, so that if the entries are overwritten,
+    // the read operation still has the original value from when it was called.
+    //
+    // The mutable content of an `Entry` is protected by the same mutex that protects
+    // `lru.cleanList`. `key` and `value` are declared `const` so that they can safely be used
+    // without a lock.
 
-    // Use makeEntry() to construct! (The Badge<> is a reminder, though obviously doesn't enforce
-    // anything since Entry is already private to ActorCache.)
-    Entry(kj::Badge<ActorCache>, ActorCache& cache, Key keyParam,
-          kj::Maybe<Value> valueParam, EntryState state);
-
-    // Makes an entry not tied to a cache. Used by GetResultList<kj::Vector<KeyValuePair>>
-    // constructor.
-    Entry(kj::Badge<GetResultList>, Key keyParam, kj::Maybe<Value> valueParam);
-
+    Entry(ActorCache& cache, Key key, kj::Maybe<Value> value);
+    Entry(Key key, kj::Maybe<Value> value);
     ~Entry() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
-    kj::Maybe<ActorCache&> cache;
+    kj::Maybe<ActorCache&> maybeCache;
     const Key key;
 
     // The value associated with this key. null means the key is known not to be set -- except in
@@ -412,7 +405,7 @@ private:
     const kj::Maybe<Value> value;
 
     // State of this key/value pair.
-    EntryState state;
+    EntryState state = NOT_IN_CACHE;
 
     // If true, then a past list() operation covered the space between this entry and the following
     // entry, meaning that we know for sure that there are no other keys on disk between them.
@@ -598,8 +591,6 @@ private:
 
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
-
-  kj::Own<Entry> makeEntry(Lock& lock, EntryState state, Key keyParam, kj::Maybe<Value> valueParam);
 
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
   // the LRU queue (unless the options say otherwise).

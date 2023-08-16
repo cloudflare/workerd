@@ -60,25 +60,17 @@ void ActorCache::clear(Lock& lock) {
   currentValues.get(lock).clear();
 }
 
-kj::Own<ActorCache::Entry> ActorCache::makeEntry(
-    Lock& lock, EntryState state, Key key, kj::Maybe<Value> value) {
-  auto result = kj::atomicRefcounted<Entry>(
-    kj::Badge<ActorCache>(), *this, kj::mv(key), kj::mv(value), state);
-
-  lru.size.fetch_add(result->size(), std::memory_order_relaxed);
-
-  return result;
+ActorCache::Entry::Entry(ActorCache& cache, Key keyParam, kj::Maybe<Value> valueParam)
+    : maybeCache(cache), key(kj::mv(keyParam)), value(kj::mv(valueParam)) {
+  KJ_IF_MAYBE(c, maybeCache) {
+    c->lru.size.fetch_add(size(), std::memory_order_relaxed);
+  }
 }
 
-ActorCache::Entry::Entry(kj::Badge<ActorCache>,ActorCache& cache, Key keyParam,
-                         kj::Maybe<Value> valueParam, EntryState state)
-    : cache(cache), key(kj::mv(keyParam)), value(kj::mv(valueParam)), state(state) {}
-
-ActorCache::Entry::Entry(kj::Badge<GetResultList>, Key keyParam, kj::Maybe<Value> valueParam)
-    : key(kj::mv(keyParam)), value(kj::mv(valueParam)), state(NOT_IN_CACHE) {}
+ActorCache::Entry::Entry(Key key, kj::Maybe<Value> value): key(kj::mv(key)), value(kj::mv(value)) {}
 
 ActorCache::Entry::~Entry() noexcept(false) {
-  KJ_IF_MAYBE(c, cache) {
+  KJ_IF_MAYBE(c, maybeCache) {
     size_t size = this->size();
 
     size_t before = c->lru.size.fetch_sub(size, std::memory_order_relaxed);
@@ -117,7 +109,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
         if (entry.state == STALE) {
           entry.state = NOT_IN_CACHE;
           lock->remove(entry);
-          KJ_ASSERT_NONNULL(entry.cache).evictEntry(lock, entry);
+          KJ_ASSERT_NONNULL(entry.maybeCache).evictEntry(lock, entry);
         } else {
           KJ_ASSERT(entry.state == CLEAN);
           entry.state = STALE;
@@ -262,7 +254,7 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
     Entry& entry = lock->front();
     entry.state = NOT_IN_CACHE;
     lock->remove(entry);
-    KJ_ASSERT_NONNULL(entry.cache).evictEntry(lock, entry);
+    KJ_ASSERT_NONNULL(entry.maybeCache).evictEntry(lock, entry);
   }
 }
 
@@ -1413,7 +1405,7 @@ kj::Maybe<kj::Own<ActorCache::Entry>> ActorCache::findInCache(
       if (prev.gapIsKnownEmpty) {
         // A previous list() operation covered this section of the key space and did not find this
         // key, so we know it's not present. Return a dummy entry saying this.
-        return makeEntry(lock, CLEAN, cloneKey(key), nullptr);
+        return kj::atomicRefcounted<ActorCache::Entry>(cloneKey(key), nullptr);
       }
     }
 
@@ -1423,14 +1415,17 @@ kj::Maybe<kj::Own<ActorCache::Entry>> ActorCache::findInCache(
 }
 
 kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
-    Lock& lock, Key key, kj::Maybe<capnp::Data::Reader> value, const ReadOptions& options) {
-  kj::Own<Entry> entry = makeEntry(lock, CLEAN, kj::mv(key),
-      value.map([](capnp::Data::Reader reader) { return kj::heapArray(reader); }));
-
+    Lock& lock, Key key, kj::Maybe<capnp::Data::Reader> maybeReader, const ReadOptions& options) {
+  kj::Maybe<Value> value;
+  KJ_IF_MAYBE(reader, maybeReader) {
+    value = kj::heapArray(*reader);
+  }
+  auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::mv(value));
   if (options.noCache) {
     // We don't actually want to add this to the cache, just return the entry.
-    entry->state = NOT_IN_CACHE;
     return kj::mv(entry);
+  } else {
+    entry->state = CLEAN;
   }
 
   auto& map = currentValues.get(lock);
@@ -1574,7 +1569,10 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
       } else {
         // We must insert an END_GAP entry to cap our range.
         KJ_IF_MAYBE(k, endKey) {
-          map.insert(makeEntry(lock, END_GAP, cloneKey(*k), nullptr));
+          kj::Maybe<Value> value;
+          auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(*k), kj::mv(value));
+          entry->state = END_GAP;
+          map.insert(kj::mv(entry));
         } else {
           // No END_GAP needed since the end is actually the end of the key space.
         }
@@ -1670,7 +1668,7 @@ ActorCache::GetResultList::GetResultList(kj::Vector<KeyValuePair> contents)
   // TODO(perf): Allocating an `Entry` object for every key/value pair is lame but to avoid it
   //   we'd have to make the common case worse...
   for (auto& kv: contents) {
-    entries.add(kj::heap<Entry>(kj::Badge<GetResultList>(), kj::mv(kv.key), kj::mv(kv.value)));
+    entries.add(kj::atomicRefcounted<Entry>(kj::mv(kv.key), kj::mv(kv.value)));
     cacheStatuses.add(CacheStatus::UNCACHED);
   }
 }
@@ -1970,8 +1968,11 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     // Insert a dummy entry with an empty key and gapIsKnownEmpty = true to indicate that
     // everything is empty.
     map.findOrCreate(Key(nullptr), [&]() {
-      auto entry = makeEntry(lock, CLEAN, Key(nullptr), nullptr);
+      Key key;
+      kj::Maybe<Value> value;
+      auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::mv(value));
       lock->add(*entry);
+      entry->state = CLEAN;
       entry->gapIsKnownEmpty = true;
       return entry;
     });
@@ -2005,9 +2006,8 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
 
 void ActorCache::putImpl(Lock& lock, Key key, kj::Maybe<Value> value,
                          const WriteOptions& options, kj::Maybe<CountedDelete&> countedDelete) {
-  // Use NOT_IN_CACHE state until the entry is actually inserted into the map.
-  return putImpl(lock, makeEntry(lock, NOT_IN_CACHE, kj::mv(key), kj::mv(value)),
-                 options, countedDelete);
+  auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::mv(value));
+  return putImpl(lock, kj::mv(entry), options, countedDelete);
 }
 
 void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
@@ -3244,10 +3244,9 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
 kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
     Lock& lock, Key key, kj::Maybe<Value> value, const WriteOptions& options,
     kj::Maybe<uint&> count) {
-  // Use NOT_IN_CACHE state because this entry is not in the cache map yet.
   Change change {
-    cache.makeEntry(lock, NOT_IN_CACHE, kj::mv(key), kj::mv(value)),
-    options
+    .entry = kj::atomicRefcounted<Entry>(cache, kj::mv(key), kj::mv(value)),
+    .options = options,
   };
   bool replaced = false;
   auto& slot = entriesToWrite.upsert(kj::mv(change), [&](auto& existing, auto&& replacement) {
