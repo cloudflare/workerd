@@ -67,7 +67,8 @@ function isBigNumber(number: NumberType) {
     name === "long" ||
     name === "unsigned long" ||
     name === "long long" ||
-    name === "unsigned long long"
+    name === "unsigned long long" ||
+    name === "jsg::JsBigInt"
   );
 }
 

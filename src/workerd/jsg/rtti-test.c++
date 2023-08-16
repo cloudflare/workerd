@@ -32,6 +32,39 @@ kj::String tStructure() {
   return codec.encode(type);
 }
 
+KJ_TEST("jsg::Js* types") {
+  KJ_EXPECT(tType<JsValue>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsObject>() == "(object = void)");
+  KJ_EXPECT(tType<JsBoolean>() == "(boolt = void)");
+  KJ_EXPECT(tType<JsArray>() == "(array = (element = (unknown = void), name = \"jsg::JsArray\"))");
+  KJ_EXPECT(tType<JsString>() == "(string = (name = \"jsg::JsString\"))");
+  KJ_EXPECT(tType<JsBigInt>() == "(number = (name = \"jsg::JsBigInt\"))");
+  KJ_EXPECT(tType<JsNumber>() == "(number = (name = \"jsg::JsNumber\"))");
+  KJ_EXPECT(tType<JsInt32>() == "(number = (name = \"jsg::JsInt32\"))");
+  KJ_EXPECT(tType<JsUint32>() == "(number = (name = \"jsg::JsUint32\"))");
+  KJ_EXPECT(tType<JsDate>() == "(builtin = (type = kjDate))");
+  KJ_EXPECT(tType<JsRegExp>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsMap>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsSet>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsSymbol>() == "(unknown = void)");
+
+  KJ_EXPECT(tType<JsRef<JsValue>>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsRef<JsObject>>() == "(object = void)");
+  KJ_EXPECT(tType<JsRef<JsBoolean>>() == "(boolt = void)");
+  KJ_EXPECT(tType<JsRef<JsArray>>() ==
+            "(array = (element = (unknown = void), name = \"jsg::JsArray\"))");
+  KJ_EXPECT(tType<JsRef<JsString>>() == "(string = (name = \"jsg::JsString\"))");
+  KJ_EXPECT(tType<JsRef<JsBigInt>>() == "(number = (name = \"jsg::JsBigInt\"))");
+  KJ_EXPECT(tType<JsRef<JsNumber>>() == "(number = (name = \"jsg::JsNumber\"))");
+  KJ_EXPECT(tType<JsRef<JsInt32>>() == "(number = (name = \"jsg::JsInt32\"))");
+  KJ_EXPECT(tType<JsRef<JsUint32>>() == "(number = (name = \"jsg::JsUint32\"))");
+  KJ_EXPECT(tType<JsRef<JsDate>>() == "(builtin = (type = kjDate))");
+  KJ_EXPECT(tType<JsRef<JsRegExp>>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsRef<JsMap>>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsRef<JsSet>>() == "(unknown = void)");
+  KJ_EXPECT(tType<JsRef<JsSymbol>>() == "(unknown = void)");
+}
+
 KJ_TEST("primitive types") {
   KJ_EXPECT(tType<void>() == "(voidt = void)");
   KJ_EXPECT(tType<bool>() == "(boolt = void)");
