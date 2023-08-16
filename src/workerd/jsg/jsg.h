@@ -1867,6 +1867,10 @@ public:
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
 
+  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
+
+  kj::Exception exceptionToKj(const JsValue& exception);
+
   kj::Exception exceptionToKj(Value&& exception);
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
@@ -1880,6 +1884,8 @@ public:
   [[noreturn]] void throwException(kj::Exception&& exception) {
     throwException(exceptionToJs(kj::mv(exception)));
   }
+
+  [[noreturn]] void throwException(const JsValue& exception);
 
   template <typename Func, typename ErrorHandler>
   auto tryCatch(Func&& func, ErrorHandler&& errorHandler) -> decltype(func()) {

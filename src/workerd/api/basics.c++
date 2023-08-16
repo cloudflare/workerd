@@ -361,9 +361,9 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 
 kj::Exception AbortSignal::abortException(
     jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Optional<jsg::JsValue> maybeReason) {
   KJ_IF_MAYBE(reason, maybeReason) {
-    return js.exceptionToKj(js.v8Ref(*reason));
+    return js.exceptionToKj(*reason);
   }
 
   return JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The operation was aborted");
@@ -371,20 +371,20 @@ kj::Exception AbortSignal::abortException(
 
 jsg::Ref<AbortSignal> AbortSignal::abort(
     jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = abortException(js, maybeReason);
   KJ_IF_MAYBE(reason, maybeReason) {
-    return jsg::alloc<AbortSignal>(kj::mv(exception), js.v8Ref(*reason));
+    return jsg::alloc<AbortSignal>(kj::mv(exception), reason->addRef(js));
   }
-  return jsg::alloc<AbortSignal>(kj::cp(exception), js.exceptionToJs(kj::mv(exception)));
+  return jsg::alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
   if (canceler->isCanceled()) {
     KJ_IF_MAYBE(r, reason) {
-      js.throwException(r->addRef(js));
+      js.throwException(r->getHandle(js));
     } else {
-      js.throwException(js.exceptionToJs(abortException(js)));
+      js.throwException(abortException(js));
     }
   }
 }
@@ -402,7 +402,7 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
   // completes, whichever comes first.
 
   global.setTimeoutInternal([signal = signal.addRef()](jsg::Lock& js) mutable {
-    auto exception = js.exceptionToJs(JSG_KJ_EXCEPTION(FAILED,
+    auto exception = js.exceptionToJsValue(JSG_KJ_EXCEPTION(FAILED,
         DOMTimeoutError, "The operation was aborted due to timeout"));
 
     signal->triggerAbort(js, exception.getHandle(js));
@@ -472,16 +472,16 @@ RefcountedCanceler& AbortSignal::getCanceler() {
 
 void AbortSignal::triggerAbort(
     jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Optional<jsg::JsValue> maybeReason) {
   KJ_ASSERT(flag != Flag::NEVER_ABORTS);
   if (canceler->isCanceled()) {
     return;
   }
   auto exception = AbortSignal::abortException(js, maybeReason);
   KJ_IF_MAYBE(r, maybeReason) {
-    reason = js.v8Ref(*r);
+    reason = r->addRef(js);
   } else {
-    reason = js.exceptionToJs(kj::mv(exception));
+    reason = js.exceptionToJsValue(kj::mv(exception));
   }
   canceler->cancel(kj::cp(exception));
 
@@ -498,7 +498,7 @@ void AbortSignal::triggerAbort(
 
 void AbortController::abort(
     jsg::Lock& js,
-    jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+    jsg::Optional<jsg::JsValue> maybeReason) {
   signal->triggerAbort(js, maybeReason);
 }
 
@@ -524,7 +524,7 @@ kj::Promise<void> Scheduler::wait(
   KJ_IF_MAYBE(options, maybeOptions) {
     KJ_IF_MAYBE(s, options->signal) {
       if ((*s)->getAborted()) {
-        return js.exceptionToKj(js.v8Ref((*s)->getReason(js)));
+        return js.exceptionToKj((*s)->getReason(js));
       }
     }
   }

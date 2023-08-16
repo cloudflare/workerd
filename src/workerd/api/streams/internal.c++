@@ -1480,7 +1480,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
       auto reason = (*signal)->getReason(js);
       if (!preventAbort) {
         KJ_IF_MAYBE(writable, parent.state.tryGet<Writable>()) {
-          parent.state.get<Writable>()->abort(js.exceptionToKj(js.v8Ref(reason)));
+          parent.state.get<Writable>()->abort(js.exceptionToKj(reason));
           parent.drain(js, reason);
         } else {
           parent.writeState.init<Unlocked>();
@@ -1489,7 +1489,7 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
         parent.writeState.init<Unlocked>();
       }
       if (!preventCancel) {
-        source.release(js, reason);
+        source.release(js, v8::Local<v8::Value>(reason));
       } else {
         source.release(js);
       }

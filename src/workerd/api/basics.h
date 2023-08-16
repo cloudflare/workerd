@@ -466,15 +466,12 @@ public:
   enum class Flag { NONE, NEVER_ABORTS };
 
   AbortSignal(kj::Maybe<kj::Exception> exception = nullptr,
-              jsg::Optional<jsg::V8Ref<v8::Value>> maybeReason = nullptr,
+              jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = nullptr,
               Flag flag = Flag::NONE) :
       canceler(IoContext::current().addObject(
           kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
-      flag(flag) {
-    KJ_IF_MAYBE(r, maybeReason) {
-      reason = kj::mv(*r);
-    }
-  }
+      flag(flag),
+      reason(kj::mv(maybeReason)) {}
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -482,11 +479,11 @@ public:
 
   bool getAborted() { return canceler->isCanceled(); }
 
-  v8::Local<v8::Value> getReason(jsg::Lock& js) {
+  jsg::JsValue getReason(jsg::Lock& js) {
     KJ_IF_MAYBE(r, reason) {
       return r->getHandle(js);
     }
-    return js.v8Undefined();
+    return js.undefined();
   }
 
   void throwIfAborted(jsg::Lock& js);
@@ -496,7 +493,7 @@ public:
 
   static jsg::Ref<AbortSignal> abort(
       jsg::Lock& js,
-      jsg::Optional<v8::Local<v8::Value>> reason);
+      jsg::Optional<jsg::JsValue> reason);
   // The static abort() function here returns an AbortSignal that
   // has been pre-emptively aborted. It's useful when it might still
   // be desirable to kick off an async process while communicating
@@ -505,7 +502,7 @@ public:
   static jsg::Ref<AbortSignal> timeout(jsg::Lock& js, double delay);
   // Returns an AbortSignal that is triggered after delay milliseconds.
 
-  void triggerAbort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason);
+  void triggerAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   static jsg::Ref<AbortSignal> any(
       jsg::Lock& js,
@@ -547,14 +544,14 @@ public:
 
   static kj::Exception abortException(
       jsg::Lock& js,
-      jsg::Optional<v8::Local<v8::Value>> reason = nullptr);
+      jsg::Optional<jsg::JsValue> reason = nullptr);
 
   RefcountedCanceler& getCanceler();
 
 private:
   IoOwn<RefcountedCanceler> canceler;
   Flag flag;
-  kj::Maybe<jsg::V8Ref<v8::Value>> reason;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> reason;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -572,7 +569,7 @@ public:
 
   jsg::Ref<AbortSignal> getSignal() { return signal.addRef(); }
 
-  void abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
+  void abort(jsg::Lock& js, jsg::Optional<jsg::JsValue> reason);
 
   JSG_RESOURCE_TYPE(AbortController, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
