@@ -27,7 +27,9 @@ public:
 private:
   WGPUCompilationMessage message;
 
-  kj::StringPtr getMessage() { return message.message; }
+  kj::StringPtr getMessage() {
+    return message.message;
+  }
   GPUCompilationMessageType getType() {
     switch (message.type) {
     case WGPUCompilationMessageType_Error:
@@ -40,31 +42,49 @@ private:
       KJ_UNREACHABLE
     }
   }
-  double getLineNum() { return message.lineNum; }
-  double getLinePos() { return message.linePos; }
-  double getOffset() { return message.offset; }
-  double getLength() { return message.length; }
+  double getLineNum() {
+    return message.lineNum;
+  }
+  double getLinePos() {
+    return message.linePos;
+  }
+  double getOffset() {
+    return message.offset;
+  }
+  double getLength() {
+    return message.length;
+  }
 };
 
 class GPUCompilationInfo : public jsg::Object {
 public:
   explicit GPUCompilationInfo(kj::Vector<jsg::Ref<GPUCompilationMessage>> messages)
       : messages_(kj::mv(messages)){};
-  JSG_RESOURCE_TYPE(GPUCompilationInfo) { JSG_READONLY_PROTOTYPE_PROPERTY(messages, getMessages); }
+  JSG_RESOURCE_TYPE(GPUCompilationInfo) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(messages, getMessages);
+  }
 
 private:
   kj::Vector<jsg::Ref<GPUCompilationMessage>> messages_;
-  kj::ArrayPtr<jsg::Ref<GPUCompilationMessage>> getMessages() { return messages_.asPtr(); };
-  void visitForGc(jsg::GcVisitor& visitor) { visitor.visitAll(messages_); }
+  kj::ArrayPtr<jsg::Ref<GPUCompilationMessage>> getMessages() {
+    return messages_.asPtr();
+  };
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visitAll(messages_);
+  }
 };
 
 class GPUShaderModule : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::ShaderModule&() const { return shader_; }
+  inline operator const wgpu::ShaderModule&() const {
+    return shader_;
+  }
   explicit GPUShaderModule(wgpu::ShaderModule s, kj::Own<AsyncRunner> async)
       : shader_(kj::mv(s)), async_(kj::mv(async)){};
-  JSG_RESOURCE_TYPE(GPUShaderModule) { JSG_METHOD(getCompilationInfo); }
+  JSG_RESOURCE_TYPE(GPUShaderModule) {
+    JSG_METHOD(getCompilationInfo);
+  }
 
 private:
   wgpu::ShaderModule shader_;

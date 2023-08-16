@@ -17,21 +17,36 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(message, getMessage);
   }
 
+  kj::StringPtr getMessage() {
+    return message_;
+  }
+
 private:
   kj::String message_;
-  kj::StringPtr getMessage() { return message_; }
 };
 
-class GPUOOMError : public GPUError {
+class GPUOutOfMemoryError : public GPUError {
 public:
   using GPUError::GPUError;
-  JSG_RESOURCE_TYPE(GPUOOMError) { JSG_INHERIT(GPUError); }
+  JSG_RESOURCE_TYPE(GPUOutOfMemoryError) {
+    JSG_INHERIT(GPUError);
+  }
 };
 
 class GPUValidationError : public GPUError {
 public:
   using GPUError::GPUError;
-  JSG_RESOURCE_TYPE(GPUValidationError) { JSG_INHERIT(GPUError); }
+  JSG_RESOURCE_TYPE(GPUValidationError) {
+    JSG_INHERIT(GPUError);
+  }
+};
+
+class GPUInternalError : public GPUError {
+public:
+  using GPUError::GPUError;
+  JSG_RESOURCE_TYPE(GPUInternalError) {
+    JSG_INHERIT(GPUError);
+  }
 };
 
 class GPUDeviceLostInfo : public jsg::Object {
@@ -46,8 +61,12 @@ public:
 private:
   GPUDeviceLostReason reason_;
   kj::String message_;
-  kj::StringPtr getMessage() { return message_; }
-  kj::StringPtr getReason() { return reason_; }
+  kj::StringPtr getMessage() {
+    return message_;
+  }
+  kj::StringPtr getReason() {
+    return reason_;
+  }
 };
 
 } // namespace workerd::api::gpu

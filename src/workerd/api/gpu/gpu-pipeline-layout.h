@@ -13,7 +13,9 @@ namespace workerd::api::gpu {
 class GPUPipelineLayout : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::PipelineLayout &() const { return layout_; }
+  inline operator const wgpu::PipelineLayout&() const {
+    return layout_;
+  }
   explicit GPUPipelineLayout(wgpu::PipelineLayout l) : layout_(kj::mv(l)){};
   JSG_RESOURCE_TYPE(GPUPipelineLayout) {}
 

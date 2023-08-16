@@ -11,8 +11,7 @@ namespace workerd::api::gpu {
 
 GPUBuffer::GPUBuffer(jsg::Lock& js, wgpu::Buffer b, wgpu::BufferDescriptor desc,
                      wgpu::Device device, kj::Own<AsyncRunner> async)
-    : buffer_(kj::mv(b)), device_(kj::mv(device)), desc_(kj::mv(desc)),
-      async_(kj::mv(async)),
+    : buffer_(kj::mv(b)), device_(kj::mv(device)), desc_(kj::mv(desc)), async_(kj::mv(async)),
       detachKey_(js.v8Ref(v8::Object::New(js.v8Isolate))) {
 
   if (desc.mappedAtCreation) {
@@ -20,12 +19,11 @@ GPUBuffer::GPUBuffer(jsg::Lock& js, wgpu::Buffer b, wgpu::BufferDescriptor desc,
   }
 };
 
-v8::Local<v8::ArrayBuffer>
-GPUBuffer::getMappedRange(jsg::Lock& js, jsg::Optional<GPUSize64> offset,
-                          jsg::Optional<GPUSize64> size) {
+v8::Local<v8::ArrayBuffer> GPUBuffer::getMappedRange(jsg::Lock& js, jsg::Optional<GPUSize64> offset,
+                                                     jsg::Optional<GPUSize64> size) {
 
-  JSG_REQUIRE(state_ == State::Mapped || state_ == State::MappedAtCreation,
-              TypeError, "trying to get mapped range of unmapped buffer");
+  JSG_REQUIRE(state_ == State::Mapped || state_ == State::MappedAtCreation, TypeError,
+              "trying to get mapped range of unmapped buffer");
 
   uint64_t o = offset.orDefault(0);
   uint64_t s = size.orDefault(desc_.size - o);
@@ -63,11 +61,10 @@ GPUBuffer::getMappedRange(jsg::Lock& js, jsg::Optional<GPUSize64> offset,
       },
       ctx);
 
-  v8::Local<v8::ArrayBuffer> arrayBuffer =
-      v8::ArrayBuffer::New(js.v8Isolate, backing);
+  v8::Local<v8::ArrayBuffer> arrayBuffer = v8::ArrayBuffer::New(js.v8Isolate, backing);
   arrayBuffer->SetDetachKey(detachKey_.getHandle(js));
 
-  mapped_.add(Mapping{ start, end, js.v8Ref(arrayBuffer) });
+  mapped_.add(Mapping{start, end, js.v8Ref(arrayBuffer)});
   return arrayBuffer;
 }
 
@@ -103,18 +100,15 @@ void GPUBuffer::unmap(jsg::Lock& js) {
   }
 }
 
-jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode,
-                                       jsg::Optional<GPUSize64> offset,
+jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
                                        jsg::Optional<GPUSize64> size) {
   wgpu::MapMode md = static_cast<wgpu::MapMode>(mode);
 
   // we can only map unmapped buffers
   if (state_ != State::Unmapped) {
-    device_.InjectError(
-        wgpu::ErrorType::Validation,
-        "mapAsync called on buffer that is not in the unmapped state");
-    JSG_FAIL_REQUIRE(
-        Error, "mapAsync called on buffer that is not in the unmapped state");
+    device_.InjectError(wgpu::ErrorType::Validation,
+                        "mapAsync called on buffer that is not in the unmapped state");
+    JSG_FAIL_REQUIRE(Error, "mapAsync called on buffer that is not in the unmapped state");
   }
 
   uint64_t o = offset.orDefault(0);
@@ -130,8 +124,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode,
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), state_,
-                         AsyncTask(kj::addRef(*async_))};
+  auto ctx = new Context{kj::mv(paf.fulfiller), state_, AsyncTask(kj::addRef(*async_))};
 
   state_ = State::MappingPending;
 
@@ -142,8 +135,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode,
         auto c = std::unique_ptr<Context>(static_cast<Context*>(userdata));
         c->state = State::Unmapped;
 
-        JSG_REQUIRE(c->fulfiller->isWaiting(), TypeError,
-                    "async operation has been canceled");
+        JSG_REQUIRE(c->fulfiller->isWaiting(), TypeError, "async operation has been canceled");
 
         switch (status) {
         case WGPUBufferMapAsyncStatus_Force32:
@@ -155,18 +147,17 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode,
         case WGPUBufferMapAsyncStatus_OffsetOutOfRange:
         case WGPUBufferMapAsyncStatus_SizeOutOfRange:
         case WGPUBufferMapAsyncStatus_ValidationError:
-          c->fulfiller->reject(JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "validation failed or out of range"));
+          c->fulfiller->reject(
+              JSG_KJ_EXCEPTION(FAILED, TypeError, "validation failed or out of range"));
           break;
         case WGPUBufferMapAsyncStatus_UnmappedBeforeCallback:
         case WGPUBufferMapAsyncStatus_DestroyedBeforeCallback:
-          c->fulfiller->reject(JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "unmapped or destroyed before callback"));
+          c->fulfiller->reject(
+              JSG_KJ_EXCEPTION(FAILED, TypeError, "unmapped or destroyed before callback"));
           break;
         case WGPUBufferMapAsyncStatus_Unknown:
         case WGPUBufferMapAsyncStatus_DeviceLost:
-          c->fulfiller->reject(JSG_KJ_EXCEPTION(
-              FAILED, TypeError, "unknown error or device lost"));
+          c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error or device lost"));
           break;
         case WGPUBufferMapAsyncStatus_MappingAlreadyPending:
           break;

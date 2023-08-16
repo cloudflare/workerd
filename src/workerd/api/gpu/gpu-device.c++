@@ -18,16 +18,14 @@
 
 namespace workerd::api::gpu {
 
-jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js,
-                                            GPUBufferDescriptor descriptor) {
+jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor descriptor) {
   wgpu::BufferDescriptor desc{};
   desc.label = descriptor.label.cStr();
   desc.mappedAtCreation = descriptor.mappedAtCreation;
   desc.size = descriptor.size;
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
-  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_,
-                               kj::addRef(*async_));
+  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
 }
 
 wgpu::CompareFunction parseCompareFunction(kj::StringPtr compare) {
@@ -112,18 +110,16 @@ wgpu::MipmapFilterMode parseMipmapFilterMode(kj::StringPtr mode) {
 jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   wgpu::SamplerDescriptor desc{};
 
-  desc.addressModeU = parseAddressMode(
-      descriptor.addressModeU.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeV = parseAddressMode(
-      descriptor.addressModeV.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeW = parseAddressMode(
-      descriptor.addressModeW.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.magFilter = parseFilterMode(
-      descriptor.magFilter.orDefault([] { return "nearest"_kj; }));
-  desc.minFilter = parseFilterMode(
-      descriptor.minFilter.orDefault([] { return "nearest"_kj; }));
-  desc.mipmapFilter = parseMipmapFilterMode(
-      descriptor.mipmapFilter.orDefault([] { return "nearest"_kj; }));
+  desc.addressModeU =
+      parseAddressMode(descriptor.addressModeU.orDefault([] { return "clamp-to-edge"_kj; }));
+  desc.addressModeV =
+      parseAddressMode(descriptor.addressModeV.orDefault([] { return "clamp-to-edge"_kj; }));
+  desc.addressModeW =
+      parseAddressMode(descriptor.addressModeW.orDefault([] { return "clamp-to-edge"_kj; }));
+  desc.magFilter = parseFilterMode(descriptor.magFilter.orDefault([] { return "nearest"_kj; }));
+  desc.minFilter = parseFilterMode(descriptor.minFilter.orDefault([] { return "nearest"_kj; }));
+  desc.mipmapFilter =
+      parseMipmapFilterMode(descriptor.mipmapFilter.orDefault([] { return "nearest"_kj; }));
   desc.lodMinClamp = descriptor.lodMinClamp.orDefault(0);
   desc.lodMaxClamp = descriptor.lodMaxClamp.orDefault(32);
   desc.compare = parseCompareFunction(descriptor.compare);
@@ -156,8 +152,7 @@ GPUDevice::createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor) {
   return jsg::alloc<GPUBindGroupLayout>(kj::mv(bindGroupLayout));
 }
 
-jsg::Ref<GPUBindGroup>
-GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
+jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
   wgpu::BindGroupDescriptor desc{};
 
   KJ_IF_MAYBE (label, descriptor.label) {
@@ -178,8 +173,7 @@ GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
   return jsg::alloc<GPUBindGroup>(kj::mv(bindGroup));
 }
 
-jsg::Ref<GPUShaderModule>
-GPUDevice::createShaderModule(GPUShaderModuleDescriptor descriptor) {
+jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescriptor descriptor) {
   wgpu::ShaderModuleDescriptor desc{};
   wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
   desc.nextInChain = &wgsl_desc;
@@ -214,8 +208,8 @@ GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor descriptor) {
   return jsg::alloc<GPUPipelineLayout>(kj::mv(layout));
 }
 
-jsg::Ref<GPUCommandEncoder> GPUDevice::createCommandEncoder(
-    jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
+jsg::Ref<GPUCommandEncoder>
+GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
   wgpu::CommandEncoderDescriptor desc{};
 
   KJ_IF_MAYBE (d, descriptor) {
@@ -254,8 +248,7 @@ parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
 
   KJ_SWITCH_ONEOF(descriptor.layout) {
     KJ_CASE_ONEOF(autoLayoutMode, kj::String) {
-      JSG_REQUIRE(autoLayoutMode == "auto", TypeError,
-                  "unknown auto layout mode", autoLayoutMode);
+      JSG_REQUIRE(autoLayoutMode == "auto", TypeError, "unknown auto layout mode", autoLayoutMode);
       desc.layout = nullptr;
     }
     KJ_CASE_ONEOF(layout, jsg::Ref<GPUPipelineLayout>) {
@@ -268,8 +261,7 @@ parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
 
 jsg::Ref<GPUComputePipeline>
 GPUDevice::createComputePipeline(GPUComputePipelineDescriptor descriptor) {
-  wgpu::ComputePipelineDescriptor desc =
-      parseComputePipelineDescriptor(descriptor);
+  wgpu::ComputePipelineDescriptor desc = parseComputePipelineDescriptor(descriptor);
   auto pipeline = device_.CreateComputePipeline(&desc);
   return jsg::alloc<GPUComputePipeline>(kj::mv(pipeline));
 }
@@ -295,13 +287,12 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
           c->fulfiller->fulfill(nullptr);
           break;
         case WGPUErrorType::WGPUErrorType_OutOfMemory: {
-          jsg::Ref<GPUError> err = jsg::alloc<GPUOOMError>(kj::str(message));
+          jsg::Ref<GPUError> err = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
           c->fulfiller->fulfill(kj::mv(err));
           break;
         }
         case WGPUErrorType::WGPUErrorType_Validation: {
-          jsg::Ref<GPUError> err =
-              jsg::alloc<GPUValidationError>(kj::str(message));
+          jsg::Ref<GPUError> err = jsg::alloc<GPUValidationError>(kj::str(message));
           c->fulfiller->fulfill(kj::mv(err));
           break;
         }
@@ -310,8 +301,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
           c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, message));
           break;
         default:
-          c->fulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, TypeError, "unhandled error type"));
+          c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "unhandled error type"));
           break;
         }
       },
@@ -323,8 +313,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
 
 jsg::Promise<jsg::Ref<GPUComputePipeline>>
 GPUDevice::createComputePipelineAsync(GPUComputePipelineDescriptor descriptor) {
-  wgpu::ComputePipelineDescriptor desc =
-      parseComputePipelineDescriptor(descriptor);
+  wgpu::ComputePipelineDescriptor desc = parseComputePipelineDescriptor(descriptor);
 
   struct Context {
     kj::Own<kj::PromiseFulfiller<jsg::Ref<GPUComputePipeline>>> fulfiller;
@@ -339,20 +328,17 @@ GPUDevice::createComputePipelineAsync(GPUComputePipelineDescriptor descriptor) {
 
   device_.CreateComputePipelineAsync(
       &desc,
-      [](WGPUCreatePipelineAsyncStatus status, WGPUComputePipeline pipeline,
-         char const* message, void* userdata) {
+      [](WGPUCreatePipelineAsyncStatus status, WGPUComputePipeline pipeline, char const* message,
+         void* userdata) {
         // Note: this is invoked outside the JS isolate lock
         auto c = std::unique_ptr<Context>(static_cast<Context*>(userdata));
 
         switch (status) {
-        case WGPUCreatePipelineAsyncStatus::
-            WGPUCreatePipelineAsyncStatus_Success:
-          c->fulfiller->fulfill(
-              jsg::alloc<GPUComputePipeline>(kj::mv(pipeline)));
+        case WGPUCreatePipelineAsyncStatus::WGPUCreatePipelineAsyncStatus_Success:
+          c->fulfiller->fulfill(jsg::alloc<GPUComputePipeline>(kj::mv(pipeline)));
           break;
         default:
-          c->fulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error"));
+          c->fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, TypeError, "unknown error"));
           break;
         }
       },
@@ -376,8 +362,8 @@ GPUDevice::~GPUDevice() {
 
 void GPUDevice::destroy() {
   if (lost_promise_fulfiller_->isWaiting()) {
-    auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(
-        kj::str("destroyed"), kj::str("device was destroyed"));
+    auto lostInfo =
+        jsg::alloc<GPUDeviceLostInfo>(kj::str("destroyed"), kj::str("device was destroyed"));
     lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
   }
 
@@ -385,8 +371,7 @@ void GPUDevice::destroy() {
   destroyed_ = true;
 }
 
-jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>&
-GPUDevice::getLost() {
+jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& GPUDevice::getLost() {
   return lost_promise_;
 }
 
@@ -402,8 +387,7 @@ kj::String parseDeviceLostReason(WGPUDeviceLostReason reason) {
 }
 
 GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
-    : device_(d), lost_promise_(nullptr),
-      async_(kj::refcounted<AsyncRunner>(d)) {
+    : device_(d), lost_promise_(nullptr), async_(kj::refcounted<AsyncRunner>(d)) {
   auto& context = IoContext::current();
   auto paf = kj::newPromiseAndFulfiller<jsg::Ref<GPUDeviceLostInfo>>();
   lost_promise_fulfiller_ = kj::mv(paf.fulfiller);
@@ -413,28 +397,54 @@ GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
       [](WGPULoggingType type, char const* message, void* userdata) {
         KJ_LOG(INFO, "WebGPU logging", kj::str(type), message);
       },
-      nullptr);
+      this);
+
   device_.SetUncapturedErrorCallback(
       [](WGPUErrorType type, char const* message, void* userdata) {
+        auto* self = static_cast<GPUDevice*>(userdata);
+        if (self->getHandlerCount("uncapturederror") > 0) {
+          jsg::Ref<GPUError> error = nullptr;
+          switch (type) {
+          case WGPUErrorType_Validation:
+            error = jsg::alloc<GPUValidationError>(kj::str(message));
+            break;
+          case WGPUErrorType_NoError:
+          case WGPUErrorType_Force32:
+            KJ_UNREACHABLE;
+          case WGPUErrorType_OutOfMemory:
+            error = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
+            break;
+          case WGPUErrorType_Internal:
+          case WGPUErrorType_DeviceLost:
+          case WGPUErrorType_Unknown:
+            error = jsg::alloc<GPUInternalError>(kj::str(message));
+            break;
+          }
+
+          auto init = GPUUncapturedErrorEventInit{kj::mv(error)};
+          auto ev = jsg::alloc<GPUUncapturedErrorEvent>("uncapturederror"_kj, kj::mv(init));
+          self->dispatchEventImpl(IoContext::current().getCurrentLock(), kj::mv(ev));
+          return;
+        }
+
+        // no "uncapturederror" handler
         KJ_LOG(INFO, "WebGPU uncaptured error", kj::str(type), message);
       },
-      nullptr);
+      this);
 
   device_.SetDeviceLostCallback(
       [](WGPUDeviceLostReason reason, char const* message, void* userdata) {
         auto r = parseDeviceLostReason(reason);
         auto* self = static_cast<GPUDevice*>(userdata);
         if (self->lost_promise_fulfiller_->isWaiting()) {
-          auto lostInfo =
-              jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
+          auto lostInfo = jsg::alloc<GPUDeviceLostInfo>(kj::mv(r), kj::str(message));
           self->lost_promise_fulfiller_->fulfill(kj::mv(lostInfo));
         }
       },
       this);
 };
 
-jsg::Ref<GPUQuerySet>
-GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
+jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
   wgpu::QuerySetDescriptor desc{};
 
   KJ_IF_MAYBE (label, descriptor.label) {

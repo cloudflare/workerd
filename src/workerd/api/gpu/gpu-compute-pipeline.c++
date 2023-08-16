@@ -5,8 +5,7 @@
 #include "gpu-compute-pipeline.h"
 
 namespace workerd::api::gpu {
-jsg::Ref<GPUBindGroupLayout>
-GPUComputePipeline::getBindGroupLayout(uint32_t index) {
+jsg::Ref<GPUBindGroupLayout> GPUComputePipeline::getBindGroupLayout(uint32_t index) {
   auto layout = pipeline_.GetBindGroupLayout(index);
   return jsg::alloc<GPUBindGroupLayout>(kj::mv(layout));
 }

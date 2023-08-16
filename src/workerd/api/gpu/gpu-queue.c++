@@ -9,7 +9,7 @@ namespace workerd::api::gpu {
 
 void GPUQueue::submit(kj::Array<jsg::Ref<GPUCommandBuffer>> commandBuffers) {
   kj::Vector<wgpu::CommandBuffer> bufs(commandBuffers.size());
-  for (auto &cb : commandBuffers) {
+  for (auto& cb : commandBuffers) {
     bufs.add(*cb);
   }
 
@@ -17,8 +17,7 @@ void GPUQueue::submit(kj::Array<jsg::Ref<GPUCommandBuffer>> commandBuffers) {
 }
 
 void GPUQueue::writeBuffer(jsg::Ref<GPUBuffer> buffer, GPUSize64 bufferOffset,
-                           jsg::BufferSource data,
-                           jsg::Optional<GPUSize64> dataOffsetElements,
+                           jsg::BufferSource data, jsg::Optional<GPUSize64> dataOffsetElements,
                            jsg::Optional<GPUSize64> sizeElements) {
   wgpu::Buffer buf = *buffer;
 
@@ -27,23 +26,19 @@ void GPUQueue::writeBuffer(jsg::Ref<GPUBuffer> buffer, GPUSize64 bufferOffset,
     // In the JS semantics of WebGPU, writeBuffer works in number of
     // elements of the typed arrays.
     dataOffset = *offset * data.getElementSize();
-    JSG_REQUIRE(dataOffset <= data.size(), TypeError,
-                "dataOffset is larger than data's size.");
+    JSG_REQUIRE(dataOffset <= data.size(), TypeError, "dataOffset is larger than data's size.");
   }
 
-  auto dataPtr =
-      reinterpret_cast<uint8_t *>(data.asArrayPtr().front()) + dataOffset;
+  auto dataPtr = reinterpret_cast<uint8_t*>(data.asArrayPtr().front()) + dataOffset;
   size_t dataSize = data.size() - dataOffset;
   KJ_IF_MAYBE (size, sizeElements) {
-    JSG_REQUIRE(*size <= std::numeric_limits<uint64_t>::max() /
-                             data.getElementSize(),
-                TypeError, "size overflows.");
+    JSG_REQUIRE(*size <= std::numeric_limits<uint64_t>::max() / data.getElementSize(), TypeError,
+                "size overflows.");
     dataSize = *size * data.getElementSize();
     JSG_REQUIRE(dataOffset + dataSize < data.size(), TypeError,
                 "size + dataOffset is larger than data's size.");
 
-    JSG_REQUIRE(dataSize % 4 == 0, TypeError,
-                "size is not a multiple of 4 bytes.");
+    JSG_REQUIRE(dataSize % 4 == 0, TypeError, "size is not a multiple of 4 bytes.");
   }
 
   KJ_ASSERT(dataSize <= std::numeric_limits<size_t>::max());

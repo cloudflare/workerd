@@ -14,9 +14,13 @@ namespace workerd::api::gpu {
 class GPUComputePipeline : public jsg::Object {
 public:
   // Implicit cast operator to Dawn GPU object
-  inline operator const wgpu::ComputePipeline &() const { return pipeline_; }
+  inline operator const wgpu::ComputePipeline&() const {
+    return pipeline_;
+  }
   explicit GPUComputePipeline(wgpu::ComputePipeline p) : pipeline_(kj::mv(p)){};
-  JSG_RESOURCE_TYPE(GPUComputePipeline) { JSG_METHOD(getBindGroupLayout); }
+  JSG_RESOURCE_TYPE(GPUComputePipeline) {
+    JSG_METHOD(getBindGroupLayout);
+  }
 
 private:
   wgpu::ComputePipeline pipeline_;
@@ -33,8 +37,7 @@ struct GPUProgrammableStage {
   JSG_STRUCT(module, entryPoint, constants);
 };
 
-using GPUComputePipelineLayout =
-    kj::OneOf<kj::String, jsg::Ref<GPUPipelineLayout>>;
+using GPUComputePipelineLayout = kj::OneOf<kj::String, jsg::Ref<GPUPipelineLayout>>;
 
 struct GPUComputePipelineDescriptor {
   jsg::Optional<kj::String> label;
