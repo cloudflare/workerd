@@ -1439,18 +1439,14 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
   preventDefault();
 
-  // Once a Response is returned, we need to apply the output lock.
-  promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
-    auto& context = IoContext::current();
-
-    KJ_IF_MAYBE(p, context.waitForOutputLocksIfNecessary()) {
-      return context.awaitIo(js, kj::mv(*p), [response = kj::mv(response)](jsg::Lock&) mutable {
-        return kj::mv(response);
-      });
-    } else {
-      return js.resolvedPromise(kj::mv(response));
-    }
-  });
+  if (IoContext::current().hasOutputGate()) {
+    // Once a Response is returned, we need to apply the output lock.
+    promise = promise.then(js, [](jsg::Lock& js, jsg::Ref<Response>&& response) {
+      auto& context = IoContext::current();
+      return context.awaitIo(js, context.waitForOutputLocks(),
+          [response = kj::mv(response)](jsg::Lock&) mutable { return kj::mv(response); });
+    });
+  }
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(_, AwaitingRespondWith) {

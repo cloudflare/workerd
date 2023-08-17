@@ -314,6 +314,10 @@ kj::Promise<void> IoContext::waitForOutputLocks() {
   }
 }
 
+bool IoContext::hasOutputGate() {
+  return actor != nullptr;
+}
+
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
   return actor.map([](Worker::Actor& actor) {
     return actor.getOutputGate().wait();
