@@ -335,6 +335,10 @@ public:
   //
   // This can only be called when I/O gates are active, i.e. in an actor.
 
+  bool hasOutputGate();
+  // Returns true if output lock gating is necessary.
+  // Can be used in optimizations to bypass wait* calls altogether.
+
   kj::Promise<void> waitForOutputLocks();
   // Wait until all outstanding output locks have been unlocked. Does not wait for future output
   // locks, even if they are created before past locks are unlocked.
