@@ -161,10 +161,9 @@ public:
                 IteratorState,
                 valueIteratorNext)
 
-  void forEach(
-      jsg::Lock& js,
-      jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg);
+  void forEach(jsg::Lock&,
+               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
+               jsg::Optional<jsg::Value>);
 
   kj::String toString();
 
