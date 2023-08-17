@@ -396,31 +396,19 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
 
 void Headers::forEach(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> callback,
+    jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
-  auto localCallback = callback.getHandle(js);
-  auto localThisArg = thisArg.map([&](jsg::Value& v) { return v.getHandle(js); })
-      .orDefault(js.v8Undefined());
+  auto receiver = js.v8Undefined();
+  KJ_IF_MAYBE(arg, thisArg) {
+    auto handle = arg->getHandle(js);
+    if (!handle->IsNullOrUndefined()) {
+      receiver = handle;
+    }
+  }
+  callback.setReceiver(js.v8Ref(receiver));
 
-  auto isolate = js.v8Isolate;
-
-  // JSG_THIS.getHandle() is guaranteed safe because `forEach()` is only called
-  // from JavaScript, which means a Headers JS wrapper object must already exist.
-  auto localHeaders = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(isolate));
-
-  auto context = js.v8Context();  // Needed later for Call().
   for (auto& entry: getDisplayedHeaders(js)) {
-    static constexpr auto ARG_COUNT = 3;
-    v8::Local<v8::Value> args[ARG_COUNT] = {
-      jsg::v8Str(isolate, entry.value),
-      // Intern the header name and not the value since the names are generally
-      // stable.
-      jsg::v8StrIntern(isolate, entry.key),
-      localHeaders,
-    };
-    // Call jsg::check() to propagate exceptions, but we don't expect any
-    // particular return value.
-    jsg::check(localCallback->Call(context, localThisArg, ARG_COUNT, args));
+    callback(js, entry.value, entry.key, JSG_THIS);
   }
 }
 

@@ -101,8 +101,8 @@ public:
   void append(jsg::ByteString name, jsg::ByteString value);
   void delete_(jsg::ByteString name);
   void forEach(jsg::Lock& js,
-      jsg::V8Ref<v8::Function>,
-      jsg::Optional<jsg::Value>);
+               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)>,
+               jsg::Optional<jsg::Value>);
 
   JSG_ITERATOR(EntryIterator, entries,
                 kj::Array<jsg::ByteString>,
