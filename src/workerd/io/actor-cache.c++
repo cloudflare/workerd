@@ -38,17 +38,11 @@ ActorCache::~ActorCache() noexcept(false) {
 void ActorCache::clear(Lock& lock) {
   for (auto& entry: currentValues.get(lock)) {
     if (entry->link.isLinked()) {
-      switch (entry->state) {
-        case DIRTY:
-        case FLUSHING:
-          dirtyList.remove(*entry);
-          entry->state = NOT_IN_CACHE;
-          break;
-        case CLEAN:
-          removeEntry(lock, *entry);
-          break;
-        case NOT_IN_CACHE:
-          KJ_FAIL_REQUIRE("NOT_IN_CACHE entry can't be linked");
+      if (entry->isDirty()) {
+        dirtyList.remove(*entry);
+        entry->syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+      } else {
+        removeEntry(lock, *entry);
       }
     }
   }
@@ -91,7 +85,8 @@ ActorCache::Entry::~Entry() noexcept(false) {
       c->lru.size.store(0, std::memory_order_relaxed);
     }
 
-    KJ_REQUIRE(!link.isLinked(), "must remove Entry from lists before destroying", state);
+    KJ_REQUIRE(!link.isLinked(),
+        "must remove Entry from lists before destroying", static_cast<int>(syncStatus));
   }
 }
 
@@ -268,7 +263,7 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
 
 void ActorCache::touchEntry(Lock& lock, Entry& entry, const ReadOptions& options) {
   if (!options.noCache) {
-    if (entry.state == CLEAN) {
+    if (!entry.isDirty()) {
       entry.isStale = false;
       lock->remove(entry);
       lock->add(entry);
@@ -282,9 +277,9 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry, const ReadOptions& options
 }
 
 void ActorCache::removeEntry(Lock& lock, Entry& entry) {
-  KJ_IASSERT(entry.state == CLEAN);
+  KJ_IASSERT(!entry.isDirty());
   lock->remove(entry);
-  entry.state = NOT_IN_CACHE;
+  entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
 }
 
 void ActorCache::evictEntry(Lock& lock, Entry& entry) {
@@ -361,7 +356,8 @@ void ActorCache::verifyConsistencyForTest() {
       }
     }
 
-    KJ_ASSERT(entry->state != NOT_IN_CACHE, "entry should not appear in map", entry->key);
+    KJ_ASSERT(entry->syncStatus != EntrySyncStatus::NOT_IN_CACHE,
+        "entry should not appear in map", entry->key);
     KJ_ASSERT(entry->link.isLinked());
 
     prevGapIsKnownEmpty = entry->gapIsKnownEmpty;
@@ -962,13 +958,12 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
          positiveCount < limit.orDefault(kj::maxValue); ++iter) {
     Entry& entry = **iter;
 
-    KJ_ASSERT(entry.state != NOT_IN_CACHE, "entry should have been removed from map", entry.key);
     touchEntry(lock, entry, options);
 
     switch(entry.valueStatus) {
       case EntryValueStatus::ABSENT: {
         cachedEntries.add(kj::atomicAddRef(entry));
-        if (storageListStart != nullptr && (entry.state == DIRTY || entry.state == FLUSHING)) {
+        if (storageListStart != nullptr && entry.isDirty()) {
           // This negative entry could negate something read from storage later, so we need to
           // increase the storage list limit.
           ++limitAdjustment;
@@ -1297,7 +1292,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     switch(entry.valueStatus) {
       case EntryValueStatus::ABSENT: {
         cachedEntries.add(kj::atomicAddRef(entry));
-        if (storageListEnd != nullptr && (entry.state == DIRTY || entry.state == FLUSHING)) {
+        if (storageListEnd != nullptr && entry.isDirty()) {
           // This negative entry could negate something read from storage later, so we need to
           // increase the storage list limit.
           ++limitAdjustment;
@@ -1414,7 +1409,6 @@ kj::Own<ActorCache::Entry> ActorCache::findInCache(
   if (iter != ordered.end() && iter->get()->key == key) {
     // Found exact matching entry.
     Entry& entry = **iter;
-    KJ_ASSERT(entry.state != NOT_IN_CACHE, "entry should have been removed from map");
     touchEntry(lock, entry, options);
     return kj::atomicAddRef(entry);
   } else {
@@ -1489,7 +1483,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
     //    the caching logic.
     //
     // Because of this, we know it is correct to leave `gapIsKnownEmpty = false` on our new entry.
-    entry->state = CLEAN;
+    entry->syncStatus = EntrySyncStatus::CLEAN;
     lock->add(*entry);
     return kj::atomicAddRef(*entry);
   });
@@ -1503,7 +1497,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
         KJ_ASSERT(!slot->gapIsKnownEmpty);  // UNKNOWN entry should never have gapIsKnownEmpty.
         removeEntry(lock, *slot);
 
-        entry->state = CLEAN;
+        entry->syncStatus = EntrySyncStatus::CLEAN;
         lock->add(*entry);
         slot = kj::atomicAddRef(*entry);
         break;
@@ -1597,7 +1591,7 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
         // We must insert an UNKNOWN entry to cap our range.
         KJ_IF_MAYBE(k, endKey) {
           auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(*k), EntryValueStatus::UNKNOWN);
-          entry->state = CLEAN;
+          entry->syncStatus = EntrySyncStatus::CLEAN;
           lock->add(*entry);
           map.insert(kj::mv(entry));
         } else {
@@ -1616,7 +1610,7 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
   for (auto iter = beginIter; iter != mapEnd; ++iter) {
     auto& entry = **iter;
 
-    if (entry.valueStatus != EntryValueStatus::PRESENT && entry.state == CLEAN &&
+    if (entry.valueStatus != EntryValueStatus::PRESENT && !entry.isDirty() &&
         (iter != endIter || iter->get()->gapIsKnownEmpty)) {
       // Either:
       // (a) This is an UNKNOWN entry.
@@ -1963,21 +1957,15 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
 
     kj::Vector<kj::Own<Entry>> deletedDirty;
     for (auto& entry: map) {
-      switch (entry->state) {
-        case DIRTY:
-        case FLUSHING:
-          // Note that we intentionally keep entry->state as-is because if an entry is currently
-          // flushing, we'll need the opportunity to remove it from `requestedDeleteAll` when that
-          // flush completes... it turns out it's not _really_ necessary to set an entry to
-          // NOT_IN_CACHE state when it's not in the cache.
-          dirtyList.remove(*entry);
-          deletedDirty.add(kj::mv(entry));
-          break;
-        case CLEAN:
-          removeEntry(lock, *entry);
-          break;
-        case NOT_IN_CACHE:
-          KJ_FAIL_REQUIRE("NOT_IN_CACHE entry can't be linked", entry->key);
+      if (entry->isDirty()) {
+        // Note that we intentionally keep entry->state as-is because if an entry is currently
+        // flushing, we'll need the opportunity to remove it from `requestedDeleteAll` when that
+        // flush completes... it turns out it's not _really_ necessary to set an entry to
+        // NOT_IN_CACHE state when it's not in the cache.
+        dirtyList.remove(*entry);
+        deletedDirty.add(kj::mv(entry));
+      } else {
+        removeEntry(lock, *entry);
       }
     }
     map.clear();
@@ -1988,7 +1976,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
       Key key;
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
       lock->add(*entry);
-      entry->state = CLEAN;
+      entry->syncStatus = EntrySyncStatus::CLEAN;
       entry->gapIsKnownEmpty = true;
       return entry;
     });
@@ -2073,32 +2061,25 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     // Inherit gap state.
     newEntry->gapIsKnownEmpty = slot->gapIsKnownEmpty;
 
-    switch (slot->state) {
-      case DIRTY:
-      case FLUSHING:
-        dirtyList.remove(*slot);
-        slot->state = NOT_IN_CACHE;
+    if (slot->isDirty()) {
+      dirtyList.remove(*slot);
+      slot->syncStatus = EntrySyncStatus::NOT_IN_CACHE;
 
-        // Entry may have `countedDelete` indicating we're still waiting to get a count from a
-        // previous delete operation. If so, we'll need to inherit it in case that delete operation
-        // fails and we end up retrying. Note that the new entry could be a positive entry rather
-        // than a negative one (a `put()` rather than a `delete()`). That is OK -- in `flushImpl()`
-        // we will still see the presence of `countedDelete` and realize we have to issue a delete
-        // on the key before we issue a put, just for the sake of counting it.
-        newEntry->countedDelete = kj::mv(slot->countedDelete);
-        break;
-      case CLEAN:
-        removeEntry(lock, *slot);
-        break;
-      case NOT_IN_CACHE:
-        KJ_FAIL_ASSERT("NOT_IN_CACHE entry shouldn't be in map");
-        break;
+      // Entry may have `countedDelete` indicating we're still waiting to get a count from a
+      // previous delete operation. If so, we'll need to inherit it in case that delete operation
+      // fails and we end up retrying. Note that the new entry could be a positive entry rather
+      // than a negative one (a `put()` rather than a `delete()`). That is OK -- in `flushImpl()`
+      // we will still see the presence of `countedDelete` and realize we have to issue a delete
+      // on the key before we issue a put, just for the sake of counting it.
+      newEntry->countedDelete = kj::mv(slot->countedDelete);
+    } else {
+      removeEntry(lock, *slot);
     }
 
     // Swap in the new entry.
     KJ_DASSERT(slot->key == newEntry->key);
     slot = kj::mv(newEntry);
-    slot->state = DIRTY;
+    slot->syncStatus = EntrySyncStatus::DIRTY;
     dirtyList.add(*slot);
 
   } else {
@@ -2124,7 +2105,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     KJ_IF_MAYBE(c, countedDelete) {
       slot->countedDelete = kj::addRef(*c);
     }
-    slot->state = DIRTY;
+    slot->syncStatus = EntrySyncStatus::DIRTY;
     dirtyList.add(*slot);
   }
 
@@ -2338,7 +2319,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
-    entry.state = FLUSHING;
+    entry.syncStatus = EntrySyncStatus::FLUSHING;
 
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
@@ -2511,7 +2492,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
       auto dst = r->deletedDirty.begin();
       for (auto src = r->deletedDirty.begin(); src != r->deletedDirty.end(); ++src) {
-        if (src->get()->state == DIRTY) {
+        if (src->get()->syncStatus == EntrySyncStatus::DIRTY) {
           if (dst != src) *dst = kj::mv(*src);
           ++dst;
         }
@@ -2521,12 +2502,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       // Mark all `FLUSHING` entries as `CLEAN`. Note that we know that all `FLUSHING` must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
       for (auto& entry: dirtyList) {
-        if (entry.state == DIRTY) {
+        if (entry.syncStatus == EntrySyncStatus::DIRTY) {
           // Completed all FLUSHING entries.
           break;
         }
 
-        KJ_ASSERT(entry.state == FLUSHING);
+        KJ_ASSERT(entry.syncStatus == EntrySyncStatus::FLUSHING);
 
         // We know all `countedDelete` operations were satisfied so we can remove this if it's
         // present. Note that if, during the flush, the entry was overwritten, then the new entry
@@ -2537,7 +2518,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
         dirtyList.remove(entry);
         if (entry.noCache) {
-          entry.state = NOT_IN_CACHE;
+          entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
           evictEntry(lock, entry);
         } else {
           if (entry.gapIsKnownEmpty && entry.valueStatus == EntryValueStatus::ABSENT) {
@@ -2552,7 +2533,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
               --prevIter;
               if (prevIter->get()->gapIsKnownEmpty) {
                 // Yep!
-                entry.state = NOT_IN_CACHE;
+                entry.syncStatus = EntrySyncStatus::NOT_IN_CACHE;
                 map.erase(*entryIter);
                 // WARNING: We might have just deleted `entry`.
                 continue;
@@ -2560,7 +2541,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
             }
           }
 
-          entry.state = CLEAN;
+          entry.syncStatus = EntrySyncStatus::CLEAN;
           lock->add(entry);
         }
       }

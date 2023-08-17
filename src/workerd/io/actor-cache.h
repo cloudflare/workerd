@@ -312,8 +312,7 @@ private:
     }
   };
 
-  // States that a cache entry may be in.
-  enum EntryState {
+  enum class EntrySyncStatus : int8_t {
     // The value was set by the app via put() or delete(), and we have not yet initiated a write
     // to disk. The entry is appended to `dirtyList` whenever entering this state.
     //
@@ -421,8 +420,23 @@ private:
       }
     }
 
-    // State of this key/value pair.
-    EntryState state = NOT_IN_CACHE;
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+
+    bool isDirty() const {
+      switch(syncStatus) {
+        case EntrySyncStatus::DIRTY:
+        case EntrySyncStatus::FLUSHING: {
+          return true;
+        }
+        case EntrySyncStatus::CLEAN: {
+          return false;
+        }
+        case EntrySyncStatus::NOT_IN_CACHE: {
+          KJ_FAIL_ASSERT("NOT_IN_CACHE entries should not be in the map or flushing");
+        }
+      }
+    }
 
     bool isStale = false;
 
