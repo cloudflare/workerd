@@ -360,7 +360,7 @@ jsg::Promise<void> KvNamespace::put(
 
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
-        headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT.toString());
+        headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT_STRING);
         expectedBodySize = uint64_t(text.size());
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {

@@ -3654,10 +3654,10 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
         }
 
       } else {
-        response.setMimeType(MimeType::PLAINTEXT.toString());
+        response.setMimeType(MimeType::PLAINTEXT_STRING);
       }
     } else {
-      response.setMimeType(MimeType::PLAINTEXT.toString());
+      response.setMimeType(MimeType::PLAINTEXT_STRING);
     }
     headersToCDP(headers, response.initHeaders());
 
