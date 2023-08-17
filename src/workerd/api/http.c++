@@ -516,7 +516,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       return kj::mv(stream);
     }
     KJ_CASE_ONEOF(text, kj::String) {
-      contentType = MimeType::PLAINTEXT.toString();
+      contentType = kj::str(MimeType::PLAINTEXT_STRING);
       buffer = kj::mv(text);
     }
     KJ_CASE_ONEOF(bytes, kj::Array<byte>) {
