@@ -751,60 +751,91 @@ async function test(storage) {
 }
 
 async function testIoStats(storage) {
-  const sql = storage.sql;
+  const sql = storage.sql
 
-  sql.exec(`CREATE TABLE tbl (id INTEGER PRIMARY KEY, value TEXT)`);
-  sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 100000, "arbitrary-initial-value");
-  await scheduler.wait(1);
+  sql.exec(`CREATE TABLE tbl (id INTEGER PRIMARY KEY, value TEXT)`)
+  sql.exec(
+    `INSERT INTO tbl (id, value) VALUES (?, ?)`,
+    100000,
+    'arbitrary-initial-value'
+  )
+  await scheduler.wait(1)
 
   // When writing, the rowsWritten count goes up.
   {
-    const cursor = sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 1, "arbitrary-value");
-    Array.from(cursor);  // Consume all the results
-    assert.equal(cursor.rowsWritten, 1);
+    const cursor = sql.exec(
+      `INSERT INTO tbl (id, value) VALUES (?, ?)`,
+      1,
+      'arbitrary-value'
+    )
+    Array.from(cursor) // Consume all the results
+    assert.equal(cursor.rowsWritten, 1)
   }
 
   // When reading, the rowsRead count goes up.
   {
-    const cursor = sql.exec(`SELECT * FROM tbl`);
-    Array.from(cursor);  // Consume all the results
-    assert.equal(cursor.rowsRead, 2);
+    const cursor = sql.exec(`SELECT * FROM tbl`)
+    Array.from(cursor) // Consume all the results
+    assert.equal(cursor.rowsRead, 2)
   }
 
   // Each invocation of a prepared statement gets its own counters.
   {
-    const id1 = 101;
-    const id2 = 202;
+    const id1 = 101
+    const id2 = 202
 
-    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`);
-    const cursor123 = prepared(id1, "value1");
-    Array.from(cursor123);
-    assert.equal(cursor123.rowsWritten, 1);
+    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`)
+    const cursor123 = prepared(id1, 'value1')
+    Array.from(cursor123)
+    assert.equal(cursor123.rowsWritten, 1)
 
-    const cursor456 = prepared(id2, "value2");
-    Array.from(cursor456);
-    assert.equal(cursor456.rowsWritten, 1);
-    assert.equal(cursor123.rowsWritten, 1);  // remained unchanged
+    const cursor456 = prepared(id2, 'value2')
+    Array.from(cursor456)
+    assert.equal(cursor456.rowsWritten, 1)
+    assert.equal(cursor123.rowsWritten, 1) // remained unchanged
   }
 
   // Row counters are updated as you consume the cursor.
   {
-    sql.exec(`DELETE FROM tbl`);
-    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`);
+    sql.exec(`DELETE FROM tbl`)
+    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`)
     for (let i = 1; i <= 10; i++) {
-      Array.from(prepared(i, "value" + i));
+      Array.from(prepared(i, 'value' + i))
     }
 
-    const cursor = sql.exec(`SELECT * FROM tbl`);
-    const resultsIterator = cursor[Symbol.iterator]();
-    let rowsSeen = 0;
+    const cursor = sql.exec(`SELECT * FROM tbl`)
+    const resultsIterator = cursor[Symbol.iterator]()
+    let rowsSeen = 0
     while (true) {
-      const result = resultsIterator.next();
+      const result = resultsIterator.next()
       if (result.done) {
-        break;
+        break
       }
-      assert.equal(++rowsSeen, cursor.rowsRead);
+      assert.equal(++rowsSeen, cursor.rowsRead)
     }
+  }
+
+  // Row counters can track interleaved cursors
+  {
+    const join = []
+    const colCounts = []
+    // In-JS joining of two tables should be possible:
+    const rows = sql.exec(`SELECT * FROM abc`)
+    for (let row of rows) {
+      const cols = sql.exec(`SELECT * FROM cde`)
+      for (let col of cols) {
+        join.push({ row, col })
+      }
+      colCounts.push(cols.rowsRead)
+    }
+    assert.deepEqual(join, [
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 4, b: 5, c: 6 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 4, b: 5, c: 6 } },
+    ])
+    assert.deepEqual(rows.rowsRead, 2)
+    assert.deepEqual(colCounts, [2, 2])
   }
 }
 
@@ -925,7 +956,7 @@ export default {
     assert.deepEqual(await doReq('sql-test'), { ok: true })
 
     // Test SQL IO stats
-    assert.deepEqual(await doReq("sql-test-io-stats"), {ok: true});
+    assert.deepEqual(await doReq('sql-test-io-stats'), { ok: true })
 
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {
