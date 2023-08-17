@@ -616,7 +616,7 @@ struct Worker::Isolate::Impl {
                 return isolate.getMetrics().tryCreateLockTiming(sync.getRequest());
               }
               KJ_CASE_ONEOF(async, AsyncLock*) {
-                KJ_REQUIRE(async->waiter->isolate.get() == &isolate,
+                KJ_REQUIRE(async->isolate == &isolate,
                     "async lock was taken against a different isolate than the synchronous lock");
                 return kj::mv(async->lockTiming);
               }
@@ -1933,9 +1933,9 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             KJ_ASSERT_NONNULL(currentLoad), false /* threadWaitingSameLock */,
             threadWaitingDifferentLockCount);
       }
-      auto newWaiter = kj::refcounted<AsyncWaiter>(kj::atomicAddRef(*this));
-      co_await newWaiter->readyPromise.addBranch();
-      co_return AsyncLock(kj::mv(newWaiter), kj::mv(lockTiming));
+      AsyncWaiter newWaiter(kj::atomicAddRef(*this));
+      co_await newWaiter.readyPromise.addBranch();
+      co_return AsyncLock(this, kj::mv(lockTiming));
     } else if (waiter->isolate == this) {
       // Thread is waiting on a lock already, and it's for the same isolate. We can coalesce the
       // locks.
@@ -1944,9 +1944,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             KJ_ASSERT_NONNULL(currentLoad), true /* threadWaitingSameLock */,
             threadWaitingDifferentLockCount);
       }
-      auto newWaiterRef = kj::addRef(*waiter);
-      co_await newWaiterRef->readyPromise.addBranch();
-      co_return AsyncLock(kj::mv(newWaiterRef), kj::mv(lockTiming));
+      co_await waiter->readyPromise.addBranch();
+      co_return AsyncLock(this, kj::mv(lockTiming));
     } else {
       // Thread is already waiting for or holding a different isolate lock. Wait for that one to
       // be released before we try to lock a different isolate.
