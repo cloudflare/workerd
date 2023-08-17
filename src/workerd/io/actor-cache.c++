@@ -42,20 +42,16 @@ void ActorCache::clear(Lock& lock) {
         case DIRTY:
         case FLUSHING:
           dirtyList.remove(*entry);
+          entry->state = NOT_IN_CACHE;
           break;
         case CLEAN:
-        case STALE:
-          lock->remove(*entry);
-          break;
         case END_GAP:
-          KJ_FAIL_REQUIRE("END_GAP entry can't be linked");
+          removeEntry(lock, *entry);
+          break;
         case NOT_IN_CACHE:
           KJ_FAIL_REQUIRE("NOT_IN_CACHE entry can't be linked");
       }
     }
-
-    // Mark entry NOT_IN_CACHE to indicate it isn't in the map anymore.
-    entry->state = NOT_IN_CACHE;
   }
   currentValues.get(lock).clear();
 }
@@ -106,13 +102,12 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
     if (lru.nextStaleCheckNs.compare_exchange_strong(oldValue, newValue)) {
       auto lock = lru.cleanList.lockExclusive();
       for (auto& entry: *lock) {
-        if (entry.state == STALE) {
-          entry.state = NOT_IN_CACHE;
-          lock->remove(entry);
-          KJ_ASSERT_NONNULL(entry.maybeCache).evictEntry(lock, entry);
+        if (entry.isStale) {
+          auto& cache = KJ_ASSERT_NONNULL(entry.maybeCache);
+          cache.removeEntry(lock, entry);
+          cache.evictEntry(lock, entry);
         } else {
-          KJ_ASSERT(entry.state == CLEAN);
-          entry.state = STALE;
+          entry.isStale = true;
         }
       }
     }
@@ -252,16 +247,16 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
     }
 
     Entry& entry = lock->front();
-    entry.state = NOT_IN_CACHE;
-    lock->remove(entry);
-    KJ_ASSERT_NONNULL(entry.maybeCache).evictEntry(lock, entry);
+    auto& cache = KJ_ASSERT_NONNULL(entry.maybeCache);
+    cache.removeEntry(lock, entry);
+    cache.evictEntry(lock, entry);
   }
 }
 
 void ActorCache::touchEntry(Lock& lock, Entry& entry, const ReadOptions& options) {
   if (!options.noCache) {
-    if (entry.state == CLEAN || entry.state == STALE) {
-      entry.state = CLEAN;
+    if (entry.state == CLEAN || entry.state == END_GAP) {
+      entry.isStale = false;
       lock->remove(entry);
       lock->add(entry);
     }
@@ -271,6 +266,12 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry, const ReadOptions& options
     // been read back, and then into cache.
     entry.noCache = false;
   }
+}
+
+void ActorCache::removeEntry(Lock& lock, Entry& entry) {
+  KJ_IASSERT(entry.state == CLEAN || entry.state == END_GAP);
+  lock->remove(entry);
+  entry.state = NOT_IN_CACHE;
 }
 
 void ActorCache::evictEntry(Lock& lock, Entry& entry) {
@@ -298,20 +299,21 @@ void ActorCache::evictEntry(Lock& lock, Entry& entry) {
 
   // If this entry has gapIsKnownEmpty and the next entry is END_GAP, we should delete the
   // END_GAP, because it no longer serves a purpose.
-  kj::Maybe<KeyPtr> eraseLater;
+  kj::Maybe<kj::Own<Entry>> eraseLater;
   if (iter->get()->gapIsKnownEmpty) {
     auto next = iter;
     ++next;
     if (next != ordered.end() && next->get()->state == END_GAP) {
       // Erasing invalidates iterators, so we have to delay...
-      eraseLater = next->get()->key;
+      eraseLater = kj::atomicAddRef(**next);
     }
   }
 
   map.erase(*iter);
 
-  KJ_IF_MAYBE(k, eraseLater) {
-    map.eraseMatch(*k);
+  KJ_IF_MAYBE(e, eraseLater) {
+    lock->remove(**e);
+    map.eraseMatch(e->get()->key);
   }
 }
 
@@ -332,13 +334,13 @@ void ActorCache::verifyConsistencyForTest() {
         KJ_ASSERT(entry->link.isLinked());
         break;
       case CLEAN:
-      case STALE:
         KJ_ASSERT(entry->link.isLinked());
         KJ_ASSERT(!(prevGapIsKnownEmpty && entry->gapIsKnownEmpty && entry->value == nullptr),
             "clean negative entry in the middle of a known-empty gap is redundant", entry->key);
         break;
       case END_GAP:
         // Verify that this actually marks the end of a known-empty gap.
+        KJ_ASSERT(entry->link.isLinked());
         KJ_ASSERT(prevGapIsKnownEmpty,
             "END_GAP entry should only appear after known-empty gap", entry->key);
         KJ_ASSERT(!entry->gapIsKnownEmpty,
@@ -935,13 +937,13 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
          positiveCount < limit.orDefault(kj::maxValue); ++iter) {
     Entry& entry = **iter;
 
+    KJ_ASSERT(entry.state != NOT_IN_CACHE, "entry should have been removed from map");
+    touchEntry(lock, entry, options);
+
     switch (entry.state) {
       case CLEAN:
-      case STALE:
       case DIRTY:
       case FLUSHING:
-        touchEntry(lock, entry, options);
-
         // Note that we need to add even negative entries to `cachedEntries` so that they override
         // whatever we read from storage later. However, they should not count against the limit.
         cachedEntries.add(kj::atomicAddRef(entry));
@@ -958,12 +960,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
           }
         }
         break;
-
       case END_GAP:
-        // Ignore entry that exists only to mark a previous list range.
-        break;
       case NOT_IN_CACHE:
-        KJ_FAIL_ASSERT("NOT_IN_CACHE entry should have been removed from map");
+        // Don't worry about caching for lists.
+        break;
     }
 
     if (storageListStart == nullptr && !entry.gapIsKnownEmpty) {
@@ -971,6 +971,12 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
       storageListStart = entry.key;
       storageListStartIsKnown = entry.state != END_GAP;
     }
+  }
+
+  if (iter != ordered.end() && iter->get()->key == endKey) {
+    // We have an entry exactly at our end, it might even be a previously inserted UNKNOWN. Let's
+    // touch it for freshness.
+    touchEntry(lock, **iter, options);
   }
 
   if (storageListStart == nullptr || knownPrefixSize >= limit.orDefault(kj::maxValue)) {
@@ -1232,7 +1238,13 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   // may still be DIRTY so won't be returned when we list the database. Later on we'll merge the
   // entries we find in cache with those we get from disk.
   KeyPtr nextKey = endKey.orDefault(nullptr);  // "the last key we saw in backwards order"
-  for (auto iter = seekOrEnd(map, endKey); positiveCount < limit.orDefault(kj::maxValue); ) {
+  auto iter = seekOrEnd(map, endKey);
+  if (iter != map.ordered().end() && iter->get()->key == endKey) {
+    // We have an entry exactly at our end, it might even be a previously inserted UNKNOWN. Let's
+    // touch it for freshness.
+    touchEntry(lock, **iter, options);
+  }
+  for (; positiveCount < limit.orDefault(kj::maxValue); ) {
     if (iter == ordered.begin()) {
       // No earlier entries, treat same as if previous entry were before beginKey and had
       // gapIsKnownEmpty = false.
@@ -1255,13 +1267,13 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
       break;
     }
 
+    KJ_ASSERT(entry.state != NOT_IN_CACHE, "entry should have been removed from map");
+    touchEntry(lock, entry, options);
+
     switch (entry.state) {
       case CLEAN:
-      case STALE:
       case DIRTY:
       case FLUSHING:
-        touchEntry(lock, entry, options);
-
         // Note that we need to add even negative entries to `cachedEntries` so that they override
         // whatever we read from storage later. However, they should not count against the limit.
         cachedEntries.add(kj::atomicAddRef(entry));
@@ -1278,12 +1290,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
           }
         }
         break;
-
       case END_GAP:
-        // Ignore entry that exists only to mark a previous list range.
-        break;
       case NOT_IN_CACHE:
-        KJ_FAIL_ASSERT("NOT_IN_CACHE entry should have been removed from map");
+        // Don't worry about these caching for lists.
+        break;
     }
 
     if (entry.key == beginKey) {
@@ -1384,7 +1394,6 @@ kj::Maybe<kj::Own<ActorCache::Entry>> ActorCache::findInCache(
     Entry& entry = **iter;
     switch (entry.state) {
       case CLEAN:
-      case STALE:
       case DIRTY:
       case FLUSHING:
         touchEntry(lock, entry, options);
@@ -1424,8 +1433,6 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
   if (options.noCache) {
     // We don't actually want to add this to the cache, just return the entry.
     return kj::mv(entry);
-  } else {
-    entry->state = CLEAN;
   }
 
   auto& map = currentValues.get(lock);
@@ -1442,9 +1449,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
       --iter;
 
       if (iter->get()->gapIsKnownEmpty) {
-        // This entry is redundant, so we won't insert it. Mark it NOT_IN_CACHE instead of CLEAN to
-        // indicate it never entered the map.
-        entry->state = NOT_IN_CACHE;
+        // This entry is redundant, so we won't insert it.
         return kj::mv(entry);
       }
     }
@@ -1469,6 +1474,8 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
     //    the caching logic.
     //
     // Because of this, we know it is correct to leave `gapIsKnownEmpty = false` on our new entry.
+    entry->state = CLEAN;
+    lock->add(*entry);
     return kj::atomicAddRef(*entry);
   });
 
@@ -1478,14 +1485,15 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
       // Oh, it's just a marker for the end of a list range. Go ahead and insert our new entry into
       // the same slot.
       KJ_ASSERT(!slot->gapIsKnownEmpty);  // END_GAP entry should never have gapIsKnownEmpty.
-      slot->state = NOT_IN_CACHE;
+      removeEntry(lock, *slot);
       slot = kj::atomicAddRef(*entry);
+      slot->state = CLEAN;
+      lock->add(*slot);
     } else {
       // The entry that's already in the map must be at least as fresh as the one we just created.
       // If it was created by a put() or delete(), then it is actually fresher. If it was created
       // by a concurrent get() or list() that fetched the same key, then it should be exactly the
-      // same value. So, either way, our new entry isn't needed. We mark it NOT_IN_CACHE since it
-      // won't be placed in the map.
+      // same value. So, either way, our new entry isn't needed.
       //
       // NOTE: You might be tempted to say that if the existing entry is DIRTY, but its value
       //   matches the value that we just read off disk, then we can cancel the write, because
@@ -1498,12 +1506,8 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
       //   one that coincidentally matches what we pulled off disk. However, the open transaction
       //   is still going to be committed, writing the intermediate value, so we still need to plan
       //   to write this value again in the next transaction.
-      entry->state = NOT_IN_CACHE;
+      touchEntry(lock, *slot, options);
     }
-  }
-
-  if (entry->state == CLEAN) {
-    lock->add(*entry);
   }
 
   return kj::mv(entry);
@@ -1572,6 +1576,7 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
           kj::Maybe<Value> value;
           auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(*k), kj::mv(value));
           entry->state = END_GAP;
+          lock->add(*entry);
           map.insert(kj::mv(entry));
         } else {
           // No END_GAP needed since the end is actually the end of the key space.
@@ -1590,7 +1595,7 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
     auto& entry = **iter;
 
     if (entry.value == nullptr &&
-        (entry.state == END_GAP || entry.state == CLEAN || entry.state == STALE) &&
+        (entry.state == END_GAP || entry.state == CLEAN) &&
         (iter != endIter || iter->get()->gapIsKnownEmpty)) {
       // Either:
       // (a) This is an END_GAP entry.
@@ -1650,15 +1655,12 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
     auto& entry = KJ_ASSERT_NONNULL(map.find(key));
     switch (entry->state) {
       case CLEAN:
-      case STALE:
-        lock->remove(*entry);
-        break;
       case END_GAP:
+        removeEntry(lock, *entry);
         break;
       default:
         KJ_UNREACHABLE;
     }
-    entry->state = NOT_IN_CACHE;
     map.erase(entry);
   }
 }
@@ -1952,12 +1954,8 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
           deletedDirty.add(kj::mv(entry));
           break;
         case CLEAN:
-        case STALE:
-          entry->state = NOT_IN_CACHE;
-          lock->remove(*entry);
-          break;
         case END_GAP:
-          entry->state = NOT_IN_CACHE;
+          removeEntry(lock, *entry);
           break;
         case NOT_IN_CACHE:
           KJ_FAIL_REQUIRE("NOT_IN_CACHE entry can't be linked");
@@ -2033,10 +2031,13 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     // Inherit gap state.
     newEntry->gapIsKnownEmpty = slot->gapIsKnownEmpty;
 
+    bool wasEndGap = slot->state == END_GAP;
     switch (slot->state) {
       case DIRTY:
       case FLUSHING:
         dirtyList.remove(*slot);
+        slot->state = NOT_IN_CACHE;
+
         // Entry may have `countedDelete` indicating we're still waiting to get a count from a
         // previous delete operation. If so, we'll need to inherit it in case that delete operation
         // fails and we end up retrying. Note that the new entry could be a positive entry rather
@@ -2046,11 +2047,8 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
         newEntry->countedDelete = kj::mv(slot->countedDelete);
         break;
       case CLEAN:
-      case STALE:
-        lock->remove(*slot);
-        break;
       case END_GAP:
-        // Overwrote an entry representing the end of a previous list range.
+        removeEntry(lock, *slot);
         break;
       case NOT_IN_CACHE:
         KJ_FAIL_ASSERT("NOT_IN_CACHE entry shouldn't be in map");
@@ -2059,7 +2057,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
 
     // Handle our own `countedDelete`.
     KJ_IF_MAYBE(c, countedDelete) {
-      if (slot->state == END_GAP) {
+      if (wasEndGap) {
         // Despite an entry being present, we don't know if the key exists, because it's just an
         // END_GAP entry. So we will still have to arrange to count the delete later.
         newEntry->countedDelete = kj::addRef(*c);
@@ -2072,7 +2070,6 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     }
 
     // Swap in the new entry.
-    slot->state = NOT_IN_CACHE;
     KJ_DASSERT(slot->key == newEntry->key);
     slot = kj::mv(newEntry);
     slot->state = DIRTY;
@@ -2517,28 +2514,27 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
           entry.state = NOT_IN_CACHE;
           evictEntry(lock, entry);
         } else {
-          entry.state = CLEAN;
-
           if (entry.gapIsKnownEmpty && entry.value == nullptr) {
             // This is a negative entry, and is followed by a known-empty gap. If the previous entry
             // also has `gapIsKnownEmpty`, then this entry is entirely redundant.
             auto& map = currentValues.get(lock);
-            auto iter = map.seek(entry.key);
-            KJ_ASSERT(iter->get() == &entry);
+            auto entryIter = map.seek(entry.key);
+            KJ_ASSERT(entryIter->get() == &entry);
 
-            if (iter != map.ordered().begin()) {
-              auto& slot = *iter;
-              --iter;
-              if (iter->get()->gapIsKnownEmpty) {
+            if (entryIter != map.ordered().begin()) {
+              auto prevIter = entryIter;
+              --prevIter;
+              if (prevIter->get()->gapIsKnownEmpty) {
                 // Yep!
                 entry.state = NOT_IN_CACHE;
-                map.erase(slot);
+                map.erase(*entryIter);
                 // WARNING: We might have just deleted `entry`.
                 continue;
               }
             }
           }
 
+          entry.state = CLEAN;
           lock->add(entry);
         }
       }

@@ -337,16 +337,9 @@ private:
     // The entry matches what is currently on disk. The entry is currently present in the LRU
     // queue.
     //
-    // Next state: STALE (if not accessed for a while), NOT_IN_CACHE (if a new put()/delete()
-    // overwrites the entry), or deleted (if evicted due to memory pressure).
+    // Next state: NOT_IN_CACHE (if a new put()/delete() overwrites the entry), or deleted (if
+    // evicted due to memory pressure).
     CLEAN,
-
-    // Same as CLEAN, except that the entry has not been accessed since the last staleness check.
-    // If it is not accessed before the next check, it will time out and be evicted.
-    //
-    // Next state: CLEAN (if accessed again before eviction), NOT_IN_CACHE (if a new put()/delete()
-    // overwrites the entry), or deleted (if evicted due to either timeout or memory pressure).
-    STALE,
 
     // This entry exists solely to mark the end of a known-empty gap. The value for this entry
     // is not known, but the previous entry has `gapIsKnownEmpty = true`. Such entries are
@@ -407,6 +400,8 @@ private:
     // State of this key/value pair.
     EntryState state = NOT_IN_CACHE;
 
+    bool isStale = false;
+
     // If true, then a past list() operation covered the space between this entry and the following
     // entry, meaning that we know for sure that there are no other keys on disk between them.
     bool gapIsKnownEmpty = false;
@@ -431,7 +426,7 @@ private:
     // to the replacement entry, so that it can be retried.)
     kj::Maybe<kj::Own<CountedDelete>> countedDelete;
 
-    // If CLEAN or STALE, the entry will be in the SharedLru's `cleanList`.
+    // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
     // If DIRTY or FLUSHING, the entry will be in `dirtyList`.
     kj::ListLink<Entry> link;
@@ -595,6 +590,12 @@ private:
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
   // the LRU queue (unless the options say otherwise).
   void touchEntry(Lock& lock, Entry& entry, const ReadOptions& options);
+
+  // TODO(soon) This function mostly belongs on the SharedLru, not the ActorCache. Notably,
+  // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
+  // the non-shared map. It is like this for now because generalizing the SharedLru into an
+  // IsolateCache is bigger work.
+  void removeEntry(Lock& lock, Entry& entry);
 
   // Look for a key in cache, returning a strong reference on the matching entry.
   //
@@ -818,8 +819,7 @@ private:
   Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
-  // most-recently-used. Note that due to the ordering, all STALE entries will appear before all
-  // CLEAN entries.
+  // most-recently-used.
   kj::MutexGuarded<kj::List<Entry, &Entry::link>> cleanList;
 
   // Total byte size of everything that is cached, including dirty values that are not in `list`.
