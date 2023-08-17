@@ -630,12 +630,13 @@ public:
   // pending events (a la `kj::evalLast()`).
 
 private:
-  kj::Own<AsyncWaiter> waiter;
+  const Worker::Isolate* isolate;
   kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming;
 
-  AsyncLock(kj::Own<AsyncWaiter> waiter,
+  AsyncLock(const Worker::Isolate *isolate,
             kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming)
-      : waiter(kj::mv(waiter)), lockTiming(kj::mv(lockTiming)) {}
+      : isolate(isolate),
+        lockTiming(kj::mv(lockTiming)) {}
 
   friend class Worker::Isolate;
   friend class Worker::AsyncWaiter;
@@ -854,7 +855,7 @@ private:
 
 inline const Worker::Isolate& Worker::getIsolate() const { return *script->isolate; }
 
-class Worker::AsyncWaiter: public kj::Refcounted {
+class Worker::AsyncWaiter {
   // Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
   // `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
 
