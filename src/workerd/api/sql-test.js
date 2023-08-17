@@ -748,62 +748,137 @@ async function test(storage) {
   `),
     'Error: not authorized'
   )
+
+  {
+    const join = []
+    // In-JS joining of two tables should be possible:
+    for (let row of sql.exec(`SELECT * FROM abc`)) {
+      for (let col of sql.exec(`SELECT * FROM cde`)) {
+        join.push({ row, col })
+      }
+    }
+    assert.deepEqual(join, [
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 4, b: 5, c: 6 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 4, b: 5, c: 6 } },
+    ])
+
+    const cursor = sql.exec(
+      `INSERT INTO abc(a,b,c) VALUES (10,11,12),(20,21,22) RETURNING *`
+    )
+    assert.deepEqual(
+      [...sql.exec(`SELECT count(1) FROM abc`)],
+      [{ 'count(1)': 4 }]
+    )
+    const cursor2 = sql.exec(
+      `INSERT INTO abc(a,b,c) VALUES (30,31,32),(40,41,42) RETURNING *`
+    )
+    assert.deepEqual(
+      [...cursor],
+      [
+        { a: 10, b: 11, c: 12 },
+        { a: 20, b: 21, c: 22 },
+      ]
+    )
+    assert.deepEqual(
+      [...sql.exec(`SELECT count(1) FROM abc`)],
+      [{ 'count(1)': 6 }]
+    )
+    console.log([...cursor2])
+  }
+}
+
+async function testUnconsumedCursor(storage) {
+  const sql = storage.sql
+  sql.exec('DROP TABLE IF EXISTS issue_959;')
+  sql.exec('CREATE TABLE issue_959 (key TEXT PRIMARY KEY, value TEXT);')
+  sql.exec(
+    "INSERT INTO issue_959 (key, value) VALUES ('key1', 'value1'), ('key2', 'value2') RETURNING *;"
+  )
+  sql.exec("SELECT value FROM issue_959 WHERE key = 'key1'")
+  storage.transactionSync(() => {
+    sql.exec(
+      "INSERT INTO issue_959 (key, value) VALUES ('key3', 'value3'), ('key4', 'value4');"
+    )
+  })
+  sql.exec("SELECT value FROM issue_959 WHERE key = 'key4'")
+
+  // sql.exec("DROP TABLE IF EXISTS issue_959;");
+
+  // // An insert + a RETURNING clause that we don't consume is enough to trigger the bug
+  //
+  // // Releasing a savepoint should work
+  // storage.transactionSync(() => {
+  //   sql.exec(`INSERT INTO abc(a,b,c) VALUES (10,11,12) RETURNING *`)
+  // })
+  //
+  // // Returning a response will automatically commit the transaction
+  // sql.exec(`INSERT INTO abc(a,b,c) VALUES (10,11,12) RETURNING *`)
 }
 
 async function testIoStats(storage) {
-  const sql = storage.sql;
+  const sql = storage.sql
 
-  sql.exec(`CREATE TABLE tbl (id INTEGER PRIMARY KEY, value TEXT)`);
-  sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 100000, "arbitrary-initial-value");
-  await scheduler.wait(1);
+  sql.exec(`CREATE TABLE tbl (id INTEGER PRIMARY KEY, value TEXT)`)
+  sql.exec(
+    `INSERT INTO tbl (id, value) VALUES (?, ?)`,
+    100000,
+    'arbitrary-initial-value'
+  )
+  await scheduler.wait(1)
 
   // When writing, the rowsWritten count goes up.
   {
-    const cursor = sql.exec(`INSERT INTO tbl (id, value) VALUES (?, ?)`, 1, "arbitrary-value");
-    Array.from(cursor);  // Consume all the results
-    assert.equal(cursor.rowsWritten, 1);
+    const cursor = sql.exec(
+      `INSERT INTO tbl (id, value) VALUES (?, ?)`,
+      1,
+      'arbitrary-value'
+    )
+    Array.from(cursor) // Consume all the results
+    assert.equal(cursor.rowsWritten, 1)
   }
 
   // When reading, the rowsRead count goes up.
   {
-    const cursor = sql.exec(`SELECT * FROM tbl`);
-    Array.from(cursor);  // Consume all the results
-    assert.equal(cursor.rowsRead, 2);
+    const cursor = sql.exec(`SELECT * FROM tbl`)
+    Array.from(cursor) // Consume all the results
+    assert.equal(cursor.rowsRead, 2)
   }
 
   // Each invocation of a prepared statement gets its own counters.
   {
-    const id1 = 101;
-    const id2 = 202;
+    const id1 = 101
+    const id2 = 202
 
-    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`);
-    const cursor123 = prepared(id1, "value1");
-    Array.from(cursor123);
-    assert.equal(cursor123.rowsWritten, 1);
+    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`)
+    const cursor123 = prepared(id1, 'value1')
+    Array.from(cursor123)
+    assert.equal(cursor123.rowsWritten, 1)
 
-    const cursor456 = prepared(id2, "value2");
-    Array.from(cursor456);
-    assert.equal(cursor456.rowsWritten, 1);
-    assert.equal(cursor123.rowsWritten, 1);  // remained unchanged
+    const cursor456 = prepared(id2, 'value2')
+    Array.from(cursor456)
+    assert.equal(cursor456.rowsWritten, 1)
+    assert.equal(cursor123.rowsWritten, 1) // remained unchanged
   }
 
   // Row counters are updated as you consume the cursor.
   {
-    sql.exec(`DELETE FROM tbl`);
-    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`);
+    sql.exec(`DELETE FROM tbl`)
+    const prepared = sql.prepare(`INSERT INTO tbl (id, value) VALUES (?, ?)`)
     for (let i = 1; i <= 10; i++) {
-      Array.from(prepared(i, "value" + i));
+      Array.from(prepared(i, 'value' + i))
     }
 
-    const cursor = sql.exec(`SELECT * FROM tbl`);
-    const resultsIterator = cursor[Symbol.iterator]();
-    let rowsSeen = 0;
+    const cursor = sql.exec(`SELECT * FROM tbl`)
+    const resultsIterator = cursor[Symbol.iterator]()
+    let rowsSeen = 0
     while (true) {
-      const result = resultsIterator.next();
+      const result = resultsIterator.next()
       if (result.done) {
-        break;
+        break
       }
-      assert.equal(++rowsSeen, cursor.rowsRead);
+      assert.equal(++rowsSeen, cursor.rowsRead)
     }
   }
 }
@@ -887,6 +962,9 @@ export class DurableObjectExample {
     } else if (req.url.endsWith('/sql-test-foreign-keys')) {
       await testForeignKeys(this.state.storage)
       return Response.json({ ok: true })
+    } else if (req.url.endsWith('/sql-test-unconsumed-cursor')) {
+      await testUnconsumedCursor(this.state.storage)
+      return Response.json({ ok: true })
     } else if (req.url.endsWith('/increment')) {
       let val = (await this.state.storage.get('counter')) || 0
       ++val
@@ -924,8 +1002,12 @@ export default {
     // Test SQL API
     assert.deepEqual(await doReq('sql-test'), { ok: true })
 
+    // Test cursors unconsumed at end of request, must be called twice
+    assert.deepEqual(await doReq('sql-test-unconsumed-cursor'), { ok: true })
+    // assert.deepEqual(await doReq('sql-test-unconsumed-cursor'), { ok: true })
+
     // Test SQL IO stats
-    assert.deepEqual(await doReq("sql-test-io-stats"), {ok: true});
+    assert.deepEqual(await doReq('sql-test-io-stats'), { ok: true })
 
     // Test defer_foreign_keys (explodes the DO)
     await assert.rejects(async () => {

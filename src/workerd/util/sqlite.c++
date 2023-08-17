@@ -477,6 +477,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
   }
 
   KJ_IF_MAYBE(d, dbName) {
+//     KJ_LOG(INFO, *d);
     if (*d == "temp"_kj) {
       return isAuthorizedTemp(actionCode, param1, param2, regulator);
     } else if (*d != "main"_kj) {
@@ -491,6 +492,13 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     // Everything is allowed for trusted queries.
     return true;
   }
+//   KJ_LOG(INFO, actionCode);
+//   KJ_IF_MAYBE(p1, param1) {
+//     KJ_LOG(INFO, *p1);
+//   }
+//   KJ_IF_MAYBE(p2, param2) {
+//     KJ_LOG(INFO, *p2);
+//   }
 
   switch (actionCode) {
     // ---------------------------------------------------------------
