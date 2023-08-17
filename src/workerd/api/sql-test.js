@@ -814,6 +814,29 @@ async function testIoStats(storage) {
       assert.equal(++rowsSeen, cursor.rowsRead)
     }
   }
+
+  // Row counters can track interleaved cursors
+  {
+    const join = []
+    const colCounts = []
+    // In-JS joining of two tables should be possible:
+    const rows = sql.exec(`SELECT * FROM abc`)
+    for (let row of rows) {
+      const cols = sql.exec(`SELECT * FROM cde`)
+      for (let col of cols) {
+        join.push({ row, col })
+      }
+      colCounts.push(cols.rowsRead)
+    }
+    assert.deepEqual(join, [
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 1, b: 2, c: 3 } },
+      { col: { c: 7, d: 8, e: 9 }, row: { a: 4, b: 5, c: 6 } },
+      { col: { c: 1, d: 2, e: 3 }, row: { a: 4, b: 5, c: 6 } },
+    ])
+    assert.deepEqual(rows.rowsRead, 2)
+    assert.deepEqual(colCounts, [2, 2])
+  }
 }
 
 async function testForeignKeys(storage) {
