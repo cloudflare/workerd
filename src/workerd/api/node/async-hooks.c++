@@ -13,28 +13,17 @@ jsg::Ref<AsyncLocalStorage> AsyncLocalStorage::constructor(jsg::Lock& js) {
 v8::Local<v8::Value> AsyncLocalStorage::run(
     jsg::Lock& js,
     v8::Local<v8::Value> store,
-    v8::Local<v8::Function> callback,
-    jsg::Varargs args) {
-  kj::Vector<v8::Local<v8::Value>> argv(args.size());
-  for (auto arg : args) {
-    argv.add(arg.getHandle(js));
-  }
-
-  auto context = js.v8Context();
-
+    jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+    jsg::Arguments<jsg::Value> args) {
+  callback.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
   jsg::AsyncContextFrame::StorageScope scope(js, *key, js.v8Ref(store));
-
-  return jsg::check(callback->Call(
-      context,
-      context->Global(),
-      argv.size(),
-      argv.begin()));
+  return callback(js, kj::mv(args));
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::exit(
     jsg::Lock& js,
-    v8::Local<v8::Function> callback,
-    jsg::Varargs args) {
+    jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+    jsg::Arguments<jsg::Value> args) {
   // Node.js defines exit as running "a function synchronously outside of a context".
   // It goes on to say that the store is not accessible within the callback or the
   // asynchronous operations created within the callback. Any getStore() call done
@@ -45,7 +34,7 @@ v8::Local<v8::Value> AsyncLocalStorage::exit(
   // implementing the enterWith/disable methods. We can emulate the correct
   // behavior simply by calling run with the store value set to undefined, which
   // will propagate correctly.
-  return run(js, js.v8Undefined(), callback, kj::mv(args));
+  return run(js, js.v8Undefined(), kj::mv(callback), kj::mv(args));
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
@@ -127,23 +116,16 @@ v8::Local<v8::Function> AsyncResource::bind(
 
 v8::Local<v8::Value> AsyncResource::runInAsyncScope(
     jsg::Lock& js,
-    v8::Local<v8::Function> fn,
+    jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> fn,
     jsg::Optional<v8::Local<v8::Value>> thisArg,
-    jsg::Varargs args) {
-  kj::Vector<v8::Local<v8::Value>> argv(args.size());
-  for (auto arg : args) {
-    argv.add(arg.getHandle(js));
+    jsg::Arguments<jsg::Value> args) {
+  v8::Local<v8::Value> receiver = js.v8Context()->Global();
+  KJ_IF_MAYBE(arg, thisArg) {
+    receiver = *arg;
   }
-
-  auto context = js.v8Context();
-
+  fn.setReceiver(js.v8Ref<v8::Value>(receiver));
   jsg::AsyncContextFrame::Scope scope(js, getFrame());
-
-  return jsg::check(fn->Call(
-      context,
-      thisArg.orDefault(context->Global()),
-      argv.size(),
-      argv.begin()));
+  return fn(js, kj::mv(args));
 }
 
 kj::Own<jsg::AsyncContextFrame::StorageKey> AsyncLocalStorage::getKey() {

@@ -83,9 +83,9 @@ void Channel::unbindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als) {
 
 v8::Local<v8::Value> Channel::runStores(
     jsg::Lock& js, jsg::Value message,
-    v8::Local<v8::Function> callback,
+    jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
     jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
-    jsg::Varargs args) {
+    jsg::Arguments<jsg::Value> args) {
   auto storageScopes = KJ_MAP(store, stores) {
     return kj::heap<jsg::AsyncContextFrame::StorageScope>(js, *store.key,
         store.transform(js, message.addRef(js)));
@@ -93,17 +93,12 @@ v8::Local<v8::Value> Channel::runStores(
 
   publish(js, message.addRef(js));
 
-  auto context = js.v8Context();
-  auto receiver = maybeReceiver.orDefault([&]() -> v8::Local<v8::Value> {
-    return context->Global();
-  });
-
-  auto arguments = KJ_MAP(arg, args) -> v8::Local<v8::Value> {
-    return arg.getHandle(js);
-  };
-
-  return jsg::check(
-      callback->Call(context, receiver, arguments.size(), arguments.begin()));
+  v8::Local<v8::Value> receiver = js.v8Context()->Global();
+  KJ_IF_MAYBE(val, maybeReceiver) {
+    receiver = *val;
+  }
+  callback.setReceiver(js.v8Ref(receiver));
+  return callback(js, kj::mv(args));
 }
 
 void Channel::visitForGc(jsg::GcVisitor& visitor) {

@@ -706,28 +706,21 @@ TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeout(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> function,
+    jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args) {
-  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
-    function = js.v8Ref(context->wrap(js, function));
-  }
-  auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
+    jsg::Arguments<jsg::Value> args) {
+  function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
+  auto fn = [function=kj::mv(function),
+             args=kj::mv(args),
+             context=jsg::AsyncContextFrame::currentRef(js)](jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, context);
+    function(js, kj::mv(args));
+  };
   auto timeoutId = IoContext::current().setTimeoutImpl(
       timeoutIdGenerator,
       /* repeats = */ false,
-      [function = function.addRef(js),
-       argv = kj::mv(argv)]
-       (jsg::Lock& js) mutable {
-    auto context = js.v8Context();
-    auto localFunction = function.getHandle(js);
-    auto localArgs = KJ_MAP(arg, argv) {
-      return arg.getHandle(js);
-    };
-    auto argc = localArgs.size();
-
-    // Cast to void to discard the result value.
-    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+      [function = kj::mv(fn)](jsg::Lock& js) mutable {
+    function(js);
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
@@ -740,28 +733,24 @@ void ServiceWorkerGlobalScope::clearTimeout(kj::Maybe<TimeoutId::NumberType> tim
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setInterval(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> function,
+    jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
     jsg::Optional<double> msDelay,
-    jsg::Varargs args) {
-  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
-    function = js.v8Ref(context->wrap(js, function));
-  }
-  auto argv = kj::heapArrayFromIterable<jsg::Value>(kj::mv(args));
+    jsg::Arguments<jsg::Value> args) {
+  function.setReceiver(js.v8Ref<v8::Value>(js.v8Context()->Global()));
+  auto fn = [function=kj::mv(function),
+             args=kj::mv(args),
+             context=jsg::AsyncContextFrame::currentRef(js)]
+             (jsg::Lock& js) mutable {
+    jsg::AsyncContextFrame::Scope scope(js, context);
+    // Because the fn is called multiple times, we will clone the args on each call.
+    auto argv = KJ_MAP(i, args) { return i.addRef(js); };
+    function(js, jsg::Arguments(kj::mv(argv)));
+  };
   auto timeoutId = IoContext::current().setTimeoutImpl(
       timeoutIdGenerator,
       /* repeats = */ true,
-      [function = function.addRef(js),
-       argv = kj::mv(argv)]
-       (jsg::Lock& js) mutable {
-    auto context = js.v8Context();
-    auto localFunction = function.getHandle(js);
-    auto localArgs = KJ_MAP(arg, argv) {
-      return arg.getHandle(js);
-    };
-    auto argc = localArgs.size();
-
-    // Cast to void to discard the result value.
-    (void)jsg::check(localFunction->Call(context, context->Global(), argc, &localArgs.front()));
+      [function = kj::mv(fn)](jsg::Lock& js) mutable {
+    function(js);
   }, msDelay.orDefault(0));
   return timeoutId.toNumber();
 }
