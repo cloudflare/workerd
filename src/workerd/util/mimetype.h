@@ -93,6 +93,9 @@ public:
   static const MimeType VTT;
   static const MimeType EVENT_STREAM;
 
+  // exposed directly for performance reasons
+  static const kj::StringPtr PLAINTEXT_STRING;
+
 private:
   kj::String type_;
   kj::String subtype_;

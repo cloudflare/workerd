@@ -312,7 +312,8 @@ kj::String KJ_STRINGIFY(const MimeType& mimeType) {
   return mimeType.toString();
 }
 
-const MimeType MimeType::PLAINTEXT = MimeType::parse("text/plain;charset=UTF-8"_kj);
+const kj::StringPtr MimeType::PLAINTEXT_STRING = "text/plain;charset=UTF-8"_kj;
+const MimeType MimeType::PLAINTEXT = MimeType::parse(PLAINTEXT_STRING);
 const MimeType MimeType::CSS = MimeType("text"_kj, "css"_kj);
 const MimeType MimeType::HTML = MimeType("text"_kj, "html"_kj);
 const MimeType MimeType::TEXT_JAVASCRIPT = MimeType("text"_kj, "javascript"_kj);
