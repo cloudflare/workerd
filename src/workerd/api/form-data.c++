@@ -413,15 +413,18 @@ jsg::Ref<FormData::ValueIterator> FormData::values(jsg::Lock&) {
 
 void FormData::forEach(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> callback,
-    jsg::Optional<jsg::Value> thisArg,
-    const jsg::TypeHandler<EntryType>& handler) {
-  auto localCallback = callback.getHandle(js);
-  auto localThisArg = thisArg.map([&js](jsg::Value& v) { return v.getHandle(js); })
-      .orDefault(js.v8Undefined());
-  // JSG_THIS.tryGetHandle() is guaranteed safe because `forEach()` is only called
-  // from JavaScript, which means a Headers JS wrapper object must already exist.
-  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
+    jsg::Function<void(EntryType, kj::StringPtr, jsg::Ref<FormData>)> callback,
+    jsg::Optional<jsg::Value> thisArg) {
+  // Here, if the thisArg is not passed, or is passed explicitly as a null or
+  // undefined, then undefined is used as the thisArg.
+  auto receiver = js.v8Undefined();
+  KJ_IF_MAYBE(arg, thisArg) {
+    auto handle = arg->getHandle(js);
+    if (!handle->IsNullOrUndefined()) {
+      receiver = handle;
+    }
+  }
+  callback.setReceiver(js.v8Ref(receiver));
 
   // On each iteration of the for loop, a JavaScript callback is invokved. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick
@@ -430,16 +433,7 @@ void FormData::forEach(
   // are added to the search params unconditionally on each iteration.
   for (size_t i = 0; i < this->data.size(); i++) {
     auto& [key, value] = this->data[i];
-    static constexpr auto ARG_COUNT = 3;
-
-    v8::Local<v8::Value> args[ARG_COUNT] = {
-      handler.wrap(js, clone(value)),
-      jsg::v8Str(js.v8Isolate, key),
-      localParams,
-    };
-    // Call jsg::check() to propagate exceptions, but we don't expect any
-    // particular return value.
-    jsg::check(localCallback->Call(js.v8Context(), localThisArg, ARG_COUNT, args));
+    callback(js, clone(value), key, JSG_THIS);
   }
 }
 

@@ -122,13 +122,18 @@ public:
 
   typedef Ret Wrapper(
       jsg::Lock& js,
-      v8::Local<v8::Object> receiver,  // the `this` value in the function
+      v8::Local<v8::Value> receiver,  // the `this` value in the function
       v8::Local<v8::Function> fn,
       Args...);
   // When holding a JavaScript function, `Wrapper` is a C++ function that will handle converting
   // C++ arguments into JavaScript values and then call the JS function.
 
   Function(Wrapper* wrapper, V8Ref<v8::Object> receiver, V8Ref<v8::Function> function)
+      : Function(wrapper,
+                 receiver.cast<v8::Value>(Lock::from(v8::Isolate::GetCurrent())),
+                 kj::mv(function)) {}
+
+  Function(Wrapper* wrapper, Value receiver, V8Ref<v8::Function> function)
       : impl(JsImpl {
           .wrapper = kj::mv(wrapper),
           .receiver = kj::mv(receiver),
@@ -231,12 +236,18 @@ public:
     __builtin_unreachable();
   }
 
+  inline void setReceiver(Value receiver) {
+    KJ_IF_MAYBE(i, impl.template tryGet<JsImpl>()) {
+      i->receiver = kj::mv(receiver);
+    }
+  }
+
 private:
   Function(Ref<NativeFunction>&& func) : impl(kj::mv(func)) {}
 
   struct JsImpl {
     Wrapper* wrapper;
-    V8Ref<v8::Object> receiver;
+    Value receiver;
     V8Ref<v8::Function> handle;
   };
 
@@ -335,7 +346,7 @@ public:
     auto isolate = context->GetIsolate();
 
     auto wrapperFn = [](Lock& js,
-                        v8::Local<v8::Object> receiver,
+                        v8::Local<v8::Value> receiver,
                         v8::Local<v8::Function> func,
                         Args... args) -> Ret {
       auto isolate = js.v8Isolate;
@@ -372,7 +383,7 @@ public:
     auto isolate = context->GetIsolate();
 
     auto wrapperFn = [](Lock& js,
-                        v8::Local<v8::Object> receiver,
+                        v8::Local<v8::Value> receiver,
                         v8::Local<v8::Function> func,
                         Args... args) -> Ret {
       auto isolate = js.v8Isolate;

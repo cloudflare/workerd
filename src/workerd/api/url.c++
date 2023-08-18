@@ -587,31 +587,25 @@ void URLSearchParams::sort() {
 
 void URLSearchParams::forEach(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> callback,
+    jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
-  auto localCallback = callback.getHandle(js);
-  auto localThisArg = thisArg.map([&js](jsg::Value& v) { return v.getHandle(js); })
-      .orDefault(js.v8Undefined());
-  // JSG_THIS.getHandle() is guaranteed safe because `forEach()` is only called
-  // from JavaScript, which means a Headers JS wrapper object must already exist.
-  auto localParams = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
+  auto receiver = js.v8Undefined();
+  KJ_IF_MAYBE(arg, thisArg) {
+    auto handle = arg->getHandle(js);
+    if (!handle->IsNullOrUndefined()) {
+      receiver = handle;
+    }
+  }
+  callback.setReceiver(js.v8Ref(receiver));
 
-  // On each iteration of the for loop, a JavaScript callback is invokved. If a new
+  // On each iteration of the for loop, a JavaScript callback is invoked. If a new
   // item is appended to the this->url->query within that function, the loop must pick
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
   for (size_t i = 0; i < this->url->query.size(); i++) {
     auto& [key, value] = this->url->query[i];
-    static constexpr auto ARG_COUNT = 3;
-    v8::Local<v8::Value> args[ARG_COUNT] = {
-      jsg::v8Str(js.v8Isolate, value),
-      jsg::v8Str(js.v8Isolate, key),
-      localParams,
-    };
-    // Call jsg::check() to propagate exceptions, but we don't expect any
-    // particular return value.
-    jsg::check(localCallback->Call(js.v8Context(), localThisArg, ARG_COUNT, args));
+    callback(js, value, key, JSG_THIS);
   }
 }
 

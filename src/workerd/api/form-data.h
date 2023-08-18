@@ -98,9 +98,8 @@ public:
 
   void forEach(
       jsg::Lock& js,
-      jsg::V8Ref<v8::Function> callback,
-      jsg::Optional<jsg::Value> thisArg,
-      const jsg::TypeHandler<EntryType>& handler);
+      jsg::Function<void(EntryType, kj::StringPtr, jsg::Ref<FormData>)> callback,
+      jsg::Optional<jsg::Value> thisArg);
 
   JSG_RESOURCE_TYPE(FormData, CompatibilityFlags::Reader flags) {
     JSG_METHOD(append);

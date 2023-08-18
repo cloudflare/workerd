@@ -2079,25 +2079,24 @@ jsg::Ref<URLSearchParams::ValueIterator> URLSearchParams::values(jsg::Lock&) {
 
 void URLSearchParams::forEach(
     jsg::Lock& js,
-    jsg::V8Ref<v8::Function> callback,
+    jsg::Function<void(jsg::UsvStringPtr, jsg::UsvStringPtr, jsg::Ref<URLSearchParams>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
-  auto cb = callback.getHandle(js);
-  auto this_ = thisArg.map([&js](jsg::Value& v) { return v.getHandle(js); })
-      .orDefault(js.v8Undefined());
-  auto query = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js.v8Isolate));
-  // On each iteration of the for loop, a JavaScript callback is invokved. If a new
+  auto receiver = js.v8Undefined();
+  KJ_IF_MAYBE(arg, thisArg) {
+    auto handle = arg->getHandle(js);
+    if (!handle->IsNullOrUndefined()) {
+      receiver = handle;
+    }
+  }
+  callback.setReceiver(js.v8Ref(receiver));
+  // On each iteration of the for loop, a JavaScript callback is invoked. If a new
   // item is appended to the URLSearchParams within that function, the loop must pick
   // it up. Using the classic for (;;) syntax here allows for that. However, this does
   // mean that it's possible for a user to trigger an infinite loop here if new items
   // are added to the search params unconditionally on each iteration.
   for (size_t i = 0; i < list.size(); i++) {
     auto& entry = list[i];
-    v8::Local<v8::Value> args[3] = {
-      jsg::v8Str(js.v8Isolate, entry.value),
-      jsg::v8Str(js.v8Isolate, entry.name),
-      query,
-    };
-    jsg::check(cb->Call(js.v8Context(), this_, 3, args));
+    callback(js, entry.value, entry.name, JSG_THIS);
   }
 }
 
