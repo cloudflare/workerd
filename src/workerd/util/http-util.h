@@ -8,11 +8,10 @@
 
 namespace workerd {
 
+// Attaches the given object to a `Request` so that it lives as long as the request's properties.
+// The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
 template<typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
-  // Attaches the given object to a `Request` so that it lives as long as the request's properties.
-  // The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
-
   req.body = req.body.attach(kj::addRef(*rcAttachment));
   req.response = req.response
       .then([rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
@@ -22,12 +21,11 @@ kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttac
   return req;
 }
 
+// Attaches the given object to a `WebSocketResponse` promise so that it lives as long as the
+// returned response's properties.
 template<typename T>
 kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
     kj::Promise<kj::HttpClient::WebSocketResponse> promise, T&& attachment) {
-  // Attaches the given object to a `WebSocketResponse` promise so that it lives as long as the
-  // returned response's properties.
-
   return promise.then([attachment = kj::mv(attachment)](
       kj::HttpClient::WebSocketResponse&& response) mutable {
     KJ_SWITCH_ONEOF(response.webSocketOrBody) {

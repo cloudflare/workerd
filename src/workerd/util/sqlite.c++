@@ -29,37 +29,37 @@
 
 namespace workerd {
 
+// Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
+// the return value of sqlite3_errmsg() or a string literal containing a similarly
+// application-approriate error message. A reference called `regulator` must be in-scope.
 #define SQLITE_REQUIRE(condition, errorMessage, ...) \
     if (!(condition)) { \
       regulator.onError(errorMessage); \
       KJ_FAIL_REQUIRE("SQLite failed", errorMessage, ##__VA_ARGS__); \
     }
-// Like KJ_REQUIRE() but give the Regulator a chance to report the error. `errorMessage` is either
-// the return value of sqlite3_errmsg() or a string literal containing a similarly
-// application-approriate error message. A reference called `regulator` must be in-scope.
 
+// Make a SQLite call and check the returned error code. Use this version when the call is not
+// associated with an open DB connection.
 #define SQLITE_CALL_NODB(code, ...) do { \
     int _ec = code; \
     KJ_ASSERT(_ec == SQLITE_OK, sqlite3_errstr(_ec), " " #code, ##__VA_ARGS__); \
   } while (false)
-// Make a SQLite call and check the returned error code. Use this version when the call is not
-// associated with an open DB connection.
 
+// This version requires the scope to contain a variable named `db` which is of type sqlite3*, or
+// can convert to it.
 #define SQLITE_CALL(code, ...) do { \
     int _ec = code; \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */ \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__); \
     SQLITE_REQUIRE(_ec == SQLITE_OK, sqlite3_errmsg(db), " " #code, ##__VA_ARGS__); \
   } while (false)
-// This version requires the scope to contain a variable named `db` which is of type sqlite3*, or
-// can convert to it.
 
+// Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
+// aren't really errors.
 #define SQLITE_CALL_FAILED(code, error, ...) do { \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__); \
     SQLITE_REQUIRE(error == SQLITE_OK, sqlite3_errmsg(db), " " code, ##__VA_ARGS__); \
   } while (false);
-// Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
-// aren't really errors.
 
 namespace {
 
@@ -112,9 +112,8 @@ kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   }
 }
 
+// We allowlist these SQLite functions.
 static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
-  // We allowlist these SQLite functions.
-
   // https://www.sqlite.org/lang_corefunc.html
   "abs"_kj,
   "changes"_kj,
@@ -270,9 +269,9 @@ struct PragmaInfo {
   PragmaSignature signature;
 };
 
+// We allowlist these SQLite pragmas (for read only, never with arguments).
 // https://www.sqlite.org/pragma.html
 static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
-  // We allowlist these SQLite pragmas (for read only, never with arguments).
   { "data_version"_kj, PragmaSignature::NO_ARG },
 
   // We allowlist some SQLite pragmas for changing internal state
@@ -372,10 +371,10 @@ kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
   }
 }
 
+// Set up the regulator that will be used for authorizer callbacks while preparing this
+// statement.
 kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     Regulator& regulator, kj::StringPtr sqlCode, uint prepFlags, Multi multi) {
-  // Set up the regulator that will be used for authorizer callbacks while preparing this
-  // statement.
   KJ_ASSERT(currentRegulator == nullptr, "recursive prepareSql()?");
   KJ_DEFER(currentRegulator = nullptr);
   currentRegulator = regulator;
@@ -694,10 +693,9 @@ bool SqliteDatabase::isAuthorizedTemp(int actionCode,
   }
 }
 
+// Set up security restrictions.
+// See: https://www.sqlite.org/security.html
 void SqliteDatabase::setupSecurity() {
-  // Set up security restrictions.
-  // See: https://www.sqlite.org/security.html
-
   // 1. Set defensive mode.
   SQLITE_CALL_NODB(sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, nullptr));
 
@@ -1017,9 +1015,8 @@ static int replaced_lstat(const char* path, struct stat* stats) {
 
 };
 
+// The sqlite3_file implementation we use when wrapping the native filesystem.
 struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
-  // The sqlite3_file implementation we use when wrapping the native filesystem.
-
   const Vfs* vfs;
   int rootFd;
 
@@ -1029,15 +1026,14 @@ struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
   static const sqlite3_io_methods METHOD_TABLE;
 };
 
+// This completely nutso template generates wrapper functions for each of the function pointer
+// members of sqlite3_vfs. The wrapper function temporarily sets `currentVfsRoot` to the FD
+// of the directory from the SqliteDatabase::Vfs instance in use, then invokes the same function
+// on the underlying native VFS.
 template <typename Result, typename... Params,
           Result (*sqlite3_vfs::*slot)(sqlite3_vfs* vfs, Params...)>
 struct SqliteDatabase::Vfs::MethodWrapperHack<
     Result (*sqlite3_vfs::*)(sqlite3_vfs* vfs, Params...), slot> {
-  // This completely nutso template generates wrapper functions for each of the function pointer
-  // members of sqlite3_vfs. The wrapper function temporarily sets `currentVfsRoot` to the FD
-  // of the directory from the SqliteDatabase::Vfs instance in use, then invokes the same function
-  // on the underlying native VFS.
-
   static Result wrapper(sqlite3_vfs* vfs, Params... params) noexcept {
     auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
     KJ_ASSERT(currentVfsRoot == AT_FDCWD);
@@ -1047,15 +1043,14 @@ struct SqliteDatabase::Vfs::MethodWrapperHack<
   }
 };
 
+// Specialization of MethodWrapperHack for wrapping methods of sqlite_file, aka
+// sqlite3_io_methods. Unfortunately, some file methods go back and perform filesystem ops. In
+// particular, accessing shared memory associated with a file actually opens another adjacent
+// file.
 template <typename Result, typename... Params,
           Result (*sqlite3_io_methods::*slot)(sqlite3_file* file, Params...)>
 struct SqliteDatabase::Vfs::MethodWrapperHack<
     Result (*sqlite3_io_methods::*)(sqlite3_file* file, Params...), slot> {
-  // Specialization of MethodWrapperHack for wrapping methods of sqlite_file, aka
-  // sqlite3_io_methods. Unfortunately, some file methods go back and perform filesystem ops. In
-  // particular, accessing shared memory associated with a file actually opens another adjacent
-  //file.
-
   static Result wrapper(sqlite3_file* file, Params... params) noexcept {
     auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
     file = wrapper->getWrapped();
@@ -1104,17 +1099,17 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
 #undef WRAP
 };
 
+// The native VFS gives us the ability to override its syscalls. We need to do so, in
+// particular to force them to use the *at() versions of the calls that accept a directory FD
+// to use as the root.
+//
+// Unfortunately, these overrides are global for the process, with no ability to pass down any
+// context to them. So, we stash the current root FD in `currentVfsRoot` whenever we call into
+// the native VFS. We also don't want to interfere with anything else in the process that is
+// using SQLite directly, so we make sure that when we're not specifically trying to invoke
+// our wrapper, then `currentVfsRoot` is `AT_FDCWD`, which causes the *at() syscalls to match
+// their non-at() versions.
 sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
-  // The native VFS gives us the ability to override its syscalls. We need to do so, in
-  // particular to force them to use the *at() versions of the calls that accept a directory FD
-  // to use as the root.
-  //
-  // Unfortunately, these overrides are global for the process, with no ability to pass down any
-  // context to them. So, we stash the current root FD in `currentVfsRoot` whenever we call into
-  // the native VFS. We also don't want to interfere with anything else in the process that is
-  // using SQLite directly, so we make sure that when we're not specifically trying to invoke
-  // our wrapper, then `currentVfsRoot` is `AT_FDCWD`, which causes the *at() syscalls to match
-  // their non-at() versions.
   static bool registerOnce KJ_UNUSED = ([&]() {
 #define REPLACE_SYSCALL(name) \
     native.xSetSystemCall(&native, #name, (sqlite3_syscall_ptr)replaced_##name);
@@ -1219,15 +1214,14 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
 // one where `getFd()` returns null. This is mainly used for unit tests which want to use in-memory
 // directories.
 
+// Implementation of sqlite3_file.
+//
+// Weirdly, for sqlite3_file, SQLite uses a C++-like inheritance approach, with a separate
+// virtual table that can be shared among all files of the same type. This is different from the
+// way sqlite3_vfs works, where the function pointers are inlined into the sqlite3_vfs struct.
+// In any case, as a result, `FileImpl`, unlike `VfsImpl`, is NOT just a namespace struct, but
+// an actual instance.
 struct SqliteDatabase::Vfs::FileImpl: public sqlite3_file {
-  // Implementation of sqlite3_file.
-  //
-  // Weirdly, for sqlite3_file, SQLite uses a C++-like inheritance approach, with a separate
-  // virtual table that can be shared among all files of the same type. This is different from the
-  // way sqlite3_vfs works, where the function pointers are inlined into the sqlite3_vfs struct.
-  // In any case, as a result, `FileImpl`, unlike `VfsImpl`, is NOT just a namespace struct, but
-  // an actual instance.
-
   const Vfs& vfs;
   kj::Maybe<const kj::File&> writableFile;
   kj::Own<const kj::ReadableFile> file;
@@ -1454,13 +1448,12 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
 #undef WRAP_METHOD
 };
 
+// SQLite VFS implementation based on abstract `kj::Directory`. This is used only when the
+// directory is NOT a true disk directory.
+//
+// This is a namespace-struct defining static methods to fill in the function pointers of
+// sqlite3_vfs.
 sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
-  // SQLite VFS implementation based on abstract `kj::Directory`. This is used only when the
-  // directory is NOT a true disk directory.
-  //
-  // This is a namespace-struct defining static methods to fill in the function pointers of
-  // sqlite3_vfs.
-
   return {
     .iVersion = kj::min(3, native.iVersion),
     .szOsFile = sizeof(FileImpl),

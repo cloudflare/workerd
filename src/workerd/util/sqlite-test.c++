@@ -20,9 +20,8 @@
 namespace workerd {
 namespace {
 
+// Initialize the database with some data.
 void setupSql(SqliteDatabase& db) {
-  // Initialize the database with some data.
-
   // TODO(sqlite): Do this automatically and don't permit it via run().
   db.run("PRAGMA journal_mode=WAL;");
 
@@ -44,10 +43,9 @@ void setupSql(SqliteDatabase& db) {
   }
 }
 
+// Do some read-only queries on `db` to check that it's in the state that `setupSql()` ought to
+// have left it in.
 void checkSql(SqliteDatabase& db) {
-  // Do some read-only queries on `db` to check that it's in the state that `setupSql()` ought to
-  // have left it in.
-
   {
     auto query = db.run("SELECT * FROM people ORDER BY name");
 
@@ -204,11 +202,10 @@ KJ_TEST("SQLite backed by real disk") {
   }
 }
 
+// Tests that concurrent database clients don't clobber each other. This verifies that the
+// LockManager interface is able to protect concurrent access and that our default implementation
+// works.
 void doLockTest(bool walMode) {
-  // Tests that concurrent database clients don't clobber each other. This verifies that the
-  // LockManager interface is able to protect concurrent access and that our default implementation
-  // works.
-
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
 

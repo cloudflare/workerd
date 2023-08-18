@@ -19,16 +19,16 @@ public:
     IGNORE_PARAMS,
   };
 
-  static kj::Maybe<MimeType> tryParse(kj::StringPtr input,
-                                      ParseOptions options = ParseOptions::DEFAULT);
   // Returning nullptr implies that the input is not a valid mime type construction.
   // If the ParseOptions::IGNORE_PARAMS option is set then the mime type parameters
   // will be ignored and will not be included in the parsed result.
+  static kj::Maybe<MimeType> tryParse(kj::StringPtr input,
+                                      ParseOptions options = ParseOptions::DEFAULT);
 
-  static MimeType parse(kj::StringPtr input,
-                        ParseOptions options = ParseOptions::DEFAULT);
   // Asserts if the input could not be parsed as a valid MimeType. tryParse should
   // be preferred for most cases.
+  static MimeType parse(kj::StringPtr input,
+                        ParseOptions options = ParseOptions::DEFAULT);
 
   explicit MimeType(kj::StringPtr type,
                     kj::StringPtr subtype,
@@ -48,25 +48,25 @@ public:
   bool addParam(kj::ArrayPtr<const char> name, kj::ArrayPtr<const char> value);
   void eraseParam(kj::StringPtr name);
 
-  kj::String essence() const;
   // Returns only the type/subtype
+  kj::String essence() const;
 
-  kj::String toString() const;
   // Returns the type/subtype and all params.
+  kj::String toString() const;
 
   kj::String paramsToString() const;
 
-  MimeType clone(ParseOptions options = ParseOptions::DEFAULT) const;
   // Copy this MimeType. If the IGNORE_PARAMS option is set the clone
   // will copy only the type and subtype and will omit all of the parameters.
+  MimeType clone(ParseOptions options = ParseOptions::DEFAULT) const;
 
+  // Compares only the essence of the MimeType (type and subtype). Ignores
+  // parameters in the comparison.
   bool operator==(const MimeType& other) const;
-  // Compares only the essence of the MimeType (type and subtype). Ignores
-  // parameters in the comparison.
 
-  bool operator!=(const MimeType& other) const;
   // Compares only the essence of the MimeType (type and subtype). Ignores
   // parameters in the comparison.
+  bool operator!=(const MimeType& other) const;
 
   operator kj::String() const;
 

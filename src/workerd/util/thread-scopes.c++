@@ -18,10 +18,10 @@ thread_local uint isolateShutdownThreadScopeCount = 0;
 bool multiTenantProcess = false;
 bool predictableMode = false;
 
-thread_local ThreadProgressCounter* activeProgressCounter = nullptr;
 // This variable is read in signal handlers, so use atomic stores and compiler barriers as
 // needed in regular code. Atomic loads are unnecessary, because we're not synchronizing with
 // other threads.
+thread_local ThreadProgressCounter* activeProgressCounter = nullptr;
 
 }  // namespace
 
