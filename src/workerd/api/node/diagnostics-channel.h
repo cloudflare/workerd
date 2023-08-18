@@ -23,10 +23,12 @@ public:
   void bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
                  jsg::Optional<TransformCallback> maybeTransform);
   void unbindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als);
-  v8::Local<v8::Value> runStores(jsg::Lock& js, jsg::Value message,
-                                 v8::Local<v8::Function> callback,
-                                 jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
-                                 jsg::Varargs args);
+  v8::Local<v8::Value> runStores(
+      jsg::Lock& js,
+      jsg::Value message,
+      jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+      jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
+      jsg::Arguments<jsg::Value> args);
 
   JSG_RESOURCE_TYPE(Channel) {
     JSG_METHOD(hasSubscribers);

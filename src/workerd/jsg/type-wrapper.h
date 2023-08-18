@@ -510,7 +510,8 @@ public:
       return Varargs(parameterIndex, args);
     } else if constexpr(isArguments<V>()) {
       using E = typename V::ElementType;
-      auto builder = kj::heapArrayBuilder<E>(args.Length() - parameterIndex);
+      size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
+      auto builder = kj::heapArrayBuilder<E>(size);
       for (size_t i = parameterIndex; i < args.Length(); i++) {
         builder.add(unwrap<E>(context, args[i], errorContext));
       }

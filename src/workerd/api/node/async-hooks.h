@@ -37,12 +37,12 @@ public:
 
   v8::Local<v8::Value> run(jsg::Lock& js,
                            v8::Local<v8::Value> store,
-                           v8::Local<v8::Function> callback,
-                           jsg::Varargs args);
+                           jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+                           jsg::Arguments<jsg::Value> args);
 
   v8::Local<v8::Value> exit(jsg::Lock& js,
-                           v8::Local<v8::Function> callback,
-                           jsg::Varargs args);
+                           jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
+                           jsg::Arguments<jsg::Value> args);
 
   v8::Local<v8::Value> getStore(jsg::Lock& js);
 
@@ -173,9 +173,9 @@ public:
 
   v8::Local<v8::Value> runInAsyncScope(
       jsg::Lock& js,
-      v8::Local<v8::Function> fn,
+      jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> fn,
       jsg::Optional<v8::Local<v8::Value>> thisArg,
-      jsg::Varargs args);
+      jsg::Arguments<jsg::Value>);
   // Calls the given function within this async context.
 
   JSG_RESOURCE_TYPE(AsyncResource, CompatibilityFlags::Reader flags) {

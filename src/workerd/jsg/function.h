@@ -10,6 +10,7 @@
 #include <kj/function.h>
 #include "wrappable.h"
 #include "meta.h"
+#include "jsg.h"
 
 namespace workerd::jsg {
 
@@ -406,6 +407,54 @@ public:
     };
 
     return Function<Ret(Args...)>(
+        wrapperFn,
+        V8Ref(isolate, parentObject.orDefault(context->Global())),
+        V8Ref(isolate, handle.As<v8::Function>()));
+  }
+
+  template <typename Ret>
+  kj::Maybe<Function<Ret(Arguments<Value>)>> tryUnwrap(
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      Function<Ret(Arguments<Value>)>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (!handle->IsFunction()) {
+      return nullptr;
+    }
+
+    auto isolate = context->GetIsolate();
+
+    auto wrapperFn = [](Lock& js,
+                        v8::Local<v8::Value> receiver,
+                        v8::Local<v8::Function> func,
+                        Arguments<Value> args) -> Ret {
+      auto isolate = js.v8Isolate;
+      auto& typeWrapper = TypeWrapper::from(isolate);
+
+      return js.withinHandleScope([&] {
+        auto context = js.v8Context();
+
+        v8::Local<v8::Value> result;
+        if (args.size() > 0) {
+          KJ_STACK_ARRAY(v8::Local<v8::Value>, argv, args.size(), 20, 20);
+          for (size_t n = 0; n < args.size(); n++) {
+            argv[n] = args[n].getHandle(js);
+          }
+          result = check(func->Call(context, receiver, argv.size(), argv.begin()));
+        } else {
+          result = check(func->Call(context, receiver, 0, nullptr));
+        }
+
+        if constexpr(!isVoid<Ret>()) {
+          return typeWrapper.template unwrap<Ret>(
+              context, result, TypeErrorContext::callbackReturn());
+        } else {
+          return;
+        }
+      });
+    };
+
+    return Function<Ret(Arguments<Value>)>(
         wrapperFn,
         V8Ref(isolate, parentObject.orDefault(context->Global())),
         V8Ref(isolate, handle.As<v8::Function>()));

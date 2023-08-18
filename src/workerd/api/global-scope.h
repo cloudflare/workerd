@@ -327,9 +327,9 @@ public:
       jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
-                                   jsg::V8Ref<v8::Function> function,
+                                   jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
                                    jsg::Optional<double> msDelay,
-                                   jsg::Varargs args);
+                                   jsg::Arguments<jsg::Value> args);
   void clearTimeout(kj::Maybe<TimeoutId::NumberType> timeoutId);
 
   TimeoutId::NumberType setTimeoutInternal(
@@ -337,9 +337,9 @@ public:
       double msDelay);
 
   TimeoutId::NumberType setInterval(jsg::Lock& js,
-                                    jsg::V8Ref<v8::Function> function,
+                                    jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
                                     jsg::Optional<double> msDelay,
-                                    jsg::Varargs args);
+                                    jsg::Arguments<jsg::Value> args);
   void clearInterval(kj::Maybe<TimeoutId::NumberType> timeoutId) { clearTimeout(timeoutId); }
 
   jsg::Promise<jsg::Ref<Response>> fetch(
