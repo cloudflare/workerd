@@ -9,6 +9,7 @@ export const read_sync_stack = {
 
     const adapter = await navigator.gpu.requestAdapter();
     ok(adapter);
+    ok(adapter instanceof GPUAdapter);
 
     const device = await adapter.requestDevice();
     ok(device);

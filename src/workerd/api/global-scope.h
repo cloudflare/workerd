@@ -491,6 +491,11 @@ public:
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     // WebGPU
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUAdapter, GPUAdapter);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUOutOfMemoryError, GPUOutOfMemoryError);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUValidationError, GPUValidationError);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUInternalError, GPUInternalError);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUDeviceLostInfo, GPUDeviceLostInfo);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
