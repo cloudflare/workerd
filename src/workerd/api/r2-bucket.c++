@@ -27,39 +27,11 @@ static bool isWholeNumber(double x) {
 // something an embedder can call directly rather than doing this rigamarole. It would also avoid
 // concerns about the user overriding the methods we're invoking.
 static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
-  auto isolate = js.v8Isolate;
-  const auto context = js.v8Context();
-  const auto tmp = jsg::check(v8::Date::New(context, 0));
-  KJ_REQUIRE(tmp->IsDate());
-  const auto constructor = js.v8Get(tmp.As<v8::Object>(), "constructor"_kj);
-  JSG_REQUIRE(constructor->IsFunction(), TypeError, "Date.constructor is not a function");
-  v8::Local<v8::Value> argv = jsg::v8Str(isolate, value);
-  const auto converted = jsg::check(
-      constructor.template As<v8::Function>()->NewInstance(context, 1, &argv));
-  JSG_REQUIRE(converted->IsDate(), TypeError, "Date.constructor did not return a Date");
-  return kj::UNIX_EPOCH +
-      (int64_t(converted.template As<v8::Date>()->ValueOf()) * kj::MILLISECONDS);
+  return js.date(value);
 }
 
 static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
-  // NOTE: If you need toISOString just unify it into this function as the only difference will be
-  // the function name called.
-  auto isolate = js.v8Isolate;
-  const auto context = js.v8Context();
-  const auto converted = jsg::check(v8::Date::New(
-      context, (date - kj::UNIX_EPOCH) / kj::MILLISECONDS)).As<v8::Object>();
-  KJ_REQUIRE(converted->IsDate());
-  const auto stringify = js.v8Get(converted, "toUTCString"_kj);
-  JSG_REQUIRE(stringify->IsFunction(), TypeError, "toUTCString on a Date is not a function");
-  const auto stringified = jsg::check(stringify.template As<v8::Function>()->Call(
-      context, converted, 0, nullptr));
-  JSG_REQUIRE(stringified->IsString(), TypeError, "toUTCString on a Date did not return a string");
-
-  const auto str = stringified.template As<v8::String>();
-  auto buf = kj::heapArray<char>(str->Utf8Length(isolate) + 1);
-  str->WriteUtf8(isolate, buf.begin(), buf.size());
-  buf[buf.size() - 1] = 0;
-  return jsg::ByteString(kj::String(kj::mv(buf)));
+  return js.date(date).toUTCString(js);
 }
 
 enum class OptionalMetadata: uint16_t {
