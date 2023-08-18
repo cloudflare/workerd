@@ -13,8 +13,10 @@ namespace workerd::api::gpu {
 
 class GPUCommandEncoder : public jsg::Object {
 public:
-  explicit GPUCommandEncoder(wgpu::CommandEncoder e) : encoder_(kj::mv(e)){};
+  explicit GPUCommandEncoder(wgpu::CommandEncoder e, kj::String label)
+      : encoder_(kj::mv(e)), label_(kj::mv(label)){};
   JSG_RESOURCE_TYPE(GPUCommandEncoder) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(label, getLabel);
     JSG_METHOD(beginComputePass);
     JSG_METHOD(copyBufferToBuffer);
     JSG_METHOD(finish);
@@ -22,6 +24,11 @@ public:
 
 private:
   wgpu::CommandEncoder encoder_;
+  kj::String label_;
+  kj::StringPtr getLabel() {
+    return label_;
+  }
+
   jsg::Ref<GPUComputePassEncoder>
   beginComputePass(jsg::Optional<GPUComputePassDescriptor> descriptor);
   jsg::Ref<GPUCommandBuffer> finish(jsg::Optional<GPUCommandBufferDescriptor>);

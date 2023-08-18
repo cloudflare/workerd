@@ -1,4 +1,4 @@
-import { deepEqual, ok } from "node:assert";
+import { deepEqual, ok, equal } from "node:assert";
 
 // run manually for now
 // bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-compute-test.gpu-wd-test` --verbose --experimental
@@ -226,8 +226,9 @@ export const read_sync_stack = {
     ok(bindGroupAutoLayout);
 
     // Commands submission
-    const commandEncoder = device.createCommandEncoder();
+    const commandEncoder = device.createCommandEncoder({ label: "label1" });
     ok(commandEncoder);
+    equal(commandEncoder.label, "label1");
 
     const passEncoder = commandEncoder.beginComputePass();
     ok(passEncoder);
