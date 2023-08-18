@@ -137,11 +137,11 @@ public:
   void runMicrotasks() {
     V8StackScope stackScope;
     typename IsolateType::Lock lock(getIsolate(), stackScope);
-    lock.v8Isolate->PerformMicrotaskCheckpoint();
+    lock.runMicrotasks();
   }
 
   void runMicrotasks(typename IsolateType::Lock& lock) {
-    lock.v8Isolate->PerformMicrotaskCheckpoint();
+    lock.runMicrotasks();
   }
 
 private:

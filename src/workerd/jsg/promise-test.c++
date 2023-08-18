@@ -80,7 +80,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
       resolved++;
     });
 
-    js.v8Isolate->PerformMicrotaskCheckpoint();
+    js.runMicrotasks();
     KJ_ASSERT(resolved == 2);
 
     {

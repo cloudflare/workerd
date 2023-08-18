@@ -248,6 +248,14 @@ Lock::ContextScope Lock::enterContextScope(v8::Local<v8::Context> context) {
   return ContextScope(context);
 }
 
+void Lock::runMicrotasks() {
+  v8Isolate->PerformMicrotaskCheckpoint();
+}
+
+void Lock::terminateExecution() {
+  v8Isolate->TerminateExecution();
+}
+
 Name Lock::newSymbol(kj::StringPtr symbol) {
   return Name(*this, v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, symbol)));
 }
