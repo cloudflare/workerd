@@ -23,20 +23,19 @@ namespace workerd::jsg {
 
 namespace workerd::server {
 
+// Implements the single-tenant Workers Runtime server / CLI.
+//
+// The purpose of this class is to implement the core logic independently of the CLI itself,
+// in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
 class Server: private kj::TaskSet::ErrorHandler {
-  // Implements the single-tenant Workers Runtime server / CLI.
-  //
-  // The purpose of this class is to implement the core logic independently of the CLI itself,
-  // in such a way that it can be unit-tested. workerd.c++ implements the CLI wrapper around this.
-
 public:
   Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
          kj::EntropySource& entropySource, kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept(false);
 
-  void allowExperimental() { experimental = true; }
   // Permit experimental features to be used. These features may break backwards compatibility
   // in the future.
+  void allowExperimental() { experimental = true; }
 
   void overrideSocket(kj::String name, kj::Own<kj::ConnectionReceiver> port) {
     socketOverrides.upsert(kj::mv(name), kj::mv(port));
@@ -57,18 +56,18 @@ public:
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
 
+  // Runs the server using the given config.
   kj::Promise<void> run(jsg::V8System& v8System, config::Config::Reader conf,
                         kj::Promise<void> drainWhen = kj::NEVER_DONE);
-  // Runs the server using the given config.
 
-  kj::Promise<bool> test(jsg::V8System& v8System, config::Config::Reader conf,
-                         kj::StringPtr servicePattern = "*"_kj,
-                         kj::StringPtr entrypointPattern = "*"_kj);
   // Executes one or more tests. By default, all exported test handlers from all entrypoints to
   // all services in the config are executed. Glob patterns can be specified to match specific
   // service and entrypoint names.
   //
   // The returned promise resolves true if at least one test ran and no tests failed.
+  kj::Promise<bool> test(jsg::V8System& v8System, config::Config::Reader conf,
+                         kj::StringPtr servicePattern = "*"_kj,
+                         kj::StringPtr entrypointPattern = "*"_kj);
 
   struct Durable { kj::String uniqueKey; };
   struct Ephemeral {};
@@ -88,38 +87,38 @@ private:
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;
-  kj::HashMap<kj::String, kj::String> externalOverrides;
+
   // Overrides from the command line.
   //
   // String overrides are left as strings rather than parsed by the caller in order to reuse the
   // code that parses strings from the config file.
+  kj::HashMap<kj::String, kj::String> externalOverrides;
 
   kj::Maybe<kj::String> inspectorOverride;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
 
   struct GlobalContext;
-  kj::Own<GlobalContext> globalContext;
   // General context needed to construct workers. Initilaized early in run().
+  kj::Own<GlobalContext> globalContext;
 
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
-  kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
   // This needs to be populated in advance of constructing any services, in order to be able to
   // correctly construct dependent services.
+  kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
-  kj::Own<AlarmScheduler> alarmScheduler;
   // Initialized in startAlarmScheduler().
+  kj::Own<AlarmScheduler> alarmScheduler;
 
+  // An HttpServer object maintained in a linked list.
   struct ListedHttpServer {
-    // An HttpServer object maintained in a linked list.
-
     Server& owner;
     kj::HttpServer httpServer;
     kj::ListLink<ListedHttpServer> link;
@@ -134,14 +133,14 @@ private:
     }
   };
 
-  kj::List<ListedHttpServer, &ListedHttpServer::link> httpServers;
   // All active HttpServer objects -- used to implement drain().
+  kj::List<ListedHttpServer, &ListedHttpServer::link> httpServers;
 
-  kj::TaskSet tasks;
   // Especially includes server loop tasks to listen on sockets. Any error is considered fatal.
+  kj::TaskSet tasks;
 
-  void taskFailed(kj::Exception&& exception) override;
   // Reports an exception thrown by a task in `tasks`.
+  void taskFailed(kj::Exception&& exception) override;
 
   kj::Own<kj::TlsContext> makeTlsContext(config::TlsOptions::Reader conf);
   kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(
@@ -165,8 +164,8 @@ private:
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
-  Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
   // Can only be called in the link stage.
+  Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
                                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);
@@ -183,8 +182,8 @@ private:
                      kj::HttpHeaderTable::Builder& headerTableBuilder,
                      kj::ForkedPromise<void>& forkedDrainWhen);
 
-  void startAlarmScheduler(config::Config::Reader config);
   // Must be called after startServices!
+  void startAlarmScheduler(config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
                                     kj::HttpHeaderTable::Builder& headerTableBuilder,

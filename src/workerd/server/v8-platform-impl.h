@@ -9,20 +9,19 @@
 
 namespace workerd::server {
 
+// Workerd-specific implementation of v8::Platform.
+//
+// We customize the CurrentClockTimeMillis() virtual method in order to control the value
+// returned by `Date.now()`.
+//
+// Everything else gets passed through to the wrapped v8::Platform implementation (presumably
+// from `jsg::defaultPlatform()`).
 class WorkerdPlatform final: public v8::Platform {
-  // Workerd-specific implementation of v8::Platform.
-  //
-  // We customize the CurrentClockTimeMillis() virtual method in order to control the value
-  // returned by `Date.now()`.
-  //
-  // Everything else gets passed through to the wrapped v8::Platform implementation (presumably
-  // from `jsg::defaultPlatform()`).
-
 public:
-  explicit WorkerdPlatform(v8::Platform& inner)
-      : inner(inner) {}
   // This takes a reference to its wrapped platform because otherwise we would have to destroy a
   // kj::Own in our noexcept destructor (feasible but ugly).
+  explicit WorkerdPlatform(v8::Platform& inner)
+      : inner(inner) {}
 
   ~WorkerdPlatform() noexcept {}
 
@@ -72,8 +71,8 @@ public:
     return inner.MonotonicallyIncreasingTime();
   }
 
-  double CurrentClockTimeMillis() noexcept override;
   // Overridden to return KJ time
+  double CurrentClockTimeMillis() noexcept override;
 
   StackTracePrinter GetStackTracePrinter() noexcept override {
     return inner.GetStackTracePrinter();
