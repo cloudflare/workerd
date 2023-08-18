@@ -7,6 +7,7 @@
 #include "writable.h"
 #include <workerd/jsg/jsg.h>
 #include <kj/vector.h>
+#include <workerd/api/util.h>
 
 namespace workerd::api {
 
@@ -181,9 +182,9 @@ public:
 
     // We only use `TeeBranch` when a locally-sourced stream was tee'd (because system streams
     // implement `tryTee()` in a different way that doesn't use `TeeBranch`). So, we know that
-    // none of the pump can be performed without the IoContext active, and thus
-    // `DeferredProxy` has to be a noop.
-    co_return newNoopDeferredProxy();
+    // none of the pump can be performed without the IoContext active, and thus we do not
+    // `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
+    co_return;
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {

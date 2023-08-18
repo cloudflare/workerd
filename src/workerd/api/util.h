@@ -104,54 +104,6 @@ double dateNow();
 
 // =======================================================================================
 
-template <typename T>
-struct DeferredProxy {
-  // Some API methods return Promise<DeferredProxy<T>> when the task can be separated into two
-  // parts: some work that must be done with the IoContext still live, and some part that
-  // can occur after the IoContext completes, but which should still be performed before
-  // the overall task is "done".
-  //
-  // In particular, when an HTTP event ends up proxying the response body stream (or WebSocket
-  // stream) directly to/from origin, then that streaming can take place without pinning the
-  // isolate in memory, and without holding the IoContext open. So,
-  // `ServiceWorkerGlobalScope::request()` returns `Promise<DeferredProxy<void>>`. The outer
-  // Promise waits for the JavaScript work to be done, and the inner DeferredProxy<void> represents
-  // the proxying step.
-  //
-  // Note that if you're performing a task that resolves to DeferredProxy but JavaScript is
-  // actually waiting for the result of the task, then it's your responsibility to call
-  // IoContext::current().registerPendingEvent() and attach it to `proxyTask`, otherwise
-  // the request might be canceled as the proxy task won't be recognized as something that the
-  // request is waiting on.
-  //
-  // TODO(cleanup): Now that we have jsg::Promise, it might make sense for deferred proxying to
-  //    be represented as `jsg::Promise<api::DeferredProxy<T>>`, since the outer promise is
-  //    intended to represent activity that happens in JavaScript while the inner one represents
-  //    pure I/O. This will require some refactoring, though.
-
-  kj::Promise<T> proxyTask;
-};
-
-inline DeferredProxy<void> newNoopDeferredProxy() {
-  return DeferredProxy<void> { kj::READY_NOW };
-}
-
-template <typename T>
-inline DeferredProxy<T> newNoopDeferredProxy(T&& value) {
-  return DeferredProxy<T> { kj::mv(value) };
-}
-
-template <typename T>
-inline kj::Promise<DeferredProxy<T>> addNoopDeferredProxy(kj::Promise<T> promise) {
-  // Helper method to use when you need to return `Promise<DeferredProxy<T>>` but no part of the
-  // operation you are returning is eligible to be deferred past the IoContext lifetime.
-  co_return newNoopDeferredProxy(co_await promise);
-}
-inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> promise) {
-  co_await promise;
-  co_return newNoopDeferredProxy();
-}
-
 kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
     jsg::Lock& js, kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf);
 

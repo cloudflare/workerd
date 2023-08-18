@@ -183,8 +183,8 @@ public:
     }
 
     // We can't defer the write to the proxy stage since it depends on `blob` which lives in the
-    // isolate.
-    co_return newNoopDeferredProxy();
+    // isolate, so we don't `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
+    co_return;
   }
 
 private:

@@ -8,6 +8,7 @@
 // Don't include this file unless your name is "crypto*.c++".
 
 #include "crypto.h"
+#include <workerd/api/util.h>
 #include <kj/encoding.h>
 #include <openssl/evp.h>
 #include <openssl/bio.h>

@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/util.h>
 #include <workerd/util/thread-scopes.h>
 
 namespace workerd {

@@ -458,7 +458,7 @@ public:
       if (end) co_await output.end();
     }
 
-    co_return newNoopDeferredProxy();
+    co_return;
   }
 
 private:
