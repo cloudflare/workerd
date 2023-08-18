@@ -1934,7 +1934,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             threadWaitingDifferentLockCount);
       }
       auto newWaiter = kj::refcounted<AsyncWaiter>(kj::atomicAddRef(*this));
-      co_await newWaiter->readyPromise.addBranch();
+      auto branch = newWaiter->readyPromise.addBranch2();
+      co_await branch;
       co_return AsyncLock(kj::mv(newWaiter), kj::mv(lockTiming));
     } else if (waiter->isolate == this) {
       // Thread is waiting on a lock already, and it's for the same isolate. We can coalesce the
@@ -1945,7 +1946,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             threadWaitingDifferentLockCount);
       }
       auto newWaiterRef = kj::addRef(*waiter);
-      co_await newWaiterRef->readyPromise.addBranch();
+      auto branch = newWaiterRef->readyPromise.addBranch2();
+      co_await branch;
       co_return AsyncLock(kj::mv(newWaiterRef), kj::mv(lockTiming));
     } else {
       // Thread is already waiting for or holding a different isolate lock. Wait for that one to
@@ -1955,7 +1957,8 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
       KJ_IF_MAYBE(lt, lockTiming) {
         lt->get()->waitingForOtherIsolate(waiter->isolate->getId());
       }
-      co_await waiter->releasePromise.addBranch();
+      auto branch = waiter->releasePromise.addBranch2();
+      co_await branch;
     }
   }
 }
