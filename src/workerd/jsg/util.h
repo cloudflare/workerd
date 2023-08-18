@@ -181,6 +181,9 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
 v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
 // Make a deep clone of the given object.
 
+// TODO(cleanup): Call sites should migrate to the new js.str(...) variants on jsg::Lock
+// rather than calling v8Str directly. Once the migration is a big further along, v8Str
+// and it's variants will be explicitly marked deprecated.
 template <typename T>
 v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
            v8::NewStringType newType = v8::NewStringType::kNormal) {
