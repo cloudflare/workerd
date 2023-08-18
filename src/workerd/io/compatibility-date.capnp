@@ -340,4 +340,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("rtti_api")
       $experimental;
   # Enables the `workerd:rtti` module for querying runtime-type-information from JavaScript.
+
+  webgpu @35 :Bool
+      $compatEnableFlag("webgpu")
+      $experimental;
 }

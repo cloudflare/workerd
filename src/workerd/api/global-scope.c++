@@ -785,4 +785,20 @@ double Performance::now() {
   return dateNow();
 }
 
-}  // namespace workerd::api
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
+  // is this a durable object?
+  KJ_IF_MAYBE (actor, IoContext::current().getActor()) {
+    JSG_REQUIRE(actor->getPersistent() != nullptr, TypeError,
+                "webgpu api is only available in Durable Objects (no storage)");
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, "webgpu api is only available in Durable Objects");
+  };
+
+  JSG_REQUIRE(flags.getWebgpu(), TypeError, "webgpu needs the webgpu compatibility flag set");
+
+  return jsg::alloc<api::gpu::GPU>();
+}
+#endif
+
+} // namespace workerd::api

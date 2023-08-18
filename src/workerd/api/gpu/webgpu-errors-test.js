@@ -1,10 +1,14 @@
-import { ok } from "node:assert";
+import { ok, equal } from "node:assert";
 
 // run manually for now
 // bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-errors-test.gpu-wd-test` --verbose --experimental
 
-export const read_sync_stack = {
-  async test(ctrl, env, ctx) {
+export class DurableObjectExample {
+  constructor(state) {
+    this.state = state;
+  }
+
+  async fetch() {
     ok(navigator.gpu);
 
     const adapter = await navigator.gpu.requestAdapter();
@@ -79,5 +83,17 @@ export const read_sync_stack = {
 
     // ensure callback with error was indeed called
     ok(callbackCalled);
+
+    return new Response("OK");
+  }
+}
+
+export const error_handling = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName("A");
+    let obj = env.ns.get(id);
+    let res = await obj.fetch("http://foo/test");
+    let text = await res.text();
+    equal(text, "OK");
   },
 };

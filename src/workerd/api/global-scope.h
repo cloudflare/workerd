@@ -44,7 +44,7 @@ class Navigator: public jsg::Object {
 public:
   kj::StringPtr getUserAgent() { return "Cloudflare-Workers"_kj; }
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
-  jsg::Ref<api::gpu::GPU> getGPU() { return jsg::alloc<api::gpu::GPU>(); }
+  jsg::Ref<api::gpu::GPU> getGPU(CompatibilityFlags::Reader flags);
 #endif
 
   JSG_RESOURCE_TYPE(Navigator) {

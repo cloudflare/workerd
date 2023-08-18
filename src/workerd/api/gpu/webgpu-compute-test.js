@@ -1,10 +1,14 @@
-import { deepEqual, ok } from "node:assert";
+import { deepEqual, ok, equal } from "node:assert";
 
 // run manually for now
 // bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-compute-test.gpu-wd-test` --verbose --experimental
 
-export const read_sync_stack = {
-  async test(ctrl, env, ctx) {
+export class DurableObjectExample {
+  constructor(state) {
+    this.state = state;
+  }
+
+  async fetch() {
     ok(navigator.gpu);
     if (!("gpu" in navigator)) {
       console.log(
@@ -271,5 +275,17 @@ export const read_sync_stack = {
       new Float32Array(arrayBuffer),
       new Float32Array([2, 2, 50, 60, 114, 140])
     );
+
+    return new Response("OK");
+  }
+}
+
+export const compute_shader = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName("A");
+    let obj = env.ns.get(id);
+    let res = await obj.fetch("http://foo/test");
+    let text = await res.text();
+    equal(text, "OK");
   },
 };
