@@ -7,8 +7,15 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "webgpu-compute-test.js")
         ],
+        durableObjectNamespaces = [
+          (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+        ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["experimental", "nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "webgpu"],
       )
     ),
   ],
