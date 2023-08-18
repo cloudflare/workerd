@@ -5,6 +5,7 @@
 #pragma once
 
 #include <kj/async.h>
+#include <kj/debug.h>
 
 namespace workerd::api {
 
@@ -211,14 +212,19 @@ private:
 
   // PromiseNode implementation
 
+  void setSelfPointer(kj::_::OwnPromiseNode* selfPtr) noexcept override {
+    this->selfPtr = selfPtr;
+  }
+
   void destroy() override {
     // The promise returned by `inner.get_return_object()` is what actually owns this coroutine
     // frame. We temporarily store that in `result` until our outer promise is fulfilled. So, to
     // destroy ourselves, we must manually drop `result`.
     //
-    // On the other hand, if our outer promise has already been fulfilled, and `result` delivered to
-    // wherever it is going, then someone else directly owns the coroutine now, not us, and it's
-    // okay for this drop to be a no-op.
+    // On the other hand, if our outer promise has already been fulfilled, then `result` has already
+    // been delivered to wherever it is going, and someone else directly owns the coroutine now, not
+    // us. In this case, this `destroy()` override will have already been called (and it will have
+    // been a no-op), because our own OwnPromiseNode will have already been dropped in `get()`.
 
     auto drop = kj::mv(result);
   }
@@ -228,6 +234,13 @@ private:
   }
 
   void get(kj::_::ExceptionOrValue& output) noexcept override {
+    // Make sure that the outer PromiseNode (`this` one) is destroyed before the inner PromiseNode.
+    // kj-async should already provide us this guarantee, but since incorrect destruction order
+    // would cause invalid memory access, we provide a stronger guarantee. Also see the comment for
+    // the `result` data member.
+    KJ_ASSERT(selfPtr != nullptr);
+    KJ_DEFER(*selfPtr = nullptr);
+
     static_cast<decltype(result)&>(output) = kj::mv(result);
   }
 
@@ -249,6 +262,16 @@ private:
 
   kj::_::ExceptionOr<DeferredProxy<T>> result;
   // Stores the result for the outer promise.
+  //
+  // WARNING: This object owns `this` PromiseNode! If `result` is ever moved away, as is done in
+  // `get()`, we must arrange to make sure that no one ever tries to use `this` PromiseNode again.
+  // Stated another way, we must guarantee that the outer PromiseNode (for `DeferredProxy<T>`) is
+  // always destroyed before the inner PromiseNode (for `T`). kj-async always does this anyway, but
+  // we implement an additional safeguard by immediately destroying our own `OwnPromiseNode` (which
+  // we have access to via `setSelfPointer()`) when we move `result` away in `get()`.
+
+  kj::_::OwnPromiseNode* selfPtr = nullptr;
+  // Used to drop ourselves in `get()` -- see comment for `result`.
 
   bool deferredProxyingHasBegun = false;
   // Set to true when deferred proxying has begun -- that is, when the outer DeferredProxy<T>

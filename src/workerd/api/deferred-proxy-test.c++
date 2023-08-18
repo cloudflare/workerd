@@ -229,5 +229,47 @@ KJ_TEST("kj::Promise<DeferredProxy<T>>: can be canceled while suspended after de
   KJ_EXPECT(unwind == 4);
 }
 
+KJ_TEST("kj::Promise<DeferredProxy<T>>: destroying inner PromiseNode before outer does not "
+    "segfault") {
+  // Destroy the inner promise before the outer promise to test our safeguard against incorrect
+  // destruction order causing segfaults.
+
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto coro = []() -> kj::Promise<DeferredProxy<void>> {
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+    co_await kj::Promise<void>(kj::NEVER_DONE);
+  };
+
+  auto outer = coro();
+
+  // We could call `get()` on the outer node immediately, even before it reports it is ready, but
+  // we call `poll()` for good measure, in case the DeferredProxyCoroutine implementation ever
+  // changes to disallow `get()`-before-ready. We cannot use `wait()` for this purpose, because
+  // `wait()` would avoid the segfault by (correctly) destroying the outer PromiseNode before
+  // returning the result to us.
+  KJ_EXPECT(outer.poll(waitScope));
+
+  auto outerNode = kj::_::PromiseNode::from(kj::mv(outer));
+
+  // `poll()`, unlike `wait()`, does not call `setSelfPointer()` on the outer PromiseNode, which
+  // would cause an assertion failure inside the outer PromiseNode's `get()` implementation, so we
+  // have to do it ourselves.
+  outerNode->setSelfPointer(&outerNode);
+
+  kj::_::ExceptionOr<DeferredProxy<void>> result;
+  outerNode->get(result);
+
+  {
+    // Destroy the inner promise.
+    auto inner = kj::mv(KJ_ASSERT_NONNULL(result.value).proxyTask);
+  }
+
+  // Destroy the outer promise. At one time, this caused a segfault ... or at least it produced
+  // invalid accesses under valgrind. :/
+  outerNode = nullptr;
+}
+
 }  // namespace
 }  // namespace workerd::api
