@@ -205,11 +205,11 @@ public:
 
   static jsg::Ref<TextEncoder> constructor();
 
-  v8::Local<v8::Uint8Array> encode(jsg::Lock& js, jsg::Optional<v8::Local<v8::String>> input);
+  jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<v8::Local<v8::String>> input);
 
   EncodeIntoResult encodeInto(jsg::Lock& js,
                               v8::Local<v8::String> input,
-                              v8::Local<v8::Uint8Array> buffer);
+                              jsg::BufferSource buffer);
 
   kj::StringPtr getEncoding() { return "utf-8"; }
   // UTF-8 is the only encoding type supported by the WHATWG spec.
