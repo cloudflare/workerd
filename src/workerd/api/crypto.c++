@@ -635,23 +635,18 @@ bool SubtleCrypto::timingSafeEqual(kj::Array<kj::byte> a, kj::Array<kj::byte> b)
 // =======================================================================================
 // Crypto implementation
 
-v8::Local<v8::ArrayBufferView> Crypto::getRandomValues(v8::Local<v8::ArrayBufferView> bufferView) {
+jsg::BufferSource Crypto::getRandomValues(jsg::BufferSource buffer) {
   // NOTE: TypeMismatchError is deprecated (obviated by TypeError), but the spec and W3C tests still
   //   expect a TypeMismatchError here.
-  JSG_REQUIRE(
-      bufferView->IsInt8Array() || bufferView->IsUint8Array() || bufferView->IsUint8ClampedArray()
-          || bufferView->IsInt16Array() || bufferView->IsUint16Array()
-          || bufferView->IsInt32Array() || bufferView->IsUint32Array()
-          || bufferView->IsBigInt64Array() || bufferView->IsBigUint64Array(),
-      DOMTypeMismatchError, "ArrayBufferView argument to getRandomValues() must be an "
-      "integer-typed view.");
-
-  auto buffer = jsg::asBytes(bufferView);
-  JSG_REQUIRE(buffer.size() <= 0x10000, DOMQuotaExceededError,
-      "getRandomValues() only accepts buffers of size <= 64K but provided ", buffer.size(),
-      " bytes.");
-  IoContext::current().getEntropySource().generate(buffer);
-  return bufferView;
+  JSG_REQUIRE(buffer.isIntegerType(),
+              DOMTypeMismatchError,
+              "ArrayBufferView argument to getRandomValues() must be an integer-typed view.");
+  JSG_REQUIRE(buffer.size() <= 0x10000,
+              DOMQuotaExceededError,
+              "getRandomValues() only accepts buffers of size <= 64K but provided ",
+              buffer.size(), " bytes.");
+  IoContext::current().getEntropySource().generate(buffer.asArrayPtr());
+  return kj::mv(buffer);
 }
 
 kj::String Crypto::randomUUID() {
