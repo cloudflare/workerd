@@ -197,7 +197,7 @@ KJ_TEST("ValueQueue with single consumer") {
 
   prp.promise.then(js, readContinuation);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ValueQueue with multiple consumers") {
@@ -263,7 +263,7 @@ KJ_TEST("ValueQueue with multiple consumers") {
   read(js, consumer1).then(js, read1Continuation)
                      .then(js, read2Continuation);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 
   // Closing the queue causes both consumers to be closed...
   queue.close(js);
@@ -276,7 +276,7 @@ KJ_TEST("ValueQueue with multiple consumers") {
   read(js, consumer1).then(js, close1Continuation)
                      .then(js, close2Continuation);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ValueQueue consumer with multiple-reads") {
@@ -313,7 +313,7 @@ KJ_TEST("ValueQueue consumer with multiple-reads") {
 
   queue.close(js);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ValueQueue errors consumer with multiple-reads") {
@@ -335,7 +335,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
 
   queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8StrIntern(js.v8Isolate, "boom"_kj))));
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ValueQueue with multiple consumers with pending reads") {
@@ -371,7 +371,7 @@ KJ_TEST("ValueQueue with multiple consumers with pending reads") {
 
   queue.push(js, getEntry(js, 2));
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 #pragma endregion ValueQueue Tests
@@ -481,7 +481,7 @@ KJ_TEST("ByteQueue with single consumer") {
 
   prp.promise.then(js, readContinuation);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with single byob consumer") {
@@ -536,7 +536,7 @@ KJ_TEST("ByteQueue with single byob consumer") {
   KJ_ASSERT(queue.size() == 0);
   KJ_ASSERT(consumer.size() == 0);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with byob consumer and default consumer") {
@@ -594,7 +594,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
   KJ_ASSERT(consumer1.size() == 0);
   KJ_ASSERT(consumer2.size() == 3);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 
   MustCall<ReadContinuation> read2Continuation([&](jsg::Lock& js, auto&& result) -> auto {
     KJ_ASSERT(!result.done);
@@ -625,7 +625,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
   ));
   prp2.promise.then(js, read2Continuation);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple byob consumers") {
@@ -682,7 +682,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
   KJ_ASSERT(nextPending->isInvalidated());
   KJ_ASSERT(queue.nextPendingByobReadRequest() == nullptr);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple byob consumers") {
@@ -739,7 +739,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
   KJ_ASSERT(nextPending->isInvalidated());
   KJ_ASSERT(queue.nextPendingByobReadRequest() == nullptr);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
@@ -822,7 +822,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
     respond(js, *pending);
   }
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
@@ -904,7 +904,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
     respond(js, *pending);
   }
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with default consumer with atLeast") {
@@ -994,7 +994,7 @@ KJ_TEST("ByteQueue with default consumer with atLeast") {
   // It will be read once the microtask queue is drained.
   KJ_ASSERT(queue.size() == 1);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
@@ -1104,7 +1104,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (same rate)") {
   // It will be read once the microtask queue is drained.
   KJ_ASSERT(queue.size() == 1);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)") {
@@ -1236,7 +1236,7 @@ KJ_TEST("ByteQueue with multiple default consumers with atLeast (different rate)
   KJ_ASSERT(queue.desiredSize() = 1);
   KJ_ASSERT(queue.size() == 1);
 
-  js.v8Isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 }
 
 #pragma endregion ByteQueue Tests

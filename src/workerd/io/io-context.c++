@@ -1169,16 +1169,17 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
     // block I/O, so why should a script in a promise loop not? If scripts want to use 100% of
     // CPU but also receive I/O as it arrives, we should offer some API to explicitly request
     // polling for I/O.
+    jsg::Lock& js = workerLock;
 
     if (gotTermination) {
       // We already consumed the termination pseudo-exception, so if we call RunMicrotasks() now,
       // they will run with no limit. But if we call TerminateExecution() again now, it will
       // conveniently cause RunMicrotasks() to terminate _right after_ dequeuing the contents of
       // the task queue, which is perfect, because it effectively cancels them all.
-      workerLock.getIsolate()->TerminateExecution();
+      js.terminateExecution();
     }
 
-    workerLock.getIsolate()->PerformMicrotaskCheckpoint();
+    js.runMicrotasks();
   });
 
   v8::TryCatch tryCatch(workerLock.getIsolate());

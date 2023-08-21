@@ -319,7 +319,7 @@ void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
 
   jsg::check(module->InstantiateModule(context, &resolveCallback));
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
-  isolate->PerformMicrotaskCheckpoint();
+  js.runMicrotasks();
 
   switch (prom->State()) {
     case v8::Promise::kPending:

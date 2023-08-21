@@ -77,7 +77,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
       KJ_FAIL_ASSERT("Should not have been called");
     });
 
-    js.v8Isolate->PerformMicrotaskCheckpoint();
+    js.runMicrotasks();
 
     KJ_ASSERT(finished);
 
@@ -97,7 +97,7 @@ struct GeneratorContext: public Object, public ContextGlobal {
       return js.resolvedPromise();
     });
 
-    js.v8Isolate->PerformMicrotaskCheckpoint();
+    js.runMicrotasks();
 
     return count;
   }

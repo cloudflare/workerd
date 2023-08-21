@@ -2236,11 +2236,11 @@ public:
     // Run microtasks in case the user made an async call.
     if (maybeLimitError == nullptr) {
       auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, maybeLimitError);
-      lock->v8Isolate->PerformMicrotaskCheckpoint();
+      lock->runMicrotasks();
     } else {
       // Oops, we already exceeded the limit, so force the microtask queue to be thrown away.
-      lock->v8Isolate->TerminateExecution();
-      lock->v8Isolate->PerformMicrotaskCheckpoint();
+      lock->terminateExecution();
+      lock->runMicrotasks();
     }
 
     KJ_IF_MAYBE(limitError, maybeLimitError) {

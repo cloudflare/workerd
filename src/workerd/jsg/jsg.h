@@ -2168,6 +2168,9 @@ public:
   JS_V8_SYMBOLS(V)
 #undef V
 
+  void runMicrotasks();
+  void terminateExecution();
+
 private:
   friend class IsolateBase;
   template <typename TypeWrapper>
