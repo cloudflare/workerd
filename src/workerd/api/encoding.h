@@ -67,7 +67,7 @@ class Decoder {
 public:
   virtual ~Decoder() noexcept(true) {}
   virtual Encoding getEncoding() = 0;
-  virtual kj::Maybe<v8::Local<v8::String>> decode(
+  virtual kj::Maybe<jsg::JsString> decode(
       jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) = 0;
@@ -85,7 +85,7 @@ public:
 
   Encoding getEncoding() override { return Encoding::Windows_1252; }
 
-  kj::Maybe<v8::Local<v8::String>> decode(
+  kj::Maybe<jsg::JsString> decode(
       jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) override;
@@ -105,7 +105,7 @@ public:
 
   Encoding getEncoding() override { return encoding; }
 
-  kj::Maybe<v8::Local<v8::String>> decode(
+  kj::Maybe<jsg::JsString> decode(
       jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> buffer,
       bool flush = false) override;
@@ -147,9 +147,9 @@ public:
       jsg::Optional<kj::String> label,
       jsg::Optional<ConstructorOptions> options);
 
-  v8::Local<v8::String> decode(jsg::Lock& js,
-                               jsg::Optional<kj::Array<const kj::byte>> input,
-                               jsg::Optional<DecodeOptions> options);
+  jsg::JsString decode(jsg::Lock& js,
+                       jsg::Optional<kj::Array<const kj::byte>> input,
+                       jsg::Optional<DecodeOptions> options);
 
   kj::StringPtr getEncoding();
 
@@ -174,10 +174,9 @@ public:
   explicit TextDecoder(DecoderImpl decoder, const ConstructorOptions& options)
       : decoder(kj::mv(decoder)), ctorOptions(options) {}
 
-  kj::Maybe<v8::Local<v8::String>> decodePtr(
-      jsg::Lock& js,
-      kj::ArrayPtr<const kj::byte> buffer,
-      bool flush);
+  kj::Maybe<jsg::JsString> decodePtr(jsg::Lock& js,
+                                     kj::ArrayPtr<const kj::byte> buffer,
+                                     bool flush);
 
 private:
   Decoder& getImpl();
@@ -205,10 +204,10 @@ public:
 
   static jsg::Ref<TextEncoder> constructor();
 
-  jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<v8::Local<v8::String>> input);
+  jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 
   EncodeIntoResult encodeInto(jsg::Lock& js,
-                              v8::Local<v8::String> input,
+                              jsg::JsString input,
                               jsg::BufferSource buffer);
 
   kj::StringPtr getEncoding() { return "utf-8"; }

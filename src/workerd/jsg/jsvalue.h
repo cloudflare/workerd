@@ -216,6 +216,14 @@ public:
       Lock& js,
       WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
 
+  struct WriteIntoStatus {
+    int read;
+    int written;
+  };
+  WriteIntoStatus writeInto(Lock& js,
+                            kj::ArrayPtr<char> buffer,
+                            WriteOptions options = WriteOptions::NONE) const;
+
   using JsBase<v8::String, JsString>::JsBase;
 };
 

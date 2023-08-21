@@ -161,6 +161,21 @@ bool JsString::operator==(const JsString& other) const {
   return inner->StringEquals(other.inner);
 }
 
+JsString::WriteIntoStatus JsString::writeInto(
+    Lock& js,
+    kj::ArrayPtr<char> buffer,
+    WriteOptions options) const {
+  WriteIntoStatus result = { 0, 0 };
+  if (buffer.size() > 0) {
+    result.written = inner->WriteUtf8(js.v8Isolate,
+                                      buffer.begin(),
+                                      buffer.size(),
+                                      &result.read,
+                                      options);
+  }
+  return result;
+}
+
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
   if (result->IsNullOrUndefined()) return nullptr;
