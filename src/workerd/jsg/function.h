@@ -433,7 +433,7 @@ public:
 
         v8::Local<v8::Value> result;
         if (args.size() > 0) {
-          KJ_STACK_ARRAY(v8::Local<v8::Value>, argv, args.size(), 20, 20);
+          kj::SmallArray<v8::Local<v8::Value>, 20> argv(args.size());
           for (size_t n = 0; n < args.size(); n++) {
             argv[n] = args[n].getHandle(js);
           }
