@@ -39,8 +39,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
     auto v8Context = isolateLock.newContext<ActorStateContext>().getHandle(isolateLock);
     auto contextScope = isolateLock.enterContextScope(v8Context);
 
-    auto trueVal = v8::True(isolateLock.v8Isolate);
-    auto buf = serializeV8Value(isolateLock, trueVal);
+    auto buf = serializeV8Value(isolateLock, isolateLock.boolean(true));
 
     // Confirm that a version header is appropriately written and that it contains the expected
     // current version. When the version increases, we need to write a v8 patch that allows it to
@@ -56,7 +55,7 @@ KJ_TEST("v8 serialization version tag hasn't changed") {
     KJ_EXPECT(deserializer.GetWireFormatVersion() == 15);
 
     // Just for kicks, make sure it deserializes properly too.
-    KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, buf)->IsTrue());
+    KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, buf).isTrue());
   });
 }
 
@@ -77,7 +76,7 @@ KJ_TEST("we support deserializing up to v15") {
 
     for (const auto& hexStr : testCases) {
       auto dataIn = kj::decodeHex(hexStr.asArray());
-      KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, dataIn)->IsTrue());
+      KJ_EXPECT(deserializeV8Value(isolateLock, "some-key"_kj, dataIn).isTrue());
     }
   });
 }
@@ -89,13 +88,13 @@ KJ_TEST("we support deserializing up to v15") {
 // data and round-trip it back to storage to deal with the problem that it likes to read in "sparse"
 // JS arrays and write them back out as "dense" JS arrays, which breaks the equality check after
 // round-tripping a value.
-v8::Local<v8::Value> oldDeserializeV8Value(
+jsg::JsValue oldDeserializeV8Value(
     jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf) {
   v8::ValueDeserializer deserializer(js.v8Isolate, buf.begin(), buf.size());
   auto maybeValue = deserializer.ReadValue(js.v8Context());
   v8::Local<v8::Value> value;
   KJ_ASSERT(maybeValue.ToLocal(&value));
-  return kj::mv(value);
+  return jsg::JsValue(value);
 }
 
 KJ_TEST("wire format version does not change deserialization behavior on real data") {
