@@ -10,8 +10,8 @@
 
 namespace workerd::server {
 
+// An ApiIsolate implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApiIsolate final: public Worker::ApiIsolate {
-  // An ApiIsolate implementation with support for all the APIs supported by the OSS runtime.
 public:
   WorkerdApiIsolate(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
@@ -34,9 +34,8 @@ public:
       Worker::ValidationErrorReporter& errorReporter,
       capnp::List<config::Extension>::Reader extensions);
 
+  // A pipeline-level binding.
   struct Global {
-    // A pipeline-level binding.
-    //
     // TODO(cleanup): Get rid of this and just load from config.Worker.bindings capnp structure
     //   directly.
 

@@ -40,14 +40,13 @@ kj::Own<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocati
   return capnp::clone(root.asReader());
 }
 
+// Accept an indented block of text and remove the indentation. From each line of text, this will
+// remove a number of spaces up to the indentation of the first line.
+//
+// This is intended to allow multi-line raw text to be specified conveniently using C++11
+// `R"(blah)"` literal syntax, without the need to mess up indentation relative to the
+// surrounding code.
 kj::String operator "" _blockquote(const char* str, size_t n) {
-  // Accept an indented block of text and remove the indentation. From each line of text, this will
-  // remove a number of spaces up to the indentation of the first line.
-  //
-  // This is intended to allow multi-line raw text to be specified conveniently using C++11
-  // `R"(blah)"` literal syntax, without the need to mess up indentation relative to the
-  // surrounding code.
-
   kj::StringPtr text(str, n);
 
   // Ignore a leading newline so that `R"(` can be placed on the line before the initial indent.
@@ -129,9 +128,8 @@ public:
     recvHttp200(expectedResponse, loc);
   }
 
+  // Return true if the stream is at EOF.
   bool isEof() {
-    // Return true if the stream is at EOF.
-
     if (premature != nullptr) {
       // We still have unread data so we're definitely not at EOF.
       return false;
@@ -160,8 +158,8 @@ private:
   kj::WaitScope& ws;
   kj::Own<kj::AsyncIoStream> stream;
 
-  kj::Maybe<char> premature;
   // isEof() may prematurely read a character. Keep it off to the side for the next actual read.
+  kj::Maybe<char> premature;
 
   kj::String readAllAvailable() {
     kj::Vector<char> buffer(256);
@@ -233,9 +231,8 @@ public:
     }
   }
 
+  // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
-    // Start the server. Call before connect().
-
     KJ_REQUIRE(runTask == nullptr);
     auto task = server.run(v8System, *config, kj::mv(drainWhen))
         .eagerlyEvaluate([](kj::Exception&& e) {
@@ -245,29 +242,26 @@ public:
     runTask = kj::mv(task);
   }
 
+  // Call instead of `start()` when the config is expected to produce errors. The parameter is
+  // the expected list of errors messages, one per line.
   void expectErrors(kj::StringPtr expected) {
-    // Call instead of `start()` when the config is expected to produce errors. The parameter is
-    // the expected list of errors messages, one per line.
-
     expectedErrors = expected;
     server.run(v8System, *config).poll(ws);
     KJ_EXPECT(expectedErrors == nullptr, "some expected errors weren't seen");
   }
 
+  // Connect to the server on the given address. The string just has to match what is in the
+  // config; the actual connection is in-memory with no network involved.
   TestStream connect(kj::StringPtr addr) {
-    // Connect to the server on the given address. The string just has to match what is in the
-    // config; the actual connection is in-memory with no network involved.
-
     return TestStream(ws, KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().wait(ws));
   }
 
+  // Expect an incoming connection on the given address and from a network with the given
+  // allowed / denied peer list.
   TestStream receiveSubrequest(kj::StringPtr addr,
       kj::ArrayPtr<const kj::StringPtr> allowedPeers = nullptr,
       kj::ArrayPtr<const kj::StringPtr> deniedPeers = nullptr,
       kj::SourceLocation loc = {}) {
-    // Expect an incoming connection on the given address and from a network with the given
-    // allowed / denied peer list.
-
     auto expectedFilter = peerFilterToString(allowedPeers, deniedPeers);
 
     auto promise = getSubrequestQueue(addr).pop();
@@ -321,8 +315,8 @@ private:
   // ---------------------------------------------------------------------------
   // implements Network
 
-  kj::HashMap<kj::String, kj::Own<kj::NetworkAddress>> sockets;
   // Addresses that the server is listening on.
+  kj::HashMap<kj::String, kj::Own<kj::NetworkAddress>> sockets;
 
   class MockNetwork;
 
@@ -331,8 +325,8 @@ private:
     kj::StringPtr peerFilter;
   };
   using SubrequestQueue = kj::ProducerConsumerQueue<SubrequestInfo>;
-  kj::HashMap<kj::String, kj::Own<SubrequestQueue>> subrequests;
   // Expected incoming connections and callbacks that should be used to handle them.
+  kj::HashMap<kj::String, kj::Own<SubrequestQueue>> subrequests;
 
   SubrequestQueue& getSubrequestQueue(kj::StringPtr addr) {
     return *subrequests.findOrCreate(addr, [&]() -> decltype(subrequests)::Entry {

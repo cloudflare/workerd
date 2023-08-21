@@ -40,23 +40,23 @@ struct ActorKey {
 
 inline uint KJ_HASHCODE(const ActorKey& k) { return kj::hashCode(k.uniqueKey, k.actorId); }
 
+// Allows scheduling alarm executions at specific times, returning a promise representing
+// the completion of the alarm event.
 class AlarmScheduler final : kj::TaskSet::ErrorHandler {
-  // Allows scheduling alarm executions at specific times, returning a promise representing
-  // the completion of the alarm event.
 public:
   static constexpr auto RETRY_START_SECONDS = WorkerInterface::ALARM_RETRY_START_SECONDS;
 
-  static constexpr auto RETRY_MAX_TRIES = WorkerInterface::ALARM_RETRY_MAX_TRIES;
   // Max number of "valid" retry attempts, i.e the worker returned an error
+  static constexpr auto RETRY_MAX_TRIES = WorkerInterface::ALARM_RETRY_MAX_TRIES;
 
-  static constexpr auto RETRY_BACKOFF_MAX = 9;
   // Bound for exponential backoff when RETRY_MAX_TRIES is exceeded due to internal errors.
   // 2 << 9 is 1024 seconds, about 17 minutes. Total time spent in retries once the backoff limit
   // is reached is over 30 minutes.
+  static constexpr auto RETRY_BACKOFF_MAX = 9;
 
-  static constexpr auto RETRY_JITTER_FACTOR = 0.25;
   // How much jitter should be applied to retry times to avoid bundled retries overloading
   // some common dependency between a set of failed alarms
+  static constexpr auto RETRY_JITTER_FACTOR = 0.25;
 
   using GetActorFn = kj::Function<kj::Own<WorkerInterface>(kj::String)>;
 

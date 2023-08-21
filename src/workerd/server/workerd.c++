@@ -97,12 +97,12 @@ auto cliMethod(Func&& func) {
   };
 }
 
-#define CLI_METHOD(name) cliMethod(KJ_BIND_METHOD(*this, name))
 // Pass to MainBuilder when a function returning kj::MainBuilder::Validity is needed, implemented
 // by a method of this class.
+#define CLI_METHOD(name) cliMethod(KJ_BIND_METHOD(*this, name))
 
-#define CLI_ERROR(...) throw CliError(kj::str(__VA_ARGS__))
 // Throws an exception that is caught and reported as a usage error.
+#define CLI_ERROR(...) throw CliError(kj::str(__VA_ARGS__))
 
 constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
   .traversalLimitInWords = kj::maxValue
@@ -114,9 +114,8 @@ constexpr capnp::ReaderOptions CONFIG_READER_OPTIONS = {
 
 #if __linux__
 
+// Class which uses inotify to watch a set of files and alert when they change.
 class FileWatcher {
-  // Class which uses inotify to watch a set of files and alert when they change.
-
 public:
   FileWatcher(kj::UnixEventPort& port)
       : inotifyFd(makeInotify()),
@@ -125,7 +124,7 @@ public:
   bool isSupported() { return true; }
 
   void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
-    // `file` is provided if available. The Linux implemnetation doesn't use it.
+    // `file` is provided if available. The Linux implementation doesn't use it.
 
     auto pathStr = path.parent().toNativeString(true);
 
@@ -194,18 +193,17 @@ private:
 
 #elif WORKERD_USE_KQUEUE_FOR_FILE_WATCHER
 
+// Class which uses inotify to watch a set of files and alert when they change.
+//
+// This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
+// to watching whole directory trees, since it must keep a file descriptor opne for each watched
+// file. However, for our use case, we don't really want to watch a directory tree anyway, we
+// want to watch the specific set of files which were opened while parsing the config. This is
+// not so bad, probably.
+//
+// Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
+// can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
 class FileWatcher {
-  // Class which uses inotify to watch a set of files and alert when they change.
-  //
-  // This version uses kqueue to watch for changes in files. kqueue typically doesn't scale well
-  // to watching whole directory trees, since it must keep a file descriptor opne for each watched
-  // file. However, for our use case, we don't really want to watch a directory tree anyway, we
-  // want to watch the specific set of files which were opened while parsing the config. This is
-  // not so bad, probably.
-  //
-  // Apple provides the FSEvents API as an alternative, but it seems way more complicated and I
-  // can't tell if it would provide a real advantage. Plus, kqueue works on BSD systems.
-
 public:
   FileWatcher(kj::UnixEventPort& port)
       : kqueueFd(makeKqueue()),
@@ -297,9 +295,8 @@ private:
 
 #else
 
+// Dummy FileWatcher implementation for operating systems that aren't supported yet.
 class FileWatcher {
-  // Dummy FileWatcher implementation for operating systems that aren't supported yet.
-
 public:
   FileWatcher(kj::UnixEventPort& port) {}
 
@@ -317,13 +314,12 @@ private:
 
 kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name);
 
+// Callbacks for capnp::SchemaFileLoader. Implementing this interface lets us control import
+// resolution, which we want to do mainly so that we can set watches on all imported files.
+//
+// These callbacks also give us more control over error reporting, in particular the ability
+// to not throw an exception on the first error seen.
 class SchemaFileImpl final: public capnp::SchemaFile {
-  // Callbacks for capnp::SchemaFileLoader. Implementing this interface lets us control import
-  // resolution, which we want to do mainly so that we can set watches on all imported files.
-  //
-  // These callbacks also give us more control over error reporting, in particular the ability
-  // to not throw an exception on the first error seen.
-
 public:
   class ErrorReporter {
   public:
@@ -412,33 +408,33 @@ private:
   const kj::Directory& root;
   kj::PathPtr current;
 
-  kj::Path fullPath;
   // Full path from root of filesystem to the file.
+  kj::Path fullPath;
 
-  kj::PathPtr basePath;
   // If this file was reached by scanning `importPath`, `basePath` is the particular import path
   // directory that was used, otherwise it is empty. `basePath` is always a prefix of `fullPath`.
+  kj::PathPtr basePath;
 
-  kj::ArrayPtr<const kj::Path> importPath;
   // Paths to search for absolute imports.
+  kj::ArrayPtr<const kj::Path> importPath;
 
   kj::Own<const kj::ReadableFile> file;
   kj::String displayName;
 
-  mutable kj::Maybe<FileWatcher&> watcher;
   // Mutable because the SchemaParser interface forces us to make all our methods `const` so that
   // parsing can happen on multiple threads, but we do not actually use multiple threads for
   // parsing, so we're good.
+  mutable kj::Maybe<FileWatcher&> watcher;
 
   ErrorReporter& errorReporter;
 };
 
+// A schema file whose text is embedded into the binary for convenience.
+//
+// TODO(someday): Could `capnp::SchemaParser` be updated such that it can use the compiled-in
+//   schema nodes rather than re-parse the file from scratch? This is tricky as some information
+//   is lost after compilation which is needed to compile dependents, e.g. aliases are erased.
 class BuiltinSchemaFileImpl final: public capnp::SchemaFile {
-  // A schema file whose text is embedded into the binary for convenience.
-  //
-  // TODO(someday): Could `capnp::SchemaParser` be updated such that it can use the compiled-in
-  //   schema nodes rather than re-parse the file from scratch? This is tricky as some information
-  //   is lost after compilation which is needed to compile dependents, e.g. aliases are erased.
 public:
   BuiltinSchemaFileImpl(kj::StringPtr name, kj::StringPtr content)
       : name(name), content(content) {}
@@ -1142,9 +1138,10 @@ private:
 
   Server server;
 
+  // This is a randomly-generated 128-bit number that identifies when a binary has been compiled
+  // with a specific config in order to run stand-alone.
   static constexpr uint64_t COMPILED_MAGIC_SUFFIX[2] = {
-    // This is a randomly-generated 128-bit number that identifies when a binary has been compiled
-    // with a specific config in order to run stand-alone. The layout of such a binary is:
+    // The layout of such a binary is:
     //
     // - Binary executable data (copy of the Workers Runtime binary).
     // - Padding to 8-byte boundary.
@@ -1266,10 +1263,9 @@ private:
     KJ_UNIMPLEMENTED("Watching is not yet implemented on Windows");
   }
 #else
+  // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
+  // down, in case there's a bunch of changes all at once.
   kj::Promise<void> waitForChanges(FileWatcher& watcher) {
-    // Wait for the FileWatcher to report a change, and then wait a moment for changes to settle
-    // down, in case there's a bunch of changes all at once.
-
     co_await watcher.onChange();
 
     // Saw our first change!

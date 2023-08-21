@@ -37,9 +37,8 @@ struct PemData {
   kj::Array<byte> data;
 };
 
+// Decode PEM format using OpenSSL helpers.
 static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
-  // Decode PEM format using OpenSSL helpers.
-  //
   // TODO(cleanup): Should this be part of the KJ TLS library? We don't technically use it for TLS.
   //   Maybe KJ should have a general crypto library that wraps OpenSSL?
 
@@ -69,9 +68,8 @@ static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
   return PemData { kj::String(kj::mv(nameArr)), kj::mv(data) };
 }
 
+// Returns a time string in the format HTTP likes to use.
 static kj::String httpTime(kj::Date date) {
-  // Returns a time string in the format HTTP likes to use.
-
   time_t time = (date - kj::UNIX_EPOCH) / kj::SECONDS;
 #if _WIN32
   // `gmtime` is thread-safe on Windows: https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/gmtime-gmtime32-gmtime64?view=msvc-170#return-value
@@ -115,9 +113,9 @@ static kj::Vector<char> escapeJsonString(kj::StringPtr text) {
   return escaped;
 }
 
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes.
 class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
-  // An ActorStorage implementation which will always respond to reads as if the state is empty,
-  // and will fail any writes.
 public:
   kj::Promise<void> get(GetContext context) override {
     return kj::READY_NOW;
@@ -193,16 +191,16 @@ struct Server::GlobalContext {
 
 class Server::Service {
 public:
-  virtual void link() {}
   // Cross-links this service with other services. Must be called once before `startRequest()`.
+  virtual void link() {}
 
-  virtual kj::Own<WorkerInterface> startRequest(
-      IoChannelFactory::SubrequestMetadata metadata) = 0;
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
+  virtual kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata) = 0;
 
-  virtual bool hasHandler(kj::StringPtr handlerName) = 0;
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
+  virtual bool hasHandler(kj::StringPtr handlerName) = 0;
 };
 
 // =======================================================================================
@@ -285,9 +283,8 @@ kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
 
 // =======================================================================================
 
+// Helper to apply config::HttpOptions.
 class Server::HttpRewriter {
-  // Helper to apply config::HttpOptions.
-  //
   // TODO(beta): Do we want to automatically add `Date`, `Server` (to outgoing responses),
   //   `User-Agent` (to outgoing requests), etc.?
 
@@ -315,9 +312,8 @@ public:
         || !requestInjector.empty();
   }
 
+  // Attach this to the promise returned by request().
   struct Rewritten {
-    // Attach this to the promise returned by request().
-
     kj::Own<kj::HttpHeaders> headers;
     kj::String ownUrl;
   };
@@ -436,9 +432,8 @@ private:
 
 // =======================================================================================
 
+// Service used when the service's config is invalid.
 class Server::InvalidConfigService final: public Service {
-  // Service used when the service's config is invalid.
-
 public:
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     JSG_FAIL_REQUIRE(Error, "Service cannot handle requests because its config is invalid.");
@@ -449,16 +444,15 @@ public:
   }
 };
 
+// Return a fake Own pointing to the singleton.
 kj::Own<Server::Service> Server::makeInvalidConfigService() {
-  // Return a fake Own pointing to the singleton.
   return { invalidConfigServiceSingleton.get(), kj::NullDisposer::instance };
 }
 
+// A NetworkAddress whose connect() method waits for a Promise<NetworkAddress> and then forwards
+// to it. Used by ExternalHttpService so that we don't have to wait for DNS lookup before the
+// server can start.
 class PromisedNetworkAddress final: public kj::NetworkAddress {
-  // A NetworkAddress whose connect() method waits for a Promise<NetworkAddress> and then forwards
-  // to it. Used by ExternalHttpService so that we don't have to wait for DNS lookup before the
-  // server can start.
-  //
   // TODO(cleanup): kj::Network should be extended with a new version of parseAddress() which does
   //   not do DNS lookup immediately, and therefore can return a NetworkAddress synchronously.
   //   In fact, this version should be designed to redo the DNS lookup periodically to see if it
@@ -503,9 +497,8 @@ private:
   kj::Maybe<kj::Own<kj::NetworkAddress>> addr;
 };
 
+// Service used when the service is configured as external HTTP service.
 class Server::ExternalHttpService final: public Service {
-  // Service used when the service is configured as external HTTP service.
-
 public:
   ExternalHttpService(kj::Own<kj::NetworkAddress> addrParam,
                       kj::Own<HttpRewriter> rewriter, kj::HttpHeaderTable& headerTable,
@@ -651,9 +644,8 @@ kj::Own<Server::Service> Server::makeExternalService(
   return makeInvalidConfigService();
 }
 
+// Service used when the service is configured as network service.
 class Server::NetworkService final: public Service, private WorkerInterface {
-  // Service used when the service is configured as network service.
-
 public:
   NetworkService(kj::HttpHeaderTable& headerTable,
                  kj::Timer& timer, kj::EntropySource& entropySource,
@@ -731,9 +723,8 @@ kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf
                                   kj::mv(restrictedNetwork), kj::mv(tlsNetwork), tlsContext);
 }
 
+// Service used when the service is configured as disk directory service.
 class Server::DiskDirectoryService final: public Service, private WorkerInterface {
-  // Service used when the service is configured as disk directory service.
-
 public:
   DiskDirectoryService(config::DiskDirectory::Reader conf,
                        kj::Own<const kj::Directory> dir,
@@ -1014,18 +1005,17 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
 
 // =======================================================================================
 
+// This class exists to update the InspectorService's table of isolates when a config
+// has multiple services. The InspectorService exists on the stack of it's own thread and
+// initializes state that is bound to the thread, e.g. a http server and an event loop.
+// This class provides a small thread-safe interface to the InspectorService so <name>:<isolate>
+// mappings can be added after the InspectorService has started.
+//
+// The CloudFlare devtools only show the first service in workerd configuration. This service
+// is always contains a users code. However, in packaging user code wrangler may add
+// additional services that also have code. If using Chrome devtools to inspect a workerd,
+// instance all services are visible and can be debugged.
 class Server::InspectorServiceIsolateRegistrar final {
-  // This class exists to update the InspectorService's table of isolates when a config
-  // has multiple services. The InspectorService exists on the stack of it's own thread and
-  // initializes state that is bound to the thread, e.g. a http server and an event loop.
-  // This class provides a small thread-safe interface to the InspectorService so <name>:<isolate>
-  // mappings can be added after the InspectorService has started.
-  //
-  // The CloudFlare devtools only show the first service in workerd configuration. This service
-  // is always contains a users code. However, in packaging user code wrangler may add
-  // additional services that also have code. If using Chrome devtools to inspect a workerd,
-  // instance all services are visible and can be debugged.
-
 public:
   InspectorServiceIsolateRegistrar() {}
   ~InspectorServiceIsolateRegistrar() noexcept(true);
@@ -1046,11 +1036,11 @@ private:
   friend class Server::InspectorService;
 };
 
+// Implements the interface for the devtools inspector protocol.
+//
+// The InspectorService is created when workerd serve is called using the -i option
+// to define the inspector socket.
 class Server::InspectorService final: public kj::HttpService, public kj::HttpServerErrorHandler {
-  // Implements the interface for the devtools inspector protocol.
-  //
-  // The InspectorService is created when workerd serve is called using the -i option
-  // to define the inspector socket.
 public:
   InspectorService(
       kj::Timer& timer,
@@ -1262,8 +1252,8 @@ class Server::WorkerService final: public Service, private kj::TaskSet::ErrorHan
 public:
   class ActorNamespace;
 
+  // I/O channels, delivered when link() is called.
   struct LinkedIoChannels {
-    // I/O channels, delivered when link() is called.
     kj::Array<Service*> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Maybe<Service&> cache;
@@ -1397,14 +1387,14 @@ public:
     kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
     kj::TaskSet onBrokenTasks;
 
+    // Error from `actors.erase()`?
     void taskFailed(kj::Exception&& exception) override {
-      // Error from `actors.erase()`?
       KJ_LOG(ERROR, exception);
     }
 
+    // Implements actor loopback, which is used by websocket hibernation to deliver events to the
+    // actor from the websocket's read loop.
     class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
-      // Implements actor loopback, which is used by websocket hibernation to deliver events to the
-      // actor from the websocket's read loop.
     public:
       Loopback(ActorNamespace& ns, kj::String id) : ns(ns), id(kj::mv(id)) {}
 
@@ -1439,11 +1429,10 @@ public:
         return kj::READY_NOW;
       }
 
+      // No-op -- armAlarmHandler() is normally used to schedule a delete after the alarm runs.
+      // But since alarm read/write operations happen on the same thread as the scheduler in
+      // workerd, we can just handle the delete in the scheduler instead.
       kj::Maybe<kj::Own<void>> armAlarmHandler(kj::Date, bool) override {
-        // No-op -- armAlarmHandler() is normally used to schedule a delete after the alarm runs.
-        // But since alarm read/write operations happen on the same thread as the scheduler in
-        // workerd, we can just handle the delete in the scheduler instead.
-        //
         // We return this weird kj::Own<void> to `this` since just doing kj::Own<void>() creates an
         // empty maybe.
         return kj::Own<void>(this, kj::NullDisposer::instance);
@@ -1555,8 +1544,8 @@ private:
 
   ThreadContext& threadContext;
 
-  kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
   // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
+  kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
@@ -2086,8 +2075,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     kj::StringPtr name;
 
     kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
-    kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
+
     // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
+    kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
 
     void addError(kj::String error) override {
       server.reportConfigError(kj::str("service ", name, ": ", error));
@@ -2119,8 +2109,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
 
+  // IsolateLimitEnforcer that enforces no limits.
   class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
-    // IsolateLimitEnforcer that enforces no limits.
   public:
     v8::Isolate::CreateParams getCreateParams() override { return {}; }
     void customizeIsolate(v8::Isolate* isolate) override {}
@@ -2588,9 +2578,9 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
       .attach(kj::mv(vfs));
 }
 
+// Configure and start the inspector socket.
 void startInspector(kj::StringPtr inspectorAddress,
                     Server::InspectorServiceIsolateRegistrar& registrar) {
-  // Configure and start the inspector socket.
   kj::Thread thread([inspectorAddress, &registrar](){
     kj::AsyncIoContext io = kj::setupAsyncIo();
 
@@ -2867,10 +2857,9 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
 namespace {
 
+// Implements glob filters. Copied from kj/test.{h,c++}, modified only to avoid copying the
+// pattern in the constructor.
 class GlobFilter {
-  // Implements glob filters. Copied from kj/test.{h,c++}, modified only to avoid copying the
-  // pattern in the constructor.
-  //
   // TODO(cleanup): Should this be a public API in KJ?
 
 public:
