@@ -97,6 +97,18 @@ public:
         checkIsIntegerType<T>());
   }
 
+  using Disposer = void(void*,size_t,void*);
+  template <BufferSourceType T = v8::Uint8Array>
+  static BackingStore wrap(void* data, size_t size, Disposer disposer, void* ctx) {
+    // Creates and returns a BackingStore that wraps an external data pointer
+    // with a custom disposer.
+    return BackingStore(
+        v8::ArrayBuffer::NewBackingStore(data, size, disposer, ctx),
+        size, 0,
+        getBufferSourceElementSize<T>(), construct<T>,
+        checkIsIntegerType<T>());
+  }
+
   explicit BackingStore(
       std::shared_ptr<v8::BackingStore> backingStore,
       size_t byteLength,
@@ -270,6 +282,10 @@ class BufferSource {
   //   };
 
 public:
+  static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
+  static BufferSource wrap(Lock& js, void* data, size_t size,
+                           BackingStore::Disposer disposer, void* ctx);
+
   explicit BufferSource(Lock& js, BackingStore&& backingStore);
   // Create a new BufferSource that takes over ownership of the given BackingStore.
 
@@ -286,12 +302,12 @@ public:
 
   bool canDetach(Lock& js);
 
-  BackingStore detach(Lock& js);
+  BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = nullptr);
   // Removes the BackingStore from the BufferSource and severs its connection to
   // the ArrayBuffer/ArrayBufferView handle.
-  // It's worth mentioning that detach wcan throw application-visible exceptions
+  // It's worth mentioning that detach can throw application-visible exceptions
   // in the case the ArrayBuffer cannot be detached. Any detaching should be
-  // performance as early as possible in an API method implementation.
+  // performed as early as possible in an API method implementation.
 
   v8::Local<v8::Value> getHandle(Lock& js);
 
@@ -340,6 +356,10 @@ public:
     // is created, we record whether or not the type qualifies as an integer type.
     return KJ_ASSERT_NONNULL(maybeBackingStore).isIntegerType();
   }
+
+  void setDetachKey(Lock& js, v8::Local<v8::Value> key);
+  // Sets the detach key that must be provided with the detach(...) method
+  // to successfully detach the backing store.
 
 private:
   Value handle;

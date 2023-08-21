@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "encoding.h"
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/buffersource.h>
 #include <unicode/ucnv.h>
 #include <unicode/utf8.h>
 #include <algorithm>
@@ -480,27 +482,35 @@ jsg::Ref<TextEncoder> TextEncoder::constructor() {
   return jsg::alloc<TextEncoder>();
 }
 
-v8::Local<v8::Uint8Array> TextEncoder::encode(jsg::Lock& js,
-                                              jsg::Optional<v8::Local<v8::String>> input) {
+namespace {
+TextEncoder::EncodeIntoResult encodeIntoImpl(jsg::Lock& js,
+                                             v8::Local<v8::String> input,
+                                             jsg::BufferSource& buffer) {
+  TextEncoder::EncodeIntoResult result{0,0};
+  if (buffer.size() > 0) {
+    auto bytes = buffer.asArrayPtr().asChars();
+    result.written = input->WriteUtf8(js.v8Isolate, bytes.begin(), bytes.size(), &result.read,
+        v8::String::NO_NULL_TERMINATION | v8::String::REPLACE_INVALID_UTF8);
+  }
+  return result;
+}
+}  // namespace
+
+jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<v8::Local<v8::String>> input) {
   auto str = input.orDefault(v8::String::Empty(js.v8Isolate));
-  auto maybeBuffer = v8::ArrayBuffer::MaybeNew(js.v8Isolate, str->Utf8Length(js.v8Isolate));
-  JSG_ASSERT(!maybeBuffer.IsEmpty(), RangeError, "Cannot allocate space for TextEncoder.encode");
-  auto buffer = maybeBuffer.ToLocalChecked();
-  auto view = v8::Uint8Array::New(buffer, 0, buffer->ByteLength());
-  [[maybe_unused]] auto result = encodeInto(js, str, view);
-  KJ_DASSERT(result.written == buffer->ByteLength());
-  KJ_DASSERT(result.read == str->Length());
-  return view;
+  auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str->Utf8Length(js.v8Isolate)),
+                                  RangeError, "Cannot allocate space for TextEncoder.encode");
+  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
+  KJ_DASSERT(result.written == view.size());
+  return kj::mv(view);
 }
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(jsg::Lock& js,
                                                       v8::Local<v8::String> input,
-                                                      v8::Local<v8::Uint8Array> buffer) {
-  EncodeIntoResult result{0,0};
-  auto bytes = jsg::asBytes(buffer.As<v8::ArrayBufferView>()).releaseAsChars();
-  result.written = input->WriteUtf8(js.v8Isolate, bytes.begin(), bytes.size(), &result.read,
-      v8::String::NO_NULL_TERMINATION | v8::String::REPLACE_INVALID_UTF8);
-  return result;
+                                                      jsg::BufferSource buffer) {
+  auto handle = buffer.getHandle(js);
+  JSG_REQUIRE(handle->IsUint8Array(), TypeError, "buffer must be a Uint8Array");
+  return encodeIntoImpl(js, input, buffer);
 }
 
 }  // namespace workerd::api

@@ -83,6 +83,14 @@ bool BackingStore::operator==(const BackingStore& other) {
          byteOffset == other.byteOffset;
 }
 
+kj::Maybe<BufferSource> BufferSource::tryAlloc(Lock& js, size_t size) {
+  v8::Local<v8::ArrayBuffer> buffer;
+  if (v8::ArrayBuffer::MaybeNew(js.v8Isolate, size).ToLocal(&buffer)) {
+    return BufferSource(js, v8::Uint8Array::New(buffer, 0, size).As<v8::Value>());
+  }
+  return nullptr;
+}
+
 BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
     : handle(js.v8Ref(handle)),
       maybeBackingStore(BackingStore(
@@ -99,7 +107,7 @@ BufferSource::BufferSource(
     : handle(createHandle(js, backingStore)),
       maybeBackingStore(kj::mv(backingStore)) {}
 
-BackingStore BufferSource::detach(Lock& js) {
+BackingStore BufferSource::detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey) {
   auto theHandle = handle.getHandle(js);
   JSG_REQUIRE(isDetachable(theHandle),
                TypeError,
@@ -110,10 +118,12 @@ BackingStore BufferSource::detach(Lock& js) {
                                   "This BufferSource has already been detached."));
   maybeBackingStore = nullptr;
 
+  v8::Local<v8::Value> key = maybeKey.orDefault(v8::Local<v8::Value>());
+
   auto buffer = theHandle->IsArrayBuffer() ?
       theHandle.As<v8::ArrayBuffer>() :
       theHandle.As<v8::ArrayBufferView>()->Buffer();
-  jsg::check(buffer->Detach(v8::Local<v8::Value>()));
+  jsg::check(buffer->Detach(key));
 
   return kj::mv(backingStore);
 }
@@ -125,6 +135,19 @@ bool BufferSource::canDetach(Lock& js) {
 
 v8::Local<v8::Value> BufferSource::getHandle(Lock& js) {
   return handle.getHandle(js);
+}
+
+void BufferSource::setDetachKey(Lock& js, v8::Local<v8::Value> key) {
+  auto handle = getHandle(js);
+  auto buffer = handle->IsArrayBuffer() ?
+      handle.As<v8::ArrayBuffer>() :
+      handle.As<v8::ArrayBufferView>()->Buffer();
+  buffer->SetDetachKey(key);
+}
+
+BufferSource BufferSource::wrap(Lock& js, void* data, size_t size,
+                                BackingStore::Disposer disposer, void* ctx) {
+  return BufferSource(js, BackingStore::wrap(data, size, disposer, ctx));
 }
 
 }  // namespace workerd::jsg
