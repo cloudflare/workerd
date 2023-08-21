@@ -142,9 +142,48 @@ struct BuildRtti<Configuration, bool> {
 };
 
 template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsBoolean> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setBoolt(); }
+};
+
+template<typename Configuration>
 struct BuildRtti<Configuration, v8::Value> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
 };
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsValue> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
+};
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsRegExp> {
+  // This isn't really unknown but we currently do not expose these types at all, so
+  // this is ok for now.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
+};
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsMap> {
+  // This isn't really unknown but we currently do not expose these types at all, so
+  // this is ok for now.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
+};
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsSet> {
+  // This isn't really unknown but we currently do not expose these types at all, so
+  // this is ok for now.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
+};
+
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsSymbol> {
+  // This isn't really unknown but we currently do not expose these types at all, so
+  // this is ok for now.
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setUnknown(); }
+};
+
 
 // Numbers
 
@@ -166,7 +205,11 @@ struct BuildRtti<Configuration, T> { \
   F(unsigned long) \
   F(long long) \
   F(unsigned long long) \
-  F(double)
+  F(double) \
+  F(jsg::JsNumber) \
+  F(jsg::JsInt32) \
+  F(jsg::JsUint32) \
+  F(jsg::JsBigInt)
 
 FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
 
@@ -187,7 +230,8 @@ struct BuildRtti<Configuration, T> { \
   F(v8::String) \
   F(ByteString) \
   F(UsvString) \
-  F(UsvStringPtr)
+  F(UsvStringPtr) \
+  F(jsg::JsString)
 
 FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
 
@@ -206,6 +250,11 @@ struct BuildRtti<Configuration, jsg::Object> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setObject(); }
 };
 
+template<typename Configuration>
+struct BuildRtti<Configuration, jsg::JsObject> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) { builder.setObject(); }
+};
+
 // References
 
 template<typename Configuration, typename T>
@@ -217,6 +266,13 @@ struct BuildRtti<Configuration, Ref<T>> {
 
 template<typename Configuration, typename T>
 struct BuildRtti<Configuration, V8Ref<T>> {
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    BuildRtti<Configuration, T>::build(builder, rtti);
+  }
+};
+
+template<typename Configuration, typename T>
+struct BuildRtti<Configuration, JsRef<T>> {
   static void build(Type::Builder builder, Builder<Configuration>& rtti) {
     BuildRtti<Configuration, T>::build(builder, rtti);
   }
@@ -303,6 +359,15 @@ struct BuildRtti<Configuration, T<V>> { \
   F(kj::ArrayPtr) \
   F(jsg::Sequence)
 
+template<typename Configuration> \
+struct BuildRtti<Configuration, jsg::JsArray> { \
+  static void build(Type::Builder builder, Builder<Configuration>& rtti) {
+    auto array = builder.initArray();
+    BuildRtti<Configuration, JsValue>::build(array.initElement(), rtti);
+    array.setName("jsg::JsArray");
+  }
+};
+
 FOR_EACH_ARRAY_TYPE(DECLARE_ARRAY_TYPE)
 
 #undef FOR_EACH_ARRAY_TYPE
@@ -382,7 +447,8 @@ struct BuildRtti<Configuration, T> { \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW) \
   F(v8::ArrayBuffer, BuiltinType::Type::V8_ARRAY_BUFFER) \
   F(v8::Function, BuiltinType::Type::V8_FUNCTION) \
-  F(v8::Uint8Array, BuiltinType::Type::V8_UINT8_ARRAY)
+  F(v8::Uint8Array, BuiltinType::Type::V8_UINT8_ARRAY) \
+  F(jsg::JsDate, BuiltinType::Type::KJ_DATE)
 
 FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
 

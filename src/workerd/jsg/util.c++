@@ -300,9 +300,23 @@ Value Lock::exceptionToJs(kj::Exception&& exception) {
   });
 }
 
+JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
+  return withinHandleScope([&] {
+    JsValue val = JsValue(makeInternalError(v8Isolate, kj::mv(exception)));
+    return val.addRef(*this);
+  });
+}
+
 void Lock::throwException(Value&& exception) {
   withinHandleScope([&] {
     v8Isolate->ThrowException(exception.getHandle(*this));
+  });
+  throw JsExceptionThrown();
+}
+
+void Lock::throwException(const JsValue& exception) {
+  withinHandleScope([&] {
+    v8Isolate->ThrowException(exception);
   });
   throw JsExceptionThrown();
 }
@@ -464,6 +478,12 @@ kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value>
 kj::Exception Lock::exceptionToKj(Value&& exception) {
   return withinHandleScope([&] {
     return createTunneledException(v8Isolate, exception.getHandle(*this));
+  });
+}
+
+kj::Exception Lock::exceptionToKj(const JsValue& exception) {
+  return withinHandleScope([&] {
+    return createTunneledException(v8Isolate, exception);
   });
 }
 

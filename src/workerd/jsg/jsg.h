@@ -1770,6 +1770,40 @@ template <typename T>
 constexpr bool isV8MaybeLocal() { return isV8MaybeLocal((T*)nullptr); }
 
 class AsyncContextFrame;
+template <typename T> class JsRef;
+
+#define JS_V8_SYMBOLS(V) \
+  V(AsyncIterator) \
+  V(HasInstance) \
+  V(IsConcatSpreadable) \
+  V(Iterator) \
+  V(Match) \
+  V(Replace) \
+  V(Search) \
+  V(Split) \
+  V(ToPrimitive) \
+  V(ToStringTag) \
+  V(Unscopables)
+
+class JsValue;
+#define JS_TYPE_CLASSES(V) \
+  V(Object) \
+  V(Boolean) \
+  V(Array) \
+  V(String) \
+  V(Symbol) \
+  V(BigInt) \
+  V(Number) \
+  V(Int32) \
+  V(Uint32) \
+  V(Date) \
+  V(RegExp) \
+  V(Map) \
+  V(Set)
+
+#define V(Name) class Js##Name;
+  JS_TYPE_CLASSES(V)
+#undef V
 
 class Lock {
   // Represents an isolate lock, which allows the current thread to execute JavaScript code within
@@ -1833,6 +1867,10 @@ public:
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
 
+  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
+
+  kj::Exception exceptionToKj(const JsValue& exception);
+
   kj::Exception exceptionToKj(Value&& exception);
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
@@ -1846,6 +1884,8 @@ public:
   [[noreturn]] void throwException(kj::Exception&& exception) {
     throwException(exceptionToJs(kj::mv(exception)));
   }
+
+  [[noreturn]] void throwException(const JsValue& exception);
 
   template <typename Func, typename ErrorHandler>
   auto tryCatch(Func&& func, ErrorHandler&& errorHandler) -> decltype(func()) {
@@ -2063,6 +2103,71 @@ public:
   ContextScope enterContextScope(v8::Local<v8::Context> context);
   // Ensures that we are currently within the scope of the given v8::Context
 
+  // ====================================================================================
+  JsValue undefined() KJ_WARN_UNUSED_RESULT;
+  JsValue null() KJ_WARN_UNUSED_RESULT;
+  JsBoolean boolean(bool val) KJ_WARN_UNUSED_RESULT;
+  JsNumber num(double) KJ_WARN_UNUSED_RESULT;
+  JsNumber num(float) KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int8_t) KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int16_t) KJ_WARN_UNUSED_RESULT;
+  JsInt32 num(int32_t) KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint8_t) KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint16_t) KJ_WARN_UNUSED_RESULT;
+  JsUint32 num(uint32_t) KJ_WARN_UNUSED_RESULT;
+  JsBigInt bigInt(int64_t) KJ_WARN_UNUSED_RESULT;
+  JsBigInt bigInt(uint64_t) KJ_WARN_UNUSED_RESULT;
+  JsString str() KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const char16_t>) KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
+  JsString str(kj::ArrayPtr<const kj::byte>) KJ_WARN_UNUSED_RESULT;
+  JsString strIntern(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::ArrayPtr<const char>) KJ_WARN_UNUSED_RESULT;
+  JsString strExtern(kj::ArrayPtr<const uint16_t>) KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbol(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolShared(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
+  JsSymbol symbolInternal(kj::StringPtr) KJ_WARN_UNUSED_RESULT;
+  JsObject obj() KJ_WARN_UNUSED_RESULT;
+  JsObject map() KJ_WARN_UNUSED_RESULT;
+  JsValue external(void*) KJ_WARN_UNUSED_RESULT;
+  JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
+  JsValue typeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
+  JsValue rangeError(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;
+  JsDate date(double timestamp) KJ_WARN_UNUSED_RESULT;
+  JsDate date(kj::Date date) KJ_WARN_UNUSED_RESULT;
+  JsDate date(kj::StringPtr date) KJ_WARN_UNUSED_RESULT;
+
+  BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+
+  enum RegExpFlags {
+    kNONE = v8::RegExp::Flags::kNone,
+    kGLOBAL = v8::RegExp::Flags::kGlobal,
+    kIGNORE_CASE = v8::RegExp::Flags::kIgnoreCase,
+    kMULTILINE = v8::RegExp::Flags::kMultiline,
+    kSTICKY = v8::RegExp::Flags::kSticky,
+    kUNICODE = v8::RegExp::Flags::kUnicode,
+    kDOTALL = v8::RegExp::Flags::kDotAll,
+    kLINEAR = v8::RegExp::Flags::kLinear,
+    kHAS_INDICES = v8::RegExp::Flags::kHasIndices,
+    kUNICODE_SETS = v8::RegExp::Flags::kUnicodeSets,
+  };
+
+  JsRegExp regexp(kj::StringPtr pattern,
+                  RegExpFlags flags = RegExpFlags::kNONE,
+                  kj::Maybe<uint32_t> backtrackLimit = nullptr)
+                  KJ_WARN_UNUSED_RESULT;
+
+  template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
+  JsArray arr(const Args&...args) KJ_WARN_UNUSED_RESULT;
+
+  template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
+  JsSet set(const Args&...args) KJ_WARN_UNUSED_RESULT;
+
+#define V(Name) JsSymbol symbol##Name() KJ_WARN_UNUSED_RESULT;
+  JS_V8_SYMBOLS(V)
+#undef V
+
 private:
   friend class IsolateBase;
   template <typename TypeWrapper>
@@ -2177,6 +2282,7 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
 }  // namespace workerd::jsg
 
 // These two includes are needed for the JSG type glue macros to work.
+#include "buffersource.h"
 #include "modules.h"
 #include "resource.h"
 #include "dom-exception.h"
@@ -2184,3 +2290,4 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) {
 #include "promise.h"
 #include "function.h"
 #include "iterator.h"
+#include "jsvalue.h"

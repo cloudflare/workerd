@@ -15,6 +15,7 @@
 #include "function.h"
 #include "string.h"
 #include "buffersource.h"
+#include "jsvalue.h"
 #include "web-idl.h"
 
 namespace workerd::jsg {
@@ -338,7 +339,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public ExceptionWrapper<Self>,
                    public ObjectWrapper<Self>,
                    public V8HandleWrapper,
-                   public UnimplementedWrapper {
+                   public UnimplementedWrapper,
+                   public JsValueWrapper<Self> {
   // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
   // values. It primarily implements two methods:
   //
@@ -461,6 +463,7 @@ public:
   USING_WRAPPER(ObjectWrapper<Self>);
   USING_WRAPPER(V8HandleWrapper);
   USING_WRAPPER(UnimplementedWrapper);
+  USING_WRAPPER(JsValueWrapper<Self>);
 #undef USING_WRAPPER
 
   template <typename U>

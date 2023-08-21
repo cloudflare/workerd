@@ -419,13 +419,13 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
     if ((*signal)->getAborted()) {
       auto reason = (*signal)->getReason(js);
       if (!preventCancel) {
-        source.release(js, reason);
+        source.release(js, v8::Local<v8::Value>(reason));
       } else {
         source.release(js);
       }
       if (!preventAbort) {
         return self.abort(js, reason).then(js,
-            JSG_VISITABLE_LAMBDA((this, reason = js.v8Ref(reason), ref = self.addRef()),
+            JSG_VISITABLE_LAMBDA((this, reason = reason.addRef(js), ref = self.addRef()),
                                  (reason, ref), (jsg::Lock& js) {
           return rejectedMaybeHandledPromise<void>(
               js,
@@ -1071,7 +1071,7 @@ jsg::Promise<void> WritableImpl<Self>::abort(
     jsg::Lock& js,
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
-  signal->triggerAbort(js, reason);
+  signal->triggerAbort(js, jsg::JsValue(reason));
 
   // We have to check this again after the AbortSignal is triggered.
   if (state.template is<StreamStates::Closed>() || state.template is<StreamStates::Errored>()) {
