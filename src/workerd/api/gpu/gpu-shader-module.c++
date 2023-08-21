@@ -17,7 +17,7 @@ jsg::Promise<jsg::Ref<GPUCompilationInfo>> GPUShaderModule::getCompilationInfo()
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(kj::addRef(*async_))};
+  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(async_.addRef())};
   shader_.GetCompilationInfo(
       [](WGPUCompilationInfoRequestStatus status, WGPUCompilationInfo const* compilationInfo,
          void* userdata) {

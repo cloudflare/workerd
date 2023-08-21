@@ -55,7 +55,7 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(
   auto obj = kj::heap<WorkerEntrypoint>(kj::Badge<WorkerEntrypoint>(), threadContext,
       waitUntilTasks, tunnelExceptions, entrypointName, kj::mv(cfBlobJson));
   obj->init(kj::mv(worker), kj::mv(actor), kj::mv(limitEnforcer),
-      kj::mv(ioContextDependency), kj::mv(ioChannelFactory), kj::addRef(*metrics),
+      kj::mv(ioContextDependency), kj::mv(ioChannelFactory), metrics.addRef(),
       kj::mv(workerTracer));
   auto& wrapper = metrics->wrapWorkerInterface(*obj);
   return kj::attachRef(wrapper, kj::mv(obj), kj::mv(metrics));
@@ -97,10 +97,10 @@ void WorkerEntrypoint::init(
   kj::Own<IoContext> context;
   KJ_IF_MAYBE(a, actor) {
     KJ_IF_MAYBE(rc, a->get()->getIoContext()) {
-      context = kj::addRef(*rc);
+      context = rc.addRef();
     } else {
       context = newContext();
-      a->get()->setIoContext(kj::addRef(*context));
+      a->get()->setIoContext(context.addRef());
     }
   } else {
     context = newContext();

@@ -126,7 +126,7 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
     jsg::Lock& js,
     jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
   auto readableSide = kj::refcounted<IdentityTransformStreamImpl>();
-  auto writableSide = kj::addRef(*readableSide);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
@@ -150,7 +150,7 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
       "FixedLengthStream requires an integer expected length less than 2^53.");
 
   auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(uint64_t(expectedLength));
-  auto writableSide = kj::addRef(*readableSide);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 

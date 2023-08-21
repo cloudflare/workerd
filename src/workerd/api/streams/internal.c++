@@ -235,8 +235,8 @@ private:
 class WarnIfUnusedStream final: public ReadableStreamSource {
 public:
   explicit WarnIfUnusedStream(kj::Own<ReadableStreamSource> inner, IoContext& ioContext)
-      : worker(kj::atomicAddRef(ioContext.getWorker())),
-        requestMetrics(kj::addRef(ioContext.getMetrics())),
+      : worker(ioContext.getWorker()),
+        requestMetrics(ioContext.getMetrics()),
         inner(kj::mv(inner)) {}
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {

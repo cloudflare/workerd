@@ -324,7 +324,7 @@ public:
   InputGate::Lock getInputLock();
 
   // Get the current CriticalSection, if there is one, or returns null if not.
-  kj::Maybe<kj::Own<InputGate::CriticalSection>> getCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> getCriticalSection();
 
   // Runs `callback` within its own critical section, returning its final result. If `callback`
   // throws, the input lock will break, resetting the actor.
@@ -481,7 +481,7 @@ public:
   };
 
   kj::Own<WeakRef> getWeakRef() {
-    return kj::addRef(*selfRef);
+    return selfRef.addRef();
   }
 
   // If there is a current IoContext, return its WeakRef.
@@ -890,7 +890,7 @@ public:
 private:
   ThreadContext& thread;
 
-  kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
+  kj::Rc<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
@@ -948,7 +948,7 @@ private:
   };
 
   // Object which receives possibly-cross-thread deletions of owned objects.
-  class DeleteQueue: public kj::AtomicRefcounted {
+  class DeleteQueue: public kj::AtomicRefcounted, public kj::ArcAddRefToThis<DeleteQueue> {
   public:
     DeleteQueue()
         : crossThreadDeleteQueue(State { kj::Vector<OwnedObject*>() }) {}
@@ -973,10 +973,10 @@ private:
   // matters a bit, we need to cancel all tasks (destroy the TaskSet) before this happens, so
   // we can't just do it in IoContext's destrucrtor. As a hack, we customize our pointer
   // to the delete queue to get the tear-down order right.
-  class DeleteQueuePtr: public kj::Own<DeleteQueue> {
+  class DeleteQueuePtr: public kj::Arc<DeleteQueue> {
   public:
-    DeleteQueuePtr(kj::Own<DeleteQueue> value)
-        : kj::Own<DeleteQueue>(kj::mv(value)) {}
+    DeleteQueuePtr(kj::Arc<DeleteQueue> value)
+        : kj::Arc<DeleteQueue>(kj::mv(value)) {}
     KJ_DISALLOW_COPY_AND_MOVE(DeleteQueuePtr);
     ~DeleteQueuePtr() noexcept(false) {
       auto ptr = get();
@@ -993,7 +993,7 @@ private:
 
   class PendingEvent;
 
-  kj::Maybe<PendingEvent&> pendingEvent;
+  kj::Maybe<kj::Rc<PendingEvent>> pendingEvent;
   kj::Maybe<kj::Promise<void>> runFinalizersTask;
 
   // Objects pointed to by IoOwn<T>s.
@@ -1144,7 +1144,7 @@ template <typename T>
 class IoPtr {
 public:
   IoPtr(const IoPtr& other)
-      : deleteQueue(kj::atomicAddRef(*other.deleteQueue)), ptr(other.ptr) {}
+      : deleteQueue(other.deleteQueue.addRef()), ptr(other.ptr) {}
   IoPtr(IoPtr&& other) = default;
 
   T* operator->();
@@ -1154,10 +1154,10 @@ public:
 private:
   friend class IoContext;
 
-  kj::Own<const IoContext::DeleteQueue> deleteQueue;
+  kj::Arc<const IoContext::DeleteQueue> deleteQueue;
   T* ptr;
 
-  IoPtr(kj::Own<const IoContext::DeleteQueue> deleteQueue,
+  IoPtr(kj::Arc<const IoContext::DeleteQueue> deleteQueue,
          T* ptr)
       : deleteQueue(kj::mv(deleteQueue)), ptr(ptr) {}
 };
@@ -1442,7 +1442,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   auto fulfiller = kj::refcounted<RefcountedFulfiller>(kj::mv(paf.fulfiller));
 
   auto errorHandler =
-      [fulfiller = addObject(kj::addRef(*fulfiller))]
+      [fulfiller = addObject(fulfiller.addRef())]
       (jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
     // Note: `context` can possibly be different than the one that started the wait, if the
     // promise resolved from a different context. In that case the use of `fulfiller` will
@@ -1514,7 +1514,7 @@ inline IoOwn<T> IoContext::DeleteQueue::addObject(
     ownedObject->finalizer = ref;
   }
 
-  IoOwn<T> result(kj::atomicAddRef(*this),
+  IoOwn<T> result(addRefToThis(),
       static_cast<SpecificOwnedObject<T>*>(ownedObject.get()));
   ownedObjects.link(kj::mv(ownedObject));
   return result;
@@ -1523,7 +1523,7 @@ inline IoOwn<T> IoContext::DeleteQueue::addObject(
 template <typename T>
 inline IoPtr<T> IoContext::addObject(T& obj) {
   requireCurrent();
-  return IoPtr<T>(kj::atomicAddRef(*deleteQueue), &obj);
+  return IoPtr<T>(deleteQueue.addRef(), &obj);
 }
 
 template <typename Func>
@@ -1630,7 +1630,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
     jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
-  auto cs2 = kj::addRef(*cs);
+  auto cs2 = cs.addRef();
 
   typedef jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>> T;
   auto [result, resolver] = js.newPromiseAndResolver<T>();

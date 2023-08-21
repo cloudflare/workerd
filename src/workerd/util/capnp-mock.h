@@ -119,7 +119,7 @@ public:
   template <typename T>
   static Pair<T> make() {
     auto mock = kj::refcounted<MockServer>(capnp::Schema::from<T>());
-    capnp::DynamicCapability::Client client = kj::heap<Server>(*mock);
+    capnp::DynamicCapability::Client client = kj::heap<Server>(mock.addRef());
     return { kj::mv(mock), client.as<T>() };
   }
 
@@ -190,7 +190,7 @@ public:
         if (field.getType().isInterface()) {
           auto name = field.getProto().getName();
           auto mockServer = kj::refcounted<MockServer>(field.getType().asInterface());
-          callResults.set(name, kj::heap<Server>(*mockServer));
+          callResults.set(name, kj::heap<Server>(mockServer.addRef()));
           results.insert(kj::str(name), kj::mv(mockServer));
         }
       }
@@ -212,7 +212,7 @@ public:
       auto& received = getReceived(location);
       auto field = received.method.getResultType().getFieldByName(fieldName);
       auto result = kj::refcounted<MockServer>(field.getType().asInterface());
-      received.context.getResults().set(field, kj::heap<Server>(*result));
+      received.context.getResults().set(field, kj::heap<Server>(result.addRef()));
       received.fulfiller.fulfill();
       return result;
     }
@@ -322,9 +322,9 @@ private:
 
   class Server final: public capnp::DynamicCapability::Server {
   public:
-    Server(MockServer& mock)
-        : capnp::DynamicCapability::Server(mock.schema, {.allowCancellation = true}),
-          mock(kj::addRef(mock)) {}
+    Server(kj::Rc<MockServer>&& mock)
+        : capnp::DynamicCapability::Server(mock->schema, {.allowCancellation = true}),
+          mock(kj::mv(mock)) {}
     ~Server() noexcept(false) {
       mock->dropped = true;
       KJ_IF_MAYBE(w, mock->waiter) {

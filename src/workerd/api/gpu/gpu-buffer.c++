@@ -124,7 +124,7 @@ jsg::Promise<void> GPUBuffer::mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUS
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), state_, AsyncTask(kj::addRef(*async_))};
+  auto ctx = new Context{kj::mv(paf.fulfiller), state_, AsyncTask(async_.addRef())};
 
   state_ = State::MappingPending;
 

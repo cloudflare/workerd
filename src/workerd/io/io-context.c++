@@ -255,7 +255,7 @@ void IoContext::IncomingRequest::delivered() {
     a->ensureConstructed(*context);
 
     // Record a new incoming request to actor metrics.
-    a->getMetrics().startRequest();
+    a->getMetrics()->startRequest();
   }
 }
 
@@ -278,7 +278,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   context->incomingRequests.remove(*this);
 
   KJ_IF_MAYBE(a, context->actor) {
-    a->getMetrics().endRequest();
+    a->getMetrics()->endRequest();
   }
   context->worker->getIsolate().completedRequest();
   metrics->jsDone();
@@ -294,10 +294,9 @@ InputGate::Lock IoContext::getInputLock() {
       "no input lock available in this context").addRef();
 }
 
-kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
+kj::Maybe<kj::Rc<InputGate::CriticalSection>> IoContext::getCriticalSection() {
   KJ_IF_MAYBE(l, currentInputLock) {
-    return l->getCriticalSection()
-        .map([](InputGate::CriticalSection& cs) { return kj::addRef(cs); });
+    return mapAddRef(l->getCriticalSection());
   } else {
     return nullptr;
   }
@@ -545,7 +544,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
   }
 
   KJ_IF_MAYBE(pe, pendingEvent) {
-    return kj::addRef(*pe);
+    return pe.addRef();
   } else {
     KJ_REQUIRE(!isFinalized(), "request has already been finalized");
 

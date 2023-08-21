@@ -92,12 +92,12 @@ public:
   };
 
   struct StorageEntry {
-    kj::Own<StorageKey> key;
+    kj::Rc<StorageKey> key;
     Value value;
 
     inline StorageEntry clone(Lock& js) {
       return {
-        .key = kj::addRef(*key),
+        .key = key.addRef(),
         .value = value.addRef(js)
       };
     }
@@ -181,7 +181,7 @@ public:
     // is important that these member fields stay in the correct cleanup order.
     Scope scope;
 
-    StorageScope(Lock& js, StorageKey& key, Value store);
+    StorageScope(Lock& js, kj::Rc<StorageKey> key, Value store);
     KJ_DISALLOW_COPY(StorageScope);
   };
 

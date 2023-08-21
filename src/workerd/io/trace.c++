@@ -373,7 +373,7 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 PipelineTracer::~PipelineTracer() noexcept(false) {
   KJ_IF_MAYBE(p, parentTracer) {
     for (auto& t: traces) {
-      (*p)->traces.add(kj::addRef(*t));
+      (*p)->traces.add(t.addRef());
     }
   }
   KJ_IF_MAYBE(f, completeFulfiller) {
@@ -381,20 +381,20 @@ PipelineTracer::~PipelineTracer() noexcept(false) {
   }
 }
 
-kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
+kj::Promise<kj::Array<kj::Rc<Trace>>> PipelineTracer::onComplete() {
   KJ_REQUIRE(completeFulfiller == nullptr, "onComplete() can only be called once");
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Rc<Trace>>>();
   completeFulfiller = kj::mv(paf.fulfiller);
   return kj::mv(paf.promise);
 }
 
-kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(
+kj::Rc<WorkerTracer> PipelineTracer::makeWorkerTracer(
     PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptName,  kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(dispatchNamespace), kj::mv(scriptTags));
-  traces.add(kj::addRef(*trace));
-  return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
+  traces.add(trace.addRef());
+  return kj::refcounted<WorkerTracer>(addRefToThis(), kj::mv(trace), pipelineLogLevel);
 }
 
 WorkerTracer::WorkerTracer(kj::Own<PipelineTracer> parentPipeline,

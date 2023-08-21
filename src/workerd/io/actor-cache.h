@@ -369,7 +369,7 @@ private:
 
   struct CountedDelete;
 
-  struct Entry: public kj::AtomicRefcounted {
+  struct Entry: public kj::AtomicRefcounted, public kj::ArcAddRefToThis<Entry> {
     // A cache entry.
     //
     // Entries are refcounted so that an operation which cares about a particular entry can keep
@@ -414,7 +414,7 @@ private:
     }
     kj::Maybe<Value> getValue() const {
       KJ_IF_MAYBE(ptr, getValuePtr()) {
-        return ptr->attach(kj::atomicAddRef(*this));
+        return ptr->attach(addRefToThis());
       } else {
         return nullptr;
       }
@@ -462,7 +462,7 @@ private:
     // because it's already fulfilled and so will be ignored anyway. However, in the unlikely case
     // that the flush failed, then it is actually important that the `countedDelete` has been moved
     // to the replacement entry, so that it can be retried.)
-    kj::Maybe<kj::Own<CountedDelete>> countedDelete;
+    kj::Maybe<kj::Rc<CountedDelete>> countedDelete;
 
     // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
@@ -546,7 +546,7 @@ private:
   //
   // This map is protected by the same lock as lru.cleanList. ExternalMutexGuarded helps enforce
   // this.
-  kj::ExternalMutexGuarded<kj::Table<kj::Own<Entry>, kj::TreeIndex<EntryTableCallbacks>>>
+  kj::ExternalMutexGuarded<kj::Table<kj::Arc<Entry>, kj::TreeIndex<EntryTableCallbacks>>>
       currentValues;
 
   struct UnknownAlarmTime{};
@@ -573,14 +573,14 @@ private:
   kj::OneOf<UnknownAlarmTime, KnownAlarmTime, DeferredAlarmDelete> currentAlarmTime = UnknownAlarmTime{};
 
   struct ReadCompletionChain: public kj::Refcounted {
-    kj::Maybe<kj::Own<ReadCompletionChain>> next;
+    kj::Maybe<kj::Rc<ReadCompletionChain>> next;
     kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> fulfiller;
     ReadCompletionChain() = default;
     ~ReadCompletionChain() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(ReadCompletionChain);
   };
   // Used to implement waitForPastReads(). See that function to understand how it works...
-  kj::Own<ReadCompletionChain> readCompletionChain = kj::refcounted<ReadCompletionChain>();
+  kj::Rc<ReadCompletionChain> readCompletionChain = kj::refcounted<ReadCompletionChain>();
 
   // True if ensureFlushScheduled() has been called but the flush has not started yet.
   bool flushScheduled = false;
@@ -652,8 +652,8 @@ private:
   void markGapsEmpty(Lock& lock, KeyPtr begin, kj::Maybe<KeyPtr> end, const ReadOptions& options);
 
   // Implements put() or delete(). Multi-key variants call this for each key.
-  void putImpl(Lock& lock, kj::Own<Entry> newEntry,
-               const WriteOptions& options,  kj::Maybe<CountedDelete&> counted);
+  void putImpl(Lock& lock, kj::Arc<Entry> newEntry,
+               const WriteOptions& options,  kj::Maybe<kj::Rc<CountedDelete>> counted);
 
   kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
@@ -697,7 +697,7 @@ private:
     kj::Vector<FlushBatch> batches;
   };
   struct CountedDeleteFlush {
-    kj::Own<CountedDelete> countedDelete;
+    kj::Rc<CountedDelete> countedDelete;
     kj::Vector<Entry*> entries;
     kj::Vector<FlushBatch> batches;
   };
@@ -904,7 +904,7 @@ private:
   ActorCache& cache;
 
   struct Change {
-    kj::Own<Entry> entry;
+    kj::Arc<Entry> entry;
     WriteOptions options;
   };
 
@@ -931,7 +931,7 @@ private:
   // Adds the given key/value pair to `changes`. If an existing entry is replaced, *count is
   // incremented if it was a positive entry. If no existing entry is replaced, then the key
   // is returned, indicating that if a count is needed, we'll need to inspect cache/disk.
-  kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Own<Entry> entry,
+  kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Arc<Entry> entry,
                             const WriteOptions& options, kj::Maybe<uint&> count = nullptr);
 };
 

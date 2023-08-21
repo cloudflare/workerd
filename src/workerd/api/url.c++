@@ -453,7 +453,7 @@ jsg::Ref<URLSearchParams> URL::getSearchParams() {
   KJ_IF_MAYBE(usp, searchParams) {
     return usp->addRef();
   } else {
-    searchParams.emplace(jsg::alloc<URLSearchParams>(kj::addRef(*url)));
+    searchParams.emplace(jsg::alloc<URLSearchParams>(url.addRef()));
     return KJ_ASSERT_NONNULL(searchParams).addRef();
   }
 }

@@ -44,7 +44,7 @@ class HeapTracer;
 //
 // For resource types, this wrapper refcount counts the number of Ref<T>s that point to the
 // Wrappable and are not visible to GC tracing.
-class Wrappable: public kj::Refcounted {
+class Wrappable: public kj::Refcounted, public kj::RcAddRefToThis<Wrappable> {
 public:
   // Number of internal fields in a wrapper object.
   static constexpr uint INTERNAL_FIELD_COUNT = 3;
@@ -187,7 +187,7 @@ public:
   void clearWrappers();
 
   void addToFreelist(Wrappable::CppgcShim& shim);
-  Wrappable::CppgcShim* allocateShim(Wrappable& wrappable);
+  Wrappable::CppgcShim* allocateShim(kj::Rc<Wrappable> wrappable);
   void clearFreelistedShims();
 
   // implements EmbedderRootsHandler -------------------------------------------

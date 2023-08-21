@@ -22,12 +22,12 @@ void CrossThreadWaitList::destroyed() {
   if (!createdFulfiller) state->lostFulfiller();
 }
 
-CrossThreadWaitList::Waiter::Waiter(const State& state,
+CrossThreadWaitList::Waiter::Waiter(kj::Arc<const State> state,
     kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfillerArg)
-    : state(kj::atomicAddRef(state)), fulfiller(kj::mv(fulfillerArg)) {
-  auto lock = state.waiters.lockExclusive();
-  if (__atomic_load_n(&state.done, __ATOMIC_ACQUIRE)) {
-    KJ_IF_MAYBE(e, state.exception) {
+    : state(kj::mv(state)), fulfiller(kj::mv(fulfillerArg)) {
+  auto lock = state->waiters.lockExclusive();
+  if (__atomic_load_n(&state->done, __ATOMIC_ACQUIRE)) {
+    KJ_IF_MAYBE(e, state->exception) {
       fulfiller->reject(kj::cp(*e));
     } else {
       fulfiller->fulfill();
@@ -64,25 +64,25 @@ kj::Promise<void> CrossThreadWaitList::addWaiter() const {
   }
 
   if (state->useThreadLocalOptimization) {
-    kj::Own<Waiter> ownWaiter;
+    kj::Rc<Waiter> ownWaiter;
 
     auto& waiter = threadLocalWaiters.findOrCreate(state.get(),
         [&]() -> decltype(threadLocalWaiters)::Entry {
       auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-      ownWaiter = kj::refcounted<Waiter>(*state, kj::mv(paf.fulfiller));
+      ownWaiter = kj::refcounted<Waiter>(state.addRef(), kj::mv(paf.fulfiller));
       ownWaiter->forkedPromise = paf.promise.fork();
-      return { state.get(), ownWaiter.get() };
+      return { state.get(), ownWaiter.addRef() };
     });
 
     if (ownWaiter.get() == nullptr) {
-      ownWaiter = kj::addRef(*waiter);
+      ownWaiter = waiter.addRef();
     }
 
     return waiter->forkedPromise.addBranch().attach(kj::mv(ownWaiter));
   } else {
     // No refcounting, no forked promise.
     auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    auto waiter = kj::heap<Waiter>(*state, kj::mv(paf.fulfiller));
+    auto waiter = kj::heap<Waiter>(state.addRef(), kj::mv(paf.fulfiller));
     return paf.promise.attach(kj::mv(waiter));
   }
 }
@@ -114,7 +114,7 @@ kj::Own<kj::CrossThreadPromiseFulfiller<void>> CrossThreadWaitList::makeSeparate
 
   KJ_REQUIRE(!createdFulfiller, "makeSeparateFulfiller() can only be called once");
   createdFulfiller = true;
-  return kj::heap<FulfillerImpl>(kj::atomicAddRef(*state));
+  return kj::heap<FulfillerImpl>(state.addRef());
 }
 
 void CrossThreadWaitList::State::fulfill() const {

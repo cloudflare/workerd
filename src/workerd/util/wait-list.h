@@ -69,14 +69,14 @@ private:
   struct Waiter;
 
 public:
-  using WaiterMap = kj::HashMap<const CrossThreadWaitList::State*, Waiter*>;
+  using WaiterMap = kj::HashMap<const CrossThreadWaitList::State*, kj::Rc<Waiter>>;
 
 private:
   struct Waiter: public kj::Refcounted {
-    Waiter(const State& state, kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller);
+    Waiter(kj::Arc<const State> state, kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller);
     ~Waiter() noexcept(false);
 
-    kj::Own<const State> state;
+    kj::Arc<const State> state;
     kj::Own<kj::CrossThreadPromiseFulfiller<void>> fulfiller;
 
     // Protected by list mutex.
@@ -112,7 +112,7 @@ private:
         : useThreadLocalOptimization(options.useThreadLocalOptimization) {}
   };
 
-  kj::Own<const State> state;
+  kj::Arc<const State> state;
   bool createdFulfiller = false;
 
   void destroyed();

@@ -101,7 +101,7 @@ private:
     bool committed = false;
   };
 
-  class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
+  class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted, public kj::RcAddRefToThis<ExplicitTxn> {
   public:
     ExplicitTxn(ActorSqlite& actorSqlite);
     ~ExplicitTxn() noexcept(false);
@@ -131,7 +131,7 @@ private:
 
   private:
     ActorSqlite& actorSqlite;
-    kj::Maybe<kj::Own<ExplicitTxn>> parent;
+    kj::Maybe<kj::Rc<ExplicitTxn>> parent;
     uint depth = 0;
     bool hasChild = false;
     bool committed = false;
@@ -147,7 +147,7 @@ private:
   //
   // When set to `ExplicitTxn*`, an explicit transaction is currently open, so no implicit
   // transactions should be used in the meantime.
-  kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
+  kj::OneOf<NoTxn, ImplicitTxn*, kj::Rc<ExplicitTxn>> currentTxn = NoTxn();
 
   kj::TaskSet commitTasks;
 

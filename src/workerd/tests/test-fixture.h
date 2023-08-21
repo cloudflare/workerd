@@ -103,9 +103,9 @@ private:
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<Worker::ApiIsolate> apiIsolate;
-  kj::Own<Worker::Isolate> workerIsolate;
-  kj::Own<Worker::Script> workerScript;
-  kj::Own<Worker> worker;
+  kj::Arc<Worker::Isolate> workerIsolate;
+  kj::Arc<Worker::Script> workerScript;
+  kj::Arc<Worker> worker;
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
   kj::TaskSet waitUntilTasks;
   kj::Own<kj::HttpHeaderTable> headerTable;

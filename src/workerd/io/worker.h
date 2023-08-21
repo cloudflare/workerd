@@ -355,18 +355,18 @@ public:
     // TODO(someday): This can be templatized & even integrated into KJ. That's why the method
     // bodies are defined inline.
   public:
-    WeakIsolateRef(Isolate* thisArg) : this_(thisArg) {}
+    WeakIsolateRef(kj::Rc<const Isolate> thisArg) : this_(kj::mv(thisArg)) {}
 
     // This tries to materialize a strong reference to the isolate. It will fail if the isolate's
     // refcount has already dropped to 0. As discussed in the class, the lifetime of this weak
     // reference can exceed the lifetime of the isolate it's tracking.
-    kj::Maybe<kj::Own<const Worker::Isolate>> tryAddStrongRef() const {
+    kj::Maybe<kj::Rc<const Worker::Isolate>> tryAddStrongRef() const {
       auto lock = this_.lockShared();
       if (*lock == nullptr) {
         return nullptr;
       }
 
-      return kj::atomicAddRefWeak(**lock);
+      return lock->addRef();
     }
 
     // This is invoked by the Isolate destructor to clear the pointer. That means that any racing
@@ -379,11 +379,11 @@ public:
     }
 
   private:
-    kj::MutexGuarded<const Isolate*> this_;
+    kj::MutexGuarded<kj::Rc<const Isolate>> this_;
   };
 
   kj::Own<const WeakIsolateRef> getWeakRef() const {
-    return kj::atomicAddRef(*weakIsolateRef);
+    return weakIsolateRef.addRef();
   }
 
 private:
@@ -409,7 +409,7 @@ private:
   // weakIsolateRef while it's safe and then call tryAddStrongRef which will return a strong
   // reference if the object isn't being destroyed (it's safe to call this even if the destructor
   // has already run).
-  kj::Own<const WeakIsolateRef> weakIsolateRef;
+  kj::Arc<const WeakIsolateRef> weakIsolateRef;
 
   class InspectorChannelImpl;
   kj::Maybe<InspectorChannelImpl&> currentInspectorSession;
@@ -440,10 +440,10 @@ private:
   public:
     explicit SubrequestClient(kj::Own<const Isolate> isolate,
         kj::Own<WorkerInterface> inner, kj::HttpHeaderId contentEncodingHeaderId,
-        RequestObserver& requestMetrics)
+        kj::Own<RequestObserver> requestMetrics)
         : constIsolate(kj::mv(isolate)), inner(kj::mv(inner)),
           contentEncodingHeaderId(contentEncodingHeaderId),
-          requestMetrics(kj::addRef(requestMetrics)) {}
+          requestMetrics(kj::mv(requestMetrics)) {}
     KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
@@ -656,9 +656,10 @@ private:
   friend class Worker::AsyncWaiter;
 };
 
-// Represents actor state within a Worker instance. This object tracks the JavaScript heap
-// objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
-class Worker::Actor final: public kj::Refcounted {
+class Worker::Actor final: public kj::Refcounted, public kj::RcAddRefToThis<Worker::Actor> {
+  // Represents actor state within a Worker instance. This object tracks the JavaScript heap
+  // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
+
 public:
   // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
   // can be used to customize the storage implementation. This will be called synchronously in
@@ -753,7 +754,7 @@ public:
   // modules-syntax workers. (Note that Service-Workers-syntax actors are not supported publicly.)
   kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
 
-  ActorObserver& getMetrics();
+  kj::Rc<ActorObserver> getMetrics();
 
   InputGate& getInputGate();
   OutputGate& getOutputGate();
@@ -846,9 +847,9 @@ public:
 
   kj::Own<Worker::Actor> addRef() {
     KJ_IF_MAYBE(t, tracker) {
-      return kj::addRef(*this).attach(t->get()->startRequest());
+      return addRefToThis().attach(t->get()->startRequest());
     } else {
-      return kj::addRef(*this);
+      return addRefToThis();
     }
   }
 private:
@@ -899,7 +900,7 @@ private:
   kj::Maybe<AsyncWaiter&> next;
   kj::Maybe<AsyncWaiter&>* prev;
 
-  static thread_local AsyncWaiter* threadCurrentWaiter;
+  static thread_local kj::Rc<AsyncWaiter> threadCurrentWaiter;
 
   friend class Worker::Isolate;
   friend class Worker::AsyncLock;

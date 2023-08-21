@@ -249,10 +249,10 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer final : public kj::Refcounted {
+class PipelineTracer final : public kj::Refcounted, public kj::RcAddRefToThis<PipelineTracer> {
 public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = nullptr)
+  explicit PipelineTracer(kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline = nullptr)
       : parentTracer(kj::mv(parentPipeline)) {}
 
   ~PipelineTracer() noexcept(false);
@@ -260,14 +260,14 @@ public:
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
   // exist at a time.
-  kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
+  kj::Promise<kj::Array<kj::Rc<Trace>>> onComplete();
 
   // Makes a tracer for a subpipeline.
-  kj::Own<PipelineTracer> makePipelineSubtracer() {
-    return kj::refcounted<PipelineTracer>(kj::addRef(*this));
+  kj::Rc<PipelineTracer> makePipelineSubtracer() {
+    return kj::refcounted<PipelineTracer>(addRefToThis());
   }
 
-  kj::Own<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
+  kj::Rc<WorkerTracer> makeWorkerTracer(PipelineLogLevel pipelineLogLevel,
                                          kj::Maybe<kj::String> stableId,
                                          kj::Maybe<kj::String> scriptName,
                                          kj::Maybe<kj::String> dispatchNamespace,
@@ -275,10 +275,10 @@ public:
   // Makes a tracer for a worker stage.
 
 private:
-  kj::Vector<kj::Own<Trace>> traces;
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Rc<Trace>> traces;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Rc<Trace>>>>> completeFulfiller;
 
-  kj::Maybe<kj::Own<PipelineTracer>> parentTracer;
+  kj::Maybe<kj::Rc<PipelineTracer>> parentTracer;
 
   friend class WorkerTracer;
 };
@@ -405,7 +405,7 @@ public:
   // Make a SpanParent that causes children not to be reported anywhere.
   SpanParent(decltype(nullptr)) {}
 
-  SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
+  SpanParent(kj::Maybe<kj::Rc<SpanObserver>> observer): observer(kj::mv(observer)) {}
 
   SpanParent(SpanParent&& other) = default;
   SpanParent& operator=(SpanParent&& other) = default;
@@ -427,10 +427,10 @@ public:
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  kj::Maybe<kj::Rc<SpanObserver>> getObserver() { return mapAddRef(observer); }
 
 private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Maybe<kj::Rc<SpanObserver>> observer;
 
   friend class SpanBuilder;
 };
@@ -450,7 +450,7 @@ public:
   //
   // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
   // attached to the observer observing this span.
-  explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName,
+  explicit SpanBuilder(kj::Maybe<kj::Rc<SpanObserver>> observer, kj::ConstString operationName,
                        kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
     if (observer != nullptr) {
       this->observer = kj::mv(observer);
@@ -480,7 +480,7 @@ public:
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
+  kj::Maybe<kj::Rc<SpanObserver>> getObserver() { return mapAddRef(observer); }
 
   // Create a new child span.
   //
@@ -506,7 +506,7 @@ public:
   void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
 private:
-  kj::Maybe<kj::Own<SpanObserver>> observer;
+  kj::Maybe<kj::Rc<SpanObserver>> observer;
   // The under-construction span, or null if the span has ended.
   kj::Maybe<Span> span;
 
@@ -540,13 +540,11 @@ inline SpanParent SpanParent::addRef() {
 }
 
 inline SpanBuilder SpanParent::newChild(kj::ConstString operationName, kj::Date startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     kj::mv(operationName), startTime);
+  return SpanBuilder(mapAddRef(observer), kj::mv(operationName), startTime);
 }
 
 inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date startTime) {
-  return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
-                     kj::mv(operationName), startTime);
+  return SpanBuilder(mapAddRef(observer), kj::mv(operationName), startTime);
 }
 
 } // namespace workerd

@@ -66,9 +66,9 @@ void HeapTracer::clearWrappers() {
 // condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
 public:
-  CppgcShim(Wrappable& wrappable): state(Active { kj::addRef(wrappable) }) {
-    KJ_DASSERT(wrappable.cppgcShim == nullptr);
-    wrappable.cppgcShim = *this;
+  CppgcShim(kj::Rc<Wrappable> wrappable): state(Active { wrappable.addRef() }) {
+    KJ_DASSERT(wrappable->cppgcShim == nullptr);
+    wrappable->cppgcShim = *this;
   }
 
   ~CppgcShim() {
@@ -141,19 +141,19 @@ void HeapTracer::addToFreelist(Wrappable::CppgcShim& shim) {
   freelistedShims = shim;
 }
 
-Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
+Wrappable::CppgcShim* HeapTracer::allocateShim(kj::Rc<Wrappable> wrappable) {
   KJ_IF_MAYBE(shim, freelistedShims) {
     freelistedShims = shim->state.get<Wrappable::CppgcShim::Freelisted>().next;
     KJ_IF_MAYBE(next, freelistedShims) {
       next->state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
     }
-    shim->state = Wrappable::CppgcShim::Active { kj::addRef(wrappable) };
-    KJ_DASSERT(wrappable.cppgcShim == nullptr);
-    wrappable.cppgcShim = *shim;
+    shim->state = Wrappable::CppgcShim::Active { wrappable.addRef() };
+    KJ_DASSERT(wrappable->cppgcShim == nullptr);
+    wrappable->cppgcShim = *shim;
     return shim;
   } else {
     auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-    return cppgc::MakeGarbageCollected<Wrappable::CppgcShim>(cppgcAllocHandle, wrappable);
+    return cppgc::MakeGarbageCollected<Wrappable::CppgcShim>(cppgcAllocHandle, wrappable.addRef());
   }
 }
 
@@ -283,7 +283,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this);
 
   // Allocate the cppgc shim.
-  auto cppgcShim = tracer.allocateShim(*this);
+  auto cppgcShim = tracer.allocateShim(addRefToThis());
 
   object->SetAlignedPointerInInternalField(CPPGC_SHIM_FIELD_INDEX, cppgcShim);
   object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX,

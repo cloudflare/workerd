@@ -762,7 +762,7 @@ public:
   void visitForGc(jsg::GcVisitor& visitor) override;
 
   kj::Own<WeakRef<WritableStreamJsController>> getWeakRef() {
-    return kj::addRef(*weakRef);
+    return weakRef.addRef();
   }
 
   bool isClosedOrClosing() override;
@@ -1875,7 +1875,7 @@ ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(fal
 }
 
 kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
-  return kj::addRef(*weakRef);
+  return weakRef.addRef();
 }
 
 
@@ -3518,7 +3518,7 @@ void WritableStreamJsController::setup(
     jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) {
   auto underlyingSink = kj::mv(maybeUnderlyingSink).orDefault({});
   auto queuingStrategy = kj::mv(maybeQueuingStrategy).orDefault({});
-  state = jsg::alloc<WritableStreamDefaultController>(kj::addRef(*weakRef));
+  state = jsg::alloc<WritableStreamDefaultController>(weakRef.addRef());
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

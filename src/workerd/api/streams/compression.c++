@@ -395,7 +395,7 @@ jsg::Ref<CompressionStream> CompressionStream::constructor(jsg::Lock& js, kj::St
   auto readableSide =
       kj::refcounted<CompressionStreamImpl<Context::Mode::COMPRESS>>(kj::mv(format),
                                                                      Context::ContextFlags::NONE);
-  auto writableSide = kj::addRef(*readableSide);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 
@@ -414,7 +414,7 @@ jsg::Ref<DecompressionStream> DecompressionStream::constructor(jsg::Lock& js, kj
           FeatureFlags::get(js).getStrictCompression() ?
               Context::ContextFlags::STRICT :
               Context::ContextFlags::NONE);
-  auto writableSide = kj::addRef(*readableSide);
+  auto writableSide = readableSide.addRef();
 
   auto& ioContext = IoContext::current();
 

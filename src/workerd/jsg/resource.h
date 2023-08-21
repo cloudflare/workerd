@@ -1049,11 +1049,12 @@ public:
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type Ref<T>.
 
-    KJ_IF_MAYBE(p, tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-      return Ref<T>(kj::addRef(*p));
-    } else {
-      return nullptr;
-    }
+    // KJ_IF_MAYBE(p, tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+    //   return Ref<T>(p.addRef());
+    // } else {
+    //   return nullptr;
+    // }
+    KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
   }
 
   template <bool isContext = false>

@@ -1005,7 +1005,7 @@ jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js,
 
   auto fulfiller = kj::refcounted<Waiter>(kj::mv(waiter.fulfiller));
 
-  auto onSuccess = [waiter=kj::addRef(*fulfiller)](jsg::Lock& js, jsg::Value value) mutable {
+  auto onSuccess = [waiter=fulfiller.addRef()](jsg::Lock& js, jsg::Value value) mutable {
     waiter->done();
   };
 
@@ -1839,7 +1839,7 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
 // =======================================================================================
 // AsyncLock implementation
 
-thread_local Worker::AsyncWaiter* Worker::AsyncWaiter::threadCurrentWaiter = nullptr;
+thread_local kj::Rc<Worker::AsyncWaiter> Worker::AsyncWaiter::threadCurrentWaiter = nullptr;
 
 Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   // It should be impossible for this list to be non-empty since each member of the list holds a
@@ -1889,7 +1889,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             KJ_ASSERT_NONNULL(currentLoad), true /* threadWaitingSameLock */,
             threadWaitingDifferentLockCount);
       }
-      auto newWaiterRef = kj::addRef(*waiter);
+      auto newWaiterRef = waiter.addRef();
       co_await newWaiterRef->readyPromise;
       co_return AsyncLock(kj::mv(newWaiterRef), kj::mv(lockTiming));
     } else {
@@ -3259,8 +3259,8 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
   KJ_UNREACHABLE;
 }
 
-ActorObserver& Worker::Actor::getMetrics() {
-  return *impl->metrics;
+kj::Rc<ActorObserver> Worker::Actor::getMetrics() {
+  return impl->metrics.addRef();
 }
 
 InputGate& Worker::Actor::getInputGate() {

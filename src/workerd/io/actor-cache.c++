@@ -313,7 +313,7 @@ void ActorCache::evictEntry(Lock& lock, Entry& entry) {
     ++next;
     if (next != ordered.end() && next->get()->valueStatus == EntryValueStatus::UNKNOWN) {
       // Erasing invalidates iterators, so we have to delay...
-      eraseLater = kj::atomicAddRef(**next);
+      eraseLater = (*next).addRef();
     }
   }
 
@@ -956,14 +956,14 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   // entries we find in cache with those we get from disk.
   for (; iter != ordered.end() && iter->get()->key < endKey &&
          positiveCount < limit.orDefault(kj::maxValue); ++iter) {
-    Entry& entry = **iter;
+    kj::Arc<Entry>& entry = *iter;
 
-    touchEntry(lock, entry, options);
+    touchEntry(lock, *entry, options);
 
-    switch(entry.valueStatus) {
+    switch(entry->valueStatus) {
       case EntryValueStatus::ABSENT: {
-        cachedEntries.add(kj::atomicAddRef(entry));
-        if (storageListStart != nullptr && entry.isDirty()) {
+        cachedEntries.add(entry.addRef());
+        if (storageListStart != nullptr && entry->isDirty()) {
           // This negative entry could negate something read from storage later, so we need to
           // increase the storage list limit.
           ++limitAdjustment;
@@ -971,7 +971,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
         break;
       }
       case EntryValueStatus::PRESENT: {
-        cachedEntries.add(kj::atomicAddRef(entry));
+        cachedEntries.add(entry.addRef());
         ++positiveCount;
         if (storageListStart == nullptr) {
           ++knownPrefixSize;
@@ -984,10 +984,10 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
       }
     }
 
-    if (storageListStart == nullptr && !entry.gapIsKnownEmpty) {
+    if (storageListStart == nullptr && !entry->gapIsKnownEmpty) {
       // The gap after this entry is not cached so we'll have to start our list operation here.
-      storageListStart = entry.key;
-      storageListStartIsKnown = entry.valueStatus != EntryValueStatus::UNKNOWN;
+      storageListStart = entry->key;
+      storageListStartIsKnown = entry->valueStatus != EntryValueStatus::UNKNOWN;
     }
   }
 
@@ -1272,27 +1272,27 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
 
     // Step backwards.
     --iter;
-    auto& entry = **iter;
+    auto& entry = *iter;
 
     // If the gap after this entry is not known empty, then we've exhausted our known-suffix and
     // will need to cover this gap using a storage RPC.
-    if (storageListEnd == nullptr && !entry.gapIsKnownEmpty) {
+    if (storageListEnd == nullptr && !entry->gapIsKnownEmpty) {
       storageListEnd = nextKey;
     }
 
-    if (entry.key < beginKey) {
+    if (entry->key < beginKey) {
       // We've traversed past the beginning of our range so exit the loop here.
       break;
     }
 
-    touchEntry(lock, entry, options);
+    touchEntry(lock, *entry, options);
 
     // Note that we need to add even negative entries to `cachedEntries` so that they override
     // whatever we read from storage later. However, they should not count against the limit.
-    switch(entry.valueStatus) {
+    switch(entry->valueStatus) {
       case EntryValueStatus::ABSENT: {
-        cachedEntries.add(kj::atomicAddRef(entry));
-        if (storageListEnd != nullptr && entry.isDirty()) {
+        cachedEntries.add(entry.addRef());
+        if (storageListEnd != nullptr && entry->isDirty()) {
           // This negative entry could negate something read from storage later, so we need to
           // increase the storage list limit.
           ++limitAdjustment;
@@ -1300,7 +1300,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
         break;
       }
       case EntryValueStatus::PRESENT: {
-        cachedEntries.add(kj::atomicAddRef(entry));
+        cachedEntries.add(entry.addRef());
         ++positiveCount;
         if (storageListEnd == nullptr) {
           ++knownSuffixSize;
@@ -1313,12 +1313,12 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
       }
     }
 
-    if (entry.key == beginKey) {
+    if (entry->key == beginKey) {
       // We've traversed through the beginning of our range so exit the loop here.
       break;
     }
 
-    nextKey = entry.key;
+    nextKey = entry->key;
   }
 
   if (storageListEnd == nullptr || knownSuffixSize >= limit.orDefault(kj::maxValue)) {
@@ -1408,9 +1408,9 @@ kj::Own<ActorCache::Entry> ActorCache::findInCache(
 
   if (iter != ordered.end() && iter->get()->key == key) {
     // Found exact matching entry.
-    Entry& entry = **iter;
-    touchEntry(lock, entry, options);
-    return kj::atomicAddRef(entry);
+    auto& entry = *iter;
+    touchEntry(lock, *entry, options);
+    return entry.addRef();
   } else {
     // Key is not in the map, but we have to check for outstanding list() operations by checking
     // the previous entry's gapState.
@@ -1442,7 +1442,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
 
   auto& map = currentValues.get(lock);
 
-  kj::Own<Entry> entry;
+  kj::Arc<Entry> entry;
   KJ_IF_MAYBE(reader, maybeReader) {
     entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::heapArray(*reader));
   } else {
@@ -1485,7 +1485,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
     // Because of this, we know it is correct to leave `gapIsKnownEmpty = false` on our new entry.
     entry->syncStatus = EntrySyncStatus::CLEAN;
     lock->add(*entry);
-    return kj::atomicAddRef(*entry);
+    return entry.addRef();
   });
 
   if (slot.get() != entry.get()) {
@@ -1499,7 +1499,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
 
         entry->syncStatus = EntrySyncStatus::CLEAN;
         lock->add(*entry);
-        slot = kj::atomicAddRef(*entry);
+        slot = entry.addRef();
         break;
       }
       case EntryValueStatus::PRESENT:
@@ -1763,7 +1763,7 @@ kj::PromiseForResult<Func, rpc::ActorStorage::Operations::Client> ActorCache::sc
     } else {
       return kj::mv(e);
     }
-  }).attach(kj::addRef(*readCompletionChain)));
+  }).attach(readCompletionChain.addRef()));
 }
 
 kj::Promise<void> ActorCache::waitForPastReads() {
@@ -1779,7 +1779,7 @@ kj::Promise<void> ActorCache::waitForPastReads() {
   // reference on the next link.
   auto paf = kj::newPromiseAndFulfiller<void>();
   readCompletionChain->fulfiller = kj::mv(paf.fulfiller);
-  readCompletionChain->next = kj::addRef(*next);
+  readCompletionChain->next = next.addRef();
 
   // Make `next` the current link.
   readCompletionChain = kj::mv(next);
@@ -1801,9 +1801,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions 
   requireNotTerminal();
   {
     auto lock = lru.cleanList.lockExclusive();
-    kj::Maybe<CountedDelete> maybeCountedDelete;
     auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::mv(value));
-    putImpl(lock, kj::mv(entry), options, maybeCountedDelete);
+    putImpl(lock, kj::mv(entry), options, kj::none);
     evictOrOomIfNeeded(lock);
   }
   return getBackpressure();
@@ -1815,9 +1814,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, Writ
   {
     auto lock = lru.cleanList.lockExclusive();
     for (auto& pair: pairs) {
-      kj::Maybe<CountedDelete> maybeCountedDelete;
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(pair.key), kj::mv(pair.value));
-      putImpl(lock, kj::mv(entry), options, maybeCountedDelete);
+      putImpl(lock, kj::mv(entry), options, kj::none);
     }
     evictOrOomIfNeeded(lock);
   }
@@ -1863,7 +1861,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
   {
     auto lock = lru.cleanList.lockExclusive();
     auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
-    putImpl(lock, kj::mv(entry), options, *countedDelete);
+    putImpl(lock, kj::mv(entry), options, countedDelete.addRef());
     evictOrOomIfNeeded(lock);
   }
 
@@ -1902,7 +1900,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     auto lock = lru.cleanList.lockExclusive();
     for (auto& key: keys) {
       auto entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), EntryValueStatus::ABSENT);
-      putImpl(lock, kj::mv(entry), options, *countedDelete);
+      putImpl(lock, kj::mv(entry), options, countedDelete.addRef());
     }
     evictOrOomIfNeeded(lock);
   }
@@ -2008,8 +2006,8 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   };
 }
 
-void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
-                         const WriteOptions& options, kj::Maybe<CountedDelete&> countedDelete) {
+void ActorCache::putImpl(Lock& lock, kj::Arc<Entry> newEntry,
+                         const WriteOptions& options, kj::Maybe<kj::Rc<CountedDelete>> countedDelete) {
   auto& map = currentValues.get(lock);
   auto ordered = map.ordered();
 
@@ -2032,7 +2030,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
 
         KJ_IF_MAYBE(c, countedDelete) {
           // Overwrote an entry that was in cache, so we can count it now.
-          ++c->countDeleted;
+          ++((*c)->countDeleted);
         }
         break;
       }
@@ -2052,7 +2050,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
         KJ_IF_MAYBE(c, countedDelete) {
           // Despite an entry being present, we don't know if the key exists, because it's just an
           // UNKNOWN entry. So we will still have to arrange to count the delete later.
-          newEntry->countedDelete = kj::addRef(*c);
+          newEntry->countedDelete = c->addRef();
         }
         break;
       }
@@ -2103,7 +2101,7 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     auto& slot = map.insert(kj::mv(newEntry));
     slot->gapIsKnownEmpty = previousGapKnownEmpty;
     KJ_IF_MAYBE(c, countedDelete) {
-      slot->countedDelete = kj::addRef(*c);
+      slot->countedDelete = c->addRef();
     }
     slot->syncStatus = EntrySyncStatus::DIRTY;
     dirtyList.add(*slot);
@@ -2340,14 +2338,15 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
           countedDeleteFlush = &countedDeleteFlushes[*i];
         } else {
           c->get()->flushIndex = countedDeleteFlushes.size();
-          countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
-            .countedDelete = kj::addRef(**c).attach(kj::defer([&cd = *c->get()]() mutable {
-              // Note that this is attached to the `Own`, not the value. We actually want this,
-              // because it allows us to reset the `flushIndex` when *this flush* finishes,
-              // regardless of if we need to retry.
-              cd.flushIndex = nullptr;
-            })),
-          });
+          KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+          // countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
+          //   .countedDelete = c->addRef().attach(kj::defer([&cd = *c->get()]() mutable {
+          //     // Note that this is attached to the `Own`, not the value. We actually want this,
+          //     // because it allows us to reset the `flushIndex` when *this flush* finishes,
+          //     // regardless of if we need to retry.
+          //     cd.flushIndex = nullptr;
+          //   })),
+          // });
         }
         auto words = keySizeInWords + 1;
         includeInCurrentBatch(countedDeleteFlush->batches, words);
@@ -2709,7 +2708,7 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
   auto txn = txnProm.getTransaction();
 
   struct RpcCountedDelete {
-    kj::Own<CountedDelete> countedDelete;
+    kj::Rc<CountedDelete> countedDelete;
     kj::Array<RpcDeleteRequest> rpcDeletes;
   };
   auto rpcCountedDeletes = kj::heapArrayBuilder<RpcCountedDelete>(countedDeleteFlushes.size());
@@ -3010,7 +3009,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
 
   for (auto& key: keys) {
     KJ_IF_MAYBE(change, entriesToWrite.find(key)) {
-      changedEntries.add(kj::atomicAddRef(*change->entry));
+      changedEntries.add(change->entry.addRef());
     } else {
       keysToFetch.add(kj::mv(key));
     }
@@ -3047,7 +3046,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   uint positiveCount = 0;
   // TODO(cleanup): Add `iterRange()` to KJ's public interface.
   for (auto& change: kj::_::iterRange(beginIter, endIter)) {
-    changedEntries.add(kj::atomicAddRef(*change.entry));
+    changedEntries.add(change.entry.addRef());
     if (change.entry->valueStatus == EntryValueStatus::PRESENT) {
       ++positiveCount;
     }
@@ -3076,7 +3075,7 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   uint positiveCount = 0;
   for (auto iter = endIter; iter != beginIter;) {
     --iter;
-    changedEntries.add(kj::atomicAddRef(*iter->entry));
+    changedEntries.add(iter->entry.addRef());
     if (iter->entry->valueStatus == EntryValueStatus::PRESENT) {
       ++positiveCount;
     }
@@ -3247,7 +3246,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
 }
 
 kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
-    Lock& lock, kj::Own<Entry> entry, const WriteOptions& options,
+    Lock& lock, kj::Arc<Entry> entry, const WriteOptions& options,
     kj::Maybe<uint&> count) {
   Change change {
     .entry = kj::mv(entry),

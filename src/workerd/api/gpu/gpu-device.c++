@@ -25,7 +25,7 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
   desc.size = descriptor.size;
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
-  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
+  return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, async_.addRef());
 }
 
 wgpu::CompareFunction parseCompareFunction(kj::StringPtr compare) {
@@ -185,7 +185,7 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   wgsl_desc.code = descriptor.code.cStr();
 
   auto shader = device_.CreateShaderModule(&desc);
-  return jsg::alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
+  return jsg::alloc<GPUShaderModule>(kj::mv(shader), async_.addRef());
 }
 
 jsg::Ref<GPUPipelineLayout>
@@ -279,7 +279,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(kj::addRef(*async_))};
+  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(async_.addRef())};
 
   device_.PopErrorScope(
       [](WGPUErrorType type, char const* message, void* userdata) {
@@ -326,7 +326,7 @@ GPUDevice::createComputePipelineAsync(GPUComputePipelineDescriptor descriptor) {
   // fullfiller to signal the caller with the result, and an async task that
   // will ensure the device's Tick() function is called periodically. It will be
   // deallocated at the end of the callback function.
-  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(kj::addRef(*async_))};
+  auto ctx = new Context{kj::mv(paf.fulfiller), AsyncTask(async_.addRef())};
 
   device_.CreateComputePipelineAsync(
       &desc,

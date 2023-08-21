@@ -12,7 +12,7 @@ namespace workerd {
 
 // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
 // interface the promise resolved to.
-class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
+class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface, public kj::RcAddRefToThis<PromisedWorkerInterface> {
 public:
   PromisedWorkerInterface(kj::TaskSet& waitUntilTasks,
                           kj::Promise<kj::Own<WorkerInterface>> promise)
@@ -51,13 +51,13 @@ public:
       static auto constexpr handlePrewarm =
           [](kj::Promise<void> promise,
              kj::String url,
-             kj::Own<PromisedWorkerInterface> self)
+             kj::Rc<PromisedWorkerInterface> self)
           -> kj::Promise<void> {
         co_await promise;
         KJ_ASSERT_NONNULL(self->worker)->prewarm(url);
       };
 
-      waitUntilTasks.add(handlePrewarm(promise.addBranch(), kj::str(url), kj::addRef(*this)));
+      waitUntilTasks.add(handlePrewarm(promise.addBranch(), kj::str(url), addRefToThis()));
     }
   }
 

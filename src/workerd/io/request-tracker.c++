@@ -10,9 +10,9 @@ RequestTracker::RequestTracker(Hooks& hooksImpl) : hooks(hooksImpl) {};
 
 RequestTracker::~RequestTracker() noexcept(false) {}
 
-RequestTracker::ActiveRequest::ActiveRequest(kj::Badge<RequestTracker>, RequestTracker& parent)
-  : maybeParent(kj::addRef(parent)) {
-  parent.requestActive();
+RequestTracker::ActiveRequest::ActiveRequest(kj::Badge<RequestTracker>, kj::Rc<RequestTracker> parent)
+  : maybeParent(parent->addRef()) {
+  parent->requestActive();
 }
 RequestTracker::ActiveRequest::~ActiveRequest() noexcept(false) {
   KJ_IF_MAYBE(p, maybeParent) {
@@ -37,7 +37,7 @@ void RequestTracker::requestInactive() {
 }
 
 RequestTracker::ActiveRequest RequestTracker::startRequest() {
-  return ActiveRequest({}, *this);
+  return ActiveRequest({}, addRefToThis());
 }
 
 } // namespace workerd

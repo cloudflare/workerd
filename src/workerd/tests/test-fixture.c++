@@ -215,14 +215,14 @@ struct MemoryOutputStream final: kj::AsyncOutputStream, public kj::Refcounted  {
 struct MockResponse final: public kj::HttpService::Response {
   uint statusCode = 0;
   kj::StringPtr statusText;
-  kj::Own<MemoryOutputStream> body = kj::refcounted<MemoryOutputStream>();
+  kj::Rc<MemoryOutputStream> body = kj::refcounted<MemoryOutputStream>();
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode, kj::StringPtr statusText,
                                       const kj::HttpHeaders &headers,
                                       kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
     this->statusCode = statusCode;
     this->statusText = statusText;
-    return kj::addRef(*body);
+    return body.addRef();
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders &headers) override {
@@ -271,13 +271,13 @@ TestFixture::TestFixture(SetupParams params)
       kj::mv(isolateLimitEnforcer),
       Worker::Isolate::InspectorPolicy::DISALLOW)),
     workerScript(kj::atomicRefcounted<Worker::Script>(
-      kj::atomicAddRef(*workerIsolate),
+      workerIsolate.addRef(),
       scriptId,
       server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter,
           capnp::List<server::config::Extension>::Reader{}),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
-      kj::atomicAddRef(*workerScript),
+      workerScript.addRef(),
       kj::atomicRefcounted<WorkerObserver>(),
       [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
         // no bindings, nothing to do
@@ -323,9 +323,9 @@ void TestFixture::runInIoContext(
 
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), nullptr, kj::heap<MockLimitEnforcer>());
+      threadContext, worker.addRef(), nullptr, kj::heap<MockLimitEnforcer>());
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(
-      kj::addRef(*context), kj::heap<DummyIoChannelFactory>(*timerChannel),
+      context.addRef(), kj::heap<DummyIoChannelFactory>(*timerChannel),
       kj::refcounted<RequestObserver>(), nullptr);
   incomingRequest->delivered();
   return incomingRequest;

@@ -152,7 +152,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   // is not under our control -- it's attached to the request. So, we wrap it in a
   // NeuterableInputStream which allows us to disconnect the stream before it becomes invalid.
   auto ownRequestBody = kj::refcounted<NeuterableInputStream>(requestBody);
-  auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
+  auto deferredNeuter = kj::defer([ownRequestBody = ownRequestBody.addRef()]() mutable {
     // Make sure to cancel the request body stream since the native stream is no longer valid once
     // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
     // haven't consumed the entire request body.
@@ -168,7 +168,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
   // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
-  auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+  auto b = newSystemStream(ownRequestBody.addRef(), StreamEncoding::IDENTITY);
   auto jsStream = jsg::alloc<ReadableStream>(ioContext, kj::mv(b));
 
   // If the request has "no body", we want `request.body` to be null. But, this is not the same
@@ -276,7 +276,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
       return DeferredProxy<void> { promise.attach(kj::mv(adapter), kj::mv(client)) };
     }
   } else KJ_IF_MAYBE(promise, event->getResponsePromise(lock)) {
-    auto body2 = kj::addRef(*ownRequestBody);
+    auto body2 = ownRequestBody.addRef();
 
     // HACK: If the client disconnects, the `response` reference is no longer valid. But our
     //   promise resolves in JavaScript space, so won't be canceled. So we need to track
@@ -291,7 +291,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     return ioContext.awaitJs(lock ,promise->then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers]
+             canceled = canceled.addRef(), &headers]
             (jsg::Lock& js, jsg::Ref<Response> innerResponse)
             -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
@@ -310,9 +310,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
       // while proxying the response. So, arrange for neutering to happen only after the proxy
       // task finishes.
       deferredProxy.proxyTask = deferredProxy.proxyTask
-          .then([body = kj::addRef(*ownRequestBody)]() mutable {
+          .then([body = ownRequestBody.addRef()]() mutable {
         body->neuter(NeuterableInputStream::SENT_RESPONSE);
-      }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
+      }, [body = ownRequestBody.addRef()](kj::Exception&& e) mutable {
         body->neuter(NeuterableInputStream::THREW_EXCEPTION);
         kj::throwFatalException(kj::mv(e));
       }).attach(kj::mv(deferredNeuter));

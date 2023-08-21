@@ -13,7 +13,7 @@ namespace workerd {
 // This class is used to track a number of associated requests so that some desired behavior
 // is carried out once all requests have completed. `activeRequests` is incremented each time a
 // new request is created, and then decremented once it completes.
-class RequestTracker final: public kj::Refcounted {
+class RequestTracker final: public kj::Refcounted, public kj::RcAddRefToThis<RequestTracker> {
 public:
   class Hooks {
   public:
@@ -27,7 +27,7 @@ public:
     // On creation, if the parent RequestTracker has 0 active requests, we call the `active()` hook.
     // On destruction, if the RequestTracker has 0 active requests, we call the `inactive()` hook.
     // Otherwise, we just increment/decrement the count on creation/destruction respectively.
-    ActiveRequest(kj::Badge<RequestTracker>, RequestTracker& parent);
+    ActiveRequest(kj::Badge<RequestTracker>, kj::Rc<RequestTracker> parent);
     ActiveRequest(ActiveRequest&& other) = default;
     KJ_DISALLOW_COPY(ActiveRequest);
     ~ActiveRequest() noexcept(false);
@@ -53,7 +53,7 @@ public:
   }
 
   kj::Own<RequestTracker> addRef()  {
-    return kj::addRef(*this);
+    return addRefToThis();
   }
 
 private:

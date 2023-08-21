@@ -124,13 +124,13 @@ class ReadableStreamJsController;
 class WritableStreamJsController;
 
 template <typename T>
-class WeakRef: public kj::Refcounted {
+class WeakRef: public kj::Refcounted, public kj::RcAddRefToThis<WeakRef<T>> {
   // Used to allow holding safe weak pointers to type T
 public:
   WeakRef(T& ref) : ref(ref) {}
   KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
   kj::Maybe<T&> tryGet() { return ref; }
-  kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
+  kj::Own<WeakRef> addRef() { return this->addRefToThis(); }
 private:
   void reset() { ref = nullptr; }
   kj::Maybe<T&> ref;

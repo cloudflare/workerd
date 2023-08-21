@@ -32,7 +32,7 @@ namespace workerd {
 using kj::uint;
 
 // An InputGate blocks incoming events from being delivered to an actor while the lock is held.
-class InputGate {
+class InputGate: public virtual kj::Refcounted, public kj::RcAddRefToThis<InputGate> {
 
 public:
   // Hooks that can be used to customize InputGate behavior.
@@ -56,7 +56,7 @@ public:
   };
 
   InputGate(Hooks& hooks = Hooks::DEFAULT);
-  ~InputGate() noexcept;
+  ~InputGate();
 
   class CriticalSection;
 
@@ -64,12 +64,12 @@ public:
   class Lock {
   public:
     KJ_DISALLOW_COPY(Lock);
-    Lock(Lock&& other): gate(other.gate), cs(kj::mv(other.cs)) { other.gate = nullptr; }
+    Lock(Lock&& other): gate(kj::mv(other.gate)), cs(kj::mv(other.cs)) { other.gate = nullptr; }
     ~Lock() noexcept(false) { if (gate != nullptr) gate->releaseLock(); }
 
     // Increments the lock's refcount, returning a duplicate `Lock`. All `Lock`s must be dropped
     // before the gate is unlocked.
-    Lock addRef() { return Lock(*gate); }
+    Lock addRef() { return Lock(gate.addRef()); }
 
     // Start a new critical section from this lock. After `wait()` has been called on the returned
     // critical section for the first time, no further Locks will be handed out by
@@ -78,7 +78,7 @@ public:
     // CriticalSections can be nested. If this Lock is itself part of a CriticalSection, the new
     // CriticalSection will be nested within it and the outer CriticalSection's wait() won't
     // produce a Lock again until the inner CriticalSection is dropped.
-    kj::Own<CriticalSection> startCriticalSection();
+    kj::Rc<CriticalSection> startCriticalSection();
 
     // If this lock was taken in a CriticalSection, return it.
     kj::Maybe<CriticalSection&> getCriticalSection();
@@ -89,11 +89,11 @@ public:
 
   private:
     // Becomes null on move.
-    InputGate* gate;
+    kj::Rc<InputGate> gate;
 
-    kj::Maybe<kj::Own<CriticalSection>> cs;
+    kj::Maybe<kj::Rc<CriticalSection>> cs;
 
-    Lock(InputGate& gate);
+    Lock(kj::Rc<InputGate>&& gate);
     friend class InputGate;
   };
 
@@ -157,9 +157,9 @@ private:
 // initiated within the critical section in the same way that input locks normally do at the
 // top-level scope. E.g., if a critical section initiates a storage read and a fetch() at the
 // same time, the fetch() is prevented from returning until after the storage read has returned.
-class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
+class InputGate::CriticalSection: public InputGate, public virtual kj::Refcounted {
 public:
-  CriticalSection(InputGate& parent);
+  CriticalSection(kj::Rc<InputGate> parent);
   ~CriticalSection() noexcept(false);
 
   // Wait for a nested lock in order to continue this CriticalSection.
@@ -198,7 +198,7 @@ private:
   State state = NOT_STARTED;
 
   // Points to the parent scope, which may be another CriticalSection in the case of nesting.
-  kj::OneOf<InputGate*, kj::Own<CriticalSection>> parent;
+  kj::OneOf<kj::Rc<InputGate>, kj::Rc<CriticalSection>> parent;
 
   // A lock in the parent scope. `parentLock` becomes non-null after the first lock is obtained,
   // and becomes null again when succeeded() is called.
@@ -207,7 +207,7 @@ private:
   friend class InputGate;
 
   // Return a reference for the parent scope, skipping any reparented CriticalSections
-  InputGate& parentAsInputGate();
+  kj::Rc<InputGate> parentAsInputGate();
 };
 
 // An OutputGate blocks outgoing messages from an Actor until writes which they might depend on

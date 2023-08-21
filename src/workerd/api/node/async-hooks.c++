@@ -129,7 +129,7 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(
 }
 
 kj::Own<jsg::AsyncContextFrame::StorageKey> AsyncLocalStorage::getKey() {
-  return kj::addRef(*key);
+  return key.addRef();
 }
 
 }  // namespace workerd::api::node

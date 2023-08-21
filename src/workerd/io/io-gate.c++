@@ -48,7 +48,7 @@ kj::Promise<InputGate::Lock> InputGate::wait() {
   KJ_IF_MAYBE(e, brokenState.tryGet<kj::Exception>()) {
     return kj::cp(*e);
   } else if (lockCount == 0) {
-    return Lock(*this);
+    return Lock(addRefToThis());
   } else {
     return kj::newAdaptedPromise<Lock, Waiter>(*this, false);
   }
@@ -62,16 +62,16 @@ kj::Promise<void> InputGate::onBroken() {
   }
 }
 
-InputGate::Lock::Lock(InputGate& gate)
-    : gate(&gate),
-      cs(gate.isCriticalSection
-          ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
+InputGate::Lock::Lock(kj::Rc<InputGate>&& gate)
+    : gate(gate.addRef()),
+      cs(gate->isCriticalSection
+          ? kj::Maybe(gate.downcast<CriticalSection>().addRef())
           : nullptr) {
-  InputGate* gateToLock = &gate;
+  kj::Rc<InputGate> gateToLock = gate.addRef();
 
-  KJ_IF_MAYBE(c, cs) {
-    if (c->get()->state == CriticalSection::REPARENTED) {
-      gateToLock = &c->get()->parentAsInputGate();
+  KJ_IF_SOME(c, cs) {
+    if (c->state == CriticalSection::REPARENTED) {
+      gateToLock = c->parentAsInputGate();
     }
   }
 
@@ -92,7 +92,7 @@ void InputGate::releaseLock() {
       KJ_DASSERT(self.waiters.size() == 0);
       KJ_DASSERT(lockCount == 0);
 
-      self.parentAsInputGate().releaseLock();
+      self.parentAsInputGate()->releaseLock();
       return;
     }
   }
@@ -105,16 +105,16 @@ void InputGate::releaseLock() {
     if (!waitingChildren.empty()) {
       auto& waiter = waitingChildren.front();
       waitingChildren.remove(waiter);
-      waiter.fulfiller.fulfill(Lock(*this));
+      waiter.fulfiller.fulfill(Lock(addRefToThis()));
     } else if (!waiters.empty()) {
       auto& waiter = waiters.front();
       waiters.remove(waiter);
-      waiter.fulfiller.fulfill(Lock(*this));
+      waiter.fulfiller.fulfill(Lock(addRefToThis()));
     }
   }
 }
 
-kj::Own<InputGate::CriticalSection> InputGate::Lock::startCriticalSection() {
+kj::Rc<InputGate::CriticalSection> InputGate::Lock::startCriticalSection() {
   return kj::refcounted<CriticalSection>(*gate);
 }
 
@@ -129,19 +129,20 @@ kj::Maybe<InputGate::CriticalSection&> InputGate::Lock::getCriticalSection() {
 bool InputGate::Lock::isFor(const InputGate& otherGate) const {
   KJ_ASSERT(!otherGate.isCriticalSection);
 
-  InputGate* ptr = gate;
+  auto ptr = gate.addRef();
   while (ptr->isCriticalSection) {
-    ptr = &static_cast<CriticalSection&>(*ptr).parentAsInputGate();
+    ptr = ptr.downcast<CriticalSection>()->parentAsInputGate();
   }
-  return ptr == &otherGate;
+  return ptr.get() == &otherGate;
 }
 
-InputGate::CriticalSection::CriticalSection(InputGate& parent) {
+InputGate::CriticalSection::CriticalSection(kj::Rc<InputGate> parent) {
   isCriticalSection = true;
-  if (parent.isCriticalSection) {
-    this->parent = kj::addRef(static_cast<CriticalSection&>(parent));
+  if (parent->isCriticalSection) {
+    this->parent = parent.downcast<CriticalSection>().addRef();
   } else {
-    this->parent = &parent;
+    KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+    // this->parent = &parent;
   }
 }
 InputGate::CriticalSection::~CriticalSection() noexcept(false) {
@@ -170,17 +171,17 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
     case NOT_STARTED: {
       state = INITIAL_WAIT;
 
-      auto& target = parentAsInputGate();
-      KJ_IF_MAYBE(e, target.brokenState.tryGet<kj::Exception>()) {
+      auto target = parentAsInputGate();
+      KJ_IF_MAYBE(e, target->brokenState.tryGet<kj::Exception>()) {
         // Oops, we're broken.
         setBroken(*e);
         return kj::cp(*e);
       }
 
       // Add ourselves to this parent's child waiter list.
-      if (target.lockCount == 0) {
+      if (target->lockCount == 0) {
         state = RUNNING;
-        parentLock = Lock(target);
+        parentLock = Lock(target.addRef());
         return wait();
       } else {
         return kj::newAdaptedPromise<Lock, Waiter>(target, true)
@@ -209,10 +210,10 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
       // WARNING: Don't use parentAsInputGate() here as that'll bypass the override of wait() if
       //   the parent is a CriticalSection itself.
       KJ_SWITCH_ONEOF(parent) {
-        KJ_CASE_ONEOF(p, InputGate*) {
+        KJ_CASE_ONEOF(p, kj::Rc<InputGate>) {
           return p->wait();
         }
-        KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+        KJ_CASE_ONEOF(c, kj::Rc<CriticalSection>) {
           return c->wait();
         }
       }
@@ -226,18 +227,18 @@ InputGate::Lock InputGate::CriticalSection::succeeded() {
 
   // Once the CriticalSection has declared itself done, then any straggler tasks it initiated are
   // adopted by the parent.
-  auto& parentGate = parentAsInputGate();
+  auto parentGate = parentAsInputGate();
   for (auto& waiter: waitingChildren) {
     waitingChildren.remove(waiter);
-    parentGate.waitingChildren.add(waiter);
-    waiter.gate = &parentGate;
+    parentGate->waitingChildren.add(waiter);
+    waiter.gate = parentGate.addRef();
   }
   for (auto& waiter: waiters) {
     waiters.remove(waiter);
-    parentGate.waiters.add(waiter);
-    waiter.gate = &parentGate;
+    parentGate->waiters.add(waiter);
+    waiter.gate = parentGate.addRef();
   }
-  parentGate.lockCount += lockCount;
+  parentGate->lockCount += lockCount;
   lockCount = 0;
 
   state = REPARENTED;
@@ -254,10 +255,10 @@ void InputGate::CriticalSection::failed(const kj::Exception& e) {
 
   setBroken(e);
   KJ_SWITCH_ONEOF(parent) {
-    KJ_CASE_ONEOF(p, InputGate*) {
+    KJ_CASE_ONEOF(p, kj::Rc<InputGate>) {
       p->setBroken(e);
     }
-    KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+    KJ_CASE_ONEOF(c, kj::Rc<CriticalSection>) {
       c->failed(e);
     }
   }
@@ -278,14 +279,14 @@ void InputGate::setBroken(const kj::Exception& e) {
   brokenState = kj::cp(e);
 }
 
-InputGate& InputGate::CriticalSection::parentAsInputGate() {
+kj::Rc<InputGate> InputGate::CriticalSection::parentAsInputGate() {
   CriticalSection* ptr = this;
   for(;;) {
     KJ_SWITCH_ONEOF(ptr->parent) {
-      KJ_CASE_ONEOF(p, InputGate*) {
-        return *p;
+      KJ_CASE_ONEOF(p, kj::Rc<InputGate>) {
+        return p.addRef();
       }
-      KJ_CASE_ONEOF(c, kj::Own<CriticalSection>) {
+      KJ_CASE_ONEOF(c, kj::Rc<CriticalSection>) {
         if (c.get()->state == REPARENTED) {
           // Keep looping...
           ptr = c;

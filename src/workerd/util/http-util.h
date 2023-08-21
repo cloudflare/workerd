@@ -12,7 +12,7 @@ namespace workerd {
 // The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
 template<typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
-  req.body = req.body.attach(kj::addRef(*rcAttachment));
+  req.body = req.body.attach(rcAttachment.addRef());
   req.response = req.response
       .then([rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
     response.body = response.body.attach(kj::mv(rcAttachment));

@@ -499,7 +499,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   // that users can write queue handlers in the old addEventListener("queue", ...) syntax (where we
   // can't just wait on their addEventListener handler to resolve because it can't be async).
   context.addWaitUntil(context.run(
-      [this, entrypointName=entrypointName, &context, queueEvent = kj::addRef(*queueEventHolder),
+      [this, entrypointName=entrypointName, &context, queueEvent = queueEventHolder.addRef(),
        &metrics = incomingRequest->getMetrics()]
       (Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);

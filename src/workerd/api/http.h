@@ -249,7 +249,7 @@ public:
     //
     // NOTE: ownBytes may contain a v8::Global reference, hence instances of `Buffer` must exist
     //   only within the V8 heap space.
-    kj::OneOf<kj::Own<RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
+    kj::OneOf<kj::Rc<RefcountedBytes>, jsg::Ref<Blob>> ownBytes;
     // TODO(cleanup): When we integrate with V8's garbage collection APIs, we need to account for
     //   that here.
 
@@ -262,11 +262,11 @@ public:
     Buffer() = default;
     Buffer(kj::Array<kj::byte> array)
         : ownBytes(kj::refcounted<RefcountedBytes>(kj::mv(array))),
-          view(ownBytes.get<kj::Own<RefcountedBytes>>()->bytes) {}
+          view(ownBytes.get<kj::Rc<RefcountedBytes>>()->bytes) {}
     Buffer(kj::String string)
         : ownBytes(kj::refcounted<RefcountedBytes>(string.releaseArray().releaseAsBytes())),
           view([this] {
-            auto bytesIncludingNull = ownBytes.get<kj::Own<RefcountedBytes>>()->bytes.asPtr();
+            auto bytesIncludingNull = ownBytes.get<kj::Rc<RefcountedBytes>>()->bytes.asPtr();
             return bytesIncludingNull.slice(0, bytesIncludingNull.size() - 1);
           }()) {}
     Buffer(jsg::Ref<Blob> blob)

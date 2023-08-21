@@ -1329,7 +1329,7 @@ public:
       kj::Maybe<kj::Own<Worker::Actor>> actor = nullptr) {
     return WorkerEntrypoint::construct(
         threadContext,
-        kj::atomicAddRef(*worker),
+        worker.addRef(),
         entrypointName,
         kj::mv(actor),
         kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
@@ -1394,7 +1394,7 @@ public:
 
     // Implements actor loopback, which is used by websocket hibernation to deliver events to the
     // actor from the websocket's read loop.
-    class Loopback : public Worker::Actor::Loopback, public kj::Refcounted {
+    class Loopback : public Worker::Actor::Loopback, public kj::Refcounted, public kj::RcAddRefToThis<Loopback> {
     public:
       Loopback(ActorNamespace& ns, kj::String id) : ns(ns), id(kj::mv(id)) {}
 
@@ -1403,7 +1403,7 @@ public:
       }
 
       kj::Own<Worker::Actor::Loopback> addRef() {
-        return kj::addRef(*this);
+        return addRefToThis();
       }
 
     private:
@@ -1547,7 +1547,7 @@ private:
   // LinkedIoChannels owns the SqliteDatabase::Vfs, so make sure it is destroyed last.
   kj::OneOf<LinkCallback, LinkedIoChannels> ioChannels;
 
-  kj::Own<const Worker> worker;
+  kj::Rc<const Worker> worker;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers;
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
@@ -2152,7 +2152,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
-      featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
+      featureFlags.asReader(), *limitEnforcer, observer.addRef());
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   KJ_IF_MAYBE(inspector, inspectorOverride) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
@@ -2430,7 +2430,7 @@ public:
       // Run the connection handler loop in the global task set, so that run() waits for open
       // connections to finish before returning, even if the listener loop is canceled. However,
       // do not consider exceptions from a specific connection to be fatal.
-      owner.tasks.add(listen(kj::addRef(*this), kj::mv(conn), kj::mv(stream.stream)));
+      owner.tasks.add(listen(addRefToThis(), kj::mv(conn), kj::mv(stream.stream)));
     }
   }
 

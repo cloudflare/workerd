@@ -471,7 +471,7 @@ Body::Buffer Body::Buffer::clone(jsg::Lock& js) {
   result.view = view;
   KJ_SWITCH_ONEOF(ownBytes) {
     KJ_CASE_ONEOF(refcounted, kj::Own<RefcountedBytes>) {
-      result.ownBytes = kj::addRef(*refcounted);
+      result.ownBytes = refcounted.addRef();
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       result.ownBytes = blob.addRef();
@@ -1328,7 +1328,7 @@ kj::Promise<DeferredProxy<void>> Response::send(
         // as long as the websocket connection.
         // The actor still retains its reference to the manager, so any subsequent requests prior
         // to hibernation will not need to re-obtain a reference.
-        wsPromise = wsPromise.attach(kj::addRef(*hib));
+        wsPromise = wsPromise.attach(hib.addRef());
       }
     }
     return wsPromise;
@@ -2023,7 +2023,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       .messages=encodedMessages.finish(),
   });
 
-  auto eventRef = kj::addRef(*event); // attempt to work around windows-specific null pointer deref.
+  auto eventRef = event.addRef(); // attempt to work around windows-specific null pointer deref.
   return ioContext.awaitIo(js, worker->customEvent(kj::mv(eventRef)).attach(kj::mv(worker)),
       [event=kj::mv(event)](jsg::Lock& js, WorkerInterface::CustomEvent::Result result) {
     return Fetcher::QueueResult{

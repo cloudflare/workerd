@@ -983,9 +983,9 @@ private:
   friend class Ref;
   friend class kj::Refcounted;
   template <typename T>
-  friend kj::Own<T> kj::addRef(T& object);
+  friend class kj::Rc;
   template <typename T, typename... Params>
-  friend kj::Own<T> kj::refcounted(Params&&... params);
+  friend kj::Rc<T> kj::refcounted(Params&&... params);
   friend class GcVisitor;
   template <typename, typename...>
   friend class TypeWrapper;
@@ -1032,7 +1032,7 @@ public:
   // the isolate lock and then bring it in later. The object must be allocated with
   // kj::refcounted. Once the Ref is constructed, the refcount is protected by the isolate lock
   // going forward; you can no longer add or remove refs outside the lock.
-  explicit Ref(kj::Own<T> innerParam): inner(kj::mv(innerParam)), strong(true) {
+  explicit Ref(kj::Rc<T> innerParam): inner(kj::mv(innerParam)), strong(true) {
     inner->addStrongRef();
   }
   template <typename U, typename = kj::EnableIf<kj::canConvert<U&, T&>()>>
@@ -1069,7 +1069,7 @@ public:
   const T* get() const { return inner.get(); }
 
   Ref addRef() & {
-    return Ref(kj::addRef(*inner));
+    return Ref(inner.addRef());
   }
   Ref addRef() && = delete;  // would be redundant
 
@@ -1094,7 +1094,7 @@ public:
   }
 
 private:
-  kj::Own<T> inner;
+  kj::Rc<T> inner;
 
   // If this has ever been traced, the parent object from which the trace originated. This is kept
   // for debugging purposes only -- there should only ever be one parent for a particular ref.
@@ -1132,7 +1132,8 @@ Ref<T> alloc(Params&&... params) {
 
 template <typename T>
 Ref<T> _jsgThis(T* obj) {
-  return Ref<T>(kj::addRef(*obj));
+  KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+  // return Ref<T>(obj.addRef());
 }
 
 #define JSG_THIS (::workerd::jsg::_jsgThis(this))

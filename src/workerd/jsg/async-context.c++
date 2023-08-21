@@ -170,10 +170,10 @@ AsyncContextFrame::Scope::~Scope() noexcept(false) {
 
 AsyncContextFrame::StorageScope::StorageScope(
     Lock& js,
-    StorageKey& key,
+    kj::Rc<StorageKey> key,
     Value store)
     : frame(AsyncContextFrame::create(js, StorageEntry {
-        .key = kj::addRef(key),
+        .key = key.addRef(),
         .value = kj::mv(store)
       })),
       scope(js, *frame) {}

@@ -378,12 +378,12 @@ WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, Io
     : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
   KJ_IF_MAYBE(a, context.getActor()) {
-    auto& metrics = a->getMetrics();
-    metrics.webSocketAccepted();
+    auto metrics = a->getMetrics();
+    metrics->webSocketAccepted();
 
     // Save the metrics object for the destructor since the IoContext may not be accessible
     // there.
-    actorMetrics = kj::addRef(metrics);
+    actorMetrics = kj::mv(metrics);
   }
 }
 
@@ -391,12 +391,12 @@ WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& c
     : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
   KJ_IF_MAYBE(a, context.getActor()) {
-    auto& metrics = a->getMetrics();
-    metrics.webSocketAccepted();
+    auto metrics = a->getMetrics();
+    metrics->webSocketAccepted();
 
     // Save the metrics object for the destructor since the IoContext may not be accessible
     // there.
-    actorMetrics = kj::addRef(metrics);
+    actorMetrics = kj::mv(metrics);
   }
 }
 
@@ -795,7 +795,7 @@ kj::Promise<void> WebSocket::pump(
     }
 
     KJ_IF_MAYBE(a, context.getActor()) {
-      a->getMetrics().sentWebSocketMessage(size);
+      a->getMetrics()->sentWebSocketMessage(size);
     }
   }
 }
@@ -823,7 +823,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
       context.getLimitEnforcer().topUpActor();
       KJ_IF_MAYBE(a, context.getActor()) {
         auto size = countBytesFromMessage(message);
-        a->getMetrics().receivedWebSocketMessage(size);
+        a->getMetrics()->receivedWebSocketMessage(size);
       }
 
       // Re-enter the context with context.run(). This is arguably a bit unusual compared to other

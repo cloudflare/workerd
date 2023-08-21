@@ -1606,7 +1606,7 @@ public:
 private:
   class LockImpl;
   struct LockState;
-  using LockMap = kj::HashMap<kj::PathPtr, LockState*>;
+  using LockMap = kj::HashMap<kj::PathPtr, kj::Rc<LockState>>;
   kj::MutexGuarded<LockMap> lockMap;
 
   struct LockState: public kj::Refcounted {
@@ -1639,11 +1639,11 @@ private:
         state = kj::refcounted<LockState>(path.clone());
         return LockMap::Entry {
           .key = state->path,
-          .value = state.get()
+          .value = state.addRef()
         };
       });
       if (state.get() == nullptr) {
-        state = kj::addRef(*slot);
+        state = slot.addRef();
       }
     }
 
@@ -1816,7 +1816,7 @@ private:
 
   private:
     const DefaultLockManager& lockManager;
-    kj::Own<LockState> state;
+    kj::Rc<LockState> state;
     Level currentLevel = UNLOCKED;
   };
 };

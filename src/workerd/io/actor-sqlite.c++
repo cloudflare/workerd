@@ -57,15 +57,15 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite)
       // API is async, and atomicity is only guaranteed over synchronous code.
       implicit->commit();
     }
-    KJ_CASE_ONEOF(exp, ExplicitTxn*) {
+    KJ_CASE_ONEOF(exp, kj::Rc<ExplicitTxn>) {
       KJ_REQUIRE(!exp->hasChild,
           "critical section should have blocked creation of more than one child at a time");
-      parent = kj::addRef(*exp);
+      parent = exp.addRef();
       exp->hasChild = true;
       depth = exp->depth + 1;
     }
   }
-  actorSqlite.currentTxn = this;
+  actorSqlite.currentTxn = addRefToThis();
 
   // To support nested transactions, we assign each savepoint a name based on its nesting depth.
   // Unfortunately this means we cannot prepare the statement, unless we prepare a series of
@@ -79,11 +79,11 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
     // We'd better crash if any of this state update fails, otherwise dangling pointers.
 
     KJ_ASSERT(!hasChild);
-    auto cur = KJ_ASSERT_NONNULL(actorSqlite.currentTxn.tryGet<ExplicitTxn*>());
-    KJ_ASSERT(cur == this);
+    auto& cur = KJ_ASSERT_NONNULL(actorSqlite.currentTxn.tryGet<kj::Rc<ExplicitTxn>>());
+    KJ_ASSERT(cur.get() == this);
     KJ_IF_MAYBE(p, parent) {
       p->get()->hasChild = false;
-      actorSqlite.currentTxn = p->get();
+      actorSqlite.currentTxn = p->addRef();
     } else {
       actorSqlite.currentTxn.init<NoTxn>();
     }

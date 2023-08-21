@@ -114,7 +114,7 @@ private:
     RefcountedUrl(Args&&... args): kj::Url(kj::fwd<Args>(args)...) {}
   };
 
-  kj::Own<RefcountedUrl> url;
+  kj::Rc<RefcountedUrl> url;
   kj::Maybe<jsg::Ref<URLSearchParams>> searchParams;
 
   void visitForGc(jsg::GcVisitor& visitor) {
