@@ -27,7 +27,7 @@ filegroup(
 # Workspace Member Dependencies
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.72//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.75//:anyhow",
     tags = ["manual"],
 )
 
@@ -39,7 +39,7 @@ alias(
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.0.26//:flate2",
+    actual = "@crates_vendor__flate2-1.0.27//:flate2",
     tags = ["manual"],
 )
 
@@ -63,12 +63,12 @@ alias(
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.171//:serde",
+    actual = "@crates_vendor__serde-1.0.185//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.104//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.105//:serde_json",
     tags = ["manual"],
 )

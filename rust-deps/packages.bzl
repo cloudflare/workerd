@@ -12,9 +12,7 @@ RTTI_PACKAGES = {
         version = "1.0",
     ),
     "serde": crate.spec(
-        # TODO: Restore to "1.0" when https://github.com/bazelbuild/rules_rust/issues/2071
-        # is resolved
-        version = "=1.0.171",
+        version = "1.0",
         features = ["derive"],
     ),
     "serde_json": crate.spec(

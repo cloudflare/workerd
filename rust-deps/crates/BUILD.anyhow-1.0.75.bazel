@@ -16,7 +16,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "serde_json",
+    name = "anyhow",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -34,26 +34,23 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.104",
+    version = "1.0.75",
     deps = [
-        "@crates_vendor__itoa-1.0.9//:itoa",
-        "@crates_vendor__ryu-1.0.15//:ryu",
-        "@crates_vendor__serde-1.0.171//:serde",
-        "@crates_vendor__serde_json-1.0.104//:build_script_build",
+        "@crates_vendor__anyhow-1.0.75//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "serde_json_build_script",
+    name = "anyhow_build_script",
     srcs = glob(["**/*.rs"]),
     crate_features = [
         "default",
@@ -72,23 +69,23 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=anyhow",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.104",
+    version = "1.0.75",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "serde_json_build_script",
+    actual = "anyhow_build_script",
     tags = ["manual"],
 )

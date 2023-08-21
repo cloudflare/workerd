@@ -6,7 +6,6 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -16,7 +15,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "anyhow",
+    name = "flate2",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -30,62 +29,24 @@ rust_library(
         ],
     ),
     crate_features = [
+        "any_impl",
         "default",
-        "std",
+        "miniz_oxide",
+        "rust_backend",
     ],
     crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=anyhow",
+        "crate-name=flate2",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.72",
+    version = "1.0.27",
     deps = [
-        "@crates_vendor__anyhow-1.0.72//:build_script_build",
+        "@crates_vendor__crc32fast-1.3.2//:crc32fast",
+        "@crates_vendor__miniz_oxide-0.7.1//:miniz_oxide",
     ],
-)
-
-cargo_build_script(
-    name = "anyhow_build_script",
-    srcs = glob(["**/*.rs"]),
-    crate_features = [
-        "default",
-        "std",
-    ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    edition = "2018",
-    rustc_flags = [
-        "--cap-lints=allow",
-    ],
-    tags = [
-        "cargo-bazel",
-        "crate-name=anyhow",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "1.0.72",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = "anyhow_build_script",
-    tags = ["manual"],
 )
