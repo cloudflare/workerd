@@ -2,7 +2,7 @@
 .DS_Store
 
 # directory for developers to store local resources
-/local/
+/.local/
 
 /*.code-workspace
 
