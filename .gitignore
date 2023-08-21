@@ -1,6 +1,9 @@
 .idea
 .DS_Store
 
+# directory for developers to store local resources
+/.local/
+
 /*.code-workspace
 
 /rust-deps/target
