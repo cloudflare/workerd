@@ -567,7 +567,9 @@ jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState() {
     auto& lock = context.getCurrentLock();
     auto persistent = actor.makeStorageForSwSyntax(lock);
     return jsg::alloc<api::ActorState>(
-        actor.cloneId(), actor.getTransient(lock), kj::mv(persistent));
+        actor.cloneId(),
+        actor.getTransient(lock),
+        kj::mv(persistent));
   });
 }
 

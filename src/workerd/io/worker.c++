@@ -2794,7 +2794,7 @@ struct Worker::Actor::Impl {
 
   kj::Own<ActorObserver> metrics;
 
-  kj::Maybe<jsg::Value> transient;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
   struct NoClass {};
@@ -2941,7 +2941,7 @@ struct Worker::Actor::Impl {
     js.withinHandleScope([&] {
       auto contextScope = js.enterContextScope(lock.getContext());
       if (hasTransient) {
-        transient.emplace(js.v8Isolate, v8::Object::New(js.v8Isolate));
+        transient.emplace(js, js.obj());
       }
 
       actorCache = makeActorCache(self.worker->getIsolate().impl->actorCacheLru, outputGate, hooks);
@@ -3120,9 +3120,11 @@ Worker::Actor::Id Worker::Actor::cloneId() {
   return cloneId(impl->actorId);
 }
 
-kj::Maybe<jsg::Value> Worker::Actor::getTransient(Worker::Lock& lock) {
+kj::Maybe<jsg::JsRef<jsg::JsValue>> Worker::Actor::getTransient(Worker::Lock& lock) {
   KJ_REQUIRE(&lock.getWorker() == worker.get());
-  return impl->transient.map([&](jsg::Value& val) { return val.addRef(lock.getIsolate()); });
+  return impl->transient.map([&](jsg::JsRef<jsg::JsValue>& val) {
+    return val.addRef(lock);
+  });
 }
 
 kj::Maybe<ActorCacheInterface&> Worker::Actor::getPersistent() {

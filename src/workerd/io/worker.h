@@ -732,7 +732,7 @@ public:
   const Id& getId();
   Id cloneId();
   static Id cloneId(Id& id);
-  kj::Maybe<jsg::Value> getTransient(Worker::Lock& lock);
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> getTransient(Worker::Lock& lock);
   kj::Maybe<ActorCacheInterface&> getPersistent();
   kj::Own<Loopback> getLoopback();
 

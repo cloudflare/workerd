@@ -11,7 +11,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/actor-storage.capnp.h>
 #include <kj/async.h>
-#include <v8.h>
 #include <workerd/io/actor-cache.h>
 
 namespace workerd::api {
@@ -21,9 +20,9 @@ class SqlStorage;
 class DurableObjectId;
 class WebSocket;
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value);
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 
-v8::Local<v8::Value> deserializeV8Value(
+jsg::JsValue deserializeV8Value(
     jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
 
 class DurableObjectStorageOperations {
@@ -45,9 +44,10 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectGetOptions); // Rename from DurableObjectStorageOperationsGetOptions
   };
 
-  jsg::Promise<jsg::Value> get(jsg::Lock& js,
-                               kj::OneOf<kj::String, kj::Array<kj::String>> keys,
-                              jsg::Optional<GetOptions> options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> get(
+      jsg::Lock& js,
+      kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+      jsg::Optional<GetOptions> options);
 
   struct GetAlarmOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -79,7 +79,7 @@ public:
     JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions); // Rename from DurableObjectStorageOperationsListOptions
   };
 
-  jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   struct PutOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -98,9 +98,10 @@ public:
   };
 
   jsg::Promise<void> put(jsg::Lock& js,
-      kj::OneOf<kj::String, jsg::Dict<v8::Local<v8::Value>>> keyOrEntries,
-      jsg::Optional<v8::Local<v8::Value>> value, jsg::Optional<PutOptions> options,
-      const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
+                         kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
+                         jsg::Optional<jsg::JsValue> value,
+                         jsg::Optional<PutOptions> options,
+                         const jsg::TypeHandler<PutOptions>& optionsTypeHandler);
 
   kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> delete_(
       jsg::Lock& js,
@@ -160,16 +161,18 @@ protected:
   }
 
 private:
-  jsg::Promise<jsg::Value> getOne(jsg::Lock& js, kj::String key, const GetOptions& options);
-  jsg::Promise<jsg::Value> getMultiple(jsg::Lock& js,
-                                       kj::Array<kj::String> keys,
-                                       const GetOptions& options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> getOne(jsg::Lock& js,
+                                                kj::String key,
+                                                const GetOptions& options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> getMultiple(jsg::Lock& js,
+                                                     kj::Array<kj::String> keys,
+                                                     const GetOptions& options);
 
   jsg::Promise<void> putOne(jsg::Lock& js,
                             kj::String key,
-                            v8::Local<v8::Value> value,
+                            jsg::JsValue value,
                             const PutOptions& options);
-  jsg::Promise<void> putMultiple(jsg::Lock& js, jsg::Dict<v8::Local<v8::Value>> entries,
+  jsg::Promise<void> putMultiple(jsg::Lock& js, jsg::Dict<jsg::JsValue> entries,
                                  const PutOptions& options);
 
   jsg::Promise<bool> deleteOne(jsg::Lock& js, kj::String key, const PutOptions& options);
@@ -196,11 +199,15 @@ public:
     // Omit from definitions
   };
 
-  jsg::Promise<jsg::Value> transaction(jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> closure,
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> transaction(
+      jsg::Lock& js,
+      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(
+          jsg::Ref<DurableObjectTransaction>)> closure,
       jsg::Optional<TransactionOptions> options);
 
-  jsg::Value transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback);
+  jsg::JsRef<jsg::JsValue> transactionSync(
+      jsg::Lock& js,
+      jsg::Function<jsg::JsRef<jsg::JsValue>()> callback);
 
   jsg::Promise<void> deleteAll(jsg::Lock& js, jsg::Optional<PutOptions> options);
 
@@ -343,13 +350,14 @@ class ActorState: public jsg::Object {
   // TODO(cleanup): Remove getPersistent method that isn't supported for colo-local actors anymore.
 
 public:
-  ActorState(Worker::Actor::Id actorId, kj::Maybe<jsg::Value> transient,
-      kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
+  ActorState(Worker::Actor::Id actorId,
+             kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
+             kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent);
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId();
 
-  jsg::Optional<v8::Local<v8::Value>> getTransient(jsg::Lock& js) {
-    return transient.map([&](jsg::Value& v) { return v.getHandle(js); });
+  jsg::Optional<jsg::JsValue> getTransient(jsg::Lock& js) {
+    return transient.map([&](jsg::JsRef<jsg::JsValue>& v) { return v.getHandle(js); });
   }
 
   jsg::Optional<jsg::Ref<DurableObjectStorage>> getPersistent() {
@@ -366,7 +374,7 @@ public:
 
 private:
   Worker::Actor::Id id;
-  kj::Maybe<jsg::Value> transient;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> transient;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent;
 };
 
@@ -406,8 +414,9 @@ public:
     return storage.map([&](jsg::Ref<DurableObjectStorage>& p) { return p.addRef(); });
   }
 
-  jsg::Promise<jsg::Value> blockConcurrencyWhile(jsg::Lock& js,
-      jsg::Function<jsg::Promise<jsg::Value>()> callback);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
+      jsg::Lock& js,
+      jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
 
   void abort(jsg::Optional<kj::String> reason);
   // Reset the object, including breaking the output gate and canceling any writes that haven't

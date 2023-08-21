@@ -33,12 +33,12 @@ uint32_t billingUnits(size_t bytes, BillAtLeastOne billAtLeastOne = BillAtLeastO
   return bytes / BILLING_UNIT + (bytes % BILLING_UNIT != 0);
 }
 
-v8::Local<v8::Value> deserializeMaybeV8Value(
+jsg::JsValue deserializeMaybeV8Value(
     jsg::Lock& js, kj::ArrayPtr<const char> key, kj::Maybe<kj::ArrayPtr<const kj::byte>> buf) {
   KJ_IF_MAYBE(b, buf) {
     return deserializeV8Value(js, key, *b);
   } else {
-    return js.v8Undefined();
+    return js.undefined();
   }
 }
 
@@ -117,19 +117,18 @@ ActorObserver& currentActorMetrics() {
   return IoContext::current().getActorOrThrow().getMetrics();
 }
 
-jsg::Value listResultsToMap(jsg::Lock& js,
-                            ActorCacheOps::GetResultList value,
-                            bool completelyCached) {
+jsg::JsRef<jsg::JsValue> listResultsToMap(jsg::Lock& js,
+                                          ActorCacheOps::GetResultList value,
+                                          bool completelyCached) {
   return js.withinHandleScope([&] {
-    auto map = v8::Map::New(js.v8Isolate);
+    auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
     for (auto entry: value) {
       auto& bytesRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                     ? cachedReadBytes : uncachedReadBytes;
       bytesRef += entry.key.size() + entry.value.size();
-      jsg::check(map->Set(js.v8Context(), jsg::v8Str(js.v8Isolate, entry.key),
-          deserializeV8Value(js, entry.key, entry.value)));
+      map.set(js, entry.key, deserializeV8Value(js, entry.key, entry.value));
     }
     auto& actorMetrics = currentActorMetrics();
     if (cachedReadBytes || uncachedReadBytes) {
@@ -150,23 +149,23 @@ jsg::Value listResultsToMap(jsg::Lock& js,
       actorMetrics.addUncachedStorageReadUnits(1);
     }
 
-    return js.v8Ref(map.As<v8::Value>());
+    return jsg::JsValue(map).addRef(js);
   });
 }
 
-kj::Function<jsg::Value(jsg::Lock&, ActorCacheOps::GetResultList)> getMultipleResultsToMap(
+kj::Function<jsg::JsRef<jsg::JsValue>(jsg::Lock&, ActorCacheOps::GetResultList)>
+getMultipleResultsToMap(
     size_t numInputKeys) {
   return [numInputKeys](jsg::Lock& js, ActorCacheOps::GetResultList value) mutable {
     return js.withinHandleScope([&] {
-      auto map = v8::Map::New(js.v8Isolate);
+      auto map = js.map();
       uint32_t cachedUnits = 0;
       uint32_t uncachedUnits = 0;
       for (auto entry: value) {
         auto& unitsRef = entry.status == ActorCacheOps::CacheStatus::CACHED
                       ? cachedUnits : uncachedUnits;
         unitsRef += billingUnits(entry.key.size() + entry.value.size());
-        jsg::check(map->Set(js.v8Context(), jsg::v8Str(js.v8Isolate, entry.key),
-            deserializeV8Value(js, entry.key, entry.value)));
+        map.set(js, entry.key, deserializeV8Value(js, entry.key, entry.value));
       }
       auto& actorMetrics = currentActorMetrics();
       actorMetrics.addCachedStorageReadUnits(cachedUnits);
@@ -187,7 +186,7 @@ kj::Function<jsg::Value(jsg::Lock&, ActorCacheOps::GetResultList)> getMultipleRe
       // only for uncached reads, we'll need to address this.
       actorMetrics.addUncachedStorageReadUnits(leftoverKeys + uncachedUnits);
 
-      return js.v8Ref(map.As<v8::Value>());
+      return jsg::JsValue(map).addRef(js);
     });
   };
 }
@@ -213,7 +212,7 @@ kj::Promise<void> updateStorageDeletes(IoContext& context,
 
 }  // namespace
 
-jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(
     jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<GetOptions> maybeOptions) {
@@ -229,7 +228,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::get(
   KJ_UNREACHABLE
 }
 
-jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
     jsg::Lock& js, kj::String key, const GetOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
@@ -246,7 +245,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getOne(
     } else {
       actorMetrics.addUncachedStorageReadUnits(units);
     }
-    return js.v8Ref(deserializeMaybeV8Value(js, key, value));
+    return deserializeMaybeV8Value(js, key, value).addRef(js);
   });
 }
 
@@ -270,7 +269,7 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   });
 }
 
-jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
   kj::String start;
   kj::Maybe<kj::String> end;
@@ -278,7 +277,7 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
   kj::Maybe<uint> limit;
 
   auto makeEmptyResult = [&]() {
-    return js.resolvedPromise(js.v8Ref(v8::Map::New(js.v8Isolate).As<v8::Value>()));
+    return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js));
   };
 
   KJ_IF_MAYBE(o, maybeOptions) {
@@ -380,9 +379,11 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::list(
                                              options, &listResultsToMap);
 }
 
-jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
-    kj::OneOf<kj::String, jsg::Dict<v8::Local<v8::Value>>> keyOrEntries,
-    jsg::Optional<v8::Local<v8::Value>> value, jsg::Optional<PutOptions> maybeOptions,
+jsg::Promise<void> DurableObjectStorageOperations::put(
+    jsg::Lock& js,
+    kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
+    jsg::Optional<jsg::JsValue> value,
+    jsg::Optional<PutOptions> maybeOptions,
     const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
   // TODO(soon): Add tests of data generated at current versions to ensure we'll
   // know before releasing any backwards-incompatible serializer changes,
@@ -396,7 +397,7 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
         JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
       }
     }
-    KJ_CASE_ONEOF(o, jsg::Dict<v8::Local<v8::Value>>) {
+    KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
       KJ_IF_MAYBE(v, value) {
         KJ_IF_MAYBE(opt, optionsTypeHandler.tryUnwrap(js, *v)) {
           return putMultiple(js, kj::mv(o), configureOptions(kj::mv(*opt)));
@@ -454,7 +455,10 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
-    jsg::Lock& js, kj::String key, v8::Local<v8::Value> value, const PutOptions& options) {
+    jsg::Lock& js,
+    kj::String key,
+    jsg::JsValue value,
+    const PutOptions& options) {
   ActorStorageLimits::checkMaxKeySize(key);
 
   kj::Array<byte> buffer = serializeV8Value(js, value);
@@ -530,8 +534,10 @@ jsg::Promise<bool> DurableObjectStorageOperations::deleteOne(
   });
 }
 
-jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
-    jsg::Lock& js, kj::Array<kj::String> keys, const GetOptions& options) {
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getMultiple(
+    jsg::Lock& js,
+    kj::Array<kj::String> keys,
+    const GetOptions& options) {
   ActorStorageLimits::checkMaxPairsCount(keys.size());
 
   auto numKeys = keys.size();
@@ -541,12 +547,14 @@ jsg::Promise<jsg::Value> DurableObjectStorageOperations::getMultiple(
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putMultiple(
-    jsg::Lock& js, jsg::Dict<v8::Local<v8::Value>> entries, const PutOptions& options) {
+    jsg::Lock& js,
+    jsg::Dict<jsg::JsValue> entries,
+    const PutOptions& options) {
   kj::Vector<ActorCacheOps::KeyValuePair> kvs(entries.fields.size());
 
   uint32_t units = 0;
   for (auto& field : entries.fields) {
-    if (field.value->IsUndefined()) continue;
+    if (field.value.isUndefined()) continue;
     // We silently drop fields with value=undefined in putMultiple. There aren't many good options here, as
     // deleting an undefined field is confusing, throwing could break otherwise working code, and
     // a stray undefined here or there is probably closer to what the user desires.
@@ -589,13 +597,14 @@ ActorCacheOps& DurableObjectStorage::getCache(OpName op) {
   return *cache;
 }
 
-jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
-    jsg::Function<jsg::Promise<jsg::Value>(jsg::Ref<DurableObjectTransaction>)> callback,
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lock& js,
+    jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>(
+        jsg::Ref<DurableObjectTransaction>)> callback,
     jsg::Optional<TransactionOptions> options) {
   auto& context = IoContext::current();
 
   struct TxnResult {
-    jsg::Value value;
+    jsg::JsRef<jsg::JsValue> value;
     bool isError;
   };
 
@@ -613,7 +622,7 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
 
     return js.resolvedPromise(txn.addRef())
         .then(js, kj::mv(callback))
-        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::Value value) mutable {
+        .then(js, [txn = txn.addRef()](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) mutable {
       // In correct usage, `context` should not have changed here, particularly because we're in
       // a critical section so it should have been impossible for any other context to receive
       // control. However, depending on all that is a bit precarious. jsg::Promise::then() itself
@@ -630,18 +639,24 @@ jsg::Promise<jsg::Value> DurableObjectStorage::transaction(jsg::Lock& js,
       // we only want to roll back the transaction and propagate the exception. So, we carefully
       // pack the exception away into a value.
       txn->maybeRollback();
-      return js.resolvedPromise(TxnResult { kj::mv(exception), true });
+      return js.resolvedPromise(TxnResult {
+        // TODO(cleanup): Simplify this once exception is passed using jsg::JsRef instead
+        // of jsg::V8Ref
+        jsg::JsValue(exception.getHandle(js)).addRef(js), true
+      });
     });
-  }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::Value {
+  }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::JsRef<jsg::JsValue> {
     if (result.isError) {
-      js.throwException(kj::mv(result.value));
+      js.throwException(result.value.getHandle(js));
     } else {
       return kj::mv(result.value);
     }
   });
 }
 
-jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<jsg::Value()> callback) {
+jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
+    jsg::Lock& js,
+    jsg::Function<jsg::JsRef<jsg::JsValue>()> callback) {
   KJ_IF_MAYBE(sqlite, cache->getSqliteDatabase()) {
     // SAVEPOINT is a readonly statement, but we need to trigger an outer TRANSACTION
     sqlite->notifyWrite();
@@ -654,7 +669,7 @@ jsg::Value DurableObjectStorage::transactionSync(jsg::Lock& js, jsg::Function<js
       auto result = callback(js);
       sqlite->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
-    }, [&](jsg::Value exception) -> jsg::Value {
+    }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       sqlite->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
       js.throwException(kj::mv(exception));
     });
@@ -736,8 +751,11 @@ void DurableObjectTransaction::maybeRollback() {
 }
 
 ActorState::ActorState(Worker::Actor::Id actorId,
-    kj::Maybe<jsg::Value> transient, kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent)
-    : id(kj::mv(actorId)), transient(kj::mv(transient)), persistent(kj::mv(persistent)) {}
+                       kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
+                       kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent)
+    : id(kj::mv(actorId)),
+      transient(kj::mv(transient)),
+      persistent(kj::mv(persistent)) {}
 
 kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId() {
   KJ_SWITCH_ONEOF(id) {
@@ -771,8 +789,8 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId() 
   KJ_UNREACHABLE;
 }
 
-jsg::Promise<jsg::Value> DurableObjectState::blockConcurrencyWhile(jsg::Lock& js,
-    jsg::Function<jsg::Promise<jsg::Value>()> callback) {
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectState::blockConcurrencyWhile(jsg::Lock& js,
+    jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback) {
   return IoContext::current().blockConcurrencyWhile(js, kj::mv(callback));
 }
 
@@ -901,7 +919,7 @@ kj::Maybe<kj::Date> DurableObjectState::getWebSocketAutoResponseTimestamp(jsg::R
   return ws->getAutoResponseTimestamp();
 }
 
-kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value) {
+kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
@@ -911,9 +929,9 @@ kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, v8::Local<v8::Value> value) 
   return kj::mv(released.data);
 }
 
-v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
-                                        kj::ArrayPtr<const char> key,
-                                        kj::ArrayPtr<const kj::byte> buf) {
+jsg::JsValue deserializeV8Value(jsg::Lock& js,
+                                kj::ArrayPtr<const char> key,
+                                kj::ArrayPtr<const kj::byte> buf) {
 
   KJ_ASSERT(buf.size() > 0, "unexpectedly empty value buffer", key);
   try {
@@ -921,7 +939,7 @@ v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
     // additional try/catch in case the js.tryCatch hits an exception that is
     // terminal for the isolate, causing exception to be rethrown, in which case
     // we throw a kj::Exception wrapping a jsg.Error.
-    return js.tryCatch([&]() -> v8::Local<v8::Value> {
+    return js.tryCatch([&]() -> jsg::JsValue {
       jsg::Deserializer::Options options {};
       if (buf[0] != 0xFF) {
         // When Durable Objects was first released, it did not properly write headers when serializing
@@ -934,8 +952,8 @@ v8::Local<v8::Value> deserializeV8Value(jsg::Lock& js,
 
       jsg::Deserializer deserializer(js, buf, nullptr, nullptr, options);
 
-      return deserializer.readValue();
-    }, [&](jsg::Value&& exception) mutable -> v8::Local<v8::Value> {
+      return jsg::JsValue(deserializer.readValue());
+    }, [&](jsg::Value&& exception) mutable -> jsg::JsValue {
       // If we do hit a deserialization error, we log information that will be helpful in
       // understanding the problem but that won't leak too much about the customer's data. We
       // include the key (to help find the data in the database if it hasn't been deleted), the
