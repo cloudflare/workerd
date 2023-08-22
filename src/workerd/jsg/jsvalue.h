@@ -125,6 +125,7 @@ public:
   bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
   JS_IS_TYPES(V)
@@ -197,6 +198,8 @@ public:
   int utf8Length(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   int hashCode() const;
+
+  bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
 

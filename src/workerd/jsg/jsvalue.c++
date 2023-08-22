@@ -104,6 +104,11 @@ kj::String JsValue::toString(Lock& js) const {
   return kj::str(inner);
 }
 
+JsString JsValue::toJsString(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  return JsString(check(inner->ToString(js.v8Context())));
+}
+
 kj::String JsValue::typeOf(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return kj::str(inner->TypeOf(js.v8Isolate));
@@ -174,6 +179,10 @@ JsString::WriteIntoStatus JsString::writeInto(
                                       options);
   }
   return result;
+}
+
+bool JsString::containsOnlyOneByte() const {
+  return inner->ContainsOnlyOneByte();
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
