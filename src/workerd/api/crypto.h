@@ -7,6 +7,7 @@
 
 #include <bit>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/buffersource.h>
 #include <openssl/err.h>
 #include "streams.h"
 
@@ -649,7 +650,7 @@ class Crypto: public jsg::Object {
   // https://www.w3.org/TR/WebCryptoAPI/#crypto-interface
 
 public:
-  v8::Local<v8::ArrayBufferView> getRandomValues(v8::Local<v8::ArrayBufferView> buffer);
+  jsg::BufferSource getRandomValues(jsg::BufferSource buffer);
 
   kj::String randomUUID();
 

@@ -125,6 +125,7 @@ public:
   bool isTruthy(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   kj::String typeOf(Lock& js) const KJ_WARN_UNUSED_RESULT;
+  JsString toJsString(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
 #define V(Type) bool is##Type() const KJ_WARN_UNUSED_RESULT;
   JS_IS_TYPES(V)
@@ -198,6 +199,8 @@ public:
   kj::String toString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   int hashCode() const;
 
+  bool containsOnlyOneByte() const;
+
   bool operator==(const JsString& other) const;
 
   static JsString concat(Lock& js, const JsString& one, const JsString& two)
@@ -215,6 +218,14 @@ public:
   kj::Array<T> toArray(
       Lock& js,
       WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
+
+  struct WriteIntoStatus {
+    int read;
+    int written;
+  };
+  WriteIntoStatus writeInto(Lock& js,
+                            kj::ArrayPtr<char> buffer,
+                            WriteOptions options = WriteOptions::NONE) const;
 
   using JsBase<v8::String, JsString>::JsBase;
 };

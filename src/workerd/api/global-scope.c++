@@ -635,25 +635,23 @@ void ServiceWorkerGlobalScope::emitPromiseRejection(
   }
 }
 
-kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, v8::Local<v8::Value> data) {
-  auto str = jsg::check(data->ToString(js.v8Context()));
+kj::String ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsValue data) {
+  auto str = data.toJsString(js);
 
   // We could implement btoa() by accepting a kj::String, but then we'd have to check that it
   // doesn't have any multibyte code points. Easier to perform that test using v8::String's
   // ContainsOnlyOneByte() function.
-  JSG_REQUIRE(str->ContainsOnlyOneByte(), DOMInvalidCharacterError,
+  JSG_REQUIRE(str.containsOnlyOneByte(), DOMInvalidCharacterError,
       "btoa() can only operate on characters in the Latin1 (ISO/IEC 8859-1) range.");
 
   // TODO(perf): v8::String sometimes holds a char pointer rather than a uint16_t pointer, which is
   //   why v8::String::IsOneByte() is both faster than ContainsOnlyOneByte() and prone to false
   //   negatives. Conceivably we could take advantage of this fact to completely avoid the later
   //   WriteOneByte() call in some cases!
-  auto buf = kj::heapArray<kj::byte>(str->Length());
-  str->WriteOneByte(js.v8Isolate, buf.begin(), 0, buf.size());
 
-  return kj::encodeBase64(buf);
+  return kj::encodeBase64(str.toArray<kj::byte>(js));
 }
-v8::Local<v8::String> ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
+jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());
 
   JSG_REQUIRE(!decoded.hadErrors, DOMInvalidCharacterError,
@@ -664,7 +662,7 @@ v8::Local<v8::String> ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String d
   // Similar to btoa() taking a v8::Value, we return a v8::String directly, as this allows us to
   // construct a string from the non-nul-terminated array returned from decodeBase64(). This avoids
   // making a copy purely to append a nul byte.
-  return jsg::v8StrFromLatin1(js.v8Isolate, decoded.asBytes());
+  return js.str(decoded.asBytes());
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(
@@ -680,9 +678,9 @@ void ServiceWorkerGlobalScope::queueMicrotask(
   js.v8Isolate->EnqueueMicrotask(task);
 }
 
-v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
+jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
     jsg::Lock& js,
-    v8::Local<v8::Value> value,
+    jsg::JsValue value,
     jsg::Optional<StructuredCloneOptions> maybeOptions) {
   kj::Maybe<kj::ArrayPtr<jsg::Value>> transfers;
   KJ_IF_MAYBE(options, maybeOptions) {
@@ -690,7 +688,7 @@ v8::Local<v8::Value> ServiceWorkerGlobalScope::structuredClone(
       return transfer.asPtr();
     });
   }
-  return jsg::structuredClone(js, value, transfers);
+  return jsg::JsValue(jsg::structuredClone(js, value, transfers));
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(

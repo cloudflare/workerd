@@ -104,6 +104,11 @@ kj::String JsValue::toString(Lock& js) const {
   return kj::str(inner);
 }
 
+JsString JsValue::toJsString(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  return JsString(check(inner->ToString(js.v8Context())));
+}
+
 kj::String JsValue::typeOf(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return kj::str(inner->TypeOf(js.v8Isolate));
@@ -159,6 +164,25 @@ JsString JsString::concat(Lock& js, const JsString& one, const JsString& two) {
 
 bool JsString::operator==(const JsString& other) const {
   return inner->StringEquals(other.inner);
+}
+
+JsString::WriteIntoStatus JsString::writeInto(
+    Lock& js,
+    kj::ArrayPtr<char> buffer,
+    WriteOptions options) const {
+  WriteIntoStatus result = { 0, 0 };
+  if (buffer.size() > 0) {
+    result.written = inner->WriteUtf8(js.v8Isolate,
+                                      buffer.begin(),
+                                      buffer.size(),
+                                      &result.read,
+                                      options);
+  }
+  return result;
+}
+
+bool JsString::containsOnlyOneByte() const {
+  return inner->ContainsOnlyOneByte();
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
