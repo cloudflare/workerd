@@ -302,10 +302,6 @@ bool MimeType::operator==(const MimeType& other) const {
   return this == &other || (type_ == other.type_ && subtype_ == other.subtype_);
 }
 
-bool MimeType::operator!=(const MimeType& other) const {
-  return !(*this == other);
-}
-
 MimeType::operator kj::String() const { return toString(); }
 
 kj::String KJ_STRINGIFY(const MimeType& mimeType) {

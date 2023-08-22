@@ -927,7 +927,6 @@ public:
     inline ptrdiff_t operator- (const Iterator& other) const { return index - other.index; }
 
     inline bool operator==(const Iterator& other) const { return index == other.index && &args == &other.args; }
-    inline bool operator!=(const Iterator& other) const { return index != other.index || &args != &other.args; }
 
   private:
     size_t index;
