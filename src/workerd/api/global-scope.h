@@ -321,9 +321,9 @@ public:
     JSG_STRUCT_TS_OVERRIDE(StructuredSerializeOptions);
   };
 
-  v8::Local<v8::Value> structuredClone(
+  jsg::JsValue structuredClone(
       jsg::Lock& js,
-      v8::Local<v8::Value> value,
+      jsg::JsValue value,
       jsg::Optional<StructuredCloneOptions> options);
 
   TimeoutId::NumberType setTimeout(jsg::Lock& js,
