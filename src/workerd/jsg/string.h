@@ -188,10 +188,6 @@ public:
     return pos == other.pos;
   }
 
-  inline bool operator!=(const UsvStringIterator& other) const {
-    return pos != other.pos;
-  }
-
   inline size_t position() const { return pos; }
   // Informational. Identifies the iterators current codepoint position.
   // When position() == size(), this iterator has reached the end.
@@ -236,10 +232,8 @@ public:
   uint32_t operator[](size_t index) const { return getCodepointAt(index); }
 
   inline bool operator==(UsvStringPtr& other) { return ptr == other.ptr; }
-  inline bool operator!=(UsvStringPtr& other) { return ptr != other.ptr; };
 
   inline bool operator==(const UsvStringPtr& other) const { return ptr == other.ptr; }
-  inline bool operator!=(const UsvStringPtr& other) const { return ptr != other.ptr; };
 
   std::weak_ordering operator<=>(const UsvString& other) const;
   std::weak_ordering operator<=>(const UsvStringPtr& other) const;
@@ -331,10 +325,8 @@ public:
   uint32_t operator[](size_t index) const { return getCodepointAt(index); }
 
   inline bool operator==(UsvString& other) { return buffer == other.buffer; }
-  inline bool operator!=(UsvString& other) { return buffer != other.buffer; };
 
   inline bool operator==(const UsvString& other) const { return buffer == other.buffer; }
-  inline bool operator!=(const UsvString& other) const { return buffer != other.buffer; };
 
   std::weak_ordering operator<=>(const UsvString& other) const;
   std::weak_ordering operator<=>(const UsvStringPtr& other) const;

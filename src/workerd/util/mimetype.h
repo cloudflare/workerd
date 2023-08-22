@@ -64,10 +64,6 @@ public:
   // parameters in the comparison.
   bool operator==(const MimeType& other) const;
 
-  // Compares only the essence of the MimeType (type and subtype). Ignores
-  // parameters in the comparison.
-  bool operator!=(const MimeType& other) const;
-
   operator kj::String() const;
 
   static bool isXml(const MimeType& mimeType);

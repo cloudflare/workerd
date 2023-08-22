@@ -58,7 +58,6 @@ struct UrlRecord {
   void setPassword(jsg::UsvStringPtr password);
 
   bool operator==(UrlRecord& other);
-  bool operator!=(UrlRecord& other) { return !operator==(other); }
 
   bool equivalentTo(UrlRecord& other, GetHrefOption option = GetHrefOption::NONE);
 };

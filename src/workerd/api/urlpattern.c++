@@ -206,14 +206,6 @@ struct Token {
     KJ_UNREACHABLE;
   }
 
-  bool operator!=(jsg::UsvString& other) {
-    return !(*this == other);
-  }
-
-  bool operator!=(uint32_t other) {
-    return !(*this == other);
-  }
-
   static Token asterisk(size_t index) {
     return {
       .type = Type::ASTERISK,

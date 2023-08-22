@@ -393,9 +393,7 @@ public:
       return false;
     }
   }
-  bool operator!=(const SchemaFile& other) const override {
-    return !operator==(other);
-  }
+
   size_t hashCode() const override {
     return kj::hashCode(fullPath);
   }
@@ -458,9 +456,7 @@ public:
       return false;
     }
   }
-  bool operator!=(const SchemaFile& other) const override {
-    return !operator==(other);
-  }
+
   size_t hashCode() const override {
     return kj::hashCode(name);
   }
