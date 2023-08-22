@@ -212,14 +212,16 @@ jsg::Ref<GPUCommandEncoder>
 GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descriptor) {
   wgpu::CommandEncoderDescriptor desc{};
 
+  kj::String label = kj::str("");
   KJ_IF_MAYBE (d, descriptor) {
-    KJ_IF_MAYBE (label, d->label) {
-      desc.label = label->cStr();
+    KJ_IF_MAYBE (l, d->label) {
+      label = kj::mv(*l);
+      desc.label = label.cStr();
     }
   }
 
   auto encoder = device_.CreateCommandEncoder(&desc);
-  return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder));
+  return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder), kj::mv(label));
 }
 
 wgpu::ComputePipelineDescriptor

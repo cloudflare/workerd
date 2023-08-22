@@ -230,8 +230,9 @@ export class DurableObjectExample {
     ok(bindGroupAutoLayout);
 
     // Commands submission
-    const commandEncoder = device.createCommandEncoder();
+    const commandEncoder = device.createCommandEncoder({ label: "label1" });
     ok(commandEncoder);
+    equal(commandEncoder.label, "label1");
 
     const passEncoder = commandEncoder.beginComputePass();
     ok(passEncoder);
