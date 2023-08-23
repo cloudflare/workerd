@@ -6,6 +6,7 @@
 // Used to provide support tools for benchmarking. Many use cases will already be covered by the
 // microbenchmark API.
 
+#include <kj/test.h>
 #include <benchmark/benchmark.h>
 
 #define WD_BENCHMARK(X) BENCHMARK(X)->Unit(benchmark::kMicrosecond)

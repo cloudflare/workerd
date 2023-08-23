@@ -38,3 +38,11 @@ wd_cc_benchmark(
         "//src/workerd/api:r2-api_capnp",
     ],
 )
+
+wd_cc_benchmark(
+    name = "bench-mimetype",
+    srcs = ["bench-mimetype.c++"],
+    deps = [
+        "//src/workerd/util",
+    ],
+)

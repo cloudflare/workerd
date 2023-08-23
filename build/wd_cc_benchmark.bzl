@@ -23,6 +23,6 @@ def wd_cc_benchmark(
         ],
         # Only run benchmarks when explicitly requested, at least until we have some more of them
         # and can define a benchmark suite.
-        tags = ["manual"],
+        tags = ["manual", "benchmark"],
         **kwargs
     )
