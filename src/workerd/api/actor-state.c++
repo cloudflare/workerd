@@ -952,7 +952,7 @@ jsg::JsValue deserializeV8Value(jsg::Lock& js,
 
       jsg::Deserializer deserializer(js, buf, nullptr, nullptr, options);
 
-      return jsg::JsValue(deserializer.readValue(js));
+      return deserializer.readValue(js);
     }, [&](jsg::Value&& exception) mutable -> jsg::JsValue {
       // If we do hit a deserialization error, we log information that will be helpful in
       // understanding the problem but that won't leak too much about the customer's data. We

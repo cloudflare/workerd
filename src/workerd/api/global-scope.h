@@ -316,7 +316,7 @@ public:
   void queueMicrotask(jsg::Lock& js, v8::Local<v8::Function> task);
 
   struct StructuredCloneOptions {
-    jsg::Optional<kj::Array<jsg::Value>> transfer;
+    jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
     JSG_STRUCT(transfer);
     JSG_STRUCT_TS_OVERRIDE(StructuredSerializeOptions);
   };

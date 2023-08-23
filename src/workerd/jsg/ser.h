@@ -5,18 +5,21 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/buffersource.h>
 #include <kj/vector.h>
 
 namespace workerd::jsg {
 
+// Wraps the v8::ValueSerializer and v8::ValueSerializer::Delegate implementation.
+// Must be allocated on the stack, and requires that a v8::HandleScope exist in
+// the stack.
 class Serializer final: v8::ValueSerializer::Delegate {
-  // Wraps the v8::ValueSerializer and v8::ValueSerializer::Delegate implementation.
 public:
   struct Options {
-    kj::Maybe<uint32_t> version;
     // When set, overrides the default wire format version with the one provided.
-    bool omitHeader = false;
+    kj::Maybe<uint32_t> version;
     // When set to true, the serialization header is not written to the output buffer.
+    bool omitHeader = false;
   };
 
   struct Released {
@@ -30,14 +33,9 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
 
-  void write(Lock& js, v8::Local<v8::Value> value);
+  void write(Lock& js, const JsValue& value);
 
-  inline void write(Lock& js, Value value) { write(js, value.getHandle(js)); }
-
-  template <typename T>
-  inline void write(Lock& js, V8Ref<T> value) { write(js, value.getHandle(js)); }
-
-  void transfer(Lock& js, v8::Local<v8::ArrayBuffer> arrayBuffer);
+  void transfer(Lock& js, const JsValue& value);
 
   Released release();
 
@@ -49,14 +47,17 @@ private:
       v8::Isolate* isolate,
       v8::Local<v8::SharedArrayBuffer> sab) override;
 
-  kj::Vector<V8Ref<v8::SharedArrayBuffer>> sharedArrayBuffers;
-  kj::Vector<V8Ref<v8::ArrayBuffer>> arrayBuffers;
+  kj::Vector<JsValue> sharedArrayBuffers;
+  kj::Vector<JsValue> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   v8::ValueSerializer ser;
   bool released = false;
 };
 
+// Wraps the v8::ValueDeserializer and v8::ValueDeserializer::Delegate implementation.
+// Must be allocated on the stack, and requires that a v8::HandleScope exist in
+// the stack.
 class Deserializer final: v8::ValueDeserializer::Delegate {
 public:
   struct Options {
@@ -80,7 +81,7 @@ public:
 
   KJ_DISALLOW_COPY_AND_MOVE(Deserializer);
 
-  v8::Local<v8::Value> readValue(Lock& js);
+  JsValue readValue(Lock& js);
 
   inline uint32_t getVersion() const { return deser.GetWireFormatVersion(); }
 
@@ -98,17 +99,17 @@ private:
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
 };
 
+// Intended for use with v8::ValueSerializer data released into a kj::Array.
 class SerializedBufferDisposer: public kj::ArrayDisposer {
-  // Intended for use with v8::ValueSerializer data released into a kj::Array.
 protected:
   void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
                    size_t capacity, void (*destroyElement)(void*)) const override;
 };
 constexpr SerializedBufferDisposer SERIALIZED_BUFFER_DISPOSER;
 
-v8::Local<v8::Value> structuredClone(
+JsValue structuredClone(
     Lock& js,
-    v8::Local<v8::Value> value,
-    kj::Maybe<kj::ArrayPtr<jsg::Value>> maybeTransfer = nullptr);
+    const JsValue& value,
+    kj::Maybe<kj::Array<JsValue>> maybeTransfer = nullptr);
 
 }  // namespace workerd::jsg

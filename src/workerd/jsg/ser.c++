@@ -25,13 +25,14 @@ v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
     v8::Isolate *isolate,
     v8::Local<v8::SharedArrayBuffer> sab) {
   uint32_t n;
+  auto value = JsValue(sab);
   for (n = 0; n < sharedArrayBuffers.size(); n++) {
     // If the SharedArrayBuffer has already been added, return the existing ID for it.
-    if (sharedArrayBuffers[n].getHandle(isolate) == sab) {
+    if (sharedArrayBuffers[n] == value) {
       return v8::Just(n);
     }
   }
-  sharedArrayBuffers.add(jsg::V8Ref(isolate, sab));
+  sharedArrayBuffers.add(value);
   sharedBackingStores.add(sab->GetBackingStore());
   return v8::Just(n);
 }
@@ -55,23 +56,34 @@ Serializer::Released Serializer::release() {
   };
 }
 
-void Serializer::transfer(Lock& js, v8::Local<v8::ArrayBuffer> arrayBuffer) {
+void Serializer::transfer(Lock& js, const JsValue& value) {
   KJ_ASSERT(!released, "The data has already been released.");
+  // Currently we only allow transfer of ArrayBuffers
+  v8::Local<v8::ArrayBuffer> arrayBuffer;
+  if (value.isArrayBufferView()) {
+    auto view = v8::Local<v8::Value>(value).As<v8::ArrayBufferView>();
+    arrayBuffer = view->Buffer();
+  } else if (value.isArrayBuffer()) {
+    arrayBuffer = v8::Local<v8::Value>(value).As<v8::ArrayBuffer>();
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, "Object is not transferable");
+  }
+
   uint32_t n;
   for (n = 0; n < arrayBuffers.size(); n++) {
     // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n].getHandle(js) == arrayBuffer) {
+    if (arrayBuffers[n] == value) {
       return;
     }
   }
+  arrayBuffers.add(value);
 
-  arrayBuffers.add(js.v8Ref(arrayBuffer));
   backingStores.add(arrayBuffer->GetBackingStore());
   check(arrayBuffer->Detach(v8::Local<v8::Value>()));
   ser.TransferArrayBuffer(n, arrayBuffer);
 }
 
-void Serializer::write(Lock& js, v8::Local<v8::Value> value) {
+void Serializer::write(Lock& js, const JsValue& value) {
   KJ_ASSERT(!released, "The data has already been released.");
   KJ_ASSERT(check(ser.WriteValue(js.v8Context(), value)));
 }
@@ -121,8 +133,8 @@ void Deserializer::init(
   }
 }
 
-v8::Local<v8::Value> Deserializer::readValue(Lock& js) {
-  return check(deser.ReadValue(js.v8Context()));
+JsValue Deserializer::readValue(Lock& js) {
+  return JsValue(check(deser.ReadValue(js.v8Context())));
 }
 
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
@@ -144,16 +156,14 @@ void SerializedBufferDisposer::disposeImpl(
   free(firstElement);
 }
 
-v8::Local<v8::Value> structuredClone(
+JsValue structuredClone(
     Lock& js,
-    v8::Local<v8::Value> value,
-    kj::Maybe<kj::ArrayPtr<jsg::Value>> maybeTransfer) {
+    const JsValue& value,
+    kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
   Serializer ser(js, nullptr);
   KJ_IF_MAYBE(transfers, maybeTransfer) {
     for (auto& item : *transfers) {
-      auto val = item.getHandle(js);
-      JSG_REQUIRE(val->IsArrayBuffer(), TypeError, "Object is not transferable");
-      ser.transfer(js, val.As<v8::ArrayBuffer>());
+      ser.transfer(js, item);
     }
   }
   ser.write(js, value);
