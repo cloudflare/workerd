@@ -1,0 +1,42 @@
+From abcde551a7250a782f17de08ad1d00828a170c54 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 26 Jul 2023 18:40:13 +0200
+Subject: Fix V8/ICU build
+
+1) ICU changed how a header is included, but V8's bazel build file has not been
+   updated to make the header available.
+2) Bazel's V8 build will use abseil in the near future. While it is
+   already added as a dependency, it is not actually required yet, so
+   do not include it for now. In a future version, we can use our
+   existing absl dependency, we'll just need to keep it in sync with
+   V8's version.
+---
+ BUILD.bazel     | 1 -
+ bazel/BUILD.icu | 2 +-
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 3c0fb68f710778b969ef5a90c70da32814f3fbd6..7c2adbb0c4aa584a37170328e5adbac66d6e5384 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -4004,7 +4004,6 @@ v8_binary(
+         "UNISTR_FROM_CHAR_EXPLICIT=",
+     ],
+     deps = [
+-        "//external:absl_optional",
+         "v8_libbase",
+         "//external:icu",
+     ],
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 73a25df55abc380092a0177bb13364e6f216ce95..3b26219eb56f4e8247af8dad476ebced2ad763af 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -96,7 +96,7 @@ cc_library(
+     hdrs = glob([
+         "source/common/unicode/*.h",
+         "source/i18n/unicode/*.h",
+-    ]),
++    ]) + ["source/stubdata/stubdata.h"],
+     copts = select({
+         "@platforms//os:windows": [
+             "/wd4005",  # Macro redefinition.

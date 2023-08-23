@@ -1,4 +1,4 @@
-From cf4f84d83de528b100ddc89149429e6d84d19f96 Mon Sep 17 00:00:00 2001
+From ed0aca8cd1673f3ff6e3f197058114d94fb51c7a Mon Sep 17 00:00:00 2001
 From: Brendan Coll <bcoll@cloudflare.com>
 Date: Thu, 16 Mar 2023 11:56:10 +0000
 Subject: Allow Windows builds under Bazel
@@ -10,10 +10,10 @@ Subject: Allow Windows builds under Bazel
  3 files changed, 84 insertions(+), 12 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b708a4501 100644
+index e6c21c523fa70388d12cedb599b1d2de2e98c55c..67442408206c3221317e32606e7f18fb349ec2e2 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -682,6 +682,7 @@ filegroup(
+@@ -689,6 +689,7 @@ filegroup(
          "src/base/platform/mutex.h",
          "src/base/platform/platform.cc",
          "src/base/platform/platform.h",
@@ -21,7 +21,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
          "src/base/platform/semaphore.cc",
          "src/base/platform/semaphore.h",
          "src/base/platform/time.cc",
-@@ -721,7 +722,6 @@ filegroup(
+@@ -728,7 +729,6 @@ filegroup(
      ] + select({
          "@v8//bazel/config:is_posix": [
              "src/base/platform/platform-posix.cc",
@@ -29,7 +29,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
              "src/base/platform/platform-posix-time.cc",
              "src/base/platform/platform-posix-time.h",
          ],
-@@ -744,6 +744,7 @@ filegroup(
+@@ -751,6 +751,7 @@ filegroup(
          "@v8//bazel/config:is_windows": [
              "src/base/debug/stack_trace_win.cc",
              "src/base/platform/platform-win32.cc",
@@ -37,7 +37,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
              "src/base/win32-headers.h",
          ],
      }),
-@@ -1120,6 +1121,7 @@ filegroup(
+@@ -1135,6 +1136,7 @@ filegroup(
          "include/v8-wasm-trap-handler-posix.h",
          "src/api/api.cc",
          "src/api/api.h",
@@ -45,7 +45,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
          "src/api/api-arguments.cc",
          "src/api/api-arguments.h",
          "src/api/api-arguments-inl.h",
-@@ -2503,6 +2505,11 @@ filegroup(
+@@ -2537,6 +2539,11 @@ filegroup(
              "src/trap-handler/handler-inside-posix.cc",
              "src/trap-handler/handler-outside-posix.cc",
          ],
@@ -57,7 +57,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
          "//conditions:default": [],
      }) + select({
          "@v8//bazel/config:v8_arm64_simulator": [
-@@ -2510,13 +2517,6 @@ filegroup(
+@@ -2544,13 +2551,6 @@ filegroup(
              "src/trap-handler/trap-handler-simulator.h",
          ],
          "//conditions:default": [],
@@ -71,7 +71,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
      }) + select({
          "@v8//bazel/config:is_windows_64bit": [
              "src/diagnostics/unwinding-info-win64.cc",
-@@ -3346,6 +3346,9 @@ filegroup(
+@@ -3405,6 +3405,9 @@ filegroup(
          "@v8//bazel/config:is_msvc_asm_ia32": ["src/heap/base/asm/ia32/push_registers_masm.asm"],
          "@v8//bazel/config:is_msvc_asm_x64": ["src/heap/base/asm/x64/push_registers_masm.asm"],
          "@v8//bazel/config:is_msvc_asm_arm64": ["src/heap/base/asm/arm64/push_registers_masm.S"],
@@ -81,7 +81,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
      }),
  )
  
-@@ -3695,9 +3698,11 @@ filegroup(
+@@ -3768,9 +3771,11 @@ filegroup(
          "src/d8/d8-js.cc",
          "src/d8/d8-platforms.cc",
          "src/d8/d8-platforms.h",
@@ -95,7 +95,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
  )
  
  genrule(
-@@ -4009,7 +4014,7 @@ py_test(
+@@ -4103,7 +4108,7 @@ py_test(
          ":noicu/d8",
          ":noicu/v8_build_config",
          "//testing/pybase",
@@ -104,7 +104,7 @@ index ba1a415eb2788b677e870e19b79a90eefc04a2a3..daca711d846c00059492f8cf56ac813b
      main = "tools/run-tests.py",
      python_version = "PY3",
      tags = [
-@@ -4039,7 +4044,7 @@ py_test(
+@@ -4133,7 +4138,7 @@ py_test(
          ":icu/d8",
          ":icu/v8_build_config",
          "//testing/pybase",
@@ -183,7 +183,7 @@ index 67454fa90eea460e70e286623fb1c99edd22c650..7efff1ab909dc7048a216e511c2e71c7
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 9651a31e062b2739e01bce1e8259030564dad9d8..9badf25f9ac9473c0636dfecf14a279f633f58d4 100644
+index 09844919a5b572184d61530a99036c2c5116535b..b77cc065b2f5881c5dfb8da39d2019f5d62428a2 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -117,6 +117,24 @@ def _default_args():
@@ -235,7 +235,7 @@ index 9651a31e062b2739e01bce1e8259030564dad9d8..9badf25f9ac9473c0636dfecf14a279f
              ],
              "@v8//bazel/config:is_macos": ["-pthread"],
              "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
-@@ -559,6 +587,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -497,6 +525,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
@@ -243,7 +243,7 @@ index 9651a31e062b2739e01bce1e8259030564dad9d8..9badf25f9ac9473c0636dfecf14a279f
              "//conditions:default": "",
          }),
      )
-@@ -570,6 +599,7 @@ def v8_mksnapshot(name, args, suffix = ""):
+@@ -508,6 +537,7 @@ def v8_mksnapshot(name, args, suffix = ""):
          suffix = suffix,
          target_os = select({
              "@v8//bazel/config:is_macos": "mac",
