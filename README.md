@@ -35,17 +35,14 @@ Although most of `workerd`'s code has been used in Cloudflare Workers for years,
 
 The config format may change in backwards-incompatible ways before `workerd` leaves beta, but should remain stable after that.
 
-As of this writing, some major features are missing which we intend to fix shortly:
+A few caveats:
 
 * **General error logging** is awkward. Traditionally we have separated error logs into "application errors" (e.g. a Worker threw an exception from JavaScript) and "internal errors" (bugs in the implementation which the Workers team should address). We then sent these errors to completely different places. In the `workerd` world, the server admin wants to see both of these, so logging has become entirely different and, at the moment, is a bit ugly. For now, it may help to run `workerd` with the `--verbose` flag, which causes application errors to be written to standard error in the same way that internal errors are (but may also produce more noise). We'll be working on making this better out-of-the-box.
-* **Binary packages** for various distributions are not built yet. We intend to provide these once out of beta.
+* **Binary packages** are only available via npm, not as distro packages. This works well for testing with Miniflare, but is awkward for a production server that doesn't actually use Node at all.
 * **Multi-threading** is not implemented. `workerd` runs in a single-threaded event loop. For now, to utilize multiple cores, we suggest running multiple instances of `workerd` and balancing load across them. We will likely add some built-in functionality for this in the near future.
 * **Performance tuning** has not been done yet, and there is low-hanging fruit here. `workerd` performs decently as-is, but not spectacularly. Experiments suggest we can roughly double performance on a "hello world" load test with some tuning of compiler optimization flags and memory allocators.
-* **Durable Objects** are currently supported only in a mode that uses in-memory storage -- i.e., not actually "durable". This is useful for local testing of DO-based apps, but not for production. Durable Objects that are actually durable, or distributed across multiple machines, are a longer-term project. Cloudflare's internal implementation of this is heavily tied to the specifics of Cloudflare's network, so a new implementation needs to be developed for public consumption.
-* **Cache API** emulation is not implemented yet.
-* **Cron trigger** emulation is not supported yet. We need to figure out how, exactly, this should work in the first place. Typically if you have a cluster of machines, you only want a cron event to run on one of the machines, so some sort of coordination or external driver is needed.
+* **Durable Objects** currently always run on the same machine that requested them, using local disk storage. This is sufficient for testing and small services that fit on a single machine. In scalable production, though, you would presumably want Durable Objects to be distributed across many machines, always choosing the same machine for the same object.
 * **Parameterized workers** are not implemented yet. This is a new feature specified in the config schema, which doesn't have any precedent on Cloudflare.
-* **Devtools inspection** is not supported yet, but this should be straightforward to hook up.
 * **Tests** for most APIs are conspicuously missing. This is because the testing harness we have used for the past five years is deeply tied to the internal version of the codebase. Ideally, we need to translate those tests into the new `workerd test` format and move them to this repo; this is an ongoing effort. For the time being, we will be counting on the internal tests to catch bugs. We understand this is not ideal for external contributors trying to test their changes.
 * **Documentation** is growing quickly but is definitely still a work in progress.
 
