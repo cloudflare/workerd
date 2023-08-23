@@ -26,17 +26,18 @@ public:
   };
 
   explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = nullptr);
-
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
-  void write(v8::Local<v8::Value> value);
+  KJ_DISALLOW_COPY_AND_MOVE(Serializer);
 
-  inline void write(Value value) { write(value.getHandle(isolate)); }
+  void write(Lock& js, v8::Local<v8::Value> value);
+
+  inline void write(Lock& js, Value value) { write(js, value.getHandle(js)); }
 
   template <typename T>
-  inline void write(V8Ref<T> value) { write(value.getHandle(isolate)); }
+  inline void write(Lock& js, V8Ref<T> value) { write(js, value.getHandle(js)); }
 
-  void transfer(v8::Local<v8::ArrayBuffer> arrayBuffer);
+  void transfer(Lock& js, v8::Local<v8::ArrayBuffer> arrayBuffer);
 
   Released release();
 
@@ -52,7 +53,6 @@ private:
   kj::Vector<V8Ref<v8::ArrayBuffer>> arrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
-  v8::Isolate* isolate;
   v8::ValueSerializer ser;
   bool released = false;
 };
@@ -64,37 +64,29 @@ public:
     bool readHeader = true;
   };
 
-  inline explicit Deserializer(
+  explicit Deserializer(
       Lock& js,
-      auto data,
+      kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = nullptr,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = nullptr,
-      kj::Maybe<Options> maybeOptions = nullptr)
-      : isolate(js.v8Isolate),
-        deser(isolate, data.begin(), data.size(), this),
-        sharedBackingStores(kj::mv(sharedArrayBuffers)) {
-    init(kj::mv(transferedArrayBuffers), kj::mv(maybeOptions));
-  }
+      kj::Maybe<Options> maybeOptions = nullptr);
 
-  inline explicit Deserializer(
+  explicit Deserializer(
       Lock& js,
       Serializer::Released& released,
-      kj::Maybe<Options> maybeOptions = nullptr)
-      : Deserializer(
-          js,
-          released.data.asPtr(),
-          released.transferedArrayBuffers.asPtr(),
-          released.sharedArrayBuffers.asPtr(),
-          kj::mv(maybeOptions)) {}
+      kj::Maybe<Options> maybeOptions = nullptr);
 
   ~Deserializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
-  v8::Local<v8::Value> readValue();
+  KJ_DISALLOW_COPY_AND_MOVE(Deserializer);
+
+  v8::Local<v8::Value> readValue(Lock& js);
 
   inline uint32_t getVersion() const { return deser.GetWireFormatVersion(); }
 
 private:
   void init(
+      Lock& js,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = nullptr,
       kj::Maybe<Options> maybeOptions = nullptr);
 
@@ -102,7 +94,6 @@ private:
       v8::Isolate* isolate,
       uint32_t clone_id) override;
 
-  v8::Isolate* isolate;
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
 };

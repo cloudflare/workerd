@@ -652,7 +652,7 @@ kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) 
       .readHeader = true,
     });
 
-    return deserializer.readValue();
+    return deserializer.readValue(js);
   });
 }
 
@@ -661,7 +661,7 @@ void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachme
     .version = 15,
     .omitHeader = false,
   });
-  serializer.write(attachment);
+  serializer.write(js, attachment);
   auto released = serializer.release();
   JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
       "A WebSocket 'attachment' cannot be larger than ",  MAX_ATTACHMENT_SIZE, " bytes." \
