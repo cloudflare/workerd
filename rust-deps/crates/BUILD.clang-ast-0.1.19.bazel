@@ -40,6 +40,6 @@ rust_library(
     ],
     version = "0.1.19",
     deps = [
-        "@crates_vendor__serde-1.0.171//:serde",
+        "@crates_vendor__serde-1.0.185//:serde",
     ],
 )
