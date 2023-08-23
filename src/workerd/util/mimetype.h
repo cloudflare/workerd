@@ -10,6 +10,9 @@
 
 namespace workerd {
 
+template<size_t>
+class StringBuffer;
+
 class MimeType final {
 public:
   using MimeParams = kj::HashMap<kj::String, kj::String>;
@@ -96,6 +99,11 @@ private:
   kj::String type_;
   kj::String subtype_;
   MimeParams params_;
+
+  using ToStringBuffer = StringBuffer<128>;
+  // 128 bytes will keep all reasonable mimetypes on the stack.
+
+  void paramsToString(ToStringBuffer& buffer) const;
 };
 
 kj::String KJ_STRINGIFY(const MimeType& state);
