@@ -92,42 +92,6 @@ private:
   }
 };
 
-static constexpr auto kDefaultBotManagementValue = R"DATA({
-  "corporateProxy": false,
-  "verifiedBot": false,
-  "jsDetection": { "passed": false },
-  "staticResource": false,
-  "detectionIds": {},
-  "score": 99
-})DATA";
-
-void handleDefaultBotManagement(jsg::Lock& js, jsg::Value& cf) {
-  // When the cfBotManagementNoOp compatibility flag is set, we'll check the
-  // request cf blob to see if it contains a botManagement field. If it does
-  // *not* we will add it using the following default fields.
-  // Note that if the botManagement team changes any of the fields they provide,
-  // this default value may need to be changed also.
-  auto context = js.v8Context();
-  auto handle = cf.getHandle(js).As<v8::Object>();
-  if (!js.v8Has(handle, "botManagement"_kj)) {
-    auto sym = v8::Private::ForApi(js.v8Isolate,
-        jsg::v8StrIntern(js.v8Isolate, "botManagement"_kj));
-    // For performance reasons, we only want to construct the default values
-    // once per isolate so we cache the constructed value using an internal
-    // private field on the global scope. Whenever we need to use it again we
-    // pull the exact same value.
-    auto defaultBm = jsg::check(context->Global()->GetPrivate(context, sym));
-    if (defaultBm->IsUndefined()) {
-      auto bm = js.parseJson(kj::StringPtr(kDefaultBotManagementValue));
-      KJ_DASSERT(bm.getHandle(js)->IsObject());
-      js.recursivelyFreeze(bm);
-      defaultBm = bm.getHandle(js);
-      jsg::check(context->Global()->SetPrivate(context, sym, defaultBm));
-    }
-    js.v8Set(handle, "botManagement"_kj, defaultBm);
-  }
-}
-
 kj::String getEventName(v8::PromiseRejectEvent type) {
   switch (type) {
     case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
@@ -200,21 +164,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
 
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
-
-  KJ_IF_MAYBE(c, cfBlobJson) {
-    auto handle = js.parseJson(*c);
-    KJ_ASSERT(handle.getHandle(js)->IsObject());
-
-    if (!FeatureFlags::get(js).getNoCfBotManagementDefault()) {
-      handleDefaultBotManagement(js, handle);
-    }
-
-    // For the inbound request, we make the `cf` blob immutable.
-    js.recursivelyFreeze(handle);
-
-    cf = handle.cast<v8::Object>(js);
-  }
+  CfProperty cf(cfBlobJson);
 
   auto jsHeaders = jsg::alloc<Headers>(headers, Headers::Guard::REQUEST);
   // We do not automatically decode gzipped request bodies because the fetch() standard doesn't

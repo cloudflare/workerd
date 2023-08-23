@@ -10,6 +10,7 @@
 #include <kj/compat/http.h>
 #include <map>
 #include "basics.h"
+#include "cf-property.h"
 #include "streams.h"
 #include "form-data.h"
 #include "web-socket.h"
@@ -643,7 +644,7 @@ public:
 
   Request(kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
           jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-          kj::Maybe<jsg::Ref<AbortSignal>> signal, kj::Maybe<jsg::V8Ref<v8::Object>> cf,
+          kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
           kj::Maybe<Body::ExtractedBody> body)
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
@@ -830,7 +831,7 @@ private:
   // an optional AbortSignal passed in with the options), and "this' signal", which is an
   // AbortSignal that is always available via the request.signal accessor. When signal is
   // used explicity, thisSignal will not be.
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  CfProperty cf;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(headers, fetcher, signal, thisSignal, cf);
@@ -845,7 +846,7 @@ public:
   };
 
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           kj::Maybe<jsg::V8Ref<v8::Object>> cf, kj::Maybe<Body::ExtractedBody> body,
+           CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
            kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
            Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
@@ -997,7 +998,7 @@ private:
   int statusCode;
   kj::String statusText;
   jsg::Ref<Headers> headers;
-  kj::Maybe<jsg::V8Ref<v8::Object>> cf;
+  CfProperty cf;
 
   kj::Array<kj::String> urlList;
   // The URL list, per the Fetch spec. Only Responses actually created by fetch() have a non-empty
