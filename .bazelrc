@@ -52,6 +52,20 @@ build:fastdbg --@rules_rust//:extra_rustc_flags=-C,panic=unwind,-C,debug-asserti
 # rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
 
+
+# common sanitizers options
+build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
+build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
+build:sanitizer-common --copt="-Og"
+build:sanitizer-common --copt="-g" --strip=never
+build:sanitizer-common --copt="-fno-optimize-sibling-calls"
+build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
+
+# address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
+build:asan --config=sanitizer-common
+build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
+build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
+
 #
 # Linux and macOS
 #
