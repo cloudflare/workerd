@@ -1,4 +1,4 @@
-From 35471a3b938449a6c320282fb7bf91b7c5f6a6c5 Mon Sep 17 00:00:00 2001
+From 690eb0dd5093ce8b29d22629bfe12654085f645c Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 9 Jul 2023 18:46:20 -0400
 Subject: Enable V8 shared linkage
@@ -9,10 +9,10 @@ Subject: Enable V8 shared linkage
  2 files changed, 6 insertions(+), 4 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 8fdd538768efb73498542f523fe3bbf12610bd78..f7c815f6d419c3beec0f33a7c5f896618c7bc5cc 100644
+index baaa3d6b1a14c23f017c9e4c7675de0a99df10ea..3c0fb68f710778b969ef5a90c70da32814f3fbd6 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1383,7 +1383,6 @@ filegroup(
+@@ -1400,7 +1400,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -20,7 +20,7 @@ index 8fdd538768efb73498542f523fe3bbf12610bd78..f7c815f6d419c3beec0f33a7c5f89661
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3398,6 +3397,10 @@ filegroup(
+@@ -3458,6 +3457,10 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -31,7 +31,7 @@ index 8fdd538768efb73498542f523fe3bbf12610bd78..f7c815f6d419c3beec0f33a7c5f89661
      ],
  )
  
-@@ -3855,6 +3858,8 @@ v8_library(
+@@ -3910,6 +3913,8 @@ v8_library(
      name = "v8",
      srcs = [
          ":v8_inspector_files",
@@ -41,7 +41,7 @@ index 8fdd538768efb73498542f523fe3bbf12610bd78..f7c815f6d419c3beec0f33a7c5f89661
          ":is_not_v8_enable_turbofan": [
              # With Turbofan disabled, we only include the stubbed-out API.
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 402c4d384466c5a3be35ae69d1527c8e6d12a9b8..f28d04b0f5a670b9356a8499da5876f6743e4484 100644
+index 6b5482d259ceadff5f9926244eb14a0f6e9eb5ca..a4d39a373657b81a7397e432c6c75cfc54dfd429 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -293,7 +293,6 @@ def v8_library(

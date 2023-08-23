@@ -1,4 +1,4 @@
-From db9013995a63651e6ad3c979842a29aa6a2a52de Mon Sep 17 00:00:00 2001
+From eb14f78eff4a92b08f0668c22a07c22b8e62f791 Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
@@ -28,10 +28,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index ab988d54d3af14abb876d97232fa5a39eb838032..64d45bd0fafe018571e34662eceffc31f3ccfe69 100644
+index 486cadf9eb807166556cdd20179484e51f1edb98..4ab15c368cba3e86f611dfbfa5a6f6be7a493510 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3656,6 +3656,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3474,6 +3474,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -43,7 +43,7 @@ index ab988d54d3af14abb876d97232fa5a39eb838032..64d45bd0fafe018571e34662eceffc31
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index f13ce1e7ebd115c383dcf03e6a0e392b282d86ee..bcf0692f62116196d9d5cba0633ef553d16f7c32 100644
+index d6251bc840631697ecd281131a9679c3ee4794b9..8b93c9c6a288c63455c3970f2cbc64a771b9e6e5 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -266,6 +266,7 @@ ValueSerializer::ValueSerializer(Isolate* isolate,
@@ -73,15 +73,15 @@ index f13ce1e7ebd115c383dcf03e6a0e392b282d86ee..bcf0692f62116196d9d5cba0633ef553
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1004,10 +1013,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(JSArrayBufferView view) {
+@@ -1005,10 +1014,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(JSArrayBufferView view) {
    WriteVarint(static_cast<uint8_t>(tag));
-   WriteVarint(static_cast<uint32_t>(view.byte_offset()));
-   WriteVarint(static_cast<uint32_t>(view.byte_length()));
+   WriteVarint(static_cast<uint32_t>(view->byte_offset()));
+   WriteVarint(static_cast<uint32_t>(view->byte_length()));
 -  uint32_t flags =
 +  if (version_ >= 14) {
 +    uint32_t flags =
-       JSArrayBufferViewIsLengthTracking::encode(view.is_length_tracking()) |
-       JSArrayBufferViewIsBackedByRab::encode(view.is_backed_by_rab());
+       JSArrayBufferViewIsLengthTracking::encode(view->is_length_tracking()) |
+       JSArrayBufferViewIsBackedByRab::encode(view->is_backed_by_rab());
 -  WriteVarint(flags);
 +    WriteVarint(flags);
 +  }
