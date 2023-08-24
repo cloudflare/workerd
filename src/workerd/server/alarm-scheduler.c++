@@ -172,36 +172,36 @@ AlarmScheduler::ScheduledAlarm AlarmScheduler::scheduleAlarm(
 }
 
 kj::Promise<void> AlarmScheduler::checkTimestamp(kj::Duration delay, kj::Date scheduledTime) {
-  return timer.afterDelay(delay).then([this, scheduledTime]() mutable
-      -> kj::Promise<void> {
-    // Since we are waiting on timer.afterDelay, it's possible that timer.now() was behind
-    // the real time by a few ms, leading to premature alarm() execution. This checks it the current
-    // time is >= than scheduledTime to ensure we run alarms only on or after their scheduled time.
-    auto now = clock.now();
-    if (now >= scheduledTime) {
-      return kj::READY_NOW;
-    }
-    // If it's not yet time to trigger the alarm, we shall wait a while longer until we can trigger it.
-    // This repeats until it's time for the alarm to run.
-    kj::Duration additionalDelay = scheduledTime - now;
-    return checkTimestamp(additionalDelay, scheduledTime);
-  });
+  co_await timer.afterDelay(delay);
+
+  // Since we are waiting on timer.afterDelay, it's possible that timer.now() was behind
+  // the real time by a few ms, leading to premature alarm() execution. This checks it the current
+  // time is >= than scheduledTime to ensure we run alarms only on or after their scheduled time.
+  auto now = clock.now();
+  if (now < scheduledTime) {
+    // If it's not yet time to trigger the alarm, we shall wait a while longer until we can
+    // trigger it. This repeats until it's time for the alarm to run.
+    co_await checkTimestamp(scheduledTime - now, scheduledTime);
+  }
 }
 
-kj::Promise<void> AlarmScheduler::makeAlarmTask(
-    kj::Duration delay, const ActorKey& actorRef, kj::Date scheduledTime) {
-  return checkTimestamp(delay, scheduledTime)
-      .then([this, actor = actorRef.clone(), scheduledTime]() mutable -> kj::Promise<RetryInfo> {
-    {
-      auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(*actor));
-      entry.value.status = AlarmStatus::STARTED;
-    }
+kj::Promise<void> AlarmScheduler::makeAlarmTask(kj::Duration delay,
+                                                const ActorKey& actorRef,
+                                                kj::Date scheduledTime) {
+  co_await checkTimestamp(delay, scheduledTime);
 
-    return runAlarm(*actor, scheduledTime).catch_([](kj::Exception&& e)
-        -> kj::Promise<RetryInfo> {
-      KJ_LOG(WARNING, e);
+  {
+    auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(actorRef));
+    entry.value.status = AlarmStatus::STARTED;
+  }
 
-      return RetryInfo {
+  auto retryInfo = co_await ([&]() -> kj::Promise<RetryInfo> {
+    try {
+      co_return co_await runAlarm(actorRef, scheduledTime);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      KJ_LOG(WARNING, exception);
+      co_return RetryInfo {
         .retry = true,
 
         // An exception here is "weird", they should normally
@@ -210,9 +210,11 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
         // retry attempt against the limit.
         .retryCountsAgainstLimit = false
       };
-    });
-  }).then([this, actor = actorRef.clone(), scheduledTime](RetryInfo retryInfo) -> kj::Promise<void> {
-    auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(*actor));
+    }
+  })();
+
+  try {
+    auto& entry = KJ_ASSERT_NONNULL(alarms.findEntry(actorRef));
 
     // We can't overwrite our entry before moving ourselves out of it, as a promise cannot
     // delete itself.
@@ -224,19 +226,20 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       // creating a new alarm and overwriting the old one will reset
       // `status` to WAITING and `queuedAlarm` to null
       entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), *a);
-      return kj::READY_NOW;
+      co_return;
     }
 
-    // When we reach this block of code and alarm has either successed or failed and may (or may not)
-    // retry. Setting the status of an alarm as FINISHED here, will allow deletion of alarms between
-    // retries. If there's a retry, `makeAlarmTask` is called, setting status as RUNNING again.
+    // When we reach this block of code and alarm has either successed or failed and may (or may
+    // not) retry. Setting the status of an alarm as FINISHED here, will allow deletion of alarms
+    // between retries. If there's a retry, `makeAlarmTask` is called, setting status as RUNNING
+    // again.
     entry.value.status = AlarmStatus::FINISHED;
 
     if (retryInfo.retry) {
       // recreate the task, running after a delay determined using the retry factor
       if (entry.value.countedRetry >= AlarmScheduler::RETRY_MAX_TRIES) {
         deleteAlarm(*entry.value.actor);
-        return kj::READY_NOW;
+        co_return;
       }
       if (retryInfo.retryCountsAgainstLimit) {
         entry.value.countedRetry++;
@@ -262,16 +265,15 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(
       entry.value.backoff++;
       entry.value.retry++;
 
-      entry.value.task = makeAlarmTask(delay, *actor, scheduledTime);
+      entry.value.task = makeAlarmTask(delay, actorRef, scheduledTime);
     } else {
       KJ_ASSERT(entry.value.queuedAlarm == nullptr);
-      deleteAlarm(*actor);
+      deleteAlarm(actorRef);
     }
-
-    return kj::READY_NOW;
-  }).eagerlyEvaluate([actor = actorRef.clone()](kj::Exception&& e) {
-    KJ_LOG(ERROR, "Failed to run alarm and was unable to schedule a retry", e);
-  });
+  } catch (...) {
+    auto exception = kj::getCaughtExceptionAsKj();
+    KJ_LOG(ERROR, "Failed to run alarm and was unable to schedule a retry", exception);
+  }
 }
 
 void AlarmScheduler::taskFailed(kj::Exception&& e) {
