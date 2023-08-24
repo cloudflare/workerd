@@ -45,7 +45,7 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
     .version = 15,
     .omitHeader = false,
   });
-  serializer.write(body);
+  serializer.write(js, jsg::JsValue(body));
   kj::Array<kj::byte> bytes = serializer.release().data;
   Serialized result;
   result.data = bytes;
@@ -144,7 +144,7 @@ jsg::JsValue deserialize(jsg::Lock& js,
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, body.asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::JsValue(jsg::Deserializer(js, body.asPtr()).readValue());
+    return jsg::JsValue(jsg::Deserializer(js, body.asPtr()).readValue(js));
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }
@@ -165,7 +165,7 @@ jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
   } else if (type == IncomingQueueMessage::ContentType::JSON) {
     return jsg::JsValue::fromJson(js, message.getData().asChars());
   } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return jsg::JsValue(jsg::Deserializer(js, message.getData()).readValue());
+    return jsg::JsValue(jsg::Deserializer(js, message.getData()).readValue(js));
   } else {
     JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
   }

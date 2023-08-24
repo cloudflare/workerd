@@ -645,14 +645,15 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
 }
 
 kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) {
-  return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment) {
+  return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment)
+      -> v8::Local<v8::Value> {
     jsg::Deserializer deserializer(js, attachment, nullptr, nullptr,
         jsg::Deserializer::Options {
       .version = 15,
       .readHeader = true,
     });
 
-    return deserializer.readValue();
+    return deserializer.readValue(js);
   });
 }
 
@@ -661,7 +662,7 @@ void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachme
     .version = 15,
     .omitHeader = false,
   });
-  serializer.write(attachment);
+  serializer.write(js, jsg::JsValue(attachment));
   auto released = serializer.release();
   JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
       "A WebSocket 'attachment' cannot be larger than ",  MAX_ATTACHMENT_SIZE, " bytes." \

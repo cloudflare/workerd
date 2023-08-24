@@ -2000,7 +2000,7 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
           .version = 15,
           .omitHeader = false,
       });
-      serializer.write(b->getHandle(js));
+      serializer.write(js, jsg::JsValue(b->getHandle(js)));
       encodedMessages.add(IncomingQueueMessage{
           .id=kj::mv(msg.id),
           .timestamp=msg.timestamp,

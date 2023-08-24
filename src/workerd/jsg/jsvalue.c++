@@ -1,5 +1,6 @@
 #include "jsvalue.h"
 #include "buffersource.h"
+#include "ser.h"
 
 namespace workerd::jsg {
 
@@ -399,5 +400,10 @@ JsDate Lock::date(kj::StringPtr date) {
 JsRef<JsValue> JsValue::addRef(Lock& js) {
   return JsRef<JsValue>(js, *this);
 }
+
+JsValue JsValue::structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers) {
+  return jsg::structuredClone(js, *this, kj::mv(maybeTransfers));
+}
+
 
 }  // namespace workerd::jsg

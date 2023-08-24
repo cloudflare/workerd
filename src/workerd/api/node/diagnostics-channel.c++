@@ -27,7 +27,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
     jsg::Serializer ser(js, jsg::Serializer::Options {
       .omitHeader = false,
     });
-    ser.write(message.getHandle(js));
+    ser.write(js, jsg::JsValue(message.getHandle(js)));
     auto tmp = ser.release();
     JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 &&
                 tmp.transferedArrayBuffers.size() == 0, Error,

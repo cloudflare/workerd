@@ -632,13 +632,15 @@ jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
     jsg::Lock& js,
     jsg::JsValue value,
     jsg::Optional<StructuredCloneOptions> maybeOptions) {
-  kj::Maybe<kj::ArrayPtr<jsg::Value>> transfers;
   KJ_IF_MAYBE(options, maybeOptions) {
-    transfers = options->transfer.map([&](kj::Array<jsg::Value>& transfer) {
-      return transfer.asPtr();
-    });
+    KJ_IF_MAYBE(transfer, options->transfer) {
+      auto transfers = KJ_MAP(i, *transfer) {
+        return i.getHandle(js);
+      };
+      return value.structuredClone(js, kj::mv(transfers));
+    }
   }
-  return jsg::JsValue(jsg::structuredClone(js, value, transfers));
+  return value.structuredClone(js);
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(

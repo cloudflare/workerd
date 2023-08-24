@@ -137,6 +137,9 @@ public:
 
   JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
+  JsValue structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = nullptr)
+      KJ_WARN_UNUSED_RESULT;
+
   template <typename T>
   static kj::Maybe<T&> tryGetExternal(Lock& js, const JsValue& value) KJ_WARN_UNUSED_RESULT;
 
