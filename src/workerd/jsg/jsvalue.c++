@@ -122,8 +122,8 @@ kj::String JsValue::toJson(Lock& js) const {
   return kj::str(check(v8::JSON::Stringify(js.v8Context(), inner)));
 }
 
-JsValue JsValue::fromJson(Lock& js, kj::StringPtr input) {
-  return JsValue(check(v8::JSON::Parse(js.v8Context(), v8Str(js.v8Isolate, input))));
+JsValue JsValue::fromJson(Lock& js, kj::ArrayPtr<const char> input) {
+  return JsValue(check(v8::JSON::Parse(js.v8Context(), js.str(input))));
 }
 
 JsValue JsValue::fromJson(Lock& js, const JsValue& input) {
@@ -134,7 +134,7 @@ bool JsBoolean::value(Lock& js) const {
   return inner->BooleanValue(js.v8Isolate);
 }
 
-uint32_t JsArray::size() const KJ_WARN_UNUSED_RESULT { return inner->Length(); }
+uint32_t JsArray::size() const { return inner->Length(); }
 
 JsValue JsArray::get(Lock& js, uint32_t i) const {
   return JsValue(check(inner->Get(js.v8Context(), i)));

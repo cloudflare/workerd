@@ -132,7 +132,7 @@ public:
 #undef V
 
   kj::String toJson(Lock& js) const KJ_WARN_UNUSED_RESULT;
-  static JsValue fromJson(Lock& js, kj::StringPtr input) KJ_WARN_UNUSED_RESULT;
+  static JsValue fromJson(Lock& js, kj::ArrayPtr<const char> input) KJ_WARN_UNUSED_RESULT;
   static JsValue fromJson(Lock& js, const JsValue& input) KJ_WARN_UNUSED_RESULT;
 
   JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
