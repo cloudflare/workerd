@@ -21,6 +21,8 @@ def wd_cc_benchmark(
           "@com_google_benchmark//:benchmark_main",
           "//src/workerd/tests:bench-tools"
         ],
+        # use the same malloc we use for server
+        malloc = "//src/workerd/server:malloc",
         # Only run benchmarks when explicitly requested, at least until we have some more of them
         # and can define a benchmark suite.
         tags = ["manual", "benchmark"],
