@@ -1,0 +1,12 @@
+#!/bin/bash
+
+cd "$(git rev-parse --show-toplevel)"
+DISALLOWED_PATTERN='KJ_DBG'
+
+if git diff-index -G"$DISALLOWED_PATTERN" --cached HEAD --diff-filter=AM -U0 | grep -i --color -E "$DISALLOWED_PATTERN"
+then
+  echo -e "\nERROR, KJ_DBG is not allowed in checked-in source code:"
+  echo -e "  see https://github.com/capnproto/capnproto/blob/v2/c%2B%2B/src/kj/debug.h#L42\n"
+  echo -e "To commit anyway, use --no-verify\n"
+  exit 1
+fi
