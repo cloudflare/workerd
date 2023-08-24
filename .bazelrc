@@ -69,6 +69,8 @@ build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 #
 # Linux and macOS
 #
+build:unix --workspace_status_command=./build/scripts/workspace-status.sh
+
 build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20'
 build:unix --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
 build:unix --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'

@@ -1,0 +1,2 @@
+This directory should be configured as git hooks in the development environment.
+workspace-status.sh checks for this during each bazel build.
