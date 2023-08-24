@@ -60,7 +60,15 @@ The Cloudflare Workers runtime manages backwards compatibility through the use o
 
 - `@cloudflare/workers-types/2022-11-30`
 
-  This entrypoint exposes the runtime types for a compatibility date after `2022-11-30`.
+  This entrypoint exposes the runtime types for a compatibility date between `2022-11-30` and `2023-03-01`.
+
+- `@cloudflare/workers-types/2023-03-01`
+
+  This entrypoint exposes the runtime types for a compatibility date between `2023-03-01` and `2023-07-01`.
+
+- `@cloudflare/workers-types/2023-07-01`
+
+  This entrypoint exposes the runtime types for a compatibility date after `2023-07-01`.
 
 - `@cloudflare/workers-types/experimental`
 

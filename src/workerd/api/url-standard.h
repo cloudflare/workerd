@@ -123,7 +123,7 @@ public:
 
   inline uint getSize() { return list.size(); }
 
-  JSG_RESOURCE_TYPE(URLSearchParams) {
+  JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
     JSG_METHOD(append);
     JSG_METHOD_NAMED(delete, delete_);
@@ -139,12 +139,24 @@ public:
     JSG_METHOD(toString);
     JSG_ITERABLE(entries);
 
-    JSG_TS_OVERRIDE(URLSearchParams {
-      entries(): IterableIterator<[key: string, value: string]>;
-      [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+    if (flags.getUrlSearchParamsDeleteHasValueArg()) {
+      JSG_TS_OVERRIDE(URLSearchParams {
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
 
-      forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
-    });
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
+      });
+    } else {
+      JSG_TS_OVERRIDE(URLSearchParams {
+        delete(name: string): void;
+        has(name: string): boolean;
+
+        entries(): IterableIterator<[key: string, value: string]>;
+        [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+        forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: URLSearchParams) => void, thisArg?: This): void;
+      });
+    }
     // Rename from urlURLSearchParams
   }
 
