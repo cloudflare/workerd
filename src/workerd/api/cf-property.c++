@@ -55,7 +55,6 @@ jsg::Optional<jsg::V8Ref<v8::Object>> CfProperty::getRef(jsg::Lock& js) {
         return parsed.addRef(js);
       }
       KJ_CASE_ONEOF(unparsed, kj::String) {
-        KJ_DBG(unparsed.asPtr());
         auto parsed = js.parseJson(unparsed);
         auto handle = parsed.getHandle(js);
         KJ_ASSERT(handle->IsObject());
