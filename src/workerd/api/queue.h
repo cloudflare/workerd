@@ -43,7 +43,7 @@ public:
   };
 
   struct MessageSendRequest {
-    jsg::Value body;
+    jsg::JsRef<jsg::JsValue> body;
 
     jsg::Optional<kj::String> contentType;
     // contentType determines the serialization format of the message.
@@ -56,8 +56,7 @@ public:
     // NOTE: Any new fields added to SendOptions must also be added here.
   };
 
-  kj::Promise<void> send(
-      jsg::Lock& js, v8::Local<v8::Value> body, jsg::Optional<SendOptions> options);
+  kj::Promise<void> send(jsg::Lock& js, jsg::JsValue body, jsg::Optional<SendOptions> options);
 
   kj::Promise<void> sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch);
 
@@ -121,7 +120,7 @@ public:
 
   kj::StringPtr getId() { return id; }
   kj::Date getTimestamp() { return timestamp; }
-  jsg::Value getBody(jsg::Lock& js);
+  jsg::JsValue getBody(jsg::Lock& js);
 
   void retry();
   void ack();
@@ -143,7 +142,7 @@ public:
 private:
   kj::String id;
   kj::Date timestamp;
-  jsg::Value body;
+  jsg::JsRef<jsg::JsValue> body;
   IoPtr<QueueEventResult> result;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -194,9 +193,7 @@ private:
   IoPtr<QueueEventResult> result;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    for (auto i: kj::indices(messages)) {
-      visitor.visit(messages[i]);
-    }
+    visitor.visitAll(messages);
   }
 };
 
@@ -235,8 +232,9 @@ private:
 struct QueueExportedHandler {
   // Extension of ExportedHandler covering queue handlers.
 
-  typedef kj::Promise<void> QueueHandler(
-      jsg::Ref<QueueController> controller, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  typedef kj::Promise<void> QueueHandler(jsg::Ref<QueueController> controller,
+                                         jsg::JsRef<jsg::JsValue> env,
+                                         jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<QueueHandler>> queue;
 
   JSG_STRUCT(queue);

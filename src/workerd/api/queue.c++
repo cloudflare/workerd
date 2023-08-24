@@ -14,6 +14,7 @@
 
 namespace workerd::api {
 
+namespace {
 kj::StringPtr validateContentType(kj::StringPtr contentType) {
   auto lowerCase = toLower(contentType);
   if (lowerCase == IncomingQueueMessage::ContentType::TEXT) {
@@ -37,7 +38,7 @@ struct Serialized {
   // of its holder.
 };
 
-Serialized serializeV8(jsg::Lock& js, v8::Local<v8::Value> body) {
+Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
   // Use a specific serialization version to avoid sending messages using a new version before all
   // runtimes at the edge know how to read it.
   jsg::Serializer serializer(js, jsg::Serializer::Options {
@@ -59,37 +60,36 @@ enum class SerializeArrayBufferBehavior {
   SHALLOW_REFERENCE,
 };
 
-Serialized serialize(
-    jsg::Lock& js,
-    v8::Local<v8::Value> body,
-    kj::StringPtr contentType,
-    SerializeArrayBufferBehavior bufferBehavior) {
+Serialized serialize(jsg::Lock& js,
+                     const jsg::JsValue& body,
+                     kj::StringPtr contentType,
+                     SerializeArrayBufferBehavior bufferBehavior) {
   if (contentType == IncomingQueueMessage::ContentType::TEXT) {
     JSG_REQUIRE(
-      body->IsString(),
+      body.isString(),
       TypeError,
       kj::str(
         "Content Type \"",
         IncomingQueueMessage::ContentType::TEXT,
         "\" requires a value of type string, but received: ",
-        body->TypeOf(js.v8Isolate)
+        body.typeOf(js)
       )
     );
 
-    kj::String s = js.toString(body);
+    kj::String s = body.toString(js);
     Serialized result;
     result.data = s.asBytes();
     result.own = kj::mv(s);
     return kj::mv(result);
   } else if (contentType == IncomingQueueMessage::ContentType::BYTES) {
     JSG_REQUIRE(
-      body->IsArrayBufferView(),
+      body.isArrayBufferView(),
       TypeError,
       kj::str(
         "Content Type \"",
         IncomingQueueMessage::ContentType::BYTES,
         "\" requires a value of type ArrayBufferView, but received: ",
-        body->TypeOf(js.v8Isolate)
+        body.typeOf(js)
       )
     );
 
@@ -115,7 +115,7 @@ Serialized serialize(
       return kj::mv(result);
     }
   } else if (contentType == IncomingQueueMessage::ContentType::JSON) {
-    kj::String s = js.serializeJson(body);
+    kj::String s = body.toJson(js);
     Serialized result;
     result.data = s.asBytes();
     result.own = kj::mv(s);
@@ -127,11 +127,57 @@ Serialized serialize(
   }
 }
 
-kj::Promise<void> WorkerQueue::send(
-    jsg::Lock& js, v8::Local<v8::Value> body, jsg::Optional<SendOptions> options) {
+struct SerializedWithContentType {
+  Serialized body;
+  kj::Maybe<kj::StringPtr> contentType;
+};
+
+jsg::JsValue deserialize(jsg::Lock& js,
+                         kj::Array<kj::byte> body,
+                         kj::Maybe<kj::StringPtr> contentType) {
+  auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
+
+  if (type == IncomingQueueMessage::ContentType::TEXT) {
+    return js.str(body);
+  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
+    return jsg::JsValue(js.bytes(kj::mv(body)).getHandle(js));
+  } else if (type == IncomingQueueMessage::ContentType::JSON) {
+    return jsg::JsValue::fromJson(js, body.asChars());
+  } else if (type == IncomingQueueMessage::ContentType::V8) {
+    return jsg::JsValue(jsg::Deserializer(js, body.asPtr()).readValue());
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
+  }
+}
+
+jsg::JsValue deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
+  kj::StringPtr type = message.getContentType();
+  if (type == "") {
+    // default to v8 format
+    type = IncomingQueueMessage::ContentType::V8;
+  }
+
+  if (type == IncomingQueueMessage::ContentType::TEXT) {
+    return js.str(message.getData().asChars());
+  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
+    kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
+    return jsg::JsValue(js.bytes(kj::mv(bytes)).getHandle(js));
+  } else if (type == IncomingQueueMessage::ContentType::JSON) {
+    return jsg::JsValue::fromJson(js, message.getData().asChars());
+  } else if (type == IncomingQueueMessage::ContentType::V8) {
+    return jsg::JsValue(jsg::Deserializer(js, message.getData()).readValue());
+  } else {
+    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
+  }
+}
+}  // namespace
+
+kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
+                                    jsg::JsValue body,
+                                    jsg::Optional<SendOptions> options) {
   auto& context = IoContext::current();
 
-  JSG_REQUIRE(!body->IsUndefined(), TypeError, "Message body cannot be undefined");
+  JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
 
   kj::Maybe<kj::StringPtr> contentType;
   KJ_IF_MAYBE(opts, options) {
@@ -172,13 +218,7 @@ kj::Promise<void> WorkerQueue::send(
   co_await response.body->readAllBytes().ignoreResult();
 };
 
-struct SerializedWithContentType {
-  Serialized body;
-  kj::Maybe<kj::StringPtr> contentType;
-};
-
-kj::Promise<void> WorkerQueue::sendBatch(
-    jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch) {
+kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSendRequest> batch) {
   auto& context = IoContext::current();
 
   JSG_REQUIRE(batch.size() > 0, TypeError, "sendBatch() requires at least one message");
@@ -188,16 +228,17 @@ kj::Promise<void> WorkerQueue::sendBatch(
   auto messageCount = batch.size();
   auto builder = kj::heapArrayBuilder<SerializedWithContentType>(messageCount);
   for (auto& message: batch) {
-    JSG_REQUIRE(!message.body.getHandle(js)->IsUndefined(), TypeError,
-        "Message body cannot be undefined");
+    auto body = message.body.getHandle(js);
+    JSG_REQUIRE(!body.isUndefined(), TypeError,
+                "Message body cannot be undefined");
 
     SerializedWithContentType item;
     KJ_IF_MAYBE(contentType, message.contentType) {
       item.contentType = validateContentType(*contentType);
-      item.body = serialize(js, message.body.getHandle(js), *contentType,
+      item.body = serialize(js, body, *contentType,
           SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
     } else {
-      item.body = serializeV8(js, message.body.getHandle(js));
+      item.body = serializeV8(js, body);
     }
 
     builder.add(kj::mv(item));
@@ -235,7 +276,7 @@ kj::Promise<void> WorkerQueue::sendBatch(
   bodyBuilder.add('\0');
   KJ_DASSERT(bodyBuilder.size() <= estimatedSize);
   kj::String body(bodyBuilder.releaseAsArray());
-  KJ_DASSERT(js.parseJson(body).getHandle(js)->IsObject());
+  KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
   auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
 
@@ -267,48 +308,12 @@ kj::Promise<void> WorkerQueue::sendBatch(
   co_await response.body->readAllBytes().ignoreResult();
 };
 
-jsg::Value deserialize(jsg::Lock& js, kj::Array<kj::byte> body, kj::Maybe<kj::StringPtr> contentType) {
-  auto type = contentType.orDefault(IncomingQueueMessage::ContentType::V8);
-
-  if (type == IncomingQueueMessage::ContentType::TEXT) {
-    return js.v8Ref(jsg::v8Str(js.v8Isolate, body.asChars()).As<v8::Value>());
-  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    return js.v8Ref(js.wrapBytes(kj::mv(body)).As<v8::Value>());
-  } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    return js.parseJson(body.asChars());
-  } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return js.v8Ref(jsg::Deserializer(js, body.asPtr()).readValue());
-  } else {
-    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
-  }
-}
-
-jsg::Value deserialize(jsg::Lock& js, rpc::QueueMessage::Reader message) {
-  kj::StringPtr type = message.getContentType();
-  if (type == "") {
-    // default to v8 format
-    type = IncomingQueueMessage::ContentType::V8;
-  }
-
-  if (type == IncomingQueueMessage::ContentType::TEXT) {
-    return js.v8Ref(jsg::v8Str(js.v8Isolate, message.getData().asChars()).As<v8::Value>());
-  } else if (type == IncomingQueueMessage::ContentType::BYTES) {
-    kj::Array<kj::byte> bytes = kj::heapArray(message.getData().asBytes());
-    return js.v8Ref(js.wrapBytes(kj::mv(bytes)).As<v8::Value>());
-  } else if (type == IncomingQueueMessage::ContentType::JSON) {
-    return js.parseJson(message.getData().asChars());
-  } else if (type == IncomingQueueMessage::ContentType::V8) {
-    return js.v8Ref(jsg::Deserializer(js, message.getData()).readValue());
-  } else {
-    JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported queue message content type: ", type));
-  }
-}
-
-QueueMessage::QueueMessage(
-    jsg::Lock& js, rpc::QueueMessage::Reader message, IoPtr<QueueEventResult> result)
+QueueMessage::QueueMessage(jsg::Lock& js,
+                           rpc::QueueMessage::Reader message,
+                           IoPtr<QueueEventResult> result)
     : id(kj::str(message.getId())),
       timestamp(message.getTimestampNs() * kj::NANOSECONDS + kj::UNIX_EPOCH),
-      body(deserialize(js, message)),
+      body(deserialize(js, message).addRef(js)),
       result(result) {}
 // Note that we must make deep copies of all data here since the incoming Reader may be
 // deallocated while JS's GC wrappers still exist.
@@ -317,11 +322,11 @@ QueueMessage::QueueMessage(
     jsg::Lock& js, IncomingQueueMessage message, IoPtr<QueueEventResult> result)
     : id(kj::mv(message.id)),
       timestamp(message.timestamp),
-      body(deserialize(js, kj::mv(message.body), message.contentType)),
+      body(deserialize(js, kj::mv(message.body), message.contentType).addRef(js)),
       result(result) {}
 
-jsg::Value QueueMessage::getBody(jsg::Lock& js) {
-  return body.addRef(js);
+jsg::JsValue QueueMessage::getBody(jsg::Lock& js) {
+  return body.getHandle(js);
 }
 
 void QueueMessage::retry() {
@@ -435,8 +440,10 @@ jsg::Ref<QueueEvent> startQueueEvent(
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(
         lock, h->self.getHandle(lock)));
     KJ_IF_MAYBE(f, queueHandler.queue) {
-      auto promise = (*f)(lock, jsg::alloc<QueueController>(event.addRef()),
-                          h->env.addRef(js), h->getCtx());
+      auto promise = (*f)(lock,
+                          jsg::alloc<QueueController>(event.addRef()),
+                          jsg::JsValue(h->env.getHandle(js)).addRef(js),
+                          h->getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
