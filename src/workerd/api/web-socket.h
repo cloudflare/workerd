@@ -20,13 +20,17 @@ template <typename T> struct DeferredProxy;
 
 class MessageEvent: public Event {
 public:
-  MessageEvent(jsg::Lock& js, v8::Local<v8::Value> data)
-      : Event("message"), data(js.v8Isolate, data) {}
-  MessageEvent(jsg::Lock& js, kj::String type, v8::Local<v8::Value> data)
-      : Event(kj::mv(type)), data(js.v8Isolate, data) {}
+  MessageEvent(jsg::Lock& js, const jsg::JsValue& data)
+      : Event("message"), data(jsg::JsRef(js, data)) {}
+  MessageEvent(jsg::Lock& js, jsg::JsRef<jsg::JsValue> data)
+      : Event("message"), data(kj::mv(data)) {}
+  MessageEvent(jsg::Lock& js, kj::String type, const jsg::JsValue& data)
+      : Event(kj::mv(type)), data(jsg::JsRef(js, kj::mv(data))) {}
+  MessageEvent(jsg::Lock& js, kj::String type, jsg::JsRef<jsg::JsValue> data)
+      : Event(kj::mv(type)), data(kj::mv(data)) {}
 
   struct Initializer {
-    v8::Local<v8::Value> data;
+    jsg::JsRef<jsg::JsValue> data;
 
     JSG_STRUCT(data);
     JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
@@ -36,10 +40,10 @@ public:
   static jsg::Ref<MessageEvent> constructor(jsg::Lock& js,
                                             kj::String type,
                                             Initializer initializer) {
-    return jsg::alloc<MessageEvent>(js, kj::mv(type), initializer.data);
+    return jsg::alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
   }
 
-  v8::Local<v8::Value> getData(jsg::Lock& js) { return data.getHandle(js); }
+  jsg::JsValue getData(jsg::Lock& js) { return data.getHandle(js); }
 
   jsg::Unimplemented getOrigin() { return jsg::Unimplemented(); }
   jsg::Unimplemented getLastEventId() { return jsg::Unimplemented(); }
@@ -64,7 +68,11 @@ public:
   }
 
 private:
-  jsg::Value data;
+  jsg::JsRef<jsg::JsValue> data;
+
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(data);
+  }
 };
 
 class CloseEvent: public Event {
@@ -112,7 +120,7 @@ private:
 
 class ErrorEvent: public Event {
 public:
-  ErrorEvent(jsg::Lock& js, kj::String&& message, jsg::Value error)
+  ErrorEvent(jsg::Lock& js, kj::String&& message, jsg::JsRef<jsg::JsValue> error)
       : Event("error"), message(kj::mv(message)), error(kj::mv(error)) {}
 
   static jsg::Ref<ErrorEvent> constructor() = delete;
@@ -123,7 +131,7 @@ public:
   kj::StringPtr getMessage() { return message; }
   int getLineno() { return 0; }
   int getColno() { return 0; }
-  v8::Local<v8::Value> getError(jsg::Lock& js) { return error.getHandle(js); }
+  jsg::JsValue getError(jsg::Lock& js) { return error.getHandle(js); }
 
 
   JSG_RESOURCE_TYPE(ErrorEvent) {
@@ -141,7 +149,7 @@ public:
 
 private:
   kj::String message;
-  jsg::Value error;
+  jsg::JsRef<jsg::JsValue> error;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -379,11 +387,11 @@ public:
 
   // Used to get/set the attachment for hibernation.
   // If the object isn't serialized, it will not survive hibernation.
-  void serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment);
+  void serializeAttachment(jsg::Lock& js, jsg::JsValue attachment);
 
   // Used to get/set the attachment for hibernation.
   // If the object isn't serialized, it will not survive hibernation.
-  kj::Maybe<v8::Local<v8::Value>> deserializeAttachment(jsg::Lock& js);
+  kj::Maybe<jsg::JsValue> deserializeAttachment(jsg::Lock& js);
 
   // Used to get/store the last auto request/response timestamp for this WebSocket.
   // These methods are c++ only and are not exposed to our js interface.
@@ -629,7 +637,7 @@ private:
   IoOwn<Native> farNative;
 
   // If any error has occurred.
-  kj::Maybe<jsg::Value> error;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> error;
 
   struct GatedMessage {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
@@ -674,7 +682,7 @@ private:
   kj::Promise<kj::Maybe<kj::Exception>> readLoop();
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
-  void reportError(jsg::Lock& js, jsg::Value err);
+  void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);
 
   void assertNoError(jsg::Lock& js);
 };
