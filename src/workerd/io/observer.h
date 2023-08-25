@@ -20,46 +20,45 @@ class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
 
+// Observes a specific request to a specific worker. Also observes outgoing subrequests.
+//
+// Observing anything is optional. Default implementations of all methods observe nothing.
 class RequestObserver: public kj::Refcounted {
-  // Observes a specific request to a specific worker. Also observes outgoing subrequests.
-  //
-  // Observing anything is optional. Default implementations of all methods observe nothing.
-
 public:
-  virtual void delivered() {};
   // Invoked when the request is actually delivered.
   //
   // If, for some reason, this is not invoked before the object is destroyed, this indicate that
   // the event was canceled for some reason before delivery. No JavaScript was invoked. In this
   // case, the request should not be billed.
+  virtual void delivered() {};
 
-  virtual void jsDone() {}
   // Call when no more JavaScript will run on behalf of this request. Note that deferred proxying
   // may still be in progress.
+  virtual void jsDone() {}
 
-  virtual void setIsPrewarm() {}
   // Called to indicate this was a prewarm request. Normal request metrics won't be logged, but
   // the prewarm metric will be incremented.
+  virtual void setIsPrewarm() {}
 
-  virtual void reportFailure(const kj::Exception& e) {}
   // Report that the request failed with the given exception. This only needs to be called in
   // cases where the wrapper created with wrapWorkerInterface() wouldn't otherwise see the
   // exception, e.g. because it has been replaced with an HTTP error response or because it
   // occurred asynchronously.
+  virtual void reportFailure(const kj::Exception& e) {}
 
-  virtual WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) { return worker; }
   // Wrap the given WorkerInterface with a version that collects metrics. This method may only be
   // called once, and only one method call may be made to the returned interface.
   //
   // The returned reference remains valid as long as the observer and `worker` both remain live.
+  virtual WorkerInterface& wrapWorkerInterface(WorkerInterface& worker) { return worker; }
 
+  // Wrap an HttpClient so that its usage is counted in the request's subrequest stats.
   virtual kj::Own<WorkerInterface> wrapSubrequestClient(kj::Own<WorkerInterface> client) {
-    // Wrap an HttpClient so that its usage is counted in the request's subrequest stats.
     return kj::mv(client);
   }
 
+  // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
   virtual kj::Own<WorkerInterface> wrapActorSubrequestClient(kj::Own<WorkerInterface> client) {
-    // Wrap an HttpClient so that its usage is counted in the request's actor subrequest count.
     return kj::mv(client);
   }
 
@@ -77,35 +76,34 @@ class IsolateObserver: public kj::AtomicRefcounted, public jsg::IsolateObserver 
 public:
   virtual ~IsolateObserver() noexcept(false) { }
 
-  virtual void created() {};
   // Called when Worker::Isolate is created.
+  virtual void created() {};
 
-  virtual void evicted() {}
   // Called when the owning Worker::Script is being destroyed. The IsolateObserver may
   // live a while longer to handle deferred proxy requests.
+  virtual void evicted() {}
 
   virtual void teardownStarted() {}
   virtual void teardownLockAcquired() {}
   virtual void teardownFinished() {}
 
+  // Describes why a worker was started.
   enum class StartType: uint8_t {
-    // Describes why a worker was started.
-
-    COLD,
     // Cold start with active request waiting.
+    COLD,
 
-    PREWARM,
     // Started due to prewarm hint (e.g. from TLS SNI); a real request is expected soon.
+    PREWARM,
 
-    PRELOAD
     // Started due to preload at process startup.
+    PRELOAD
   };
 
+  // Created while parsing a script, to record related metrics.
   class Parse {
-    // Created while parsing a script, to record related metrics.
   public:
-    virtual void done() {}
     // Marks the ScriptReplica as finished parsing, which starts reporting of isolate metrics.
+    virtual void done() {}
   };
 
   virtual kj::Own<Parse> parse(StartType startType) const {
@@ -115,14 +113,13 @@ public:
 
   class LockTiming {
   public:
-    virtual void waitingForOtherIsolate(kj::StringPtr id) {}
     // Called by `Isolate::takeAsyncLock()` when it is blocked by a different isolate lock on the
     // same thread.
+    virtual void waitingForOtherIsolate(kj::StringPtr id) {}
 
+    // Call if this is an async lock attempt, before constructing LockRecord.
     virtual void reportAsyncInfo(uint currentLoad, bool threadWaitingSameLock,
         uint threadWaitingDifferentLockCount) {}
-    // Call if this is an async lock attempt, before constructing LockRecord.
-    //
     // TODO(cleanup): Should be able to get this data at `tryCreateLockTiming()` time. It'd be
     //   easier if IsolateObserver were an AOP class, and thus had access to the real isolate.
 
@@ -134,26 +131,25 @@ public:
     virtual void gcEpilogue() {}
   };
 
-  virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
-      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return nullptr; }
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
   // request (if any) is being traced.
+  virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return nullptr; }
 
+  // Use like so:
+  //
+  //   auto lockTiming = MetricsCollector::ScriptReplica::LockTiming::tryCreate(script, maybeRequest);
+  //   MetricsCollector::ScriptReplica::LockRecord record(lockTiming);
+  //   JsgWorkerIsolate::Lock lock(isolate);
+  //   record.locked();
+  //
+  // And `record()` will report the time spent waiting for the lock (including any asynchronous
+  // time you might insert between the construction of `lockTiming` and `LockRecord()`), plus
+  // the time spent holding the lock for the given ScriptReplica.
+  //
+  // This is a thin wrapper around LockTiming which efficiently handles the case where we don't
+  // want to track timing.
   class LockRecord {
-    // Use like so:
-    //
-    //   auto lockTiming = MetricsCollector::ScriptReplica::LockTiming::tryCreate(script, maybeRequest);
-    //   MetricsCollector::ScriptReplica::LockRecord record(lockTiming);
-    //   JsgWorkerIsolate::Lock lock(isolate);
-    //   record.locked();
-    //
-    // And `record()` will report the time spent waiting for the lock (including any asynchronous
-    // time you might insert between the construction of `lockTiming` and `LockRecord()`), plus
-    // the time spent holding the lock for the given ScriptReplica.
-    //
-    // This is a thin wrapper around LockTiming which efficiently handles the case where we don't
-    // want to track timing.
-
   public:
     explicit LockRecord(kj::Maybe<kj::Own<LockTiming>> lockTimingParam)
         : lockTiming(kj::mv(lockTimingParam)) {
@@ -169,16 +165,16 @@ public:
     void gcEpilogue() { KJ_IF_MAYBE(l, lockTiming) l->get()->gcEpilogue(); }
 
   private:
-    kj::Maybe<kj::Own<LockTiming>> lockTiming;
     // The presence of `lockTiming` determines whether or not we need to record timing data. If
     // we have no `lockTiming`, then this LockRecord wrapper is just a big nothingburger.
+    kj::Maybe<kj::Own<LockTiming>> lockTiming;
   };
 };
 
 class WorkerObserver: public kj::AtomicRefcounted {
 public:
+  // Created while executing a script's global scope, to record related metrics.
   class Startup {
-    // Created while executing a script's global scope, to record related metrics.
   public:
     virtual void done() {}
   };
@@ -195,11 +191,10 @@ public:
 
 class ActorObserver: public kj::Refcounted {
 public:
+  // Allows the observer to run in the background, periodically making observations. Owner must
+  // call this and store the promise. `limitEnforcer` is used to collect CPU usage metrics, it
+  // must remain valid as long as the loop is running.
   virtual kj::Promise<void> flushLoop(TimerChannel& timer, LimitEnforcer& limitEnforcer) {
-    // Allows the observer to run in the background, periodically making observations. Owner must
-    // call this and store the promise. `limitEnforcer` is used to collect CPU usage metrics, it
-    // must remain valid as long as the loop is running.
-
     return kj::NEVER_DONE;
   }
 
