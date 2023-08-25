@@ -12,9 +12,9 @@ namespace workerd {
 struct FeatureFlags {
   FeatureFlags() = delete;
 
-  static CompatibilityFlags::Reader get(jsg::Lock&);
   // Get the feature flags that are relevant for the current jsg::Lock or
   // throw if we are not currently executing JavaScript.
+  static CompatibilityFlags::Reader get(jsg::Lock&);
 };
 
 }  // namespace workerd

@@ -73,9 +73,8 @@ private:
 
   void setTimeoutImpl(IoContext& context, Iterator it);
 
+  // A pair of a Date and a numeric ID, used as entry in timeoutTimes set, below.
   struct TimeoutTime {
-    // A pair of a Date and a numeric ID, used as entry in timeoutTimes set, below.
-
     kj::Date when;
     uint tiebreaker;  // Unique number, in case two timeouts target same time.
 
@@ -89,24 +88,24 @@ private:
     }
   };
 
-  kj::TreeMap<TimeoutTime, kj::Own<kj::PromiseFulfiller<void>>> timeoutTimes;
-  uint timeoutTimesTiebreakerCounter = 0;
   // Tracks registered timeouts sorted by the next time the timeout is expected to fire.
   //
   // The associated fulfiller should be fulfilled when the time has been reached AND all previous
   // timeouts have completed.
+  kj::TreeMap<TimeoutTime, kj::Own<kj::PromiseFulfiller<void>>> timeoutTimes;
+  uint timeoutTimesTiebreakerCounter = 0;
 
   uint timeoutsStarted = 0;
   uint timeoutsFinished = 0;
   Map timeouts;
 
-  kj::Promise<void> timerTask = nullptr;
   // Promise that is waiting for the closest timeout, and will fulfill its fulfiller. We only ever
   // actually wait on the next timeout in `timeoutTasks`, so that we can't fulfill timer callbacks
   // out-of-order. This task gets replaced each time the lead timeout changes.
+  kj::Promise<void> timerTask = nullptr;
 
-  void resetTimerTask(TimerChannel& timerChannel);
   // Must be called any time timeoutTimes.begin() changes.
+  void resetTimerTask(TimerChannel& timerChannel);
 };
 
 class IoContext::TimeoutManagerImpl::TimeoutState {
@@ -225,13 +224,11 @@ IoContext::IncomingRequest::IoContext_IncomingRequest(
       workerTracer(kj::mv(workerTracer)),
       ioChannelFactory(kj::mv(ioChannelFactoryParam)) {}
 
+// A call to delivered() implies a promise to call drain() later (or one of the other methods
+// that sets waitedForWaitUntil). So, we can now safely add the request to
+// context->incomingRequests, which implies taking responsibility for draining on the way out.
 void IoContext::IncomingRequest::delivered() {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
-
-  // A call to delivered() implies a promise to call drain() later (or one of the other methods
-  // that sets waitedForWaitUntil). So, we can now safely add the request to
-  // context->incomingRequests, which implies taking responsibility for draining on the way out.
-
   if (!context->incomingRequests.empty()) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
     // longer current. Make sure to attribute accumulated CPU time to it.
@@ -464,8 +461,8 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   waitUntilTasks.add(kj::mv(promise));
 }
 
+// Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 kj::Promise<void> IoContext::IncomingRequest::drain() {
-  // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
   waitedForWaitUntil = true;
 
   if (&context->incomingRequests.front() != this) {
