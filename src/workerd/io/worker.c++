@@ -238,25 +238,23 @@ void addJsStackTrace(v8::Local<v8::Context> context,
   }
 }
 
+// Inform the inspector of a problem not associated with any particular exception object.
+//
+// Passes `description` as the exception's detailed message, dummy values for everything else.
 void sendExceptionToInspector(v8_inspector::V8Inspector& inspector, v8::Local<v8::Context> context,
                               kj::StringPtr description) {
-  // Inform the inspector of a problem not associated with any particular exception object.
-  //
-  // Passes `description` as the exception's detailed message, dummy values for everything else.
-
   inspector.exceptionThrown(context, v8_inspector::StringView(), v8::Local<v8::Value>(),
       toStringView(description), v8_inspector::StringView(),
       0, 0, nullptr, 0);
 }
 
+// Inform the inspector of an exception thrown.
+//
+// Passes `source` as the exception's short message. Reconstructs `message` from `exception` if
+// `message` is empty.
 void sendExceptionToInspector(v8_inspector::V8Inspector& inspector, v8::Local<v8::Context> context,
                               UncaughtExceptionSource source, v8::Local<v8::Value> exception,
                               v8::Local<v8::Message> message) {
-  // Inform the inspector of an exception thrown.
-  //
-  // Passes `source` as the exception's short message. Reconstructs `message` from `exception` if
-  // `message` is empty.
-
   if (message.IsEmpty()) {
     // This exception didn't come with a Message. This can happen for exceptions delivered via
     // v8::Promise::Catch(), or for exceptions which were tunneled through C++ promises. In the
@@ -441,10 +439,9 @@ uint64_t getCurrentThreadId() {
 
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
 public:
+  // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
+  // function to implement timers.
   double currentTimeMS() override {
-    // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
-    // function to implement timers.
-
     auto timePoint = kj::UNIX_EPOCH;
 
     if (IoContext::hasCurrent()) {
@@ -480,13 +477,13 @@ public:
     lockedState->channel = {};
   }
 
+  // This method is called by v8 when a breakpoint or debugger statement is hit. This method
+  // processes debugger messages until `Debugger.resume()` is called, when v8 then calls
+  // `quitMessageLoopOnPause()`.
+  //
+  // This method is ultimately called from the `InspectorChannelImpl` and the isolate lock is
+  // held when this method is called.
   void runMessageLoopOnPause(int contextGroupId) override {
-    // This method is called by v8 when a breakpoint or debugger statement is hit. This method
-    // processes debugger messages until `Debugger.resume()` is called, when v8 then calls
-    // `quitMessageLoopOnPause()`.
-    //
-    // This method is ultimately called from the `InspectorChannelImpl` and the isolate lock is
-    // held when this method is called.
     auto lockedState = state.lockExclusive();
     KJ_IF_MAYBE(channel, lockedState->channel) {
       pauseIncomingMessages(*channel);
@@ -500,8 +497,8 @@ public:
     }
   }
 
+  // This method is called by v8 to resume execution after a breakpoint is hit.
   void quitMessageLoopOnPause() override {
-    // This method is called by v8 to resume execution after a breakpoint is hit.
     runMessageLoop = false;
   }
 
@@ -518,21 +515,21 @@ private:
 
   bool runMessageLoop;
 
+  // State that may be set on a thread other than the isolate thread.
+  // These are typically set in attachInspector when an inspector connection is
+  // made.
   struct State {
-    // State that may be set on a thread other than the isolate thread.
-    // These are typically set in attachInspector when an inspector connection is
-    // made.
-    kj::Maybe<Worker::Isolate::InspectorChannelImpl&> channel;
     // Inspector channel to use to pump messages.
+    kj::Maybe<Worker::Isolate::InspectorChannelImpl&> channel;
 
-    kj::Maybe<InspectorTimerInfo> inspectorTimerInfo;
     // The timer and offset for the inspector-serving thread.
+    kj::Maybe<InspectorTimerInfo> inspectorTimerInfo;
   };
   kj::MutexGuarded<State> state;
 };
 
-void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
 // Defined later in this file.
+void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
 
 static thread_local uint warnAboutIsolateLockScopeCount = 0;
 static thread_local const Worker::ApiIsolate* currentApiIsolate = nullptr;
@@ -556,21 +553,20 @@ void Worker::WarnAboutIsolateLockScope::release() {
 struct Worker::Impl {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 
-  kj::Maybe<jsg::Value> env;
   // The environment blob to pass to handlers.
+  kj::Maybe<jsg::Value> env;
 
   kj::Maybe<api::ExportedHandler> defaultHandler;
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
   kj::HashMap<kj::String, DurableObjectConstructor> actorClasses;
 
-  kj::Maybe<kj::Exception> permanentException;
   // If set, then any attempt to use this worker shall throw this exception.
+  kj::Maybe<kj::Exception> permanentException;
 };
 
+// Note that Isolate mutable state is protected by locking the JsgWorkerIsolate unless otherwise
+// noted.
 struct Worker::Isolate::Impl {
-  // Note that Isolate mutable state is protected by locking the JsgWorkerIsolate unless otherwise
-  // noted.
-
   IsolateObserver& metrics;
   InspectorClient inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
@@ -578,30 +574,30 @@ struct Worker::Isolate::Impl {
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
 
-  kj::Vector<kj::String> queuedNotifications;
   // Notification messages to deliver to the next inspector client when it connects.
+  kj::Vector<kj::String> queuedNotifications;
 
-  kj::HashSet<kj::String> warningOnceDescriptions;
   // Set of warning log lines that should not be logged to the inspector again.
+  kj::HashSet<kj::String> warningOnceDescriptions;
 
-  kj::HashSet<kj::String> errorOnceDescriptions;
   // Set of error log lines that should not be logged again.
+  kj::HashSet<kj::String> errorOnceDescriptions;
 
-  mutable uint lockAttemptGauge = 0;
   // Instantaneous count of how many threads are trying to or have successfully obtained an
   // AsyncLock on this isolate, used to implement getCurrentLoad().
+  mutable uint lockAttemptGauge = 0;
 
-  mutable uint64_t lockSuccessCount = 0;
   // Atomically incremented upon every successful lock. The ThreadProgressCounter in Impl::Lock
   // registers a reference to `lockSuccessCounter` as the thread's progress counter during a lock
   // attempt. This allows watchdogs to see evidence of forward progress in other threads, even if
   // their own thread has blocked waiting for the lock for a long time.
+  mutable uint64_t lockSuccessCount = 0;
 
+  // Wrapper around JsgWorkerIsolate::Lock and various RAII objects which help us report metrics,
+  // measure instantaneous load, avoid spurious watchdog kills, and defer context destruction.
+  //
+  // Always use this wrapper in code which may face lock contention (that's mostly everywhere).
   class Lock {
-    // Wrapper around JsgWorkerIsolate::Lock and various RAII objects which help us report metrics,
-    // measure instantaneous load, avoid spurious watchdog kills, and defer context destruction.
-    //
-    // Always use this wrapper in code which may face lock contention (that's mostly everywhere).
 
   public:
     explicit Lock(const Worker::Isolate& isolate, Worker::LockType lockType,
@@ -721,10 +717,10 @@ struct Worker::Isolate::Impl {
       metrics.gcEpilogue();
     }
 
-    bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
     // Call limitEnforcer->exitJs(), and also schedule to call limitEnforcer->reportMetrics()
     // later. Returns true if condemned. We take a mutable reference to it to make sure the caller
     // believes it has exclusive access.
+    bool checkInWithLimitEnforcer(Worker::Isolate& isolate);
 
   private:
     const Impl& impl;
@@ -739,16 +735,13 @@ struct Worker::Isolate::Impl {
     kj::Own<jsg::Lock> lock;
   };
 
-  mutable kj::Maybe<Lock&> currentLock;
   // Protected by v8::Locker -- if v8::Locker::IsLocked(isolate) is true, then it is safe to access
   // this variable.
+  mutable kj::Maybe<Lock&> currentLock;
 
   static constexpr auto WORKER_DESTRUCTION_QUEUE_INITIAL_SIZE = 8;
   static constexpr auto WORKER_DESTRUCTION_QUEUE_MAX_CAPACITY = 100;
-  const kj::MutexGuarded<BatchQueue<kj::Own<Worker::Impl>>> workerDestructionQueue {
-    WORKER_DESTRUCTION_QUEUE_INITIAL_SIZE,
-    WORKER_DESTRUCTION_QUEUE_MAX_CAPACITY
-  };
+
   // Similar in spirit to the deferred destruction queue in jsg::IsolateBase. When a Worker is
   // destroyed, it puts its Impl, which contains objects that need to be destroyed under the isolate
   // lock, into this queue. Our own Isolate::Impl::Lock implementation then clears this queue the
@@ -756,7 +749,10 @@ struct Worker::Isolate::Impl {
   // destructor if it owns the last `kj::Own<const Script>` reference.
   //
   // Fairly obviously, this member is protected by its own mutex, not the isolate lock.
-  //
+  const kj::MutexGuarded<BatchQueue<kj::Own<Worker::Impl>>> workerDestructionQueue {
+    WORKER_DESTRUCTION_QUEUE_INITIAL_SIZE,
+    WORKER_DESTRUCTION_QUEUE_MAX_CAPACITY
+  };
   // TODO(cleanup): The only reason this exists and we can't just rely on the isolate's regular
   //   deferred destruction queue to lazily destroy the various V8 objects in Worker::Impl is
   //   because our GlobalScope object needs to have a function called on it, and any attached
@@ -890,8 +886,8 @@ struct Worker::Script::Impl {
 
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> moduleContext;
 
-  kj::Maybe<kj::Exception> permanentException;
   // If set, then any attempt to use this script shall throw this exception.
+  kj::Maybe<kj::Exception> permanentException;
 
   void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
     struct DynamicImportResult {
@@ -979,12 +975,11 @@ struct Worker::Script::Impl {
 
 namespace {
 
+// Given an array of strings, return a valid serialized JSON string like:
+//   {"flags":["minimal_subrequests",...]}
+//
+// Return null if the array is empty.
 kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
-  // Given an array of strings, return a valid serialized JSON string like:
-  //   {"flags":["minimal_subrequests",...]}
-  //
-  // Return null if the array is empty.
-
   if (enableFlags.size() == 0) {
     return nullptr;
   }
@@ -1029,14 +1024,13 @@ kj::Maybe<kj::String> makeCompatJson(kj::ArrayPtr<kj::StringPtr> enableFlags) {
   return kj::String(json.releaseAsArray());
 }
 
+// When a promise is created in a different IoContext, we need to use a
+// kj::CrossThreadFulfiller in order to wait on it. The Waiter instance will
+// be held on the Promise itself, and will be fulfilled/rejected when the
+// promise is resolved or rejected. This will signal all of the waiters
+// from other IoContexts.
 jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js,
                                                v8::Local<v8::Promise>& promise) {
-  // When a promise is created in a different IoContext, we need to use a
-  // kj::CrossThreadFulfiller in order to wait on it. The Waiter instance will
-  // be held on the Promise itself, and will be fulfilled/rejected when the
-  // promise is resolved or rejected. This will signal all of the waiters
-  // from other IoContexts.
-
   auto waiter = kj::newPromiseAndCrossThreadFulfiller<void>();
 
   struct Waiter: public kj::Refcounted {
@@ -1348,12 +1342,11 @@ bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isol
   return limitEnforcer.exitJs(*lock);
 }
 
+// EW-1319: Set WebAssembly.Module @@HasInstance
+//
+// The instanceof operator can be changed by setting the @@HasInstance method
+// on the object, https://tc39.es/ecma262/#sec-instanceofoperator.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // EW-1319: Set WebAssembly.Module @@HasInstance
-  //
-  // The instanceof operator can be changed by setting the @@HasInstance method
-  // on the object, https://tc39.es/ecma262/#sec-instanceofoperator.
-
   auto instanceof = [](const v8::FunctionCallbackInfo<v8::Value>& info) {
     jsg::Lock::from(info.GetIsolate()).withinHandleScope([&] {
       info.GetReturnValue().Set(info[0]->IsWasmModuleObject());
@@ -2049,13 +2042,13 @@ kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
 
 // =======================================================================================
 
+// A proxy for OutputStream that internally buffers data as long as it's beyond a given limit.
+// Also, it counts size of all the data it has seen (whether it has hit the limit or not).
+//
+// We use this in the Network tab to report response stats and preview [decompressed] bodies,
+// but we don't want to keep buffering extremely large ones, so just discard buffered data
+// upon hitting a limit and don't return any body to the devtools frontend afterwards.
 class Worker::Isolate::LimitedBodyWrapper: public kj::OutputStream {
-  // A proxy for OutputStream that internally buffers data as long as it's beyond a given limit.
-  // Also, it counts size of all the data it has seen (whether it has hit the limit or not).
-  //
-  // We use this in the Network tab to report response stats and preview [decompressed] bodies,
-  // but we don't want to keep buffering extremely large ones, so just discard buffered data
-  // upon hitting a limit and don't return any body to the devtools frontend afterwards.
 public:
   LimitedBodyWrapper(size_t limit = 1 * 1024 * 1024): limit(limit) {
     if (limit > 0) {
@@ -2105,10 +2098,10 @@ public:
     ioHandler.connect(*this);
   }
 
-  using InspectorLock = Worker::Lock::TakeSynchronously;
   // In preview sessions, synchronous locks are not an issue. We declare an alternate spelling of
   // the type so that all the individual locks below don't turn up in a search for synchronous
   // locks.
+  using InspectorLock = Worker::Lock::TakeSynchronously;
 
   ~InspectorChannelImpl() noexcept try {
     // Stop message pump.
@@ -2311,25 +2304,25 @@ public:
     // delay signaling the outgoing loop until this call?
   }
 
-  void pauseIncomingMessages();
   // Stops the delivery of CDP messages on the I/O worker thread. Called when the isolate hits a
   // breakpoint or debugger statement.
+  void pauseIncomingMessages();
 
-  void resumeIncomingMessages();
   // Resumes delivery of CDP messages on the I/O worker thread. Called when execution resumes after
   // a breakpoint or debugger statement.
+  void resumeIncomingMessages();
 
-  bool dispatchOneMessageDuringPause();
   // Dispatches one message whilst automatic CDP messages on the I/O worker thread is paused, called
   // on the thread executing the isolate whilst execution is suspended due to a breakpoint or
   // debugger statement.
+  bool dispatchOneMessageDuringPause();
 
 private:
+  // Class that manages the I/O for devtools connections. I/O is performed on the
+  // thread associated with the InspectorService (the thread that calls attachInspector).
+  // Most of the public API is intended for code running on the isolate thread, such as
+  // the InspectorChannelImpl and the InspectorClient.
   class WebSocketIoHandler final {
-    // Class that manages the I/O for devtools connections. I/O is performed on the
-    // thread associated with the InspectorService (the thread that calls attachInspector).
-    // Most of the public API is intended for code running on the isolate thread, such as
-    // the InspectorChannelImpl and the InspectorClient.
   public:
     WebSocketIoHandler(kj::WebSocket& webSocket)
         : webSocket(webSocket) {
@@ -2342,8 +2335,8 @@ private:
       outgoingQueueNotifier->clear();
     }
 
+    // Sets the channel that messages are delivered to.
     void connect(InspectorChannelImpl& inspectorChannel) {
-      // Sets the channel that messages are delivered to.
       channel = inspectorChannel;
     }
 
@@ -2369,11 +2362,11 @@ private:
       deliverProtocolMessages(channel, lockedIncomingQueue);
     }
 
+    // Blocked the current thread until a message arrives. This is intended
+    // for use in the InspectorClient when breakpoints are hit. The InspectorClient
+    // has to remain in runMessageLoopOnPause() but still receive CDP messages
+    // (e.g. resume).
     kj::Maybe<kj::String> waitForMessage() {
-      // Blocked the current thread until a message arrives. This is intended
-      // for use in the InspectorClient when breakpoints are hit. The InspectorClient
-      // has to remain in runMessageLoopOnPause() but still receive CDP messages
-      // (e.g. resume).
       return incomingQueue.when(
         [](const MessageQueue& incomingQueue) {
           return (incomingQueue.head < incomingQueue.messages.size() ||
@@ -2385,9 +2378,9 @@ private:
         });
     }
 
+    // Message pumping promise that should be evaluated on the InspectorService
+    // thread.
     kj::Promise<void> messagePump() {
-      // Message pumping promise that should be evaluated on the InspectorService
-      // thread.
       return incomingLoop().exclusiveJoin(outgoingLoop());
     }
 
@@ -2430,9 +2423,9 @@ private:
     }
 
     void shutdown() {
-      // Drain incoming queue, the isolate thread may be waiting on it
-      // on will notice it is closed if woken without any messages to
-      // deliver in WebSocketIoWorker::waitForMessage().
+    // Drain incoming queue, the isolate thread may be waiting on it
+    // on will notice it is closed if woken without any messages to
+    // deliver in WebSocketIoWorker::waitForMessage().
       {
         auto lockedIncomingQueue = incomingQueue.lockExclusive();
         lockedIncomingQueue->head = 0;
@@ -2585,19 +2578,19 @@ private:
       }
     }
 
+    // Must be called with the worker isolate locked. Should be called immediately before
+    // destruction.
     void teardownUnderLock() {
-      // Must be called with the worker isolate locked. Should be called immediately before
-      // destruction.
       session = nullptr;
     }
 
     KJ_DISALLOW_COPY_AND_MOVE(State);
   };
-  kj::MutexGuarded<kj::Own<State>> state;
   // Mutex ordering: You must lock this *before* locking the isolate.
+  kj::MutexGuarded<kj::Own<State>> state;
 
-  volatile bool networkEnabled = false;
   // Not under `state` lock due to lock ordering complications.
+  volatile bool networkEnabled = false;
 
   void dispatchProtocolMessage(
       kj::Locked<kj::Own<workerd::Worker::Isolate::InspectorChannelImpl::State>>& lockedState,
@@ -2800,6 +2793,8 @@ struct Worker::Actor::Impl {
   struct NoClass {};
   struct Initializing {};
 
+  // If the actor is backed by a class, this field tracks the instance through its stages. The
+  // instance is constructed as part of the first request to be delivered.
   kj::OneOf<
     NoClass,                         // not class-based
     DurableObjectConstructor*,       // constructor not run yet
@@ -2807,8 +2802,6 @@ struct Worker::Actor::Impl {
     api::ExportedHandler,            // fully constructed
     kj::Exception                    // constructor threw
   > classInstance;
-  // If the actor is backed by a class, this field tracks the instance through its stages. The
-  // instance is constructed as part of the first request to be delivered.
 
   class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
   public:
@@ -2836,14 +2829,16 @@ struct Worker::Actor::Impl {
             "timeout which caused object to be reset."));
     }
 
+    // Implements OutputGate::Hooks.
+
     void outputGateLocked() override { metrics.outputGateLocked(); }
     void outputGateReleased() override { metrics.outputGateReleased(); }
     void outputGateWaiterAdded() override { metrics.outputGateWaiterAdded(); }
     void outputGateWaiterRemoved() override { metrics.outputGateWaiterRemoved(); }
-    // Implements OutputGate::Hooks.
+
+    // Implements ActorCache::Hooks
 
     void updateAlarmInMemory(kj::Maybe<kj::Date> newAlarmTime) override;
-    // Implements ActorCache::Hooks
 
   private:
     kj::Own<Loopback> loopback;    // only for updateAlarmInMemory()
@@ -2855,36 +2850,36 @@ struct Worker::Actor::Impl {
 
   HooksImpl hooks;
 
-  InputGate inputGate;
   // Handles both input locks and request locks.
+  InputGate inputGate;
 
-  OutputGate outputGate;
   // Handles output locks.
+  OutputGate outputGate;
 
-  kj::Maybe<kj::Own<IoContext>> ioContext;
   // `ioContext` is initialized upon delivery of the first request.
+  kj::Maybe<kj::Own<IoContext>> ioContext;
 
-  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<void>>>> abortFulfiller;
   // If onBroken() is called while `ioContext` is still null, this is initialized. When
   // `ioContext` is constructed, this will be fulfilled with `ioContext.onAbort()`.
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Promise<void>>>> abortFulfiller;
 
-  kj::Maybe<kj::Promise<void>> metricsFlushLoopTask;
   // Task which periodically flushes metrics. Initialized after `ioContext` is initialized.
+  kj::Maybe<kj::Promise<void>> metricsFlushLoopTask;
 
-  kj::Own<Loopback> loopback;
   // Allows sending requests back into this actor, recreating it as necessary. Safe to hold longer
   // than the Worker::Actor is alive.
+  kj::Own<Loopback> loopback;
 
   TimerChannel& timerChannel;
 
   kj::ForkedPromise<void> shutdownPromise;
   kj::Own<kj::PromiseFulfiller<void>> shutdownFulfiller;
 
-  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   // If this Actor has a HibernationManager, it means the Actor has recently accepted a Hibernatable
   // websocket. We eventually move the HibernationManager into the DeferredProxy task
   // (since it's long lived), but can still refer to the HibernationManager by passing a reference
   // in each CustomEvent.
+  kj::Maybe<kj::Own<HibernationManager>> hibernationManager;
   kj::Maybe<uint16_t> hibernationEventType;
   kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
@@ -2909,17 +2904,17 @@ struct Worker::Actor::Impl {
     kj::Date scheduledTime;
     kj::ForkedPromise<AlarmResult> resultPromise;
   };
-  kj::Maybe<ScheduledAlarm> maybeScheduledAlarm;
   // If valid, we have an alarm invocation that has not yet received an `AlarmFulfiller` and thus
   // is either waiting for a running alarm or its scheduled time.
+  kj::Maybe<ScheduledAlarm> maybeScheduledAlarm;
 
-  kj::Maybe<RunningAlarm> maybeRunningAlarm;
   // If valid, we have an alarm invocation that has received an `AlarmFulfiller` and is currently
   // considered running. This alarm is no longer cancellable.
+  kj::Maybe<RunningAlarm> maybeRunningAlarm;
 
-  kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
   // This is a forked promise so that we can schedule and then cancel multiple alarms while an alarm
   // is running.
+  kj::ForkedPromise<void> runningAlarmTask = kj::Promise<void>(kj::READY_NOW).fork();
 
   Impl(Worker::Actor& self, Worker::Lock& lock, Actor::Id actorId,
        bool hasTransient, MakeActorCacheFunc makeActorCache,
@@ -3396,17 +3391,15 @@ namespace {
 // for some things, and we do so because we may not have a IoContext available to get
 // Spectre-safe time.
 
+// Monotonic time in seconds with millisecond precision.
 double getMonotonicTimeForProcessSandboxOnly() {
-  // Monotonic time in seconds with millisecond precision.
-
   KJ_REQUIRE(!isMultiTenantProcess(), "precise timing not safe in multi-tenant processes");
   auto timePoint = kj::systemPreciseMonotonicClock().now();
   return (timePoint - kj::origin<kj::TimePoint>()) / kj::MILLISECONDS / 1e3;
 }
 
+// Wall time in seconds with millisecond precision.
 double getWallTimeForProcessSandboxOnly() {
-  // Wall time in seconds with millisecond precision.
-
   KJ_REQUIRE(!isMultiTenantProcess(), "precise timing not safe in multi-tenant processes");
   auto timePoint = kj::systemPreciseCalendarClock().now();
   return (timePoint - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1e3;

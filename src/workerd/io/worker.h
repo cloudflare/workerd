@@ -45,26 +45,25 @@ class IoContext;
 class InputGate;
 class OutputGate;
 
+// Type signature of a durable object implementation class.
 typedef jsg::Constructor<api::ExportedHandler(
       jsg::Ref<api::DurableObjectState> durableObject, jsg::Value env)>
     DurableObjectConstructor;
-// Type signature of a durable object implementation class.
 
-typedef kj::OneOf<DurableObjectConstructor, api::ExportedHandler> NamedExport;
 // The type of a top-level export -- either a simple handler or a durable object class.
+typedef kj::OneOf<DurableObjectConstructor, api::ExportedHandler> NamedExport;
 
+// An instance of a Worker.
+//
+// Typically each worker script is loaded into a single Worker instance which is reused by
+// multiple requests. The Worker can only be used by one thread at a time, so multiple requests
+// for the same worker can block each other. JavaScript code is asynchronous, though, so any such
+// blocking should be brief.
+//
+// Note: This class should be referred to as "Worker instance" in cases where the bare word
+//   "Worker" is ambiguous. I considered naming the class WorkerInstance, but it feels redundant
+//   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
 class Worker: public kj::AtomicRefcounted {
-  // An instance of a Worker.
-  //
-  // Typically each worker script is loaded into a single Worker instance which is reused by
-  // multiple requests. The Worker can only be used by one thread at a time, so multiple requests
-  // for the same worker can block each other. JavaScript code is asynchronous, though, so any such
-  // blocking should be brief.
-  //
-  // Note: This class should be referred to as "Worker instance" in cases where the bare word
-  //   "Worker" is ambiguous. I considered naming the class WorkerInstance, but it feels redundant
-  //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
-
 public:
   class Script;
   class Isolate;
@@ -100,8 +99,13 @@ public:
   class Lock;
 
   class AsyncLock;
+
+  // Places this thread into the queue of threads which are interested in locking this isolate,
+  // and returns when it is this thread's turn. The thread must still obtain a `Worker::Lock`, but
+  // by obtaining an `AsyncLock` first, the thread ensures that it is not fighting over the lock
+  // with many other threads, and all interested threads get their fair turn.
   kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
-  kj::Promise<AsyncLock> takeAsyncLock(RequestObserver& request) const;
+
   // Places this thread into the queue of threads which are interested in locking this isolate,
   // and returns when it is this thread's turn. The thread must still obtain a `Worker::Lock`, but
   // by obtaining an `AsyncLock` first, the thread ensures that it is not fighting over the lock
@@ -109,17 +113,18 @@ public:
   //
   // The version accepting a `request` metrics object accumulates lock timing data and reports the
   // data via `request`'s trace span.
+  kj::Promise<AsyncLock> takeAsyncLock(RequestObserver& request) const;
 
   class Actor;
 
+  // Like takeAsyncLock(), but also takes care of actor cache time-based eviction and backpressure.
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(kj::Date now, Actor& actor,
       RequestObserver& request) const;
-  // Like takeAsyncLock(), but also takes care of actor cache time-based eviction and backpressure.
 
+  // Create on stack in scopes where any attempt to take an isolate lock should log a warning.
+  // Isolate locks can block for a relatively long time, so we especially try to avoid taking
+  // them while any other locks are held.
   class WarnAboutIsolateLockScope {
-    // Create on stack in scopes where any attempt to take an isolate lock should log a warning.
-    // Isolate locks can block for a relatively long time, so we especially try to avoid taking
-    // them while any other locks are held.
   public:
     WarnAboutIsolateLockScope();
     inline ~WarnAboutIsolateLockScope() noexcept(false) {
@@ -140,9 +145,9 @@ public:
 private:
   kj::Own<const Script> script;
 
+  // RAII object to call `teardownFinished()` on an observer for you.
   template <typename Observer>
   class TeardownFinishedGuard {
-    // RAII object to call `teardownFinished()` on an observer for you.
   public:
     TeardownFinishedGuard(Observer& ref): ref(ref) {}
     ~TeardownFinishedGuard() noexcept(false) {
@@ -155,9 +160,10 @@ private:
   };
 
   kj::Own<WorkerObserver> metrics;
-  TeardownFinishedGuard<WorkerObserver&> teardownGuard { *metrics };
+
   // metrics needs to be first to be destroyed last to correctly capture destruction timing.
   // it needs script to report destruction time, so it comes right after that.
+  TeardownFinishedGuard<WorkerObserver&> teardownGuard { *metrics };
 
   struct Impl;
   kj::Own<Impl> impl;
@@ -169,10 +175,9 @@ private:
       jsg::Lock& js, LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info);
 };
 
+// A compiled script within an Isolate, but which hasn't been instantiated into a particular
+// context (Worker).
 class Worker::Script: public kj::AtomicRefcounted {
-  // A compiled script within an Isolate, but which hasn't been instantiated into a particular
-  // context (Worker).
-
 public:
   ~Script() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Script);
@@ -188,25 +193,25 @@ public:
   };
 
   struct ScriptSource {
-    kj::StringPtr mainScript;
     // Content of the script (JavaScript). Pointer is valid only until the Script constructor
     // returns.
+    kj::StringPtr mainScript;
 
-    kj::StringPtr mainScriptName;
     // Name of the script, used as the script origin for stack traces. Pointer is valid only until
     // the Script constructor returns.
+    kj::StringPtr mainScriptName;
 
+    // Callback which will compile the script-level globals, returning a list of them.
     kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer)>
         compileGlobals;
-    // Callback which will compile the script-level globals, returning a list of them.
   };
   struct ModulesSource {
-    kj::StringPtr mainModule;
     // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
+    kj::StringPtr mainModule;
 
-    kj::Function<void(jsg::Lock& lock, const ApiIsolate& apiIsolate)> compileModules;
     // Callback which will construct the module registry and load all the modules into it.
+    kj::Function<void(jsg::Lock& lock, const ApiIsolate& apiIsolate)> compileModules;
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
@@ -226,38 +231,37 @@ public:  // pretend this is private (needs to be public because allocated throug
                   kj::Maybe<ValidationErrorReporter&> errorReporter);
 };
 
+// Multiple zones may share the same script. We would like to compile each script only once,
+// yet still provide strong separation between zones. To that end, each Script gets a V8
+// Isolate, while each Zone sharing that script gets a JavaScript context (global object).
+//
+// Note that this means that multiple workers sharing the same script cannot execute
+// concurrently. Worker::Lock takes care of this.
+//
+// An Isolate maintains weak maps of Workers and Scripts loaded within it.
+//
+// An Isolate is persisted by strong references given to each `Worker::Script` returned from
+// `newScript()`. At various points, other strong references are made, but these are generally
+// ephemeral. So when the last script is destructed, the isolate can be expected to also be
+// destructed soon.
 class Worker::Isolate: public kj::AtomicRefcounted {
-  // Multiple zones may share the same script. We would like to compile each script only once,
-  // yet still provide strong separation between zones. To that end, each Script gets a V8
-  // Isolate, while each Zone sharing that script gets a JavaScript context (global object).
-  //
-  // Note that this means that multiple workers sharing the same script cannot execute
-  // concurrently. Worker::Lock takes care of this.
-  //
-  // An Isolate maintains weak maps of Workers and Scripts loaded within it.
-  //
-  // An Isolate is persisted by strong references given to each `Worker::Script` returned from
-  // `newScript()`. At various points, other strong references are made, but these are generally
-  // ephemeral. So when the last script is destructed, the isolate can be expected to also be
-  // destructed soon.
-
 public:
+  // Determines whether a devtools inspector client can be attached.
   enum class InspectorPolicy {
-    // Determines whether a devtools inspector client can be attached.
     DISALLOW,
     ALLOW_UNTRUSTED,
     ALLOW_FULLY_TRUSTED,
   };
 
+  // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
+  // Usually it matches the script ID. An exception is preview isolates: there, each preview
+  // session has one isolate which may load many iterations of the script (this allows the
+  // inspector session to stay open across them).
   explicit Isolate(kj::Own<ApiIsolate> apiIsolate,
                    kj::Own<IsolateObserver>&& metrics,
                    kj::StringPtr id,
                    kj::Own<IsolateLimitEnforcer> limitEnforcer,
                    InspectorPolicy inspectorPolicy);
-  // Creates an isolate with the given ID. The ID only matters for metrics-reporting purposes.
-  // Usually it matches the script ID. An exception is preview isolates: there, each preview
-  // session has one isolate which may load many iterations of the script (this allows the
-  // inspector session to stay open across them).
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -266,81 +270,85 @@ public:
 
   inline kj::StringPtr getId() const { return id; }
 
+  // Parses the given code to create a new script object and returns it.
   kj::Own<const Worker::Script> newScript(
       kj::StringPtr id, Script::Source source,
       IsolateObserver::StartType startType, bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = nullptr) const;
-  // Parses the given code to create a new script object and returns it.
 
   const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
   const ApiIsolate& getApiIsolate() const { return *apiIsolate; }
 
-  uint getCurrentLoad() const;
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
+  uint getCurrentLoad() const;
 
-  uint getLockSuccessCount() const;
   // Returns a count that is incremented upon every successful lock.
+  uint getLockSuccessCount() const;
 
+  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
   kj::Promise<void> attachInspector(
       kj::Timer& timer,
       kj::Duration timerOffset,
       kj::HttpService::Response& response,
       const kj::HttpHeaderTable& headerTable,
       kj::HttpHeaderId controlHeaderId) const;
-  // Accepts a connection to the V8 inspector and handles requests until the client disconnects.
 
   kj::Promise<void> attachInspector(
       kj::Timer& timer,
       kj::Duration timerOffset,
       kj::WebSocket& webSocket) const;
 
+  // Log a warning to the inspector if attached, and log an INFO severity message.
   void logWarning(kj::StringPtr description, Worker::Lock& lock);
+
+  // logWarningOnce() only logs the warning if it has not already been logged for this
+  // worker instance.
   void logWarningOnce(kj::StringPtr description, Worker::Lock& lock);
-  // Log a warning to the inspector if attached, and log an INFO severity message. logWarningOnce()
-  // only logs the warning if it has not already been logged for this worker instance.
 
-  void logErrorOnce(kj::StringPtr description);
   // Log an ERROR severity message, if it has not already been logged for this worker instance.
+  void logErrorOnce(kj::StringPtr description);
 
+  // Wrap an HttpClient to report subrequests to inspector.
   kj::Own<WorkerInterface> wrapSubrequestClient(
       kj::Own<WorkerInterface> client,
       kj::HttpHeaderId contentEncodingHeaderId,
       RequestObserver& requestMetrics) const;
-  // Wrap an HttpClient to report subrequests to inspector.
 
   kj::Maybe<kj::StringPtr> getFeatureFlagsForFl() const {
     return featureFlagsForFl;
   }
 
-  void completedRequest() const;
   // Called after each completed request. Does not require a lock.
+  void completedRequest() const;
 
-  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
-  kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
   // See Worker::takeAsyncLock().
+  kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
+
+  // See Worker::takeAsyncLock().
+  kj::Promise<AsyncLock> takeAsyncLock(RequestObserver&) const;
 
   bool isInspectorEnabled() const;
 
+  // Represents a weak reference back to the isolate that code within the isolate can use as an
+  // indirect pointer when they want to be able to race destruction safely. A caller wishing to
+  // use a weak reference to the isolate should acquire a strong reference to weakIsolateRef.
+  // That will ensure it's always safe to invoke `tryAddStrongRef` to try to obtain a strong
+  // reference of the underlying isolate. This is because the Isolate's destructor will explicitly
+  // clear the underlying pointer that would be dereferenced by `tryAddStrongRef`. This means that
+  // after the refcount reaches 0, `tryAddStrongRef` is always still safe to invoke even if the
+  // underlying Isolate memory has been deallocated (provided ownership of the weak isolate
+  // reference is retained).
   class WeakIsolateRef: public kj::AtomicRefcounted {
-    // Represents a weak reference back to the isolate that code within the isolate can use as an
-    // indirect pointer when they want to be able to race destruction safely. A caller wishing to
-    // use a weak reference to the isolate should acquire a strong reference to weakIsolateRef.
-    // That will ensure it's always safe to invoke `tryAddStrongRef` to try to obtain a strong
-    // reference of the underlying isolate. This is because the Isolate's destructor will explicitly
-    // clear the underlying pointer that would be dereferenced by `tryAddStrongRef`. This means that
-    // after the refcount reaches 0, `tryAddStrongRef` is always still safe to invoke even if the
-    // underlying Isolate memory has been deallocated (provided ownership of the weak isolate
-    // reference is retained).
     // TODO(someday): This can be templatized & even integrated into KJ. That's why the method
     // bodies are defined inline.
   public:
     WeakIsolateRef(Isolate* thisArg) : this_(thisArg) {}
 
+    // This tries to materialize a strong reference to the isolate. It will fail if the isolate's
+    // refcount has already dropped to 0. As discussed in the class, the lifetime of this weak
+    // reference can exceed the lifetime of the isolate it's tracking.
     kj::Maybe<kj::Own<const Worker::Isolate>> tryAddStrongRef() const {
-      // This tries to materialize a strong reference to the isolate. It will fail if the isolate's
-      // refcount has already dropped to 0. As discussed in the class, the lifetime of this weak
-      // reference can exceed the lifetime of the isolate it's tracking.
       auto lock = this_.lockShared();
       if (*lock == nullptr) {
         return nullptr;
@@ -349,12 +357,12 @@ public:
       return kj::atomicAddRefWeak(**lock);
     }
 
+    // This is invoked by the Isolate destructor to clear the pointer. That means that any racing
+    // code will never try to invoke `atomicAddRefWeak` on the instance any more. Any code racing
+    // in between the refcount dropping to 0 and the invalidation getting invoked will still fail
+    // to acquire a strong reference. Any code acquiring a strong reference prior to the refcount
+    // dropping to 0 will prevent invalidation until that extra reference is dropped.
     void invalidate() const {
-      // This is invoked by the Isolate destructor to clear the pointer. That means that any racing
-      // code will never try to invoke `atomicAddRefWeak` on the instance any more. Any code racing
-      // in between the refcount dropping to 0 and the invalidation getting invoked will still fail
-      // to acquire a strong reference. Any code acquiring a strong reference prior to the refcount
-      // dropping to 0 will prevent invalidation until that extra reference is dropped.
       *this_.lockExclusive() = nullptr;
     }
 
@@ -374,9 +382,9 @@ private:
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<ApiIsolate> apiIsolate;
 
-  kj::Maybe<kj::String> featureFlagsForFl;
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
+  kj::Maybe<kj::String> featureFlagsForFl;
 
   kj::Own<IsolateObserver> metrics;
   Worker::TeardownFinishedGuard<IsolateObserver&> teardownGuard { *metrics };
@@ -384,12 +392,12 @@ private:
   struct Impl;
   kj::Own<Impl> impl;
 
-  kj::Own<const WeakIsolateRef> weakIsolateRef;
   // This is a weak reference that can be used to safely (in a multi-threaded context) try to
   // acquire a strong reference to the isolate. To do that add a strong reference to the
   // weakIsolateRef while it's safe and then call tryAddStrongRef which will return a strong
   // reference if the object isn't being destroyed (it's safe to call this even if the destructor
   // has already run).
+  kj::Own<const WeakIsolateRef> weakIsolateRef;
 
   class InspectorChannelImpl;
   kj::Maybe<InspectorChannelImpl&> currentInspectorSession;
@@ -400,11 +408,11 @@ private:
 
     ~AsyncWaiterList() noexcept;
   };
-  kj::MutexGuarded<AsyncWaiterList> asyncWaiters;
+
   // Mutex-guarded linked list of threads waiting for an async lock on this worker. The lock
   // protects the `AsyncWaiterList` as well as the next/prev pointers in each `AsyncWaiter` that
   // is currently in the list.
-  //
+  kj::MutexGuarded<AsyncWaiterList> asyncWaiters;
   // TODO(perf): Use a lock-free list? Tricky to get right. `asyncWaiters` should only be locked
   //   briefly so there's probably not that much to gain.
 
@@ -412,9 +420,9 @@ private:
 
   void disconnectInspector();
 
-  void logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description);
   // Log a message as if with console.{log,warn,error,etc}. `type` must be one of the cdp::LogType
   // enum, which unfortunately we cannot forward-declare, ugh.
+  void logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr description);
 
   class SubrequestClient final: public WorkerInterface {
   public:
@@ -453,42 +461,39 @@ private:
   friend class Worker;
 };
 
+// The "API isolate" is a wrapper around JSG which determines which APIs are available. This is
+// an abstract interface which can be customized to make the runtime support a different set of
+// APIs. All JSG wrapping/unwrapping is encapsulated within this.
+//
+// In contrast, the rest of the classes in `worker.h` are concerned more with lifecycle
+// management.
 class Worker::ApiIsolate {
-  // The "API isolate" is a wrapper around JSG which determines which APIs are available. This is
-  // an abstract interface which can be customized to make the runtime support a different set of
-  // APIs. All JSG wrapping/unwrapping is encapsulated within this.
-  //
-  // In contrast, the rest of the classes in `worker.h` are concerned more with lifecycle
-  // management.
-  //
   // TODO(cleanup): Find a better name for this, we have too many things called "isolate".
 public:
-  static const ApiIsolate& current();
   // Get the current `ApiIsolate` or throw if we're not currently executing JavaScript.
-  //
+  static const ApiIsolate& current();
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
 
-  virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // Take a lock on the isolate.
-  //
+  virtual kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const = 0;
   // TODO(cleanup): Change all locking to a synchronous callback style rather than RAII style, so
   //   that this doesn't have to allocate and so it's not possible to hold a lock while returning
   //   to the event loop.
 
-  virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
   // Get the FeatureFlags this isolate is configured with. Returns a Reader that is owned by the
   // ApiIsolate.
+  virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
 
-  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
   // Create the context (global scope) object.
+  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
 
+  // Given a module's export namespace, return all the top-level exports.
   virtual jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const = 0;
-  // Given a module's export namespace, return all the top-level exports.
 
+  // Convenience struct for accessing typical Error properties.
   struct ErrorInterface {
-    // Convenience struct for accessing typical Error properties.
     jsg::Optional<kj::String> name;
     jsg::Optional<kj::String> message;
     JSG_STRUCT(name, message);
@@ -498,9 +503,9 @@ public:
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
 
+  // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
+  // WebCrypto algorithms supported.
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
-    // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
-    // WebCrypto algorithms supported.
     return nullptr;
   }
 };
@@ -518,29 +523,27 @@ enum class UncaughtExceptionSource {
 };
 kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value);
 
+// A Worker may bounce between threads as it handles multiple requests, but can only actually
+// execute on one thread at a time. Each thread must therefore lock the Worker while executing
+// code.
+//
+// A Worker::Lock MUST be allocated on the stack.
 class Worker::Lock {
-  // A Worker may bounce between threads as it handles multiple requests, but can only actually
-  // execute on one thread at a time. Each thread must therefore lock the Worker while executing
-  // code.
-  //
-  // A Worker::Lock MUST be allocated on the stack.
-
 public:
+  // Worker locks should normally be taken asynchronously. The TakeSynchronously type can be used
+  // when a synchronous lock is unavoidable. The purpose of this type is to make it easy to find
+  // all the places where we take synchronous locks.
   class TakeSynchronously {
-    // Worker locks should normally be taken asynchronously. The TakeSynchronously type can be used
-    // when a synchronous lock is unavoidable. The purpose of this type is to make it easy to find
-    // all the places where we take synchronous locks.
-
   public:
-    explicit TakeSynchronously(kj::Maybe<RequestObserver&> request);
     // We don't provide a default constructor so that call sites need to think about whether they
     // have a Request& available to pass in.
+    explicit TakeSynchronously(kj::Maybe<RequestObserver&> request);
 
     kj::Maybe<RequestObserver&> getRequest();
 
   private:
-    RequestObserver* request = nullptr;
     // Non-null if this lock is being taken on behalf of a request.
+    RequestObserver* request = nullptr;
     // HACK: The OneOf<TakeSynchronously, ...> in Worker::LockType doesn't like that
     //   Maybe<RequestObserver&> forces us to have a mutable copy constructor. I couldn't figure
     //   out how to work around it, so here we are with a raw pointer. :/
@@ -565,31 +568,33 @@ public:
 
   void logErrorOnce(kj::StringPtr description);
 
+  // Logs an exception to the debug console or trace, if active.
   void logUncaughtException(kj::StringPtr description);
+
+  // Logs an exception to the debug console or trace, if active.
   void logUncaughtException(UncaughtExceptionSource source, v8::Local<v8::Value> exception,
                             v8::Local<v8::Message> message = {});
-  // Logs an exception to the debug console or trace, if active.
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
-  void validateHandlers(ValidationErrorReporter& errorReporter);
   // Checks for problems with the registered event handlers (such as that there are none) and
   // reports them to the error reporter.
+  void validateHandlers(ValidationErrorReporter& errorReporter);
 
-  kj::Maybe<api::ExportedHandler&> getExportedHandler(
-      kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
   // Get the ExportedHandler exported under the given name. `entrypointName` may be null to get the
   // default handler. Returns null if this is not a modules-syntax worker (but `entrypointName`
   // must be null in that case).
   //
   // If running in an actor, the name is ignored and the entrypoint originally used to construct
   // the actor is returned.
+  kj::Maybe<api::ExportedHandler&> getExportedHandler(
+      kj::Maybe<kj::StringPtr> entrypointName, kj::Maybe<Worker::Actor&> actor);
 
-  api::ServiceWorkerGlobalScope& getGlobalScope();
   // Get the C++ object representing the global scope.
+  api::ServiceWorkerGlobalScope& getGlobalScope();
 
-  jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
   // Get the opaque storage key to use for recording trace information in async contexts.
+  jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
 
 private:
   struct Impl;
@@ -601,9 +606,9 @@ private:
   friend class Worker;
 };
 
+// Can be initialized either from an `AsyncLock` or a `TakeSynchronously`, to indicate whether an
+// async lock is held and help us grep for places in the code that do not support async locks.
 class Worker::LockType {
-  // Can be initialized either from an `AsyncLock` or a `TakeSynchronously`, to indicate whether an
-  // async lock is held and help us grep for places in the code that do not support async locks.
 public:
   LockType(Lock::TakeSynchronously origin): origin(origin) {}
   LockType(AsyncLock& origin): origin(&origin) {}
@@ -613,21 +618,18 @@ private:
   friend class Worker::Isolate;
 };
 
+// Represents the thread's ownership of an isolate's asynchronous lock. Call `takeAsyncLock()`
+// on a `Worker` or `Worker::Isolate` to obtain this. Pass it to the constructor of
+// `Worker::Lock` (as the `lockType`) in order to indicate that the calling thread has taken
+// the async lock first.
+//
+// You must never store an `AsyncLock` long-term. Use it in a continuation and then discard it.
+// To put it another way: An `AsyncLock` instance must never outlive an `evalLast()`.
 class Worker::AsyncLock {
-  // Represents the thread's ownership of an isolate's asynchronous lock. Call `takeAsyncLock()`
-  // on a `Worker` or `Worker::Isolate` to obtain this. Pass it to the constructor of
-  // `Worker::Lock` (as the `lockType`) in order to indicate that the calling thread has taken
-  // the async lock first.
-  //
-  // You must never store an `AsyncLock` long-term. Use it in a continuation and then discard it.
-  // To put it another way: An `AsyncLock` instance must never outlive an `evalLast()`.
 public:
-  // No public methods. The only thing you can do is pass this for the `LockType` parameter of
-  // `Worker::Lock`'s constructor.
-
-  static kj::Promise<void> whenThreadIdle();
   // Waits until the thread has no async locks, is not waiting on any locks, and has finished all
   // pending events (a la `kj::evalLast()`).
+  static kj::Promise<void> whenThreadIdle();
 
 private:
   kj::Own<AsyncWaiter> waiter;
@@ -641,43 +643,41 @@ private:
   friend class Worker::AsyncWaiter;
 };
 
+// Represents actor state within a Worker instance. This object tracks the JavaScript heap
+// objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
 class Worker::Actor final: public kj::Refcounted {
-  // Represents actor state within a Worker instance. This object tracks the JavaScript heap
-  // objects backing `event.actorState`. Multiple `Actor`s can be created within a single `Worker`.
-
 public:
-  using MakeActorCacheFunc = kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(
-      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks)>;
   // Callback which constructs the `ActorCacheInterface` instance (if any) for the Actor. This
   // can be used to customize the storage implementation. This will be called synchronously in
   // the constructor.
+  using MakeActorCacheFunc = kj::Function<kj::Maybe<kj::Own<ActorCacheInterface>>(
+      const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks)>;
 
-  using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
-      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)>;
   // Callback which constructs the `DurableObjectStorage` instance for an actor. This can be used
   // to customize the JavaScript API.
-  //
+  using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
+      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)>;
   // TODO(cleanup): Can we refactor the (internal-codebase) user of this so that it doesn't need
   //   to customize the JS API but only the underlying ActorCacheInterface?
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
 
+  // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
+  // onto this for longer than a Worker::Actor is alive.
   class Loopback {
-    // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
-    // onto this for longer than a Worker::Actor is alive.
   public:
-    virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
     // Send a request to this actor, potentially re-creating it if it is not currently active.
     // The returned kj::Own<WorkerInterface> may be held longer than Loopback, and is assumed
     // to keep the Worker::Actor alive as well.
+    virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) = 0;
 
     virtual kj::Own<Loopback> addRef() = 0;
   };
 
+  // The HibernationManager class manages HibernatableWebSockets created by an actor.
+  // The manager handles accepting new WebSockets, retrieving existing WebSockets by tag, and
+  // removing WebSockets from its collection when they disconnect.
   class HibernationManager : public kj::Refcounted {
-    // The HibernationManager class manages HibernatableWebSockets created by an actor.
-    // The manager handles accepting new WebSockets, retrieving existing WebSockets by tag, and
-    // removing WebSockets from its collection when they disconnect.
   public:
     virtual void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) = 0;
     virtual kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
@@ -690,44 +690,44 @@ public:
     virtual void setTimerChannel(TimerChannel& timerChannel) = 0;
   };
 
+  // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
+  // from the thread that created it.
   Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Id actorId,
         bool hasTransient, MakeActorCacheFunc makeActorCache,
         kj::Maybe<kj::StringPtr> className, MakeStorageFunc makeStorage, Worker::Lock& lock,
         kj::Own<Loopback> loopback, TimerChannel& timerChannel, kj::Own<ActorObserver> metrics,
         kj::Maybe<kj::Own<HibernationManager>> manager, kj::Maybe<uint16_t> hibernationEventType);
-  // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
-  // from the thread that created it.
 
   ~Actor() noexcept(false);
 
-  void ensureConstructed(IoContext&);
   // Call when starting any new request, to ensure that the actor object's constructor has run.
   //
   // This is used only for modules-syntax actors (which most are, since that's the only format we
   // support publicly).
+  void ensureConstructed(IoContext&);
 
-  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = nullptr);
   // Forces cancellation of all "background work" this actor is executing, i.e. work that is not
   // happening on behalf of an active request. Note that this is not a part of the dtor because
   // IoContext objects prolong the lifetime of their Actor.
   //
   // `reasonCode` is passed back to the WorkerObserver.
+  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = nullptr);
 
-  void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
   // Stops new work on behalf of the ActorCache. This does not cancel any ongoing flushes.
   // TODO(soon) This should probably be folded into shutdown(). We'd need a piece that converts
   // `error` to `reasonCode` in workerd to do this. There may also be opportunities to streamline
   // interactions between `onAbort` and `onShutdown` promises.
+  void shutdownActorCache(kj::Maybe<const kj::Exception&> error);
 
-  kj::Promise<void> onShutdown();
   // Get a promise that resolves when `shutdown()` has been called.
+  kj::Promise<void> onShutdown();
 
-  kj::Promise<void> onBroken();
   // Get a promise that rejects when this actor becomes broken in some way. See doc comments for
   // WorkerRuntime.makeActor() in worker.capnp for a discussion of actor brokenness.
   // Note that this doesn't cover every cause of actor brokenness -- some of them are fulfilled
   // in worker-set or process-sandbox code, in particular code updates and exceeded memory.
   // This method can only be called once.
+  kj::Promise<void> onBroken();
 
   const Id& getId();
   Id cloneId();
@@ -736,39 +736,38 @@ public:
   kj::Maybe<ActorCacheInterface&> getPersistent();
   kj::Own<Loopback> getLoopback();
 
-  kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
   // Make the storage object for use in Service Workers syntax. This should not be used for
   // modules-syntax workers. (Note that Service-Workers-syntax actors are not supported publicly.)
+  kj::Maybe<jsg::Ref<api::DurableObjectStorage>> makeStorageForSwSyntax(Worker::Lock& lock);
 
   ActorObserver& getMetrics();
 
   InputGate& getInputGate();
   OutputGate& getOutputGate();
 
-  kj::Maybe<IoContext&> getIoContext();
   // Get the IoContext which should be used for all activity in this Actor. Returns null if
   // setIoContext() hasn't been called yet.
+  kj::Maybe<IoContext&> getIoContext();
 
-  void setIoContext(kj::Own<IoContext> context);
   // Set the IoContext for this actor. This is called once, when starting the first request
   // to the actor.
-  //
+  void setIoContext(kj::Own<IoContext> context);
   // TODO(cleanup): Could we make it so the Worker::Actor can create the IoContext directly,
   //   rather than have WorkerEntrypoint create it on the first request? We'd have to plumb through
   //   some more information to the place where `Actor` is created, which might be uglier than it's
   //   worth.
 
-  kj::Maybe<HibernationManager&> getHibernationManager();
   // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
   // setHibernationManager() hasn't been called yet.
+  kj::Maybe<HibernationManager&> getHibernationManager();
 
-  void setHibernationManager(kj::Own<HibernationManager> manager);
   // Set the HibernationManager for this actor. This is called once, on the first call to
   // `acceptWebSocket`.
+  void setHibernationManager(kj::Own<HibernationManager> manager);
 
-  kj::Maybe<uint16_t> getHibernationEventType();
   // Gets the event type ID of the hibernation event, which is defined outside of workerd.
   // Only needs to be called when allocating a HibernationManager!
+  kj::Maybe<uint16_t> getHibernationEventType();
 
   const Worker& getWorker() { return *worker; }
 
@@ -776,9 +775,9 @@ public:
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
 
   using AlarmResult = WorkerInterface::AlarmResult;
-  kj::Maybe<kj::Promise<AlarmResult>> getAlarm(kj::Date scheduledTime);
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
+  kj::Maybe<kj::Promise<AlarmResult>> getAlarm(kj::Date scheduledTime);
 
   class AlarmFulfiller {
   public:
@@ -824,13 +823,13 @@ public:
     }
   };
   using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
-  kj::Promise<ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or
   // `cancel()`. Otherwise, the scheduled alarm was overriden by another call to `scheduleAlarm()`
   // and thus was cancelled. Note that callers likely want to invoke `getAlarm()` first to see if
   // there is an existing alarm at `scheduledTime` for which they want to wait (instead of
   // cancelling it).
+  kj::Promise<ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
 
   kj::Own<Worker::Actor> addRef() {
     KJ_IF_MAYBE(t, tracker) {
@@ -854,39 +853,38 @@ private:
 
 inline const Worker::Isolate& Worker::getIsolate() const { return *script->isolate; }
 
+// Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
+// `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
 class Worker::AsyncWaiter: public kj::Refcounted {
-  // Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
-  // `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
-
 public:
   AsyncWaiter(kj::Own<const Isolate> isolate);
   ~AsyncWaiter() noexcept;
   KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
 
 private:
-  const kj::Executor& executor;
   // Executor for this waiter's thread.
+  const kj::Executor& executor;
 
-  kj::Own<const Isolate> isolate;
   // The isolate for which this waiter is currently waiting.
+  kj::Own<const Isolate> isolate;
 
-  kj::ForkedPromise<void> readyPromise = nullptr;
-  kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
   // Promise/fulfiller to fire when the waiter reaches the front of the list for the corresponding
   // isolate.
+  kj::ForkedPromise<void> readyPromise = nullptr;
+  kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
 
-  kj::ForkedPromise<void> releasePromise = nullptr;
-  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
   // Promise/fulfiller to fire when the AsyncLock is finally released. This is used when a thread
   // tries to take locks on multiple different isolates concurrently, in order to serialize the
   // locks so only one is taken at a time. This is NOT a cross-thread fulfiller; it can only be
   // fulfilled by the thread that owns the waiter.
+  kj::ForkedPromise<void> releasePromise = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
 
-  kj::Maybe<AsyncWaiter&> next;
-  kj::Maybe<AsyncWaiter&>* prev;
   // Protected by the lock on `Isolate::asyncWaiters` for the isolate identified by
   // `currentIsolate`. Must be null if `currentIsolate` is null. (All other members of `Waiter`
   // can only be accessed by the thread that created the `Waiter`.)
+  kj::Maybe<AsyncWaiter&> next;
+  kj::Maybe<AsyncWaiter&>* prev;
 
   static thread_local AsyncWaiter* threadCurrentWaiter;
 
