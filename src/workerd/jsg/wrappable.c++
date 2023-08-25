@@ -38,34 +38,33 @@ void HeapTracer::clearWrappers() {
   clearFreelistedShims();
 }
 
+// V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
+// integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
+// trace through our C++ objects to find what is reachable through them. The only way for us to
+// supprot this is by integrating with cppgc.
+//
+// However, workerd was written using KJ idioms long before cppgc existed. Rewriting all our code
+// to use cppgc allocation instead would be a highly invasive change. Maybe we'll do it someday,
+// but today is not the day. So, our API objects continue to be allocated on the regular (non-GC)
+// C++ heap.
+//
+// CppgcShim provides a compromise. For each API object that has been wrapped for use from JS,
+// we create a CppgcShim object on the cppgc heap. This basically just contains a pointer to the
+// regular old C++ object. This lets us get our GC visitation without fully integrating with
+// cppgc.
+//
+// There is an additional trick here: As of this writing, cppgc objects cannot be collected
+// during V8's minor GC passes ("scavenge" passes). Only full GCs ("trace" passes) can collect
+// them. But we do want our API objects to be collectable during minor GC. We integrate with V8's
+// EmbedderRootsHandler to get notification when these objects can be collected. But when they
+// are, what happens to the CppgcShim object we allocated? We can't force it to be collected
+// early. We could just discard it and let it be collected during the next major GC, but that
+// would mean accumulating a lot of garbage shims. Instead, we freelist the objects: when a
+// wrapper is collected during minor GC, the CppgcShim is placed in a freelist and can be
+// reused for a future allocation, if that allocation occurs before the next major GC. When a
+// major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
+// condemned after that point and will be deleted shortly thereafter.
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
-  // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
-  // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
-  // trace through our C++ objects to find what is reachable through them. The only way for us to
-  // supprot this is by integrating with cppgc.
-  //
-  // However, workerd was written using KJ idioms long before cppgc existed. Rewriting all our code
-  // to use cppgc allocation instead would be a highly invasive change. Maybe we'll do it someday,
-  // but today is not the day. So, our API objects continue to be allocated on the regular (non-GC)
-  // C++ heap.
-  //
-  // CppgcShim provides a compromise. For each API object that has been wrapped for use from JS,
-  // we create a CppgcShim object on the cppgc heap. This basically just contains a pointer to the
-  // regular old C++ object. This lets us get our GC visitation without fully integrating with
-  // cppgc.
-  //
-  // There is an additional trick here: As of this writing, cppgc objects cannot be collected
-  // during V8's minor GC passes ("scavenge" passes). Only full GCs ("trace" passes) can collect
-  // them. But we do want our API objects to be collectable during minor GC. We integrate with V8's
-  // EmbedderRootsHandler to get notification when these objects can be collected. But when they
-  // are, what happens to the CppgcShim object we allocated? We can't force it to be collected
-  // early. We could just discard it and let it be collected during the next major GC, but that
-  // would mean accumulating a lot of garbage shims. Instead, we freelist the objects: when a
-  // wrapper is collected during minor GC, the CppgcShim is placed in a freelist and can be
-  // reused for a future allocation, if that allocation occurs before the next major GC. When a
-  // major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
-  // condemned after that point and will be deleted shortly thereafter.
-
 public:
   CppgcShim(Wrappable& wrappable): state(Active { kj::addRef(wrappable) }) {
     KJ_DASSERT(wrappable.cppgcShim == nullptr);
@@ -115,10 +114,10 @@ public:
   struct Active {
     kj::Own<Wrappable> wrappable;
   };
-  struct Freelisted {
-    // The JavaScript wrapper using this shim was collected in a minor GC. cppgc objects can only
-    // be collected in full GC, so we freelist the shim object in the meantime.
 
+  // The JavaScript wrapper using this shim was collected in a minor GC. cppgc objects can only
+  // be collected in full GC, so we freelist the shim object in the meantime.
+  struct Freelisted {
     kj::Maybe<Wrappable::CppgcShim&> next;
     kj::Maybe<Wrappable::CppgcShim&>* prev;
     // kj::List doesn't quite work here because the list link is inside a OneOf. Also we want a

@@ -30,10 +30,10 @@ namespace std {
 
 namespace workerd::jsg {
 
+// Return true if the type requires GC visitation, which we assume is the case if the type or any
+// superclass (other than Object) declares a `visitForGc()` method.
 template <typename T>
 constexpr bool resourceNeedsGcTracing() {
-  // Return true if the type requires GC visitation, which we assume is the case if the type or any
-  // superclass (other than Object) declares a `visitForGc()` method.
   return &T::visitForGc != &Object::visitForGc;
 }
 template <>
@@ -41,10 +41,10 @@ constexpr bool resourceNeedsGcTracing<Object>() {
   return false;
 }
 
+// Call obj->visitForGc() if and only if T defines its own `visitForGc()` method -- do not call
+// the parent class's `visitForGc()`.
 template <typename T>
 inline void visitSubclassForGc(T* obj, GcVisitor& visitor) {
-  // Call obj->visitForGc() if and only if T defines its own `visitForGc()` method -- do not call
-  // the parent class's `visitForGc()`.
   if constexpr (&T::visitForGc != &T::jsgSuper::visitForGc) {
     obj->visitForGc(visitor);
   }
@@ -54,27 +54,34 @@ void throwIfConstructorCalledAsFunction(
     const v8::FunctionCallbackInfo<v8::Value>& args,
     const std::type_info& type);
 
-void scheduleUnimplementedConstructorError(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    const std::type_info& type);
-void scheduleUnimplementedMethodError(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    const std::type_info& type, const char* methodName);
-void scheduleUnimplementedPropertyError(
-    const v8::PropertyCallbackInfo<v8::Value>& args,
-    const std::type_info& type, const char* propertyName);
 // The scheduleUnimplemented* variants will schedule an exception on the isolate
 // but do not throw a JsExceptionThrown.
 
 // Called to throw errors about calling unimplemented functionality. It's assumed these are called
 // directly from the V8 trampoline without liftKj, so they don't throw JsExceptionThrown.
+void scheduleUnimplementedConstructorError(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    const std::type_info& type);
 
+// Called to throw errors about calling unimplemented functionality. It's assumed these are called
+// directly from the V8 trampoline without liftKj, so they don't throw JsExceptionThrown.
+void scheduleUnimplementedMethodError(
+    const v8::FunctionCallbackInfo<v8::Value>& args,
+    const std::type_info& type, const char* methodName);
+
+// Called to throw errors about calling unimplemented functionality. It's assumed these are called
+// directly from the V8 trampoline without liftKj, so they don't throw JsExceptionThrown.
+void scheduleUnimplementedPropertyError(
+    const v8::PropertyCallbackInfo<v8::Value>& args,
+    const std::type_info& type, const char* propertyName);
+
+
+// Implements the V8 callback function for calling the static `constructor()` method of the C++
+// class.
 template <typename TypeWrapper, typename T,
           typename = decltype(T::constructor),
           typename = ArgumentIndexes<decltype(T::constructor)>>
 struct ConstructorCallback;
-// Implements the V8 callback function for calling the static `constructor()` method of the C++
-// class.
 
 template <typename TypeWrapper, typename T, typename... Args, size_t... indexes>
 struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<indexes...>> {
@@ -101,11 +108,10 @@ struct ConstructorCallback<TypeWrapper, T, Ref<T>(Args...), kj::_::Indexes<index
   }
 };
 
+// Specialization for constructors that take `Lock&` as their first parameter.
 template <typename TypeWrapper, typename T, typename... Args, size_t... indexes>
 struct ConstructorCallback<TypeWrapper, T,
     Ref<T>(Lock&, Args...), kj::_::Indexes<indexes...>> {
-  // Specialization for constructors that take `Lock&` as their first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -129,12 +135,11 @@ struct ConstructorCallback<TypeWrapper, T,
   }
 };
 
+// Specialization for constructors that take `const v8::FunctionCallbackInfo<v8::Value>&` as
+// their first parameter.
 template <typename TypeWrapper, typename T, typename... Args, size_t... indexes>
 struct ConstructorCallback<TypeWrapper, T,
     Ref<T>(const v8::FunctionCallbackInfo<v8::Value>&, Args...), kj::_::Indexes<indexes...>> {
-  // Specialization for constructors that take `const v8::FunctionCallbackInfo<v8::Value>&` as
-  // their first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -165,10 +170,10 @@ struct ConstructorCallback<TypeWrapper, T, Unimplemented(Args...), kj::_::Indexe
   }
 };
 
+// Implements the V8 callback function for calling a method of the C++ class.
 template <typename TypeWrapper, const char* methodName, bool isContext,
           typename T, typename Method, Method method, typename Indexes>
 struct MethodCallback;
-// Implements the V8 callback function for calling a method of the C++ class.
 
 template <typename TypeWrapper, const char* methodName, bool isContext,
           typename T, typename U, typename Ret, typename... Args,
@@ -194,14 +199,13 @@ struct MethodCallback<TypeWrapper, methodName, isContext,
   }
 };
 
+// Specialization for methods that take `Lock&` as their first parameter.
 template <typename TypeWrapper, const char* methodName, bool isContext,
           typename T, typename U, typename Ret, typename... Args,
           Ret (U::*method)(Lock&, Args...), size_t... indexes>
 struct MethodCallback<TypeWrapper, methodName, isContext,
                       T, Ret (U::*)(Lock&, Args...),
                       method, kj::_::Indexes<indexes...>> {
-  // Specialization for methods that take `Lock&` as their first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -222,15 +226,14 @@ struct MethodCallback<TypeWrapper, methodName, isContext,
   }
 };
 
+// Specialization for methods that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
+// first parameter.
 template <typename TypeWrapper, const char* methodName, bool isContext,
           typename T, typename U, typename Ret, typename... Args,
           Ret (U::*method)(const v8::FunctionCallbackInfo<v8::Value>&, Args...), size_t... indexes>
 struct MethodCallback<TypeWrapper, methodName, isContext,
                       T, Ret (U::*)(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
                       method, kj::_::Indexes<indexes...>> {
-  // Specialization for methods that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
-  // first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -260,9 +263,6 @@ struct MethodCallback<TypeWrapper, methodName, isContext,
   }
 };
 
-template <typename TypeWrapper, const char* methodName,
-          typename T, typename Method, Method* method, typename Indexes>
-struct StaticMethodCallback;
 // Implements the V8 callback function for calling a static method of the C++ class.
 //
 // This is separate from MethodCallback<> because we need to know the interface type, T, and it
@@ -271,6 +271,10 @@ struct StaticMethodCallback;
 // In the explicit specializations of this template, we use TypeErrorContext::methodArgument() for
 // generating error messages, rather than concoct a new error message format specifically for static
 // methods. This matches Chrome's behavior.
+
+template <typename TypeWrapper, const char* methodName,
+          typename T, typename Method, Method* method, typename Indexes>
+struct StaticMethodCallback;
 
 template <typename TypeWrapper, const char* methodName,
           typename T, typename Ret, typename... Args,
@@ -294,14 +298,13 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
   }
 };
 
+// Specialization for methods that take `Lock&` as their first parameter.
 template <typename TypeWrapper, const char* methodName,
           typename T, typename Ret, typename... Args,
           Ret (*method)(Lock&, Args...), size_t... indexes>
 struct StaticMethodCallback<TypeWrapper, methodName, T,
                             Ret(Lock&, Args...),
                             method, kj::_::Indexes<indexes...>> {
-  // Specialization for methods that take `Lock&` as their first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -320,15 +323,14 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
   }
 };
 
+// Specialization for methods that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
+// first parameter.
 template <typename TypeWrapper, const char* methodName,
           typename T, typename Ret, typename... Args,
           Ret (*method)(const v8::FunctionCallbackInfo<v8::Value>&, Args...), size_t... indexes>
 struct StaticMethodCallback<TypeWrapper, methodName, T,
                             Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
                             method, kj::_::Indexes<indexes...>> {
-  // Specialization for methods that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
-  // first parameter.
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -356,10 +358,10 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
   }
 };
 
+// Implements the V8 callback function for calling a property getter method of a C++ class.
 template <typename TypeWrapper, const char* methodName,
           typename Method, Method method, bool isContext>
 struct GetterCallback;
-// Implements the V8 callback function for calling a property getter method of a C++ class.
 
 #define JSG_DEFINE_GETTER_CALLBACK_STRUCTS(...) \
     template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
@@ -384,6 +386,7 @@ struct GetterCallback;
       } \
     }; \
     \
+    /* Specialization for methods that take `Lock&` as their first parameter. */ \
     template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
               typename... Args, \
               Ret (T::*method)(Lock&, Args...) __VA_ARGS__, \
@@ -391,7 +394,6 @@ struct GetterCallback;
     struct GetterCallback<TypeWrapper, methodName, \
                           Ret (T::*)(Lock&, Args...) __VA_ARGS__, \
                           method, isContext> { \
-      /* Specialization for methods that take `Lock&` as their first parameter. */ \
       static constexpr bool enumerable = true; \
       static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) { \
         liftKj(info, [&]() { \
@@ -410,6 +412,8 @@ struct GetterCallback;
       } \
     }; \
     \
+    /* Specialization for methods that take `const v8::PropertyCallbackInfo<v8::Value>&` as \
+      * their first parameter. */ \
     template <typename TypeWrapper, const char* methodName, typename T, typename Ret, \
               typename... Args, \
               Ret (T::*method)(const v8::PropertyCallbackInfo<v8::Value>&, Args...) __VA_ARGS__, \
@@ -417,8 +421,6 @@ struct GetterCallback;
     struct GetterCallback<TypeWrapper, methodName, \
                           Ret (T::*)(const v8::PropertyCallbackInfo<v8::Value>&, Args...) __VA_ARGS__, \
                           method, isContext> { \
-      /* Specialization for methods that take `const v8::PropertyCallbackInfo<v8::Value>&` as \
-       * their first parameter. */ \
       static constexpr bool enumerable = true; \
       static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) { \
         liftKj(info, [&]() { \
@@ -452,10 +454,10 @@ JSG_DEFINE_GETTER_CALLBACK_STRUCTS(const)
 
 #undef JSG_DEFINE_GETTER_CALLBACK_STRUCTS
 
+// Implements the V8 callback function for calling a property setter method of a C++ class.
 template <typename TypeWrapper, const char* methodName,
           typename Method, Method method, bool isContext>
 struct SetterCallback;
-// Implements the V8 callback function for calling a property setter method of a C++ class.
 
 template <typename TypeWrapper, const char* methodName, typename T, typename Arg,
           void (T::*method)(Arg), bool isContext>
@@ -478,12 +480,11 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
   }
 };
 
+// Specialization for methods that take `Lock&` as their first parameter.
 template <typename TypeWrapper, const char* methodName, typename T, typename Arg,
           void (T::*method)(Lock&, Arg), bool isContext>
 struct SetterCallback<TypeWrapper, methodName,
                       void (T::*)(Lock&, Arg), method, isContext> {
-  // Specialization for methods that take `Lock&` as their first parameter.
-
   static void callback(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                        const v8::PropertyCallbackInfo<void>& info) {
     liftKj(info, [&]() {
@@ -502,13 +503,12 @@ struct SetterCallback<TypeWrapper, methodName,
   }
 };
 
+// Specialization for methods that take `const v8::PropertyCallbackInfo<void>&` as their
+// first parameter.
 template <typename TypeWrapper, const char* methodName, typename T, typename Arg,
           void (T::*method)(const v8::PropertyCallbackInfo<void>&, Arg), bool isContext>
 struct SetterCallback<TypeWrapper, methodName,
                       void (T::*)(const v8::PropertyCallbackInfo<void>&, Arg), method, isContext> {
-  // Specialization for methods that take `const v8::PropertyCallbackInfo<void>&` as their
-  // first parameter.
-
   static void callback(v8::Local<v8::Name>, v8::Local<v8::Value> value,
                        const v8::PropertyCallbackInfo<void>& info) {
     liftKj(info, [&]() {
@@ -527,6 +527,8 @@ struct SetterCallback<TypeWrapper, methodName,
   }
 };
 
+
+// SFINAE to detect if a type has a static method called `constructor`.
 template <typename T, typename Constructor = decltype(&T::constructor)>
 constexpr bool hasConstructorMethod(T*) {
   static_assert(!std::is_member_function_pointer<Constructor>::value,
@@ -536,10 +538,9 @@ constexpr bool hasConstructorMethod(T*) {
   //   dive in and do it.)
   return true;
 }
-constexpr bool hasConstructorMethod(...) { return false; }
 // SFINAE to detect if a type has a static method called `constructor`.
+constexpr bool hasConstructorMethod(...) { return false; }
 
-void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context);
 // Expose the global scope type as a nested type under the global scope itself, such that for some
 // global scope type `GlobalScope`, `this.GlobalScope === this.constructor` holds true. Note that
 // this does not actually allow the user to construct a global scope object (unless it has a static
@@ -553,19 +554,19 @@ void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context)
 //         JSG_NESTED_TYPE(GlobalScope);  // BAD!
 //       }
 //     };
+void exposeGlobalScopeType(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
+// A configuration type that can be derived from any input type, because it contains nothing.
 class NullConfiguration {
-  // A configuration type that can be derived from any input type, because it contains nothing.
 public:
   template <typename T>
   NullConfiguration(T&&) {}
 };
 
+// TypeWrapper must list this type as its first superclass. The ResourceWrappers that it
+// subclasses will then be able to regsiter themselves in the map.
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
-  // TypeWrapper must list this type as its first superclass. The ResourceWrappers that it
-  // subclasses will then be able to regsiter themselves in the map.
-
 private:
   typedef void ReflectionInitializer(jsg::Object& object, TypeWrapper& wrapper);
   struct DynamicTypeInfo {
@@ -585,9 +586,10 @@ private:
   }
 
   typedef DynamicTypeInfo GetTypeInfoFunc(TypeWrapper&, v8::Isolate*);
-  kj::HashMap<std::type_index, GetTypeInfoFunc*> resourceTypeMap;
+
   // Maps type_info values to functions that can be used to get the associated template. Used by
   // ResourceWrapper.
+  kj::HashMap<std::type_index, GetTypeInfoFunc*> resourceTypeMap;
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -595,11 +597,9 @@ private:
   friend class ObjectWrapper;
 };
 
-
+// Used by the JSG_METHOD macro to register a method on a resource type.
 template<typename TypeWrapper, typename Self, bool isContext>
 struct ResourceTypeBuilder {
-  // Used by the JSG_METHOD macro to register a method on a resource type.
-
   ResourceTypeBuilder(
       TypeWrapper& typeWrapper,
       v8::Isolate* isolate,
@@ -798,10 +798,9 @@ private:
   v8::Local<v8::Signature> signature;
 };
 
+// initializes javascript parts of a context
 template<typename TypeWrapper, typename Self>
 struct JsSetup {
-  // initializes javascript parts of a context
-
   KJ_DISALLOW_COPY_AND_MOVE(JsSetup);
 
   JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
@@ -904,16 +903,14 @@ private:
   v8::Local<v8::Context> context;
 };
 
-
+// TypeWrapper mixin for resource types (application-defined C++ classes declared with a
+// JSG_RESOURCE_TYPE block).
 template <typename TypeWrapper, typename T>
 class ResourceWrapper {
-  // TypeWrapper mixin for resource types (application-defined C++ classes declared with a
-  // JSG_RESOURCE_TYPE block).
-
 public:
-  using Configuration = DetectedOr<NullConfiguration, GetConfiguration, T>;
   // If the JSG_RESOURCE_TYPE macro declared a configuration parameter, then `Configuration` will
   // be that type, otherwise NullConfiguration which accepts any configuration.
+  using Configuration = DetectedOr<NullConfiguration, GetConfiguration, T>;
 
   template <typename MetaConfiguration>
   ResourceWrapper(MetaConfiguration&& configuration)
@@ -1132,20 +1129,18 @@ private:
   friend struct ConstructorCallback;
 };
 
+// Like ResourceWrapper for T = jsg::Object. We need some special-casing for this type.
 template <typename TypeWrapper>
 class ObjectWrapper {
-  // Like ResourceWrapper for T = jsg::Object. We need some special-casing for this type.
-
 public:
   static constexpr const std::type_info& getName(Object*) { return typeid(Object); }
 
   static constexpr const std::type_info& getName(Ref<Object>*) { return typeid(Object); }
 
+  // Wrap a value of type T.
   v8::Local<v8::Object> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
       Ref<Object>&& value) {
-    // Wrap a value of type T.
-
     auto isolate = context->GetIsolate();
 
     KJ_IF_MAYBE(h, value->tryGetHandle(isolate)) {

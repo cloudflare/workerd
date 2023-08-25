@@ -17,47 +17,48 @@ namespace workerd::jsg {
 template <typename TypeWrapper>
 class GeneratorWrapper;
 
+// GeneratorNext is used internally by jsg::Generator and jsg::AsyncGenerator.
 template <typename T>
 struct GeneratorNext {
-  // GeneratorNext is used internally by jsg::Generator and jsg::AsyncGenerator.
   bool done;
-  kj::Maybe<T> value;
+
   // Value should only be nullptr if done is true. It does not
   // *have* to be nullptr if done is true, however.
+  kj::Maybe<T> value;
 };
 
 template <typename T>
 class GeneratorContext final {
   // See the documentation in jsg.h
 public:
+  // Signal early return on the generator. The value given will be returned by the
+  // generator's forEach once the generator completes returning.
   void return_(Lock& js, kj::Maybe<T> maybeValue = nullptr) {
-    // Signal early return on the generator. The value given will be returned by the
-    // generator's forEach once the generator completes returning.
     returning = true;
     if (state.template is<Init>()) {
       state = kj::mv(maybeValue);
     }
   }
 
-  inline bool isReturning() const { return returning; }
   // Indicates that return_() has been called and that an early return on the generator
   // is pending. The generator can still yield additional values.
+  inline bool isReturning() const { return returning; }
 
-  inline bool isErroring() const { return state.template is<Erroring>(); }
   // Indicates that the generator's throw() handler has been called and that the generator
   // is likely expecting a throw. The generator can still yield additional values and could
   // even exit normally without throwing.
+  inline bool isErroring() const { return state.template is<Erroring>(); }
 
 private:
   struct Init {};
   struct Erroring {};
   using Returning = kj::Maybe<T>;
 
-  kj::OneOf<Init, Erroring, Returning> state = Init();
-  bool returning = false;
   // Active = The generator is active and producing values.
   // Errored = The generator has errored and may produce one final value.
   // Returning = return_() has been called, inserting a pending return value.
+  kj::OneOf<Init, Erroring, Returning> state = Init();
+  bool returning = false;
 
   kj::Maybe<kj::Maybe<T>> tryClearPendingReturn(Lock& js) {
     KJ_IF_MAYBE(pending, state.template tryGet<Returning>()) {
@@ -75,9 +76,9 @@ private:
   friend class AsyncGenerator<T>;
 };
 
+// Provides underlying state for Generator and AsyncGenerator instances.
 template <typename Generator>
 class GeneratorImpl {
-  // Provides underlying state for Generator and AsyncGenerator instances.
 public:
   using T = typename Generator::Type;
   using NextSignature = typename Generator::NextSignature;
@@ -707,58 +708,57 @@ private:
   std::deque<Promise<void>> pendingStack;
 };
 
+// Provides the base implementation of JSG_ASYNC_ITERATOR types. See the documentation
+// for JSG_ASYNC_ITERATOR for details.
+//
+// Objects that use AsyncIteratorBase will be usable with the for await syntax in
+// JavaScript, e.g.:
+//
+//   const obj = new MyNewAsyncIterableObject();
+//   for await (const chunk of obj) {
+//     console.log(chunk);
+//   }
+//
+// The for await syntax is just sugar for using an async generator object.
+// All async iterable objects will have a method that will return an instance
+// of the AsyncIteratorBase. This is typically a method named values() or
+// entries().
+//
+// const obj = new MyNewAsyncIterableObject();
+// const gen = obj.values();
+//
+// The async generator object has two methods: next() and return()
+// next() is called to fetch the next item from the iterator, and should
+// be called until there is no more data to return. The return() method
+// is called to signal early termination of the iterator. Both methods
+// return a JavaScript promise that resolves to an IteratorResult object
+// (an ordinary JavaScript object with a done and value property).
+//
+// const result = await gen.next();
+// console.log(result.done);   // true or false
+// console.log(result.value);  // the value yielded in this iteration.
+//
+// const result = await gen.return("foo");
+// console.log(result.done);   // true
+// console.log(result.value);  // "foo" ... whatever value was passed in.
+//
+// It is important for the generator to queue and properly sequence concurrent
+// next() and return() calls. Specifically, the following pattern should read
+// five elements off the iterator before terminating it early:
+//
+// await Promise.all([
+//   gen.next(),         // must resolve to the first item
+//   gen.next(),         // must resolve to the second item
+//   gen.next(),         // must resolve to the third item
+//   gen.next(),         // must resolve to the fourth item
+//   gen.next(),         // must resolve to the fifth item
+//   gen.return("boom"), // must not be processed until after the fifth next()
+// ]);
+//
+// Once return() is called, all subsequent next() and return() calls must just
+// return an immediately resolved promise indicating that the iterator is done.
 template <typename SelfType, typename Type, typename State>
 class AsyncIteratorBase: public Object {
-  // Provides the base implementation of JSG_ASYNC_ITERATOR types. See the documentation
-  // for JSG_ASYNC_ITERATOR for details.
-  //
-  // Objects that use AsyncIteratorBase will be usable with the for await syntax in
-  // JavaScript, e.g.:
-  //
-  //   const obj = new MyNewAsyncIterableObject();
-  //   for await (const chunk of obj) {
-  //     console.log(chunk);
-  //   }
-  //
-  // The for await syntax is just sugar for using an async generator object.
-  // All async iterable objects will have a method that will return an instance
-  // of the AsyncIteratorBase. This is typically a method named values() or
-  // entries().
-  //
-  // const obj = new MyNewAsyncIterableObject();
-  // const gen = obj.values();
-  //
-  // The async generator object has two methods: next() and return()
-  // next() is called to fetch the next item from the iterator, and should
-  // be called until there is no more data to return. The return() method
-  // is called to signal early termination of the iterator. Both methods
-  // return a JavaScript promise that resolves to an IteratorResult object
-  // (an ordinary JavaScript object with a done and value property).
-  //
-  // const result = await gen.next();
-  // console.log(result.done);   // true or false
-  // console.log(result.value);  // the value yielded in this iteration.
-  //
-  // const result = await gen.return("foo");
-  // console.log(result.done);   // true
-  // console.log(result.value);  // "foo" ... whatever value was passed in.
-  //
-  // It is important for the generator to queue and properly sequence concurrent
-  // next() and return() calls. Specifically, the following pattern should read
-  // five elements off the iterator before terminating it early:
-  //
-  // await Promise.all([
-  //   gen.next(),         // must resolve to the first item
-  //   gen.next(),         // must resolve to the second item
-  //   gen.next(),         // must resolve to the third item
-  //   gen.next(),         // must resolve to the fourth item
-  //   gen.next(),         // must resolve to the fifth item
-  //   gen.return("boom"), // must not be processed until after the fifth next()
-  // ]);
-  //
-  // Once return() is called, all subsequent next() and return() calls must just
-  // return an immediately resolved promise indicating that the iterator is done.
-
 public:
   using NextSignature = Promise<kj::Maybe<Type>>(Lock&, State&);
   using ReturnSignature = Promise<void>(Lock&, State&, Optional<Value>);
@@ -911,18 +911,6 @@ private:
   friend SelfType;
 };
 
-#define JSG_ITERATOR(Name, Label, Type, State, NextFunc)                                        \
-  class Name final: public jsg::IteratorBase<Name, Type, State> {                               \
-  public:                                                                                       \
-    using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                   \
-    inline Next next(jsg::Lock& js) { return nextImpl(js, NextFunc); }                          \
-    JSG_RESOURCE_TYPE(Name) {                                                                   \
-      JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype);                                            \
-      JSG_METHOD(next);                                                                         \
-      JSG_ITERABLE(self);                                                                       \
-    }                                                                                           \
-  };                                                                                            \
-  jsg::Ref<Name> Label(jsg::Lock&);
 // The JSG_ITERATOR macro provides a mechanism for easily implementing JavaScript-style iterators
 // for JSG_RESOURCE_TYPES.
 //
@@ -966,6 +954,18 @@ private:
 // A member function named entries(Lock&) will be added to MyApiType that returns a
 // jsg::Ref<MyApiTypeIterator>() instance. It will be necessary for uses to provide the
 // implementation of the entries(Lock&) member function.
+#define JSG_ITERATOR(Name, Label, Type, State, NextFunc)                                        \
+  class Name final: public jsg::IteratorBase<Name, Type, State> {                               \
+  public:                                                                                       \
+    using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                   \
+    inline Next next(jsg::Lock& js) { return nextImpl(js, NextFunc); }                          \
+    JSG_RESOURCE_TYPE(Name) {                                                                   \
+      JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype);                                            \
+      JSG_METHOD(next);                                                                         \
+      JSG_ITERABLE(self);                                                                       \
+    }                                                                                           \
+  };                                                                                            \
+  jsg::Ref<Name> Label(jsg::Lock&);
 
 #define JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                       \
   class Name final: public jsg::AsyncIteratorBase<Name, Type, State> {                         \
@@ -983,14 +983,6 @@ private:
     }                                                                                           \
   };
 
-#define JSG_ASYNC_ITERATOR(Name, Label, Type, State, NextFunc, ReturnFunc)                     \
-  JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                             \
-  jsg::Ref<Name> Label(jsg::Lock&);
-
-#define JSG_ASYNC_ITERATOR_WITH_OPTIONS(Name, Label, Type, State, NextFunc,                    \
-                                         ReturnFunc, Options)                                   \
-  JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                             \
-  jsg::Ref<Name> Label(jsg::Lock&, jsg::Optional<Options>);
 // The JSG_ASYNC_ITERATOR and JSG_ASYNC_ITERATOR_WITH_OPTIONS macros provide a mechanism for
 // easily implementing JavaScript-style asynchronous iterators for JSG_RESOURCE_TYPES.
 //
@@ -1048,5 +1040,13 @@ private:
 // A member function named entries(Lock&) will be added to MyApiType that returns a
 // jsg::Ref<MyApiTypeIterator>() instance. It will be necessary for uses to provide the
 // implementation of the entries(Lock&) member function.
+#define JSG_ASYNC_ITERATOR(Name, Label, Type, State, NextFunc, ReturnFunc)                     \
+  JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                             \
+  jsg::Ref<Name> Label(jsg::Lock&);
+
+#define JSG_ASYNC_ITERATOR_WITH_OPTIONS(Name, Label, Type, State, NextFunc,                    \
+                                         ReturnFunc, Options)                                   \
+  JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                             \
+  jsg::Ref<Name> Label(jsg::Lock&, jsg::Optional<Options>);
 
 }  // namespace workerd::jsg

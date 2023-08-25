@@ -10,9 +10,9 @@
 namespace workerd::jsg {
 
 namespace {
+// In this variation, the result length will be <= buffer.size, with the exact
+// size dependent on the number of paired or unpaired surrogates in the buffer.
 kj::Array<uint32_t> transcodeToUtf32(kj::ArrayPtr<uint16_t> buffer) {
-  // In this variation, the result length will be <= buffer.size, with the exact
-  // size dependent on the number of paired or unpaired surrogates in the buffer.
   if (buffer.size() == 0) {
     return kj::Array<uint32_t>();
   }
@@ -28,9 +28,9 @@ kj::Array<uint32_t> transcodeToUtf32(kj::ArrayPtr<uint16_t> buffer) {
   return result.releaseAsArray();
 }
 
+// In this variation, we assume buffer is UTF8 encoded data. The result size
+// will be <= buffer.
 kj::Array<uint32_t> transcodeToUtf32(kj::ArrayPtr<const char> buffer) {
-  // In this variation, we assume buffer is UTF8 encoded data. The result size
-  // will be <= buffer.
   if (buffer.size() == 0) {
     return kj::Array<uint32_t>();
   }

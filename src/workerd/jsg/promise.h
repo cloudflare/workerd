@@ -45,23 +45,22 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
   }
 };
 
+// Create a JavaScript value that wraps `t` in an opaque way. JS code will see this as an empty
+// object, as if created by `{}`, but C++ code can unwrap the handle with `unwrapOpaque()`.
+//
+// If `T` is a type that can be passed to GcVisitor::visit(), then it will be visited whenever
+// the opaque handle is found to be reachable.
+//
+// Generally, the opaque handle should not actually be passed to the application at all. This
+// is useful in cases where the producer and consumer are both C++ code, but V8 requires that
+// a handle be used for some reason. For example, this is used to pass C++ values through V8
+// Promises.
+//
+// Opaque-wrapping of `V8Ref<T>` is explicitly disallowed to avoid waste. Just use the handle
+// directly in this case. If you really want to wrap a V8Ref opaquely, wrap it in a struct of
+// your own first. (Don't forget to implement `visitForGc()`.)
 template <typename T>
 v8::Local<v8::Value> wrapOpaque(v8::Local<v8::Context> context, T&& t) {
-  // Create a JavaScript value that wraps `t` in an opaque way. JS code will see this as an empty
-  // object, as if created by `{}`, but C++ code can unwrap the handle with `unwrapOpaque()`.
-  //
-  // If `T` is a type that can be passed to GcVisitor::visit(), then it will be visited whenever
-  // the opaque handle is found to be reachable.
-  //
-  // Generally, the opaque handle should not actually be passed to the application at all. This
-  // is useful in cases where the producer and consumer are both C++ code, but V8 requires that
-  // a handle be used for some reason. For example, this is used to pass C++ values through V8
-  // Promises.
-  //
-  // Opaque-wrapping of `V8Ref<T>` is explicitly disallowed to avoid waste. Just use the handle
-  // directly in this case. If you really want to wrap a V8Ref opaquely, wrap it in a struct of
-  // your own first. (Don't forget to implement `visitForGc()`.)
-
   static_assert(!kj::isReference<T>());
   static_assert(!isV8Ref<T>(), "no need to opaque-wrap regular JavaScript values");
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
@@ -70,12 +69,11 @@ v8::Local<v8::Value> wrapOpaque(v8::Local<v8::Context> context, T&& t) {
   return wrapped->attachOpaqueWrapper(context, isGcVisitable<T>());
 }
 
+// Unwraps a handle created using `wrapOpaque()`. This consumes (moves away) the underlying
+// value, so can only be called once. Throws if the handle is the wrong type or has already been
+// consumed previously.
 template <typename T>
 T unwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
-  // Unwraps a handle created using `wrapOpaque()`. This consumes (moves away) the underlying
-  // value, so can only be called once. Throws if the handle is the wrong type or has already been
-  // consumed previously.
-
   static_assert(!kj::isReference<T>());
   static_assert(!isV8Ref<T>(), "no need to opaque-wrap regular JavaScript values");
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
@@ -88,11 +86,10 @@ T unwrapOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   return kj::mv(holder->value);
 }
 
+// Unwraps a handle created using `wrapOpaque()`, without consuming the value.  Throws if the
+// handle is the wrong type or has already been consumed previously.
 template <typename T>
 T& unwrapOpaqueRef(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
-  // Unwraps a handle created using `wrapOpaque()`, without consuming the value.  Throws if the
-  // handle is the wrong type or has already been consumed previously.
-
   static_assert(!kj::isReference<T>());
   static_assert(!isV8Ref<T>(), "no need to opaque-wrap regular JavaScript values");
   static_assert(!isV8Local<T>(), "can't opaque-wrap non-persistent handles");
@@ -104,12 +101,11 @@ T& unwrapOpaqueRef(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   return holder->value;
 }
 
+// Destroys the value contained by an opaque handle, without returning it. This is equivalent
+// to calling unwrapOpaque<T>() and dropping the result, except that if the handle is the wrong
+// type, this function silently does nothing rather than throw.
 template <typename T>
 void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
-  // Destroys the value contained by an opaque handle, without returning it. This is equivalent
-  // to calling unwrapOpaque<T>() and dropping the result, except that if the handle is the wrong
-  // type, this function silently does nothing rather than throw.
-
   static_assert(!kj::isReference<T>());
   static_assert(!isV8Ref<T>());
 
@@ -125,24 +121,23 @@ void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
 // =======================================================================================
 // Promise implementation
 
+// This type (opaque-wrapped) is the type of the "data" for a continuation callback. We have both
+// the success and error callbacks share the same "data" object so that both underlying C++
+// callbacks are proactively destroyed after one of the runs. Otherwise, we'd only destroy the
+// function that was called, while the other one would have to wait for GC, which may mean
+// keeping around C++ resources longer than necessary.
 template <typename ThenFunc, typename CatchFunc>
 struct ThenCatchPair {
-  // This type (opaque-wrapped) is the type of the "data" for a continuation callback. We have both
-  // the success and error callbacks share the same "data" object so that both underlying C++
-  // callbacks are proactively destroyed after one of the runs. Otherwise, we'd only destroy the
-  // function that was called, while the other one would have to wait for GC, which may mean
-  // keeping around C++ resources longer than necessary.
-
   ThenFunc thenFunc;
   CatchFunc catchFunc;
 };
 
+// FunctionCallback implementing a C++ .then() continuation on a JS promise.
+//
+// We expect the input is already an opaque-wrapped value, args.Data() is an opaque-wrapped C++
+// function to eoxecute, and we want to produce an opaque-wrapped output or Promise.
 template <typename FuncPairType, bool passLock, bool isCatch, typename Input, typename Output>
 void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // FunctionCallback implementing a C++ .then() continuation on a JS promise.
-  //
-  // We expect the input is already an opaque-wrapped value, args.Data() is an opaque-wrapped C++
-  // function to eoxecute, and we want to produce an opaque-wrapped output or Promise.
   liftKj(args, [&]() {
     auto isolate = args.GetIsolate();
 #ifdef KJ_DEBUG
@@ -201,10 +196,10 @@ void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// Promise continuation that propagates the value or exception unmodified, but makes sure to
+// proactively destroy the ThenCatchPair.
 template <typename FuncPairType, bool isCatch>
 void identityPromiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Promise continuation that propagates the value or exception unmodified, but makes sure to
-  // proactively destroy the ThenCatchPair.
   auto isolate = args.GetIsolate();
   dropOpaque<FuncPairType>(isolate, args.Data());
   if constexpr (isCatch) {
@@ -274,13 +269,13 @@ public:
         &promiseContinuation<FuncPair, passLock, true, Value, T>);
   }
 
+  // whenResolved returns a new Promise<void> that resolves when this promise resolves,
+  // stopping the propagation of the resolved value. Unlike then(), calling whenResolved()
+  // does not consume the promise, and whenResolved() can be called multiple times,
+  // with each call creating a new branch off the original promise. Another key difference
+  // with whenResolved() is that the markAsHandled status will propagate to the new Promise<void>
+  // returned by whenResolved().
   Promise<void> whenResolved(Lock& js) {
-    // whenResolved returns a new Promise<void> that resolves when this promise resolves,
-    // stopping the propagation of the resolved value. Unlike then(), calling whenResolved()
-    // does not consume the promise, and whenResolved() can be called multiple times,
-    // with each call creating a new branch off the original promise. Another key difference
-    // with whenResolved() is that the markAsHandled status will propagate to the new Promise<void>
-    // returned by whenResolved().
     auto promise = Promise<void>(js.v8Isolate, getInner(js));
     if (markedAsHandled) {
       promise.markAsHandled(js);
@@ -294,11 +289,10 @@ public:
     return result;
   }
 
+  // If the promise is resolved, return the result, consuming the Promise. If it is pending
+  // or rejected, returns null. This can be used as an optimization or in tests, but you must
+  // never rely on it for correctness.
   kj::Maybe<T> tryConsumeResolved(Lock& js) {
-    // If the promise is resolved, return the result, consuming the Promise. If it is pending
-    // or rejected, returns null. This can be used as an optimization or in tests, but you must
-    // never rely on it for correctness.
-
     return js.withinHandleScope([&]() -> kj::Maybe<T> {
       auto handle = KJ_REQUIRE_NONNULL(v8Promise, "jsg::Promise can only be used once")
           .getHandle(js);
@@ -413,9 +407,9 @@ public:
   }
 
 private:
-  v8::Isolate* deprecatedIsolate;
   // We store a copy of the isolate pointer so that `.then()` can be called without passing in
   // the isolate pointer every time.
+  v8::Isolate* deprecatedIsolate;
 
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
   bool markedAsHandled = false;
@@ -593,10 +587,9 @@ PromiseForResult<Func, void, false> evalNow(v8::Isolate* isolate, Func&& func) {
 
 // -----------------------------------------------------------------------------
 
+// Continuation function that converts a promised C++ value into a JavaScript value.
 template <typename TypeWrapper, typename Input>
 void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Continuation function that converts a promised C++ value into a JavaScript value.
-
   if constexpr (isVoid<Input>()) {
     // No wrapping needed. Note that we still attach `thenWrap` to the promise chain only because
     // we use `args.data` to prevent the object from being GC'd while the promise is still
@@ -615,9 +608,9 @@ void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
   }
 }
 
+// Continuation function that converts a promised JavaScript value into a C++ value.
 template <typename TypeWrapper, typename Output>
 void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Continuation function that converts a promised JavaScript value into a C++ value.
   liftKj(args, [&]() {
     v8::Isolate* isolate = args.GetIsolate();
     auto& wrapper = TypeWrapper::from(isolate);
@@ -627,10 +620,9 @@ void thenUnwrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// TypeWrapper mixin for Promise.
 template <typename TypeWrapper>
 class PromiseWrapper {
-  // TypeWrapper mixin for Promise.
-
 public:
   template <typename T>
   static constexpr const char* getName(Promise<T>*) { return "Promise"; }
@@ -713,11 +705,11 @@ public:
 
 // -----------------------------------------------------------------------------
 
+// A utility used internally by ServiceWorkerGlobalScope to perform the book keeping
+// for unhandled promise rejection notifications. The handler maintains a table of
+// weak references to rejected promises that have not been handled and will handle
+// emitting events and console warnings as appropriate.
 class UnhandledRejectionHandler {
-  // A utility used internally by ServiceWorkerGlobalScope to perform the book keeping
-  // for unhandled promise rejection notifications. The handler maintains a table of
-  // weak references to rejected promises that have not been handled and will handle
-  // emitting events and console warnings as appropriate.
 public:
   using Handler = void(jsg::Lock& js,
                        v8::PromiseRejectEvent event,
@@ -735,14 +727,13 @@ public:
   void clear();
 
 private:
+  // Used as part of the book keeping for unhandled rejections. When an
+  // unhandled rejection occurs, the unhandledRejections Table will be updated.
+  // If the rejection is later handled asynchronously, then the item will be
+  // removed from the table. When the unhandled rejection table is processed
+  // later in the event loop tick, any remaining rejections will generate a
+  // warning to the inspector console (if enabled);
   struct UnhandledRejection {
-    // Used as part of the book keeping for unhandled rejections. When an
-    // unhandled rejection occurs, the unhandledRejections Table will be updated.
-    // If the rejection is later handled asynchronously, then the item will be
-    // removed from the table. When the unhandled rejection table is processed
-    // later in the event loop tick, any remaining rejections will generate a
-    // warning to the inspector console (if enabled);
-
     explicit UnhandledRejection(
         jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
@@ -760,9 +751,11 @@ private:
     // that the book keeping doesn't end up being a memory leak.
 
     uint hash;
+
     // We use v8::Globals directly here because these references are going to
     // be made weak and could be garbage collected and cleared while the items
     // are still in the unhandledRejections or warnedRejections tables.
+
     v8::Global<v8::Promise> promise;
     v8::Global<v8::Value> value;
     v8::Global<v8::Message> message;
@@ -775,8 +768,8 @@ private:
     uint hashCode() const { return hash; }
   };
 
+  // A v8::Promise with memoized hash code.
   struct HashedPromise {
-    // A v8::Promise with memoized hash code.
     v8::Local<v8::Promise> promise;
     uint hash;
 

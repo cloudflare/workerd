@@ -20,6 +20,10 @@
 
 namespace workerd::jsg {
 
+// True if there is an unwrap() overload which does *not* take a v8::Value to unwrap for this
+// parameter type T. This is useful to identify types like TypeHandlers and v8::Isolate* which
+// functions can declare they accept at the end of their parameter list, but which are not created
+// from any particular JS value.
 template <typename TypeWrapper, typename T, typename = void>
 constexpr bool isValueLessParameter = false;
 template <typename TypeWrapper, typename T>
@@ -27,16 +31,11 @@ constexpr bool isValueLessParameter<
     TypeWrapper, T, kj::VoidSfinae<decltype(
         kj::instance<TypeWrapper>().unwrap(kj::instance<v8::Local<v8::Context>>(),
                                            kj::instance<T*>()))>> = true;
-// True if there is an unwrap() overload which does *not* take a v8::Value to unwrap for this
-// parameter type T. This is useful to identify types like TypeHandlers and v8::Isolate* which
-// functions can declare they accept at the end of their parameter list, but which are not created
-// from any particular JS value.
 
+// TypeWrapper mixin for V8 handles.
+//
+// This is just a trivial pass-through.
 class V8HandleWrapper {
-  // TypeWrapper mixin for V8 handles.
-  //
-  // This is just a trivial pass-through.
-
 public:
   template <typename T, typename = kj::EnableIf<kj::canConvert<T, v8::Value>()>>
   static constexpr const std::type_info& getName(v8::Local<T>*) { return typeid(T); }
@@ -166,75 +165,72 @@ public:
   }
 };
 
+// The application can use this type to extend TypeWrapper with its own custom mixins. The
+// template `Extension` is a mixin which will be inherited by the TypeWrapper. It will be passed
+// the full TypeWrapper specialization as a type parameter. See TypeWrapper, below, for an
+// explanation of the mixin design and use of CRTP.
+//
+// Specify `TypeWrapperExtension` in the same list as your API types. Example:
+//
+//     template <typename TypeWrapper>
+//     class MyMixin {
+//     public:
+//       // ... implementation ...
+//     };
+//
+//     JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyApiType1, MyApiType2,
+//         jsg::TypeWrapperExtension<MyMixin>, ...)
+//
+// The extension mixin must declare the following methods:
+//
+//     static constexpr const char* getName(T* dummy);
+//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
+//                               kj::Maybe<v8::Local<v8::Object>> creator,
+//                               T cppValue);
+//     kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle,
+//                            T* dummy, kj::Maybe<v8::Local<v8::Object>> parentObject);
+//
+//     Ref<T, v8::Context> newContext(v8::Isolate* isolate, T* dummy, Args&&... args);
+//     template <bool isContext = false>
+//     v8::Local<v8::FunctionTemplate> getTemplate(v8::Isolate* isolate, T*)
+//
+// Note that most mixins do not actually need the last two methods. Unfortunately, due to
+// limitation of the C++ `using` directive, we can't easily make these optional. You can,
+// however, declare them deleted, like:
+//
+//     void newContext() = delete;
+//     void getTemplate() = delete;
+//
+// The mixin's constructor can optionally accept a configuration value as its parameter, which
+// works the same way as the second parameter to `JSG_RESOURCE_TYPE`.
 template <template <typename TypeWrapper> typename Extension>
 class TypeWrapperExtension {
-  // The application can use this type to extend TypeWrapper with its own custom mixins. The
-  // template `Extension` is a mixin which will be inherited by the TypeWrapper. It will be passed
-  // the full TypeWrapper specialization as a type parameter. See TypeWrapper, below, for an
-  // explanation of the mixin design and use of CRTP.
-  //
-  // Specify `TypeWrapperExtension` in the same list as your API types. Example:
-  //
-  //     template <typename TypeWrapper>
-  //     class MyMixin {
-  //     public:
-  //       // ... implementation ...
-  //     };
-  //
-  //     JSG_DECLARE_ISOLATE_TYPE(MyIsolate, MyApiType1, MyApiType2,
-  //         jsg::TypeWrapperExtension<MyMixin>, ...)
-  //
-  // The extension mixin must declare the following methods:
-  //
-  //     static constexpr const char* getName(T* dummy);
-  //     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
-  //                               kj::Maybe<v8::Local<v8::Object>> creator,
-  //                               T cppValue);
-  //     kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle,
-  //                            T* dummy, kj::Maybe<v8::Local<v8::Object>> parentObject);
-  //
-  //     Ref<T, v8::Context> newContext(v8::Isolate* isolate, T* dummy, Args&&... args);
-  //     template <bool isContext = false>
-  //     v8::Local<v8::FunctionTemplate> getTemplate(v8::Isolate* isolate, T*)
-  //
-  // Note that most mixins do not actually need the last two methods. Unfortunately, due to
-  // limitation of the C++ `using` directive, we can't easily make these optional. You can,
-  // however, declare them deleted, like:
-  //
-  //     void newContext() = delete;
-  //     void getTemplate() = delete;
-  //
-  // The mixin's constructor can optionally accept a configuration value as its parameter, which
-  // works the same way as the second parameter to `JSG_RESOURCE_TYPE`.
-
 public:
   static const JsgKind JSG_KIND = JsgKind::EXTENSION;
 };
 
+// Include this type in the FFI type list to implement auto-injection of a parameter type based
+// on configuration. `Configuration` must be a type that can be constructed from the isolate's
+// meta configuration object. Wrapped functions will be able to accept `Configuration` as a
+// parameter type, and instead of being converted from a JavaScript parameter, it will instead
+// receive the isolate-global configuration.
+//
+// `Configuration` can be a reference type.
 template <typename Configuration>
 class InjectConfiguration {
-  // Include this type in the FFI type list to implement auto-injection of a parameter type based
-  // on configuration. `Configuration` must be a type that can be constructed from the isolate's
-  // meta configuration object. Wrapped functions will be able to accept `Configuration` as a
-  // parameter type, and instead of being converted from a JavaScript parameter, it will instead
-  // receive the isolate-global configuration.
-  //
-  // `Configuration` can be a reference type.
-
 public:
   static const JsgKind JSG_KIND = JsgKind::EXTENSION;
 };
 
-template <typename Self, typename T, JsgKind kind = T::JSG_KIND>
-class TypeWrapperBase;
 // Selects the appropriate mixin to support wrapping/unwrapping type T, which is one of the API
 // types passed to JSG_DECLARE_ISOLATE_TYPE() by the application.
+template <typename Self, typename T, JsgKind kind = T::JSG_KIND>
+class TypeWrapperBase;
 
+// Specialization of TypeWrapperBase for types that have a JSG_RESOURCE_TYPE block.
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::RESOURCE>
     : public ResourceWrapper<Self, T> {
-  // Specialization of TypeWrapperBase for types that have a JSG_RESOURCE_TYPE block.
-
 public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config)
@@ -243,11 +239,10 @@ public:
   void unwrap() = delete;  // ResourceWrapper only implements tryUnwrap(), not unwrap()
 };
 
+// Specialization of TypeWrapperBase for types that have a JSG_STRUCT block.
 template <typename Self, typename T>
 class TypeWrapperBase<Self, T, JsgKind::STRUCT>
     : public StructWrapper<Self, T, typename T::template JsgFieldWrappers<Self, T>> {
-  // Specialization of TypeWrapperBase for types that have a JSG_STRUCT block.
-
 public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config) {}
@@ -257,11 +252,10 @@ public:
   void unwrap() = delete;  // StructWrapper only implements tryUnwrap(), not unwrap()
 };
 
+// Specialization of TypeWrapperBase for TypeWrapperExtension.
 template <typename Self, template <typename> typename Extension>
 class TypeWrapperBase<Self, TypeWrapperExtension<Extension>, JsgKind::EXTENSION>
     : public Extension<Self> {
-  // Specialization of TypeWrapperBase for TypeWrapperExtension.
-
   template <typename MetaConfiguration>
   static constexpr bool sfinae(
       decltype(Extension<Self>(kj::instance<MetaConfiguration&>()))*) {
@@ -286,10 +280,9 @@ public:
   inline void initTypeWrapper() { }
 };
 
+// Specialization of TypeWrapperBase for InjectConfiguration.
 template <typename Self, typename Configuration>
 class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSION> {
-  // Specialization of TypeWrapperBase for InjectConfiguration.
-
 public:
   template <typename MetaConfiguration>
   TypeWrapperBase(MetaConfiguration& config)
@@ -312,6 +305,71 @@ private:
   Configuration configuration;
 };
 
+// The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
+// values. It primarily implements two methods:
+//
+//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
+//                               kj::Maybe<v8::Local<v8::Object>> creator
+//                               T cppValue);
+//     // Converts cppValue to JavaScript.
+//     //
+//     // `creator` is non-null when converting the return value of a method; in this case,
+//     // `creator` is the object on which the method was called. This is useful for some types
+//     // (like Promises) where the KJ convention is to assume that the creator must outlive the
+//     // returned object.
+//
+//     T unwrap<T>(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle);
+//     // Converts jsValue to C++, expecting type T.
+//
+// The design is based on mixins: TypeWrapper derives from classes that handle each individual
+// type. Each mixin is expected to implement the following methods:
+//
+//     static constexpr const char* getName(T* dummy);
+//     // Return the name of the type for the purpose of TypeError exception messages. Note that
+//     // you can also return `const std::type_info&` here, in which case the type name will
+//     // be derived by stripping off the namespase from the C++ type name.
+//
+//     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
+//                               kj::Maybe<v8::Local<v8::Object>> creator,
+//                               T cppValue);
+//     // Converts cppValue to JavaScript.
+//
+//     kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle,
+//                            T* dummy, kj::Maybe<v8::Local<v8::Object>> parentObject);
+//     // Converts jsValue to C++, expecting type T. If the input is not of type T, returns
+//     // null. If we're unwrapping a field of an object, then `parentObject` is the handle to
+//     // the object; this is useful when unwrapping a function, to bind `this`.
+//     //
+//     // Note that only a shallow type check is performed. E.g. if a struct type is expected,
+//     // tryUnwrap() will only return null if the input is not a JS Object. If it is an object,
+//     // but one of its fields is the wrong type, tryUnwrap() will throw a TypeError. The idea
+//     // here is that `tryUnwrap()` should only do the amount of type checking that one would
+//     // typically do in JavaScript to distinguish a variant type (e.g. "string or number").
+//     // Typically this is limited to what you can do with the `typeof` and `instanceof`
+//     // keywords on the top-level value.
+//
+// Note the `dummy` parameters of type T*. These will always be passed `nullptr`. The purpose of
+// these parameters is to select the correct overload for the desired type. Normally, one would
+// use an explicit template parameter for this, but that only works if all the methods are
+// actually specializations of the same template method declaration. That's not the case here,
+// because we're inheriting totally independent method declarations from all our mixins. So, we
+// have to slum it by passing `(T*)nullptr` as an argument purely for overload selection.
+//
+// Note that many of these mixins need to call back to the TypeWrapper recursively. For example,
+// OptionalWrapper (for Optional<T>) will need to call back to unwrap the inner T. To that end,
+// we use the Curiously Recurring Template Pattern, passing the TypeWrapper type itself to its
+// superclasses, so that they can cast themselves back to the subclass type and call it
+// recursively. See:
+//
+//     https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
+//
+// Actually, TypeWrapper itself *also* takes itself as a template parameter called `Self`. This
+// is primarily done as a trick in order to make compiler error messages less difficult to read.
+// The `Self` parameter to `TypeWrapper` is actually a specific subclass of TypeWrapper. See
+// JSG_DECLARE_ISOLATE_TYPE in setup.h.
+//
+// Note that a pointer to the TypeWrapper object is stored in the V8 context's "embedder data",
+// in slot 1, so that we can get back to it from V8 callbacks.
 template <typename Self, typename... T>
 class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public TypeWrapperBase<Self, T>...,
@@ -341,72 +399,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public V8HandleWrapper,
                    public UnimplementedWrapper,
                    public JsValueWrapper<Self> {
-  // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
-  // values. It primarily implements two methods:
-  //
-  //     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
-  //                               kj::Maybe<v8::Local<v8::Object>> creator
-  //                               T cppValue);
-  //     // Converts cppValue to JavaScript.
-  //     //
-  //     // `creator` is non-null when converting the return value of a method; in this case,
-  //     // `creator` is the object on which the method was called. This is useful for some types
-  //     // (like Promises) where the KJ convention is to assume that the creator must outlive the
-  //     // returned object.
-  //
-  //     T unwrap<T>(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle);
-  //     // Converts jsValue to C++, expecting type T.
-  //
-  // The design is based on mixins: TypeWrapper derives from classes that handle each individual
-  // type. Each mixin is expected to implement the following methods:
-  //
-  //     static constexpr const char* getName(T* dummy);
-  //     // Return the name of the type for the purpose of TypeError exception messages. Note that
-  //     // you can also return `const std::type_info&` here, in which case the type name will
-  //     // be derived by stripping off the namespase from the C++ type name.
-  //
-  //     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
-  //                               kj::Maybe<v8::Local<v8::Object>> creator,
-  //                               T cppValue);
-  //     // Converts cppValue to JavaScript.
-  //
-  //     kj::Maybe<T> tryUnwrap(v8::Local<v8::Context> jsContext, v8::Local<v8::Value> jsHandle,
-  //                            T* dummy, kj::Maybe<v8::Local<v8::Object>> parentObject);
-  //     // Converts jsValue to C++, expecting type T. If the input is not of type T, returns
-  //     // null. If we're unwrapping a field of an object, then `parentObject` is the handle to
-  //     // the object; this is useful when unwrapping a function, to bind `this`.
-  //     //
-  //     // Note that only a shallow type check is performed. E.g. if a struct type is expected,
-  //     // tryUnwrap() will only return null if the input is not a JS Object. If it is an object,
-  //     // but one of its fields is the wrong type, tryUnwrap() will throw a TypeError. The idea
-  //     // here is that `tryUnwrap()` should only do the amount of type checking that one would
-  //     // typically do in JavaScript to distinguish a variant type (e.g. "string or number").
-  //     // Typically this is limited to what you can do with the `typeof` and `instanceof`
-  //     // keywords on the top-level value.
-  //
-  // Note the `dummy` parameters of type T*. These will always be passed `nullptr`. The purpose of
-  // these parameters is to select the correct overload for the desired type. Normally, one would
-  // use an explicit template parameter for this, but that only works if all the methods are
-  // actually specializations of the same template method declaration. That's not the case here,
-  // because we're inheriting totally independent method declarations from all our mixins. So, we
-  // have to slum it by passing `(T*)nullptr` as an argument purely for overload selection.
-  //
-  // Note that many of these mixins need to call back to the TypeWrapper recursively. For example,
-  // OptionalWrapper (for Optional<T>) will need to call back to unwrap the inner T. To that end,
-  // we use the Curiously Recurring Template Pattern, passing the TypeWrapper type itself to its
-  // superclasses, so that they can cast themselves back to the subclass type and call it
-  // recursively. See:
-  //
-  //     https://en.wikipedia.org/wiki/Curiously_recurring_template_pattern
-  //
-  // Actually, TypeWrapper itself *also* takes itself as a template parameter called `Self`. This
-  // is primarily done as a trick in order to make compiler error messages less difficult to read.
-  // The `Self` parameter to `TypeWrapper` is actually a specific subclass of TypeWrapper. See
-  // JSG_DECLARE_ISOLATE_TYPE in setup.h.
-  //
-  // Note that a pointer to the TypeWrapper object is stored in the V8 context's "embedder data",
-  // in slot 1, so that we can get back to it from V8 callbacks.
-  //
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
 
 public:
@@ -501,12 +493,11 @@ public:
     }
   }
 
+  // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
+  // handle the case where the user passes in fewer arguments than the function has parameters.
   template <typename U>
   auto unwrap(v8::Local<v8::Context> context, const v8::FunctionCallbackInfo<v8::Value>& args,
               size_t parameterIndex, TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
-    // Helper for unwrapping function/method arguments correctly. Specifically, we need logic to
-    // handle the case where the user passes in fewer arguments than the function has parameters.
-
     using V = kj::Decay<U>;
 
     if constexpr(kj::isSameType<V, Varargs>()) {
