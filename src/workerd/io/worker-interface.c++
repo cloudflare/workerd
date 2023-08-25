@@ -10,10 +10,9 @@ using kj::uint;
 
 namespace workerd {
 
+// A WorkerInterface that delays requests until some promise resolves, then forwards them to the
+// interface the promise resolved to.
 class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
-  // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
-  // interface the promise resolved to.
-
 public:
   PromisedWorkerInterface(kj::TaskSet& waitUntilTasks,
                           kj::Promise<kj::Own<WorkerInterface>> promise)
@@ -104,8 +103,8 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
   return kj::newHttpClient(*workerInterface).attach(kj::mv(workerInterface));
 }
 
+// A Revocable WebSocket wrapper, revoked when revokeProm rejects
 class RevocableWebSocket final: public kj::WebSocket {
-  // A Revocable WebSocket wrapper, revoked when revokeProm rejects
 public:
   RevocableWebSocket(kj::Own<WebSocket> ws, kj::Promise<void> revokeProm)
       : ws(kj::mv(ws)), revokeProm(revokeProm.catch_([this](kj::Exception&& e) -> kj::Promise<void> {
@@ -184,9 +183,9 @@ private:
   kj::Canceler canceler;
 };
 
+// A HttpResponse that can revoke long-running websocket connections started as part of the
+// response. Ordinary HTTP requests are not revoked.
 class RevocableWebSocketHttpResponse final : public kj::HttpService::Response {
-  // A HttpResponse that can revoke long-running websocket connections started as part of the
-  // response. Ordinary HTTP requests are not revoked.
 public:
   RevocableWebSocketHttpResponse(kj::HttpService::Response& inner, kj::Promise<void> revokeProm)
       : inner(inner), revokeProm(revokeProm.fork()) {}

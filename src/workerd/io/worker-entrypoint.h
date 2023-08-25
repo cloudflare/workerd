@@ -12,15 +12,27 @@ namespace workerd {
 
 class WorkerTracer;
 
+// Wrapper around a Worker that handles receiving a new event from the outside. In particular,
+// this handles:
+// - Creating a IoContext and making it current.
+// - Executing the worker under lock.
+// - Catching exceptions and converting them to HTTP error responses.
+//   - Or, falling back to proxying if passThroughOnException() was used.
+// - Finish waitUntil() tasks.
 class WorkerEntrypoint final: public WorkerInterface {
-  // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
-  // this handles:
-  // - Creating a IoContext and making it current.
-  // - Executing the worker under lock.
-  // - Catching exceptions and converting them to HTTP error responses.
-  //   - Or, falling back to proxying if passThroughOnException() was used.
-  // - Finish waitUntil() tasks.
 public:
+  // Call this instead of the constructor. It actually adds a wrapper object around the
+  // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
+  //
+  // WorkerEntrypoint will create a IoContext, and that IoContext may outlive the
+  // WorkerEntrypoint by means of a waitUntil() task. Any object(s) which must be kept alive to
+  // support the worker for the lifetime of the IoContext (e.g., subsequent pipeline stages)
+  // must be passed in via `ioContextDependency`.
+  //
+  // If this is NOT a zone worker, then `zoneDefaultWorkerLimits` should be a default instance of
+  // WorkerLimits::Reader. Hence this is not necessarily the same as
+  // topLevelRequest.getZoneDefaultWorkerLimits(), since the top level request may be shared between
+  // zone and non-zone workers.
   static kj::Own<WorkerInterface> construct(
                    ThreadContext& threadContext,
                    kj::Own<const Worker> worker,
@@ -34,18 +46,6 @@ public:
                    bool tunnelExceptions,
                    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
                    kj::Maybe<kj::String> cfBlobJson);
-  // Call this instead of the constructor. It actually adds a wrapper object around the
-  // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
-  //
-  // WorkerEntrypoint will create a IoContext, and that IoContext may outlive the
-  // WorkerEntrypoint by means of a waitUntil() task. Any object(s) which must be kept alive to
-  // support the worker for the lifetime of the IoContext (e.g., subsequent pipeline stages)
-  // must be passed in via `ioContextDependency`.
-  //
-  // If this is NOT a zone worker, then `zoneDefaultWorkerLimits` should be a default instance of
-  // WorkerLimits::Reader. Hence this is not necessarily the same as
-  // topLevelRequest.getZoneDefaultWorkerLimits(), since the top level request may be shared between
-  // zone and non-zone workers.
 
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
@@ -62,19 +62,21 @@ public:
 private:
   class ResponseSentTracker;
 
+  // Members initialized at startup.
+
   ThreadContext& threadContext;
   kj::TaskSet& waitUntilTasks;
   kj::Maybe<kj::Own<IoContext::IncomingRequest>> incomingRequest;
   bool tunnelExceptions;
   kj::Maybe<kj::StringPtr> entrypointName;
   kj::Maybe<kj::String> cfBlobJson;
-  // Members initialized at startup.
+
+  // Hacky members used to hold some temporary state while processing a request.
+  // See gory details in WorkerEntrypoint::request().
 
   kj::Maybe<kj::Promise<void>> proxyTask;
   kj::Maybe<kj::Own<WorkerInterface>> failOpenService;
   bool loggedExceptionEarlier = false;
-  // Hacky members used to hold some temporary state while processing a request.
-  // See gory details in WorkerEntrypoint::request().
 
   void init(
       kj::Own<const Worker> worker,
