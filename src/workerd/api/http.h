@@ -732,7 +732,7 @@ public:
   jsg::Ref<AbortSignal> getThisSignal(jsg::Lock& js);
 
   // Returns the `cf` field containing Cloudflare feature flags.
-  jsg::Optional<v8::Local<v8::Object>> getCf(jsg::Lock& js);
+  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
 
   // We do not implement support for the keepalive option but we do want to at least provide
   // the standard property, hard-coded to always be false.
@@ -960,7 +960,7 @@ public:
   kj::Maybe<jsg::Ref<WebSocket>> getWebSocket(jsg::Lock& js);
 
   // Returns the `cf` field containing Cloudflare feature flags.
-  jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
+  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
 
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was

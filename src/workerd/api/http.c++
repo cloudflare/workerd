@@ -845,7 +845,10 @@ jsg::Ref<Request> Request::constructor(
         }
 
         KJ_IF_MAYBE(newCf, initDict.cf) {
-          cf = CfProperty(newCf->deepClone(js));
+          // TODO(cleanup): When initDict.cf is updated to use jsg::JsRef instead
+          // of jsg::V8Ref, we can clean this up a bit further.
+          auto cloned = newCf->deepClone(js);
+          cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
         }
 
         KJ_IF_MAYBE(b, kj::mv(initDict.body).orDefault(nullptr)) {
@@ -937,7 +940,7 @@ kj::Maybe<jsg::Ref<AbortSignal>> Request::getSignal() {
   return signal.map([](jsg::Ref<AbortSignal>& s) {return s.addRef();});
 }
 
-jsg::Optional<v8::Local<v8::Object>> Request::getCf(jsg::Lock& js) {
+jsg::Optional<jsg::JsObject> Request::getCf(jsg::Lock& js) {
   return cf.get(js);
 }
 
@@ -1039,7 +1042,10 @@ jsg::Ref<Response> Response::constructor(
       }
 
       KJ_IF_MAYBE(newCf, initDict.cf) {
-        cf = CfProperty(newCf->deepClone(js));
+        // TODO(cleanup): When initDict.cf is updated to use jsg::JsRef instead
+        // of jsg::V8Ref, we can clean this up a bit further.
+        auto cloned = newCf->deepClone(js);
+        cf = CfProperty(js, jsg::JsObject(cloned.getHandle(js)));
       }
 
       KJ_IF_MAYBE(ws, initDict.webSocket) {
@@ -1376,9 +1382,8 @@ kj::Maybe<jsg::Ref<WebSocket>> Response::getWebSocket(jsg::Lock& js) {
   });
 }
 
-jsg::Optional<v8::Local<v8::Object>> Response::getCf(
-    const v8::PropertyCallbackInfo<v8::Value>& info) {
-  return cf.get(jsg::Lock::from(info.GetIsolate()));
+jsg::Optional<jsg::JsObject> Response::getCf(jsg::Lock& js) {
+  return cf.get(js);
 }
 
 // =======================================================================================

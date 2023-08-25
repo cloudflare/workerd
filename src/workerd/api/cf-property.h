@@ -22,23 +22,17 @@ public:
   CfProperty(CfProperty&&) = default;
   CfProperty& operator=(CfProperty&&) = default;
 
-  explicit CfProperty(kj::Maybe<kj::StringPtr> unparsed) {
-    KJ_IF_MAYBE(str, unparsed) {
-      value = kj::str(*str);
-    }
-  }
+  explicit CfProperty(kj::Maybe<kj::StringPtr> unparsed);
 
-  explicit CfProperty(kj::Maybe<jsg::V8Ref<v8::Object>>&& parsed) {
-    KJ_IF_MAYBE(v, parsed) {
-      value = kj::mv(*v);
-    }
-  }
+  explicit CfProperty(jsg::Lock& js, const jsg::JsObject& object);
+
+  explicit CfProperty(kj::Maybe<jsg::JsRef<jsg::JsObject>>&& parsed);
 
   // Get parsed value
-  jsg::Optional<v8::Local<v8::Object>> get(jsg::Lock& js);
+  jsg::Optional<jsg::JsObject> get(jsg::Lock& js);
 
   // Get parsed value as a global ref
-  jsg::Optional<jsg::V8Ref<v8::Object>> getRef(jsg::Lock& js);
+  jsg::Optional<jsg::JsRef<jsg::JsObject>> getRef(jsg::Lock& js);
 
   // Serialize to string
   kj::Maybe<kj::String> serialize(jsg::Lock& js);
@@ -49,7 +43,7 @@ public:
   void visitForGc(jsg::GcVisitor& visitor);
 
 private:
-  kj::Maybe<kj::OneOf<kj::String, jsg::V8Ref<v8::Object>>> value;
+  kj::Maybe<kj::OneOf<kj::String, jsg::JsRef<jsg::JsObject>>> value;
 };
 
 
