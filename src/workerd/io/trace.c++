@@ -10,10 +10,10 @@
 
 namespace workerd {
 
-static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 // Approximately how much external data we allow in a trace before we start ignoring requests.  We
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request.
+static constexpr size_t MAX_TRACE_BYTES = 128 * 1024;
 
 namespace {
 
