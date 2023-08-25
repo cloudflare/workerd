@@ -15,8 +15,8 @@
 
 namespace workerd {
 
+// Implements the HibernationManager class.
 class HibernationManagerImpl final : public Worker::Actor::HibernationManager {
-  // Implements the HibernationManager class.
 public:
   HibernationManagerImpl(kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType)
       : loopback(kj::mv(loopback)),
@@ -25,20 +25,20 @@ public:
         readLoopTasks(onDisconnect) {}
   ~HibernationManagerImpl() noexcept(false);
 
-  void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) override;
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags
   // and to initiate the `readLoop()` for this websocket. The `tags` array *must* contain only
   // unique elements.
+  void acceptWebSocket(jsg::Ref<api::WebSocket> ws, kj::ArrayPtr<kj::String> tags) override;
 
+  // Gets a collection of websockets associated with the given tag. Any hibernating websockets will
+  // be woken up. If no tag is provided, we return all accepted websockets.
   kj::Vector<jsg::Ref<api::WebSocket>> getWebSockets(
       jsg::Lock& js,
       kj::Maybe<kj::StringPtr> tag) override;
-  // Gets a collection of websockets associated with the given tag. Any hibernating websockets will
-  // be woken up. If no tag is provided, we return all accepted websockets.
 
-  void hibernateWebSockets(Worker::Lock& lock) override;
   // Hibernates all the websockets held by the HibernationManager.
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
+  void hibernateWebSockets(Worker::Lock& lock) override;
 
   void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) override;
   void unsetWebSocketAutoResponse() override;
@@ -49,25 +49,26 @@ public:
 
 private:
   class HibernatableWebSocket;
+
+  // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
+  // in our kj::List.
   struct TagListItem {
-    // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
-    // in our kj::List.
     kj::Maybe<HibernatableWebSocket&> hibWS;
     kj::ListLink<TagListItem> link;
     kj::StringPtr tag;
-    kj::Maybe<kj::List<TagListItem, &TagListItem::link>&> list;
     // The List that refers to this TagListItem.
     // If `list` is null, we've already removed this item from the list.
+    kj::Maybe<kj::List<TagListItem, &TagListItem::link>&> list;
   };
 
+  // api::WebSockets cannot survive hibernation, but kj::WebSockets do. This class helps us
+  // manage the transition of an api::WebSocket from its active state to a hibernated state
+  // and vice versa.
+  //
+  // Some properties of the JS websocket object need to be retained throughout hibernation,
+  // such as `attachment`, `url`, `extensions`, etc. These properties are only read/modified
+  // when initiating, or waking from hibernation.
   class HibernatableWebSocket {
-    // api::WebSockets cannot survive hibernation, but kj::WebSockets do. This class helps us
-    // manage the transition of an api::WebSocket from its active state to a hibernated state
-    // and vice versa.
-    //
-    // Some properties of the JS websocket object need to be retained throughout hibernation,
-    // such as `attachment`, `url`, `extensions`, etc. These properties are only read/modified
-    // when initiating, or waking from hibernation.
   public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
                           kj::ArrayPtr<kj::String> tags,
@@ -100,10 +101,10 @@ private:
       }
     }
 
+    // Returns a reference to the active websocket. If the websocket is currently hibernating,
+    // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
+    // to the api::WebSocket.
     jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js) {
-      // Returns a reference to the active websocket. If the websocket is currently hibernating,
-      // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
-      // to the api::WebSocket.
       KJ_IF_MAYBE(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
             api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(*package))
@@ -116,57 +117,60 @@ private:
 
     kj::ListLink<HibernatableWebSocket> link;
 
-    kj::Array<TagListItem> tagItems;
     // An array of all the items/nodes that refer to this HibernatableWebSocket.
     // Keeping track of these items allows us to quickly remove every reference from `tagToWs`
     // once the websocket disconnects -- rather than iterating through each relevant tag in the
     // hashmap and removing it from each kj::List.
+    kj::Array<TagListItem> tagItems;
 
-    kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage;
     // If active, we have an api::WebSocket reference, otherwise, we're hibernating, so we retain
     // the websocket's properties in a HibernationPackage until it's time to wake up.
-    kj::Maybe<kj::Own<kj::WebSocket>> ws;
+    kj::OneOf<jsg::Ref<api::WebSocket>, api::WebSocket::HibernationPackage> activeOrPackage;
+
     // This is an owned websocket that we extract from the api::WebSocket after accepting as
     // hibernatable. It becomes null once we dispatch a close or error event because we want its
     // lifetime to be managed by IoContext's DeleteQueue. This helps prevent a situation where the
     // HibernationManager drops the websocket before all queued messages have sent.
+    kj::Maybe<kj::Own<kj::WebSocket>> ws;
+
     HibernationManagerImpl& manager;
     // TODO(someday): We (currently) only use the HibernationManagerImpl reference to refer to
     // `tagToWs` when running the dtor for `HibernatableWebSocket`. This feels a bit excessive,
     // I would rather have the HibernationManager deal with its collections than have the
     // HibernatableWebSocket do so. Maybe come back to this at some point?
-    kj::Maybe<std::list<kj::Own<HibernatableWebSocket>>::iterator> node;
-    // Reference to the Node in `allWs` that allows us to do fast deletion on disconnect.
 
-    bool hasDispatchedClose = false;
+    // Reference to the Node in `allWs` that allows us to do fast deletion on disconnect.
+    kj::Maybe<std::list<kj::Own<HibernatableWebSocket>>::iterator> node;
+
     // True once we have dispatched the close event.
     // This prevents us from dispatching it if we have already done so.
+    bool hasDispatchedClose = false;
 
-    kj::Maybe<kj::Date> autoResponseTimestamp;
     // Stores the last received autoResponseRequest timestamp.
+    kj::Maybe<kj::Date> autoResponseTimestamp;
 
     friend HibernationManagerImpl;
   };
 
 private:
-  void dropHibernatableWebSocket(HibernatableWebSocket& hib);
   // Removes a HibernatableWebSocket from the HibernationManager's various collections.
+  void dropHibernatableWebSocket(HibernatableWebSocket& hib);
 
-  inline void removeFromAllWs(HibernatableWebSocket& hib);
   // Removes the HibernatableWebSocket from `allWs`.
+  inline void removeFromAllWs(HibernatableWebSocket& hib);
 
-  kj::Promise<void> handleSocketTermination(
-      HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError);
   // Handles the termination of the websocket. If termination was not clean, we might try to
   // dispatch a close event (if we haven't already), or an error event.
   // We will also remove the HibernatableWebSocket from the HibernationManager's collections.
+  kj::Promise<void> handleSocketTermination(
+      HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError);
 
-  kj::Promise<void> readLoop(HibernatableWebSocket& hib);
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
+  kj::Promise<void> readLoop(HibernatableWebSocket& hib);
 
+  // This struct is held by the `tagToWs` hashmap. The key is a StringPtr to tag, and the value
+  // is this struct itself.
   struct TagCollection {
-    // This struct is held by the `tagToWs` hashmap. The key is a StringPtr to tag, and the value
-    // is this struct itself.
     kj::String tag;
     kj::Own<kj::List<TagListItem, &TagListItem::link>> list;
 
@@ -174,22 +178,21 @@ private:
     TagCollection(TagCollection&& other) = default;
   };
 
-  kj::HashMap<kj::StringPtr, kj::Own<TagCollection>> tagToWs;
   // A hashmap of tags to HibernatableWebSockets associated with the tag.
   // We use a kj::List so we can quickly remove websockets that have disconnected.
   // Also note that we box the keys and values such that in the event of a hashmap resizing we don't
   // move the underlying data (thereby keeping any references intact).
+  kj::HashMap<kj::StringPtr, kj::Own<TagCollection>> tagToWs;
 
-  std::list<kj::Own<HibernatableWebSocket>> allWs;
   // We store all of our HibernatableWebSockets in a doubly linked-list.
+  std::list<kj::Own<HibernatableWebSocket>> allWs;
 
-  kj::Own<Worker::Actor::Loopback> loopback;
   // Used to obtain the worker so we can dispatch Hibernatable websocket events.
+  kj::Own<Worker::Actor::Loopback> loopback;
 
-  uint16_t hibernationEventType;
   // Passed to HibernatableWebSocket custom event as the typeId.
+  uint16_t hibernationEventType;
 
-  kj::HashMap<kj::String, HibernatableWebSocket*> webSocketsForEventHandler;
   // A map of { ID -> HibernatableWebSocket } that allows the event handler that is currently
   // running to access the HibernatableWebSocket that it needs to execute.
   //
@@ -197,15 +200,16 @@ private:
   // around the same time. Suppose there are two websockets that disconnect at the same time.
   // It is possible that both of them will be added to the map (i.e. their `receive()`
   // will throw) before the first event is dispatched and manages to obtain its associated websocket.
+  kj::HashMap<kj::String, HibernatableWebSocket*> webSocketsForEventHandler;
 
-  const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
   // The maximum number of Hibernatable WebSocket connections a single HibernationManagerImpl
   // instance can manage.
+  const size_t ACTIVE_CONNECTION_LIMIT = 1024 * 32;
 
   class DisconnectHandler: public kj::TaskSet::ErrorHandler {
   public:
-    void taskFailed(kj::Exception&& exception) override {};
     // We don't need to do anything here; we already handle disconnects in the callee of readLoop().
+    void taskFailed(kj::Exception&& exception) override {};
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;

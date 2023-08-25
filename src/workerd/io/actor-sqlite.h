@@ -9,9 +9,8 @@
 
 namespace workerd {
 
+// An implementation of ActorCacheOps that is backed by SqliteKv.
 class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorHandler {
-  // An implementation of ActorCacheOps that is backed by SqliteKv.
-  //
   // TODO(perf): This interface is not designed ideally for wrapping SqliteKv. In particular, we
   //   end up allocating extra copies of all the results. It would be nicer if we could actually
   //   parse the V8-serialized values directly from the blob pointers that SQLite spits out.
@@ -19,10 +18,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   //   here is easier and not too costly.
 
 public:
+  // Hooks to configure ActorSqlite behavior, right now only used to allow plugging in a backend
+  // for alarm operations.
   class Hooks {
-    // Hooks to configure ActorSqlite behavior, right now only used to allow plugging in a backend
-    // for alarm operations.
-
   public:
     virtual kj::Promise<kj::Maybe<kj::Date>> getAlarm();
     virtual kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime);
@@ -32,9 +30,6 @@ public:
     static Hooks DEFAULT;
   };
 
-  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
-                       kj::Function<kj::Promise<void>()> commitCallback,
-                       Hooks& hooks = Hooks::DEFAULT);
   // Constructs ActorSqlite, arranging to honor the output gate, that is, any writes to the
   // database which occur without any `await`s in between will automatically be combined into a
   // single atomic write. This is accomplished using transactions. In addition to ensuring
@@ -44,6 +39,9 @@ public:
   // `commitCallback` will be invoked after committing a transaction. The output gate will block on
   // the returned promise. This can be used e.g. when the database needs to be replicated to other
   // machines before being considered durable.
+  explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam, OutputGate& outputGate,
+                       kj::Function<kj::Promise<void>()> commitCallback,
+                       Hooks& hooks = Hooks::DEFAULT);
 
   bool isCommitScheduled() { return !currentTxn.is<NoTxn>(); }
 
@@ -141,7 +139,6 @@ private:
     void rollbackImpl();
   };
 
-  kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
   // When set to NoTxn, there is no transaction outstanding.
   //
   // When set to `ImplicitTxn*`, an implicit transaction is currently open, owned by `commitTasks`.
@@ -150,6 +147,7 @@ private:
   //
   // When set to `ExplicitTxn*`, an explicit transaction is currently open, so no implicit
   // transactions should be used in the meantime.
+  kj::OneOf<NoTxn, ImplicitTxn*, ExplicitTxn*> currentTxn = NoTxn();
 
   kj::TaskSet commitTasks;
 
