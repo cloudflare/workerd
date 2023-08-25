@@ -54,3 +54,9 @@ wd_cc_benchmark(
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
+
+wd_cc_benchmark(
+    name = "bench-global-scope",
+    srcs = ["bench-global-scope.c++"],
+    deps = [":test-fixture"],
+)
