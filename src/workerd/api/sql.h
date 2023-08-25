@@ -116,7 +116,7 @@ public:
   // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
   // JSG, which does not need to make a copy.
 
-  using RowDict = jsg::Dict<Value, v8::Local<v8::String>>;
+  using RowDict = jsg::Dict<Value, jsg::JsString>;
   JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
   JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
 

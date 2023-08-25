@@ -720,7 +720,7 @@ public:
   // We do not implement support for the keepalive option but we do want to at least provide
   // the standard property, hard-coded to always be false.
 
-  // v8::Local<v8::Value> getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
   // TODO(conform): Might implement?
   // The duplex option controls whether or not a fetch is expected to send the entire request
   // before processing the response. The default value ("half"), which is currently the only
@@ -729,8 +729,8 @@ public:
   // we support. Once "full" is added, we need to update this to accept either undefined or
   // "full", and possibly decide if we want to support the "half" option.
 
-  // v8::Local<v8::Value> getMode(jsg::Lock& js) { return js.v8Undefined(); }
-  // v8::Local<v8::Value> getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getMode(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getCredentials(jsg::Lock& js) { return js.v8Undefined(); }
   // TODO(conform): Won't implement?
   // These relate to CORS support, which we do not implement. In the
   // Request initializer we will explicitly throw if any attempt is
@@ -742,7 +742,7 @@ public:
   // with other implementers with the same issues, it was decided that
   // simply returning undefined for these was the best option.
 
-  // v8::Local<v8::Value> getCache(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getCache(jsg::Lock& js) { return js.v8Undefined(); }
   // TODO(conform): Won't implement?
   // The cache mode determines how HTTP cache is used with the request.
   // We currently do not fully implement this. Currently we will explicitly
@@ -918,7 +918,7 @@ public:
 
   static jsg::Ref<Response> json_(
       jsg::Lock& js,
-      v8::Local<v8::Value> any,
+      jsg::JsValue any,
       jsg::Optional<Initializer> maybeInit);
 
   struct SendOptions {
@@ -942,7 +942,7 @@ public:
   jsg::Optional<v8::Local<v8::Object>> getCf(const v8::PropertyCallbackInfo<v8::Value>& info);
   // Returns the `cf` field containing Cloudflare feature flags.
 
-  // v8::Local<v8::Value> getType(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getType(jsg::Lock& js) { return js.v8Undefined(); }
   // TODO(conform): Won't implement?
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was
