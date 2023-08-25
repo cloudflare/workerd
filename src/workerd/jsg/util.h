@@ -19,6 +19,14 @@ namespace workerd::jsg {
 
 typedef unsigned int uint;
 
+// When a C++ callback wishes to throw a JavaScript exception, it should first call
+// isolate->ThrowException() to set the JavaScript error value, then it should throw
+// JsExceptionThrown() as a C++ exception. This will be caught by the callback glue before the
+// code returns to V8.
+//
+// This differs from the usual convention in V8 which is to return a v8::Maybe that is null in the
+// case an exception is thrown. Writing code that deals with maybes is cumbersome and error-prone
+// compared to C++ exceptions.
 class JsExceptionThrown: public std::exception {
 public:
   JsExceptionThrown();
@@ -29,14 +37,6 @@ private:
   kj::ArrayPtr<void* const> tracePtr;
   mutable kj::String whatBuffer;
 };
-// When a C++ callback wishes to throw a JavaScript exception, it should first call
-// isolate->ThrowException() to set the JavaScript error value, then it should throw
-// JsExceptionThrown() as a C++ exception. This will be caught by the callback glue before the
-// code returns to V8.
-//
-// This differs from the usual convention in V8 which is to return a v8::Maybe that is null in the
-// case an exception is thrown. Writing code that deals with maybes is cumbersome and error-prone
-// compared to C++ exceptions.
 
 bool getCaptureThrowsAsRejections(v8::Isolate* isolate);
 bool getCommonJsExportDefault(v8::Isolate* isolate);
@@ -44,15 +44,21 @@ bool getCommonJsExportDefault(v8::Isolate* isolate);
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
+v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
-void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
-void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+// Creates a JavaScript error that obfuscates the exception details, while logging the full details
+// to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
+// but instead return the original reconstructed JavaScript exception.
+v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+
 // calls makeInternalError() and then tells the isolate to throw it.
+void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
+
+// calls makeInternalError() and then tells the isolate to throw it.
+void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
 
 struct TypeErrorContext {
   enum Kind: uint8_t {
@@ -116,33 +122,39 @@ struct TypeErrorContext {
   }
 };
 
+// Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
+// of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(v8::Isolate* isolate,
     TypeErrorContext errorContext, const char* expectedType);
+
+// Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
+// of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(v8::Isolate* isolate,
     TypeErrorContext errorContext, const std::type_info& expectedType);
+
+// Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
+// of type JsExceptionThrown, which will be caught by liftKj().
 [[noreturn]] void throwTypeError(v8::Isolate* isolate,
     TypeErrorContext errorContext,
     kj::String expectedType);
-// Throw a JavaScript exception indicating an argument type error, and then throw a C++ exception
-// of type JsExceptionThrown, which will be caught by liftKj().
 
-[[noreturn]] void throwTypeError(v8::Isolate* isolate, kj::StringPtr message);
 // Throw a JavaScript TypeError with a free-form message.
+[[noreturn]] void throwTypeError(v8::Isolate* isolate, kj::StringPtr message);
 
-void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 // Callback used when attempting to construct a type that can't be constructed from JavaScript.
+void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 
 kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message);
 
-kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
 // Given a JavaScript exception, returns a KJ exception that contains a tunneled exception type that
 // can be converted back to JavaScript via makeInternalError().
+kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
 
-[[noreturn]] void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
 // Given a JavaScript exception, throw a KJ exception that contains a tunneled exception type that
 // can be converted back to JavaScript via makeInternalError().
 //
 // Equivalent to throwing the exception returned by `createTunneledException(exception)`.
+[[noreturn]] void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
 
 template <typename T>
 v8::Local<T> check(v8::MaybeLocal<T> maybe) {
@@ -166,32 +178,35 @@ T check(v8::Maybe<T> maybe) {
   }
 }
 
-kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer);
-kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView);
 // View the contents of the given v8::ArrayBuffer/ArrayBufferView as an ArrayPtr<byte>.
+kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBuffer> arrayBuffer);
 
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
+// View the contents of the given v8::ArrayBuffer/ArrayBufferView as an ArrayPtr<byte>.
+kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView);
+
 // Freeze the given object and all its members, making it recursively immutable.
 //
 // WARNING: This function is unsafe to call on user-provided content since if the value is cyclic
 //   or may contain non-simple values it won't do the right thing. It is safe to call this on the
 //   output of JSON.parse().
 // TODO(cleanup): Maybe replace this with a function that parses and freezes JSON in one step.
+void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
 
-v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
 // Make a deep clone of the given object.
+v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
 
+// Make a JavaScript String in v8's Heap.
+//
+// The type T of kj::Array<T> will determine the specific type of v8 string that is created:
+// * When T is const char, the kj::Array<T> is interpreted as UTF-8.
+// * When T is char16_t, the kj::Array<T> is interpreted as UTF-16.
+//
 // TODO(cleanup): Call sites should migrate to the new js.str(...) variants on jsg::Lock
 // rather than calling v8Str directly. Once the migration is a big further along, v8Str
 // and it's variants will be explicitly marked deprecated.
 template <typename T>
 v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
            v8::NewStringType newType = v8::NewStringType::kNormal) {
-  // Make a JavaScript String in v8's Heap.
-  //
-  // The type T of kj::Array<T> will determine the specific type of v8 string that is created:
-  // * When T is const char, the kj::Array<T> is interpreted as UTF-8.
-  // * When T is char16_t, the kj::Array<T> is interpreted as UTF-16.
   if constexpr (kj::isSameType<char16_t, T>()) {
     return check(v8::String::NewFromTwoByte(
         isolate,
@@ -215,17 +230,17 @@ v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::ArrayPtr<T> ptr,
   }
 }
 
+// Make a JavaScript String in v8's Heap with the kj::StringPtr interpreted as UTF-8.
 inline v8::Local<v8::String> v8Str(v8::Isolate* isolate, kj::StringPtr str,
            v8::NewStringType newType = v8::NewStringType::kNormal) {
-  // Make a JavaScript String in v8's Heap with the kj::StringPtr interpreted as UTF-8.
   return v8Str(isolate, str.asArray(), newType);
 }
 
+// Make a JavaScript String in v8's Heap with the kj::ArrayPtr interpreted as Latin1.
 inline v8::Local<v8::String> v8StrFromLatin1(
     v8::Isolate* isolate,
     kj::ArrayPtr<const kj::byte> ptr,
     v8::NewStringType newType = v8::NewStringType::kNormal) {
-  // Make a JavaScript String in v8's Heap with the kj::ArrayPtr interpreted as Latin1.
   return check(v8::String::NewFromOneByte(isolate, ptr.begin(), newType, ptr.size()));
 }
 
@@ -332,24 +347,23 @@ struct LiftKj_<v8::Local<v8::Promise>> {
   }
 };
 
+// Lifts KJ code into V8 code: Catches exceptions and manages HandleScope. Converts the
+// function's return value into the appropriate V8 return.
+//
+// liftKj() translates certain KJ exceptions thrown into JS exceptions. KJ exceptions opt into
+// this behavior by suffixing their description strings with "jsg.SomeError", followed by an
+// optional colon, optional whitespace, and a message which will be exposed to the user.
+// In the example "jsg.SomeError", "SomeError" must be a specific recognized string:
+// "RangeError", "TypeError", or "DOMException(name)", where `name` is the "error name" of the
+// DOMException you wish to throw.
+//
+// The DOMException error name will typically be dictated by the spec governing the API you are
+// implementing. While it can be any string without a closing parenthesis as far as JSG is
+// concerned, it will likely be one of the ones listed here:
+//
+// https://heycam.github.io/webidl/#dfn-error-names-table
 template <typename Info, typename Func>
 void liftKj(const Info& info, Func&& func) {
-  // Lifts KJ code into V8 code: Catches exceptions and manages HandleScope. Converts the
-  // function's return value into the appropriate V8 return.
-  //
-  // liftKj() translates certain KJ exceptions thrown into JS exceptions. KJ exceptions opt into
-  // this behavior by suffixing their description strings with "jsg.SomeError", followed by an
-  // optional colon, optional whitespace, and a message which will be exposed to the user.
-  // In the example "jsg.SomeError", "SomeError" must be a specific recognized string:
-  // "RangeError", "TypeError", or "DOMException(name)", where `name` is the "error name" of the
-  // DOMException you wish to throw.
-  //
-  // The DOMException error name will typically be dictated by the spec governing the API you are
-  // implementing. While it can be any string without a closing parenthesis as far as JSG is
-  // concerned, it will likely be one of the ones listed here:
-  //
-  // https://heycam.github.io/webidl/#dfn-error-names-table
-
   LiftKj_<decltype(func())>::apply(info, kj::fwd<Func>(func));
 }
 
@@ -371,21 +385,23 @@ struct Detector<Default, kj::VoidSfinae<Op<Args...>>, Op, Args...> {
 
 }  // namespace _ (private)
 
+// A typedef for `Op<Args...>` if that template is instantiable, otherwise `Default`.
 template <typename Default, template <typename...> class Op, typename... Args>
 using DetectedOr = typename _::Detector<Default, void, Op, Args...>::Type;
-// A typedef for `Op<Args...>` if that template is instantiable, otherwise `Default`.
 
-template <template <typename...> class Op, typename... Args>
-constexpr bool isDetected() { return _::Detector<_::NoneDetected, void, Op, Args...>::value; }
 // True if Op<Args...> is instantiable, false otherwise. This is basically the same as
 // std::experimental::is_detected from the library fundamentals TS v2.
 //   http://en.cppreference.com/w/cpp/experimental/is_detected
 //
+template <template <typename...> class Op, typename... Args>
+constexpr bool isDetected() { return _::Detector<_::NoneDetected, void, Op, Args...>::value; }
 // TODO(cleanup): Should live in kj?
 
-template <typename Arg> auto getParameterType(void (*)(Arg)) -> Arg;
-template <typename T> using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
 // SFINAE-friendly accessor for a resource type's configuration parameter.
+template <typename Arg> auto getParameterType(void (*)(Arg)) -> Arg;
+
+// SFINAE-friendly accessor for a resource type's configuration parameter.
+template <typename T> using GetConfiguration = decltype(getParameterType(&T::jsgConfiguration));
 
 v8::Local<v8::Value> makeDOMException(
     v8::Isolate* isolate,
@@ -400,8 +416,6 @@ inline bool isFinite(double value) {
 
 class Lock;
 
-v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
-v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
 // Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
 // take ownership of the buf. The buf *must* point to a static constant with infinite
 // lifetime.
@@ -414,22 +428,36 @@ v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint
 // Note that these intentionally do not use the v8Str naming convention like the other
 // string methods because it needs to be absolutely clear that these use external buffers
 // that are not owned by the v8 heap.
+v8::Local<v8::String> newExternalOneByteString(Lock& js, kj::ArrayPtr<const char> buf);
 
-struct Unimplemented {};
+// Creates v8 Strings from buffers not on the v8 heap. These do not copy and do not
+// take ownership of the buf. The buf *must* point to a static constant with infinite
+// lifetime.
+//
+// It is important to understand that the OneByteString variant will interpret buf as
+// latin-1 rather than UTF-8, which is how KJ normally represents text. There is no
+// variation of external strings that support UTF-8 encoded bytes. To represent any
+// text outside of the Latin1 range, the two-byte (uint16_t) variant must be used.
+//
+// Note that these intentionally do not use the v8Str naming convention like the other
+// string methods because it needs to be absolutely clear that these use external buffers
+// that are not owned by the v8 heap.
+v8::Local<v8::String> newExternalTwoByteString(Lock& js, kj::ArrayPtr<const uint16_t> buf);
+
 // Use this type to mark APIs that are not implemented. Attempts to use the API will throw an
 // exception.
 // - Use Unimplemented as a method parameter type or struct field type to mark that
 //   parameter/field unimplemented; only the value `undefined` will be allowed.
 // - Use Unimplemented as the return type of a method to mark the whole method unimplemented.
 //   Have the method body simply return `Unimplemented()`.
-//
+struct Unimplemented {};
 // TODO(someday): We should consider making it easier for people to probe features by doing
 //   `if (obj.someMember)`. Currently this check would pass for methods and would throw an
 //   exception for properties. Is it possible for us to hook into the V8 feature where there are
 //   special values of `undefined` that augment the error message thrown if they are used?
 
-using WontImplement = Unimplemented;
 // Use to mark APIs that are not just unimplemented, but that we don't plan to implement, e.g.
 // standard ServiceWorker APIs that don't make sense for Workers.
+using WontImplement = Unimplemented;
 
 }  // namespace workerd::jsg

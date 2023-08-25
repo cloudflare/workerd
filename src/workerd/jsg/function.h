@@ -86,13 +86,12 @@ struct FunctorCallback<TypeWrapper, Ret(Args...), kj::_::Indexes<indexes...>> {
   }
 };
 
+// Specialization for functions that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
+// second parameter (after Lock&).
 template <typename TypeWrapper, typename Ret, typename... Args, size_t... indexes>
 struct FunctorCallback<TypeWrapper,
                        Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...),
                        kj::_::Indexes<indexes...>> {
-  // Specialization for functions that take `const v8::FunctionCallbackInfo<v8::Value>&` as their
-  // second parameter (after Lock&).
-
   static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     liftKj(args, [&]() {
       auto isolate = args.GetIsolate();
@@ -121,35 +120,35 @@ class Function<Ret(Args...)> {
 public:
   using NativeFunction = jsg::WrappableFunction<Ret(Args...)>;
 
+  // When holding a JavaScript function, `Wrapper` is a C++ function that will handle converting
+  // C++ arguments into JavaScript values and then call the JS function.
   typedef Ret Wrapper(
       jsg::Lock& js,
       v8::Local<v8::Value> receiver,  // the `this` value in the function
       v8::Local<v8::Function> fn,
       Args...);
-  // When holding a JavaScript function, `Wrapper` is a C++ function that will handle converting
-  // C++ arguments into JavaScript values and then call the JS function.
 
   Function(Wrapper* wrapper, V8Ref<v8::Object> receiver, V8Ref<v8::Function> function)
       : Function(wrapper,
                  receiver.cast<v8::Value>(Lock::from(v8::Isolate::GetCurrent())),
                  kj::mv(function)) {}
 
+  // Construct jsg::Function wrapping a JavaScript function.
   Function(Wrapper* wrapper, Value receiver, V8Ref<v8::Function> function)
       : impl(JsImpl {
           .wrapper = kj::mv(wrapper),
           .receiver = kj::mv(receiver),
           .handle = kj::mv(function)
         }) {}
-  // Construct jsg::Function wrapping a JavaScript function.
 
+  // Construct jsg::Function wrapping a C++ function. The parameter can be a lambda or anything
+  // else with operator() with a compatible signature. If the parameter has a visitForGc(GcVisitor&)
+  // method, then GC visitation will be arranged.
   template <typename Func, typename =
       decltype(kj::instance<Func>()(kj::instance<Lock&>(), kj::instance<Args>()...))>
   Function(Func&& func)
       : impl(Ref<NativeFunction>(
           alloc<WrappableFunctionImpl<Ret(Args...), Func>>(kj::fwd<Func>(func)))) {}
-  // Construct jsg::Function wrapping a C++ function. The parameter can be a lambda or anything
-  // else with operator() with a compatible signature. If the parameter has a visitForGc(GcVisitor&)
-  // method, then GC visitation will be arranged.
 
   Function(Function&&) = default;
   Function& operator=(Function&&) = default;
@@ -168,15 +167,14 @@ public:
     __builtin_unreachable();
   }
 
+  // Get a handle to the underlying function. If this is a native funciton,
+  // `makeNativeWrapper(Ref<Func>&)` is called to create the wrapper.
+  //
+  // Only the `FunctionWrapper` TypeWrapper mixin should call this. Anyone else needs to call
+  // `tryGetHandle()`.
   template <typename MakeNativeWrapperFunc>
   v8::Local<v8::Function> getOrCreateHandle(v8::Isolate* isolate,
       MakeNativeWrapperFunc&& makeNativeWrapper) {
-    // Get a handle to the underlying function. If this is a native funciton,
-    // `makeNativeWrapper(Ref<Func>&)` is called to create the wrapper.
-    //
-    // Only the `FunctionWrapper` TypeWrapper mixin should call this. Anyone else needs to call
-    // `tryGetHandle()`.
-
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         return makeNativeWrapper(native);
@@ -188,9 +186,8 @@ public:
     __builtin_unreachable();
   }
 
+  // Like getHandle() but if there's no wrapper yet, returns null.
   kj::Maybe<v8::Local<v8::Function>> tryGetHandle(v8::Isolate* isolate) {
-    // Like getHandle() but if there's no wrapper yet, returns null.
-
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
         return nullptr;
@@ -272,13 +269,13 @@ struct MethodSignature_<Ret (T::*)(Lock&, Args...) const> {
   using Type = Ret(Args...);
 };
 
+// Extracts a function signature from a method type.
 template <typename Method>
 using MethodSignature = typename MethodSignature_<Method>::Type;
-// Extracts a function signature from a method type.
 
+// TypeWrapper mixin for functions / lambdas.
 template <typename TypeWrapper>
 class FunctionWrapper {
-  // TypeWrapper mixin for functions / lambdas.
 
 public:
   template <typename Func, typename = decltype(&kj::Decay<Func>::operator())>

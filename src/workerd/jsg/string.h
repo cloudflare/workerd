@@ -151,8 +151,9 @@ class UsvStringBuilder;
 // Keep in mind that the lifetime of the jsg::UsvStringPtr is bound to it's parent
 // jsg::UsvString.
 
+
+// Iterates over the 32-bit unicode codepoints in a UsvString or UsvStringPtr
 class UsvStringIterator {
-  // Iterates over the 32-bit unicode codepoints in a UsvString or UsvStringPtr
 public:
   uint32_t operator* () const;
 
@@ -188,12 +189,12 @@ public:
     return pos == other.pos;
   }
 
-  inline size_t position() const { return pos; }
   // Informational. Identifies the iterators current codepoint position.
   // When position() == size(), this iterator has reached the end.
+  inline size_t position() const { return pos; }
 
-  inline size_t size() const { return ptr.size(); }
   // Informational. Identifies the maximum number of codepoints.
+  inline size_t size() const { return ptr.size(); }
 
 private:
   explicit inline UsvStringIterator(kj::ArrayPtr<uint32_t> ptr, size_t pos) : ptr(ptr), pos(pos) {}
@@ -205,28 +206,28 @@ private:
   friend class UsvString;
 };
 
+// A humble pointer to a UsvString.
+// Shares the same underlying storage as the UsvString.
 class UsvStringPtr: public kj::DisallowConstCopy {
-  // A humble pointer to a UsvString.
-  // Shares the same underlying storage as the UsvString.
 public:
   UsvStringPtr(UsvStringPtr&&) = default;
   UsvStringPtr& operator=(UsvStringPtr&&) = default;
   UsvStringPtr(UsvStringPtr&) = default;
   UsvStringPtr& operator=(UsvStringPtr&) = default;
 
-  kj::String toStr() KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvStringPtr as a UTF-8 encoded kj::String.
+  kj::String toStr() KJ_WARN_UNUSED_RESULT;
 
   const kj::String toStr() const KJ_WARN_UNUSED_RESULT;
 
+  // Return a copy of this UsvStringPtr as an array of UTF-16 code units.
   kj::Array<uint16_t> toUtf16() KJ_WARN_UNUSED_RESULT;
-  // Return a copy of this UsvStringPtr as an array of UTF-16 code units.
 
+  // Return a copy of this UsvStringPtr as an array of UTF-16 code units.
   const kj::Array<const uint16_t> toUtf16() const KJ_WARN_UNUSED_RESULT;
-  // Return a copy of this UsvStringPtr as an array of UTF-16 code units.
 
-  UsvString clone() KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvStringPtr.
+  UsvString clone() KJ_WARN_UNUSED_RESULT;
 
   uint32_t getCodepointAt(size_t index) const;
   uint32_t operator[](size_t index) const { return getCodepointAt(index); }
@@ -240,11 +241,11 @@ public:
   std::weak_ordering operator<=>(UsvString& other);
   std::weak_ordering operator<=>(UsvStringPtr& other);
 
-  inline uint32_t first() const { return getCodepointAt(0); }
   // Returns the first Unicode codepoint in the sequence.
+  inline uint32_t first() const { return getCodepointAt(0); }
 
-  inline uint32_t last() const { return getCodepointAt(size() - 1); }
   // Returns the last Unicode codepoint in the sequence.
+  inline uint32_t last() const { return getCodepointAt(size() - 1); }
 
   kj::Maybe<size_t> lastIndexOf(uint32_t codepoint);
 
@@ -255,13 +256,13 @@ public:
     return UsvStringIterator(ptr, size());
   }
 
-  inline size_t size() const { return ptr.size(); }
   // Returns the counted number of unicode codepoints in the string.
+  inline size_t size() const { return ptr.size(); }
 
   inline bool empty() const { return size() == 0; }
 
-  inline kj::ArrayPtr<uint32_t> storage() KJ_LIFETIMEBOUND { return ptr; }
   // Informational. Returns a pointer to the underlying storage.
+  inline kj::ArrayPtr<uint32_t> storage() KJ_LIFETIMEBOUND { return ptr; }
 
   inline const kj::ArrayPtr<const uint32_t> storage() const KJ_LIFETIMEBOUND { return ptr; }
 
@@ -283,40 +284,41 @@ private:
   friend class UsvStringBuilder;
 };
 
+
+// A sequence of Unicode Codepoints (a.k.a Unicode scalar values).
+// Unpaired surrogate codepoints are automatically converted into
+// the standard 0xFFFD replacement character on creation.
+//
+// Internally, a UsvString is an array of 2-byte code units.
+// Every Unicode codepoint is represented by either one or two
+// code units each.
 class UsvString {
-  // A sequence of Unicode Codepoints (a.k.a Unicode scalar values).
-  // Unpaired surrogate codepoints are automatically converted into
-  // the standard 0xFFFD replacement character on creation.
-  //
-  // Internally, a UsvString is an array of 2-byte code units.
-  // Every Unicode codepoint is represented by either one or two
-  // code units each.
 public:
   UsvString() = default;
 
-  UsvString(kj::Array<uint32_t> buffer) : buffer(kj::mv(buffer)) {}
   // Takes over ownership of the array of unicode code units. Specifically,
   // does not copy or heap allocate anything. The number of Unicode codepoints
   // will be calculated.
+  UsvString(kj::Array<uint32_t> buffer) : buffer(kj::mv(buffer)) {}
 
   UsvString(UsvString&& other) = default;
   UsvString& operator=(UsvString&& other) = default;
 
   KJ_DISALLOW_COPY(UsvString);
 
-  UsvString clone() KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvString.
+  UsvString clone() KJ_WARN_UNUSED_RESULT;
 
-  kj::String toStr() KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvString as a UTF-8 encoded kj::String.
+  kj::String toStr() KJ_WARN_UNUSED_RESULT;
 
   const kj::String toStr() const KJ_WARN_UNUSED_RESULT;
 
+  // Return a copy of this UsvString as an array of UTF-16 code units.
   kj::Array<uint16_t> toUtf16() KJ_WARN_UNUSED_RESULT;
-  // Return a copy of this UsvString as an array of UTF-16 code units.
 
-  const kj::Array<const uint16_t> toUtf16() const KJ_WARN_UNUSED_RESULT;
   // Return a copy of this UsvString as an array of UTF-16 code units.
+  const kj::Array<const uint16_t> toUtf16() const KJ_WARN_UNUSED_RESULT;
 
   inline operator UsvStringPtr() KJ_LIFETIMEBOUND { return UsvStringPtr(buffer); }
   inline UsvStringPtr asPtr() KJ_LIFETIMEBOUND { return UsvStringPtr(*this); }
@@ -333,11 +335,11 @@ public:
   std::weak_ordering operator<=>(UsvString& other);
   std::weak_ordering operator<=>(UsvStringPtr& other);
 
-  inline uint32_t first() const { return getCodepointAt(0); }
   // Returns the first Unicode codepoint in the sequence.
+  inline uint32_t first() const { return getCodepointAt(0); }
 
-  inline uint32_t last() const { return getCodepointAt(size() - 1); }
   // Returns the last Unicode codepoint in the sequence.
+  inline uint32_t last() const { return getCodepointAt(size() - 1); }
 
   kj::Maybe<size_t> lastIndexOf(uint32_t codepoint);
 
@@ -348,13 +350,13 @@ public:
     return UsvStringIterator(buffer, size());
   }
 
-  inline size_t size() const { return buffer.size(); }
   // Returns the counted number of unicode codepoints in the string.
+  inline size_t size() const { return buffer.size(); }
 
   inline bool empty() const { return size() == 0; }
 
-  inline kj::ArrayPtr<uint32_t> storage() KJ_LIFETIMEBOUND { return buffer; }
   // Informational. Returns a pointer to the underlying storage.
+  inline kj::ArrayPtr<uint32_t> storage() KJ_LIFETIMEBOUND { return buffer; }
 
   inline const kj::ArrayPtr<const uint32_t> storage() const KJ_LIFETIMEBOUND { return buffer; }
 
@@ -376,37 +378,37 @@ private:
 
 inline KJ_WARN_UNUSED_RESULT UsvString usv() { return UsvString(); }
 
-KJ_WARN_UNUSED_RESULT UsvString usv(kj::ArrayPtr<const char> string);
 // Make a UsvString from a kj::StringPtr (assumed to by UTF-8 encoded)
 // reinterpreted as a sequence of UTF-16 Unicode code units. The underlying
 // storage of utf16_t code units will be heap allocated.
+KJ_WARN_UNUSED_RESULT UsvString usv(kj::ArrayPtr<const char> string);
 
 inline KJ_WARN_UNUSED_RESULT UsvString usv(UsvString&& other) { return kj::mv(other); }
 inline KJ_WARN_UNUSED_RESULT UsvString usv(UsvStringPtr other) { return other.clone(); }
 
-inline KJ_WARN_UNUSED_RESULT UsvString usv(const char* string) {
-  return usv(kj::toCharSequence(string));
-}
 // Make a UsvString from a string literal (assumed to be UTF-8 encoded)
 // reinterpretd as a sequence of UTF-16 Unicode code units. The underlying
 // storage of utf16_t code units will be heap allocated.
+inline KJ_WARN_UNUSED_RESULT UsvString usv(const char* string) {
+  return usv(kj::toCharSequence(string));
+}
 
 KJ_WARN_UNUSED_RESULT UsvString usv(kj::ArrayPtr<uint16_t> string);
 
-KJ_WARN_UNUSED_RESULT
-UsvString usv(v8::Isolate* isolate, v8::Local<v8::Value> value);
 // Make a UsvString from a JavaScript value reinterpreted first as a string,
 // and then as a sequence of utf16_t Unicode code units. The underlying
 // storage of utf16_t code units will be heap allocated.
+KJ_WARN_UNUSED_RESULT
+UsvString usv(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
+// Make a JavaScript String in v8's Heap from a UsvString.
 KJ_WARN_UNUSED_RESULT
 v8::Local<v8::String> v8Str(v8::Isolate* isolate,
                             UsvStringPtr str,
                             v8::NewStringType newType = v8::NewStringType::kNormal);
-// Make a JavaScript String in v8's Heap from a UsvString.
 
+// Allows incrementally constructing a UsvString.
 class UsvStringBuilder {
-  // Allows incrementally constructing a UsvString.
 public:
   UsvStringBuilder() = default;
   UsvStringBuilder(size_t reservedSize) { reserve(reservedSize); }

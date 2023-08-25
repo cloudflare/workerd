@@ -58,11 +58,10 @@ template <typename Self, typename T, typename FieldWrapperTuple,
           typename Indices = typename FieldWrapperTuple::Indexes>
 class StructWrapper;
 
+// TypeWrapper mixin for struct types (application-defined C++ structs declared with a
+// JSG_STRUCT block).
 template <typename Self, typename T, typename... FieldWrappers, size_t... indices>
 class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices...>> {
-  // TypeWrapper mixin for struct types (application-defined C++ structs declared with a
-  // JSG_STRUCT block).
-
 public:
   static const JsgKind JSG_KIND = JsgKind::STRUCT;
 

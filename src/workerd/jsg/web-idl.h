@@ -26,14 +26,14 @@ constexpr bool isOptional<Optional<T>> = true;
 template <typename T>
 constexpr bool isOptional<LenientOptional<T>> = true;
 
-template <typename... T>
-constexpr size_t nullableTypeCount = 0;
 // Counts the number of Web IDL nullable types (modeled with kj::Maybe in JSG) that exist in
 // `T...`. This variable template is designed to accept unflattened OneOfs -- it will recurse
 // manually through the OneOfs, meaning `nullableTypeCount<Maybe<OneOf<Maybe<U>>>> == 2`.
 //
 // Implements the "number of nullable member types" algorithm defined here:
 // https://heycam.github.io/webidl/#dfn-number-of-nullable-member-types
+template <typename... T>
+constexpr size_t nullableTypeCount = 0;
 
 template <typename T, typename... U>
 constexpr size_t nullableTypeCount<T, U...> = nullableTypeCount<U...>;
@@ -62,25 +62,37 @@ constexpr size_t nullableTypeCount<kj::OneOf<T...>, U...> = nullableTypeCount<T.
 //   with:
 //       `constexpr JsgKind getKind(T*)`
 
+// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT), false otherwise.
 template <typename T, typename = void>
 constexpr bool isDictionaryType = false;
+
+// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT), false otherwise.
 template <typename T>
 constexpr bool isDictionaryType<
     T, kj::VoidSfinae<decltype(T::JSG_KIND)>> = T::JSG_KIND == JsgKind::STRUCT;
-// True if T is a Web IDL dictionary type (modeled with JSG_STRUCT), false otherwise.
 
-template <typename T, typename = void>
-constexpr bool isNonCallbackInterfaceType = false;
-template <typename T>
-constexpr bool isNonCallbackInterfaceType<
-    T, kj::VoidSfinae<decltype(T::JSG_KIND)>> = T::JSG_KIND == JsgKind::RESOURCE;
-template <typename T>
-constexpr bool isNonCallbackInterfaceType<
-    Ref<T>, kj::VoidSfinae<decltype(T::JSG_KIND)>> = T::JSG_KIND == JsgKind::RESOURCE;
 // True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
 //
 // Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
 //   but it's worth knowing that the Web IDL spec considers the two categories distinct.
+template <typename T, typename = void>
+constexpr bool isNonCallbackInterfaceType = false;
+
+// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
+//
+// Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
+//   but it's worth knowing that the Web IDL spec considers the two categories distinct.
+template <typename T>
+constexpr bool isNonCallbackInterfaceType<
+    T, kj::VoidSfinae<decltype(T::JSG_KIND)>> = T::JSG_KIND == JsgKind::RESOURCE;
+
+// True if T is a Web IDL non-callback interface type (modeled with JSG_RESOURCE), false otherwise.
+//
+// Note: This covers Web IDL exception types as well. This doesn't seem to be a problem in practice,
+//   but it's worth knowing that the Web IDL spec considers the two categories distinct.
+template <typename T>
+constexpr bool isNonCallbackInterfaceType<
+    Ref<T>, kj::VoidSfinae<decltype(T::JSG_KIND)>> = T::JSG_KIND == JsgKind::RESOURCE;
 
 template <typename T>
 constexpr bool isBufferSourceType = kj::isSameType<T, kj::Array<kj::byte>>()
@@ -137,11 +149,11 @@ constexpr bool isCallbackFunctionType<kj::Function<T>> = true;
 template <typename T>
 constexpr bool isCallbackFunctionType<Constructor<T>> = true;
 
-template <typename T, typename = void>
-constexpr bool isInterfaceLikeType = isBufferSourceType<T> || isNonCallbackInterfaceType<T>;
 // True if T is a Web IDL buffer source type, exception type, or non-callback interface type. The
 // latter two cases are both modeled with JSG_RESOURCE_TYPE, which is why this trait only has two
 // predicates, rather than three.
+template <typename T, typename = void>
+constexpr bool isInterfaceLikeType = isBufferSourceType<T> || isNonCallbackInterfaceType<T>;
 
 template <typename T>
 constexpr bool isDictionaryLikeType = isDictionaryType<T> || isRecordType<T>;
@@ -157,13 +169,13 @@ template <typename T>
 constexpr bool isSequenceLikeType<Sequence<T>> = true;
 // TODO(soon): And frozen array types.
 
+// True if T is not listed in the table in Web IDL's distinguishable type algorithm:
+// https://heycam.github.io/webidl/#dfn-distinguishable, step 4.
 template <typename T>
 constexpr bool isIndistinguishableType = !(isBooleanType<T> || isNumericType<T> || isStringType<T>
                                            || isObjectType<T> || isSymbolType<T>
                                            || isInterfaceLikeType<T> || isCallbackFunctionType<T>
                                            || isDictionaryLikeType<T> || isSequenceLikeType<T>);
-// True if T is not listed in the table in Web IDL's distinguishable type algorithm:
-// https://heycam.github.io/webidl/#dfn-distinguishable, step 4.
 
 template <typename... T>
 constexpr bool hasDuplicateTypes = false;
@@ -204,8 +216,6 @@ struct Flatten<Traits<T...>, kj::Maybe<U>, V...>   : Flatten<Traits<T...>, U, V.
 template <template <typename...> class Traits, typename... T, typename... U, typename... V>
 struct Flatten<Traits<T...>, kj::OneOf<U...>, V...>: Flatten<Traits<T...>, U..., V...> {};
 
-template <typename... T>
-using FlattenedTypeTraits = Flatten<FlattenedTypeTraits_<>, T...>;
 // Flattens a list of types (recursively unwraps Maybes and OneOfs) and exposes some data about
 // those types: number of dictionary types, whether or not there are duplicate types, presence of
 // indistinguishable types, etc.
@@ -214,12 +224,13 @@ using FlattenedTypeTraits = Flatten<FlattenedTypeTraits_<>, T...>;
 //   flattening: Ref<T> -> T. We do this because JSG has two models for non-callback interface
 //   types: Ref<T> (unwrapped by reference) and T (unwrapped by copy/move). We need to be able to
 //   catch ambiguous OneOfs like `kj::OneOf<Interface, Ref<Interface>>`.
+template <typename... T>
+using FlattenedTypeTraits = Flatten<FlattenedTypeTraits_<>, T...>;
 
+// Instantiate to check that the type T satisfies the constraints on union types prescribed by
+// Web IDL spec: https://heycam.github.io/webidl/#idl-union
 template <typename T>
 struct UnionTypeValidator {
-  // Instantiate to check that the type T satisfies the constraints on union types prescribed by
-  // Web IDL spec: https://heycam.github.io/webidl/#idl-union
-
   using Traits = FlattenedTypeTraits<T>;
 
   static_assert(nullableTypeCount<T> + Traits::dictionaryTypeCount <= 1,

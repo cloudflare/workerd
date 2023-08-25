@@ -18,16 +18,18 @@ struct CompilationObserver {
 
   // Monitors behavior of compilation processes.
 
-  virtual kj::Own<void> onEsmCompilationStart(
-      v8::Isolate* isolate, kj::StringPtr name, Option option) const { return kj::Own<void>(); }
   // Called at the start of module compilation.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during both invocations.
+  virtual kj::Own<void> onEsmCompilationStart(
+      v8::Isolate* isolate, kj::StringPtr name, Option option) const { return kj::Own<void>(); }
 
-  virtual kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const { return kj::Own<void>(); }
   // Called at the start of wasm compilation.
   // Returned value will be destroyed when module compilation finishes.
   // It is guaranteed that isolate lock is held during both invocations.
+  virtual kj::Own<void> onWasmCompilationStart(v8::Isolate* isolate, size_t codeSize) const {
+    return kj::Own<void>();
+  }
 };
 
 

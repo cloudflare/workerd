@@ -35,20 +35,19 @@
 
 namespace workerd::jsg {
 
+// JSG allows DOMExceptions to be tunneled through kj::Exceptions (see makeInternalError() for
+// details). While this feature is activated conditionally at run-time, and thus does not depend
+// on any specific concrete C++ type, JSG needs to be able to unit test the tunneled exception
+// functionality, thus the existence of this implementation.
+//
+// Note that DOMException is currently the only user-defined exception to get this special
+// treatment because it is the only non-builtin JS exception that standard web APIs are allowed to
+// throw, per Web IDL.
+//
+// Users of JSG are free (and encouraged) to use this implementation, but they can also opt into
+// the same tunneled exception feature by defining their own globally-accesible type named
+// "DOMException".
 class DOMException: public Object {
-  // JSG allows DOMExceptions to be tunneled through kj::Exceptions (see makeInternalError() for
-  // details). While this feature is activated conditionally at run-time, and thus does not depend
-  // on any specific concrete C++ type, JSG needs to be able to unit test the tunneled exception
-  // functionality, thus the existence of this implementation.
-  //
-  // Note that DOMException is currently the only user-defined exception to get this special
-  // treatment because it is the only non-builtin JS exception that standard web APIs are allowed to
-  // throw, per Web IDL.
-  //
-  // Users of JSG are free (and encouraged) to use this implementation, but they can also opt into
-  // the same tunneled exception feature by defining their own globally-accesible type named
-  // "DOMException".
-
 public:
   DOMException(kj::String message,
                kj::String name,
@@ -111,9 +110,9 @@ private:
   kj::String message;
   kj::String name;
 
-  V8Ref<v8::Object> errorForStack;
   // We implement the `stack` property in a similarly hacky way as Chrome: store an Error object
   // and use its `stack`.
+  V8Ref<v8::Object> errorForStack;
 
   void visitForGc(GcVisitor& visitor);
 };

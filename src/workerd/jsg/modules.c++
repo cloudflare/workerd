@@ -10,15 +10,15 @@
 namespace workerd::jsg {
 namespace {
 
+// The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
+//
+// Importantly, this is a process-lifetime in-memory cache that is only appropriate for
+// built-in modules.
+//
+// The memory-safety of this cache depends on the assumption that entries are never removed
+// or replaced. If things are ever changed such that entries are removed/replaced, then
+// we'd likely need to have find return an atomic refcount or something similar.
 class CompileCache {
-  // The CompileCache is used to hold cached compilation data for built-in JavaScript modules.
-  //
-  // Importantly, this is a process-lifetime in-memory cache that is only appropriate for
-  // built-in modules.
-  //
-  // The memory-safety of this cache depends on the assumption that entries are never removed
-  // or replaced. If things are ever changed such that entries are removed/replaced, then
-  // we'd likely need to have find return an atomic refcount or something similar.
 public:
   void add(const void* key, std::unique_ptr<v8::ScriptCompiler::CachedData> cached) const {
     cache.lockExclusive()->upsert(key, kj::mv(cached), [](auto&,auto&&) {});
@@ -37,16 +37,15 @@ public:
   }
 
 private:
-  kj::MutexGuarded<kj::HashMap<const void*, std::unique_ptr<v8::ScriptCompiler::CachedData>>> cache;
   // The key is the address of the static global that was compiled to produce the CachedData.
+  kj::MutexGuarded<kj::HashMap<const void*, std::unique_ptr<v8::ScriptCompiler::CachedData>>> cache;
 };
 
+// Implementation of `v8::Module::ResolveCallback`.
 v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
                                            v8::Local<v8::String> specifier,
                                            v8::Local<v8::FixedArray> import_assertions,
                                            v8::Local<v8::Module> referrer) {
-  // Implementation of `v8::Module::ResolveCallback`.
-
   auto& js = jsg::Lock::from(context->GetIsolate());
   v8::MaybeLocal<v8::Module> result;
 
@@ -102,11 +101,11 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   return result;
 }
 
+// Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
+// the exports on a synthetic module. Obnoxiously, you can only initialize the exports in this
+// callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
 v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module) {
-  // Implementation of `v8::Module::SyntheticModuleEvaluationSteps`, which is called to initialize
-  // the exports on a synthetic module. Obnoxiously, you can only initialize the exports in this
-  // callback; V8 will crash if you try to call `SetSyntheticModuleExport()` from anywhere else.
   auto& js = Lock::from(context->GetIsolate());
   v8::EscapableHandleScope scope(js.v8Isolate);
   v8::MaybeLocal<v8::Value> result;

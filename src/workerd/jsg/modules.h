@@ -94,14 +94,14 @@ private:
   kj::String path;
 };
 
+// The NodeJsModuleContext is similar in structure to CommonJsModuleContext
+// with the exception that:
+// (a) Node.js-compat built-in modules can be required without the `node:` specifier-prefix
+//     (meaning that worker-bundle modules whose names conflict with the Node.js built-ins
+//     are ignored), and
+// (b) The common Node.js globals that we implement are exposed. For instance, `process`
+//     and `Buffer` will be found at the global scope.
 class NodeJsModuleContext: public jsg::Object {
-  // The NodeJsModuleContext is similar in structure to CommonJsModuleContext
-  // with the exception that:
-  // (a) Node.js-compat built-in modules can be required without the `node:` specifier-prefix
-  //     (meaning that worker-bundle modules whose names conflict with the Node.js built-ins
-  //     are ignored), and
-  // (b) The common Node.js globals that we implement are exposed. For instance, `process`
-  //     and `Buffer` will be found at the global scope.
 public:
   NodeJsModuleContext(jsg::Lock& js, kj::Path path);
 
@@ -135,8 +135,8 @@ private:
   jsg::Value exports;
 };
 
+// jsg::NonModuleScript wraps a v8::UnboundScript.
 class NonModuleScript {
-  // jsg::NonModuleScript wraps a v8::UnboundScript.
 public:
   NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
       : unboundScript(js.v8Isolate, script) {}
@@ -144,9 +144,9 @@ public:
   NonModuleScript(NonModuleScript&&) = default;
   NonModuleScript& operator=(NonModuleScript&&) = default;
 
-  void run(v8::Local<v8::Context> context) const;
   // Running the script will create a v8::Script instance bound to the given
   // context then will run it to completion.
+  void run(v8::Local<v8::Context> context) const;
 
   static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
 
@@ -157,23 +157,24 @@ private:
 void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
 
 enum class ModuleInfoCompileOption {
-  BUNDLE,
   // The BUNDLE options tells the compile operation to treat the content as coming
   // from a worker bundle.
-  BUILTIN,
+  BUNDLE,
+
   // The BUILTIN option tells the compile operation to treat the content as a builtin
   // module. This implies certain changes in behavior, such as treating the content
   // as an immutable, process-lifetime buffer that will never be destroyed, and caching
   // the compilation data.
+  BUILTIN,
 };
 
 v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
     kj::ArrayPtr<const uint8_t> code,
     const CompilationObserver& observer);
 
+// The ModuleRegistry maintains the collection of modules known to a script that can be
+// required or imported.
 class ModuleRegistry {
-  // The ModuleRegistry maintains the collection of modules known to a script that can be
-  // required or imported.
 public:
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
@@ -340,10 +341,10 @@ public:
                                               const kj::Path& specifier,
                                               const kj::Path& referrer) = 0;
 
-  using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into
   // the callback is called to actually perform the instantiation of the module.
+  using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
 
   virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
 };
@@ -393,15 +394,15 @@ public:
     }
   }
 
+  // Register new module accessible by a given importPath. The module is instantiated
+  // after first resolve attempt within application has failed, i.e. it is possible for
+  // application to override the module.
+  // sourceCode has to exist while this ModuleRegistry exists.
+  // The expectation is for this method to be called during the assembly of worker global context
+  // after registering all user modules.
   void addBuiltinModule(kj::StringPtr specifier,
                         kj::ArrayPtr<const char> sourceCode,
                         Type type = Type::BUILTIN) {
-    // Register new module accessible by a given importPath. The module is instantiated
-    // after first resolve attempt within application has failed, i.e. it is possible for
-    // application to override the module.
-    // sourceCode has to exist while this ModuleRegistry exists.
-    // The expectation is for this method to be called during the assembly of worker global context
-    // after registering all user modules.
     KJ_ASSERT(type != Type::BUNDLE);
     using Key = typename Entry::Key;
 
@@ -548,8 +549,9 @@ private:
 
     kj::Path specifier;
     Type type;
-    Info info;
+
     // Either instantiated module or module source code.
+    Info info;
 
     Entry(const kj::Path& specifier, Type type, ModuleInfo info)
         : specifier(specifier.clone()),
@@ -569,9 +571,8 @@ private:
     Entry(Entry&&) = default;
     Entry& operator=(Entry&&) = default;
 
+    // Lazily instantiate module from source code if needed
     ModuleInfo& module(jsg::Lock& js, CompilationObserver& observer) {
-      // Lazily instantiate module from source code if needed
-
       KJ_SWITCH_ONEOF(info) {
         KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
           return moduleInfo;
