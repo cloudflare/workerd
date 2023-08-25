@@ -52,6 +52,10 @@ compat_dates = [
     # https://developers.cloudflare.com/workers/platform/compatibility-dates/#streams-constructors
     # https://developers.cloudflare.com/workers/platform/compatibility-dates/#compliant-transformstream-constructor
     ("2022-11-30", "2022-11-30"),
+    # https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L275-L280 (http_headers_getsetcookie)
+    ("2023-03-01", "2023-03-01"),
+    # https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L307-L312 (urlsearchparams_delete_has_value_arg)
+    ("2023-07-01", "2023-07-01"),
     # Latest compatibility date (note these types should be the same as the previous entry)
     (None, "experimental"),
 ]
