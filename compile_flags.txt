@@ -2,11 +2,9 @@
 -stdlib=libc++
 -xc++
 -nostdinc
--Ibazel-bin
--Ibazel-bin/external/capnp-cpp/src
 -Ibazel-bin/external/com_googlesource_chromium_base_trace_event_common/_virtual_includes/trace_event_common
 -Ibazel-bin/external/dawn/include
--Iexternal/capnp-cpp/src
+-Ibazel-bin/external/com_cloudflare_lol_html/_virtual_includes/lolhtml
 -Iexternal/com_google_benchmark/include/
 -Iexternal/dawn/include
 -Isrc
@@ -19,9 +17,19 @@
 -isystem/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Kernel.framework/Versions/Current/Headers
 -isystemC:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.35.32215\include
 -isystemc:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\ucrt
+-isystembazel-bin/_virtual_includes/icudata-embed
+-isystembazel-bin/external/capnp-cpp/src
+-isystembazel-bin/external/capnp-cpp/src/capnp/_virtual_includes/capnp
+-isystembazel-bin/external/capnp-cpp/src/capnp/compat/_virtual_includes/http-over-capnp
+-isystembazel-bin/external/capnp-cpp/src/capnp/compat/_virtual_includes/json
+-isystembazel-bin/external/capnp-cpp/src/kj/_virtual_includes/kj
+-isystembazel-bin/external/capnp-cpp/src/kj/_virtual_includes/kj-async
+-isystembazel-bin/external/capnp-cpp/src/kj/compat/_virtual_includes/kj-http
+-isystembazel-bin/external/capnp-cpp/src/kj/compat/_virtual_includes/kj-tls
 -isystembazel-bin/external/v8
 -isystembazel-bin/external/v8/icu
 -isystembazel-bin/src
+-isystembazel-workerd/external/ssl/src/include
 -isystemexternal/brotli/c/include
 -isystemexternal/com_googlesource_chromium_icu/source/common
 -isystemexternal/icu
