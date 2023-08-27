@@ -516,27 +516,16 @@ kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(
     worker = kj::atomicAddRef(context.getWorker());
   }
 
-  static auto constexpr maybeRequestGc = [](auto& worker) {
+  KJ_ON_SCOPE_SUCCESS({
     if (isPredictableModeForTest()) {
       jsg::V8StackScope stackScope;
       auto lock = KJ_ASSERT_NONNULL(worker)->getIsolate().getApiIsolate().lock(stackScope);
       lock->requestGcForTesting();
     }
-  };
+  });
 #endif  // KJ_DEBUG
 
-  if constexpr (kj::isSameType<T, void>()) {
-    co_await promise;
-#ifdef KJ_DEBUG
-    maybeRequestGc(worker);
-#endif  // KJ_DEBUG
-  } else {
-    auto ret = co_await promise;
-#ifdef KJ_DEBUG
-    maybeRequestGc(worker);
-#endif  // KJ_DEBUG
-    co_return kj::mv(ret);
-  }
+  co_return co_await promise;
 }
 
 } // namespace workerd
