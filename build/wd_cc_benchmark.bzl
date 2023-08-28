@@ -25,6 +25,15 @@ def wd_cc_benchmark(
         malloc = "//src/workerd/server:malloc",
         # Only run benchmarks when explicitly requested, at least until we have some more of them
         # and can define a benchmark suite.
-        tags = ["manual", "benchmark"],
+        tags = ["off-by-default", "benchmark"],
         **kwargs
+    )
+
+    # generate benchmark report
+    native.genrule(
+      name = name + "@benchmark.csv",
+      outs = [name + ".benchmark.csv"],
+      srcs = [name],
+      cmd = "./$(location {}) --benchmark_format=csv > \"$@\"".format(name),
+      tags = ["off-by-default", "benchmark_report"],
     )
