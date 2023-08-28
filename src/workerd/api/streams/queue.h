@@ -477,12 +477,17 @@ public:
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {
+        // Technically we shouldn't really have to gc visit the stored error here but there
+        // should not be any harm in doing so.
         visitor.visit(errored);
       }
       KJ_CASE_ONEOF(ready, Ready) {
-        for (auto& req : ready.readRequests) {
-          visitor.visit(req.resolver);
-        }
+          // There's no reason to gc visit the promise resolver or buffer here and it is
+          // potentially problematic if we do. Since the read requests are queued, if we
+          // gc visit it once, remove it from the queue, and gc happens to kick in before
+          // we access the resolver, then v8 could determine that the resolver or buffered
+          // entries are no longer reachable via tracing and free them before we can
+          // actually try to access the held resolver.
       }
     }
   }
