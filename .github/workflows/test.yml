@@ -56,9 +56,9 @@ jobs:
         # Set a custom output dir and disable generating debug information on Windows. By default,
         # bazel generates huge amounts of debug information on Windows which slows down the build
         # and takes up an excessive amount of cache space.
+        #  bazelisk clean --expunge
+        # Remove-Item -Path ~/bazel-disk-cache -Force -Recurse
         run: |
-            bazelisk clean --expunge
-            Remove-Item -Path ~/bazel-disk-cache -Force -Recurse
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
             choco upgrade llvm
