@@ -152,10 +152,14 @@ rules_fuzzing_init()
 # OK, now we can bring in tcmalloc itself.
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "10b1217154c2b432241ded580d6b0e0b01f5d2566b4eeacf2edf937b87683274",
-    strip_prefix = "google-tcmalloc-ca82471",
+    sha256 = "3ce32025566c7134a5705722197f6ceac836a4b30a572d9b4f916a44a819037b",
+    strip_prefix = "google-tcmalloc-36d90dc",
     type = "tgz",
-    url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+    url = "https://github.com/google/tcmalloc/tarball/36d90dcb0520d82b3155d0052c998477e63bf837",
+    patches = [
+        "@workerd//:patches/tcmalloc/0001-count-bytes-allocated-per-thread.patch",
+    ],
+    patch_args = ['-p1'],
 )
 
 # ========================================================================================
