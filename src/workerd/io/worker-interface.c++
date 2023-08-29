@@ -27,7 +27,7 @@ public:
     KJ_IF_MAYBE(w, worker) {
       co_await w->get()->request(method, url, headers, requestBody, response);
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }
@@ -38,7 +38,7 @@ public:
     KJ_IF_MAYBE(w, worker) {
       co_await w->get()->connect(host, headers, connection, response, kj::mv(settings));
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->connect(
           host, headers, connection, response, kj::mv(settings));
     }
@@ -65,7 +65,7 @@ public:
     KJ_IF_MAYBE(w, worker) {
       co_return co_await w->get()->runScheduled(scheduledTime, cron);
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
     }
   }
@@ -74,7 +74,7 @@ public:
     KJ_IF_MAYBE(w, worker) {
       co_return co_await w->get()->runAlarm(scheduledTime);
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
     }
   }
@@ -83,7 +83,7 @@ public:
     KJ_IF_MAYBE(w, worker) {
       co_return co_await w->get()->customEvent(kj::mv(event));
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
     }
   }

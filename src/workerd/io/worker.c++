@@ -1930,7 +1930,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             threadWaitingDifferentLockCount);
       }
       auto newWaiter = kj::refcounted<AsyncWaiter>(kj::atomicAddRef(*this));
-      co_await newWaiter->readyPromise.addBranch();
+      co_await newWaiter->readyPromise;
       co_return AsyncLock(kj::mv(newWaiter), kj::mv(lockTiming));
     } else if (waiter->isolate == this) {
       // Thread is waiting on a lock already, and it's for the same isolate. We can coalesce the
@@ -1941,7 +1941,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
             threadWaitingDifferentLockCount);
       }
       auto newWaiterRef = kj::addRef(*waiter);
-      co_await newWaiterRef->readyPromise.addBranch();
+      co_await newWaiterRef->readyPromise;
       co_return AsyncLock(kj::mv(newWaiterRef), kj::mv(lockTiming));
     } else {
       // Thread is already waiting for or holding a different isolate lock. Wait for that one to
@@ -1951,7 +1951,7 @@ kj::Promise<Worker::AsyncLock> Worker::Isolate::takeAsyncLockImpl(
       KJ_IF_MAYBE(lt, lockTiming) {
         lt->get()->waitingForOtherIsolate(waiter->isolate->getId());
       }
-      co_await waiter->releasePromise.addBranch();
+      co_await waiter->releasePromise;
     }
   }
 }
@@ -2030,7 +2030,7 @@ Worker::AsyncWaiter::~AsyncWaiter() noexcept {
 kj::Promise<void> Worker::AsyncLock::whenThreadIdle() {
   for (;;) {
     if (auto waiter = AsyncWaiter::threadCurrentWaiter; waiter != nullptr) {
-      co_await waiter->releasePromise.addBranch();
+      co_await waiter->releasePromise;
       continue;
     }
 
@@ -3219,7 +3219,7 @@ auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<Schedul
   KJ_IF_MAYBE(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm->scheduledTime == scheduledTime) {
       // The running alarm has the same time, we can just wait for it.
-      auto result = co_await runningAlarm->resultPromise.addBranch();
+      auto result = co_await runningAlarm->resultPromise;
       co_return result;
     }
   }
