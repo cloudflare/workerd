@@ -109,26 +109,24 @@ public:
     JSG_READONLY_PROTOTYPE_PROPERTY(rowsWritten, getRowsWritten);
   }
 
-
-  using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
   // One value returned from SQL. Note that we intentionally return StringPtr instead of String
   // because we know that the underlying buffer returned by SQLite will be valid long enough to be
   // converted by JSG into a V8 string. For byte arrays, on the other hand, we pass ownership to
   // JSG, which does not need to make a copy.
+  using Value = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
 
   using RowDict = jsg::Dict<Value, jsg::JsString>;
   JSG_ITERATOR(RowIterator, rows, RowDict, jsg::Ref<Cursor>, rowIteratorNext);
   JSG_ITERATOR(RawIterator, raw, kj::Array<Value>, jsg::Ref<Cursor>, rawIteratorNext);
 
 private:
+  // Helper class to cache column names for a query so that we don't have to recreate the V8
+  // strings for every row.
   class CachedColumnNames {
-    // Helper class to cache column names for a query so that we don't have to recreate the V8
-    // strings for every row.
-    //
     // TODO(perf): Can we further cache the V8 object layout information for a row?
   public:
-    kj::ArrayPtr<jsg::V8Ref<v8::String>> get() { return KJ_REQUIRE_NONNULL(names); }
     // Get the cached names. ensureInitialized() must have been called previously.
+    kj::ArrayPtr<jsg::V8Ref<v8::String>> get() { return KJ_REQUIRE_NONNULL(names); }
 
     void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
 
@@ -137,12 +135,12 @@ private:
   };
 
   struct State {
+      // Refcount on the SqliteDatabase::Statement underlying the query, if any.
     kj::Own<void> dependency;
-    // Refcount on the SqliteDatabase::Statement underlying the query, if any.
 
-    kj::Array<BindingValue> bindings;
     // The bindings that were used to construct `query`. We have to keep these alive until the query
     // is done since it might contain pointers into strings and blobs.
+    kj::Array<BindingValue> bindings;
 
     SqliteDatabase::Query query;
 
@@ -154,25 +152,27 @@ private:
           kj::StringPtr sqlCode, kj::Array<BindingValue> bindings);
   };
 
-  kj::Maybe<IoOwn<State>> state;
   // Nulled out when query is done or canceled.
+  kj::Maybe<IoOwn<State>> state;
 
-  bool canceled = false;
   // True if the cursor was canceled by a new call to the same statement. This is used only to
   // flag an error if the application tries to reuse the cursor.
+  bool canceled = false;
 
-  kj::Maybe<kj::Maybe<Cursor&>&> selfRef;
   // Reference to a weak reference that might point back to this object. If so, null it out at
   // destruction. Used by Statement to invalidate past cursors when the statement is
   // executed again.
+  kj::Maybe<kj::Maybe<Cursor&>&> selfRef;
 
-  kj::Maybe<jsg::Ref<Statement>> statement;
   // If this cursor was created from a prepared statement, this keeps the statement object alive.
+  kj::Maybe<jsg::Ref<Statement>> statement;
 
-  uint64_t rowsRead = 0;
-  uint64_t rowsWritten = 0;
   // Row IO counts. These are updated as the query runs. We keep these outside the State so they
   // remain available even after the query is done or canceled.
+  uint64_t rowsRead = 0;
+  // Row IO counts. These are updated as the query runs. We keep these outside the State so they
+  // remain available even after the query is done or canceled.
+  uint64_t rowsWritten = 0;
 
   kj::Maybe<CachedColumnNames> ownCachedColumnNames;
   CachedColumnNames& cachedColumnNames;
@@ -207,12 +207,12 @@ public:
 private:
   IoOwn<kj::RefcountedWrapper<SqliteDatabase::Statement>> statement;
 
-  kj::Maybe<Cursor&> currentCursor;
   // Weak reference to the Cursor that is currently using this statement.
+  kj::Maybe<Cursor&> currentCursor;
 
-  Cursor::CachedColumnNames cachedColumnNames;
   // All queries from the same prepared statement have the same column names, so we can cache them
   // on the statement.
+  Cursor::CachedColumnNames cachedColumnNames;
 
   friend class Cursor;
 };

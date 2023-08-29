@@ -58,9 +58,12 @@ using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<kj::byte>,
 
 struct R2Result {
   uint httpStatus;
-  kj::Maybe<kj::Own<R2Error>> toThrow;
+
   // Non-null if httpStatus >= 400.
+  kj::Maybe<kj::Own<R2Error>> toThrow;
+
   kj::Maybe<kj::Array<char>> metadataPayload;
+
   kj::Maybe<kj::Own<workerd::api::ReadableStreamSource>> stream;
 
   bool objectNotFound() {

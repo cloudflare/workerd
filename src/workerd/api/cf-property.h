@@ -10,9 +10,9 @@
 
 namespace workerd::api {
 
+// A holder for Cf header property value.
+// The string header is parsed on demand and the parsed value cached.
 class CfProperty {
-  // A holder for Cf header property value.
-  // The string header is parsed on demand and the parsed value cached.
 
 public:
   KJ_DISALLOW_COPY(CfProperty);
@@ -34,17 +34,17 @@ public:
     }
   }
 
-  jsg::Optional<v8::Local<v8::Object>> get(jsg::Lock& js);
   // Get parsed value
+  jsg::Optional<v8::Local<v8::Object>> get(jsg::Lock& js);
 
-  jsg::Optional<jsg::V8Ref<v8::Object>> getRef(jsg::Lock& js);
   // Get parsed value as a global ref
+  jsg::Optional<jsg::V8Ref<v8::Object>> getRef(jsg::Lock& js);
 
-  kj::Maybe<kj::String> serialize(jsg::Lock& js);
   // Serialize to string
+  kj::Maybe<kj::String> serialize(jsg::Lock& js);
 
-  CfProperty deepClone(jsg::Lock& js);
   // Clone by deep cloning parsed v8 object (if any).
+  CfProperty deepClone(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
 

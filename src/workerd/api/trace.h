@@ -111,16 +111,15 @@ private:
 // TODO(cleanup): Later we can further optimize by creating the JS objects
 // immediately on creation.
 
+// While this class is named FetchEventInfo, it encapsulates both the actual
+// FetchEventInfo as well as the FetchResponseInfo, which is an (optional)
+// sibling field (see worker.capnp). The internal FetchEventInfo (and
+// EventInfo in general) only represents the original event, not any
+// subsequent results such as the HTTP response. Internally, FetchEventInfo is
+// populated as soon as a request comes in, whereas the FetchResponseInfo is
+// only set once the request has finished entirely (along with the outcome,
+// see TraceItem::getOutcome).
 class TraceItem::FetchEventInfo final: public jsg::Object {
-  // While this class is named FetchEventInfo, it encapsulates both the actual
-  // FetchEventInfo as well as the FetchResponseInfo, which is an (optional)
-  // sibling field (see worker.capnp). The internal FetchEventInfo (and
-  // EventInfo in general) only represents the original event, not any
-  // subsequent results such as the HTTP response. Internally, FetchEventInfo is
-  // populated as soon as a request comes in, whereas the FetchResponseInfo is
-  // only set once the request has finished entirely (along with the outcome,
-  // see TraceItem::getOutcome).
-
 public:
   class Request;
   class Response;
@@ -160,8 +159,8 @@ public:
 
   explicit Request(jsg::Lock& js, const Trace& trace, const Trace::FetchEventInfo& eventInfo);
 
-  explicit Request(Detail& detail, bool redacted = true);
   // Creates a possibly unredacted instance that shared a ref of the Detail
+  explicit Request(Detail& detail, bool redacted = true);
 
   jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
   jsg::Dict<jsg::ByteString, jsg::ByteString> getHeaders();

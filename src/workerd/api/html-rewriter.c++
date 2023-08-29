@@ -23,11 +23,10 @@ namespace {
 // =======================================================================================
 // RAII helpers for lol-html
 
+// RAII helper for lol-html types which are managed by pointers and have straightforward _free()
+// functions.
 template <typename T, void (*lolhtmlFree)(T*)>
 class LolHtmlDisposer: public kj::Disposer {
-  // RAII helper for lol-html types which are managed by pointers and have straightforward _free()
-  // functions.
-
 public:
   static const LolHtmlDisposer INSTANCE;
 
@@ -47,14 +46,13 @@ const LolHtmlDisposer<T, lolhtmlFree> LolHtmlDisposer<T, lolhtmlFree>::INSTANCE;
     kj::Own<T>(&check(__VA_ARGS__), LolHtmlDisposer<T, lolhtmlFree>::INSTANCE); \
   })
 
+// RAII helper for lol_html_str_t.
+//
+// We cannot use a kj::Own<T> because lol_html_str_t is a struct, not a pointer, so instead we
+// have this LolString RAII wrapper.
+//
+// Use `kj::str(LolString.asChars())` to allocate your own copy of a LolString.
 class LolString {
-  // RAII helper for lol_html_str_t.
-  //
-  // We cannot use a kj::Own<T> because lol_html_str_t is a struct, not a pointer, so instead we
-  // have this LolString RAII wrapper.
-  //
-  // Use `kj::str(LolString.asChars())` to allocate your own copy of a LolString.
-
 public:
   explicit LolString(lol_html_str_t s): chars(s.data, s.len) {}
   ~LolString() noexcept(false) {
@@ -123,16 +121,15 @@ template <typename T>
   return *ptr;
 }
 
+// Helper function to determine if a content token is still valid. Each content token has an
+// implementation object inside a Maybe -- when HTMLRewriter::TokenScope (defined below)
+// gets destroyed, that Maybe gets nullified, and the content token becomes a dead, useless,
+// JavaScript object occupying space, waiting to get garbage collected.
+//
+// In other words, if you try to access a content token (Element, Text, etc.) outside of a
+// content handler, you're gonna get this exception.
 template <typename T>
 decltype(auto) checkToken(kj::Maybe<T>& impl) {
-  // Helper function to determine if a content token is still valid. Each content token has an
-  // implementation object inside a Maybe -- when HTMLRewriter::TokenScope (defined below)
-  // gets destroyed, that Maybe gets nullified, and the content token becomes a dead, useless,
-  // JavaScript object occupying space, waiting to get garbage collected.
-  //
-  // In other words, if you try to access a content token (Element, Text, etc.) outside of a
-  // content handler, you're gonna get this exception.
-
   return JSG_REQUIRE_NONNULL(impl,
       TypeError, "This content token is no longer valid. Content tokens are only valid "
       "during the execution of the relevant content handler.");
@@ -171,10 +168,11 @@ using ElementCallbackFunction = HTMLRewriter::ElementCallbackFunction;
 struct UnregisteredElementHandlers {
   kj::Own<lol_html_Selector> selector;
 
+  // The actual handler functions. We store them as jsg::Values for compatibility with GcVisitor.
+
   jsg::Optional<ElementCallbackFunction> element;
   jsg::Optional<ElementCallbackFunction> comments;
   jsg::Optional<ElementCallbackFunction> text;
-  // The actual handler functions. We store them as jsg::Values for compatibility with GcVisitor.
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(element, comments, text);
@@ -182,11 +180,13 @@ struct UnregisteredElementHandlers {
 };
 
 struct UnregisteredDocumentHandlers {
+
+  // The actual handler functions. We store them as jsg::Values for compatibility with GcVisitor.
+
   jsg::Optional<ElementCallbackFunction> doctype;
   jsg::Optional<ElementCallbackFunction> comments;
   jsg::Optional<ElementCallbackFunction> text;
   jsg::Optional<ElementCallbackFunction> end;
-  // The actual handler functions. We store them as jsg::Values for compatibility with GcVisitor.
 
   // The `this` object used to call the handler functions.
 
@@ -200,9 +200,8 @@ using UnregisteredElementOrDocumentHandlers =
 
 }  // namespace
 
+// Wrapper around an actual rewriter (streaming parser).
 class Rewriter final: public WritableStreamSink {
-  // Wrapper around an actual rewriter (streaming parser).
-
 public:
   explicit Rewriter(
       jsg::Lock& js,
@@ -221,10 +220,10 @@ public:
   void onEndTag(lol_html_element_t *element, ElementCallbackFunction&& callback);
 
 private:
-  kj::Promise<void> finishWrite();
   // Wait for the write promise (if any) produced by our `output()` callback, then, if there is a
   // stored exception, abort the wrapped WritableStreamSink with it, then return the exception.
   // Otherwise, just return.
+  kj::Promise<void> finishWrite();
 
   static kj::Own<lol_html_HtmlRewriter> buildRewriter(jsg::Lock& js,
       kj::ArrayPtr<UnregisteredElementOrDocumentHandlers> unregisteredHandlers,
@@ -251,8 +250,8 @@ private:
   friend class ::workerd::api::HTMLRewriter;
 
   struct RegisteredHandler {
-    Rewriter& rewriter;
     // A back-reference to the rewriter which owns this particular registered handler.
+    Rewriter& rewriter;
 
     ElementCallbackFunction callback;
   };
@@ -263,9 +262,9 @@ private:
   //   know precisely how many handlers we're going to register beforehand, so we need a vector. But
   //   vectors can grow, moving their objects around, invalidating pointers into their storage.
 
-  kj::Vector<kj::Own<RegisteredHandler>> registeredEndTagHandlers;
   // This is separate from `registeredHandlers` so we can delete them more eagerly when EndTags are
   // destroyed, and not have to look through all other handlers.
+  kj::Vector<kj::Own<RegisteredHandler>> registeredEndTagHandlers;
   // TODO(perf) Don't store Owns, same as `registeredHandlers` above.
 
   template <typename T, typename CType = typename T::CType>
@@ -275,13 +274,13 @@ private:
   template <typename T, typename CType = typename T::CType>
   kj::Promise<void> thunkPromise( CType* content, RegisteredHandler& registration);
 
-  void removeEndTagHandler(RegisteredHandler& registration);
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
   // used again.
+  void removeEndTagHandler(RegisteredHandler& registration);
 
-  kj::Own<lol_html_HtmlRewriter> rewriter;
   // Must be constructed AFTER the registered handler vector, since the function which constructs
   // this (buildRewriter()) modifies that vector.
+  kj::Own<lol_html_HtmlRewriter> rewriter;
 
   kj::Own<WritableStreamSink> inner;
 
@@ -979,9 +978,8 @@ void DocumentEnd::htmlContentScopeEnd() {
 // HTMLRewriter
 
 struct HTMLRewriter::Impl {
-  kj::Vector<UnregisteredElementOrDocumentHandlers> unregisteredHandlers;
   // The list of handlers added to this builder.
-  //
+  kj::Vector<UnregisteredElementOrDocumentHandlers> unregisteredHandlers;
   // TODO(perf): It'd be nice to eagerly register handlers on the native builder object. However,
   //   currently lol-html rewriters are inextricably linked to the builders which created them,
   //   and this has concurrency and reentrancy ramifications: two rewriters built from the same

@@ -20,11 +20,9 @@
 namespace workerd::api {
 
 namespace {
-
+// Like split() in kj/compat/url.c++, but splits at a substring rather than a character.
 kj::ArrayPtr<const char> splitAtSubString(
     kj::ArrayPtr<const char>& text, kj::StringPtr subString) {
-  // Like split() in kj/compat/url.c++, but splits at a substring rather than a character.
-
   // TODO(perf): Use a Boyer-Moore search?
   auto iter = std::search(text.begin(), text.end(), subString.begin(), subString.end());
   auto result = kj::arrayPtr(text.begin(), iter - text.begin());
@@ -210,10 +208,9 @@ blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::Str
   KJ_UNREACHABLE;
 }
 
+// Add the chars from `value` into `builder` escaping the characters '"' and '\n' using %
+// encoding, exactly as Chrome does for Content-Disposition values.
 void addEscapingQuotes(kj::Vector<char>& builder, kj::StringPtr value) {
-  // Add the chars from `value` into `builder` escaping the characters '"' and '\n' using %
-  // encoding, exactly as Chrome does for Content-Disposition values.
-
   // Chrome throws "Failed to fetch" if the name ends with a backslash. Otherwise it worries that
   // the backslash may be interpreted as escaping the final quote.
   JSG_REQUIRE(!value.endsWith("\\"), TypeError, "Name or filename can't end with backslash");
@@ -384,10 +381,10 @@ bool FormData::has(kj::String name) {
   return false;
 }
 
+// Set the first element named `name` to `value`, then remove all the rest matching that name.
 void FormData::set(kj::String name,
     kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
     jsg::Optional<kj::String> filename) {
-  // Set the first element named `name` to `value`, then remove all the rest matching that name.
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
   auto firstFound = std::find_if(data.begin(), data.end(), predicate);
   if (firstFound != data.end()) {

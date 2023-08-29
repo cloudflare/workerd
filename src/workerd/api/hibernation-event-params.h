@@ -10,9 +10,8 @@
 #include <kj/one-of.h>
 
 namespace workerd::api {
+  // Event types and their corresponding parameters.
   struct HibernatableSocketParams {
-    // Event types and their corresponding parameters.
-
     struct Text {
       kj::String message;
     };

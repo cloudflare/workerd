@@ -202,12 +202,12 @@ private:
   struct Native;
 public:
   enum Locality {
-    LOCAL,
     // This is one end of a local WebSocketPair. Do not use IoContext::registerPendingEvent()
     // when waiting on this WebSocket.
+    LOCAL,
 
-    REMOTE
     // This is a remote WebSocket. Use IoContext::registerPendingEvent() when waiting.
+    REMOTE
   };
 
   // WebSocket ready states.
@@ -216,44 +216,47 @@ public:
   static constexpr int READY_STATE_CLOSING = 2;
   static constexpr int READY_STATE_CLOSED = 3;
 
-  IoOwn<Native> initNative(IoContext& ioContext, kj::WebSocket& ws, bool closedOutgoingConn);
   // Creates the Native object when we recreate the WebSocket when waking from hibernation.
+  IoOwn<Native> initNative(IoContext& ioContext, kj::WebSocket& ws, bool closedOutgoingConn);
 
+  // Some properties of the `api::WebSocket` that need to survive hibernation. When we initiate
+  // the hibernation process, we want to move these properties out of the `api::WebSocket`.
   struct HibernationPackage {
-    // Some properties of the `api::WebSocket` that need to survive hibernation. When we initiate
-    // the hibernation process, we want to move these properties out of the `api::WebSocket`.
     kj::Maybe<kj::String> url;
     kj::Maybe<kj::String> protocol;
     kj::Maybe<kj::String> extensions;
     kj::Maybe<kj::Array<byte>> serializedAttachment;
-    bool closedOutgoingConnection = false;
     // True forever once the JS WebSocket calls `close()`.
+    bool closedOutgoingConnection = false;
   };
 
-  WebSocket(jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package);
   // This WebSocket constructor is only used when WebSockets wake up from hibernation.
   // It will immediately set the `state` to `Accepted`, but it limits the behavior by specifying it
   // as `Hibernatable` -- thereby making most api::WebSocket methods inaccessible.
+  WebSocket(jsg::Lock& js, IoContext& ioContext, kj::WebSocket& ws, HibernationPackage package);
 
+  // Similar to how the JS `constructor()` creates a WebSocket, when waking from hibernation
+  // we want to be able to recreate WebSockets from C++ that will be delivered to JS code.
   static jsg::Ref<WebSocket> hibernatableFromNative(
       jsg::Lock& js,
       kj::WebSocket& ws,
       HibernationPackage package);
-  // Similar to how the JS `constructor()` creates a WebSocket, when waking from hibernation
-  // we want to be able to recreate WebSockets from C++ that will be delivered to JS code.
 
-  WebSocket(kj::Own<kj::WebSocket> native, Locality locality);
-  WebSocket(kj::String url, Locality locality);
   // The JS WebSocket constructor needs to initiate a connection, but we need to return the
   // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
   // to the `initConnection` method.
+  WebSocket(kj::Own<kj::WebSocket> native, Locality locality);
 
-  void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket>);
+  // The JS WebSocket constructor needs to initiate a connection, but we need to return the
+  // WebSocket object to the caller in Javascript immediately. We will defer the connection logic
+  // to the `initConnection` method.
+  WebSocket(kj::String url, Locality locality);
+
   // We initiate a `new WebSocket()` connection and set up a continuation that handles the
   // response once it's available. This includes assigning the native websocket and dispatching the
   // relevant `open`/`error` events.
+  void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket>);
 
-  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other);
   // Pumps messages from this WebSocket to `other`, and from `other` to this, making sure to
   // register pending events as appropriate. Used to implement FetchEvent.respondWith().
   //
@@ -262,10 +265,11 @@ public:
   // As an exception to the usual KJ convention, it is not necessary for the JavaScript `WebSocket`
   // object to be kept live while waiting for the promise returned by couple() to complete. Instead,
   // the promise takes direct ownership of the underlying KJ-native WebSocket (as well as `other`).
+  kj::Promise<DeferredProxy<void>> couple(kj::Own<kj::WebSocket> other);
 
+  // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
+  // owned elsewhere, but the api::WebSocket will retain a reference.
   kj::Own<kj::WebSocket> acceptAsHibernatable() {
-    // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
-    // owned elsewhere, but the api::WebSocket will retain a reference.
     KJ_IF_MAYBE(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
       // We can only request hibernation if we have not called accept.
       auto ws = kj::mv(hibernatable->ws);
@@ -289,12 +293,11 @@ public:
     ERROR
   };
 
+  // Called when a Hibernatable WebSocket wants to dispatch a close/error event, this modifies
+  // our `Accepted` state to prepare the state to transition to `Released`.
   void initiateHibernatableRelease(jsg::Lock& js,
       kj::Own<kj::WebSocket> ws,
       HibernatableReleaseState releaseState) {
-    // Called when a Hibernatable WebSocket wants to dispatch a close/error event, this modifies
-    // our `Accepted` state to prepare the state to transition to `Released`.
-    //
     // TODO(soon): We probably want this to be an assert, since this is meant to be called once
     // at the end of a websocket connection and if it doesn't run then it's likely that no close
     // or error event will get dispatched.
@@ -322,18 +325,18 @@ public:
     return false;
   }
 
+  // Can only be called on one end of a WebSocketPair.
+  // Relevant for WebSocket Hibernation: `couple()` will only allow IoContext to
+  // go away if the end returned in the Response is REMOTE.
   void setRemoteOnPair() {
-    // Can only be called on one end of a WebSocketPair.
-    // Relevant for WebSocket Hibernation: `couple()` will only allow IoContext to
-    // go away if the end returned in the Response is REMOTE.
     JSG_REQUIRE_NONNULL(maybePair, Error,
         "this WebSocket is not one end of a WebSocketPair")->locality = REMOTE;
   }
 
+  // Should only be called on one end of a WebSocketPair.
+  // Relevant for WebSocket Hibernation: the end we return in the Response must be in the
+  // AwaitingAcceptanceOrCoupling state.
   bool pairIsAwaitingCoupling() {
-    // Should only be called on one end of a WebSocketPair.
-    // Relevant for WebSocket Hibernation: the end we return in the Response must be in the
-    // AwaitingAcceptanceOrCoupling state.
     KJ_IF_MAYBE(pair, maybePair) {
       return (*pair)->farNative->state.is<AwaitingAcceptanceOrCoupling>();
     }
@@ -355,44 +358,50 @@ public:
   // ---------------------------------------------------------------------------
   // JS API.
 
+  // Creates a new outbound WebSocket.
   static jsg::Ref<WebSocket> constructor(jsg::Lock& js, kj::String url,
       jsg::Optional<kj::OneOf<kj::Array<kj::String>, kj::String>> protocols);
-  // Creates a new outbound WebSocket.
 
-  void accept(jsg::Lock& js);
   // Begin delivering events locally.
+  void accept(jsg::Lock& js);
 
-  void internalAccept(jsg::Lock& js);
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
   // so that the websocket can start processing messages once the connection has been established.
+  void internalAccept(jsg::Lock& js);
 
-  void startReadLoop(jsg::Lock& js);
   // We defer the actual logic of accept() and internalAccept() to this method, since they largely
   // share code.
+  void startReadLoop(jsg::Lock& js);
 
   void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<kj::String> reason);
 
-  void serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment);
-  kj::Maybe<v8::Local<v8::Value>> deserializeAttachment(jsg::Lock& js);
   // Used to get/set the attachment for hibernation.
   // If the object isn't serialized, it will not survive hibernation.
+  void serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment);
 
-  void setAutoResponseTimestamp(kj::Maybe<kj::Date> time);
-  kj::Maybe<kj::Date> getAutoResponseTimestamp();
+  // Used to get/set the attachment for hibernation.
+  // If the object isn't serialized, it will not survive hibernation.
+  kj::Maybe<v8::Local<v8::Value>> deserializeAttachment(jsg::Lock& js);
+
   // Used to get/store the last auto request/response timestamp for this WebSocket.
   // These methods are c++ only and are not exposed to our js interface.
+  void setAutoResponseTimestamp(kj::Maybe<kj::Date> time);
+
+  // Used to get/store the last auto request/response timestamp for this WebSocket.
+  // These methods are c++ only and are not exposed to our js interface.
+  kj::Maybe<kj::Date> getAutoResponseTimestamp();
 
   int getReadyState();
 
   bool isAccepted();
   bool isReleased();
 
-  kj::Maybe<kj::String> getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx);
   // For internal use only.
   // We need to access the underlying KJ WebSocket so we can determine the compression configuration
   // it uses (if any).
+  kj::Maybe<kj::String> getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx);
 
   kj::Maybe<kj::StringPtr> getUrl();
   kj::Maybe<kj::StringPtr> getProtocol();
@@ -441,43 +450,45 @@ private:
   kj::Maybe<kj::String> protocol = kj::String();
   kj::Maybe<kj::String> extensions = kj::String();
   kj::Maybe<kj::Date> autoResponseTimestamp;
-  kj::Maybe<kj::Array<byte>> serializedAttachment;
   // All WebSockets have this property. It starts out null but can
   // be assigned to any serializable value. The property will survive hibernation.
   // We have to serialize each time we call the setter so we can determine if the size limit
   // has been breached.
-  bool closedOutgoingForHib = false;
+  kj::Maybe<kj::Array<byte>> serializedAttachment;
+
   // Tracks farNative->closedOutgoing, but we need to access it when we trigger Hibernation so it
   // cannot be `IoOwn`ed as `farNative` is. This informs the HibernatableWebSocket if we called
   // `close()`, thereby preventing calls to `send()` even after we wake from hibernation.
+  bool closedOutgoingForHib = false;
 
-  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
   // Maximum size of a WebSocket attachment.
+  inline static const size_t MAX_ATTACHMENT_SIZE = 1024 * 2;
 
   struct AwaitingConnection {
-    kj::Canceler canceler;
     // A canceler associated with the pending websocket connection for `new Websocket()`.
+    kj::Canceler canceler;
   };
   struct AwaitingAcceptanceOrCoupling {
     explicit AwaitingAcceptanceOrCoupling(kj::Own<kj::WebSocket> ws): ws(kj::mv(ws)) {}
     kj::Own<kj::WebSocket> ws;
   };
   struct Accepted {
+    // A `Hibernatable` WebSocket shares a sub-set of behavior that's already implemented for an
+    // `Accepted` WebSocket, so we can think of it a sub-state.
     struct Hibernatable {
-      // A `Hibernatable` WebSocket shares a sub-set of behavior that's already implemented for an
-      // `Accepted` WebSocket, so we can think of it a sub-state.
       kj::WebSocket& ws;
-      kj::Maybe<kj::Own<void>> attachedForClose;
       // If we have initiated a hibernatable error/close event, we need to take back ownership of
       // the kj::WebSocket so any final queued messages will deliver. We store this owned websocket
       // in `attachedForClose`. Since the `ws` reference is still valid, we prevent usage of
       // `attachedForClose` directly in favor of using continuing to use `ws` directly.
-      HibernatableReleaseState releaseState = HibernatableReleaseState::NONE;
+      kj::Maybe<kj::Own<void>> attachedForClose;
+
       // We can't move the state to Released after the Hibernatable Close/Error event runs, since
       // we don't have a request on the thread by the time the event completes.
       //
       // If we are "releasing", we may prevent the websocket from doing certain things like calling
       // send/close. We're more restrictive if we're delivering an Error than delivering a Close.
+      HibernatableReleaseState releaseState = HibernatableReleaseState::NONE;
     };
 
     explicit Accepted(kj::Own<kj::WebSocket> ws, Native& native, IoContext& context);
@@ -485,8 +496,8 @@ private:
 
     ~Accepted() noexcept(false);
 
+    // A simple wrapper to make it easier to access the underlying kj::WebSocket.
     class WrappedWebSocket {
-      // A simple wrapper to make it easier to access the underlying kj::WebSocket.
     public:
       explicit WrappedWebSocket(Hibernatable ws) {
         inner.init<Hibernatable>(kj::mv(ws));
@@ -530,11 +541,11 @@ private:
         return inner.tryGet<Hibernatable>();
       }
 
+      // Transitions our Hibernatable websocket to a "Releasing" state.
+      // The websocket will transition to `Released` when convenient.
       void initiateHibernatableRelease(jsg::Lock& js,
           kj::Own<kj::WebSocket> ws,
           HibernatableReleaseState state) {
-        // Transitions our Hibernatable websocket to a "Releasing" state.
-        // The websocket will transition to `Released` when convenient.
         auto& hibernatable = KJ_REQUIRE_NONNULL(getIfHibernatable());
         hibernatable.releaseState = state;
         // Note that we move the owned kj::WebSocket here.
@@ -566,17 +577,17 @@ private:
     }
 
     kj::Promise<void> createAbortTask(Native& native, IoContext& context);
-    kj::Promise<void> whenAbortedTask = nullptr;
     // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
+    kj::Promise<void> whenAbortedTask = nullptr;
 
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
 
-    kj::Canceler canceler;
     // This canceler wraps the pump loop as a precaution to make sure we can't exit the Accepted
     // state with a pump task still happening asychronously. In practice the canceler should usually
     // be empty when destroyed because we do not leave the Accepted state if we're still pumping.
     // Even in the case of IoContext premature cancellation, the pump task should be canceled
     // by the IoContext before the Canceler is destroyed.
+    kj::Canceler canceler;
   };
 
   struct Released {};
@@ -587,21 +598,21 @@ private:
   struct Native {
     NativeState state;
 
-    bool isPumping = false;
     // Is there currently a task running to pump outgoing messages?
+    bool isPumping = false;
 
-    bool closedOutgoing = false;
     // Has a Close message been enqueued for send? (It may still be in outgoingMessages. Check
     // closedOutgoing && !isPumping to check if it has gone out.)
+    bool closedOutgoing = false;
 
-    bool closedIncoming = false;
     // Has a Close message been received, or has a premature disconnection occurred?
+    bool closedIncoming = false;
 
-    bool outgoingAborted = false;
     // Have we detected that the peer has stopped accepting messages? We may want to clean up more
     // proactively in this case.
+    bool outgoingAborted = false;
   };
-  IoOwn<Native> farNative;
+
   // The underlying native WebSocket (or a promise that will emplace one).
   //
   // The state transitions look like so:
@@ -615,18 +626,19 @@ private:
   //   web socket.
   // - Transitions from `Accepted` to `Released` when outgoing pump is done and either both
   //   directions have seen "close" messages or an error has occured.
+  IoOwn<Native> farNative;
 
-  kj::Maybe<jsg::Value> error;
   // If any error has occurred.
+  kj::Maybe<jsg::Value> error;
 
   struct GatedMessage {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
     kj::WebSocket::Message message;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
-  IoOwn<OutgoingMessagesMap> outgoingMessages;
   // Queue of messages to be sent. This is wraped in a IoOwn so that the pump loop can safely
   // access the map without locking the isolate.
+  IoOwn<OutgoingMessagesMap> outgoingMessages;
 
   Locality locality;
 
@@ -637,8 +649,8 @@ private:
     kj::Maybe<kj::String> extensions;
   };
 
-  kj::Maybe<jsg::Ref<WebSocket>> maybePair;
   // So that each end of a WebSocketPair can keep track of its pair.
+  kj::Maybe<jsg::Ref<WebSocket>> maybePair;
 
   void setMaybePair(jsg::Ref<WebSocket> other) {
     maybePair = other.addRef();
@@ -649,8 +661,6 @@ private:
 
   void ensurePumping(jsg::Lock& js);
 
-  static kj::Promise<void> pump(
-      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native);
   // Write messages from `outgoingMessages` into `ws`.
   //
   // These are not necessarily called under isolate lock, but they are called on the given
@@ -658,6 +668,8 @@ private:
   // object's members in a thread-unsafe way. `outgoingMessages` and `ws` are both `IoOwn`ed
   // objects so are safe to access from the thread without the isolate lock. The whole task is
   // owned by the `IoContext` so it'll be canceled if the `IoContext` is destroyed.
+  static kj::Promise<void> pump(
+      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop();
 

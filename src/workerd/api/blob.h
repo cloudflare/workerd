@@ -11,6 +11,7 @@ namespace workerd::api {
 
 class ReadableStream;
 
+// An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
 public:
   Blob(kj::Array<byte> data, kj::String type)
@@ -73,6 +74,7 @@ private:
   class BlobInputStream;
 };
 
+// An implementation of the Web Platform Standard File API
 class File: public Blob {
 public:
   File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)

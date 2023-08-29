@@ -44,9 +44,8 @@ auto lookupAesGcmType(uint bitLength) {
   }
 }
 
+// Ensure the tagLength passed to the AES-GCM algorithm is one of the allowed bit lengths.
 void validateAesGcmTagLength(int tagLength) {
-  // Ensure the tagLength passed to the AES-GCM algorithm is one of the allowed bit lengths.
-
   switch (tagLength) {
     case 32:
     case 64:
@@ -99,10 +98,9 @@ int decryptFinalHelper(kj::StringPtr algorithm, size_t inputLength,
 //   algorithm's encrypt() or decrypt() implementation, it'd be worth reviewing the other
 //   algorithm's implementation as well.
 
+// The base key is used to avoid repeating the JWK export logic. It also happens to simplify the
+// concrete implementations to only define encrypt/decrypt.
 class AesKeyBase: public CryptoKey::Impl {
-  // The base key is used to avoid repeating the JWK export logic. It also happens to simplify the
-  // concrete implementations to only define encrypt/decrypt.
-
 public:
   explicit AesKeyBase(kj::Array<kj::byte> keyData, CryptoKey::AesKeyAlgorithm keyAlgorithm,
                       bool extractable, CryptoKeyUsageSet usages)
