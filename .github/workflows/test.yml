@@ -29,7 +29,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE', '.github/workflows/test.yml') }}
           # Use an older cache key, if available.
           restore-keys: |
             bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-
@@ -57,8 +57,11 @@ jobs:
         # bazel generates huge amounts of debug information on Windows which slows down the build
         # and takes up an excessive amount of cache space.
         run: |
+            bazelisk clean --expunge
+            Remove-Item -Path ~/bazel-disk-cache -Force -Recurse
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
+            choco upgrade llvm
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
