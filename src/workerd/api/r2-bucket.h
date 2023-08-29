@@ -23,9 +23,8 @@ kj::ArrayPtr<kj::StringPtr> fillR2Path(kj::StringPtr pathStorage[1], const kj::M
 
 class R2MultipartUpload;
 
+// A capability to an R2 Bucket.
 class R2Bucket: public jsg::Object {
-  // A capability to an R2 Bucket.
-
 protected:
   struct friend_tag_t {};
 
@@ -36,10 +35,10 @@ protected:
   };
 
 public:
-  explicit R2Bucket(CompatibilityFlags::Reader featureFlags, uint clientIndex)
-      : featureFlags(featureFlags), clientIndex(clientIndex) {}
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
+  explicit R2Bucket(CompatibilityFlags::Reader featureFlags, uint clientIndex)
+      : featureFlags(featureFlags), clientIndex(clientIndex) {}
 
   explicit R2Bucket(FeatureFlags featureFlags, uint clientIndex, kj::String bucket, friend_tag_t)
       : featureFlags(featureFlags), clientIndex(clientIndex), adminBucket(kj::mv(bucket)) {}
@@ -418,10 +417,10 @@ private:
   friend class R2MultipartUpload;
 };
 
-kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
-  kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 // Non-generic wrapper avoid moving the parseObjectMetadata implementation into this header file
 // by making use of dynamic dispatch.
+kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(
+  kj::StringPtr action, R2Result& r2Result, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
 }  // namespace workerd::api::public_beta
 

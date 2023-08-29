@@ -59,9 +59,8 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
   }
 }
 
+// Left- and right-trim HTTP whitespace from `value`.
 jsg::ByteString normalizeHeaderValue(jsg::ByteString value) {
-  // Left- and right-trim HTTP whitespace from `value`.
-
   warnIfBadHeaderString(value);
 
   kj::ArrayPtr<char> slice = value;
@@ -146,10 +145,9 @@ jsg::Ref<Headers> Headers::clone() const {
   return kj::mv(result);
 }
 
+// Fill in the given HttpHeaders with these headers. Note that strings are inserted by
+// reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
-  // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
-  // reference, so the output must be consumed immediately.
-
   for (auto& entry: headers) {
     for (auto& value: entry.second.values) {
       out.add(entry.second.name, value);
@@ -456,14 +454,13 @@ private:
 
 }  // namespace
 
+// Make an array of characters containing random hexadecimal digits.
+//
+// Note: Rather than use random hex digits, we could generate the hex digits by hashing the
+//   form-data content itself! This would give us pleasing assurance that our boundary string is
+//   not present in the content being divided. The downside is CPU usage if, say, a user uploads
+//   an enormous file.
 kj::String makeRandomBoundaryCharacters() {
-  // Make an array of characters containing random hexadecimal digits.
-  //
-  // Note: Rather than use random hex digits, we could generate the hex digits by hashing the
-  //   form-data content itself! This would give us pleasing assurance that our boundary string is
-  //   not present in the content being divided. The downside is CPU usage if, say, a user uploads
-  //   an enormous file.
-
   kj::FixedArray<kj::byte, 16> buffer;
   IoContext::current().getEntropySource().generate(buffer);
   return kj::encodeHex(buffer);
@@ -944,15 +941,15 @@ jsg::Optional<v8::Local<v8::Object>> Request::getCf(jsg::Lock& js) {
   return cf.get(js);
 }
 
+// If signal is given, getThisSignal returns a reference to it.
+// Otherwise, we lazily create a new never-aborts AbortSignal that will not
+// be used for anything because the spec wills it so.
+// Note: To be pedantic, the spec actually calls for us to create a
+// second AbortSignal in addition to the one being passed in, but
+// that's a bit silly and unnecessary.
+// The name "thisSignal" is derived from the fetch spec, which draws a
+// distinction between the "signal" and "this' signal".
 jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
-  // If signal is given, getThisSignal returns a reference to it.
-  // Otherwise, we lazily create a new never-aborts AbortSignal that will not
-  // be used for anything because the spec wills it so.
-  // Note: To be pedantic, the spec actually calls for us to create a
-  // second AbortSignal in addition to the one being passed in, but
-  // that's a bit silly and unnecessary.
-  // The name "thisSignal" is derived from the fetch spec, which draws a
-  // distinction between the "signal" and "this' signal".
   KJ_IF_MAYBE(s, signal) {
     return s->addRef();
   }
@@ -1457,12 +1454,11 @@ public:
   }
 };
 
-constexpr auto MAX_REDIRECT_COUNT = 20;
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
+constexpr auto MAX_REDIRECT_COUNT = 20;
 
+// URI-encode control characters and spaces.
 kj::String uriEncodeControlChars(kj::ArrayPtr<const byte> bytes) {
-  // URI-encode control characters and spaces.
-  //
   // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
   const char HEX_DIGITS_URI[] = "0123456789ABCDEF";
 

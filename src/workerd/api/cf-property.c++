@@ -16,12 +16,12 @@ static constexpr auto kDefaultBotManagementValue = R"DATA({
   "score": 99
 })DATA";
 
+// When the cfBotManagementNoOp compatibility flag is set, we'll check the
+// request cf blob to see if it contains a botManagement field. If it does
+// *not* we will add it using the following default fields.
+// Note that if the botManagement team changes any of the fields they provide,
+// this default value may need to be changed also.
 static void handleDefaultBotManagement(jsg::Lock& js, v8::Local<v8::Object> handle) {
-  // When the cfBotManagementNoOp compatibility flag is set, we'll check the
-  // request cf blob to see if it contains a botManagement field. If it does
-  // *not* we will add it using the following default fields.
-  // Note that if the botManagement team changes any of the fields they provide,
-  // this default value may need to be changed also.
   auto context = js.v8Context();
   if (!js.v8Has(handle, "botManagement"_kj)) {
     auto sym = v8::Private::ForApi(js.v8Isolate,

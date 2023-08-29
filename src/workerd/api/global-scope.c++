@@ -25,10 +25,9 @@ namespace workerd::api {
 
 namespace {
 
+// An InputStream that can be disconnected. Used for request body, which becomes invalid as
+// soon as the response is returned.
 class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted {
-  // An InputStream that can be disconnected. Used for request body, which becomes invalid as
-  // soon as the response is returned.
-
 public:
   NeuterableInputStream(kj::AsyncInputStream& inner): inner(&inner) {}
 

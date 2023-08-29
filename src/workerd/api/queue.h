@@ -20,20 +20,19 @@ class ExecutionContext;
 
 // Binding types
 
+// A capability to a Worker Queue.
 class WorkerQueue: public jsg::Object {
-  // A capability to a Worker Queue.
-
 public:
-  WorkerQueue(uint subrequestChannel)
-    : subrequestChannel(subrequestChannel) {}
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this queue.
+  WorkerQueue(uint subrequestChannel)
+    : subrequestChannel(subrequestChannel) {}
 
   struct SendOptions {
     // TODO(soon): Support metadata.
 
-    jsg::Optional<kj::String> contentType;
     // contentType determines the serialization format of the message.
+    jsg::Optional<kj::String> contentType;
 
     JSG_STRUCT(contentType);
     JSG_STRUCT_TS_OVERRIDE(QueueSendOptions {
@@ -45,8 +44,8 @@ public:
   struct MessageSendRequest {
     jsg::JsRef<jsg::JsValue> body;
 
-    jsg::Optional<kj::String> contentType;
     // contentType determines the serialization format of the message.
+    jsg::Optional<kj::String> contentType;
 
     JSG_STRUCT(body, contentType);
     JSG_STRUCT_TS_OVERRIDE(MessageSendRequest<Body = unknown> {
@@ -197,8 +196,8 @@ private:
   }
 };
 
+// Type used when calling a module-exported queue event handler.
 class QueueController final: public jsg::Object {
-  // Type used when calling a module-exported queue event handler.
 public:
   QueueController(jsg::Ref<QueueEvent> event)
       : event(kj::mv(event)) {}
@@ -229,9 +228,8 @@ private:
   }
 };
 
+// Extension of ExportedHandler covering queue handlers.
 struct QueueExportedHandler {
-  // Extension of ExportedHandler covering queue handlers.
-
   typedef kj::Promise<void> QueueHandler(jsg::Ref<QueueController> controller,
                                          jsg::JsRef<jsg::JsValue> env,
                                          jsg::Optional<jsg::Ref<ExecutionContext>> ctx);

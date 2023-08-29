@@ -91,8 +91,8 @@ Common& getCommonStrings() {
 using EncodingCallback =
     kj::Function<jsg::UsvString(jsg::UsvStringPtr, kj::Maybe<jsg::UsvStringPtr>)>;
 
+// Options used internally when compiling a URLPattern component
 struct CompileOptions {
-  // Options used internally when compiling a URLPattern component
   kj::Maybe<uint32_t> delimiterCodePoint;
   kj::Maybe<uint32_t> prefixCodePoint;
 
@@ -110,23 +110,22 @@ const CompileOptions CompileOptions::DEFAULT(nullptr, nullptr);
 const CompileOptions CompileOptions::HOSTNAME('.');
 const CompileOptions CompileOptions::PATHNAME('/', '/');
 
+// String inputs passed into URLPattern constructor are parsed by first
+// interpreting them into a list of Tokens. Each token has a type, a
+// position index in the input string, and a value. The value is either
+// a individual codepoint or a substring of input. Once the tokens are
+// determined, the parsing algorithms convert those into a Part list.
+// The part list is then used to generate the internal JavaScript RegExps
+// that are used for the actual matching operation.
 struct Token {
-  // String inputs passed into URLPattern constructor are parsed by first
-  // interpreting them into a list of Tokens. Each token has a type, a
-  // position index in the input string, and a value. The value is either
-  // a individual codepoint or a substring of input. Once the tokens are
-  // determined, the parsing algorithms convert those into a Part list.
-  // The part list is then used to generate the internal JavaScript RegExps
-  // that are used for the actual matching operation.
-
+  // Per the URLPattern spec, the tokenizer runs in one of two modes:
+  // Strict and Lenient. In Strict mode, invalid characters and sequences
+  // detected by the tokenizer will cause a TypeError to be thrown.
+  // In lenient mode, the invalid codepoints and sequences are marked
+  // but no error is thrown. When parsing a string passed to the
+  // URLPattern constructor, lenient mode is used. When parsing the
+  // pattern string for an individual component, strict mode is used.
   enum class Policy {
-    // Per the URLPattern spec, the tokenizer runs in one of two modes:
-    // Strict and Lenient. In Strict mode, invalid characters and sequences
-    // detected by the tokenizer will cause a TypeError to be thrown.
-    // In lenient mode, the invalid codepoints and sequences are marked
-    // but no error is thrown. When parsing a string passed to the
-    // URLPattern constructor, lenient mode is used. When parsing the
-    // pattern string for an individual component, strict mode is used.
     STRICT,
     LENIENT,
   };

@@ -36,11 +36,10 @@ constexpr auto CACHE_API_PREVIEW_WARNING =
 //   } \
 // })
 
+// Throw an application-visible exception if the URL won't be parsed correctly at a lower
+// layer. If the URL is valid then just return it. The purpose of this function is to avoid
+// throwing an "internal error".
 kj::StringPtr validateUrl(kj::StringPtr url) {
-  // Throw an application-visible exception if the URL won't be parsed correctly at a lower
-  // layer. If the URL is valid then just return it. The purpose of this function is to avoid
-  // throwing an "internal error".
-
   // TODO(bug): We should parse and process URLs the same way we would URLs passed to fetch().
   //   But, that might mean e.g. discarding fragments ("hashes", stuff after a '#'), which would
   //   be a change in behavior that could subtly affect production workers...
@@ -137,37 +136,36 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
   });
 }
 
+// Send a PUT request to the cache whose URL is the original request URL and whose body is the
+// HTTP response we'd like to cache for that request.
+//
+// The HTTP response in the PUT request body (the "PUT payload") must itself be an HTTP message,
+// except that it MUST NOT have chunked encoding applied to it, even if it has a
+// Transfer-Encoding: chunked header. To be clear, the PUT request itself may be chunked, but it
+// must not have any nested chunked encoding.
+//
+// In order to extract the response's data to serialize it, we'll need to call
+// `jsResponse->send()`, which will properly encode the response's body if a Content-Encoding
+// header is present. This means we'll need to create an instance of kj::HttpService::Response.
 jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     jsg::Ref<Response> jsResponse, CompatibilityFlags::Reader flags) {
-  // Send a PUT request to the cache whose URL is the original request URL and whose body is the
-  // HTTP response we'd like to cache for that request.
-  //
-  // The HTTP response in the PUT request body (the "PUT payload") must itself be an HTTP message,
-  // except that it MUST NOT have chunked encoding applied to it, even if it has a
-  // Transfer-Encoding: chunked header. To be clear, the PUT request itself may be chunked, but it
-  // must not have any nested chunked encoding.
-  //
-  // In order to extract the response's data to serialize it, we'll need to call
-  // `jsResponse->send()`, which will properly encode the response's body if a Content-Encoding
-  // header is present. This means we'll need to create an instance of kj::HttpService::Response.
 
+  // Fake kj::HttpService::Response implementation that allows us to reuse jsResponse->send() to
+  // serialize the response (headers + body) in the format needed to serve as the payload of
+  // our cache PUT request.
   class ResponseSerializer final: public kj::HttpService::Response {
-    // Fake kj::HttpService::Response implementation that allows us to reuse jsResponse->send() to
-    // serialize the response (headers + body) in the format needed to serve as the payload of
-    // our cache PUT request.
-
   public:
     struct Payload {
-      kj::Own<kj::AsyncInputStream> stream;
       // The serialized form of the response to be cached. This stream itself contains a full
       // HTTP response, with headers and body, representing the content of jsResponse to be written
       // to the cache.
+      kj::Own<kj::AsyncInputStream> stream;
 
-      kj::Promise<void> writeHeadersPromise;
       // A promise which resolves once the payload's headers have been written. Normally, this
       // couldn't possibly resolve until the body has been written, and jsRepsonse->send() won't
       // complete until then -- except if the body is empty, in which case jsResponse->send() may
       // return immediately.
+      kj::Promise<void> writeHeadersPromise;
     };
 
     Payload getPayload() {

@@ -9,15 +9,15 @@
 
 namespace workerd::api {
 
+// An individual compiled component of a URLPattern
 struct URLPatternComponent {
-  // An individual compiled component of a URLPattern
   jsg::UsvString pattern;
   jsg::V8Ref<v8::RegExp> regex;
   kj::Array<jsg::UsvString> nameList;
 };
 
+// The collection of compiled patterns for each component of a URLPattern.
 struct URLPatternComponents {
-  // The collection of compiled patterns for each component of a URLPattern.
   URLPatternComponent protocol;
   URLPatternComponent username;
   URLPatternComponent password;
@@ -28,20 +28,20 @@ struct URLPatternComponents {
   URLPatternComponent hash;
 };
 
+// URLPattern is a Web Platform standard API for matching URLs against a
+// pattern syntax (think of it as a regular expression for URLs). It is
+// defined in https://wicg.github.io/urlpattern.
+// More information about the URL Pattern syntax can be found at
+// https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 class URLPattern: public jsg::Object {
-  // URLPattern is a Web Platform standard API for matching URLs against a
-  // pattern syntax (think of it as a regular expression for URLs). It is
-  // defined in https://wicg.github.io/urlpattern.
-  // More information about the URL Pattern syntax can be found at
-  // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
 public:
+  // A structure providing matching patterns for individual components
+  // of a URL. When a URLPattern is created, or when a URLPattern is
+  // used to match or test against a URL, the input can be given as
+  // either a string or a URLPatternInit struct. If a string is given,
+  // it will be parsed to create a URLPatternInit. The URLPatternInit
+  // API is defined as part of the URLPattern specification.
   struct URLPatternInit {
-    // A structure providing matching patterns for individual components
-    // of a URL. When a URLPattern is created, or when a URLPattern is
-    // used to match or test against a URL, the input can be given as
-    // either a string or a URLPatternInit struct. If a string is given,
-    // it will be parsed to create a URLPatternInit. The URLPatternInit
-    // API is defined as part of the URLPattern specification.
     jsg::Optional<jsg::UsvString> protocol;
     jsg::Optional<jsg::UsvString> username;
     jsg::Optional<jsg::UsvString> password;
@@ -57,22 +57,22 @@ public:
 
   using URLPatternInput = kj::OneOf<jsg::UsvString, URLPatternInit>;
 
+  // A struct providing the URLPattern matching results for a single
+  // URL component. The URLPatternComponentResult is only ever used
+  // as a member attribute of a URLPatternResult struct. The
+  // URLPatternComponentResult API is defined as part of the URLPattern
+  // specification.
   struct URLPatternComponentResult {
-    // A struct providing the URLPattern matching results for a single
-    // URL component. The URLPatternComponentResult is only ever used
-    // as a member attribute of a URLPatternResult struct. The
-    // URLPatternComponentResult API is defined as part of the URLPattern
-    // specification.
     jsg::UsvString input;
     jsg::Dict<jsg::UsvString, jsg::UsvString> groups;
 
     JSG_STRUCT(input, groups);
   };
 
+  // A struct providing the URLPattern matching results for all
+  // components of a URL. The URLPatternResult API is defined as
+  // part of the URLPattern specification.
   struct URLPatternResult {
-    // A struct providing the URLPattern matching results for all
-    // components of a URL. The URLPatternResult API is defined as
-    // part of the URLPattern specification.
     kj::Array<URLPatternInput> inputs;
     URLPatternComponentResult protocol;
     URLPatternComponentResult username;
