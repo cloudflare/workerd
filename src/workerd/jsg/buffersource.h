@@ -62,14 +62,14 @@ class BufferSource;
 class BackingStore;
 using BufferSourceViewConstructor = v8::Local<v8::Value>(*)(Lock&, BackingStore&);
 
+// The jsg::BackingStore wraps a v8::BackingStore and retains information about the
+// type of ArrayBuffer or ArrayBufferView to which it is associated. Namely, it records
+// the byte length, offset, element size, and constructor type allowing the view to be
+// recreated.
+//
+// The BackingStore can be safely used outside of the isolate lock and can even be passed
+// into another isolate if necessary.
 class BackingStore {
-  // The jsg::BackingStore wraps a v8::BackingStore and retains information about the
-  // type of ArrayBuffer or ArrayBufferView to which it is associated. Namely, it records
-  // the byte length, offset, element size, and constructor type allowing the view to be
-  // recreated.
-  //
-  // The BackingStore can be safely used outside of the isolate lock and can even be passed
-  // into another isolate if necessary.
 public:
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore from(kj::Array<kj::byte> data) {
@@ -87,9 +87,9 @@ public:
         checkIsIntegerType<T>());
   }
 
+  // Creates a new BackingStore of the given size.
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore alloc(Lock& js, size_t size) {
-    // Creates a new BackingStore of the given size.
     return BackingStore(
         v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size),
         size, 0,
@@ -98,10 +98,11 @@ public:
   }
 
   using Disposer = void(void*,size_t,void*);
+
+  // Creates and returns a BackingStore that wraps an external data pointer
+  // with a custom disposer.
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore wrap(void* data, size_t size, Disposer disposer, void* ctx) {
-    // Creates and returns a BackingStore that wraps an external data pointer
-    // with a custom disposer.
     return BackingStore(
         v8::ArrayBuffer::NewBackingStore(data, size, disposer, ctx),
         size, 0,
@@ -148,13 +149,13 @@ public:
   inline size_t getElementSize() const { return elementSize; }
   inline bool isIntegerType() const { return integerType; }
 
+  // Creates a new BackingStore as a view over the same underlying v8::BackingStore
+  // but with different handle type information. This is required, for instance, in
+  // use cases like the Streams API where we have to be able to surface a Uint8Array
+  // view over the BackingStore to fulfill a BYOB read while maintaining the original
+  // type information to recreate the original type of view once the read is complete.
   template <BufferSourceType T = v8::Uint8Array>
   BackingStore getTypedView() {
-    // Creates a new BackingStore as a view over the same underlying v8::BackingStore
-    // but with different handle type information. This is required, for instance, in
-    // use cases like the Streams API where we have to be able to surface a Uint8Array
-    // view over the BackingStore to fulfill a BYOB read while maintaining the original
-    // type information to recreate the original type of view once the read is complete.
     return BackingStore(
         backingStore,
         byteLength,
@@ -185,19 +186,19 @@ public:
     return ctor(js, *this);
   }
 
+  // Shrinks the effective size of the backing store by a number of bytes off
+  // the front of the data. Useful when incrementally consuming the data as
+  // we do in the streams implementation.
   inline void consume(size_t bytes) {
-    // Shrinks the effective size of the backing store by a number of bytes off
-    // the front of the data. Useful when incrementally consuming the data as
-    // we do in the streams implementation.
     KJ_ASSERT(bytes <= byteLength);
     byteOffset += bytes;
     byteLength -= bytes;
   }
 
+  // Shrinks the effective size of the backing store by a number of bytes off
+  // the end of the data. Useful when a more limited view of the buffer is
+  // required (such as when fulfilling partial stream reads).
   inline void trim(size_t bytes) {
-    // Shrinks the effective size of the backing store by a number of bytes off
-    // the end of the data. Useful when a more limited view of the buffer is
-    // required (such as when fulfilling partial stream reads).
     KJ_ASSERT(bytes <= byteLength);
     byteLength -= bytes;
   }
@@ -211,12 +212,14 @@ private:
   size_t byteLength;
   size_t byteOffset;
   size_t elementSize;
-  BufferSourceViewConstructor ctor;
+
   // The ctor here is a pointer to a static template function that can create a
   // new type-specific instance of the JavaScript ArrayBuffer or ArrayBufferView wrapper
   // for the backing store. The specific type of constructor to store is determined
   // when the BufferSource instance is created and it is used only if getHandle() is
   // called on a BufferSource that has been detached.
+  BufferSourceViewConstructor ctor;
+
   bool integerType;
 
   template <BufferSourceType T>
@@ -242,72 +245,71 @@ private:
   friend class BufferSource;
 };
 
+// A BufferSource is an abstraction for v8::ArrayBuffer and v8::ArrayBufferView types.
+// It has a couple of significant features relative to the alternative mapping between
+// kj::Array<kj::byte> and ArrayBuffer/ArrayBufferView:
+//
+//  * A BufferSource created from an ArrayBuffer/ArrayBufferView maintains a reference
+//    to JavaScript object, ensuring that when the BufferSource is passed back
+//    out to JavaScript, the same object will be returned.
+//  * A BufferSource can detach the BackingStore from the ArrayBuffer/ArrayBufferView.
+//    When doing so, the BackingStore is removed from the BufferSource and the association
+//    with the ArrayBuffer/ArrayBufferView is severed.
+//
+// When an object holds a reference to a BufferSource (e.g. as a member variable), it
+// must implement visitForGc and ensure the BufferSource is properly visited,
+//
+// As a side note, the name "BufferSource" comes from the Web IDL spec.
+//
+// How to use it:
+//
+// In methods that are exposed to JavaScript, specify jsg::BufferSource as the type:
+// e.g.
+//
+//   class MyAPiObject: public jsg::Object {
+//   public:
+//     jsg::BufferSource foo(jsg::Lock& js, jsg::BufferSource source) {
+//       // While the BufferSource is attached, you can access the data as an
+//       // kj::ArrayPtr...
+//       {
+//         auto ptr = kj::ArrayPtr<kj::byte>(source);
+//       }
+//
+//       // Or, you can detach the jsg::BackingStore from the BufferSource.
+//       auto backingStore = source.detach();
+//       auto ptr = kj::ArrayPtr<kj::byte>(backingStore);
+//       // Do something with ptr...
+//       return BufferSource(js, kj::mv(backingStore));
+//     }
+//   };
 class BufferSource {
-  // A BufferSource is an abstraction for v8::ArrayBuffer and v8::ArrayBufferView types.
-  // It has a couple of significant features relative to the alternative mapping between
-  // kj::Array<kj::byte> and ArrayBuffer/ArrayBufferView:
-  //
-  //  * A BufferSource created from an ArrayBuffer/ArrayBufferView maintains a reference
-  //    to JavaScript object, ensuring that when the BufferSource is passed back
-  //    out to JavaScript, the same object will be returned.
-  //  * A BufferSource can detach the BackingStore from the ArrayBuffer/ArrayBufferView.
-  //    When doing so, the BackingStore is removed from the BufferSource and the association
-  //    with the ArrayBuffer/ArrayBufferView is severed.
-  //
-  // When an object holds a reference to a BufferSource (e.g. as a member variable), it
-  // must implement visitForGc and ensure the BufferSource is properly visited,
-  //
-  // As a side note, the name "BufferSource" comes from the Web IDL spec.
-  //
-  // How to use it:
-  //
-  // In methods that are exposed to JavaScript, specify jsg::BufferSource as the type:
-  // e.g.
-  //
-  //   class MyAPiObject: public jsg::Object {
-  //   public:
-  //     jsg::BufferSource foo(jsg::Lock& js, jsg::BufferSource source) {
-  //       // While the BufferSource is attached, you can access the data as an
-  //       // kj::ArrayPtr...
-  //       {
-  //         auto ptr = kj::ArrayPtr<kj::byte>(source);
-  //       }
-  //
-  //       // Or, you can detach the jsg::BackingStore from the BufferSource.
-  //       auto backingStore = source.detach();
-  //       auto ptr = kj::ArrayPtr<kj::byte>(backingStore);
-  //       // Do something with ptr...
-  //       return BufferSource(js, kj::mv(backingStore));
-  //     }
-  //   };
-
 public:
   static kj::Maybe<BufferSource> tryAlloc(Lock& js, size_t size);
   static BufferSource wrap(Lock& js, void* data, size_t size,
                            BackingStore::Disposer disposer, void* ctx);
 
-  explicit BufferSource(Lock& js, BackingStore&& backingStore);
   // Create a new BufferSource that takes over ownership of the given BackingStore.
+  explicit BufferSource(Lock& js, BackingStore&& backingStore);
 
-  explicit BufferSource(Lock& js, v8::Local<v8::Value> handle);
   // Create a BufferSource from the given JavaScript handle.
+  explicit BufferSource(Lock& js, v8::Local<v8::Value> handle);
 
   BufferSource(BufferSource&&) = default;
   BufferSource& operator=(BufferSource&&) = default;
 
   KJ_DISALLOW_COPY(BufferSource);
 
-  inline bool isDetached() const { return maybeBackingStore == nullptr; }
   // True if the BackingStore has been removed from this BufferSource.
+  inline bool isDetached() const { return maybeBackingStore == nullptr; }
 
   bool canDetach(Lock& js);
 
-  BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = nullptr);
   // Removes the BackingStore from the BufferSource and severs its connection to
   // the ArrayBuffer/ArrayBufferView handle.
   // It's worth mentioning that detach can throw application-visible exceptions
   // in the case the ArrayBuffer cannot be detached. Any detaching should be
   // performed as early as possible in an API method implementation.
+  BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = nullptr);
 
   v8::Local<v8::Value> getHandle(Lock& js);
 
@@ -350,16 +352,16 @@ public:
     return KJ_ASSERT_NONNULL(maybeBackingStore).getElementSize();
   }
 
+  // Some standard APIs that use BufferSource / ArrayBufferView are limited to just
+  // supported "Integer-type ArrayBufferViews". As a convenience, when the BufferSource
+  // is created, we record whether or not the type qualifies as an integer type.
   inline bool isIntegerType() const {
-    // Some standard APIs that use BufferSource / ArrayBufferView are limited to just
-    // supported "Integer-type ArrayBufferViews". As a convenience, when the BufferSource
-    // is created, we record whether or not the type qualifies as an integer type.
     return KJ_ASSERT_NONNULL(maybeBackingStore).isIntegerType();
   }
 
-  void setDetachKey(Lock& js, v8::Local<v8::Value> key);
   // Sets the detach key that must be provided with the detach(...) method
   // to successfully detach the backing store.
+  void setDetachKey(Lock& js, v8::Local<v8::Value> key);
 
 private:
   Value handle;
@@ -381,9 +383,9 @@ private:
   friend class GcVisitor;
 };
 
+// TypeWrapper implementation for the BufferSource type.
 template <typename TypeWrapper>
 class BufferSourceWrapper {
-  // TypeWrapper implementation for the BufferSource type.
 public:
   static constexpr const char* getName(BufferSource*) { return "BufferSource"; }
 

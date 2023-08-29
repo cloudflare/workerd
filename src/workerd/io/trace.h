@@ -45,8 +45,9 @@ enum class PipelineLogLevel {
 //   - Request builds a vector of results, while Tracer builds a tree.
 
 // TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
+
+// Collects trace information about the handling of a worker/pipline fetch event.
 class Trace final : public kj::Refcounted {
-  // Collects trace information about the handling of a worker/pipline fetch event.
 public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
   Trace(rpc::Trace::Reader reader);
@@ -74,8 +75,8 @@ public:
 
     kj::HttpMethod method;
     kj::String url;
+      // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
     kj::String cfJson;
-    // TODO(perf): It might be more efficient to store some sort of parsed JSON result instead?
     kj::Array<Header> headers;
 
     void copyTo(rpc::Trace::FetchEventInfo::Builder builder);
@@ -166,12 +167,12 @@ public:
     KJ_DISALLOW_COPY(Log);
     ~Log() noexcept(false) = default;
 
-    kj::Date timestamp;
     // Only as accurate as Worker's Date.now(), for Spectre mitigation.
+    kj::Date timestamp;
 
     LogLevel logLevel;
-    kj::String message;
     // TODO(soon): Just string for now.  Eventually, capture serialized JS objects.
+    kj::String message;
 
     void copyTo(rpc::Trace::Log::Builder builder);
   };
@@ -184,21 +185,21 @@ public:
     KJ_DISALLOW_COPY(Exception);
     ~Exception() noexcept(false) = default;
 
-    kj::Date timestamp;
     // Only as accurate as Worker's Date.now(), for Spectre mitigation.
+    kj::Date timestamp;
 
     kj::String name;
-    kj::String message;
     // TODO(someday): record exception source, line/column number, stack trace?
+    kj::String message;
 
     void copyTo(rpc::Trace::Exception::Builder builder);
   };
 
-  kj::Maybe<kj::String> stableId;
   // Empty for toplevel worker.
+  kj::Maybe<kj::String> stableId;
 
-  kj::Date eventTimestamp = kj::UNIX_EPOCH;
   // We treat the origin value as "unset".
+  kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
   typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
           EmailEventInfo, CustomEventInfo> EventInfo;
@@ -212,8 +213,8 @@ public:
   kj::Array<kj::String> scriptTags;
 
   kj::Vector<Log> logs;
-  kj::Vector<Exception> exceptions;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
+  kj::Vector<Exception> exceptions;
 
   kj::Vector<DiagnosticChannelEvent> diagnosticChannelEvents;
 
@@ -227,44 +228,42 @@ public:
   bool exceededLogLimit = false;
   bool exceededExceptionLimit = false;
   bool exceededDiagnosticChannelEventLimit = false;
-  size_t bytesUsed = 0;
   // Trace data is recorded outside of the JS heap.  To avoid DoS, we keep an estimate of trace
   // data size, and we stop recording if too much is used.
-
+  size_t bytesUsed = 0;
   // TODO(someday): Eventually, want to capture: customer-facing spans, metrics, user data
 
-  void copyTo(rpc::Trace::Builder builder);
   // Copy content from this trace into `builder`.
+  void copyTo(rpc::Trace::Builder builder);
 
-  void mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel);
   // Adds all content from `reader` to this `Trace`. (Typically this trace is empty before the
   // call.)  Also applies filtering to the trace as if it were recorded with the given
   // pipelineLogLevel.
+  void mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel);
 };
 
 // =======================================================================================
 
 class WorkerTracer;
 
+// A tracer which records traces for a set of stages. All traces for a pipeline's stages and
+// possible subpipeline stages are recorded here, where they can be used to call a pipeline's
+// trace worker.
 class PipelineTracer final : public kj::Refcounted {
-  // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
-  // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
-  // trace worker.
-
 public:
+  // Creates a pipeline tracer (with a possible parent).
   explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = nullptr)
       : parentTracer(kj::mv(parentPipeline)) {}
-  // Creates a pipeline tracer (with a possible parent).
 
   ~PipelineTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
-  kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
   // exist at a time.
+  kj::Promise<kj::Array<kj::Own<Trace>>> onComplete();
 
+  // Makes a tracer for a subpipeline.
   kj::Own<PipelineTracer> makePipelineSubtracer() {
-    // Makes a tracer for a subpipeline.
     return kj::refcounted<PipelineTracer>(kj::addRef(*this));
   }
 
@@ -284,20 +283,19 @@ private:
   friend class WorkerTracer;
 };
 
+// Records a worker stage's trace information into a Trace object.  When all references to the
+// Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
+// write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
+// via extractTrace.
 class WorkerTracer final : public kj::Refcounted {
-  // Records a worker stage's trace information into a Trace object.  When all references to the
-  // Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
-  // write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
-  // via extractTrace.
-
 public:
   explicit WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace, PipelineLogLevel pipelineLogLevel);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
-  void log(kj::Date timestamp, LogLevel logLevel, kj::String message);
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
+  void log(kj::Date timestamp, LogLevel logLevel, kj::String message);
 
   // TODO(soon): Eventually:
   //void setMetrics(...) // Or get from MetricsCollector::Request directly?
@@ -307,12 +305,12 @@ public:
   void addDiagnosticChannelEvent(kj::Date timestamp, kj::String channel,
                                  kj::Array<kj::byte> message);
 
-  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
   // Adds info about the event that triggered the trace.  Must not be called more than once.
+  void setEventInfo(kj::Date timestamp, Trace::EventInfo&&);
 
-  void setFetchResponseInfo(Trace::FetchResponseInfo&&);
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
+  void setFetchResponseInfo(Trace::FetchResponseInfo&&);
 
   void setOutcome(EventOutcome outcome);
 
@@ -320,13 +318,13 @@ public:
 
   void setWallTime(kj::Duration wallTime);
 
-  void extractTrace(rpc::Trace::Builder builder);
   // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
   // builder.
+  void extractTrace(rpc::Trace::Builder builder);
 
-  void setTrace(rpc::Trace::Reader reader);
   // Sets the main trace of this Tracer to match the content of `reader`. This is used in the
   // parent process after receiving a trace from a process sandbox.
+  void setTrace(rpc::Trace::Reader reader);
 
 private:
   PipelineLogLevel pipelineLogLevel;
@@ -339,9 +337,9 @@ private:
 
 // =======================================================================================
 
+// Helper function used when setting "truncated_script_id" tags. Truncates the scriptId to 10
+// characters.
 inline kj::String truncateScriptId(kj::StringPtr id) {
-  // Helper function used when setting "truncated_script_id" tags. Truncates the scriptId to 10
-  // characters.
   auto truncatedId = id.slice(0, kj::min(id.size(), 10));
   return kj::str(truncatedId);
 }
@@ -383,30 +381,29 @@ public:
   TagMap tags;
   kj::Vector<Log> logs;
 
-  static constexpr auto MAX_LOGS = 1023;
-  uint droppedLogs = 0;
   // We set an arbitrary (-ish) cap on log messages for safety. If we drop logs because of this,
   // we report how many in a final "dropped_logs" log.
   //
   // At the risk of being too clever, I chose a limit that is one below a power of two so that
   // we'll typically have space for one last element available for the "dropped_logs" log without
   // needing to grow the vector.
+  static constexpr auto MAX_LOGS = 1023;
+  uint droppedLogs = 0;
 
   explicit Span(kj::ConstString operationName, kj::Date startTime)
       : operationName(kj::mv(operationName)), startTime(startTime), endTime(startTime) {}
 };
 
+// An opaque token which can be used to create child spans of some parent. This is typically
+// passed down from a caller to a callee when the caller wants to allow the callee to create
+// spans for itself that show up as children of the caller's span, but the caller does not
+// want to give the callee any other ability to modify the parent span.
 class SpanParent {
-  // An opaque token which can be used to create child spans of some parent. This is typically
-  // passed down from a caller to a callee when the caller wants to allow the callee to create
-  // spans for itself that show up as children of the caller's span, but the caller does not
-  // want to give the callee any other ability to modify the parent span.
-
 public:
   SpanParent(SpanBuilder& builder);
 
-  SpanParent(decltype(nullptr)) {}
   // Make a SpanParent that causes children not to be reported anywhere.
+  SpanParent(decltype(nullptr)) {}
 
   SpanParent(kj::Maybe<kj::Own<SpanObserver>> observer): observer(kj::mv(observer)) {}
 
@@ -416,21 +413,21 @@ public:
 
   SpanParent addRef();
 
-  SpanBuilder newChild(kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
+  SpanBuilder newChild(kj::ConstString operationName,
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
-  bool isObserved() { return observer != nullptr; }
   // Useful to skip unnecessary code when not observed.
+  bool isObserved() { return observer != nullptr; }
 
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
   // Get the underlying SpanObserver representing the parent span.
   //
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
+  kj::Maybe<SpanObserver&> getObserver() { return observer; }
 
 private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
@@ -438,17 +435,21 @@ private:
   friend class SpanBuilder;
 };
 
+// Interface for writing a span. Essentially, this is a mutable interface to a `Span` object,
+// given only to the code which is meant to create the span, whereas code that merely collects
+// and reports spans gets the `Span` type.
+//
+// The reason we use a separate builder type rather than rely on constness is so that the methods
+// can be no-ops when there is no observer, avoiding unnecessary allocations. To allow for this,
+// SpanBuilder is designed to be write-only -- you cannot read back the content. Only the
+// observer (if there is one) receives the content.
 class SpanBuilder {
-  // Interface for writing a span. Essentially, this is a mutable interface to a `Span` object,
-  // given only to the code which is meant to create the span, whereas code that merely collects
-  // and reports spans gets the `Span` type.
-  //
-  // The reason we use a separate builder type rather than rely on constness is so that the methods
-  // can be no-ops when there is no observer, avoiding unnecessary allocations. To allow for this,
-  // SpanBuilder is designed to be write-only -- you cannot read back the content. Only the
-  // observer (if there is one) receives the content.
-
 public:
+  // Create a new top-level span that will report to the given observer. If the observer is null,
+  // no data is collected.
+  //
+  // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
+  // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName,
                        kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
     if (observer != nullptr) {
@@ -456,14 +457,9 @@ public:
       span.emplace(kj::mv(operationName), startTime);
     }
   }
-  // Create a new top-level span that will report to the given observer. If the observer is null,
-  // no data is collected.
-  //
-  // `operationName` should be a string literal with infinite lifetime, or somehow otherwise be
-  // attached to the observer observing this span.
 
-  SpanBuilder(decltype(nullptr)) {}
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
+  SpanBuilder(decltype(nullptr)) {}
 
   SpanBuilder(SpanBuilder&& other) = default;
   SpanBuilder& operator=(SpanBuilder&& other);  // ends the existing span and starts a new one
@@ -471,70 +467,69 @@ public:
 
   ~SpanBuilder() noexcept(false);
 
-  void end();
   // Finishes and submits the span. This is done implicitly by the destructor, but sometimes it's
   // useful to be able to submit early. The SpanBuilder ignores all further method calls after this
   // is invoked.
+  void end();
 
-  bool isObserved() { return observer != nullptr; }
   // Useful to skip unnecessary code when not observed.
+  bool isObserved() { return observer != nullptr; }
 
-  kj::Maybe<SpanObserver&> getObserver() { return observer; }
   // Get the underlying SpanObserver representing the span.
   //
   // This is needed in particular when making outbound network requests that must be annotated with
   // trace IDs in a way that is specific to the trace back-end being used. The caller must downcast
   // the `SpanObserver` to the expected observer type in order to extract the trace ID.
+  kj::Maybe<SpanObserver&> getObserver() { return observer; }
 
-  SpanBuilder newChild(kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
   // Create a new child span.
   //
   // `operationName` should be a string literal with infinite lifetime.
+  SpanBuilder newChild(kj::ConstString operationName,
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
-  void setOperationName(kj::ConstString operationName);
   // Change the operation name from what was specified at span creation.
   //
   // `operationName` should be a string literal with infinite lifetime.
+  void setOperationName(kj::ConstString operationName);
 
   using TagValue = Span::TagValue;
-  void setTag(kj::ConstString key, TagValue value);
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
+  void setTag(kj::ConstString key, TagValue value);
 
-  void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
   // `key` must point to memory that will remain valid all the way until this span's data is
   // serialized.
   //
   // The differences between this and `setTag()` is that logs are timestamped and may have
   // duplicate keys.
+  void addLog(kj::Date timestamp, kj::ConstString key, TagValue value);
 
 private:
   kj::Maybe<kj::Own<SpanObserver>> observer;
-  kj::Maybe<Span> span;
   // The under-construction span, or null if the span has ended.
+  kj::Maybe<Span> span;
 
   friend class SpanParent;
 };
 
+// Abstract interface for observing trace spans reported by the runtime. Different
+// implementations might support different tracing back-ends, e.g. Trace Workers, Jaeger, or
+// whatever infrastrure you prefer to use for this.
+//
+// A new SpanObserver is created at the start of each Span. The observer is used to report the
+// span data at the end of the span, as well as to construct child observers.
 class SpanObserver: public kj::Refcounted {
-  // Abstract interface for observing trace spans reported by the runtime. Different
-  // implementations might support different tracing back-ends, e.g. Trace Workers, Jaeger, or
-  // whatever infrastrure you prefer to use for this.
-  //
-  // A new SpanObserver is created at the start of each Span. The observer is used to report the
-  // span data at the end of the span, as well as to construct child observers.
-
 public:
-  virtual kj::Own<SpanObserver> newChild() = 0;
   // Allocate a new child span.
   //
   // Note that children can be created long after a span has completed.
+  virtual kj::Own<SpanObserver> newChild() = 0;
 
-  virtual void report(const Span& span) = 0;
   // Report the span data. Called at the end of the span.
   //
   // This should always be called exactly once per observer.
+  virtual void report(const Span& span) = 0;
 };
 
 inline SpanParent::SpanParent(SpanBuilder& builder)

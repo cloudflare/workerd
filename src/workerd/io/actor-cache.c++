@@ -13,7 +13,6 @@
 
 namespace workerd {
 
-static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp::word);
 // Max size, in words, of a storage RPC request. Set to 16MiB because our storage backend has a
 // hard limit of 16MiB per operation.
 //
@@ -21,6 +20,7 @@ static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp
 //
 // Note that in practice, the key size limit (options.maxKeysPerRpc) will kick in long before we
 // hit this limit, so this is just a sanity check.
+static constexpr size_t MAX_ACTOR_STORAGE_RPC_WORDS = (16u << 20) / sizeof(capnp::word);
 
 ActorCache::Hooks ActorCache::Hooks::DEFAULT;
 
@@ -501,11 +501,11 @@ public:
         kj::mv(cachedEntries), kj::mv(fetchedEntries), GetResultList::FORWARD));
   }
 
+  // Indicates that the operation is being canceled. Proactively drops all entries. This
+  // is important because the destructor of an `Entry` updates the cache's accounting of memory
+  // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
+  // itself.
   void cancel() {
-    // Indicates that the operation is being canceled. Proactively drops all entries. This
-    // is important because the destructor of an `Entry` updates the cache's accounting of memory
-    // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
-    // itself.
     KJ_ASSERT(!fulfiller->isWaiting());  // proves further RPCs will be ignored
     cachedEntries.clear();
     fetchedEntries.clear();
@@ -796,24 +796,24 @@ public:
                                      GetResultList::FORWARD, originalLimit));
   };
 
+  // Mark the start of the list operation will a null entry, because we did not see it listed.
+  //
+  // Note that this insertion attempt will be ignored in two cases:
+  // 1. An entry already exists with this key, perhaps as the result of a put(). This is
+  //    fine, because the existing entry means we have something to mark.
+  // 2. The entry doesn't exist, but the previous entry has `gapIsKnownEmpty = true`, and
+  //    so the insertion of a new null entry is ignored for being redundant. This case is
+  //    fine too, as the gap is already marked. Our markGapsEmpty() call will start with the
+  //    following entry.
   void markBeginAsEmpty(Lock& lock) {
-    // Mark the start of the list operation will a null entry, because we did not see it listed.
-    //
-    // Note that this insertion attempt will be ignored in two cases:
-    // 1. An entry already exists with this key, perhaps as the result of a put(). This is
-    //    fine, because the existing entry means we have something to mark.
-    // 2. The entry doesn't exist, but the previous entry has `gapIsKnownEmpty = true`, and
-    //    so the insertion of a new null entry is ignored for being redundant. This case is
-    //    fine too, as the gap is already marked. Our markGapsEmpty() call will start with the
-    //    following entry.
     cache.addReadResultToCache(lock, cloneKey(beginKey), nullptr, options);
   }
 
+  // Indicates that the operation is being canceled. Proactively drops all entries. This
+  // is important because the destructor of an `Entry` updates the cache's accounting of memory
+  // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
+  // itself.
   void cancel() {
-    // Indicates that the operation is being canceled. Proactively drops all entries. This
-    // is important because the destructor of an `Entry` updates the cache's accounting of memory
-    // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
-    // itself.
     KJ_ASSERT(!fulfiller->isWaiting());  // proves further RPCs will be ignored
     cachedEntries.clear();
     fetchedEntries.clear();
@@ -821,35 +821,35 @@ public:
 
   ActorCache& cache;
 
-  Key beginKey;
   // Either:
   // - No prefix of the list is known yet, and `beginKey` is the original begin point passed to
   //   list().
   // - Some prefix is already satisfied, either from cache or from a previous batch of results
   //   streamed from storage, and `beginKey` is the key of the last known entry in this prefix.
+  Key beginKey;
 
-  kj::Maybe<Key> endKey;
   // The end of the list range, as originally passed to list().
+  kj::Maybe<Key> endKey;
 
-  kj::Vector<kj::Own<Entry>> cachedEntries;
   // Entries we gathered from cache.
+  kj::Vector<kj::Own<Entry>> cachedEntries;
 
-  kj::Vector<kj::Own<Entry>> fetchedEntries;
   // Entries that have streamed in from disk.
+  kj::Vector<kj::Own<Entry>> fetchedEntries;
 
-  kj::Own<kj::PromiseFulfiller<GetResultList>> fulfiller;
   // Fulfiller for the final results.
+  kj::Own<kj::PromiseFulfiller<GetResultList>> fulfiller;
 
-  kj::Maybe<uint> originalLimit;
   // The original requested limit, if any.
+  kj::Maybe<uint> originalLimit;
 
-  kj::Maybe<uint> adjustedLimit;
   // The limit we sent to storage.
+  kj::Maybe<uint> adjustedLimit;
 
-  bool beginKeyIsKnown;
   // Does `beginKey` point to a key where we already know the associated value? This is
   // especially true when `beginKey` points to the last entry of a previous batch received via
   // a call to `values()`.
+  bool beginKeyIsKnown;
 
   ReadOptions options;
 };
@@ -1156,11 +1156,11 @@ public:
         kj::mv(cachedEntries), kj::mv(fetchedEntries), GetResultList::REVERSE, originalLimit));
   }
 
+  // Indicates that the operation is being canceled. Proactively drops all entries. This
+  // is important because the destructor of an `Entry` updates the cache's accounting of memory
+  // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
+  // itself.
   void cancel() {
-    // Indicates that the operation is being canceled. Proactively drops all entries. This
-    // is important because the destructor of an `Entry` updates the cache's accounting of memory
-    // usage, so it's important that an `Entry` cannot be held beyond the lifetime of the cache
-    // itself.
     KJ_ASSERT(!fulfiller->isWaiting());  // proves further RPCs will be ignored
     cachedEntries.clear();
     fetchedEntries.clear();
@@ -1168,30 +1168,30 @@ public:
 
   ActorCache& cache;
 
-  Key beginKey;
   // The beginning of the list range, as originally passed to list().
+  Key beginKey;
 
-  kj::Maybe<Key> endKey;
   // Either:
   // - No suffix of the list is known yet, and `endKey` is the original end point passed to
   //   list().
   // - Some suffix is already satisfied , either from cache or from a previous batch of results
   //   streamed from storage, and `endKey` is the key of the first known entry in this suffix.
+  kj::Maybe<Key> endKey;
 
-  kj::Vector<kj::Own<Entry>> cachedEntries;
   // Entries we gathered from cache.
+  kj::Vector<kj::Own<Entry>> cachedEntries;
 
-  kj::Vector<kj::Own<Entry>> fetchedEntries;
   // Entries that have streamed in from disk.
+  kj::Vector<kj::Own<Entry>> fetchedEntries;
 
-  kj::Own<kj::PromiseFulfiller<GetResultList>> fulfiller;
   // Fulfiller for the final results.
+  kj::Own<kj::PromiseFulfiller<GetResultList>> fulfiller;
 
-  kj::Maybe<uint> originalLimit;
   // The original requested limit, if any.
+  kj::Maybe<uint> originalLimit;
 
-  kj::Maybe<uint> adjustedLimit;
   // The limit we sent to storage.
+  kj::Maybe<uint> adjustedLimit;
 
   ReadOptions options;
 };
@@ -1514,25 +1514,24 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
   return kj::mv(entry);
 }
 
+// Set `gapIsKnownEmpty` across the range covered by a new batch of entries arriving from
+// storage via a list() operation. Since we just listed this range, we know that all the gaps
+// between entries in this range can now be marked as empty.
+//
+// You might ask: "But what if an entry was evicted from the cache between when list() was
+// called and now, creating a gap?"
+//
+// There are two possibilities:
+// 1. The evicted entry was clean at the time list() was called. In this case, the list()
+//    operation will have returned it, so it would have been re-added to the cache just
+//    before this method call.
+// 2. The evicted entry was dirty at the time list() was called. This can't cause a problem
+//    because we ensure that any flush is ordered after all previous read operations, so such
+//    entries could not possibly be marked clean until after the list operation completes.
+//    And, they cannot be evicted until they are marked clean. So these entries could not
+//    have been evicted yet.
 void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> endKey,
                                const ReadOptions& options) {
-  // Set `gapIsKnownEmpty` across the range covered by a new batch of entries arriving from
-  // storage via a list() operation. Since we just listed this range, we know that all the gaps
-  // between entries in this range can now be marked as empty.
-  //
-  // You might ask: "But what if an entry was evicted from the cache between when list() was
-  // called and now, creating a gap?"
-  //
-  // There are two possibilities:
-  // 1. The evicted entry was clean at the time list() was called. In this case, the list()
-  //    operation will have returned it, so it would have been re-added to the cache just
-  //    before this method call.
-  // 2. The evicted entry was dirty at the time list() was called. This can't cause a problem
-  //    because we ensure that any flush is ordered after all previous read operations, so such
-  //    entries could not possibly be marked clean until after the list operation completes.
-  //    And, they cannot be evicted until they are marked clean. So these entries could not
-  //    have been evicted yet.
-
   if (options.noCache) {
     // Oops, never mind. We're not caching the list() results, so we can't mark anything
     // known-empty.
@@ -1676,19 +1675,18 @@ ActorCache::GetResultList::GetResultList(kj::Vector<KeyValuePair> contents)
   }
 }
 
+// Merges `cachedEntries` and `fetchedEntries`, which should each already be sorted in the
+// given order. If a key exists in both, `cachedEntries` is preferred.
+//
+// After merging, if an entry's value is null, it is dropped.
+//
+// The final result is truncated to `limit`, if any.
+//
+// The idea is that `cachedEntries` is the set of entries that were loaded from cache while
+// `fetchedEntries` is the set read from storage.
 ActorCache::GetResultList::GetResultList(
     kj::Vector<kj::Own<Entry>> cachedEntries, kj::Vector<kj::Own<Entry>> fetchedEntries,
     Order order, kj::Maybe<uint> maybeLimit) {
-  // Merges `cachedEntries` and `fetchedEntries`, which should each already be sorted in the
-  // given order. If a key exists in both, `cachedEntries` is preferred.
-  //
-  // After merging, if an entry's value is null, it is dropped.
-  //
-  // The final result is truncated to `limit`, if any.
-  //
-  // The idea is that `cachedEntries` is the set of entries that were loaded from cache while
-  // `fetchedEntries` is the set read from storage.
-
   uint limit = maybeLimit.orDefault(kj::maxValue);
   entries.reserve(kj::min(cachedEntries.size() + fetchedEntries.size(), limit));
 
@@ -2172,12 +2170,11 @@ void ActorCache::ensureFlushScheduled(const WriteOptions& options) {
   }
 }
 
+// This function returns a Maybe<Promise> because a falsy maybe allows the jsg interface to make
+// a resolved jsg::Promise. This is meaningfully different from a ready kj::Promise because it
+// allows the next continuation to run immediately on the microtask queue instead of returning to
+// the kj event loop and fulfilling a resolver that enqueues the continuation.
 kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
-  // This function returns a Maybe<Promise> because a falsy maybe allows the jsg interface to make
-  // a resolved jsg::Promise. This is meaningfully different from a ready kj::Promise because it
-  // allows the next continuation to run immediately on the microtask queue instead of returning to
-  // the kj event loop and fulfilling a resolver that enqueues the continuation.
-
   if (lru.options.neverFlush) {
     // We won't ever flush (usually because we're a preview session), so return a falsy maybe.
     return nullptr;

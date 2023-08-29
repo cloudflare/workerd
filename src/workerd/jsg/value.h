@@ -20,16 +20,15 @@ namespace workerd::jsg {
 // =======================================================================================
 // Primitives (numbers, booleans)
 
+// TypeWrapper mixin for numbers and booleans.
+//
+// This wrapper has extra wrap() overloads that take an isolate instead of a context. This is used
+// to implement static constants in JavaScript: we need to be able to wrap C++ constants in V8
+// values before a context has been entered.
+//
+// Note that we can't generally change the wrap(context, ...) functions to wrap(isolate, ...)
+// because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
 class PrimitiveWrapper {
-  // TypeWrapper mixin for numbers and booleans.
-  //
-  // This wrapper has extra wrap() overloads that take an isolate instead of a context. This is used
-  // to implement static constants in JavaScript: we need to be able to wrap C++ constants in V8
-  // values before a context has been entered.
-  //
-  // Note that we can't generally change the wrap(context, ...) functions to wrap(isolate, ...)
-  // because ResourceWrapper<TW, T>::wrap() needs the context to create new object instances.
-
 public:
   static constexpr const char* getName(double*) { return "number"; }
 
@@ -414,12 +413,11 @@ public:
 // =======================================================================================
 // Strings
 
+// TypeWrapper mixin for strings.
+//
+// This wrapper has an extra wrap() overload that takes an isolate instead of a context, for the
+// same reason discussed in PrimitiveWrapper.
 class StringWrapper {
-  // TypeWrapper mixin for strings.
-  //
-  // This wrapper has an extra wrap() overload that takes an isolate instead of a context, for the
-  // same reason discussed in PrimitiveWrapper.
-
 public:
   static constexpr const char* getName(kj::String*) { return "string"; }
   // TODO(someday): This conflates USVStrings, which must have valid code points, with DOMStrings,
@@ -489,10 +487,9 @@ constexpr bool isUnionType(kj::OneOf<T...>*) { return true; }
 template <typename T>
 constexpr bool isUnionType(T*) { return false; }
 
+// TypeWrapper mixin for optionals.
 template <typename TypeWrapper>
 class OptionalWrapper {
-  // TypeWrapper mixin for optionals.
-
 public:
   template <typename U> static constexpr decltype(auto) getName(Optional<U>*)
       { return TypeWrapper::getName((kj::Decay<U>*)nullptr); }
@@ -522,10 +519,9 @@ public:
   }
 };
 
+// TypeWrapper mixin for lenient optionals.
 template <typename TypeWrapper>
 class LenientOptionalWrapper {
-  // TypeWrapper mixin for lenient optionals.
-
 public:
   template <typename U> static constexpr decltype(auto) getName(LenientOptional<U>*)
       { return TypeWrapper::getName((kj::Decay<U>*)nullptr); }
@@ -560,9 +556,9 @@ public:
 
 static JsgConfig DEFAULT_JSG_CONFIG = {};
 
+// TypeWrapper mixin for maybes.
 template <typename TypeWrapper>
 class MaybeWrapper {
-  // TypeWrapper mixin for maybes.
 
 public:
   template <typename Config>
@@ -574,11 +570,11 @@ public:
     }
   }
 
-  MaybeWrapper(const auto& config) : config(getConfig(config)) {}
   // The constructor here is a bit of a hack. The config is optional and might not be a JsgConfig
   // object (or convertable to a JsgConfig) if is provided. However, because of the way TypeWrapper
   // inherits MaybeWrapper, we always end up passing a config option (which might be std::nullptr_t)
   // The getConfig allows us to handle any case using reasonable defaults.
+  MaybeWrapper(const auto& config) : config(getConfig(config)) {}
 
   template <typename U> static constexpr decltype(auto) getName(kj::Maybe<U>*)
       { return TypeWrapper::getName((kj::Decay<U>*)nullptr); }
@@ -626,10 +622,9 @@ template <typename... T>
 constexpr bool isOneOf<kj::OneOf<T...>> = true;
 // TODO(cleanup): Move to kj/one-of.h?
 
+// TypeWrapper mixin for variants.
 template <typename TypeWrapper>
 class OneOfWrapper {
-  // TypeWrapper mixin for variants.
-
 public:
   template <typename... U> static kj::String getName(kj::OneOf<U...>*) {
     const auto getNameStr = [](auto u) {
@@ -691,6 +686,9 @@ public:
     return (unwrapHelperRecursive<Predicate, U>(context, in, out) || ...);
   }
 
+  // Predicates for helping implement nested OneOf unwrapping. These must be struct templates
+  // because we can't pass variable templates as template template parameters.
+
   template <typename T>
   struct IsResourceType {
     static constexpr bool value = webidl::isNonCallbackInterfaceType<T>;
@@ -706,8 +704,6 @@ public:
   struct IsNumericType { static constexpr bool value = webidl::isNumericType<T>; };
   template <typename T>
   struct IsBooleanType { static constexpr bool value = webidl::isBooleanType<T>; };
-  // Predicates for helping implement nested OneOf unwrapping. These must be struct templates
-  // because we can't pass variable templates as template template parameters.
 
   template <typename... U>
   kj::Maybe<kj::OneOf<U...>> tryUnwrap(
@@ -761,10 +757,9 @@ public:
 // =======================================================================================
 // Arrays
 
+// TypeWrapper mixin for arrays.
 template <typename TypeWrapper>
 class ArrayWrapper {
-  // TypeWrapper mixin for arrays.
-
 public:
   static auto constexpr MAX_STACK = 64;
   template <typename U> static constexpr const char* getName(kj::Array<U>*) { return "Array"; }
@@ -875,11 +870,8 @@ public:
 //   - use `jsg::asBytes()` as a quick way to get a `kj::ArrayPtr<kj::byte>` view onto it.
 //
 // 3. If a method returns an ArrayBuffer, create and return a `kj::Array<kj::byte>`.
-
 template <typename TypeWrapper>
 class ArrayBufferWrapper {
-  // TypeWrapper mixin for ArrayBuffers and ArrayBufferViews.
-
 public:
   static constexpr const char* getName(kj::ArrayPtr<byte>*) {
     return "ArrayBuffer or ArrayBufferView";
@@ -944,10 +936,9 @@ public:
 // =======================================================================================
 // Dicts
 
+// TypeWrapper mixin for dictionaries (objects used as string -> value maps).
 template <typename TypeWrapper>
 class DictWrapper {
-  // TypeWrapper mixin for dictionaries (objects used as string -> value maps).
-
 public:
   template <typename K, typename V>
   static constexpr const char* getName(Dict<V, K>*) { return "object"; }

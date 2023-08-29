@@ -8,7 +8,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-         "@com_google_benchmark//:benchmark",
+        "@com_google_benchmark//:benchmark",
     ],
 )
 
@@ -34,8 +34,8 @@ wd_cc_benchmark(
     name = "bench-json",
     srcs = ["bench-json.c++"],
     deps = [
-        "@capnp-cpp//src/kj",
         "//src/workerd/api:r2-api_capnp",
+        "@capnp-cpp//src/kj",
     ],
 )
 
@@ -45,4 +45,18 @@ wd_cc_benchmark(
     deps = [
         "//src/workerd/util",
     ],
+)
+
+wd_cc_benchmark(
+    name = "bench-headers",
+    srcs = ["bench-headers.c++"],
+    deps = [
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-global-scope",
+    srcs = ["bench-global-scope.c++"],
+    deps = [":test-fixture"],
 )

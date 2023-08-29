@@ -12,9 +12,9 @@
 
 namespace workerd {
 
+// Simple wrapper around `HttpService::Response` to let us know if the response was sent
+// already.
 class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Response {
-  // Simple wrapper around `HttpService::Response` to let us know if the response was sent
-  // already.
 public:
   ResponseSentTracker(kj::HttpService::Response& inner)
       : inner(inner) {}

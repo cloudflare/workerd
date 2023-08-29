@@ -103,16 +103,16 @@ namespace workerd::jsg {
     }                                                                                              \
   } while (0)
 
-kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 // Given a KJ exception's description, strips any leading "remote exception: " prefixes.
+kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 
-bool isTunneledException(kj::StringPtr internalMessage);
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
 // be converted back to JavaScript via makeInternalError().
+bool isTunneledException(kj::StringPtr internalMessage);
 
-bool isDoNotLogException(kj::StringPtr internalMessage);
 // Given a KJ exception's description, returns whether it contains the magic constant that indicates
 // the exception is the script's fault and isn't worth logging.
+bool isDoNotLogException(kj::StringPtr internalMessage);
 
 // Log an exception ala LOG_EXCEPTION, but only if it is worth logging and not a tunneled exception.
 #define LOG_EXCEPTION_IF_INTERNAL(context, exception) \
@@ -123,26 +123,26 @@ bool isDoNotLogException(kj::StringPtr internalMessage);
 
 
 struct TunneledErrorType {
-  kj::StringPtr message;
   // The original error message stripped of prefixes.
+  kj::StringPtr message;
 
-  bool isJsgError;
   // Was this error prefixed by JSG already?
+  bool isJsgError;
 
-  bool isInternal;
   // Is this error internal? If so, the error message should be logged to syslog and hidden from
   // the app.
+  bool isInternal;
 
-  bool isFromRemote;
   // Was the error tunneled from either a worker or an actor?
+  bool isFromRemote;
 
-  bool isDurableObjectReset;
   // Was the error created because a durable object is broken?
+  bool isDurableObjectReset;
 };
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
 // Annotate an internal message with the corresponding brokeness reason.
+kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
 
 }  // namespace workerd::jsg
