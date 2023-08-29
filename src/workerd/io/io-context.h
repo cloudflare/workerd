@@ -685,9 +685,9 @@ public:
   // into a regular `Promise<T>`, including registering pending events as needed.
   template <typename T>
   kj::Promise<T> waitForDeferredProxy(kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return promise.then([this](api::DeferredProxy<T> deferredProxy) {
-      return deferredProxy.proxyTask.attach(registerPendingEvent());
-    });
+    api::DeferredProxy<T> deferredProxy = co_await promise;
+    auto pending = registerPendingEvent();
+    co_return co_await deferredProxy.proxyTask;
   }
 
   // Like awaitIo(), but handles the specific case of Promise<DeferredProxy>. This is special
@@ -1171,12 +1171,10 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_MAYBE(cs, criticalSection) {
-    return cs->get()->wait()
-        .then([this,func=kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
-      return run(kj::fwd<Func>(func), kj::mv(inputLock));
-    });
+    InputGate::Lock inputLock = co_await cs->get()->wait();
+      co_return co_await run(kj::fwd<Func>(func), kj::mv(inputLock));
   } else {
-    return run(kj::fwd<Func>(func));
+      co_return co_await run(kj::fwd<Func>(func));
   }
 }
 
