@@ -3,20 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <algorithm>
 #include <cstring>
-#include <list>
 #include <kj/string.h>
+#include <kj/vector.h>
 
 namespace workerd {
 
+// String buffer optimized for appending a lot of strings together.
+// Allocates StackSize chunk on the stack and uses that until full.
+// Keeps allocating new chunks of at least HeapChunkSize as needed.
+// Doesn't perform any heap allocations if string stays within
+// StackSize bytes (without \0)
 template<size_t StackSize>
 class StringBuffer {
-  // String buffer optimized for appending a lot of strings together.
-  // Allocates StackSize chunk on the stack and uses that until full.
-  // Keeps allocating new chunks of at least HeapChunkSize as needed.
-  // Doesn't perform any heap allocations if string stays within
-  // StackSize bytes (without \0)
 
 public:
   KJ_DISALLOW_COPY_AND_MOVE(StringBuffer);
@@ -38,26 +37,26 @@ public:
   }
 
 private:
-  const size_t heapChunkSize;
   // minimum heap chunk size
+  const size_t heapChunkSize;
 
-  char arr[StackSize];
   // chunk on the stack
+  char arr[StackSize];
 
-  std::list<kj::Array<char>> chunks;
   // on the heap chunks
+  kj::Vector<kj::Array<char>> chunks;
 
-  char *tail;
   // points after the last used bytes in current chunk
+  char *tail;
 
-  size_t cap;
   // number of bytes available in current chunk
+  size_t cap;
 
-  size_t len = 0;
   // total length of the data appended so far
+  size_t len = 0;
 
   void appendImpl(const char* ptr, size_t size) {
-    size_t toCopy = std::min(size, cap);
+    size_t toCopy = kj::min(size, cap);
     memcpy(tail, ptr, toCopy);
     tail += toCopy;
     cap -= toCopy;
@@ -65,7 +64,7 @@ private:
     if (toCopy != size) {
       // prepare new chunk
       size_t remaining = size - toCopy;
-      size_t chunkSize = std::max(remaining, heapChunkSize); // don't chunk large strings
+      size_t chunkSize = kj::max(remaining, heapChunkSize); // don't chunk large strings
       auto chunk = kj::heapArray<char>(chunkSize);
 
       // copy the rest of the string to the new chunk
@@ -73,7 +72,7 @@ private:
       tail = chunk.begin() + remaining;
       cap = chunk.size() - remaining;
 
-      chunks.push_back(kj::mv(chunk));
+      chunks.add(kj::mv(chunk));
     }
 
     len += size;
@@ -98,7 +97,7 @@ private:
 
   void copyTo(char* dest) {
     // copy stack portion first
-    size_t onStack = std::min(len, StackSize);
+    size_t onStack = kj::min(len, StackSize);
     memcpy(dest, arr, onStack);
     dest += onStack;
 
@@ -106,7 +105,7 @@ private:
     if (onStack < len) {
       size_t remaining = len - onStack;
       for (auto& chunk: chunks) {
-        size_t inChunk = std::min(remaining, chunk.size()); // last chunk won't be full
+        size_t inChunk = kj::min(remaining, chunk.size()); // last chunk won't be full
         memcpy(dest, chunk.begin(), inChunk);
         dest += inChunk;
         remaining -= inChunk;
