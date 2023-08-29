@@ -3,30 +3,28 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/tests/bench-tools.h>
-#include <kj/compat/http.h>
+#include <workerd/tests/test-fixture.h>
+#include <workerd/api/http.h>
+
+// A benchmark for js Header class.
 
 namespace workerd {
 namespace {
 
-struct Fixture: public benchmark::Fixture {
-  virtual ~Fixture() noexcept(true) {}
+struct ApiHeaders: public benchmark::Fixture {
+  virtual ~ApiHeaders() noexcept(true) {}
+
 
   void SetUp(benchmark::State& state) noexcept(true) override {
+    fixture = kj::heap<TestFixture>();
+
     kj::HttpHeaderTable::Builder builder;
     builder.add("Host");
     builder.add("Accept");
     builder.add("Content-Type");
     builder.add("Last-Modified");
     table = builder.build();
-  }
-
-  kj::Own<kj::HttpHeaderTable> table;
-};
-
-BENCHMARK_F(Fixture, Parse)(benchmark::State& state) {
-  for (auto _ : state) {
-    kj::HttpHeaders headers(*table);
-
+    kjHeaders = kj::heap<kj::HttpHeaders>(*table);
     auto in = kj::heapString(
           "GET /favicon.ico HTTP/1.1\r\n"
           "Host: 0.0.0.0=5000\r\n"
@@ -38,8 +36,25 @@ BENCHMARK_F(Fixture, Parse)(benchmark::State& state) {
           "Keep-Alive: 300\r\n"
           "Connection: keep-alive\r\n"
           "\r\n");
-    KJ_EXPECT(headers.tryParseRequest(in.asArray()).is<kj::HttpHeaders::Request>());
+    KJ_EXPECT(kjHeaders->tryParseRequest(in.asArray()).is<kj::HttpHeaders::Request>());
   }
+
+  void TearDown(benchmark::State& state) noexcept(true) override {
+    fixture = nullptr;
+  }
+
+  kj::Own<TestFixture> fixture;
+  kj::Own<kj::HttpHeaderTable> table;
+  kj::Own<kj::HttpHeaders> kjHeaders;
+};
+
+// initialization performs a lot of copying, benchmark it
+BENCHMARK_F(ApiHeaders, constructor)(benchmark::State& state) {
+  fixture->runInIoContext([&](const TestFixture::Environment& env) {
+    for (auto _ : state) {
+      auto jsHeaders = jsg::alloc<api::Headers>(*kjHeaders, api::Headers::Guard::REQUEST);
+    }
+  });
 }
 
 } // namespace

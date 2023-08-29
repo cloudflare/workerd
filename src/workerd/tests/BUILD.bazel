@@ -48,10 +48,18 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
-    name = "bench-headers",
-    srcs = ["bench-headers.c++"],
+    name = "bench-kj-headers",
+    srcs = ["bench-kj-headers.c++"],
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-api-headers",
+    srcs = ["bench-api-headers.c++"],
+    deps = [
+        ":test-fixture",
     ],
 )
 
