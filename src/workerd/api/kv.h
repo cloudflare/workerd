@@ -36,7 +36,10 @@ public:
   };
 
   using GetResult = kj::Maybe<
-      kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::Value>>;
+      kj::OneOf<jsg::Ref<ReadableStream>,
+                kj::Array<byte>,
+                kj::String,
+                jsg::JsRef<jsg::JsValue>>>;
 
   jsg::Promise<GetResult> get(
       jsg::Lock& js,
@@ -46,8 +49,8 @@ public:
 
   struct GetWithMetadataResult {
     GetResult value;
-    kj::Maybe<jsg::Value> metadata;
-    kj::Maybe<jsg::Value> cacheStatus;
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> metadata;
+    kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus;
 
     JSG_STRUCT(value, metadata, cacheStatus);
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceGetWithMetadataResult<Value, Metadata> {
@@ -71,14 +74,14 @@ public:
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceListOptions);
   };
 
-  jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
+  jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   // Optional parameter for passing options into a Fetcher::put. Initially
   // intended for supporting expiration times in KV bindings.
   struct PutOptions {
     jsg::Optional<int> expiration;
     jsg::Optional<int> expirationTtl;
-    jsg::Optional<kj::Maybe<jsg::Value>> metadata;
+    jsg::Optional<kj::Maybe<jsg::JsRef<jsg::JsValue>>> metadata;
 
     JSG_STRUCT(expiration, expirationTtl, metadata);
     JSG_STRUCT_TS_OVERRIDE(KVNamespacePutOptions);
@@ -88,7 +91,7 @@ public:
   // would get coerced into meaningless strings like "[object Object]". Instead we first use this
   // OneOf to differentiate between primitives and objects, and check the object for the types that
   // we specifically support later.
-  using PutBody = kj::OneOf<kj::String, v8::Local<v8::Object>>;
+  using PutBody = kj::OneOf<kj::String, jsg::JsObject>;
 
   using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, jsg::Ref<ReadableStream>>;
 
