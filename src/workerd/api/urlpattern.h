@@ -12,7 +12,7 @@ namespace workerd::api {
 // An individual compiled component of a URLPattern
 struct URLPatternComponent {
   jsg::UsvString pattern;
-  jsg::V8Ref<v8::RegExp> regex;
+  jsg::JsRef<jsg::JsRegExp> regex;
   kj::Array<jsg::UsvString> nameList;
 };
 

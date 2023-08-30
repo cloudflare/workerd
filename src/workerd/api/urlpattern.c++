@@ -69,7 +69,7 @@ namespace {
 // require the compatibility flag to be enabled. It will use the new parser
 // internally.
 
-using RegexAndNameList = std::pair<jsg::V8Ref<v8::RegExp>, kj::Array<jsg::UsvString>>;
+using RegexAndNameList = std::pair<jsg::JsRef<jsg::JsRegExp>, kj::Array<jsg::UsvString>>;
 
 constexpr const char* SYNTAX_ERROR = "Syntax error in URLPattern";
 constexpr const char* BASEURL_ERROR = "A baseURL is not allowed when input is an object.";
@@ -378,15 +378,9 @@ Part::Modifier maybeTokenToModifier(kj::Maybe<Token&> modifierToken) {
 // TODO (later): Investigate whether there is a more efficient way to handle this.
 bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& component) {
   auto handle = component.regex.getHandle(js);
-  auto context = js.v8Context();
-
-  const auto checkIt = [&handle, &js, &context](const char* name) {
-    return !jsg::check(handle->Exec(context, jsg::v8StrIntern(js.v8Isolate, name)))
-        ->IsNullOrUndefined();
-  };
 
   return js.tryCatch([&] {
-#define V(name) if (checkIt(#name)) return true;
+#define V(name) if (handle(js, #name) != nullptr) return true;
   SPECIAL_SCHEME(V)
 #undef V
     return false;
@@ -1116,14 +1110,11 @@ RegexAndNameList generateRegularExpressionAndNameList(
   // regular expression syntax is invalid as opposed to the default SyntaxError
   // that V8 throws.
   return js.tryCatch([&]() {
-    auto context = js.v8Context();
     return RegexAndNameList {
-      js.v8Ref(jsg::check(v8::RegExp::New(context,
-                        v8Str(js.v8Isolate, result.finish()),
-                        v8::RegExp::Flags::kUnicode)).As<v8::RegExp>()),
+      js.regexp(result.finish().toStr(), jsg::Lock::RegExpFlags::kUNICODE).addRef(js),
       nameList.releaseAsArray(),
     };
-  }, [&](jsg::Value reason) -> RegexAndNameList {
+  }, [&](auto reason) -> RegexAndNameList {
     JSG_FAIL_REQUIRE(TypeError, "Invalid regular expression syntax.");
   });
 }
@@ -1826,37 +1817,31 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
     jsg::UsvStringPtr input) {
   using Groups = jsg::Dict<jsg::UsvString, jsg::UsvString>;
 
-  auto context = js.v8Context();
+  auto handle = component.regex.getHandle(js);
+  KJ_IF_MAYBE(array, handle(js, input.toStr())) {
+    // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
+    // is an array and we're skipping the first element.
+    uint32_t index = 1;
+    uint32_t length = array->size();
+    kj::Vector<Groups::Field> fields(length - 1);
 
-  auto execResult =
-      jsg::check(component.regex.getHandle(js)->Exec(
-          context, jsg::v8Str(js.v8Isolate, input)));
+    while (index < length) {
+      auto value = array->get(js, index);
+      fields.add(Groups::Field {
+        .name = jsg::usv(component.nameList[index - 1]),
+        .value = value.isUndefined() ? jsg::usv() : jsg::usv(js, value),
+      });
+      index++;
+    }
 
-  if (execResult->IsNullOrUndefined()) {
-    return nullptr;
+    return URLPattern::URLPatternComponentResult {
+      .input = jsg::usv(input),
+      .groups = Groups { .fields = fields.releaseAsArray() },
+    };
+
   }
 
-  KJ_ASSERT(execResult->IsArray());
-  v8::Local<v8::Array> resultsArray = execResult.As<v8::Array>();
-  // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
-  // is an array and we're skipping the first element.
-  uint32_t index = 1;
-  uint32_t length = resultsArray->Length();
-  kj::Vector<Groups::Field> fields(length - 1);
-
-  while (index < length) {
-    auto value = js.v8Get(resultsArray, index);
-    fields.add(Groups::Field {
-      .name = jsg::usv(component.nameList[index - 1]),
-      .value = value->IsUndefined() ? jsg::usv() : jsg::usv(js.v8Isolate, value),
-    });
-    index++;
-  }
-
-  return URLPattern::URLPatternComponentResult {
-    .input = jsg::usv(input),
-    .groups = Groups { .fields = fields.releaseAsArray() },
-  };
+  return nullptr;
 }
 
 }  // namespace
