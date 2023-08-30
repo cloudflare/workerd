@@ -11,7 +11,7 @@ class BufferUtil final: public jsg::Object {
   // Implements utilities in support of the Node.js Buffer
 public:
 
-  uint32_t byteLength(jsg::Lock& js, v8::Local<v8::String> str);
+  uint32_t byteLength(jsg::Lock& js, jsg::JsString str);
 
   struct CompareOptions {
     jsg::Optional<uint32_t> aStart;
@@ -32,34 +32,34 @@ public:
                              uint32_t length);
 
   kj::Array<kj::byte> decodeString(jsg::Lock& js,
-                                   v8::Local<v8::String> string,
+                                   jsg::JsString string,
                                    kj::String encoding);
 
   void fillImpl(jsg::Lock& js,
                 kj::Array<kj::byte> buffer,
-                kj::OneOf<v8::Local<v8::String>, jsg::BufferSource> value,
+                kj::OneOf<jsg::JsString, jsg::BufferSource> value,
                 uint32_t start,
                 uint32_t end,
                 jsg::Optional<kj::String> encoding);
 
   jsg::Optional<uint32_t> indexOf(jsg::Lock& js,
                                   kj::Array<kj::byte> buffer,
-                                  kj::OneOf<v8::Local<v8::String>, jsg::BufferSource> value,
+                                  kj::OneOf<jsg::JsString, jsg::BufferSource> value,
                                   int32_t byteOffset,
                                   kj::String encoding,
                                   bool isForward);
 
   void swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size);
 
-  v8::Local<v8::String> toString(jsg::Lock& js,
-                                 kj::Array<kj::byte> bytes,
-                                 uint32_t start,
-                                 uint32_t end,
-                                 kj::String encoding);
+  jsg::JsString toString(jsg::Lock& js,
+                         kj::Array<kj::byte> bytes,
+                         uint32_t start,
+                         uint32_t end,
+                         kj::String encoding);
 
   uint32_t write(jsg::Lock& js,
                  kj::Array<kj::byte> buffer,
-                 v8::Local<v8::String> string,
+                 jsg::JsString string,
                  uint32_t offset,
                  uint32_t length,
                  kj::String encoding);
@@ -73,10 +73,10 @@ public:
     kSize = 7,
   };
 
-  v8::Local<v8::String> decode(jsg::Lock& js,
-                               kj::Array<kj::byte> bytes,
-                               kj::Array<kj::byte> state);
-  v8::Local<v8::String> flush(jsg::Lock& js, kj::Array<kj::byte> state);
+  jsg::JsString decode(jsg::Lock& js,
+                        kj::Array<kj::byte> bytes,
+                        kj::Array<kj::byte> state);
+  jsg::JsString flush(jsg::Lock& js, kj::Array<kj::byte> state);
 
   JSG_RESOURCE_TYPE(BufferUtil) {
     JSG_METHOD(byteLength);

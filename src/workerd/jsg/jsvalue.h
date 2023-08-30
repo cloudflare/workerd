@@ -223,11 +223,19 @@ public:
       WriteOptions options = WriteOptions::NONE) const KJ_WARN_UNUSED_RESULT;
 
   struct WriteIntoStatus {
+    // The number of elements (e.g. char, byte, uint16_t) read from this string.
     int read;
+    // The number of elements (e.g. char, byte, uint16_t) written to the buffer.
     int written;
   };
   WriteIntoStatus writeInto(Lock& js,
                             kj::ArrayPtr<char> buffer,
+                            WriteOptions options = WriteOptions::NONE) const;
+  WriteIntoStatus writeInto(Lock& js,
+                            kj::ArrayPtr<kj::byte> buffer,
+                            WriteOptions options = WriteOptions::NONE) const;
+  WriteIntoStatus writeInto(Lock& js,
+                            kj::ArrayPtr<uint16_t> buffer,
                             WriteOptions options = WriteOptions::NONE) const;
 
   using JsBase<v8::String, JsString>::JsBase;

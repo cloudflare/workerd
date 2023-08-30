@@ -166,29 +166,34 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
 uint32_t writeInto(
     jsg::Lock& js,
     kj::ArrayPtr<kj::byte> buffer,
-    v8::Local<v8::String> string,
+    jsg::JsString string,
     uint32_t offset,
     uint32_t length,
     Encoding encoding) {
   auto dest = buffer.slice(offset, kj::min(offset + length, buffer.size()));
-  if (dest.size() == 0 || string->Length() == 0) { return 0; }
+  if (dest.size() == 0 || string.length(js) == 0) { return 0; }
 
-  int flags = v8::String::HINT_MANY_WRITES_EXPECTED |
-              v8::String::NO_NULL_TERMINATION |
-              v8::String::REPLACE_INVALID_UTF8;
+  static constexpr jsg::JsString::WriteOptions flags = static_cast<jsg::JsString::WriteOptions>(
+    jsg::JsString::MANY_WRITES_EXPETED |
+    jsg::JsString::NO_NULL_TERMINATION |
+    jsg::JsString::REPLACE_INVALID_UTF8);
 
   switch (encoding) {
     case Encoding::ASCII:
       // Fall-through
     case Encoding::LATIN1: {
-      return string->WriteOneByte(js.v8Isolate, dest.begin(), 0, dest.size(), flags);
+      auto result = string.writeInto(js, dest, flags);
+      return result.written;
     }
     case Encoding::UTF8: {
-      return string->WriteUtf8(js.v8Isolate, dest.asChars().begin(), dest.size(), nullptr, flags);
+      auto result = string.writeInto(js, dest.asChars(), flags);
+      return result.written;
     }
     case Encoding::UTF16LE: {
-      return string->Write(js.v8Isolate, reinterpret_cast<uint16_t*>(dest.begin()),
-                           0, dest.size()/sizeof(uint16_t), flags) * sizeof(uint16_t);
+      kj::ArrayPtr<uint16_t> buf(reinterpret_cast<uint16_t*>(dest.begin()),
+                                 dest.size() / sizeof(uint16_t));
+      auto result = string.writeInto(js, buf, flags);
+      return result.written * sizeof(uint16_t);
     }
     case Encoding::BASE64:
       // Fall-through
@@ -201,10 +206,11 @@ uint32_t writeInto(
           str.size());
     }
     case Encoding::HEX: {
-      KJ_STACK_ARRAY(kj::byte, buf, string->Length(), 1024, 536870888);
-      string->WriteOneByte(js.v8Isolate, buf.begin(), 0, -1,
-                           v8::String::NO_NULL_TERMINATION |
-                           v8::String::REPLACE_INVALID_UTF8);
+      KJ_STACK_ARRAY(kj::byte, buf, string.length(js), 1024, 536870888);
+      static constexpr jsg::JsString::WriteOptions options =
+          static_cast<jsg::JsString::WriteOptions>(jsg::JsString::NO_NULL_TERMINATION |
+                                                   jsg::JsString::REPLACE_INVALID_UTF8);
+      string.writeInto(js, buf, options);
       auto bytes = decodeHexTruncated(buf, false);
       auto amountToCopy = kj::min(bytes.size(), dest.size());
       memcpy(dest.begin(), bytes.begin(), amountToCopy);
@@ -216,26 +222,32 @@ uint32_t writeInto(
 
 kj::Array<kj::byte> decodeStringImpl(
     jsg::Lock& js,
-    v8::Local<v8::String> string,
+    const jsg::JsString& string,
     Encoding encoding,
     bool strict = false) {
-  if (string->Length() == 0) return kj::Array<kj::byte>();
+  auto length = string.length(js);
+  if (length == 0) return kj::Array<kj::byte>();
+
+  static constexpr jsg::JsString::WriteOptions options =
+      static_cast<jsg::JsString::WriteOptions>(
+        jsg::JsString::NO_NULL_TERMINATION |
+        jsg::JsString::REPLACE_INVALID_UTF8);
 
   switch (encoding) {
     case Encoding::ASCII:
       // Fall-through
     case Encoding::LATIN1: {
-      auto dest = kj::heapArray<kj::byte>(string->Length());
-      writeInto(js, dest, string, 0, string->Length(), Encoding::LATIN1);
+      auto dest = kj::heapArray<kj::byte>(length);
+      writeInto(js, dest, string, 0, dest.size(), Encoding::LATIN1);
       return kj::mv(dest);
     }
     case Encoding::UTF8: {
-      auto dest = kj::heapArray<kj::byte>(string->Utf8Length(js.v8Isolate));
+      auto dest = kj::heapArray<kj::byte>(string.utf8Length(js));
       writeInto(js, dest, string, 0, dest.size(), Encoding::UTF8);
       return kj::mv(dest);
     }
     case Encoding::UTF16LE: {
-      auto dest = kj::heapArray<kj::byte>(string->Length() * sizeof(uint16_t));
+      auto dest = kj::heapArray<kj::byte>(length * sizeof(uint16_t));
       writeInto(js, dest, string, 0, dest.size(), Encoding::UTF16LE);
       return kj::mv(dest);
     }
@@ -244,10 +256,9 @@ kj::Array<kj::byte> decodeStringImpl(
     case Encoding::BASE64URL: {
       // We do not use the kj::String conversion here because inline null-characters
       // need to be ignored.
-      KJ_STACK_ARRAY(kj::byte, buf, string->Length(), 1024, 536870888);
-      auto len = string->WriteOneByte(js.v8Isolate, buf.begin(), 0, -1,
-                                      v8::String::NO_NULL_TERMINATION |
-                                      v8::String::REPLACE_INVALID_UTF8);
+      KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
+      auto result = string.writeInto(js, buf, options);
+      auto len = result.written;
       auto dest = kj::heapArray<kj::byte>(base64_decoded_size(buf.begin(), len));
       len = base64_decode(
         dest.asChars().begin(),
@@ -257,10 +268,8 @@ kj::Array<kj::byte> decodeStringImpl(
       return dest.slice(0, len).attach(kj::mv(dest));
     }
     case Encoding::HEX: {
-      KJ_STACK_ARRAY(kj::byte, buf, string->Length(), 1024, 536870888);
-      string->WriteOneByte(js.v8Isolate, buf.begin(), 0, -1,
-                           v8::String::NO_NULL_TERMINATION |
-                           v8::String::REPLACE_INVALID_UTF8);
+      KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
+      string.writeInto(js, buf, options);
       return decodeHexTruncated(buf, strict);
     }
   }
@@ -268,11 +277,8 @@ kj::Array<kj::byte> decodeStringImpl(
 }
 }  // namespace
 
-uint32_t BufferUtil::byteLength(jsg::Lock& js, v8::Local<v8::String> str) {
-  // Gets the UTF8 byte length for the given input. We use v8::String
-  // directly in order to avoid any copying and we just use the V8 API
-  // to determine the UTF8 length.
-  return str->Utf8Length(js.v8Isolate);
+uint32_t BufferUtil::byteLength(jsg::Lock& js, jsg::JsString str) {
+  return str.utf8Length(js);
 }
 
 int BufferUtil::compare(
@@ -334,7 +340,7 @@ kj::Array<kj::byte> BufferUtil::concat(
 
 kj::Array<kj::byte> BufferUtil::decodeString(
     jsg::Lock& js,
-    v8::Local<v8::String> string,
+    jsg::JsString string,
     kj::String encoding) {
   return decodeStringImpl(js, string, getEncoding(encoding));
 }
@@ -342,7 +348,7 @@ kj::Array<kj::byte> BufferUtil::decodeString(
 void BufferUtil::fillImpl(
     jsg::Lock& js,
     kj::Array<kj::byte> buffer,
-    kj::OneOf<v8::Local<v8::String>, jsg::BufferSource> value,
+    kj::OneOf<jsg::JsString, jsg::BufferSource> value,
     uint32_t start,
     uint32_t end,
     jsg::Optional<kj::String> encoding) {
@@ -363,7 +369,7 @@ void BufferUtil::fillImpl(
   };
 
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(string, v8::Local<v8::String>) {
+    KJ_CASE_ONEOF(string, jsg::JsString) {
       auto enc = kj::mv(encoding).orDefault(kj::str("utf8"));
       auto decoded = decodeStringImpl(js, string, getEncoding(enc), true /* strict */);
       fillFromBytes(decoded);
@@ -461,7 +467,7 @@ jsg::Optional<uint32_t> indexOfBuffer(
 jsg::Optional<uint32_t> indexOfString(
     jsg::Lock& js,
     kj::ArrayPtr<kj::byte> hayStack,
-    v8::Local<v8::String> needle,
+    const jsg::JsString& needle,
     int32_t byteOffset,
     kj::String encoding,
     bool isForward) {
@@ -513,14 +519,14 @@ jsg::Optional<uint32_t> indexOfString(
   return result;
 }
 
-v8::Local<v8::String> toStringImpl(
+jsg::JsString toStringImpl(
     jsg::Lock& js,
     kj::ArrayPtr<kj::byte> bytes,
     uint32_t start,
     uint32_t end,
     Encoding encoding) {
   auto slice = bytes.slice(start, end);
-  if (slice.size() == 0) return v8::String::Empty(js.v8Isolate);
+  if (slice.size() == 0) return js.str();
   switch (encoding) {
     case Encoding::ASCII: {
       // TODO(perf): We can look at making this more performant later.
@@ -528,28 +534,28 @@ v8::Local<v8::String> toStringImpl(
       // has the highest bit turned off. Whee! Node.js has a faster
       // algorithm that it implements so we can likely adopt that.
       kj::Array<kj::byte> copy = KJ_MAP(b, slice) -> kj::byte { return b & 0x7f; };
-      return jsg::v8StrFromLatin1(js.v8Isolate, copy);
+      return js.str(copy);
     }
     case Encoding::LATIN1: {
-      return jsg::v8StrFromLatin1(js.v8Isolate, slice);
+      return js.str(slice);
     }
     case Encoding::UTF8: {
-      return jsg::v8Str(js.v8Isolate, slice.asChars());
+      return js.str(slice.asChars());
     }
     case Encoding::UTF16LE: {
       // TODO(soon): Using just the slice here results in v8 hitting an IsAligned assertion.
       auto data = kj::heapArray<uint16_t>(
           reinterpret_cast<uint16_t*>(slice.begin()), slice.size() / 2);
-      return jsg::v8Str<uint16_t>(js.v8Isolate, data);
+      return js.str(data);
     }
     case Encoding::BASE64: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeBase64(slice));
+      return js.str(kj::encodeBase64(slice));
     }
     case Encoding::BASE64URL: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeBase64Url(slice));
+      return js.str(kj::encodeBase64Url(slice));
     }
     case Encoding::HEX: {
-      return jsg::v8Str(js.v8Isolate, kj::encodeHex(slice));
+      return js.str(kj::encodeHex(slice));
     }
   }
   KJ_UNREACHABLE;
@@ -560,13 +566,13 @@ v8::Local<v8::String> toStringImpl(
 jsg::Optional<uint32_t> BufferUtil::indexOf(
     jsg::Lock& js,
     kj::Array<kj::byte> buffer,
-    kj::OneOf<v8::Local<v8::String>, jsg::BufferSource> value,
+    kj::OneOf<jsg::JsString, jsg::BufferSource> value,
     int32_t byteOffset,
     kj::String encoding,
     bool isForward) {
 
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(string, v8::Local<v8::String>) {
+    KJ_CASE_ONEOF(string, jsg::JsString) {
       return indexOfString(js, buffer, string, byteOffset, kj::mv(encoding), isForward);
     }
     KJ_CASE_ONEOF(source, jsg::BufferSource) {
@@ -586,7 +592,7 @@ void BufferUtil::swap(jsg::Lock& js, kj::Array<kj::byte> buffer, int size) {
   KJ_UNREACHABLE;
 }
 
-v8::Local<v8::String> BufferUtil::toString(
+jsg::JsString BufferUtil::toString(
     jsg::Lock& js,
     kj::Array<kj::byte> bytes,
     uint32_t start,
@@ -598,7 +604,7 @@ v8::Local<v8::String> BufferUtil::toString(
 uint32_t BufferUtil::write(
     jsg::Lock& js,
     kj::Array<kj::byte> buffer,
-    v8::Local<v8::String> string,
+    jsg::JsString string,
     uint32_t offset,
     uint32_t length,
     kj::String encoding) {
@@ -669,7 +675,7 @@ inline Encoding getEncoding(kj::ArrayPtr<kj::byte> state) {
   return static_cast<Encoding>(state[BufferUtil::kEncoding]);
 }
 
-v8::Local<v8::String> getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> state) {
+jsg::JsString getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> state) {
   JSG_REQUIRE(getBufferedBytes(state) <= BufferUtil::kIncompleteCharactersEnd, Error,
               "Invalid StringDecoder state");
   auto ret = toStringImpl(js, state,
@@ -681,9 +687,9 @@ v8::Local<v8::String> getBufferedString(jsg::Lock& js, kj::ArrayPtr<kj::byte> st
 }
 }  // namespace
 
-v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
-                                         kj::Array<kj::byte> bytes,
-                                         kj::Array<kj::byte> state) {
+jsg::JsString BufferUtil::decode(jsg::Lock& js,
+                                 kj::Array<kj::byte> bytes,
+                                 kj::Array<kj::byte> state) {
   JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
   auto enc = getEncoding(state);
   if (enc == Encoding::ASCII || enc == Encoding::LATIN1 || enc == Encoding::HEX) {
@@ -693,8 +699,8 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
     return toStringImpl(js, bytes, 0, bytes.size(), enc);
   }
 
-  v8::Local<v8::String> prepend;
-  v8::Local<v8::String> body;
+  jsg::JsString prepend = js.str();
+  jsg::JsString body = js.str();
   auto nread = bytes.size();
   auto data = bytes.begin();
   if (getMissingBytes(state) > 0) {
@@ -736,8 +742,8 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
   }
 
   if (nread == 0) {
-    body = !prepend.IsEmpty() ? prepend : v8::String::Empty(js.v8Isolate);
-    prepend = v8::Local<v8::String>();
+    body = prepend.length(js) ? prepend : js.str();
+    prepend = js.str();
   } else {
     JSG_REQUIRE(getMissingBytes(state) == 0, Error, "Invalid StringDecoder state");
     JSG_REQUIRE(getBufferedBytes(state) == 0, Error, "Invalid StringDecoder state");
@@ -819,20 +825,20 @@ v8::Local<v8::String> BufferUtil::decode(jsg::Lock& js,
     if (nread > 0) {
       body = toStringImpl(js, kj::ArrayPtr<kj::byte>(data, data + nread), 0, nread, enc);
     } else {
-      body = v8::String::Empty(js.v8Isolate);
+      body = js.str();
     }
   }
 
-  if (prepend.IsEmpty()) {
+  if (prepend.length(js) == 0) {
     return body;
   } else {
-    return v8::String::Concat(js.v8Isolate, prepend, body);
+    return jsg::JsString::concat(js, prepend, body);
   }
 
-  return v8::String::Empty(js.v8Isolate);
+  return js.str();
 }
 
-v8::Local<v8::String> BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state) {
+jsg::JsString BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state) {
   JSG_REQUIRE(state.size() == BufferUtil::kSize, TypeError, "Invalid StringDecoder");
   auto enc = getEncoding(state);
   if (enc == Encoding::ASCII || enc == Encoding::HEX || enc == Encoding::LATIN1) {
@@ -847,7 +853,7 @@ v8::Local<v8::String> BufferUtil::flush(jsg::Lock& js, kj::Array<kj::byte> state
   }
 
   if (getBufferedBytes(state) == 0) {
-    return v8::String::Empty(js.v8Isolate);
+    return js.str();
   }
 
   auto ret = getBufferedString(js, state);
