@@ -12,14 +12,14 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-2022]
+        os: [ubuntu-20.04, macos-latest] # windows-2022 disabled due to actions/runner-images#812
         include:
           - os-name: linux
             os: ubuntu-20.04
           - os-name: macOS
             os: macos-latest
-          - os-name: windows
-            os: windows-2022
+          # - os-name: windows
+          #   os: windows-2022
     runs-on: ${{ matrix.os }}
     name: test (${{ matrix.os-name }})
     steps:

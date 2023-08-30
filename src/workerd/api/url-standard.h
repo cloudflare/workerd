@@ -11,19 +11,19 @@
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
-  // The original URL implementation based on kj::Url is not compliant with the
-  // WHATWG URL standard, but we can't get rid of it. This is an alternate
-  // implementation that is based on the spec. It can be enabled using a
-  // configuration flag. We put it in it's own namespace to keep it's classes
-  // from conflicting with the old implementation.
+// The original URL implementation based on kj::Url is not compliant with the
+// WHATWG URL standard, but we can't get rid of it. This is an alternate
+// implementation that is based on the spec. It can be enabled using a
+// configuration flag. We put it in it's own namespace to keep it's classes
+// from conflicting with the old implementation.
 namespace url {
 
-struct OpaqueOrigin {};
 // An internal structure representing a URL origin that cannot be serialized.
+struct OpaqueOrigin {};
 
+// "Special scheme" URLs have an origin that is composed of the scheme, host, and port.
+// https://html.spec.whatwg.org/multipage/origin.html#concept-origin-tuple
 struct TupleOrigin {
-  // "Special scheme" URLs have an origin that is composed of the scheme, host, and port.
-  // https://html.spec.whatwg.org/multipage/origin.html#concept-origin-tuple
   jsg::UsvStringPtr scheme;
   jsg::UsvStringPtr host;
   kj::Maybe<uint16_t> port = nullptr;
@@ -31,8 +31,8 @@ struct TupleOrigin {
 
 using Origin = kj::OneOf<OpaqueOrigin, TupleOrigin>;
 
-struct UrlRecord {
   // The internal representation of a parsed URL.
+struct UrlRecord {
   using Path = kj::OneOf<jsg::UsvString, kj::Array<jsg::UsvString>>;
 
   jsg::UsvString scheme;
@@ -64,10 +64,10 @@ struct UrlRecord {
 
 class URL;
 
+// The URLSearchParams object is a wrapper for application/x-www-form-urlencoded
+// data. It can be used by itself or with URL (every URL object has a searchParams
+// attribute that is kept in sync).
 class URLSearchParams: public jsg::Object {
-  // The URLSearchParams object is a wrapper for application/x-www-form-urlencoded
-  // data. It can be used by itself or with URL (every URL object has a searchParams
-  // attribute that is kept in sync).
 private:
   struct IteratorState {
     jsg::Ref<URLSearchParams> parent;
@@ -84,11 +84,11 @@ public:
                                 jsg::Dict<jsg::UsvString, jsg::UsvString>,
                                 jsg::UsvString>;
 
-  URLSearchParams(Initializer init);
   // Constructor called by the static constructor method.
+  URLSearchParams(Initializer init);
 
-  URLSearchParams(kj::Maybe<jsg::UsvString>& maybeQuery, URL& url);
   // Constructor called by the URL class when created.
+  URLSearchParams(kj::Maybe<jsg::UsvString>& maybeQuery, URL& url);
 
   static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init) {
     return jsg::alloc<URLSearchParams>(kj::mv(init).orDefault(jsg::usv()));
@@ -238,8 +238,8 @@ private:
   V(QUERY) \
   V(FRAGMENT)
 
+// The humble URL object, in all its spec-compliant glory.
 class URL: public jsg::Object {
-  // The humble URL object, in all its spec-compliant glory.
 public:
   enum class ParseState {
   #define V(name) name,
@@ -301,8 +301,6 @@ public:
 
   UrlRecord& getRecord() KJ_LIFETIMEBOUND { return inner; }
 
-  static bool canParse(jsg::UsvString url,
-                       jsg::Optional<jsg::UsvString> base = nullptr);
   // Standard utility that returns true if the given input can be
   // successfully parsed as a URL. This is useful for validating
   // URL inputs without incurring the additional cost of constructing
@@ -313,6 +311,8 @@ public:
   //   'not a url'
   // ].filter((test) => URL.canParse(test));
   //
+  static bool canParse(jsg::UsvString url,
+                       jsg::Optional<jsg::UsvString> base = nullptr);
 
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);

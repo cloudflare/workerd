@@ -25,10 +25,9 @@ kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 jsg::JsValue deserializeV8Value(
     jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf);
 
+// Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
+// designed to be used as a mixin.
 class DurableObjectStorageOperations {
-  // Common implementation of DurableObjectStorage and DurableObjectTransaction. This class is
-  // designed to be used as a mixin.
-
 public:
   struct GetOptions {
     jsg::Optional<bool> allowConcurrency;
@@ -146,13 +145,13 @@ protected:
 
   virtual ActorCacheOps& getCache(OpName op) = 0;
 
-  virtual bool useDirectIo() = 0;
   // Whether to skip caching and allow concurrency on all operations.
+  virtual bool useDirectIo() = 0;
 
+  // Method that should be called at the start of each storage operation to override any of the
+  // options as appropriate.
   template <typename T>
   T configureOptions(T&& options) {
-    // Method that should be called at the start of each storage operation to override any of the
-    // options as appropriate.
     if (useDirectIo()) {
       options.allowConcurrency = true;
       options.noCache = true;
@@ -215,17 +214,16 @@ public:
 
   jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
 
-  kj::Promise<kj::String> getCurrentBookmark();
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
   // performed after this call begins. It could also include concurrent writes that haven't happned
   // yet, unless blockConcurrencyWhile() is used to prevent them.
+  kj::Promise<kj::String> getCurrentBookmark();
 
-  kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
   // Get a bookmark representing approximately the given timestamp, which is a time up to 30 days
   // in the past (or whatever the backup retention period is).
+  kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
 
-  kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
   // Arrange that the next time the Durable Object restarts, the database will be restored to
   // the state represented by the given bookmark. This returns a bookmark string which represents
   // the state immediately before the restoration takes place, and thus can be used to undo the
@@ -234,6 +232,7 @@ public:
   //
   // It is up to the caller to force a restart in order to complete the restoration, for instance
   // by calling state.abort() or by throwing from a blockConcurrencyWhile() callback.
+  kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::String bookmark);
 
   JSG_RESOURCE_TYPE(DurableObjectStorage, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
@@ -290,15 +289,18 @@ public:
   DurableObjectTransaction(IoOwn<ActorCacheInterface::Transaction> cacheTxn)
     : cacheTxn(kj::mv(cacheTxn)) {}
 
-  kj::Promise<void> maybeCommit();
-  void maybeRollback();
   // Called from C++, not JS, after the transaction callback has completed (successfully or not).
   // These methods do nothing if the transaction is already committed / rolled back.
+  kj::Promise<void> maybeCommit();
+
+  // Called from C++, not JS, after the transaction callback has completed (successfully or not).
+  // These methods do nothing if the transaction is already committed / rolled back.
+  void maybeRollback();
 
   void rollback();  // called from JS
 
-  void deleteAll();
   // Just throws an exception saying this isn't supported.
+  void deleteAll();
 
   JSG_RESOURCE_TYPE(DurableObjectTransaction) {
     JSG_METHOD(get);
@@ -335,20 +337,19 @@ protected:
   }
 
 private:
-  kj::Maybe<IoOwn<ActorCacheInterface::Transaction>> cacheTxn;
   // Becomes null when committed or rolled back.
+  kj::Maybe<IoOwn<ActorCacheInterface::Transaction>> cacheTxn;
 
   bool rolledBack = false;
 
   friend DurableObjectStorage;
 };
 
+// The type placed in event.actorState (pre-modules API).
+// NOTE: It hasn't been renamed under the assumption that it will only be
+// used for colo-local namespaces.
 class ActorState: public jsg::Object {
-  // The type placed in event.actorState (pre-modules API).
-  // NOTE: It hasn't been renamed under the assumption that it will only be
-  // used for colo-local namespaces.
   // TODO(cleanup): Remove getPersistent method that isn't supported for colo-local actors anymore.
-
 public:
   ActorState(Worker::Actor::Id actorId,
              kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
@@ -400,9 +401,8 @@ private:
   kj::String response;
 };
 
+// The type passed as the first parameter to durable object class's constructor.
 class DurableObjectState: public jsg::Object {
-  // The type passed as the first parameter to durable object class's constructor.
-
 public:
   DurableObjectState(Worker::Actor::Id actorId, kj::Maybe<jsg::Ref<DurableObjectStorage>> storage);
 
@@ -418,11 +418,10 @@ public:
       jsg::Lock& js,
       jsg::Function<jsg::Promise<jsg::JsRef<jsg::JsValue>>()> callback);
 
-  void abort(jsg::Optional<kj::String> reason);
   // Reset the object, including breaking the output gate and canceling any writes that haven't
   // been committed yet.
+  void abort(jsg::Optional<kj::String> reason);
 
-  void acceptWebSocket(jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
   // Adds a WebSocket to the set attached to this object.
   // `ws.accept()` must NOT have been called separately.
   // Once called, any incoming messages will be delivered
@@ -441,24 +440,25 @@ public:
   //
   // `tags` are string tags which can be used to look up
   // the WebSocket with getWebSockets().
+  void acceptWebSocket(jsg::Ref<WebSocket> ws, jsg::Optional<kj::Array<kj::String>> tags);
 
-  kj::Array<jsg::Ref<api::WebSocket>> getWebSockets(jsg::Lock& js, jsg::Optional<kj::String> tag);
   // Gets an array of accepted WebSockets matching the given tag.
   // If no tag is provided, an array of all accepted WebSockets is returned.
   // Disconnected WebSockets are automatically removed from the list.
+  kj::Array<jsg::Ref<api::WebSocket>> getWebSockets(jsg::Lock& js, jsg::Optional<kj::String> tag);
 
-  void setWebSocketAutoResponse(jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
   // Sets an object-wide websocket auto response message for a specific
   // request string. All websockets belonging to the same object must
   // reply to the request with the matching response, then store the timestamp at which
   // the request was received.
   // If maybeReqResp is not set, we consider it as unset and remove any set request response pair.
+  void setWebSocketAutoResponse(jsg::Optional<jsg::Ref<api::WebSocketRequestResponsePair>> maybeReqResp);
 
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
   // Gets the currently set object-wide websocket auto response.
+  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse();
 
-  kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);
   // Get the last auto response timestamp or null
+  kj::Maybe<kj::Date> getWebSocketAutoResponseTimestamp(jsg::Ref<WebSocket> ws);
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
@@ -490,9 +490,11 @@ public:
 private:
   Worker::Actor::Id id;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
+
+  // Limits for Hibernatable WebSocket tags.
+
   const size_t MAX_TAGS_PER_CONNECTION = 10;
   const size_t MAX_TAG_LENGTH = 256;
-  // Limits for Hibernatable WebSocket tags.
 };
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                     \

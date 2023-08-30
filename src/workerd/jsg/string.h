@@ -403,6 +403,12 @@ UsvString usv(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
 // Make a JavaScript String in v8's Heap from a UsvString.
 KJ_WARN_UNUSED_RESULT
+UsvString usv(Lock& js, const JsValue& value);
+// Make a UsvString from a JavaScript value reinterpreted first as a string,
+// and then as a sequence of utf16_t Unicode code units. The underlying
+// storage of utf16_t code units will be heap allocated.
+
+KJ_WARN_UNUSED_RESULT
 v8::Local<v8::String> v8Str(v8::Isolate* isolate,
                             UsvStringPtr str,
                             v8::NewStringType newType = v8::NewStringType::kNormal);

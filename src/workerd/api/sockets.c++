@@ -12,10 +12,10 @@ namespace workerd::api {
 
 namespace {
 
+// This function performs some basic length and characters checks, it does not guarantee that
+// the specified host is a valid domain. It should only be used to reject malicious
+// hosts.
 bool isValidHost(kj::StringPtr host) {
-  // This function performs some basic length and characters checks, it does not guarantee that
-  // the specified host is a valid domain. It should only be used to reject malicious
-  // hosts.
   if (host.size() > 255 || host.size() == 0) {
     // RFC1035 states that maximum domain name length is 255 octets.
     //

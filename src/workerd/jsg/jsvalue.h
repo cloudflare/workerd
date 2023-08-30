@@ -293,6 +293,9 @@ public:
   using JsBase<v8::Object, JsObject>::JsBase;
 
   explicit JsObject(v8::Local<v8::Map> inner);
+
+  void recursivelyFreeze(Lock&);
+  JsObject jsonClone(Lock&);
 };
 
 template <typename T>
@@ -371,7 +374,8 @@ public:
   JsRef(JsRef<T>& other) = delete;
   JsRef(JsRef<T>&& other) = default;
   template <typename U>
-  JsRef(Value&& v8Value) : value(kj::mv(v8Value)) {}
+  JsRef(Lock& js, V8Ref<U>&& v8Value)
+      : value(js.v8Isolate, v8Value.getHandle(js).template As<v8::Value>()) {}
   JsRef& operator=(JsRef<T>& other) = delete;
   JsRef& operator=(JsRef<T>&& other) = default;
 

@@ -13,16 +13,19 @@ namespace workerd::api {
 
 class URLSearchParams;
 
+// Implements the URL interface as prescribed by: https://url.spec.whatwg.org/#api
+// This is the legacy, non-standard implementation.
 class URL: public jsg::Object {
-  // Implements the URL interface as prescribed by: https://url.spec.whatwg.org/#api
-
 public:
   static jsg::Ref<URL> constructor(kj::String url, jsg::Optional<kj::String> base);
 
-  kj::String getHref();
-  void setHref(const v8::PropertyCallbackInfo<void>& info, kj::String value);
   // Href is the only setter that throws. All others ignore errors, leaving their values
   // unchanged.
+  kj::String getHref();
+
+  // Href is the only setter that throws. All others ignore errors, leaving their values
+  // unchanged.
+  void setHref(const v8::PropertyCallbackInfo<void>& info, kj::String value);
 
   kj::String getOrigin();
 
@@ -100,8 +103,8 @@ public:
     // Allow URLs which get coerced to strings in either constructor parameter
   }
 
-  explicit URL(kj::Url&& u);
   // Treat as private -- needs to be public for jsg::alloc<T>()...
+  explicit URL(kj::Url&& u);
 
 private:
   friend class URLSearchParams;

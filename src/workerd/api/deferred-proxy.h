@@ -11,26 +11,25 @@ namespace workerd::api {
 
 // =======================================================================================
 
+// Some API methods return Promise<DeferredProxy<T>> when the task can be separated into two
+// parts: some work that must be done with the IoContext still live, and some part that
+// can occur after the IoContext completes, but which should still be performed before
+// the overall task is "done".
+//
+// In particular, when an HTTP event ends up proxying the response body stream (or WebSocket
+// stream) directly to/from origin, then that streaming can take place without pinning the
+// isolate in memory, and without holding the IoContext open. So,
+// `ServiceWorkerGlobalScope::request()` returns `Promise<DeferredProxy<void>>`. The outer
+// Promise waits for the JavaScript work to be done, and the inner DeferredProxy<void> represents
+// the proxying step.
+//
+// Note that if you're performing a task that resolves to DeferredProxy but JavaScript is
+// actually waiting for the result of the task, then it's your responsibility to call
+// IoContext::current().registerPendingEvent() and attach it to `proxyTask`, otherwise
+// the request might be canceled as the proxy task won't be recognized as something that the
+// request is waiting on.
 template <typename T>
 struct DeferredProxy {
-  // Some API methods return Promise<DeferredProxy<T>> when the task can be separated into two
-  // parts: some work that must be done with the IoContext still live, and some part that
-  // can occur after the IoContext completes, but which should still be performed before
-  // the overall task is "done".
-  //
-  // In particular, when an HTTP event ends up proxying the response body stream (or WebSocket
-  // stream) directly to/from origin, then that streaming can take place without pinning the
-  // isolate in memory, and without holding the IoContext open. So,
-  // `ServiceWorkerGlobalScope::request()` returns `Promise<DeferredProxy<void>>`. The outer
-  // Promise waits for the JavaScript work to be done, and the inner DeferredProxy<void> represents
-  // the proxying step.
-  //
-  // Note that if you're performing a task that resolves to DeferredProxy but JavaScript is
-  // actually waiting for the result of the task, then it's your responsibility to call
-  // IoContext::current().registerPendingEvent() and attach it to `proxyTask`, otherwise
-  // the request might be canceled as the proxy task won't be recognized as something that the
-  // request is waiting on.
-  //
   // TODO(cleanup): Now that we have jsg::Promise, it might make sense for deferred proxying to
   //    be represented as `jsg::Promise<api::DeferredProxy<T>>`, since the outer promise is
   //    intended to represent activity that happens in JavaScript while the inner one represents
@@ -48,10 +47,10 @@ inline DeferredProxy<T> newNoopDeferredProxy(T&& value) {
   return DeferredProxy<T> { kj::mv(value) };
 }
 
+// Helper method to use when you need to return `Promise<DeferredProxy<T>>` but no part of the
+// operation you are returning is eligible to be deferred past the IoContext lifetime.
 template <typename T>
 inline kj::Promise<DeferredProxy<T>> addNoopDeferredProxy(kj::Promise<T> promise) {
-  // Helper method to use when you need to return `Promise<DeferredProxy<T>>` but no part of the
-  // operation you are returning is eligible to be deferred past the IoContext lifetime.
   co_return newNoopDeferredProxy(co_await promise);
 }
 inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> promise) {
@@ -79,12 +78,11 @@ inline kj::Promise<DeferredProxy<void>> addNoopDeferredProxy(kj::Promise<void> p
 // that is, `co_return DeferredProxy<T> { ... }` is a compile error. You must initiate deferred
 // proxying using `KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING`.
 
-template <typename T, typename... Args>
-class DeferredProxyCoroutine;
 // The coroutine adapter class, required for the compiler to know how to create coroutines
 // returning kj::Promise<DeferredProxy<T>>. We declare it here so we can name it in our
 // `coroutine_traits` specialization below.
-
+template <typename T, typename... Args>
+class DeferredProxyCoroutine;
 }  // namespace workerd::api
 
 namespace KJ_COROUTINE_STD_NAMESPACE {
@@ -101,24 +99,23 @@ struct coroutine_traits<kj::Promise<workerd::api::DeferredProxy<T>>, Args...> {
 namespace workerd::api {
 
 class BeginDeferredProxyingConstant final {};
-constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING {};
 // A magic constant which a DeferredProxyPromise<T> coroutine can `KJ_CO_MAGIC` to indicate that the
 // deferred proxying phase of its operation has begun.
+constexpr BeginDeferredProxyingConstant BEGIN_DEFERRED_PROXYING {};
 
+// A concept which is true if C is a coroutine adapter which supports the `co_yield` operator for
+// type T. We could also check that the expression results in an awaitable, but that is already a
+// compile error in other ways.
 template <typename T, typename C>
 concept CoroutineYieldValue = requires (T&& v, C coroutineAdapter) {
-  // A concept which is true if C is a coroutine adapter which supports the `co_yield` operator for
-  // type T. We could also check that the expression results in an awaitable, but that is already a
-  // compile error in other ways.
   { coroutineAdapter.yield_value(kj::fwd<T>(v)) };
 };
 
+// The coroutine adapter type for DeferredProxyPromise<T>. Most of the work is forwarded to the
+// regular kj::Promise<T> coroutine adapter.
 template <typename T, typename... Args>
 class DeferredProxyCoroutine: public kj::_::PromiseNode,
                               public kj::_::CoroutineMixin<DeferredProxyCoroutine<T, Args...>, T> {
-  // The coroutine adapter type for DeferredProxyPromise<T>. Most of the work is forwarded to the
-  // regular kj::Promise<T> coroutine adapter.
-
   using InnerCoroutineAdapter =
       typename kj::_::stdcoro::coroutine_traits<kj::Promise<T>, Args...>::promise_type;
 
@@ -253,14 +250,13 @@ private:
     builder.add(getMethodStartAddress(implicitCast<PromiseNode&>(*this), &PromiseNode::get));
   }
 
-  InnerCoroutineAdapter inner;
   // We defer the majority of the implementation to the regular kj::Promise<T> coroutine adapter.
+  InnerCoroutineAdapter inner;
 
-  OnReadyEvent onReadyEvent;
   // Helper to arm the event which fires when the outer promise (that is, `this` PromiseNode) for
   // the DeferredProxy<T> is ready.
+  OnReadyEvent onReadyEvent;
 
-  kj::_::ExceptionOr<DeferredProxy<T>> result;
   // Stores the result for the outer promise.
   //
   // WARNING: This object owns `this` PromiseNode! If `result` is ever moved away, as is done in
@@ -269,13 +265,14 @@ private:
   // always destroyed before the inner PromiseNode (for `T`). kj-async always does this anyway, but
   // we implement an additional safeguard by immediately destroying our own `OwnPromiseNode` (which
   // we have access to via `setSelfPointer()`) when we move `result` away in `get()`.
+  kj::_::ExceptionOr<DeferredProxy<T>> result;
 
-  kj::_::OwnPromiseNode* selfPtr = nullptr;
   // Used to drop ourselves in `get()` -- see comment for `result`.
+  kj::_::OwnPromiseNode* selfPtr = nullptr;
 
-  bool deferredProxyingHasBegun = false;
   // Set to true when deferred proxying has begun -- that is, when the outer DeferredProxy<T>
   // promise is fulfilled by calling `onReadyEvent.arm()`.
+  bool deferredProxyingHasBegun = false;
 };
 
 }  // namespace workerd::api

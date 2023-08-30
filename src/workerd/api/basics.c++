@@ -11,15 +11,15 @@
 namespace workerd::api {
 
 namespace {
+// "Special" events are the global addEventListener(...) events that the runtime itself
+// will emit for various things (e.g. the "fetch" event). When using module syntax, these
+// are not emitted as events and instead should be registered as functions on the exported
+// handler. To help make that clearer, if user code calls addEventListener() using one of
+// these special types (only when using module syntax), a warning will be logged to the
+// console.
+// It's important to keep this list in sync with any other top level events that are emitted
+// when in worker syntax but called as exports in module syntax.
 bool isSpecialEventType(kj::StringPtr type) {
-  // "Special" events are the global addEventListener(...) events that the runtime itself
-  // will emit for various things (e.g. the "fetch" event). When using module syntax, these
-  // are not emitted as events and instead should be registered as functions on the exported
-  // handler. To help make that clearer, if user code calls addEventListener() using one of
-  // these special types (only when using module syntax), a warning will be logged to the
-  // console.
-  // It's important to keep this list in sync with any other top level events that are emitted
-  // when in worker syntax but called as exports in module syntax.
   // TODO(someday): How should we cover custom events here? Since it's just for a warning I'm
   //   leaving them out for now.
   return type == "fetch" ||

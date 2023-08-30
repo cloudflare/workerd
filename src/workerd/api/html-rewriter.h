@@ -48,12 +48,11 @@ public:
   using ElementCallback = kj::Promise<void>(jsg::Ref<jsg::Object> element);
   using ElementCallbackFunction = jsg::Function<ElementCallback>;
 
+  // A struct-like wrapper around element content handlers. I say struct-like, because we only use
+  // this wrapper as a convenience to help us access the three function properties that we expect
+  // to find. In reality, this is more like a "callback interface" in Web IDL terms, since we hang
+  // onto the original object so that we can use it as the `this` argument.
   struct ElementContentHandlers {
-    // A struct-like wrapper around element content handlers. I say struct-like, because we only use
-    // this wrapper as a convenience to help us access the three function properties that we expect
-    // to find. In reality, this is more like a "callback interface" in Web IDL terms, since we hang
-    // onto the original object so that we can use it as the `this` argument.
-
     jsg::Optional<ElementCallbackFunction> element;
     jsg::Optional<ElementCallbackFunction> comments;
     jsg::Optional<ElementCallbackFunction> text;
@@ -68,10 +67,9 @@ public:
     // Specify parameter types for callback functions
   };
 
+  // A struct-like wrapper around document content handlers. See the doc comment on
+  // ElementContentHandlers for more information on its idiosyncrasies.
   struct DocumentContentHandlers {
-    // A struct-like wrapper around document content handlers. See the doc comment on
-    // ElementContentHandlers for more information on its idiosyncrasies.
-
     jsg::Optional<ElementCallbackFunction> doctype;
     jsg::Optional<ElementCallbackFunction> comments;
     jsg::Optional<ElementCallbackFunction> text;
@@ -95,7 +93,6 @@ public:
   // ElementContentHandlers or DocumentContentHandlers struct, respectively. We take it as a
   // v8::Object so that we can use it as the `this` argument for the function calls.
 
-  jsg::Ref<Response> transform(jsg::Lock& js, jsg::Ref<Response> response);
   // Create a new Response object that is identical to the input response except that its body is
   // the result of running the original body through this HTMLRewriter's rewriter. This
   // function does not run the parser itself -- to drive the parser, you must read the transformed
@@ -103,6 +100,7 @@ public:
   //
   // Pre-condition: the input response body is not disturbed.
   // Post-condition: the input response body is disturbed.
+  jsg::Ref<Response> transform(jsg::Lock& js, jsg::Ref<Response> response);
 
   JSG_RESOURCE_TYPE(HTMLRewriter) {
     JSG_METHOD(on);
@@ -141,17 +139,15 @@ public:
   virtual void htmlContentScopeEnd() = 0;
 };
 
-using Content = kj::OneOf<kj::String, jsg::Ref<ReadableStream>, jsg::Ref<Response>>;
 // A chunk of text or HTML which can be passed to content token mutation functions.
-//
+using Content = kj::OneOf<kj::String, jsg::Ref<ReadableStream>, jsg::Ref<Response>>;
 // TODO(soon): Support ReadableStream/Response types. Requires fibers or lol-html saveable state.
 
+// Options bag which can be passed to content token mutation functions.
 struct ContentOptions {
-  // Options bag which can be passed to content token mutation functions.
-
-  jsg::Optional<bool> html;
   // True if the Content being passed to the mutation function is HTML. If false, the content will
   // be escaped (HTML entity-encoded).
+  jsg::Optional<bool> html;
 
   JSG_STRUCT(html);
 };
@@ -248,9 +244,9 @@ class Element::AttributesIterator final: public HTMLRewriter::Token {
 public:
   using CType = lol_html_AttributesIterator;
 
-  explicit AttributesIterator(kj::Own<CType> iter);
   // lol_html_AttributesIterator has the distinction of being valid only during a content handler
   // execution scope AND also requiring manual deallocation, so this takes an Own<T> rather than T&.
+  explicit AttributesIterator(kj::Own<CType> iter);
 
   struct Next {
     bool done;

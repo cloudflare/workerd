@@ -100,9 +100,8 @@ kj::String percentDecodeQuery(kj::ArrayPtr<const char> text, bool& hadErrors) {
   return kj::mv(result);
 }
 
+// Use this instead of calling kj::Url::toString() directly.
 kj::String kjUrlToString(const kj::Url& url) {
-  // Use this instead of calling kj::Url::toString() directly.
-
   kj::String result;
   KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
     result = url.toString();
@@ -552,8 +551,8 @@ bool URLSearchParams::has(kj::String name) {
   return false;
 }
 
+// Set the first element named `name` to `value`, then remove all the rest matching that name.
 void URLSearchParams::set(kj::String name, kj::String value) {
-  // Set the first element named `name` to `value`, then remove all the rest matching that name.
   const auto predicate = [name = name.slice(0)](const auto& kv) { return kv.name == name; };
   auto firstFound = std::find_if(url->query.begin(), url->query.end(), predicate);
   if (firstFound != url->query.end()) {
@@ -565,9 +564,8 @@ void URLSearchParams::set(kj::String name, kj::String value) {
   }
 }
 
+// Sort by UTF-16 code unit, preserving order of equal elements.
 void URLSearchParams::sort() {
-  // Sort by UTF-16 code unit, preserving order of equal elements.
-  //
   // TODO(perf): This UTF-16 business is sad. The WPT points out the specific example 🌈 < ﬃ,
   //   because the rainbow is lexicographically less than the ligature in UTF-16 code units. In
   //   UTF-8 code units, their order is the opposite.

@@ -34,24 +34,26 @@ public:
   // kj::StringPtr getAlgorithmName() const = 0;
   // (inheritted from CryptoKey::Impl, needs to be implemented by subclass)
 
-  virtual kj::StringPtr chooseHash(
-      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash) const = 0;
   // Determine the hash function to use. Some algorithms choose this at key import time while
   // others choose it at sign() or verify() time. `callTimeHash` is the hash name passed to the
   // call.
+  virtual kj::StringPtr chooseHash(
+      const kj::Maybe<kj::OneOf<kj::String, SubtleCrypto::HashAlgorithm>>& callTimeHash) const = 0;
 
+  // Convert OpenSSL-format signature to WebCrypto-format signature, if different.
   virtual kj::Array<kj::byte> signatureSslToWebCrypto(kj::Array<kj::byte> signature) const {
-    // Convert OpenSSL-format signature to WebCrypto-format signature, if different.
     return kj::mv(signature);
   }
+
+  // Convert WebCrypto-format signature to OpenSSL-format signature, if different.
   virtual kj::Array<const kj::byte> signatureWebCryptoToSsl(
       kj::ArrayPtr<const kj::byte> signature) const {
-    // Convert WebCrypto-format signature to OpenSSL-format signature, if different.
     return { signature.begin(), signature.size(), kj::NullArrayDisposer::instance };
   }
-  virtual void addSalt(EVP_PKEY_CTX* digestCtx, const SubtleCrypto::SignAlgorithm& algorithm) const {}
+
   // Add salt to digest context in order to generate or verify salted signature.
   // Currently only used for RSA-PSS sign and verify operations.
+  virtual void addSalt(EVP_PKEY_CTX* digestCtx, const SubtleCrypto::SignAlgorithm& algorithm) const {}
 
   // ---------------------------------------------------------------------------
   // Implementation of CryptoKey
@@ -942,13 +944,12 @@ kj::Maybe<T> fromBignum(kj::ArrayPtr<kj::byte> value) {
 
 namespace {
 
+// The W3C standard itself doesn't describe any parameter validation but the conformance tests
+// do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
+// with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
+// library might be expected to handle such cases on its own, no?).
 void validateRsaParams(jsg::Lock& js, int modulusLength, kj::ArrayPtr<kj::byte> publicExponent,
                        bool isImport = false) {
-  // The W3C standard itself doesn't describe any parameter validation but the conformance tests
-  // do test "bad" exponents, likely because everyone uses OpenSSL that suffers from poor behavior
-  // with these bad exponents (e.g. if an exponent < 3 or 65535 generates an infinite loop, a
-  // library might be expected to handle such cases on its own, no?).
-
   // Use Chromium's limits for RSA keygen to avoid infinite loops:
   // * Key sizes a multiple of 8 bits.
   // * Key sizes must be in [256, 16k] bits.
