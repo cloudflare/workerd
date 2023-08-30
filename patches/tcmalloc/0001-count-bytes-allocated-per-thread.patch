@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Aizatsky <maizatskyi@cloudflare.com>
+Date: Tue, 29 Aug 2023 07:32:51 -0700
+Subject: count bytes allocated per thread
+
+Introduce a thread-local storage and update it on every allocation
+attempt.
+
+diff --git a/tcmalloc/internal_malloc_extension.h b/tcmalloc/internal_malloc_extension.h
+index f65f17c03bf0f16b531ec2d34d3c1db37a5ce181..2e721780de2bef82840e2a22dbda37c81e07af11 100644
+--- a/tcmalloc/internal_malloc_extension.h
++++ b/tcmalloc/internal_malloc_extension.h
+@@ -122,6 +122,9 @@ ABSL_ATTRIBUTE_WEAK int64_t
+ MallocExtension_Internal_GetMaxTotalThreadCacheBytes();
+ ABSL_ATTRIBUTE_WEAK void MallocExtension_Internal_SetMaxTotalThreadCacheBytes(
+     int64_t value);
++
++ABSL_ATTRIBUTE_WEAK size_t MallocExtension_Internal_GetBytesAllocatedByCurrentThread();
++
+ }
+ 
+ #endif
+diff --git a/tcmalloc/malloc_extension.h b/tcmalloc/malloc_extension.h
+index 2c8cacb3af12feff66449a1272935edf6d24f1e1..e4d349e8b63e02bcea2c35f4bcad142d920411bd 100644
+--- a/tcmalloc/malloc_extension.h
++++ b/tcmalloc/malloc_extension.h
+@@ -566,6 +566,12 @@ class MallocExtension final {
+   // includes Apple and Emscripten.
+   static bool NeedsProcessBackgroundActions();
+ 
++  // Returns total number of bytes allocated by current thread.
++  static void SetUserHooks(
++    void(*beforeAlloc)(size_t),
++    void(*beforeFree)()
++  );
++
+   // Specifies a rate in bytes per second.
+   //
+   // The enum is used to provide strong-typing for the value.
+diff --git a/tcmalloc/tcmalloc.cc b/tcmalloc/tcmalloc.cc
+index 426a0bc237e55a42f16dcec95d07210b8ceb7767..8969f287e6ee2e569a6274ad285a545d0d7838c5 100644
+--- a/tcmalloc/tcmalloc.cc
++++ b/tcmalloc/tcmalloc.cc
+@@ -143,8 +143,33 @@
+ 
+ GOOGLE_MALLOC_SECTION_BEGIN
+ namespace tcmalloc {
++
++static void(*g_before_alloc)(size_t) = nullptr;
++static void(*g_before_free)() = nullptr;
++
++void MallocExtension::SetUserHooks(
++    void(*beforeAlloc)(size_t),
++    void(*beforeFree)()
++  ) {
++  g_before_alloc = beforeAlloc;
++  g_before_free = beforeFree;
++}
++
+ namespace tcmalloc_internal {
+ 
++inline void beforeDoFree() {
++  if (ABSL_PREDICT_FALSE(g_before_free != nullptr)) {
++    g_before_free();
++  }
++}
++
++inline void beforeFastAlloc(size_t size) {
++  if (ABSL_PREDICT_FALSE(g_before_alloc != nullptr)) {
++    g_before_alloc(size);
++  }
++}
++
++
+ // Gets a human readable description of the current state of the malloc data
+ // structures. Returns the actual written size.
+ // [buffer, buffer+result] will contain NUL-terminated output string.
+@@ -780,10 +805,12 @@ inline ABSL_ATTRIBUTE_ALWAYS_INLINE void do_free_with_size_class(
+ }
+ 
+ inline ABSL_ATTRIBUTE_ALWAYS_INLINE void do_free(void* ptr) {
++  beforeDoFree();
+   return do_free_with_size_class<false, Hooks::RUN>(ptr, 0);
+ }
+ 
+ void do_free_no_hooks(void* ptr) {
++  beforeDoFree();
+   return do_free_with_size_class<false, Hooks::NO>(ptr, 0);
+ }
+ 
+@@ -801,6 +828,7 @@ template <typename AlignPolicy>
+ inline ABSL_ATTRIBUTE_ALWAYS_INLINE void do_free_with_size(void* ptr,
+                                                            size_t size,
+                                                            AlignPolicy align) {
++  beforeDoFree();
+   ASSERT(CorrectSize(ptr, size, align));
+   ASSERT(CorrectAlignment(ptr, static_cast<std::align_val_t>(align.align())));
+ 
+@@ -1040,6 +1068,7 @@ static void* ABSL_ATTRIBUTE_SECTION(google_malloc)
+ template <typename Policy, typename CapacityPtr = std::nullptr_t>
+ static inline void* ABSL_ATTRIBUTE_ALWAYS_INLINE
+ fast_alloc(Policy policy, size_t size, CapacityPtr capacity = nullptr) {
++  tcmalloc::tcmalloc_internal::beforeFastAlloc(size);
+   // If size is larger than kMaxSize, it's not fast-path anymore. In
+   // such case, GetSizeClass will return false, and we'll delegate to the slow
+   // path. If malloc is not yet initialized, we may end up with size_class == 0
