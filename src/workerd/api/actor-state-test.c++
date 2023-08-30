@@ -88,13 +88,9 @@ KJ_TEST("we support deserializing up to v15") {
 // data and round-trip it back to storage to deal with the problem that it likes to read in "sparse"
 // JS arrays and write them back out as "dense" JS arrays, which breaks the equality check after
 // round-tripping a value.
-jsg::JsValue oldDeserializeV8Value(
-    jsg::Lock& js, kj::ArrayPtr<const char> key, kj::ArrayPtr<const kj::byte> buf) {
-  v8::ValueDeserializer deserializer(js.v8Isolate, buf.begin(), buf.size());
-  auto maybeValue = deserializer.ReadValue(js.v8Context());
-  v8::Local<v8::Value> value;
-  KJ_ASSERT(maybeValue.ToLocal(&value));
-  return jsg::JsValue(value);
+jsg::JsValue oldDeserializeV8Value(jsg::Lock& js, kj::ArrayPtr<const kj::byte> buf) {
+  jsg::Deserializer des(js, buf);
+  return des.readValue(js);
 }
 
 KJ_TEST("wire format version does not change deserialization behavior on real data") {
@@ -125,7 +121,7 @@ KJ_TEST("wire format version does not change deserialization behavior on real da
       auto dataIn = kj::decodeHex(kj::ArrayPtr(hexStr.c_str(), hexStr.size()));
       KJ_EXPECT(!dataIn.hadErrors, hexStr);
 
-      auto oldVal = oldDeserializeV8Value(isolateLock, key, dataIn);
+      auto oldVal = oldDeserializeV8Value(isolateLock, dataIn);
       auto oldOutput = serializeV8Value(isolateLock, oldVal);
 
       auto newVal = deserializeV8Value(isolateLock, key, dataIn);

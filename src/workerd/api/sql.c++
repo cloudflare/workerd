@@ -123,7 +123,7 @@ kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
       // which would be relatively slower.
-      .name = names[i].getHandle(js),
+      .name = jsg::JsString(names[i].getHandle(js).As<v8::String>()),
       .value = kj::mv(value)
     };
   }).map([&](kj::Array<RowDict::Field>&& fields) {

@@ -10,9 +10,9 @@
 
 namespace workerd::api {
 
+// A holder for Cf header property value.
+// The string header is parsed on demand and the parsed value cached.
 class CfProperty {
-  // A holder for Cf header property value.
-  // The string header is parsed on demand and the parsed value cached.
 
 public:
   KJ_DISALLOW_COPY(CfProperty);
@@ -22,34 +22,28 @@ public:
   CfProperty(CfProperty&&) = default;
   CfProperty& operator=(CfProperty&&) = default;
 
-  explicit CfProperty(kj::Maybe<kj::StringPtr> unparsed) {
-    KJ_IF_MAYBE(str, unparsed) {
-      value = kj::str(*str);
-    }
-  }
+  explicit CfProperty(kj::Maybe<kj::StringPtr> unparsed);
 
-  explicit CfProperty(kj::Maybe<jsg::V8Ref<v8::Object>>&& parsed) {
-    KJ_IF_MAYBE(v, parsed) {
-      value = kj::mv(*v);
-    }
-  }
+  explicit CfProperty(jsg::Lock& js, const jsg::JsObject& object);
 
-  jsg::Optional<v8::Local<v8::Object>> get(jsg::Lock& js);
+  explicit CfProperty(kj::Maybe<jsg::JsRef<jsg::JsObject>>&& parsed);
+
   // Get parsed value
+  jsg::Optional<jsg::JsObject> get(jsg::Lock& js);
 
-  jsg::Optional<jsg::V8Ref<v8::Object>> getRef(jsg::Lock& js);
   // Get parsed value as a global ref
+  jsg::Optional<jsg::JsRef<jsg::JsObject>> getRef(jsg::Lock& js);
 
-  kj::Maybe<kj::String> serialize(jsg::Lock& js);
   // Serialize to string
+  kj::Maybe<kj::String> serialize(jsg::Lock& js);
 
-  CfProperty deepClone(jsg::Lock& js);
   // Clone by deep cloning parsed v8 object (if any).
+  CfProperty deepClone(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
 private:
-  kj::Maybe<kj::OneOf<kj::String, jsg::V8Ref<v8::Object>>> value;
+  kj::Maybe<kj::OneOf<kj::String, jsg::JsRef<jsg::JsObject>>> value;
 };
 
 

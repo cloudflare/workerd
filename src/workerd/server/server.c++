@@ -2581,7 +2581,8 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
 // Configure and start the inspector socket.
 void startInspector(kj::StringPtr inspectorAddress,
                     Server::InspectorServiceIsolateRegistrar& registrar) {
-  kj::Thread thread([inspectorAddress, &registrar](){
+  kj::MutexGuarded<bool> inspectorReady;
+  kj::Thread thread([inspectorAddress, &inspectorReady, &registrar](){
     kj::AsyncIoContext io = kj::setupAsyncIo();
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
@@ -2590,6 +2591,9 @@ void startInspector(kj::StringPtr inspectorAddress,
     auto inspectorService(
         kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder, registrar));
     auto ownHeaderTable = headerTableBuilder.build();
+
+    // EW-7716: Signal to the thread that started the inspector service that the inspector is ready.
+    *inspectorReady.lockExclusive() = true;
 
     // Configure and start the inspector socket.
     static constexpr uint DEFAULT_PORT = 9229;
@@ -2614,6 +2618,9 @@ void startInspector(kj::StringPtr inspectorAddress,
     kj::NEVER_DONE.wait(io.waitScope);
   });
   thread.detach();
+
+  // EW-7716: Wait for the InspectorService instance to be initialized before proceeding.
+  inspectorReady.when([](const bool& isReady) { return isReady; }, [](const bool&){});
 }
 
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,

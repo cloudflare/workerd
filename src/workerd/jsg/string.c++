@@ -130,6 +130,10 @@ UsvString usv(v8::Isolate* isolate, v8::Local<v8::Value> value) {
   return UsvString(writeFromV8String(isolate, value));
 }
 
+UsvString usv(Lock& js, const jsg::JsValue& value) {
+  return UsvString(writeFromV8String(js.v8Isolate, value));
+}
+
 UsvString usv(kj::ArrayPtr<uint16_t> string) {
   return UsvString(transcodeToUtf32(string));
 }

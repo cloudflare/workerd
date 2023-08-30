@@ -451,8 +451,11 @@ public:
     } else {
       auto lockedState = state.lockExclusive();
       KJ_IF_MAYBE(info, lockedState->inspectorTimerInfo) {
-        timePoint = info->timer.now() + info->timerOffset
-                  - kj::origin<kj::TimePoint>() + kj::UNIX_EPOCH;
+        if (info->threadId == getCurrentThreadId()) {
+          // We're on an inspector-serving thread.
+          timePoint = info->timer.now() + info->timerOffset
+                    - kj::origin<kj::TimePoint>() + kj::UNIX_EPOCH;
+        }
       }
       // We're at script startup time -- just return the Epoch.
     }

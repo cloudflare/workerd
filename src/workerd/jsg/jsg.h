@@ -2133,6 +2133,7 @@ public:
   ContextScope enterContextScope(v8::Local<v8::Context> context);
 
   // ====================================================================================
+  JsObject global() KJ_WARN_UNUSED_RESULT;
   JsValue undefined() KJ_WARN_UNUSED_RESULT;
   JsValue null() KJ_WARN_UNUSED_RESULT;
   JsBoolean boolean(bool val) KJ_WARN_UNUSED_RESULT;
