@@ -118,7 +118,7 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     farNative->closedIncoming = true;
 
     // Sets readyState to CLOSED.
-    reportError(js, kj::mv(e));
+    reportError(js, jsg::JsValue(e.getHandle(js)).addRef(js));
 
     dispatchEventImpl(js,
         jsg::alloc<CloseEvent>(1006, kj::str("Failed to establish websocket connection"),
@@ -644,9 +644,9 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
   return extensions.map([](kj::StringPtr value){ return value; });
 }
 
-kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) {
+kj::Maybe<jsg::JsValue> WebSocket::deserializeAttachment(jsg::Lock& js) {
   return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment)
-      -> v8::Local<v8::Value> {
+      -> jsg::JsValue {
     jsg::Deserializer deserializer(js, attachment, nullptr, nullptr,
         jsg::Deserializer::Options {
       .version = 15,
@@ -657,12 +657,12 @@ kj::Maybe<v8::Local<v8::Value>> WebSocket::deserializeAttachment(jsg::Lock& js) 
   });
 }
 
-void WebSocket::serializeAttachment(jsg::Lock& js, v8::Local<v8::Value> attachment) {
+void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
   jsg::Serializer serializer(js, jsg::Serializer::Options {
     .version = 15,
     .omitHeader = false,
   });
-  serializer.write(js, jsg::JsValue(attachment));
+  serializer.write(js, attachment);
   auto released = serializer.release();
   JSG_REQUIRE(released.data.size() <= MAX_ATTACHMENT_SIZE, Error,
       "A WebSocket 'attachment' cannot be larger than ",  MAX_ATTACHMENT_SIZE, " bytes." \
@@ -723,7 +723,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
         // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
         tryReleaseNative(js);
       } else {
-        reportError(js, kj::mv(exception));
+        reportError(js, jsg::JsValue(exception.getHandle(js)).addRef(js));
       }
     });
   }
@@ -840,10 +840,12 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
         jsg::Lock& js = wLock;
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js, js.wrapString(text)));
+            dispatchEventImpl(js,
+                jsg::alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js, js.wrapBytes(kj::mv(data))));
+            dispatchEventImpl(js,
+                jsg::alloc<MessageEvent>(js, jsg::JsValue(js.bytes(kj::mv(data)).getHandle(js))));
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;
@@ -883,11 +885,10 @@ void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
-  jsg::Value err = js.exceptionToJs(kj::cp(e));
-  reportError(js, kj::mv(err));
+  reportError(js, js.exceptionToJsValue(kj::cp(e)));
 }
 
-void WebSocket::reportError(jsg::Lock& js, jsg::Value err) {
+void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
   // If this is the first error, raise the error event.
   if (error == nullptr) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
