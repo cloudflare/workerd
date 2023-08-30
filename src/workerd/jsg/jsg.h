@@ -2074,6 +2074,7 @@ public:
   bool toBool(v8::Local<v8::Value> value);
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;
+  virtual jsg::Dict<JsValue> toDict(const jsg::JsValue& value) = 0;
   virtual Promise<Value> toPromise(v8::Local<v8::Promise> promise) = 0;
 
   // ---------------------------------------------------------------------------

@@ -379,6 +379,10 @@ public:
       return jsgIsolate.wrapper->template unwrap<jsg::Dict<v8::Local<v8::Value>>>(
           v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
+    jsg::Dict<jsg::JsValue> toDict(const jsg::JsValue& value) override {
+      return jsgIsolate.wrapper->template unwrap<jsg::Dict<jsg::JsValue>>(
+          v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
+    }
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
       return jsgIsolate.wrapper->wrap(v8Context(), nullptr, kj::mv(promise));
     }
