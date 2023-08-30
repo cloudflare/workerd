@@ -13,6 +13,13 @@ WD_BENCH("Mimetype::ParseAndSerialize") {
   MimeType::parse("application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"_kj).toString();
 }
 
+WD_BENCH("Mimetype::Serialize") {
+  MimeType::PLAINTEXT.toString();
+  MimeType::CSS.toString();
+  MimeType::HTML.toString();
+  MimeType::JSON.toString();
+}
+
 } // namespace
 
 }

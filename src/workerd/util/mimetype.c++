@@ -5,10 +5,12 @@
 #include "strings.h"
 #include <kj/debug.h>
 #include <kj/string-tree.h>
+#include <workerd/util/string-buffer.h>
 
 namespace workerd {
 
 namespace {
+
 bool isWhitespace(const char c) {
   return (c == '\r' || c == '\n' || c == '\t' || c == ' ');
 }
@@ -253,39 +255,45 @@ kj::String MimeType::essence() const {
 }
 
 kj::String MimeType::paramsToString() const {
-  auto str = kj::strTree();
+  ToStringBuffer buffer(512);
+  paramsToString(buffer);
+  return buffer.toString();
+}
+
+void MimeType::paramsToString(MimeType::ToStringBuffer& buffer) const {
   bool first = true;
   for (auto& param : params()) {
-    str = kj::strTree(kj::mv(str), first ? "" : ";", param.key, "=");
+    buffer.append(first ? "" : ";", param.key, "=");
     first = false;
     if (param.value.size() == 0) {
-      str = kj::strTree(kj::mv(str), "\"\"");
+      buffer.append("\"\"");
     } else if (hasInvalidCodepoints(param.value, isTokenChar)) {
       auto view = param.value.asPtr();
-      str = kj::strTree(kj::mv(str), "\"");
+      buffer.append("\"");
       while (view.size() > 0) {
         KJ_IF_MAYBE(pos, view.findFirst('"')) {
-          str = kj::strTree(kj::mv(str), view.slice(0, *pos), "\\\"");
+          buffer.append(view.slice(0, *pos), "\\\"");
           view = view.slice(*pos + 1);
         } else {
-          str = kj::strTree(kj::mv(str), view);
+          buffer.append(view);
           view = view.slice(view.size());
         }
       }
-      str = kj::strTree(kj::mv(str), "\"");
+      buffer.append("\"");
     } else {
-      str = kj::strTree(kj::mv(str), param.value);
+      buffer.append(param.value);
     }
   }
-  return str.flatten();
 }
 
 kj::String MimeType::toString() const {
-  auto str = kj::strTree(type(), "/", subtype());
+  ToStringBuffer buffer(512);
+  buffer.append(type(), "/", subtype());
   if (params_.size() > 0) {
-    str = kj::strTree(kj::mv(str), ";", paramsToString());
+    buffer.append(";");
+    paramsToString(buffer);
   }
-  return str.flatten();
+  return buffer.toString();
 }
 
 MimeType MimeType::clone(ParseOptions options) const {
