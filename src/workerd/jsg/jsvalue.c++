@@ -95,6 +95,16 @@ kj::String JsObject::getConstructorName() {
   return kj::str(inner->GetConstructorName());
 }
 
+void JsObject::recursivelyFreeze(Lock& js) {
+  jsg::recursivelyFreeze(js.v8Context(), inner);
+}
+
+JsObject JsObject::jsonClone(Lock& js) {
+  auto tmp = JsValue(inner).toJson(js);
+  auto obj = KJ_ASSERT_NONNULL(JsValue::fromJson(js, tmp).tryCast<jsg::JsObject>());
+  return JsObject(obj);
+}
+
 bool JsValue::isTruthy(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   return inner->BooleanValue(js.v8Isolate);
@@ -212,6 +222,10 @@ jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
 
 JsDate::operator kj::Date() const {
   return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
+}
+
+JsObject Lock::global() {
+  return JsObject(v8Context()->Global());
 }
 
 JsValue Lock::undefined() {
