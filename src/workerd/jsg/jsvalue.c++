@@ -383,6 +383,11 @@ JsSymbol Lock::symbolInternal(kj::StringPtr str) {
   return JsSymbol(v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, str)));
 }
 
+JsArray Lock::arr(kj::ArrayPtr<JsValue> values) {
+  auto items = KJ_MAP(i, values) { return v8::Local<v8::Value>(i); };
+  return JsArray(v8::Array::New(v8Isolate, items.begin(), items.size()));
+}
+
 #define V(Name) \
   JsSymbol Lock::symbol##Name() { \
     return JsSymbol(v8::Symbol::Get##Name(v8Isolate)); }

@@ -2191,6 +2191,8 @@ public:
   template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
   JsArray arr(const Args&...args) KJ_WARN_UNUSED_RESULT;
 
+  JsArray arr(kj::ArrayPtr<JsValue> values) KJ_WARN_UNUSED_RESULT;
+
   template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)
   JsSet set(const Args&...args) KJ_WARN_UNUSED_RESULT;
 
