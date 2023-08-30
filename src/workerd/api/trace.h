@@ -285,7 +285,7 @@ public:
 
   double getTimestamp();
   kj::StringPtr getChannel();
-  v8::Local<v8::Value> getMessage(jsg::Lock& js);
+  jsg::JsValue getMessage(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(TraceDiagnosticChannelEvent) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);

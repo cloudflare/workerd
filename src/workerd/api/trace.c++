@@ -375,8 +375,8 @@ kj::StringPtr TraceDiagnosticChannelEvent::getChannel() {
   return channel;
 }
 
-v8::Local<v8::Value> TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
-  if (message.size() == 0) return js.v8Undefined();
+jsg::JsValue TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
+  if (message.size() == 0) return js.undefined();
   jsg::Deserializer des(js, message.asPtr());
   return des.readValue(js);
 }

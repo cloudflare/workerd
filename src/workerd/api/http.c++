@@ -1188,7 +1188,7 @@ jsg::Ref<Response> Response::redirect(
 
 jsg::Ref<Response> Response::json_(
     jsg::Lock& js,
-    v8::Local<v8::Value> any,
+    jsg::JsValue any,
     jsg::Optional<Initializer> maybeInit) {
 
   const auto maybeSetContentType = [](auto headers) {
@@ -1240,8 +1240,8 @@ jsg::Ref<Response> Response::json_(
       .headers = maybeSetContentType(jsg::alloc<Headers>()),
     };
   }
-  kj::String json = js.serializeJson(any);
-  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
+
+  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
