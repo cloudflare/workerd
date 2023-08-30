@@ -11,20 +11,19 @@
 namespace workerd { class IoContext; }
 namespace workerd::api {
 
+// A capability to a KV namespace.
 class KvNamespace: public jsg::Object {
-  // A capability to a KV namespace.
-
 public:
   struct AdditionalHeader {
     kj::String name;
     kj::String value;
   };
 
-  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
-      : additionalHeaders(kj::mv(additionalHeaders)), subrequestChannel(subrequestChannel) {}
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   // `additionalHeaders` is what gets appended to every outbound request.
+  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
+      : additionalHeaders(kj::mv(additionalHeaders)), subrequestChannel(subrequestChannel) {}
 
   struct GetOptions {
     jsg::Optional<kj::String> type;
@@ -74,10 +73,9 @@ public:
 
   jsg::Promise<jsg::Value> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
+  // Optional parameter for passing options into a Fetcher::put. Initially
+  // intended for supporting expiration times in KV bindings.
   struct PutOptions {
-    // Optional parameter for passing options into a Fetcher::put. Initially
-    // intended for supporting expiration times in KV bindings.
-
     jsg::Optional<int> expiration;
     jsg::Optional<int> expirationTtl;
     jsg::Optional<kj::Maybe<jsg::Value>> metadata;
@@ -86,11 +84,11 @@ public:
     JSG_STRUCT_TS_OVERRIDE(KVNamespacePutOptions);
   };
 
-  using PutBody = kj::OneOf<kj::String, v8::Local<v8::Object>>;
   // We can't just list the supported types in this OneOf because if we did then arbitrary objects
   // would get coerced into meaningless strings like "[object Object]". Instead we first use this
   // OneOf to differentiate between primitives and objects, and check the object for the types that
   // we specifically support later.
+  using PutBody = kj::OneOf<kj::String, v8::Local<v8::Object>>;
 
   using PutSupportedTypes = kj::OneOf<kj::String, kj::Array<byte>, jsg::Ref<ReadableStream>>;
 
@@ -155,17 +153,17 @@ public:
   }
 
 protected:
+  // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
+  // the limiter for that op type to be checked. If a string is used, that's used as the operation
+  // name for the HttpClient without any limiter enforcement.
+  // NOTE: The urlStr is added to the headers as a non-owning reference and thus must outlive
+  // the usage of the headers.
   kj::Own<kj::HttpClient> getHttpClient(
       IoContext& context,
       kj::HttpHeaders& headers,
       kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
       kj::StringPtr urlStr
   );
-  // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
-  // the limiter for that op type to be checked. If a string is used, that's used as the operation
-  // name for the HttpClient without any limiter enforcement.
-  // NOTE: The urlStr is added to the headers as a non-owning reference and thus must outlive
-  // the usage of the headers.
 
 private:
   kj::Array<AdditionalHeader> additionalHeaders;

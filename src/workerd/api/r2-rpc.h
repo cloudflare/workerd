@@ -25,7 +25,7 @@ public:
   uint getV4Code() const { return v4Code; }
   kj::StringPtr getMessage() const { return message; }
   kj::StringPtr getAction() const { return KJ_ASSERT_NONNULL(action); }
-  v8::Local<v8::Value> getStack(jsg::Lock& js);
+  jsg::JsValue getStack(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(R2Error) {
     JSG_INHERIT_INTRINSIC(v8::kErrorPrototype);
@@ -58,9 +58,12 @@ using R2PutValue = kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<kj::byte>,
 
 struct R2Result {
   uint httpStatus;
-  kj::Maybe<kj::Own<R2Error>> toThrow;
+
   // Non-null if httpStatus >= 400.
+  kj::Maybe<kj::Own<R2Error>> toThrow;
+
   kj::Maybe<kj::Array<char>> metadataPayload;
+
   kj::Maybe<kj::Own<workerd::api::ReadableStreamSource>> stream;
 
   bool objectNotFound() {

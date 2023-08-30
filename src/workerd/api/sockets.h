@@ -13,9 +13,12 @@ namespace workerd::api {
 class Fetcher;
 
 enum class SecureTransportKind {
-  OFF, // plain-text
-  STARTTLS, // plain-text at first, with `startTls` available to upgrade at a later time
-  ON // TLS enabled immediately
+  // plain-text
+  OFF,
+  // plain-text at first, with `startTls` available to upgrade at a later time
+  STARTTLS,
+  // TLS enabled immediately
+  ON,
 };
 
 struct SocketAddress {
@@ -62,21 +65,26 @@ public:
     return closedPromise;
   }
 
-  jsg::Promise<void> close(jsg::Lock& js);
   // Closes the socket connection.
+  jsg::Promise<void> close(jsg::Lock& js);
 
-  jsg::Ref<Socket> startTls(jsg::Lock& js, jsg::Optional<TlsOptions> options);
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
   // All new operations should be performed on the new `Socket` instance.
+  jsg::Ref<Socket> startTls(jsg::Lock& js, jsg::Optional<TlsOptions> options);
 
-  void handleProxyStatus(
-      jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
-  void handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exception>> status);
   // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
   // The first variant is useful for connections established using HTTP connect. The latter is for
   // connections established any other way, where the lack of an exception indicates we connected
   // successfully.
+  void handleProxyStatus(
+      jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status);
+
+  // Sets up relevant callbacks to handle the case when the proxy rejects our connection.
+  // The first variant is useful for connections established using HTTP connect. The latter is for
+  // connections established any other way, where the lack of an exception indicates we connected
+  // successfully.
+  void handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exception>> status);
 
   void handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof);
   // Sets up relevant callbacks to handle the case when the readable stream reaches EOF.
@@ -96,26 +104,26 @@ private:
   IoOwn<kj::RefcountedWrapper<kj::Own<kj::AsyncIoStream>>> connectionStream;
   jsg::Ref<ReadableStream> readable;
   jsg::Ref<WritableStream> writable;
-  jsg::Promise<void>::Resolver closedResolver;
   // This fulfiller is used to resolve the `closedPromise` below.
+  jsg::Promise<void>::Resolver closedResolver;
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   IoOwn<kj::Promise<void>> watchForDisconnectTask;
   jsg::Optional<SocketOptions> options;
-  IoOwn<kj::TlsStarterCallback> tlsStarter;
   // Callback used to upgrade the existing connection to a secure one.
-  bool isSecureSocket;
+  IoOwn<kj::TlsStarterCallback> tlsStarter;
   // Set to true on sockets created with `useSecureTransport` set to true or a socket returned by
   // `startTls`.
-  kj::String domain;
+  bool isSecureSocket;
   // The domain/ip this socket is connected to. Used for startTls.
-  bool isDefaultFetchPort;
+  kj::String domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
+  bool isDefaultFetchPort;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
 
-  void handleProxyError(jsg::Lock& js, kj::Exception e);
   // Helper method for handleProxyStatus implementations.
+  void handleProxyError(jsg::Lock& js, kj::Exception e);
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
     KJ_IF_MAYBE(err, maybeErr) {

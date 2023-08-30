@@ -20,9 +20,8 @@ namespace workerd {
 
 namespace workerd::api {
 
+// A capability to an ephemeral Actor namespace.
 class ColoLocalActorNamespace: public jsg::Object {
-  // A capability to an ephemeral Actor namespace.
-
 public:
   ColoLocalActorNamespace(uint channel)
     : channel(channel) {}
@@ -39,9 +38,8 @@ private:
 
 class DurableObjectNamespace;
 
+// DurableObjectId type seen by JavaScript.
 class DurableObjectId: public jsg::Object {
-  // DurableObjectId type seen by JavaScript.
-
 public:
   DurableObjectId(kj::Own<ActorIdFactory::ActorId> id): id(kj::mv(id)) {}
 
@@ -50,13 +48,13 @@ public:
   // ---------------------------------------------------------------------------
   // JS API
 
-  kj::String toString();
   // Converts to a string which can be passed back to the constructor to reproduce the same ID.
+  kj::String toString();
 
   inline bool equals(DurableObjectId& other) { return id->equals(*other.id); }
 
-  inline jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
   // Get the name, if known.
+  inline jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
 
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
@@ -70,8 +68,8 @@ private:
   friend class DurableObjectNamespace;
 };
 
+// Stub object used to send messages to a remote durable object.
 class DurableObject: public Fetcher {
-  // Stub object used to send messages to a remote durable object.
 
 public:
   DurableObject(jsg::Ref<DurableObjectId> id, IoOwn<OutgoingFactory> outgoingFactory,
@@ -108,16 +106,16 @@ private:
   }
 };
 
+// Global durable object class binding type.
 class DurableObjectNamespace: public jsg::Object {
-  // Global durable object class binding type.
 
 public:
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
     : channel(channel), idFactory(kj::mv(idFactory)) {}
 
   struct NewUniqueIdOptions {
+      // Restricts the new unique ID to a set of colos within a jurisdiction.
     jsg::Optional<kj::String> jurisdiction;
-    // Restricts the new unique ID to a set of colos within a jurisdiction.
 
     JSG_STRUCT(jurisdiction);
 
@@ -128,19 +126,19 @@ public:
     });
   };
 
-  jsg::Ref<DurableObjectId> newUniqueId(jsg::Optional<NewUniqueIdOptions> options);
   // Create a new unique ID for a durable object that will be allocated nearby the calling colo.
+  jsg::Ref<DurableObjectId> newUniqueId(jsg::Optional<NewUniqueIdOptions> options);
 
-  jsg::Ref<DurableObjectId> idFromName(kj::String name);
   // Create a name-derived ID. Passing in the same `name` (to the same class) will always
   // produce the same ID.
+  jsg::Ref<DurableObjectId> idFromName(kj::String name);
 
-  jsg::Ref<DurableObjectId> idFromString(kj::String id);
   // Create a DurableObjectId from the stringified form of the ID (as produced by calling
   // `toString()` on a durable object ID). Throws if the ID is not a 64-digit hex number, or if the
   // ID was not originally created for this class.
   //
   // The ID may be one that was originally created using either `newUniqueId()` or `idFromName()`.
+  jsg::Ref<DurableObjectId> idFromString(kj::String id);
 
   struct GetDurableObjectOptions {
     jsg::Optional<kj::String> locationHint;
@@ -154,21 +152,21 @@ public:
     });
   };
 
+  // Gets a durable object by ID or creates it if it doesn't already exist.
   jsg::Ref<DurableObject> get(
       jsg::Lock& js,
       jsg::Ref<DurableObjectId> id,
       jsg::Optional<GetDurableObjectOptions> options);
-  // Gets a durable object by ID or creates it if it doesn't already exist.
 
+  // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
+  // by cloudflare only.
   jsg::Ref<DurableObject> getExisting(
       jsg::Lock& js,
       jsg::Ref<DurableObjectId> id,
       jsg::Optional<GetDurableObjectOptions> options);
-  // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
-  // by cloudflare only.
 
-  jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
   // Creates a subnamespace with the jurisdiction hardcoded.
+  jsg::Ref<DurableObjectNamespace> jurisdiction(kj::String jurisdiction);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);

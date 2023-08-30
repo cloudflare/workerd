@@ -13,22 +13,22 @@ namespace workerd::api {
 // Cache
 
 struct CacheQueryOptions {
-  jsg::Optional<bool> ignoreMethod;
   // By default, Cache.match() and Cache.delete() will return undefined/false if passed a non-GET
   // request. Setting `ignoreMethod` to true disables this behavior; Cache.match() and
   // Cache.delete() will treat any request as a GET request.
+  jsg::Optional<bool> ignoreMethod;
 
-  jsg::WontImplement ignoreSearch;
   // Our cache does not support matching without query parameters at match time. Users can still
   // remove query parameters before put()ing the Request/Response pair, if they wish.
+  jsg::WontImplement ignoreSearch;
 
-  jsg::WontImplement ignoreVary;
   // Historically, Cloudflare has not supported the Vary header because it's easy to blow up your
   // cache keys. Customers can now implement this with workers by modifying cache keys as they see
   // fit based on any arbitary parameter (User-Agent, Content-Encoding, etc.).
+  jsg::WontImplement ignoreVary;
 
-  jsg::WontImplement cacheName;
   // Only used in CacheStorage::match(), which we won't implement.
+  jsg::WontImplement cacheName;
 
   JSG_STRUCT(ignoreMethod, ignoreSearch, ignoreVary, cacheName);
 };
@@ -49,13 +49,13 @@ public:
   jsg::Promise<bool> delete_(
       jsg::Lock& js, Request::Info request, jsg::Optional<CacheQueryOptions> options);
 
+  // Our cache does not support one-to-many matching, so this is not possible to implement.
   jsg::WontImplement matchAll(
       jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) { return {}; }
-  // Our cache does not support one-to-many matching, so this is not possible to implement.
 
+  // Our cache does not support cache item enumeration, so this is not possible to implement.
   jsg::WontImplement keys(
       jsg::Optional<Request::Info>, jsg::Optional<CacheQueryOptions>) { return {}; }
-  // Our cache does not support cache item enumeration, so this is not possible to implement.
 
   JSG_RESOURCE_TYPE(Cache) {
     JSG_METHOD(add);
@@ -92,11 +92,12 @@ public:
 
   jsg::Ref<Cache> getDefault() { return default_.addRef(); }
 
+  // Our cache does not support namespace enumeration, so none of these are possible to implement.
+
   jsg::WontImplement match(Request::Info, jsg::Optional<CacheQueryOptions>) { return {}; }
   jsg::WontImplement has(kj::String) { return {}; }
   jsg::WontImplement delete_(kj::String) { return {}; }
   jsg::WontImplement keys() { return {}; }
-  // Our cache does not support namespace enumeration, so none of these are possible to implement.
 
   JSG_RESOURCE_TYPE(CacheStorage) {
     JSG_METHOD(open);

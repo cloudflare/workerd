@@ -9,9 +9,8 @@
 
 namespace workerd::api {
 
+// Concatenate an array of segments (parameter to Blob constructor).
 static kj::Array<byte> concat(jsg::Optional<Blob::Bits> maybeBits) {
-  // Concatenate an array of segments (parameter to Blob constructor).
-  //
   // TODO(perf): Make it so that a Blob can keep references to the input data rather than copy it.
   //   Note that we can't keep references to ArrayBuffers since they are mutable, but we can
   //   reference other Blobs in the input.
@@ -143,13 +142,13 @@ public:
       : unread(blob->data),
         blob(kj::mv(blob)) {}
 
+  // Attempt to read a maximum of maxBytes from the remaining unread content of the blob
+  // into the given buffer. It is the caller's responsibility to ensure that buffer has
+  // enough capacity for at least maxBytes.
+  // The minBytes argument is ignored in this implementation of tryRead.
+  // The buffer must be kept alive by the caller until the returned promise is fulfilled.
+  // The returned promise is fulfilled with the actual number of bytes read.
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    // Attempt to read a maximum of maxBytes from the remaining unread content of the blob
-    // into the given buffer. It is the caller's responsibility to ensure that buffer has
-    // enough capacity for at least maxBytes.
-    // The minBytes argument is ignored in this implementation of tryRead.
-    // The buffer must be kept alive by the caller until the returned promise is fulfilled.
-    // The returned promise is fulfilled with the actual number of bytes read.
     size_t amount = kj::min(maxBytes, unread.size());
     if (amount > 0) {
       memcpy(buffer, unread.begin(), amount);
@@ -158,9 +157,9 @@ public:
     return amount;
   }
 
+  // Returns the number of bytes remaining to be read for the given encoding if that
+  // encoding is supported. This implementation only supports StreamEncoding::IDENTITY.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-    // Returns the number of bytes remaining to be read for the given encoding if that
-    // encoding is supported. This implementation only supports StreamEncoding::IDENTITY.
     if (encoding == StreamEncoding::IDENTITY) {
       return unread.size();
     } else {
@@ -168,11 +167,11 @@ public:
     }
   }
 
+  // Write all of the remaining unread content of the blob to output.
+  // If end is true, output.end() will be called once the write has been completed.
+  // Importantly, the WritableStreamSink must be kept alive by the caller until the
+  // returned promise is fulfilled.
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    // Write all of the remaining unread content of the blob to output.
-    // If end is true, output.end() will be called once the write has been completed.
-    // Importantly, the WritableStreamSink must be kept alive by the caller until the
-    // returned promise is fulfilled.
     if (unread.size() != 0) {
       auto promise = output.write(unread.begin(), unread.size());
       unread = nullptr;

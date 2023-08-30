@@ -308,17 +308,17 @@ inline constexpr HexEncodeOption operator~(HexEncodeOption a) {
   return static_cast<HexEncodeOption>(~static_cast<uint>(a));
 }
 
+// This hexEncode differs from kj::hex in that it supports encoding
+// individual bytes or uint16_t. It also supports the ability to
+// selectively encode using uppercase or lowercase hex values, and
+// encoding using the shortest sequence of hex digits necessary
+// for a value. The options are particularly important for the URLs
+// rules for encoding normalized IPv6 address, which must use the lower
+// case and shortest-sequence options.
 void hexEncode(
     jsg::UsvStringBuilder& builder,
     auto value,
     HexEncodeOption option = HexEncodeOption::NONE) {
-  // This hexEncode differs from kj::hex in that it supports encoding
-  // individual bytes or uint16_t. It also supports the ability to
-  // selectively encode using uppercase or lowercase hex values, and
-  // encoding using the shortest sequence of hex digits necessary
-  // for a value. The options are particularly important for the URLs
-  // rules for encoding normalized IPv6 address, which must use the lower
-  // case and shortest-sequence options.
   static uint32_t HEX[] = {'0', '1', '2', '3', '4', '5', '6', '7',
                            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
   auto lower = (option & HexEncodeOption::LOWER) == HexEncodeOption::LOWER;
@@ -394,11 +394,10 @@ bool nextCodepointIs(auto it, auto... codepoints) {
   return next && codepointIs(*next, kj::fwd<decltype(codepoints)>(codepoints)...);
 };
 
+// This is essentially a more lenient alternative to kj::decodeUriComponent
+// that follows the guidelines of the URL standard spec. Invalid sequences
+// are simply ignored and passed through as-is to the result.
 jsg::UsvString percentDecode(jsg::UsvStringPtr input) {
-  // This is essentially a more lenient alternative to kj::decodeUriComponent
-  // that follows the guidelines of the URL standard spec. Invalid sequences
-  // are simply ignored and passed through as-is to the result.
-
   // At the worst case, the result is as long as the input. That said, the
   // input is user defined, so let's cap how much we reserve to something
   // reasonable.

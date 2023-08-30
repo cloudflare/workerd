@@ -15,32 +15,31 @@ namespace workerd::api {
 
 namespace {
 
+// A wrapper around a native `kj::AsyncInputStream` which knows the underlying encoding of the
+// stream and whether or not it requires pending event registration.
 class EncodedAsyncInputStream final: public ReadableStreamSource {
-  // A wrapper around a native `kj::AsyncInputStream` which knows the underlying encoding of the
-  // stream and whether or not it requires pending event registration.
-
 public:
   explicit EncodedAsyncInputStream(kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding,
                                    IoContext& context);
 
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
   // Read bytes in identity encoding. If the stream is not already in identity encoding, it will be
   // converted to identity encoding via an appropriate stream wrapper.
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
 
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding outEncoding) override;
   // Return the number of bytes, if known, which this input stream will produce if the sink is known
   // to be of a particular encoding.
   //
   // It is likely an error to call this function without immediately following it with a pumpTo()
   // to a EncodedAsyncOutputStream of that exact encoding.
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding outEncoding) override;
 
-  kj::Maybe<Tee> tryTee(uint64_t limit) override;
   // Consume this stream and return two streams with the same encoding that read the exact same
   // data.
   //
   // This implementation of `tryTee()` is not technically required for correctness, but prevents
   // re-encoding (and converting Content-Length responses to chunk-encoded responses) gzip and
   // brotli streams.
+  kj::Maybe<Tee> tryTee(uint64_t limit) override;
 
 private:
   friend class EncodedAsyncOutputStream;
@@ -134,19 +133,18 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 // =======================================================================================
 // EncodedAsyncOutputStream
 
+// A wrapper around a native `kj::AsyncOutputStream` which knows the underlying encoding of the
+// stream and optimizes pumps from `EncodedAsyncInputStream`.
+//
+// The inner will be held on to right up until either end() or abort() is called.
+// This is important because some AsyncOutputStream implementations perform cleanup
+// operations equivalent to end() in their destructors (for instance HttpChunkedEntityWriter).
+// If we wait to clear the kj::Own when the EncodedAsyncOutputStream is destroyed, and the
+// EncodedAsyncOutputStream is owned (for instance) by an IoOwn, then the lifetime of the
+// inner may be extended past when it should. Eventually, kj::AsyncOutputStream should
+// probably have a distinct end() method of its own that we can defer to, but until it
+// does, it is important for us to release it as soon as end() or abort() are called.
 class EncodedAsyncOutputStream final: public WritableStreamSink {
-  // A wrapper around a native `kj::AsyncOutputStream` which knows the underlying encoding of the
-  // stream and optimizes pumps from `EncodedAsyncInputStream`.
-  //
-  // The inner will be held on to right up until either end() or abort() is called.
-  // This is important because some AsyncOutputStream implementations perform cleanup
-  // operations equivalent to end() in their destructors (for instance HttpChunkedEntityWriter).
-  // If we wait to clear the kj::Own when the EncodedAsyncOutputStream is destroyed, and the
-  // EncodedAsyncOutputStream is owned (for instance) by an IoOwn, then the lifetime of the
-  // inner may be extended past when it should. Eventually, kj::AsyncOutputStream should
-  // probably have a distinct end() method of its own that we can defer to, but until it
-  // does, it is important for us to release it as soon as end() or abort() are called.
-
 public:
   explicit EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding,
                                     IoContext& context);
@@ -164,20 +162,18 @@ public:
 private:
   void ensureIdentityEncoding();
 
-  kj::AsyncOutputStream& getInner();
   // Unwrap `inner` as a `kj::AsyncOutputStream`.
-  //
+  kj::AsyncOutputStream& getInner();
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
 
-  struct Ended {
-    // A sentinel indicating that the EncodedOutputStream has ended and is no longer usable.
-  };
+  // A sentinel indicating that the EncodedOutputStream has ended and is no longer usable.
+  struct Ended {};
 
-  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>,
-            kj::Own<kj::BrotliAsyncOutputStream>, Ended> inner;
   // I use a OneOf here rather than probing with downcasts because end() must be called for
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
   // but I'm paranoid.
+  kj::OneOf<kj::Own<kj::AsyncOutputStream>, kj::Own<kj::GzipAsyncOutputStream>,
+            kj::Own<kj::BrotliAsyncOutputStream>, Ended> inner;
 
   StreamEncoding encoding;
 

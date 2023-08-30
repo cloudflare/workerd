@@ -21,6 +21,7 @@ class AbortSignal;
 class AbortController;
 class ActorState;
 
+// An implementation of the Web Platform Standard Event API
 class Event: public jsg::Object {
 public:
   struct Init final {
@@ -80,26 +81,26 @@ public:
   bool getDefaultPrevented() { return getCancelable() && preventedDefault; }
   bool getReturnValue() { return !getDefaultPrevented(); }
 
-  double getTimestamp() { return 0.0; }
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
   // on this property for timing details.
+  double getTimestamp() { return 0.0; }
 
-  bool getIsTrusted() { return trusted; }
   // What makes an Event trusted? It's pretty simple... any Event created
   // by EW internally is Trusted, any Event created using new Event() in JS
   // is not trusted.
+  bool getIsTrusted() { return trusted; }
 
-  jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
   // The currentTarget is the EventTarget on which the Event is being
   // dispatched. This will be set every time dispatchEvent() is called
   // successfully and will remain set after dispatching is completed.
+  jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
 
-  kj::Array<jsg::Ref<EventTarget>> composedPath();
   // For our implementation, since we do not support hierarchical EventTargets,
   // the composedPath is always either an empty array if the Event is currently
   // not being dispatched, or an array containing only the currentTarget if
   // it is being dispatched.
+  kj::Array<jsg::Ref<EventTarget>> composedPath();
 
   JSG_RESOURCE_TYPE(Event, CompatibilityFlags::Reader flags) {
     // Previously, we were setting all properties as instance properties,
@@ -167,10 +168,10 @@ class ExtendableEvent: public Event {
 public:
   using Event::Event;
 
-  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
   // While ExtendableEvent is defined by the spec to be constructable, there's really not a
   // lot of reason currently to do so, especially with the restriction that waitUntil can
   // only be called on trusted events (which have to originate from within the system).
+  static jsg::Ref<ExtendableEvent> constructor(kj::String type) = delete;
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -189,11 +190,12 @@ public:
   }
 };
 
+// An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
 public:
 
+  // RAII-style listener that can be attached to an EventTarget.
   class NativeHandler {
-    // RAII-style listener that can be attached to an EventTarget.
   public:
     using Signature = void(jsg::Ref<Event>);
 
@@ -342,9 +344,9 @@ private:
     struct JavaScriptHandler {
       jsg::HashableV8Ref<v8::Object> identity;
       HandlerFunction callback;
-      kj::Maybe<kj::Own<NativeHandler>> abortHandler;
       // If the event handler is registered with an AbortSignal, then the abortHandler
       // is set and will ensure that the handler is removed correctly.
+      kj::Maybe<kj::Own<NativeHandler>> abortHandler;
 
       void visitForGc(jsg::GcVisitor& visitor) {
         visitor.visit(identity, callback);
@@ -355,15 +357,15 @@ private:
       NativeHandler& handler;
     };
 
-    using Handler = kj::OneOf<JavaScriptHandler, NativeHandlerRef>;
     // An EventHandler can be backed by either a JavaScript Handler (which is either a
     // function or an object) or a native handler. The insertion order matters here so
     // we maintain a single table.
+    using Handler = kj::OneOf<JavaScriptHandler, NativeHandlerRef>;
 
     Handler handler;
 
-    bool once = false;
     // When once is true, the handler will be removed after it is invoked one time.
+    bool once = false;
   };
 
   struct EventHandlerHashCallbacks {
@@ -446,21 +448,23 @@ private:
   jsg::PropertyReflection<kj::OneOf<HandlerFunction, jsg::Value>> onEvents;
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
-  bool warnOnSpecialEvents = false;
+
   // When using module syntax, the "fetch", "scheduled", "trace", etc.
   // events are handled by exports rather than events. When warnOnSpecialEvents is true,
   // when using module syntax, attempts to register event handlers for these special
   // types of events will result in a warning being emitted.
+  bool warnOnSpecialEvents = false;
 
-  bool warnOnHandlerReturn = true;
   // Event handlers are not supposed to return values. The first time one does, we'll
   // emit a warning to help users debug things but we'll otherwise ignore it.
+  bool warnOnHandlerReturn = true;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class NativeHandler;
 };
 
+// An implementation of the Web Platform Standard AbortSignal API
 class AbortSignal final: public EventTarget {
 public:
   enum class Flag { NONE, NEVER_ABORTS };
@@ -486,21 +490,21 @@ public:
     return js.undefined();
   }
 
-  void throwIfAborted(jsg::Lock& js);
   // Will synchronously throw an error if the abort signal has been triggered.
+  void throwIfAborted(jsg::Lock& js);
 
   bool getNeverAborts() const { return flag == Flag::NEVER_ABORTS; }
 
-  static jsg::Ref<AbortSignal> abort(
-      jsg::Lock& js,
-      jsg::Optional<jsg::JsValue> reason);
   // The static abort() function here returns an AbortSignal that
   // has been pre-emptively aborted. It's useful when it might still
   // be desirable to kick off an async process while communicating
   // that it shouldn't continue.
+  static jsg::Ref<AbortSignal> abort(
+      jsg::Lock& js,
+      jsg::Optional<jsg::JsValue> reason);
 
-  static jsg::Ref<AbortSignal> timeout(jsg::Lock& js, double delay);
   // Returns an AbortSignal that is triggered after delay milliseconds.
+  static jsg::Ref<AbortSignal> timeout(jsg::Lock& js, double delay);
 
   void triggerAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
@@ -558,6 +562,7 @@ private:
   friend class AbortController;
 };
 
+// An implementation of the Web Platform Standard AbortController API
 class AbortController final: public jsg::Object {
 public:
   explicit AbortController()
@@ -590,23 +595,23 @@ private:
   }
 };
 
+// The scheduler class is an emerging web platform standard API that is meant
+// to be global and provides task scheduling APIs. We currently only implement
+// a subset of the API that is being defined.
 class Scheduler final: public jsg::Object {
-  // The scheduler class is an emerging web platform standard API that is meant
-  // to be global and provides task scheduling APIs. We currently only implement
-  // a subset of the API that is being defined.
 public:
   struct WaitOptions {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
     JSG_STRUCT(signal);
   };
 
+  // Returns a promise that resolves after the `delay` milliseconds.
+  // Essentially an awaitable alternative to setTimeout(). The wait
+  // can be canceled using an AbortSignal.
   kj::Promise<void> wait(
       jsg::Lock& js,
       double delay,
       jsg::Optional<WaitOptions> maybeOptions);
-  // Returns a promise that resolves after the `delay` milliseconds.
-  // Essentially an awaitable alternative to setTimeout(). The wait
-  // can be canceled using an AbortSignal.
 
   JSG_RESOURCE_TYPE(Scheduler) {
     JSG_METHOD(wait);

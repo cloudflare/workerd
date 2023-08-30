@@ -16,14 +16,14 @@ namespace url {
 class URLSearchParams;
 }  // namespace url
 
+// Implements the FormData interface as prescribed by:
+// https://xhr.spec.whatwg.org/#interface-formdata
+//
+// NOTE: This class is actually reused by some internal code implementing the fiddle service, for
+//   lack of any other C++ form data parser implementation. In that usage, there is no isolate.
+//   It uses `parse()` and `getData()`. This relies on the ability to construct `File` objects
+//   without an isolate.
 class FormData: public jsg::Object {
-  // Implements the FormData interface as prescribed by:
-  // https://xhr.spec.whatwg.org/#interface-formdata
-  //
-  // NOTE: This class is actually reused by some internal code implementing the fiddle service, for
-  //   lack of any other C++ form data parser implementation. In that usage, there is no isolate.
-  //   It uses `parse()` and `getData()`. This relies on the ability to construct `File` objects
-  //   without an isolate.
 private:
   using EntryType = kj::OneOf<jsg::Ref<File>, kj::String>;
   using EntryIteratorType = kj::Array<EntryType>;
@@ -40,18 +40,18 @@ private:
   };
 
 public:
-  kj::Array<kj::byte> serialize(kj::ArrayPtr<const char> boundary);
   // Given a delimiter string `boundary`, serialize all fields in this form data to an array of
   // bytes suitable for use as an HTTP message body.
+  kj::Array<kj::byte> serialize(kj::ArrayPtr<const char> boundary);
 
-  void parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
-             bool convertFilesToStrings);
   // Parse `rawText`, storing the results in this FormData object. `contentType` must be either
   // multipart/form-data or application/x-www-form-urlencoded.
   //
   // `convertFilesToStrings` is for backwards-compatibility. The first implementation of this
   // class in Workers incorrectly represented files as strings (of their content). Changing this
   // could break deployed code, so this has to be controlled by a compatibility flag.
+  void parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
+             bool convertFilesToStrings);
 
   struct Entry {
     kj::String name;
@@ -62,11 +62,11 @@ public:
 
   // JS API
 
-  static jsg::Ref<FormData> constructor();
   // The spec allows a FormData to be constructed from a <form> HTML element. We don't support that,
   // for obvious reasons, so this constructor doesn't take any parameters. If someone tries to use
   // FormData to represent a <form> element we probably don't have to worry about making the error
   // message they receive too pretty: they won't get farther than `document.getElementById()`.
+  static jsg::Ref<FormData> constructor();
 
   void append(kj::String name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::String> value,
               jsg::Optional<kj::String> filename);

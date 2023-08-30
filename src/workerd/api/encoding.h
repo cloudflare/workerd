@@ -62,8 +62,8 @@ enum class Encoding {
 #undef V
 };
 
+// A Decoder provides the underlying implementation of a TextDecoder.
 class Decoder {
-  // A Decoder provides the underlying implementation of a TextDecoder.
 public:
   virtual ~Decoder() noexcept(true) {}
   virtual Encoding getEncoding() = 0;
@@ -75,8 +75,8 @@ public:
   virtual void reset() {}
 };
 
+// Decoder implementation that provides a fast-track for US-ASCII.
 class AsciiDecoder: public Decoder {
-  // Decoder implementation that provides a fast-track for US-ASCII.
 public:
   AsciiDecoder() = default;
   AsciiDecoder(AsciiDecoder&&) = default;
@@ -91,10 +91,10 @@ public:
       bool flush = false) override;
 };
 
+// Decoder implementation that uses ICU's built-in conversion APIs.
+// ICU's decoder is fairly comprehensive, covering the full range
+// of encodings required by the Encoding specification.
 class IcuDecoder: public Decoder {
-  // Decoder implementation that uses ICU's built-in conversion APIs.
-  // ICU's decoder is fairly comprehensive, covering the full range
-  // of encodings required by the Encoding specification.
 public:
   IcuDecoder(Encoding encoding, UConverter* converter, bool ignoreBom)
       : encoding(encoding), inner(converter), ignoreBom(ignoreBom), bomSeen(false) {}
@@ -124,9 +124,9 @@ private:
   bool bomSeen;
 };
 
+// Implements the TextDecoder interface as prescribed by:
+// https://encoding.spec.whatwg.org/#interface-textdecoder
 class TextDecoder: public jsg::Object {
-  // Implements the TextDecoder interface as prescribed by:
-  // https://encoding.spec.whatwg.org/#interface-textdecoder
 public:
   using DecoderImpl = kj::OneOf<AsciiDecoder, IcuDecoder>;
 
@@ -189,10 +189,9 @@ private:
   static kj::Array<const kj::byte> EMPTY;
 };
 
+// Implements the TextEncoder interface as prescribed by:
+// https://encoding.spec.whatwg.org/#interface-textencoder
 class TextEncoder: public jsg::Object {
-  // Implements the TextEncoder interface as prescribed by:
-  // https://encoding.spec.whatwg.org/#interface-textencoder
-
 public:
   struct EncodeIntoResult {
     int read;
@@ -210,8 +209,8 @@ public:
                               jsg::JsString input,
                               jsg::BufferSource buffer);
 
-  kj::StringPtr getEncoding() { return "utf-8"; }
   // UTF-8 is the only encoding type supported by the WHATWG spec.
+  kj::StringPtr getEncoding() { return "utf-8"; }
 
   JSG_RESOURCE_TYPE(TextEncoder, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encode);

@@ -31,8 +31,8 @@ private:
   kj::String cron;
 };
 
+// Type used when calling a module-exported scheduled event handler.
 class ScheduledController final: public jsg::Object {
-  // Type used when calling a module-exported scheduled event handler.
 public:
   ScheduledController(jsg::Ref<ScheduledEvent> event)
       : event(kj::mv(event)) {}

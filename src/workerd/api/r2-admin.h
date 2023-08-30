@@ -13,23 +13,24 @@ class R2CrossAccount;
 
 namespace workerd::api::public_beta {
 
+// A capability to an R2 Admin interface.
 class R2Admin: public jsg::Object {
 
-  struct friend_tag_t {};
   // A friend tag that grants access to an internal constructor for the R2CrossAccount binding
-
-  // A capability to an R2 Admin interface.
+  struct friend_tag_t {};
 
   struct FeatureFlags: public R2Bucket::FeatureFlags {
     using R2Bucket::FeatureFlags::FeatureFlags;
   };
 
 public:
-  explicit R2Admin(CompatibilityFlags::Reader featureFlags, uint subrequestChannel)
-      : featureFlags(featureFlags), subrequestChannel(subrequestChannel) {}
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
+  explicit R2Admin(CompatibilityFlags::Reader featureFlags, uint subrequestChannel)
+      : featureFlags(featureFlags), subrequestChannel(subrequestChannel) {}
 
+  // This constructor is intended to be used by the R2CrossAccount binding, which has access to the
+  // friend_tag
   R2Admin(FeatureFlags featureFlags,
           uint subrequestChannel,
           kj::String jwt,
@@ -37,8 +38,6 @@ public:
       : featureFlags(featureFlags),
         subrequestChannel(subrequestChannel),
         jwt(kj::mv(jwt)) {}
-  // This constructor is intended to be used by the R2CrossAccount binding, which has access to the
-  // friend_tag
 
   struct ListOptions {
     jsg::Optional<int> limit;

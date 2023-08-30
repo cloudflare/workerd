@@ -56,10 +56,9 @@ void SslArrayDisposer::disposeImpl(void* firstElement, size_t elementSize, size_
   OPENSSL_free(firstElement);
 }
 
+// Call when an OpenSSL function returns an error code to convert that into an exception and
+// throw it.
 void throwOpensslError(const char* file, int line, kj::StringPtr code) {
-  // Call when an OpenSSL function returns an error code to convert that into an exception and
-  // throw it.
-
   // Some error codes that we know are the application's fault are converted to app errors.
   // We only attempt to convert the most-recent error in the queue this way, because other errors
   // in the queue might have been accidentally left there by previous, unrelated operations.

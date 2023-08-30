@@ -135,13 +135,12 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
 // =======================================================================================
 // Helper functions
 
+// Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
+// or if it doesn't support the given usage.
 void validateOperation(
     const CryptoKey& key,
     kj::StringPtr requestedName,
     CryptoKeyUsageSet usage) {
-  // Throws InvalidAccessError if the key is incompatible with the given normalized algorithm name,
-  // or if it doesn't support the given usage.
-  //
   // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError, but
   //   Web IDL says that's deprecated.
   //
@@ -156,9 +155,9 @@ void validateOperation(
       usage.name(), "\" does not match any usage listed in this CryptoKey.");
 }
 
+// Helper for `deriveKey()`. This private crypto operation is actually defined by the spec as
+// the "get key length" operation.
 kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derivedKeyAlgorithm) {
-  // Helper for `deriveKey()`. This private crypto operation is actually defined by the spec as
-  // the "get key length" operation.
 
   kj::StringPtr algName = derivedKeyAlgorithm.name;
 
