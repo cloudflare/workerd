@@ -12,14 +12,14 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest] # windows-2022 disabled due to actions/runner-images#812
+        os: [ubuntu-20.04, macos-latest, windows-2022]
         include:
           - os-name: linux
             os: ubuntu-20.04
           - os-name: macOS
             os: macos-latest
-          # - os-name: windows
-          #   os: windows-2022
+          - os-name: windows
+            os: windows-2022
       fail-fast: false
     runs-on: ${{ matrix.os }}
     name: test (${{ matrix.os-name }})
@@ -60,6 +60,11 @@ jobs:
         run: |
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
+            # Upgrade to LLVM 16.0.6, default install is currently 15 (https://github.com/actions/runner-images/issues/8125).
+            # When we need to upgrade beyond LLVM 16.0.6, ${WORKSPACE}/.bazelrc will need updating.
+            choco upgrade llvm --version=16.0.6
+            # Work around bazel clang 16 include path bug (https://github.com/bazelbuild/bazel/issues/17863)
+            Move-Item -Path "C:\Program Files\LLVM\lib\clang\16" -Destination "C:\Program Files\LLVM\lib\clang\16.0.6"
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
