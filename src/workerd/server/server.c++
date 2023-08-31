@@ -467,7 +467,7 @@ public:
     KJ_IF_MAYBE(a, addr) {
       co_return co_await a->get()->connect();
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(addr)->connect();
     }
   }
@@ -476,7 +476,7 @@ public:
     KJ_IF_MAYBE(a, addr) {
       co_return co_await a->get()->connectAuthenticated();
     } else {
-      co_await promise.addBranch();
+      co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(addr)->connectAuthenticated();
     }
   }
