@@ -192,6 +192,36 @@ JsString::WriteIntoStatus JsString::writeInto(
   return result;
 }
 
+JsString::WriteIntoStatus JsString::writeInto(
+    Lock& js,
+    kj::ArrayPtr<uint16_t> buffer,
+    WriteOptions options) const {
+  WriteIntoStatus result = { 0, 0 };
+  if (buffer.size() > 0) {
+    result.written = inner->Write(js.v8Isolate,
+                                  buffer.begin(),
+                                  0,
+                                  buffer.size(),
+                                  options);
+  }
+  return result;
+}
+
+JsString::WriteIntoStatus JsString::writeInto(
+    Lock& js,
+    kj::ArrayPtr<kj::byte> buffer,
+    WriteOptions options) const {
+  WriteIntoStatus result = { 0, 0 };
+  if (buffer.size() > 0) {
+    result.written = inner->WriteOneByte(js.v8Isolate,
+                                         buffer.begin(),
+                                         0,
+                                         buffer.size(),
+                                         options);
+  }
+  return result;
+}
+
 bool JsString::containsOnlyOneByte() const {
   return inner->ContainsOnlyOneByte();
 }
