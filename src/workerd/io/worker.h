@@ -37,6 +37,7 @@ namespace api {
   struct ExportedHandler;
   struct CryptoAlgorithm;
   struct QueueExportedHandler;
+  class Socket;
   class WebSocket;
   class WebSocketRequestResponsePair;
 }
@@ -121,6 +122,15 @@ public:
   kj::Promise<AsyncLock> takeAsyncLockWhenActorCacheReady(kj::Date now, Actor& actor,
       RequestObserver& request) const;
 
+  // Track a set of address->callback overrides for which the connect(address) behavior should be
+  // overridden via callbacks rather than using the default Socket connect() logic.
+  // This is useful for allowing generic client libraries to connect to private local services using
+  // just a provided address (rather than requiring them to support being passed a binding to call
+  // binding.connect() on).
+  typedef kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)> ConnectFn;
+  void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
+  kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
+
   // Create on stack in scopes where any attempt to take an isolate lock should log a warning.
   // Isolate locks can block for a relatively long time, so we especially try to avoid taking
   // them while any other locks are held.
@@ -167,6 +177,8 @@ private:
 
   struct Impl;
   kj::Own<Impl> impl;
+
+  kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
   class InspectorClient;
   class AsyncWaiter;
