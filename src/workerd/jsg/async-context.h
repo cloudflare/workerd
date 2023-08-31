@@ -182,6 +182,7 @@ public:
     Scope scope;
 
     StorageScope(Lock& js, StorageKey& key, Value store);
+    StorageScope(Lock& js, StorageKey& key, const JsValue& store);
     KJ_DISALLOW_COPY(StorageScope);
   };
 

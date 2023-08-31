@@ -491,4 +491,11 @@ struct JsValueWrapper {
   }
 };
 
+template <typename Ret, typename...Args>
+inline void Function<Ret(Args...)>::setReceiver(Lock& js, const JsValue& receiver) {
+  KJ_IF_MAYBE(i, impl.template tryGet<JsImpl>()) {
+    i->receiver = js.v8Ref<v8::Value>(receiver);
+  }
+}
+
 }  // namespace workerd::jsg

@@ -9,26 +9,26 @@ namespace workerd::api::node {
 
 class Channel : public jsg::Object {
 public:
-  using MessageCallback = jsg::Function<void(jsg::Value, jsg::Name)>;
-  using TransformCallback = jsg::Function<jsg::Value(jsg::Value)>;
+  using MessageCallback = jsg::Function<void(jsg::JsValue, jsg::Name)>;
+  using TransformCallback = jsg::Function<jsg::JsValue(jsg::JsValue)>;
 
-  static jsg::Value identityTransform(jsg::Lock& js, jsg::Value value);
+  static jsg::JsValue identityTransform(jsg::Lock& js, jsg::JsValue value);
 
   Channel(jsg::Name name);
 
   bool hasSubscribers();
-  void publish(jsg::Lock& js, jsg::Value message);
+  void publish(jsg::Lock& js, jsg::JsValue message);
   void subscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback);
   void unsubscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback);
   void bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
                  jsg::Optional<TransformCallback> maybeTransform);
   void unbindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als);
-  v8::Local<v8::Value> runStores(
+  jsg::JsValue runStores(
       jsg::Lock& js,
-      jsg::Value message,
-      jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
-      jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
-      jsg::Arguments<jsg::Value> args);
+      jsg::JsValue message,
+      jsg::Function<jsg::JsValue(jsg::Arguments<jsg::JsRef<jsg::JsValue>>)> callback,
+      jsg::Optional<jsg::JsValue> maybeReceiver,
+      jsg::Arguments<jsg::JsRef<jsg::JsValue>> args);
 
   JSG_RESOURCE_TYPE(Channel) {
     JSG_METHOD(hasSubscribers);
@@ -63,8 +63,27 @@ private:
     }
   };
 
+  struct SubscriberKey {
+    int hash;
+    jsg::JsRef<jsg::JsObject> ref;
+    int hashCode() const { return hash; };
+    // TODO(cleanup): Later, jsg::Identified should be updated to use jsg::JsRef
+    // rather than V8Ref/HashableV8Ref.
+    SubscriberKey(jsg::Lock& js, jsg::Identified<MessageCallback>& callback)
+        : SubscriberKey(js, jsg::JsObject(callback.identity.getHandle(js))) {}
+    SubscriberKey(jsg::Lock& js, const jsg::JsObject& key)
+        : hash(key.hashCode()),
+          ref(js, key) {}
+    bool operator==(const SubscriberKey& other) const {
+      return hash == other.hash;
+    }
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(ref);
+    }
+  };
+
   jsg::Name name;
-  kj::HashMap<jsg::HashableV8Ref<v8::Object>, MessageCallback> subscribers;
+  kj::HashMap<SubscriberKey, MessageCallback> subscribers;
   kj::Table<StoreEntry, kj::HashIndex<StoreCallbacks>> stores;
 
   void visitForGc(jsg::GcVisitor& visitor);

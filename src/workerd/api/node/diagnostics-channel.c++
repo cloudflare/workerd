@@ -5,8 +5,8 @@
 
 namespace workerd::api::node {
 
-jsg::Value Channel::identityTransform(jsg::Lock& js, jsg::Value value) {
-  return value.addRef(js);
+jsg::JsValue Channel::identityTransform(jsg::Lock& js, jsg::JsValue value) {
+  return value;
 }
 
 Channel::Channel(jsg::Name name) : name(kj::mv(name)) {}
@@ -17,34 +17,36 @@ bool Channel::hasSubscribers() {
   return subscribers.size() != 0;
 }
 
-void Channel::publish(jsg::Lock& js, jsg::Value message) {
-  for (auto& sub : subscribers) {
-    sub.value(js, message.addRef(js), name.clone(js));
-  }
+void Channel::publish(jsg::Lock& js, jsg::JsValue message) {
+  js.withinHandleScope([&] {
+    for (auto& sub : subscribers) {
+      sub.value(js, message, name.clone(js));
+    }
 
-  auto& context = IoContext::current();
-  KJ_IF_MAYBE(tracer, context.getWorkerTracer()) {
-    jsg::Serializer ser(js, jsg::Serializer::Options {
-      .omitHeader = false,
-    });
-    ser.write(js, jsg::JsValue(message.getHandle(js)));
-    auto tmp = ser.release();
-    JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 &&
-                tmp.transferedArrayBuffers.size() == 0, Error,
-                "Diagnostic events cannot be published with SharedArrayBuffer or "
-                "transferred ArrayBuffer instances");
-    tracer->addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
-  }
+    auto& context = IoContext::current();
+    KJ_IF_MAYBE(tracer, context.getWorkerTracer()) {
+      jsg::Serializer ser(js, jsg::Serializer::Options {
+        .omitHeader = false,
+      });
+      ser.write(js, message);
+      auto tmp = ser.release();
+      JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 &&
+                  tmp.transferedArrayBuffers.size() == 0, Error,
+                  "Diagnostic events cannot be published with SharedArrayBuffer or "
+                  "transferred ArrayBuffer instances");
+      tracer->addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));
+    }
+  });
 }
 
 void Channel::subscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback) {
-  subscribers.upsert(kj::mv(callback.identity),
+  subscribers.upsert(SubscriberKey(js, callback),
                      kj::mv(callback.unwrapped),
                      [&](auto&, auto&&) {});
 }
 
 void Channel::unsubscribe(jsg::Lock& js, jsg::Identified<MessageCallback> callback) {
-  subscribers.erase(callback.identity);
+  subscribers.erase(SubscriberKey(js, callback));
 }
 
 void Channel::bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
@@ -54,8 +56,8 @@ void Channel::bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
     KJ_IF_MAYBE(transform, maybeTransform) {
       entry->transform = kj::mv(*transform);
     } else {
-      entry->transform = [](jsg::Lock& js, jsg::Value value) {
-        return identityTransform(js, kj::mv(value));
+      entry->transform = [](jsg::Lock& js, jsg::JsValue value) {
+        return identityTransform(js, value);
       };
     }
     return;
@@ -69,8 +71,8 @@ void Channel::bindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als,
   } else {
     stores.insert({
       .key = kj::mv(key),
-      .transform = [](jsg::Lock& js, jsg::Value value) {
-        return identityTransform(js, kj::mv(value));
+      .transform = [](jsg::Lock& js, jsg::JsValue value) {
+        return identityTransform(js, value);
       }
     });
   }
@@ -81,23 +83,24 @@ void Channel::unbindStore(jsg::Lock& js, jsg::Ref<AsyncLocalStorage> als) {
   stores.eraseMatch(*key);
 }
 
-v8::Local<v8::Value> Channel::runStores(
-    jsg::Lock& js, jsg::Value message,
-    jsg::Function<v8::Local<v8::Value>(jsg::Arguments<jsg::Value>)> callback,
-    jsg::Optional<v8::Local<v8::Value>> maybeReceiver,
-    jsg::Arguments<jsg::Value> args) {
+jsg::JsValue Channel::runStores(
+    jsg::Lock& js,
+    jsg::JsValue message,
+    jsg::Function<jsg::JsValue(jsg::Arguments<jsg::JsRef<jsg::JsValue>>)> callback,
+    jsg::Optional<jsg::JsValue> maybeReceiver,
+    jsg::Arguments<jsg::JsRef<jsg::JsValue>> args) {
   auto storageScopes = KJ_MAP(store, stores) {
     return kj::heap<jsg::AsyncContextFrame::StorageScope>(js, *store.key,
-        store.transform(js, message.addRef(js)));
+        store.transform(js, message));
   };
 
-  publish(js, message.addRef(js));
+  publish(js, message);
 
-  v8::Local<v8::Value> receiver = js.v8Context()->Global();
+  jsg::JsValue receiver = js.global();
   KJ_IF_MAYBE(val, maybeReceiver) {
     receiver = *val;
   }
-  callback.setReceiver(js.v8Ref(receiver));
+  callback.setReceiver(js, receiver);
   return callback(js, kj::mv(args));
 }
 

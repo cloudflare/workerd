@@ -178,6 +178,16 @@ AsyncContextFrame::StorageScope::StorageScope(
       })),
       scope(js, *frame) {}
 
+AsyncContextFrame::StorageScope::StorageScope(
+    Lock& js,
+    StorageKey& key,
+    const JsValue& store)
+    : frame(AsyncContextFrame::create(js, StorageEntry {
+        .key = kj::addRef(key),
+        .value = js.v8Ref<v8::Value>(store),
+      })),
+      scope(js, *frame) {}
+
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {
   KJ_IF_MAYBE(handle, tryGetHandle(isolate)) {
     return *handle;

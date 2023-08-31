@@ -240,6 +240,8 @@ public:
     }
   }
 
+  void setReceiver(Lock& js, const JsValue& receiver);
+
 private:
   Function(Ref<NativeFunction>&& func) : impl(kj::mv(func)) {}
 
