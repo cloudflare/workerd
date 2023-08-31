@@ -81,6 +81,19 @@ inline kj::StringPtr maybeOmitColoFromSentry(uint32_t coloId) {
     }                                                                          \
   } while (0)
 
+// Like LOG_ERROR_PERIODICALLY, but NOSENTRY.
+#define LOG_NOSENTRY_PERIODICALLY(severity, ...)                               \
+  do {                                                                         \
+    static kj::TimePoint KJ_UNIQUE_NAME(lastLogged) =                          \
+        kj::origin<kj::TimePoint>() - 1 * kj::HOURS;                           \
+    const auto now = kj::systemCoarseMonotonicClock().now();                   \
+    const auto elapsed = now - KJ_UNIQUE_NAME(lastLogged);                     \
+    if (KJ_UNLIKELY(elapsed >= 1 * kj::HOURS)) {                               \
+      KJ_UNIQUE_NAME(lastLogged) = now;                                        \
+      KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);                               \
+    }                                                                          \
+  } while (0)
+
 // The DEBUG_FATAL_RELEASE_LOG macros is for assertions that should definitely break in tests but
 // are not worth breaking production over. Instead, it logs the assertion message to sentry so that
 // we can notice the event. If your code requires that an assertion is true for safety (e.g.
