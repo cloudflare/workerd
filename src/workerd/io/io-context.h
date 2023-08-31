@@ -786,7 +786,8 @@ public:
       kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
       SubrequestOptions options);
 
-  // If creating a new subrequest is permitted, calls the given factory function to create one.
+  // If creating a new subrequest is permitted, calls the given factory function synchronously to
+  // create one.
   kj::Own<WorkerInterface> getSubrequest(
       kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
       SubrequestOptions options);
