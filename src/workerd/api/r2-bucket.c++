@@ -841,7 +841,7 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
     return parseConditionalEtagHeader(condHeader.slice(nextComma + 1), kj::mv(etagAccumulator));
   } else if (leadingCommaRequired) {
   // Did not find a leading comma, and we expected a leading comma before any further etags
-    KJ_FAIL_REQUIRE("Comma was expected to separate etags");
+    JSG_FAIL_REQUIRE(Error, "Comma was expected to separate etags");
   }
 
   if (nextWildcard < nextQuotation) {
@@ -865,10 +865,11 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
       // Slice end is non inclusive, meaning that this drops the closingQuotation from the etag
       kj::String etagValue = kj::str(condHeader.slice(etagValueStart, *cq));
       if (nextWeak < nextQuotation) {
-        KJ_REQUIRE(
+        JSG_REQUIRE(
           condHeader.size() > nextWeak + 2
             && condHeader[nextWeak + 1] == '/'
             && nextWeak + 2 == nextQuotation,
+          Error,
           "Weak etags must start with W/ and their value must be quoted"
         );
         R2Bucket::WeakEtag etag = {kj::mv(etagValue)};
@@ -883,10 +884,10 @@ kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(
         true
       );
     } else {
-      KJ_FAIL_REQUIRE("Unclosed double quote for Etag");
+      JSG_FAIL_REQUIRE(Error, "Unclosed double quote for Etag");
     }
   } else {
-    KJ_FAIL_REQUIRE("Invalid conditional header");
+    JSG_FAIL_REQUIRE(Error, "Invalid conditional header");
   }
 }
 
