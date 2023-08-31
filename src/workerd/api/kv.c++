@@ -36,31 +36,28 @@ static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
       414, " UTF-8 encoded length of ", name.size(), " exceeds key length limit of ", kMaxKeyLength, ".");
 }
 
-static void parseListMetadata(jsg::Lock& js, v8::Local<v8::Value> listResponse,
-    kj::Maybe<v8::Local<v8::Value>> cacheStatus) {
+static void parseListMetadata(jsg::Lock& js,
+                              jsg::JsValue listResponse,
+                              kj::Maybe<jsg::JsValue> cacheStatus) {
+  static constexpr auto METADATA = "metadata"_kjc;
+  static constexpr auto KEYS = "keys"_kjc;
+
   js.withinHandleScope([&] {
-    KJ_ASSERT(listResponse->IsObject());
-    v8::Local<v8::Object> obj = listResponse.As<v8::Object>();
-    auto keys = js.v8Get(obj, "keys"_kj);
-    if (keys->IsArray()) {
-      auto keysArr = keys.As<v8::Array>();
-      auto length = keysArr->Length();
-      v8::Local<v8::Object> key;
+    auto obj = KJ_ASSERT_NONNULL(listResponse.tryCast<jsg::JsObject>());
+    KJ_IF_MAYBE(keysArr, obj.get(js, KEYS).tryCast<jsg::JsArray>()) {
+      auto length = keysArr->size();
       for (int i = 0; i < length; i++) {
         js.withinHandleScope([&] {
-          key = js.v8Get(keysArr, i).As<v8::Object>();
-          if (js.v8HasOwn(key, "metadata"_kj)) {
-            auto metadata = js.v8Get(key, "metadata"_kj);
-            KJ_ASSERT(metadata->IsString());
-            auto metadataStr = metadata.As<v8::String>();
-            auto json = js.parseJson(metadataStr);
-            js.v8Set(key, "metadata"_kj, json);
+          KJ_IF_MAYBE(key, keysArr->get(js, i).tryCast<jsg::JsObject>()) {
+            KJ_IF_MAYBE(str, key->get(js, METADATA).tryCast<jsg::JsString>()) {
+              key->set(js, METADATA, jsg::JsValue::fromJson(js, *str));
+            }
           }
         });
       }
     }
 
-    js.v8Set(obj, "cacheStatus"_kj, cacheStatus.orDefault(js.v8Null()));
+    obj.set(js, "cacheStatus"_kjc, cacheStatus.orDefault(js.null()));
   });
 }
 
@@ -160,8 +157,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
 
     auto cacheStatus = response.headers->get(context.getHeaderIds().cfCacheStatus)
         .map([&](kj::StringPtr cs) {
-          auto value = jsg::v8StrIntern(js.v8Isolate, cs);
-          return js.v8Ref(kj::mv(value).As<v8::Value>());
+          return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         });
 
     if (response.statusCode == 404 || response.statusCode == 410) {
@@ -216,7 +212,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
           [](jsg::Lock& js, kj::String text) {
-        return KvNamespace::GetResult(js.parseJson(text));
+        auto ref = jsg::JsRef(js, jsg::JsValue::fromJson(js, text));
+        return KvNamespace::GetResult(kj::mv(ref));
       });
     } else {
       JSG_FAIL_REQUIRE(TypeError,
@@ -225,9 +222,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     }
     return result.then(js, [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)]
         (jsg::Lock& js, KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
-      kj::Maybe<jsg::Value> meta;
+      kj::Maybe<jsg::JsRef<jsg::JsValue>> meta;
       KJ_IF_MAYBE (metaStr, maybeMeta) {
-        meta = js.parseJson(*metaStr);
+        meta = jsg::JsRef(js, jsg::JsValue::fromJson(js, *metaStr));
       }
       return KvNamespace::GetWithMetadataResult{
         kj::mv(result),
@@ -238,7 +235,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   });
 }
 
-jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOptions> options) {
+jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
+                                                         jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
@@ -273,13 +271,14 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
         kj::mv(request.response),
         [&context, client = kj::mv(client)]
         (jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-            -> jsg::Promise<jsg::Value> {
+            -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
 
       checkForErrorStatus("GET", response);
 
-      kj::Maybe<jsg::Value> cacheStatus = [&]()-> kj::Maybe<jsg::Value> {
+      kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus = [&]()
+          -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
         KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          return js.v8Ref(jsg::v8StrIntern(js.v8Isolate, *cs).As<v8::Value>());
+          return jsg::JsRef<jsg::JsValue>(js, js.strIntern(*cs));
         }
         return nullptr;
       }();
@@ -292,12 +291,12 @@ jsg::Promise<jsg::Value> KvNamespace::list(jsg::Lock& js, jsg::Optional<ListOpti
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
           [cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js, kj::String text) mutable {
-        auto result = js.parseJson(text);
-        parseListMetadata(js, result.getHandle(js),
-            cacheStatus.map([&](jsg::Value& cs) -> v8::Local<v8::Value> {
+        auto result = jsg::JsValue::fromJson(js, text);
+        parseListMetadata(js, result,
+            cacheStatus.map([&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue {
           return cs.getHandle(js);
         }));
-        return result;
+        return jsg::JsRef(js, result);
       });
     });
   });
@@ -333,7 +332,7 @@ jsg::Promise<void> KvNamespace::put(
       }
       KJ_IF_MAYBE(maybeMetadata, o->metadata) {
         KJ_IF_MAYBE(metadata, *maybeMetadata) {
-          kj::String json = js.serializeJson(*metadata);
+          kj::String json = metadata->getHandle(js).toJson(js);
           headers.set(context.getHeaderIds().cfKvMetadata, kj::mv(json));
         }
       }
@@ -345,7 +344,7 @@ jsg::Promise<void> KvNamespace::put(
       KJ_CASE_ONEOF(text, kj::String) {
         supportedBody = kj::mv(text);
       }
-      KJ_CASE_ONEOF(object, v8::Local<v8::Object>) {
+      KJ_CASE_ONEOF(object, jsg::JsObject) {
         supportedBody = JSG_REQUIRE_NONNULL(putTypeHandler.tryUnwrap(js, object),
             TypeError, "KV put() accepts only strings, ArrayBuffers, ArrayBufferViews, and "
             "ReadableStreams as values.");
