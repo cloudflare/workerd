@@ -164,7 +164,7 @@ jsg::Ref<Socket> setupSocket(
 }
 
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
+    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
 
   // Extract the domain/ip we are connecting to from the address.
@@ -208,8 +208,22 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
 
+  jsg::Ref<Fetcher> actualFetcher = nullptr;
+  KJ_IF_MAYBE(f, fetcher) {
+    actualFetcher = kj::mv(*f);
+  } else {
+    // Support calling into arbitrary callbacks for any registered "magic" addresses for which
+    // custom connect() logic is needed. Note that these overrides should only apply to calls of the
+    // global connect() method, not for fetcher->connect(), hence why we check for them here.
+    KJ_IF_MAYBE(fn, ioContext.getCurrentLock().getWorker().getConnectOverride(addressStr)) {
+      return (*fn)(js);
+    }
+    actualFetcher = jsg::alloc<Fetcher>(
+        IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
+  }
+
   auto jsRequest = Request::constructor(js, kj::str(addressStr), nullptr);
-  kj::Own<WorkerInterface> client = fetcher->getClient(
+  kj::Own<WorkerInterface> client = actualFetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kjc);
 
   // Set up the connection.
@@ -238,14 +252,9 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 jsg::Ref<Socket> connectImpl(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
-  jsg::Ref<Fetcher> actualFetcher = nullptr;
-  KJ_IF_MAYBE(f, fetcher) {
-    actualFetcher = kj::mv(*f);
-  } else {
-    actualFetcher = jsg::alloc<Fetcher>(
-        IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
-  }
-  return connectImplNoOutputLock(js, kj::mv(actualFetcher), kj::mv(address), kj::mv(options));
+  // TODO(soon): Doesn't this need to check for the presence of an output lock, and if it finds one
+  // then wait on it, before calling into connectImplNoOutputLock?
+  return connectImplNoOutputLock(js, kj::mv(fetcher), kj::mv(address), kj::mv(options));
 }
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {

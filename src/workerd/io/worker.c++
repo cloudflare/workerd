@@ -12,6 +12,7 @@
 #include <workerd/util/xthreadnotifier.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
+#include <workerd/api/sockets.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
@@ -2963,6 +2964,14 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
   }
 
   return getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
+}
+
+void Worker::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
+  connectOverrides.upsert(kj::mv(networkAddress), kj::mv(connectFn));
+}
+
+kj::Maybe<Worker::ConnectFn&> Worker::getConnectOverride(kj::StringPtr networkAddress) {
+  return connectOverrides.find(networkAddress);
 }
 
 Worker::Actor::Actor(const Worker& worker, kj::Maybe<RequestTracker&> tracker, Actor::Id actorId,

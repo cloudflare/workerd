@@ -150,7 +150,7 @@ jsg::Ref<Socket> setupSocket(
     bool isSecureSocket, kj::String domain, bool isDefaultFetchPort);
 
 jsg::Ref<Socket> connectImplNoOutputLock(
-    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, AnySocketAddress address,
+    jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
 
 jsg::Ref<Socket> connectImpl(
