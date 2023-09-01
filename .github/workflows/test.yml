@@ -31,9 +31,9 @@ jobs:
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-          # Use an older cache key, if available.
-          restore-keys: |
-            bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-
+          # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
+          # ends up with a larger cache at the end when starting with an available cache entry,
+          # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Linux
         if: runner.os == 'Linux'
         # Install dependencies, including clang via through LLVM APT repository. Note that this

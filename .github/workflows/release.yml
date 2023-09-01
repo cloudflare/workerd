@@ -20,8 +20,6 @@ jobs:
         with:
           path: ~/bazel-disk-cache
           key: capnp-cache-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-          restore-keys: |
-            capnp-cache-${{ runner.os }}-
       - name: build capnp
         run: |
           bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
@@ -51,8 +49,6 @@ jobs:
           # Use a different cache key than for tests here, otherwise the release cache could end up
           # being used for test builds, where it provides little benefit.
           key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-          restore-keys: |
-            bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-
       - name: Setup Linux
         if: runner.os == 'Linux'
         run: |
