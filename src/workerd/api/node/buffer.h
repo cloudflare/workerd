@@ -7,8 +7,8 @@
 
 namespace workerd::api::node {
 
+// Implements utilities in support of the Node.js Buffer
 class BufferUtil final: public jsg::Object {
-  // Implements utilities in support of the Node.js Buffer
 public:
 
   uint32_t byteLength(jsg::Lock& js, jsg::JsString str);

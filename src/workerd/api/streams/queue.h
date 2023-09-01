@@ -143,9 +143,9 @@ class ConsumerImpl;
 template <typename Self>
 class QueueImpl;
 
+// Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>
 class QueueImpl final {
-  // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 public:
   using ConsumerImpl = ConsumerImpl<Self>;
   using Entry = typename Self::Entry;
@@ -156,9 +156,9 @@ public:
   QueueImpl(QueueImpl&&) = default;
   QueueImpl& operator=(QueueImpl&&) = default;
 
+  // Closes the queue. The close is forwarded on to all consumers.
+  // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
-    // Closes the queue. The close is forwarded on to all consumers.
-    // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the close callback, invalidating the iterator.
@@ -170,19 +170,19 @@ public:
     }
   }
 
+  // The amount of data the Queue needs until it is considered full.
+  // The value can be zero or negative, in which case backpressure is
+  // signaled on the queue.
+  // If the queue is already closed or errored, return 0.
   inline ssize_t desiredSize() const {
-    // The amount of data the Queue needs until it is considered full.
-    // The value can be zero or negative, in which case backpressure is
-    // signaled on the queue.
-    // If the queue is already closed or errored, return 0.
     return state.template is<Ready>() ? highWaterMark - size() : 0;
   }
 
+  // Errors the queue. The error is forwarded on to all consumers,
+  // which will, in turn, reset their internal buffers and reject
+  // all pending consume promises.
+  // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
-    // Errors the queue. The error is forwarded on to all consumers,
-    // which will, in turn, reset their internal buffers and reject
-    // all pending consume promises.
-    // If we are already closed or errored, do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the error callback, invalidating the iterator.
@@ -194,10 +194,10 @@ public:
     }
   }
 
+  // Polls all known consumers to collect their current buffer sizes
+  // so that the current queue size can be updated.
+  // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
-    // Polls all known consumers to collect their current buffer sizes
-    // so that the current queue size can be updated.
-    // If we are already closed or errored, set totalQueueSize to zero.
     totalQueueSize = 0;
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       for (auto consumer : ready->consumers) {
@@ -206,14 +206,14 @@ public:
     }
   }
 
+  // Forwards the entry to all consumers (except skipConsumer if given).
+  // For each consumer, the entry will be used to fulfill any pending consume operations.
+  // If the entry type is byteOriented and has not been fully consumed by pending consume
+  // operations, then any left over data will be pushed into the consumer's buffer.
+  // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js,
             kj::Own<Entry> entry,
             kj::Maybe<ConsumerImpl&> skipConsumer = nullptr) {
-    // Forwards the entry to all consumers (except skipConsumer if given).
-    // For each consumer, the entry will be used to fulfill any pending consume operations.
-    // If the entry type is byteOriented and has not been fully consumed by pending consume
-    // operations, then any left over data will be pushed into the consumer's buffer.
-    // Asserts if the queue is closed or errored.
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(),
         "The queue is closed or errored.");
 
@@ -228,8 +228,8 @@ public:
     }
   }
 
-  size_t size() const { return totalQueueSize; }
   // The current size of consumer with the most stored data.
+  size_t size() const { return totalQueueSize; }
 
   size_t getConsumerCount() const {
     KJ_SWITCH_ONEOF(state) {
@@ -254,9 +254,9 @@ public:
     KJ_UNREACHABLE;
   }
 
+  // Specific queue implementations may provide additional state that is attached
+  // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
-    // Specific queue implementations may provide additional state that is attached
-    // to the Ready struct.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       return *ready;
     }
@@ -292,9 +292,9 @@ private:
   friend ConsumerImpl;
 };
 
+// Provides the underlying implementation shared by ByteQueue::Consumer and ValueQueue::Consumer
 template <typename Self>
 class ConsumerImpl final {
-  // Provides the underlying implementation shared by ByteQueue::Consumer and ValueQueue::Consumer
 public:
   struct StateListener {
     virtual void onConsumerClose(jsg::Lock& js) = 0;
@@ -304,10 +304,10 @@ public:
 
   using QueueImpl = QueueImpl<Self>;
 
+  // A simple utility to be allocated on any stack where consumer buffer data maybe consumed
+  // or expanded. When the stack is unwound, it ensures the backpressure is appropriately
+  // updated.
   struct UpdateBackpressureScope final {
-    // A simple utility to be allocated on any stack where consumer buffer data maybe consumed
-    // or expanded. When the stack is unwound, it ensures the backpressure is appropriately
-    // updated.
     QueueImpl& queue;
     UpdateBackpressureScope(QueueImpl& queue) : queue(queue) {};
     ~UpdateBackpressureScope() noexcept(false) {
@@ -348,7 +348,7 @@ public:
   }
 
   void close(jsg::Lock& js) {
-    // If we are already closed or errored, then we do nothing here.
+  // If we are already closed or errored, then we do nothing here.
     KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
@@ -409,8 +409,8 @@ public:
     }
   }
 
+  // The current total calculated size of the consumer's internal buffer.
   size_t size() const {
-    // The current total calculated size of the consumer's internal buffer.
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(e, Errored) { return 0; }
       KJ_CASE_ONEOF(c, Closed) { return 0; }
@@ -493,8 +493,8 @@ public:
   }
 
 private:
-  struct Close {};
   // A sentinel used in the buffer to signal that close() has been called.
+  struct Close {};
 
   struct Closed {};
   using Errored = jsg::Value;
@@ -593,9 +593,9 @@ public:
     void reject(jsg::Lock& js, jsg::Value& value);
   };
 
+  // A value queue entry consists of an arbitrary JavaScript value and a size that is
+  // calculated by the size algorithm function provided in the stream constructor.
   class Entry {
-    // A value queue entry consists of an arbitrary JavaScript value and a size that is
-    // calculated by the size algorithm function provided in the stream constructor.
   public:
     explicit Entry(jsg::Value value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
@@ -712,10 +712,10 @@ public:
   struct ReadRequest final {
     enum class Type { DEFAULT, BYOB };
     jsg::Promise<ReadResult>::Resolver resolver;
-    kj::Maybe<ByobRequest&> byobReadRequest;
     // The reference here should be cleared when the ByobRequest is invalidated,
     // which happens either when respond(), respondWithNewView(), or invalidate()
     // is called, or when the ByobRequest is destroyed, whichever comes first.
+    kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
       jsg::BackingStore store;
@@ -736,13 +736,13 @@ public:
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
   };
 
+  // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
+  // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
+  //
+  // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
+  // the BYOB read request. Once either of those are called, or once invalidate() is called,
+  // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final {
-    // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
-    // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
-    //
-    // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
-    // the BYOB read request. Once either of those are called, or once invalidate() is called,
-    // the ByobRequest is no longer usable and should be discarded.
   public:
     ByobRequest(
         ReadRequest& request,
@@ -762,9 +762,9 @@ public:
 
     bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
-    void invalidate();
     // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
+    void invalidate();
 
     inline bool isInvalidated() const { return request == nullptr; }
 
@@ -784,9 +784,9 @@ public:
     std::deque<kj::Own<ByobRequest>> pendingByobReadRequests;
   };
 
+  // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
+  // sequence of bytes. The size is determined by the number of bytes in the entry.
   class Entry {
-    // A byte queue entry consists of a jsg::BackingStore containing a non-zero-length
-    // sequence of bytes. The size is determined by the number of bytes in the entry.
   public:
     explicit Entry(jsg::BackingStore store);
 
@@ -865,7 +865,6 @@ public:
 
   bool hasPartiallyFulfilledRead();
 
-  kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
   // nextPendingByobReadRequest will be used to support the ReadableStreamBYOBRequest interface
   // that is part of ReadableByteStreamController. When user code calls the `controller.byobRequest`
   // API on a ReadableByteStreamController, they are going to get an instance of a
@@ -874,6 +873,7 @@ public:
   // that byobRequest long after it has been invalidated. We heap-allocate these just to allow
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
+  kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
 
   void visitForGc(jsg::GcVisitor& visitor);
 

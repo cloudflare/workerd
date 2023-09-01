@@ -34,10 +34,10 @@ KJ_DECLARE_NON_POLYMORPHIC(ByteReadable);
 
 namespace {
 
+// A utility class used by ReadableStreamJsController
+// for implementing the reader lock in a consistent way (without duplicating any code).
 template <typename Controller>
 class ReadableLockImpl {
-  // A utility class used by ReadableStreamJsController
-  // for implementing the reader lock in a consistent way (without duplicating any code).
 public:
   using PipeController = ReadableStreamController::PipeController;
   using Reader = ReadableStreamController::Reader;
@@ -46,8 +46,8 @@ public:
 
   bool lockReader(jsg::Lock& js, Controller& self, Reader& reader);
 
-  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
   // See the comment for releaseReader in common.h for details on the use of maybeJs
+  void releaseReader(Controller& self, Reader& reader, kj::Maybe<jsg::Lock&> maybeJs);
 
   bool lock();
 
@@ -114,11 +114,11 @@ private:
   friend Controller;
 };
 
+// A utility class used by WritableStreamJsController to implement the writer lock
+// mechanism. Extracted for consistency with ReadableStreamJsController and to
+// eventually allow it to be shared also with WritableStreamInternalController.
 template <typename Controller>
 class WritableLockImpl {
-  // A utility class used by WritableStreamJsController to implement the writer lock
-  // mechanism. Extracted for consistency with ReadableStreamJsController and to
-  // eventually allow it to be shared also with WritableStreamInternalController.
 public:
   using Writer = WritableStreamController::Writer;
 
@@ -126,8 +126,8 @@ public:
 
   bool lockWriter(jsg::Lock& js, Controller& self, Writer& writer);
 
-  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
+  void releaseWriter(Controller& self, Writer& writer, kj::Maybe<jsg::Lock&> maybeJs);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -495,13 +495,13 @@ int getHighWaterMark(const UnderlyingSource& underlyingSource,
 
 }  // namespace
 
+// It is possible for the controller state to be released synchronously while
+// we are in the middle of a read. When that happens we need to defer the actual
+// close/error state change until the read call is complete. ReadPendingScope
+// handles this for us. It is constructed when we start a read and destructed
+// synchronously when the call to read completes.
 template <typename C>
 struct ReadPendingScope {
-  // It is possible for the controller state to be released synchronously while
-  // we are in the middle of a read. When that happens we need to defer the actual
-  // close/error state change until the read call is complete. ReadPendingScope
-  // handles this for us. It is constructed when we start a read and destructed
-  // synchronously when the call to read completes.
   jsg::Lock& js;
   C& controller;
   ReadPendingScope(jsg::Lock& js, C& controller)
@@ -529,35 +529,35 @@ struct ReadPendingScope {
   }
 };
 
+// The ReadableStreamJsController provides the implementation of custom
+// ReadableStreams backed by a user-code provided Underlying Source. The implementation
+// is fairly complicated and defined entirely by the streams specification.
+//
+// Another important thing to understand is that there are two types of JavaScript
+// backed ReadableStreams: value-oriented, and byte-oriented.
+//
+// When user code uses the `new ReadableStream(underlyingSource)` constructor, the
+// underlyingSource argument may have a `type` property, the value of which is either
+// `undefined`, the empty string, or the string value `'bytes'`. If the underlyingSource
+// argument is not given, the default value of `type` is `undefined`. If `type` is
+// `undefined` or the empty string, the ReadableStream is value-oriented. If `type` is
+// exactly equal to `'bytes'`, the ReadableStream is byte-oriented.
+//
+// For value-oriented streams, any JavaScript value can be pushed through the stream,
+// and the stream will only support use of the ReadableStreamDefaultReader to consume
+// the stream data.
+//
+// For byte-oriented streams, only byte data (as provided by `ArrayBufferView`s) can
+// be pushed through the stream. All byte-oriented streams support using both
+// ReadableStreamDefaultReader and ReadableStreamBYOBReader to consume the stream
+// data.
+//
+// When the ReadableStreamJsController::setup() method is called the type
+// of stream is determined, and the controller will create an instance of either
+// jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
+// These are the objects that are actually passed on to the user-code's Underlying Source
+// implementation.
 class ReadableStreamJsController: public ReadableStreamController {
-  // The ReadableStreamJsController provides the implementation of custom
-  // ReadableStreams backed by a user-code provided Underlying Source. The implementation
-  // is fairly complicated and defined entirely by the streams specification.
-  //
-  // Another important thing to understand is that there are two types of JavaScript
-  // backed ReadableStreams: value-oriented, and byte-oriented.
-  //
-  // When user code uses the `new ReadableStream(underlyingSource)` constructor, the
-  // underlyingSource argument may have a `type` property, the value of which is either
-  // `undefined`, the empty string, or the string value `'bytes'`. If the underlyingSource
-  // argument is not given, the default value of `type` is `undefined`. If `type` is
-  // `undefined` or the empty string, the ReadableStream is value-oriented. If `type` is
-  // exactly equal to `'bytes'`, the ReadableStream is byte-oriented.
-  //
-  // For value-oriented streams, any JavaScript value can be pushed through the stream,
-  // and the stream will only support use of the ReadableStreamDefaultReader to consume
-  // the stream data.
-  //
-  // For byte-oriented streams, only byte data (as provided by `ArrayBufferView`s) can
-  // be pushed through the stream. All byte-oriented streams support using both
-  // ReadableStreamDefaultReader and ReadableStreamBYOBReader to consume the stream
-  // data.
-  //
-  // When the ReadableStreamJsController::setup() method is called the type
-  // of stream is determined, and the controller will create an instance of either
-  // jsg::Ref<ReadableStreamDefaultController> or jsg::Ref<ReadableByteStreamController>.
-  // These are the objects that are actually passed on to the user-code's Underlying Source
-  // implementation.
 public:
   using ReadableLockImpl = ReadableLockImpl<ReadableStreamJsController>;
 
@@ -578,9 +578,6 @@ public:
       jsg::Optional<UnderlyingSource> maybeUnderlyingSource,
       jsg::Optional<StreamQueuingStrategy> maybeQueuingStrategy) override;
 
-  jsg::Promise<void> cancel(
-      jsg::Lock& js,
-      jsg::Optional<v8::Local<v8::Value>> reason) override;
   // Signals that this ReadableStream is no longer interested in the underlying
   // data source. Whether this cancels the underlying data source also depends
   // on whether or not there are other ReadableStreams still attached to it.
@@ -588,6 +585,9 @@ public:
   // is still pending, the ReadableStream will be no longer usable and any
   // data still in the queue will be dropped. Pending read requests will be
   // rejected if a reason is given, or resolved with no data otherwise.
+  jsg::Promise<void> cancel(
+      jsg::Lock& js,
+      jsg::Optional<v8::Local<v8::Value>> reason) override;
 
   void doClose(jsg::Lock& js);
 
@@ -622,8 +622,8 @@ public:
       jsg::Lock& js,
       kj::Maybe<ByobOptions> byobOptions) override;
 
-  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
+  void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   void setOwnerRef(ReadableStream& stream) override;
 
@@ -645,9 +645,9 @@ public:
 private:
   bool hasPendingReadRequests();
 
-  kj::Maybe<IoContext&> ioContext;
   // If the stream was created within the scope of a request, we want to treat it as I/O
   // and make sure it is not advanced from the scope of a different request.
+  kj::Maybe<IoContext&> ioContext;
   kj::Maybe<ReadableStream&> owner;
 
   kj::OneOf<StreamStates::Closed,
@@ -655,8 +655,8 @@ private:
             kj::Own<ValueReadable>,
             kj::Own<ByteReadable>> state = StreamStates::Closed();
 
-  ReadableLockImpl lock;
   // The lock state is separate because a closed or errored stream can still be locked.
+  ReadableLockImpl lock;
 
   bool disturbed = false;
   size_t pendingReadCount = 0;
@@ -678,14 +678,14 @@ private:
   friend struct ReadPendingScope<ReadableStreamJsController>;
 };
 
+// The WritableStreamJsController provides the implementation of custom
+// WritableStream's backed by a user-code provided Underlying Sink. The implementation
+// is fairly complicated and defined entirely by the streams specification.
+//
+// Importantly, the controller is designed to operate entirely within the JavaScript
+// isolate lock. It is possible to call removeSink() to acquire a WritableStreamSink
+// implementation that delegates to the WritableStreamDefaultController.
 class WritableStreamJsController: public WritableStreamController {
-  // The WritableStreamJsController provides the implementation of custom
-  // WritableStream's backed by a user-code provided Underlying Sink. The implementation
-  // is fairly complicated and defined entirely by the streams specification.
-  //
-  // Importantly, the controller is designed to operate entirely within the JavaScript
-  // isolate lock. It is possible to call removeSink() to acquire a WritableStreamSink
-  // implementation that delegates to the WritableStreamDefaultController.
 public:
   using WritableLockImpl = WritableLockImpl<WritableStreamJsController>;
 
@@ -737,8 +737,8 @@ public:
 
   void maybeResolveReadyPromise(jsg::Lock& js);
 
-  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseWriter in common.h for details on the use of maybeJs
+  void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) override;
 
   kj::Maybe<kj::Own<WritableStreamSink>> removeSink(jsg::Lock& js) override;
 
@@ -883,17 +883,16 @@ bool ReadableImpl<Self>::canCloseOrEnqueue() {
   return state.template is<Queue>();
 }
 
+// doCancel() is triggered by cancel() being called, which is an explicit signal from
+// the ReadableStream that we don't care about the data this controller provides any
+// more. We don't need to notify the consumers because we presume they already know
+// that they called cancel. What we do want to do here, tho, is close the implementation
+// and trigger the cancel algorithm.
 template <typename Self>
 void ReadableImpl<Self>::doCancel(
     jsg::Lock& js,
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
-  // doCancel() is triggered by cancel() being called, which is an explicit signal from
-  // the ReadableStream that we don't care about the data this controller provides any
-  // more. We don't need to notify the consumers because we presume they already know
-  // that they called cancel. What we do want to do here, tho, is close the implementation
-  // and trigger the cancel algorithm.
-
   state.template init<StreamStates::Closed>();
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
@@ -987,10 +986,10 @@ kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
   KJ_UNREACHABLE;
 }
 
+// We should call pull if any of the consumers known to the queue have read requests or
+// we haven't yet signalled backpressure.
 template <typename Self>
 bool ReadableImpl<Self>::shouldCallPull() {
-  // We should call pull if any of the consumers known to the queue have read requests or
-  // we haven't yet signalled backpressure.
   return canCloseOrEnqueue() &&
       (state.template get<Queue>().wantsRead() || getDesiredSize().orDefault(0) > 0);
 }
@@ -1752,12 +1751,12 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     KJ_IF_MAYBE(s, state) { s->setOwner(kj::mv(newOwner)); }
   }
 
+  // A single ReadableByteStreamController can have multiple consumers.
+  // When the ByteReadable constructor is used, the new consumer is added
+  // and starts to receive new data that becomes enqueued. When clone
+  // is used, any state currently held by this consumer is copied to the
+  // new consumer.
   kj::Own<ByteReadable> clone(jsg::Lock& js, ReadableStreamJsController* owner) {
-    // A single ReadableByteStreamController can have multiple consumers.
-    // When the ByteReadable constructor is used, the new consumer is added
-    // and starts to receive new data that becomes enqueued. When clone
-    // is used, any state currently held by this consumer is copied to the
-    // new consumer.
     return kj::heap<ByteReadable>(js, owner, *this);
   }
 
@@ -1811,14 +1810,14 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     }
   }
 
+  // When a ReadableStream is canceled, the expected behavior is that the underlying
+  // controller is notified and the cancel algorithm on the underlying source is
+  // called. When there are multiple ReadableStreams sharing consumption of a
+  // controller, however, it should act as a shared pointer of sorts, canceling
+  // the underlying controller only when the last reader is canceled.
+  // Here, we rely on the controller implementing the correct behavior since it owns
+  // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-    // When a ReadableStream is canceled, the expected behavior is that the underlying
-    // controller is notified and the cancel algorithm on the underlying source is
-    // called. When there are multiple ReadableStreams sharing consumption of a
-    // controller, however, it should act as a shared pointer of sorts, canceling
-    // the underlying controller only when the last reader is canceled.
-    // Here, we rely on the controller implementing the correct behavior since it owns
-    // the queue that knows about all of the attached consumers.
     KJ_IF_MAYBE(s, state) {
       KJ_DEFER({
         // Clear the references to the controller, free the consumer, and the
@@ -1841,10 +1840,10 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     KJ_IF_MAYBE(s, state) { s->consumerError(js, kj::mv(reason)); };
   }
 
+  // Called by the consumer when it has a queued pending read and needs
+  // data to be provided to fulfill it. We need to notify the controller
+  // to initiate pulling to provide the data.
   void onConsumerWantsData(jsg::Lock& js) override {
-    // Called by the consumer when it has a queued pending read and needs
-    // data to be provided to fulfill it. We need to notify the controller
-    // to initiate pulling to provide the data.
     KJ_IF_MAYBE(s, state) { s->consumerWantsData(js); }
   }
 
@@ -1941,10 +1940,10 @@ void ReadableStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> 
   impl.doError(js, js.v8Ref(reason));
 }
 
+// When a consumer receives a read request, but does not have the data available to
+// fulfill the request, the consumer will call pull on the controller to pull that
+// data if needed.
 void ReadableStreamDefaultController::pull(jsg::Lock& js) {
-  // When a consumer receives a read request, but does not have the data available to
-  // fulfill the request, the consumer will call pull on the controller to pull that
-  // data if needed.
   impl.pullIfNeeded(js, JSG_THIS);
 }
 
@@ -2184,10 +2183,10 @@ ReadableByteStreamController::getByobRequest(jsg::Lock& js) {
   });
 }
 
+// When a consumer receives a read request, but does not have the data available to
+// fulfill the request, the consumer will call pull on the controller to pull that
+// data if needed.
 void ReadableByteStreamController::pull(jsg::Lock& js) {
-  // When a consumer receives a read request, but does not have the data available to
-  // fulfill the request, the consumer will call pull on the controller to pull that
-  // data if needed.
   impl.pullIfNeeded(js, JSG_THIS);
 }
 
@@ -2270,13 +2269,13 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
   KJ_UNREACHABLE;
 }
 
+// Finalizes the closed state of this ReadableStream. The connection to the underlying
+// controller is released with no further action. Importantly, this method is triggered
+// by the underlying controller as a result of that controller closing or being canceled.
+// We detach ourselves from the underlying controller by releasing the ValueReadable or
+// ByteReadable in the state and changing that to closed.
+// We also clean up other state here.
 void ReadableStreamJsController::doClose(jsg::Lock& js) {
-  // Finalizes the closed state of this ReadableStream. The connection to the underlying
-  // controller is released with no further action. Importantly, this method is triggered
-  // by the underlying controller as a result of that controller closing or being canceled.
-  // We detach ourselves from the underlying controller by releasing the ValueReadable or
-  // ByteReadable in the state and changing that to closed.
-  // We also clean up other state here.
   if (isReadPending()) {
     setPendingState(StreamStates::Closed());
   } else {
@@ -2285,13 +2284,13 @@ void ReadableStreamJsController::doClose(jsg::Lock& js) {
   }
 }
 
-void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   // As with doClose(), doError() finalizes the error state of this ReadableStream.
   // The connection to the underlying controller is released with no further action.
   // This method is triggered by the underlying controller as a result of that controller
   // erroring. We detach ourselves from the underlying controller by releasing the ValueReadable
   // or ByteReadable in the state and changing that to errored.
   // We also clean up other state here.
+void ReadableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   if (isReadPending()) {
     setPendingState(js.v8Ref(reason));
   } else {
@@ -2642,10 +2641,10 @@ ReadableStreamJsController::getController() {
 }
 
 namespace {
+// Consumes all bytes from a stream, buffering in memory, with the purpose
+// of producing either a single concatenated kj::Array<byte> or kj::String.
 template <typename T>
 class AllReader final: public AllReaderBase {
-  // Consumes all bytes from a stream, buffering in memory, with the purpose
-  // of producing either a single concatenated kj::Array<byte> or kj::String.
 public:
   using Readable = kj::Own<T>;
   using PartList = kj::Array<kj::ArrayPtr<byte>>;

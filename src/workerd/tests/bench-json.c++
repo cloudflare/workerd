@@ -9,8 +9,8 @@
 #include <kj/string.h>
 #include <kj/test.h>
 
+// Example test, derived from capnproto's json test.
 static void Test_JSON_ENC(benchmark::State& state) {
-  // Example test, derived from capnproto's json test.
   capnp::JsonCodec json;
   // Perform setup here
 

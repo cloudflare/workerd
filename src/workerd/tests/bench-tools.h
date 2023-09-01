@@ -9,14 +9,14 @@
 #include <kj/test.h>
 #include <benchmark/benchmark.h>
 
-#define WD_BENCHMARK(X) BENCHMARK(X)->Unit(benchmark::kMicrosecond)
 // Define a benchmark. Use microseconds instead of nanoseconds by default, most tests run long
 // enough to not need ns precision.
+#define WD_BENCHMARK(X) BENCHMARK(X)->Unit(benchmark::kMicrosecond)
 
+/* Macro inspired by KJ_TEST() to enable benchmarking without requiring the benchmark::State */ \
+/* argument and make it easy to convert tests to benchmarks. */ \
+/* Make sure the linker fails if tests are not in anonymous namespaces. */ \
 #define WD_BENCH(description) \
-  /* Macro inspired by KJ_TEST() to enable benchmarking without requiring the benchmark::State */ \
-  /* argument and make it easy to convert tests to benchmarks. */ \
-  /* Make sure the linker fails if tests are not in anonymous namespaces. */ \
   extern int KJ_CONCAT(YouMustWrapTestsInAnonymousNamespace, __COUNTER__) KJ_UNUSED; \
   void KJ_UNIQUE_NAME(Bench)(); \
   void KJ_UNIQUE_NAME(BenchImpl)(benchmark::State& state) { \
