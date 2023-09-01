@@ -362,7 +362,7 @@ void IoContext::logUncaughtException(kj::StringPtr description) {
 void IoContext::logUncaughtException(UncaughtExceptionSource source,
                                           v8::Local<v8::Value> exception,
                                           v8::Local<v8::Message> message) {
-  KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
+  logUncaughtException(source, jsg::JsValue(exception), jsg::JsMessage(message));
 }
 
 void IoContext::logUncaughtException(UncaughtExceptionSource source,
@@ -397,7 +397,7 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
         : source(source), exception(kj::mv(exception)) {}
     void run(Worker::Lock& lock) override {
       jsg::Lock& js = lock;
-      auto error = js.exceptionToJs(kj::mv(exception));
+      auto error = js.exceptionToJsValue(kj::mv(exception));
       // TODO(soon): Add logUncaughtException to jsg::Lock.
       lock.logUncaughtException(source, error.getHandle(js));
     }
@@ -1214,8 +1214,9 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
         //   exception has been tunneled into a KJ exception, so the later logging won't be as
         //   useful. We should improve the tunneling to include stack traces and ensure that all
         //   consumers do in fact log exceptions, then we can remove this.
-        workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL, jsException,
-                                        tryCatch.Message());
+        workerLock.logUncaughtException(UncaughtExceptionSource::INTERNAL,
+                                        jsg::JsValue(jsException),
+                                        jsg::JsMessage(tryCatch.Message()));
 
         jsg::throwTunneledException(workerLock.getIsolate(), jsException);
       }

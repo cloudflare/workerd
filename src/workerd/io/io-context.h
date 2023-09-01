@@ -1462,7 +1462,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     //   once the exception has been tunneled into a KJ exception, so the later logging won't be
     //   as useful. We should improve the tunneling to include stack traces and ensure that all
     //   consumers do in fact log exceptions, then we can remove this.
-    context.logUncaughtException(UncaughtExceptionSource::INTERNAL_ASYNC, jsException);
+    context.logUncaughtException(UncaughtExceptionSource::INTERNAL_ASYNC,
+                                 jsg::JsValue(jsException));
 
     fulfiller->fulfiller->reject(jsg::createTunneledException(isolate, jsException));
     fulfiller->isDone = true;
