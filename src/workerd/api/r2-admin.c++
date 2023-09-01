@@ -84,18 +84,16 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
     auto responseBuilder = responseMessage.initRoot<R2ListBucketResponse>();
     json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
 
-    auto buckets = v8::Map::New(js.v8Isolate);
+    auto buckets = js.map();
     for(auto b: responseBuilder.getBuckets()) {
       auto bucket = jsg::alloc<RetrievedBucket>(featureFlags, subrequestChannel,
           kj::str(b.getName()),
           kj::UNIX_EPOCH + b.getCreatedMillisecondsSinceEpoch() * kj::MILLISECONDS);
-      jsg::check(buckets->Set(
-          js.v8Context(), jsg::v8Str(js.v8Isolate, b.getName()),
-          retrievedBucketType.wrap(js, kj::mv(bucket))));
+      buckets.set(js, b.getName(), jsg::JsValue(retrievedBucketType.wrap(js, kj::mv(bucket))));
     }
 
     ListResult result {
-      .buckets = js.v8Ref(buckets.As<v8::Value>()),
+      .buckets = buckets.addRef(js),
       .truncated = responseBuilder.getTruncated(),
     };
     if (responseBuilder.hasCursor()) {

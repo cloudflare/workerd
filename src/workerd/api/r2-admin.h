@@ -70,7 +70,7 @@ public:
   };
 
   struct ListResult {
-    jsg::Value buckets;
+    jsg::JsRef<jsg::JsObject> buckets;
     bool truncated = false;
     jsg::Optional<kj::String> cursor;
 
