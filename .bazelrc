@@ -39,6 +39,10 @@ build:fastdbg --//:dead_strip=False
 build --@capnp-cpp//src/kj:openssl=True --@capnp-cpp//src/kj:zlib=True --@capnp-cpp//src/kj:brotli=True
 build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 
+# Disable the new Maybe deprecations until we have converted more of the codebase.
+build --@capnp-cpp//src/kj:deprecate_kj_if_maybe=False
+build --@capnp-cpp//src/kj:deprecate_empty_maybe_from_nullptr=False
+
 # Additional Rust flags (see https://doc.rust-lang.org/rustc/codegen-options/index.html)
 # Need to disable debug-assertions for fastbuild, should be off automatically for opt. As long as
 # rust-level LTO is not enabled, LLVM bitcode is not needed so -C embed-bitcode=n provides a free
