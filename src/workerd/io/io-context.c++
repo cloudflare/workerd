@@ -360,12 +360,6 @@ void IoContext::logUncaughtException(kj::StringPtr description) {
 }
 
 void IoContext::logUncaughtException(UncaughtExceptionSource source,
-                                          v8::Local<v8::Value> exception,
-                                          v8::Local<v8::Message> message) {
-  logUncaughtException(source, jsg::JsValue(exception), jsg::JsMessage(message));
-}
-
-void IoContext::logUncaughtException(UncaughtExceptionSource source,
                                      const jsg::JsValue& exception,
                                      const jsg::JsMessage& message) {
   KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);

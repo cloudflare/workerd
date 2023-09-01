@@ -380,11 +380,6 @@ public:
 
   void logUncaughtException(kj::StringPtr description);
   void logUncaughtException(UncaughtExceptionSource source,
-                            v8::Local<v8::Value> exception,
-                            v8::Local<v8::Message> message = {})
-      KJ_DEPRECATED("Use the version that takes jsg::JsValue instead");
-
-  void logUncaughtException(UncaughtExceptionSource source,
                             const jsg::JsValue& exception,
                             const jsg::JsMessage& message = jsg::JsMessage());
 

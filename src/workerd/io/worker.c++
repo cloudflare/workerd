@@ -1794,12 +1794,6 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
 }
 
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
-                                        v8::Local<v8::Value> exception,
-                                        v8::Local<v8::Message> message) {
-  logUncaughtException(source, jsg::JsValue(exception), jsg::JsMessage(message));
-}
-
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
                                         const jsg::JsValue& exception,
                                         const jsg::JsMessage& message) {
   // Only add exception to trace when running within an I/O context with a tracer.
