@@ -252,7 +252,7 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(wasmCount);
   for (auto binding: conf.getBindings()) {
     if (binding.isWasmModule()) {
-      auto name = jsg::v8StrIntern(lock.v8Isolate, binding.getName());
+      auto name = lock.str(binding.getName());
       auto value = Impl::compileWasmGlobal(lock, binding.getWasmModule(), observer);
 
       compiledGlobals.add(Worker::Script::CompiledGlobal {
