@@ -494,12 +494,20 @@ struct JsValueWrapper {
 class JsMessage final {
 public:
   static JsMessage create(Lock& js, const JsValue& exception);
-  explicit inline JsMessage() : inner(v8::Local<v8::Message>()) {}
-  explicit inline JsMessage(v8::Local<v8::Message> inner) : inner(inner) {}
+  explicit inline JsMessage() : inner(v8::Local<v8::Message>()) {
+    requireOnStack(this);
+  }
+  explicit inline JsMessage(v8::Local<v8::Message> inner) : inner(inner) {
+    requireOnStack(this);
+  }
   operator v8::Local<v8::Message>() const { return inner; }
 
-  operator bool() const { return inner.IsEmpty(); }
+  // Is it possible for the underlying v8::Local<v8::Message> to be
+  // empty, in which case the bool() operator will return false.
+  operator bool() const { return !inner.IsEmpty(); }
 
+  // Adds the JS Stack associated with this JsMessage to the given
+  // kj::Vector.
   void addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines);
 
 private:

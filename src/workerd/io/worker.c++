@@ -203,12 +203,13 @@ void sendExceptionToInspector(jsg::Lock& js,
     // latter case, V8 will create a Message based on the current stack trace, but it won't be
     // super meaningful.
     message = jsg::JsMessage::create(js, jsg::JsValue(exception));
-    KJ_DASSERT(message);
   }
 
   // TODO(cleanup): Move the inspector stuff into a utility within jsg to better
   // encapsulate
+  KJ_ASSERT(message);
   v8::Local<v8::Message> msg = message;
+
   auto context = js.v8Context();
 
   auto stackTrace = msg->GetStackTrace();
