@@ -149,7 +149,7 @@ KJ_TEST("ValueQueue erroring works") {
 
   ValueQueue queue(2);
 
-  queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8StrIntern(js.v8Isolate, "boom"_kj))));
+  queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
 
   KJ_ASSERT(queue.desiredSize() == 0);
 
@@ -333,7 +333,7 @@ KJ_TEST("ValueQueue errors consumer with multiple-reads") {
   read(js, consumer).then(js, readContinuation, errorContinuation);
   read(js, consumer).then(js, readContinuation, errorContinuation);
 
-  queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8StrIntern(js.v8Isolate, "boom"_kj))));
+  queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
 
   js.runMicrotasks();
 }
@@ -417,7 +417,7 @@ KJ_TEST("ByteQueue erroring works") {
 
   ByteQueue queue(2);
 
-  queue.error(js, js.v8Ref(v8::Exception::Error(jsg::v8StrIntern(js.v8Isolate, "boom"_kj))));
+  queue.error(js, js.v8Ref(js.v8Error("boom"_kj)));
 
   KJ_ASSERT(queue.desiredSize() == 0);
 
