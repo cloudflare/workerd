@@ -1,6 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 wd_cc_library(
     name = "bench-tools",

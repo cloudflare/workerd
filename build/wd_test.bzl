@@ -61,7 +61,7 @@ def _wd_test_impl(ctx):
     return [
         DefaultInfo(
             executable = executable,
-            runfiles = ctx.runfiles(files = ctx.files.data)
+            runfiles = ctx.runfiles(files = ctx.files.data),
         ),
     ]
 
@@ -78,5 +78,5 @@ _wd_test = rule(
         "flags": attr.string_list(),
         "data": attr.label_list(allow_files = True),
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
-    }
+    },
 )

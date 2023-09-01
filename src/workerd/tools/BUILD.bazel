@@ -1,9 +1,9 @@
-load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
-load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
-load("//:build/run_binary_target.bzl", "run_binary_target")
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
+load("//:build/run_binary_target.bzl", "run_binary_target")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 # ========================================================================================
 # C++ deps for API extraction

@@ -1,6 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
-load("//:build/typescript.bzl", "module_name")
 load("@npm//:typescript/package_json.bzl", tsc_bin = "bin")
+load("//:build/typescript.bzl", "module_name")
 
 def wd_ts_type_test(src, **kwargs):
     """Bazel rule to test TypeScript file type-checks under @cloudflare/workers-types"""
