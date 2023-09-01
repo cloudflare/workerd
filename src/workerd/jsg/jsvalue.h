@@ -493,9 +493,14 @@ struct JsValueWrapper {
 
 class JsMessage final {
 public:
+  static JsMessage create(Lock& js, const JsValue& exception);
   explicit inline JsMessage() : inner(v8::Local<v8::Message>()) {}
   explicit inline JsMessage(v8::Local<v8::Message> inner) : inner(inner) {}
   operator v8::Local<v8::Message>() const { return inner; }
+
+  operator bool() const { return inner.IsEmpty(); }
+
+  void addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines);
 
 private:
   v8::Local<v8::Message> inner;
