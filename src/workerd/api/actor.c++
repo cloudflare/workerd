@@ -23,16 +23,15 @@ public:
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
 
-    // Lazily initialize actorChannel
-    if (actorChannel == nullptr) {
-      auto& context = IoContext::current();
-      actorChannel = context.getColoLocalActorChannel(channelId, actorId);
-    }
-
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
       if (span.isObserved()) {
         span.setTag("actor_id"_kjc, kj::str(actorId));
+      }
+
+      // Lazily initialize actorChannel
+      if (actorChannel == nullptr) {
+        actorChannel = context.getColoLocalActorChannel(channelId, actorId, span);
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
@@ -67,17 +66,16 @@ public:
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
 
-    // Lazily initialize actorChannel
-    if (actorChannel == nullptr) {
-      auto& context = IoContext::current();
-      actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint),
-          mode);
-    }
-
     return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
         [&](SpanBuilder& span, IoChannelFactory& ioChannelFactory) {
       if (span.isObserved()) {
         span.setTag("actor_id"_kjc, id->toString());
+      }
+
+      // Lazily initialize actorChannel
+      if (actorChannel == nullptr) {
+        actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint),
+            mode, span);
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)->startRequest({
