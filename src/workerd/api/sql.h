@@ -100,7 +100,7 @@ public:
   double getRowsRead();
   double getRowsWritten();
 
-  kj::Array<jsg::V8Ref<v8::String>> getColumnNames(jsg::Lock& js);
+  kj::Array<jsg::JsRef<jsg::JsString>> getColumnNames(jsg::Lock& js);
   JSG_RESOURCE_TYPE(Cursor, CompatibilityFlags::Reader flags) {
     JSG_ITERABLE(rows);
     JSG_METHOD(raw);
@@ -126,12 +126,12 @@ private:
     // TODO(perf): Can we further cache the V8 object layout information for a row?
   public:
     // Get the cached names. ensureInitialized() must have been called previously.
-    kj::ArrayPtr<jsg::V8Ref<v8::String>> get() { return KJ_REQUIRE_NONNULL(names); }
+    kj::ArrayPtr<jsg::JsRef<jsg::JsString>> get() { return KJ_REQUIRE_NONNULL(names); }
 
     void ensureInitialized(jsg::Lock& js, SqliteDatabase::Query& source);
 
   private:
-    kj::Maybe<kj::Array<jsg::V8Ref<v8::String>>> names;
+    kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> names;
   };
 
   struct State {
