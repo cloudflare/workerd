@@ -604,7 +604,7 @@ public:
       jsg::Sequence<U> sequence) {
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, sequence.size(), MAX_STACK, MAX_STACK);
+    kj::SmallArray<v8::Local<v8::Value>, MAX_STACK> items(sequence.size());
     for (auto i: kj::indices(sequence)) {
       items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }
@@ -618,7 +618,7 @@ public:
       jsg::Sequence<U>& sequence) {
     v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
-    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, sequence.size(), MAX_STACK, MAX_STACK);
+    kj::SmallArray<v8::Local<v8::Value>, MAX_STACK> items(sequence.size());
     for (auto i: kj::indices(sequence)) {
       items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }

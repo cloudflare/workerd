@@ -92,7 +92,7 @@ V8System::V8System(kj::Own<v8::Platform> platformParam, kj::ArrayPtr<const kj::S
   // Especially annoying is that V8 expects an array of `char*` -- not `const`. It won't actually
   // modify the strings, so we'll just const_cast them here...
   int argc = flags.size() + 1;
-  KJ_STACK_ARRAY(char*, argv, flags.size() + 2, 32, 32);
+  kj::SmallArray<char*, 32> argv(flags.size() + 2);
   argv[0] = const_cast<char*>("fake-binary-name");
   for (auto i: kj::zeroTo(flags.size())) {
     argv[i + 1] = const_cast<char*>(flags[i].cStr());
