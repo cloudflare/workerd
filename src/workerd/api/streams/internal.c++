@@ -12,11 +12,10 @@
 namespace workerd::api {
 
 namespace {
+// Use this in places where the exception thrown would cause finalizers to run. Your exception
+// will not go anywhere, but we'll log the exception message to the console until the problem this
+// papers over is fixed.
 [[noreturn]] void throwTypeErrorAndConsoleWarn(kj::StringPtr message) {
-  // Use this in places where the exception thrown would cause finalizers to run. Your exception
-  // will not go anywhere, but we'll log the exception message to the console until the problem this
-  // papers over is fixed.
-
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();
     if (context.isInspectorEnabled()) {
@@ -46,9 +45,8 @@ kj::Promise<void> pumpTo(ReadableStreamSource& input, WritableStreamSink& output
   }
 }
 
+// Modified from AllReader in kj/async-io.c++.
 class AllReader {
-  // Modified from AllReader in kj/async-io.c++.
-
   using PartList = kj::Array<kj::ArrayPtr<byte>>;
 
 public:
@@ -129,9 +127,8 @@ kj::Exception reasonToException(
 
 // =======================================================================================
 
+// Adapt ReadableStreamSource to kj::AsyncInputStream's interface for use with `kj::newTee()`.
 class TeeAdapter final: public kj::AsyncInputStream {
-  // Adapt ReadableStreamSource to kj::AsyncInputStream's interface for use with `kj::newTee()`.
-
 public:
   explicit TeeAdapter(kj::Own<ReadableStreamSource> inner)
       : inner(kj::mv(inner)) {}
@@ -210,11 +207,10 @@ public:
   }
 
 private:
+  // Adapt WritableStreamSink to kj::AsyncOutputStream's interface for use in
+  // `TeeBranch::pumpTo()`. If you squint, the write logic looks very similar to TeeAdapter's
+  // read logic.
   class PumpAdapter final: public kj::AsyncOutputStream {
-    // Adapt WritableStreamSink to kj::AsyncOutputStream's interface for use in
-    // `TeeBranch::pumpTo()`. If you squint, the write logic looks very similar to TeeAdapter's
-    // read logic.
-
   public:
     explicit PumpAdapter(WritableStreamSink& inner): inner(inner) {}
 

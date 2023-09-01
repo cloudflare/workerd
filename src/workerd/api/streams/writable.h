@@ -26,7 +26,7 @@ public:
   kj::Maybe<int> getDesiredSize(jsg::Lock& js);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
-  jsg::Promise<void> close(jsg::Lock& js);
+
   // Closes the stream. All present write requests will complete, but future write requests will
   // be rejected with a TypeError to the effect of "This writable stream has been closed."
   // `reason` will be passed to the underlying sink's close algorithm -- if this writable stream
@@ -37,6 +37,7 @@ public:
   //   transform stream while the readable side has readable chunks in its queue, those chunks get
   //   lost. This seems like a bug to me. Why would we wait for all present write requests to
   //   complete on this side if we don't care that they're actually read?
+  jsg::Promise<void> close(jsg::Lock& js);
 
   jsg::Promise<void> write(jsg::Lock& js, v8::Local<v8::Value> chunk);
   void releaseLock(jsg::Lock& js);
@@ -76,7 +77,6 @@ public:
 
 private:
   struct Initial {};
-  using Attached = jsg::Ref<WritableStream>;
   // While a Writer is attached to a WritableStream, it holds a strong reference to the
   // WritableStream to prevent it from being GC'd so long as the Writer is available.
   // Once the writer is closed, released, or GC'd the reference to the WritableStream
@@ -84,6 +84,7 @@ private:
   // it being held anywhere. If the writer is still attached to the WritableStream when
   // it is destroyed, the WritableStream's reference to the writer is cleared but the
   // WritableStream remains in the "writer locked" state, per the spec.
+  using Attached = jsg::Ref<WritableStream>;
   struct Released {};
 
   kj::Maybe<IoContext&> ioContext;
@@ -107,10 +108,10 @@ public:
 
   jsg::Ref<WritableStream> addRef();
 
-  virtual kj::Own<WritableStreamSink> removeSink(jsg::Lock& js);
   // Remove and return the underlying implementation of this WritableStream. Throw a TypeError if
   // this WritableStream is locked or closed, otherwise this WritableStream becomes immediately
   // locked and closed. If this writable stream is errored, throw the stored error.
+  virtual kj::Own<WritableStreamSink> removeSink(jsg::Lock& js);
 
   // ---------------------------------------------------------------------------
   // JS interface
@@ -122,11 +123,11 @@ public:
 
   bool isLocked();
 
-  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
   // Errors the stream. All present and future read requests are rejected with a TypeError to the
   // effect of "This writable stream has been requested to abort." `reason` will be passed to the
   // underlying sink's abort algorithm -- if this writable stream is one side of a transform stream,
   // then its abort algorithm causes the transform's readable side to become errored with `reason`.
+  jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason);
 
   jsg::Promise<void> close(jsg::Lock& js);
   jsg::Promise<void> flush(jsg::Lock& js);

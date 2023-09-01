@@ -238,11 +238,12 @@ private:
   kj::Maybe<PendingAbort> maybePendingAbort;
 
   uint64_t currentWriteBufferSize = 0;
-  kj::Maybe<uint64_t> maybeHighWaterMark;
+
   // The highWaterMark is the total amount of data currently buffered in
   // the controller waiting to be flushed out to the underlying WritableStreamSink.
   // It is used to implement backpressure signaling using desiredSize and the ready
   // promise on the writer.
+  kj::Maybe<uint64_t> maybeHighWaterMark;
 
   void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
   void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
@@ -281,15 +282,14 @@ private:
   std::deque<WriteEvent> queue;
 };
 
+// An implementation of ReadableStreamSource and WritableStreamSink which communicates read and
+// write requests via a OneOf.
+//
+// This class is also used as the implementation of FixedLengthStream, in which case `limit` is
+// non-nullptr.
 class IdentityTransformStreamImpl: public kj::Refcounted,
                                    public ReadableStreamSource,
                                    public WritableStreamSink {
-  // An implementation of ReadableStreamSource and WritableStreamSink which communicates read and
-  // write requests via a OneOf.
-  //
-  // This class is also used as the implementation of FixedLengthStream, in which case `limit` is
-  // non-nullptr.
-  //
   // TODO(soon): Reimplement this in terms of kj::OneWayPipe, so we can optimize pumpTo().
 
 public:

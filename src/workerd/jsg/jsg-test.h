@@ -11,11 +11,10 @@
 
 namespace workerd::jsg::test {
 
+// Checks the evaluation of a blob of JS code under the given context and isolate types.
 template <typename ContextType, typename IsolateType,
           typename ConfigurationType = decltype(nullptr)>
 class Evaluator {
-  // Checks the evaluation of a blob of JS code under the given context and isolate types.
-  //
   // TODO(cleanup): `ConfigurationType` currently can optionally be specified to fix the build
   //   in cases that the isolate includes types that require configuration, but currently the
   //   type is always default-constructed. What if you want to specify a test config?

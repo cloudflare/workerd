@@ -8,9 +8,9 @@ namespace workerd::api::node {
 
 MIMEParams::MIMEParams(kj::Maybe<MimeType&> mimeType) : mimeType(mimeType) {}
 
+// Oddly, Node.js allows creating MIMEParams directly but it's not actually
+// functional. But, to match, we'll go ahead and allow it.
 jsg::Ref<MIMEParams> MIMEParams::constructor() {
-  // Oddly, Node.js allows creating MIMEParams directly but it's not actually
-  // functional. But, to match, we'll go ahead and allow it.
   return jsg::alloc<MIMEParams>(nullptr);
 }
 

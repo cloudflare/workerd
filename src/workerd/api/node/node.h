@@ -12,10 +12,10 @@
 
 namespace workerd::api::node {
 
+// To be exposed only as an internal module for use by other built-ins.
+// TODO(later): Consider moving out of node.h when needed for other
+// built-ins
 class CompatibilityFlags : public jsg::Object {
-  // To be exposed only as an internal module for use by other built-ins.
-  // TODO(later): Consider moving out of node.h when needed for other
-  // built-ins
 public:
   JSG_RESOURCE_TYPE(CompatibilityFlags, workerd::CompatibilityFlags::Reader flags) {
     // Not your typical JSG_RESOURCE_TYPE definition.. here we are iterating
@@ -43,10 +43,10 @@ void registerNodeJsCompatModules(
   V(UtilModule, "node-internal:util")                                           \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
 
-#define NODEJS_MODULES_EXPERIMENTAL(V)
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
 // flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
+#define NODEJS_MODULES_EXPERIMENTAL(V)
 
 #define V(T, N)                                                                 \
   registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);

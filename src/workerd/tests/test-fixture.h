@@ -15,10 +15,9 @@
 
 namespace workerd {
 
+// TestFixture is responsible for creating workerd environment during tests.
+// All the infrastructure is started in the constructor. It is accessed through run() method.
 struct TestFixture {
-  // TestFixture is responsible for creating workerd environment during tests.
-  // All the infrastructure is started in the constructor. It is accessed through run() method.
-
   struct SetupParams {
     // waitScope of outer IO loop. New IO will be set up if missing.
     kj::Maybe<kj::WaitScope&> waitScope;
@@ -31,12 +30,12 @@ struct TestFixture {
   struct V8Environment {
     v8::Isolate* isolate;
 
-    v8::Local<v8::Value> compileAndRunScript(kj::StringPtr script) const;
     // Compile and run the script. Returns the result of last statement.
+    v8::Local<v8::Value> compileAndRunScript(kj::StringPtr script) const;
 
+    // Compile and instantiate esm module. Returns module namespace object.
     v8::Local<v8::Object> compileAndInstantiateModule(
       kj::StringPtr name, kj::ArrayPtr<const char> src) const;
-    // Compile and instantiate esm module. Returns module namespace object.
   };
 
   struct Environment : public V8Environment {
@@ -49,14 +48,13 @@ struct TestFixture {
   template <typename T> struct RunReturnType { using Type = T; };
   template <typename T> struct RunReturnType<kj::Promise<T>> { using Type = T; };
 
+  // Setup the incoming request and run given callback in worker's IO context.
+  // callback should accept const Environment& parameter and return Promise<T>|void.
+  // For void callbacks run waits for their completion, for promises waits for their resolution
+  // and returns the result.
   template<typename CallBack>
   auto runInIoContext(CallBack&& callback)
       -> typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
-    // Setup the incoming request and run given callback in worker's IO context.
-    // callback should accept const Environment& parameter and return Promise<T>|void.
-    // For void callbacks run waits for their completion, for promises waits for their resolution
-    // and returns the result.
-
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
     KJ_IF_MAYBE(ws, params.waitScope) {
@@ -75,18 +73,18 @@ struct TestFixture {
     }).wait(*waitScope);
   }
 
+  // Special void version of runInIoContext that ignores exceptions with given descriptions.
   void runInIoContext(
       kj::Function<kj::Promise<void>(const Environment&)>&& callback,
       kj::ArrayPtr<kj::StringPtr> errorsToIgnore);
-  // Special void version of runInIoContext that ignores exceptions with given descriptions.
 
   struct Response {
     uint statusCode;
     kj::String body;
   };
 
-  Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
   // Performs HTTP request on the default module handler, and waits for full response.
+  Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
 private:
   SetupParams params;

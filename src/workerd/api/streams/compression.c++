@@ -135,11 +135,11 @@ private:
   ContextFlags strictCompression;
 };
 
+// Uncompressed data goes in. Compressed data comes out.
 template <Context::Mode mode>
 class CompressionStreamImpl: public kj::Refcounted,
                              public ReadableStreamSource,
                              public WritableStreamSink {
-  // Uncompressed data goes in. Compressed data comes out.
 public:
   explicit CompressionStreamImpl(kj::String format, Context::ContextFlags flags)
       : context(mode, format, flags) {}
@@ -306,8 +306,8 @@ private:
     return writeInternal(flush);
   }
 
+  // Fulfill as many pending reads as we can from the output buffer.
   kj::Promise<void> maybeFulfillRead() {
-    // Fulfill as many pending reads as we can from the output buffer.
     auto remaining = output.size();
     auto source = output.begin();
 

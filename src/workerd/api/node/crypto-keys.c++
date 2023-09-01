@@ -6,12 +6,12 @@
 namespace workerd::api::node {
 
 namespace {
+// An algorithm-independent secret key. Used as the underlying
+// implementation of Node.js SecretKey objects. Unlike Web Crypto,
+// a Node.js secret key is not algorithm specific. For instance, a
+// single secret key can be used for both AES and HMAC, where as
+// Web Crypto requires a separate key for each algorithm.
 class SecretKey final: public CryptoKey::Impl {
-  // An algorithm-independent secret key. Used as the underlying
-  // implementation of Node.js SecretKey objects. Unlike Web Crypto,
-  // a Node.js secret key is not algorithm specific. For instance, a
-  // single secret key can be used for both AES and HMAC, where as
-  // Web Crypto requires a separate key for each algorithm.
 public:
   explicit SecretKey(kj::Array<kj::byte> keyData)
       : Impl(true, CryptoKeyUsageSet::privateKeyMask() |
