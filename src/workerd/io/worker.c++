@@ -2908,13 +2908,11 @@ kj::Promise<Worker::AsyncLock> Worker::takeAsyncLockWhenActorCacheReady(
     KJ_IF_MAYBE(p, c->get()->evictStale(now)) {
       // Got backpressure, wait for it.
       // TODO(someday): Count this time period differently in lock timing data?
-      return p->then([this, lockTiming = kj::mv(lockTiming)]() mutable {
-        return getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
-      });
+      co_await *p;
     }
   }
 
-  return getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
+  co_return co_await getIsolate().takeAsyncLockImpl(kj::mv(lockTiming));
 }
 
 void Worker::setConnectOverride(kj::String networkAddress, ConnectFn connectFn) {
@@ -3194,44 +3192,47 @@ auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<Schedul
   auto& scheduledAlarm = impl->maybeScheduledAlarm.emplace(
       scheduledTime, kj::newPromiseAndFulfiller<AlarmResult>());
 
-  auto whenCanceled = scheduledAlarm.resultPromise.addBranch().then(
-      [](AlarmResult result) -> ScheduleAlarmResult {
+  // Probably don't need to use kj::coCapture for this but doing so just to be on the
+  // safe side...
+  auto whenCanceled = (kj::coCapture([&scheduledAlarm]() -> kj::Promise<ScheduleAlarmResult> {
     // We've been cancelled, so return that result. Note that we cannot be resolved any other
     // way until we return an AlarmFulfiller below.
-    return result;
-  });
+    co_return co_await scheduledAlarm.resultPromise;
+  }))();
 
+  // Date.now() < scheduledTime when the alarm comes in, since we subtract elapsed CPU time from
+  // the time of last I/O in the implementation of Date.now(). This difference could be used to
+  // implement a spectre timer, so we have to wait a little longer until
+  // `Date.now() == scheduledTime`. Note that this also means that we could invoke ahead of its
+  // `scheduledTime` and we'll delay until appropriate, this may be useful in cases of clock skew.
+
+  co_return co_await handleAlarm(scheduledTime).exclusiveJoin(kj::mv(whenCanceled));
+}
+
+kj::Promise<Worker::Actor::ScheduleAlarmResult> Worker::Actor::handleAlarm(kj::Date scheduledTime) {
   // Let's wait for any running alarm to cleanup before we even delay.
-  auto whenReady = impl->runningAlarmTask.addBranch().then([this, scheduledTime](){
-    // Date.now() < scheduledTime when the alarm comes in, since we subtract elapsed CPU time from
-    // the time of last I/O in the implementation of Date.now(). This difference could be used to
-    // implement a spectre timer, so we have to wait a little longer until
-    // `Date.now() == scheduledTime`. Note that this also means that we could invoke ahead of its
-    // `scheduledTime` and we'll delay until appropriate, this may be useful in cases of clock skew.
-    return KJ_ASSERT_NONNULL(impl->ioContext)->atTime(scheduledTime);
+  co_await impl->runningAlarmTask;
+
+  co_await KJ_ASSERT_NONNULL(impl->ioContext)->atTime(scheduledTime);
+  // It's time to run! Let's tear apart the scheduled alarm and make a running alarm.
+
+  // `maybeScheduledAlarm` should have the same value we emplaced above. If another call to
+  // `scheduleAlarm()` emplaced a new value, then `whenCanceled` should have resolved which
+  // cancels this this promise chain.
+  auto scheduledAlarm = KJ_ASSERT_NONNULL(kj::mv(impl->maybeScheduledAlarm));
+  impl->maybeScheduledAlarm = nullptr;
+
+  impl->maybeRunningAlarm.emplace(Impl::RunningAlarm{
+    .scheduledTime = scheduledAlarm.scheduledTime,
+    .resultPromise = kj::mv(scheduledAlarm.resultPromise),
   });
-
-  co_return co_await whenReady.then([this]() -> ScheduleAlarmResult {
-    // It's time to run! Let's tear apart the scheduled alarm and make a running alarm.
-
-    // `maybeScheduledAlarm` should have the same value we emplaced above. If another call to
-    // `scheduleAlarm()` emplaced a new value, then `whenCanceled` should have resolved which
-    // cancels this this promise chain.
-    auto scheduledAlarm = KJ_ASSERT_NONNULL(kj::mv(impl->maybeScheduledAlarm));
-    impl->maybeScheduledAlarm = nullptr;
-
-    impl->maybeRunningAlarm.emplace(Impl::RunningAlarm{
-      .scheduledTime = scheduledAlarm.scheduledTime,
-      .resultPromise = kj::mv(scheduledAlarm.resultPromise),
-    });
-    impl->runningAlarmTask = scheduledAlarm.cleanupPromise.attach(kj::defer([this](){
-      // As soon as we get fulfilled or rejected, let's unset this alarm as the running alarm.
-      impl->maybeRunningAlarm = nullptr;
-    })).eagerlyEvaluate([](kj::Exception&& e){
-      LOG_EXCEPTION("actorAlarmCleanup", e);
-    }).fork();
-    return kj::mv(scheduledAlarm.resultFulfiller);
-  }).exclusiveJoin(kj::mv(whenCanceled));
+  impl->runningAlarmTask = scheduledAlarm.cleanupPromise.attach(kj::defer([this](){
+    // As soon as we get fulfilled or rejected, let's unset this alarm as the running alarm.
+    impl->maybeRunningAlarm = nullptr;
+  })).eagerlyEvaluate([](kj::Exception&& e){
+    LOG_EXCEPTION("actorAlarmCleanup", e);
+  }).fork();
+  co_return kj::mv(scheduledAlarm.resultFulfiller);
 }
 
 kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {

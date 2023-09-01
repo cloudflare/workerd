@@ -62,17 +62,19 @@ void HibernationManagerImpl::acceptWebSocket(
     tagListItem.list = *list.get();
   }
 
-  // Finally, we initiate the readloop for this HibernatableWebSocket.
-  kj::Promise<kj::Maybe<kj::Exception>> readLoopPromise = kj::evalNow([&] {
-    return readLoop(refToHibernatable);
-  }).then([]() -> kj::Maybe<kj::Exception> { return nullptr; },
-          [](kj::Exception&& e) -> kj::Maybe<kj::Exception> { return kj::mv(e); });
+  // Finally, we initiate the readloop for this HibernatableWebSocket and
+  // give the task to the HibernationManager so it lives long.
+  readLoopTasks.add(handleReadLoop(refToHibernatable));
+}
 
-  // Give the task to the HibernationManager so it lives long.
-  readLoopTasks.add(readLoopPromise.then(
-      [&refToHibernatable, this](kj::Maybe<kj::Exception>&& maybeError) -> kj::Promise<void> {
-    return handleSocketTermination(refToHibernatable, maybeError);
-  }));
+kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& refToHibernatable) {
+  kj::Maybe<kj::Exception> maybeException;
+  try {
+    co_await readLoop(refToHibernatable);
+  } catch (...) {
+    maybeException = kj::getCaughtExceptionAsKj();
+  }
+  handleSocketTermination(refToHibernatable, maybeException);
 }
 
 kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
@@ -171,13 +173,10 @@ kj::Promise<void> HibernationManagerImpl::handleSocketTermination(
   // Returning the event promise will store it in readLoopTasks.
   // After the task completes, we want to drop the websocket since we've closed the connection.
   KJ_IF_MAYBE(promise, event) {
-    return kj::mv(*promise).then([&]() {
-      dropHibernatableWebSocket(hib);
-    });
-  } else {
-    dropHibernatableWebSocket(hib);
-    return kj::READY_NOW;
+    co_await *promise;
   }
+
+  dropHibernatableWebSocket(hib);
 }
 
 kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
