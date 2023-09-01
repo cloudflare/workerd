@@ -5,7 +5,7 @@
 
 def _run_binary_target_impl(ctx):
     tool = ctx.attr.tool[DefaultInfo].files_to_run.executable
-    flags = [ ctx.expand_location(a) if "$(location" in a else a for a in ctx.attr.args ]
+    flags = [ctx.expand_location(a) if "$(location" in a else a for a in ctx.attr.args]
 
     cmd = " ".join([tool.path] + flags)
     ctx.actions.run_shell(
@@ -32,6 +32,7 @@ run_binary_target = rule(
         "tool": attr.label(
             executable = True,
             cfg = "target",
-            mandatory = True),
+            mandatory = True,
+        ),
     },
 )

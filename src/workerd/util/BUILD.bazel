@@ -1,5 +1,5 @@
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 wd_cc_library(
     name = "util",
@@ -51,7 +51,7 @@ wd_cc_library(
 wd_cc_library(
     name = "test-util",
     srcs = ["capnp-mock.c++"],
-    hdrs = glob(["capnp-mock.h"]),
+    hdrs = ["capnp-mock.h"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/capnp:capnpc",

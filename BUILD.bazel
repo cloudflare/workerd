@@ -1,9 +1,9 @@
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("@aspect_rules_js//npm:defs.bzl", "npm_link_package", "npm_package")
-load("@npm//:defs.bzl", "npm_link_all_packages")
-load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
+load("@npm//:capnpc-ts/package_json.bzl", capnpc_ts_bin = "bin")
+load("@npm//:defs.bzl", "npm_link_all_packages")
 
 cc_capnp_library(
     name = "icudata-embed",

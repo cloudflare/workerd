@@ -1,7 +1,7 @@
-load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_cc_library.bzl", "wd_cc_library")
-load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("//:build/kj_test.bzl", "kj_test")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 # Flag to enable WebGPU support via the Dawn library
 bool_flag(

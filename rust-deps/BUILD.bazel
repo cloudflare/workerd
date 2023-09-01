@@ -1,6 +1,6 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@rules_rust//crate_universe:defs.bzl", "crate", "crates_vendor")
 load("@rules_rust//rust:defs.bzl", "rust_static_library")
-load("@bazel_skylib//lib:selects.bzl", "selects")
 load("packages.bzl", "PACKAGES")
 
 selects.config_setting_group(
