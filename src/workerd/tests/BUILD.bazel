@@ -13,6 +13,31 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "benchmark-main",
+    srcs = ["benchmark-main.c++"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_benchmark//:benchmark",
+    ] + select({
+        "@platforms//os:linux": [":malloc-memory-manager"],
+        "//conditions:default": [],
+    }),
+)
+
+wd_cc_library(
+    name = "malloc-memory-manager",
+    srcs = ["malloc-memory-manager.c++"],
+    hdrs = ["malloc-memory-manager.h"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "@com_google_benchmark//:benchmark",
+    ],
+)
+
+wd_cc_library(
     name = "test-fixture",
     srcs = ["test-fixture.c++"],
     hdrs = ["test-fixture.h"],
