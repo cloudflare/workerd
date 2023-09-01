@@ -379,8 +379,14 @@ public:
   void logErrorOnce(kj::StringPtr description);
 
   void logUncaughtException(kj::StringPtr description);
-  void logUncaughtException(UncaughtExceptionSource source, v8::Local<v8::Value> exception,
-                            v8::Local<v8::Message> message = {});
+  void logUncaughtException(UncaughtExceptionSource source,
+                            v8::Local<v8::Value> exception,
+                            v8::Local<v8::Message> message = {})
+      KJ_DEPRECATED("Use the version that takes jsg::JsValue instead");
+
+  void logUncaughtException(UncaughtExceptionSource source,
+                            const jsg::JsValue& exception,
+                            const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
   // "current".

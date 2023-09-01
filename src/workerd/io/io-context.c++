@@ -365,6 +365,12 @@ void IoContext::logUncaughtException(UncaughtExceptionSource source,
   KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
 }
 
+void IoContext::logUncaughtException(UncaughtExceptionSource source,
+                                     const jsg::JsValue& exception,
+                                     const jsg::JsMessage& message) {
+  KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
+}
+
 void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
                                                kj::Exception&& exception) {
   if (getWorkerTracer() == nullptr &&

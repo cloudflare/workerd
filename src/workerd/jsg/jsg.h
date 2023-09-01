@@ -1806,6 +1806,7 @@ template <typename T> class JsRef;
   V(Unscopables)
 
 class JsValue;
+class JsMessage;
 #define JS_TYPE_CLASSES(V) \
   V(Object) \
   V(Boolean) \

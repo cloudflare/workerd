@@ -491,4 +491,14 @@ struct JsValueWrapper {
   }
 };
 
+class JsMessage final {
+public:
+  explicit inline JsMessage() : inner(v8::Local<v8::Message>()) {}
+  explicit inline JsMessage(v8::Local<v8::Message> inner) : inner(inner) {}
+  operator v8::Local<v8::Message>() const { return inner; }
+
+private:
+  v8::Local<v8::Message> inner;
+};
+
 }  // namespace workerd::jsg
