@@ -902,6 +902,9 @@ jsg::Promise<void> WritableStreamInternalController::flush(
 jsg::Promise<void> WritableStreamInternalController::abort(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
+  // While it may be confusing to users to throw `undefined` rather than a more helpful Error here,
+  // doing so is required by the relevant spec:
+  // https://streams.spec.whatwg.org/#writable-stream-abort
   return doAbort(js, maybeReason.orDefault(js.v8Undefined()));
 }
 
