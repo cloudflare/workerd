@@ -357,7 +357,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, kj::mv(e));
   readable->getController().cancel(js, nullptr).markAsHandled(js);
-  writable->getController().abort(js, nullptr).markAsHandled(js);
+  writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
 void Socket::handleReadableEof(jsg::Lock& js, jsg::Promise<void> onEof) {
