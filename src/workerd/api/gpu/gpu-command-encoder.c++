@@ -39,12 +39,14 @@ GPUCommandEncoder::beginComputePass(jsg::Optional<GPUComputePassDescriptor> desc
       desc.label = label->cStr();
     }
 
-    for (auto& timestamp : d->timestampWrites) {
-      wgpu::ComputePassTimestampWrite t{};
-      t.querySet = *timestamp.querySet;
-      t.queryIndex = timestamp.queryIndex;
-      t.location = parseComputePassTimestampLocation(timestamp.location);
-      timestamps.add(kj::mv(t));
+    KJ_IF_MAYBE (timestampWrites, d->timestampWrites) {
+      for (auto& timestamp : *timestampWrites) {
+        wgpu::ComputePassTimestampWrite t{};
+        t.querySet = *timestamp.querySet;
+        t.queryIndex = timestamp.queryIndex;
+        t.location = parseComputePassTimestampLocation(timestamp.location);
+        timestamps.add(kj::mv(t));
+      }
     }
   }
   desc.timestampWrites = timestamps.begin();

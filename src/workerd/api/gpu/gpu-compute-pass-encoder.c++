@@ -26,7 +26,7 @@ void GPUComputePassEncoder::end() {
 
 void GPUComputePassEncoder::setBindGroup(
     GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
-    jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets) {
+    jsg::Optional<jsg::Sequence<GPUBufferDynamicOffset>> dynamicOffsets) {
   wgpu::BindGroup bg = nullptr;
 
   KJ_IF_MAYBE (bgroup, bindGroup) {

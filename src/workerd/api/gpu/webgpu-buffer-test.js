@@ -62,6 +62,14 @@ export class DurableObjectExample {
 
     deepEqual(new Uint8Array(copyArrayBuffer), new Uint8Array([0, 1, 2, 3]));
 
+    device.queue.writeBuffer(
+      gpuWriteBuffer,
+      0,
+      new Uint16Array([0, 1, 2, 3]),
+      0,
+      4
+    );
+
     return new Response("OK");
   }
 }
