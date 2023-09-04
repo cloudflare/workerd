@@ -1,3 +1,6 @@
+# The master copy of this file lives under ${workspaceFolder}/tools/compile_flags.txt. For
+# standalone workerd development it is copied by vscode on startup to
+# ${workspaceFolder}/compile_flags.txt.
 -std=c++20
 -stdlib=libc++
 -xc++

@@ -220,6 +220,28 @@
         "reevaluateOnRerun": false,
         "runOn": "folderOpen"
       }
+    },
+    {
+      "label": "Setup compile_flags.txt",
+      "linux": {
+        "command": "cp \"${workspaceFolder}/tools/compile_flags.txt\" \"${workspaceFolder}/compile_flags.txt\""
+      },
+      "osx": {
+        "command": "cp \"${workspaceFolder}/tools/compile_flags.txt\" \"${workspaceFolder}/compile_flags.txt\""
+      },
+      "windows": {
+        "command": "Copy-Item \"${workspaceFolder}/tools/compile_flags.txt\" \"${workspaceFolder}/compile_flags.txt\""
+      },
+      "group": "none",
+      "type": "shell",
+      "presentation": {
+        "reveal": "never",
+        "panel": "dedicated"
+      },
+      "runOptions": {
+        "reevaluateOnRerun": false,
+        "runOn":"folderOpen"
+      },
     }
   ]
 }
