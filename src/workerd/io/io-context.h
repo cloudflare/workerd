@@ -379,8 +379,9 @@ public:
   void logErrorOnce(kj::StringPtr description);
 
   void logUncaughtException(kj::StringPtr description);
-  void logUncaughtException(UncaughtExceptionSource source, v8::Local<v8::Value> exception,
-                            v8::Local<v8::Message> message = {});
+  void logUncaughtException(UncaughtExceptionSource source,
+                            const jsg::JsValue& exception,
+                            const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
   // "current".
@@ -1458,7 +1459,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
     //   once the exception has been tunneled into a KJ exception, so the later logging won't be
     //   as useful. We should improve the tunneling to include stack traces and ensure that all
     //   consumers do in fact log exceptions, then we can remove this.
-    context.logUncaughtException(UncaughtExceptionSource::INTERNAL_ASYNC, jsException);
+    context.logUncaughtException(UncaughtExceptionSource::INTERNAL_ASYNC,
+                                 jsg::JsValue(jsException));
 
     fulfiller->fulfiller->reject(jsg::createTunneledException(isolate, jsException));
     fulfiller->isDone = true;

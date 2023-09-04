@@ -174,115 +174,64 @@ kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value) {
 }
 
 namespace {
-
-void addJsStackTrace(v8::Local<v8::Context> context,
-                     kj::Vector<kj::String>& lines, v8::Local<v8::Message> message) {
-  // TODO(someday): Relying on v8::Message to pass around source locations means
-  // we can't provide the module name for errors like compiling wasm modules. We
-  // should have our own type, but it requires a refactor of how we pass around errors
-  // for script startup.
-
-  auto addLineCol = [](kj::StringTree str, int line, int col) {
-    if (line != v8::Message::kNoLineNumberInfo) {
-      str = kj::strTree(kj::mv(str), ":", line);
-      if (col != v8::Message::kNoColumnInfo) {
-        str = kj::strTree(kj::mv(str), ":", col);
-      }
-    }
-    return str;
-  };
-
-  if (!message.IsEmpty()) {
-    auto trace = message->GetStackTrace();
-    if (trace.IsEmpty() || trace->GetFrameCount() == 0) {
-      kj::StringTree locationStr;
-
-      auto resourceNameVal = message->GetScriptResourceName();
-      if (resourceNameVal->IsString()) {
-        auto resourceName = resourceNameVal.As<v8::String>();
-        if (!resourceName.IsEmpty() && resourceName->Length() != 0) {
-          locationStr = kj::strTree("  at ", resourceName);
-        }
-      }
-
-      auto lineNumber = jsg::check(message->GetLineNumber(context));
-      auto columnNumber = jsg::check(message->GetStartColumn(context));
-      locationStr = addLineCol(kj::mv(locationStr), lineNumber, columnNumber);
-
-      if (locationStr.size() > 0) {
-        lines.add(locationStr.flatten());
-      }
-    } else {
-      for (auto i: kj::zeroTo(trace->GetFrameCount())) {
-        auto frame = trace->GetFrame(context->GetIsolate(), i);
-        kj::StringTree locationStr;
-
-        auto scriptName = frame->GetScriptName();
-        if (!scriptName.IsEmpty() && scriptName->Length() != 0) {
-          locationStr = kj::strTree("  at ", scriptName);
-        } else {
-          locationStr = kj::strTree("  at worker.js");
-        }
-
-        auto lineNumber = frame->GetLineNumber();
-        auto columnNumber = frame->GetColumn();
-        locationStr = addLineCol(kj::mv(locationStr), lineNumber, columnNumber);
-
-        auto func = frame->GetFunctionName();
-        if (!func.IsEmpty() && func->Length() != 0) {
-          locationStr = kj::strTree(kj::mv(locationStr), " in ", func);
-        }
-
-        lines.add(locationStr.flatten());
-      }
-    }
-  }
-}
-
 // Inform the inspector of a problem not associated with any particular exception object.
 //
 // Passes `description` as the exception's detailed message, dummy values for everything else.
-void sendExceptionToInspector(v8_inspector::V8Inspector& inspector, v8::Local<v8::Context> context,
+void sendExceptionToInspector(jsg::Lock& js,
+                              v8_inspector::V8Inspector& inspector,
                               kj::StringPtr description) {
-  inspector.exceptionThrown(context, v8_inspector::StringView(), v8::Local<v8::Value>(),
-      toStringView(description), v8_inspector::StringView(),
-      0, 0, nullptr, 0);
+  inspector.exceptionThrown(js.v8Context(),
+                            v8_inspector::StringView(),
+                            v8::Local<v8::Value>(),
+                            toStringView(description),
+                            v8_inspector::StringView(),
+                            0, 0, nullptr, 0);
 }
 
 // Inform the inspector of an exception thrown.
 //
 // Passes `source` as the exception's short message. Reconstructs `message` from `exception` if
 // `message` is empty.
-void sendExceptionToInspector(v8_inspector::V8Inspector& inspector, v8::Local<v8::Context> context,
-                              UncaughtExceptionSource source, v8::Local<v8::Value> exception,
-                              v8::Local<v8::Message> message) {
-  if (message.IsEmpty()) {
+void sendExceptionToInspector(jsg::Lock& js,
+                              v8_inspector::V8Inspector& inspector,
+                              UncaughtExceptionSource source,
+                              const jsg::JsValue& exception,
+                              jsg::JsMessage message) {
+  if (!message) {
     // This exception didn't come with a Message. This can happen for exceptions delivered via
     // v8::Promise::Catch(), or for exceptions which were tunneled through C++ promises. In the
     // latter case, V8 will create a Message based on the current stack trace, but it won't be
     // super meaningful.
-    message = v8::Exception::CreateMessage(context->GetIsolate(), exception);
-    KJ_ASSERT(!message.IsEmpty());
+    message = jsg::JsMessage::create(js, jsg::JsValue(exception));
   }
 
-  auto stackTrace = message->GetStackTrace();
+  // TODO(cleanup): Move the inspector stuff into a utility within jsg to better
+  // encapsulate
+  KJ_ASSERT(message);
+  v8::Local<v8::Message> msg = message;
+
+  auto context = js.v8Context();
+
+  auto stackTrace = msg->GetStackTrace();
 
   // The resource name is whatever we set in the Script ctor, e.g. "worker.js".
-  auto scriptResourceName = message->GetScriptResourceName();
+  auto scriptResourceName = msg->GetScriptResourceName();
 
-  auto lineNumber = message->GetLineNumber(context).FromMaybe(0);
-  auto startColumn = message->GetStartColumn(context).FromMaybe(0);
+  auto lineNumber = msg->GetLineNumber(context).FromMaybe(0);
+  auto startColumn = msg->GetStartColumn(context).FromMaybe(0);
 
   // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
   //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
   inspector.exceptionThrown(context, toStringView(kj::str(source)), exception,
-      toStringView(kj::str(message->Get())), toStringView(kj::str(scriptResourceName)),
+      toStringView(kj::str(msg->Get())), toStringView(kj::str(scriptResourceName)),
       lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
 }
 
-void addExceptionToTrace(jsg::Lock& js, IoContext &ioContext, WorkerTracer& tracer,
-                         v8::Local<v8::Context> context, UncaughtExceptionSource source,
-                         v8::Local<v8::Value> exception,
+void addExceptionToTrace(jsg::Lock& js,
+                         IoContext &ioContext,
+                         WorkerTracer& tracer,
+                         UncaughtExceptionSource source,
+                         const jsg::JsValue& exception,
                          const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
                              errorTypeHandler) {
   if (source == UncaughtExceptionSource::INTERNAL ||
@@ -319,7 +268,6 @@ void reportStartupError(
     kj::StringPtr id,
     jsg::Lock& js,
     const kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>>& inspector,
-    v8::Local<v8::Context> context,
     const IsolateLimitEnforcer& limitEnforcer,
     kj::Maybe<kj::Exception> maybeLimitError,
     v8::TryCatch& catcher,
@@ -338,7 +286,7 @@ void reportStartupError(
         // We want to extend just enough cpu time as is necessary to report the exception
         // to the inspector here. 10 milliseconds should be more than enough.
         auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-        sendExceptionToInspector(*i->get(), context, description);
+        sendExceptionToInspector(js, *i->get(), description);
         // When the inspector is active, we don't want to throw here because then the inspector
         // won't be able to connect and the developer will never know what happened.
       } else {
@@ -358,19 +306,23 @@ void reportStartupError(
           kj::Vector<kj::String> lines;
           lines.add(kj::str("Uncaught ", jsg::extractTunneledExceptionDescription(
               KJ_ASSERT_NONNULL(permanentException).getDescription())));
-          addJsStackTrace(context, lines, catcher.Message());
+          jsg::JsMessage message(catcher.Message());
+          message.addJsStackTrace(js, lines);
           e->addError(kj::strArray(lines, "\n"));
 
         } else KJ_IF_MAYBE(i, inspector) {
           auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-          sendExceptionToInspector(*i->get(), context, UncaughtExceptionSource::INTERNAL,
-                                  exception, catcher.Message());
+          sendExceptionToInspector(js, *i->get(),
+                                   UncaughtExceptionSource::INTERNAL,
+                                   jsg::JsValue(exception),
+                                   jsg::JsMessage(catcher.Message()));
           // When the inspector is active, we don't want to throw here because then the inspector
           // won't be able to connect and the developer will never know what happened.
         } else {
           // We should never get here in production if we've validated scripts before deployment.
           kj::Vector<kj::String> lines;
-          addJsStackTrace(context, lines, catcher.Message());
+          jsg::JsMessage message(catcher.Message());
+          message.addJsStackTrace(js, lines);
           auto trace = kj::strArray(lines, "; ");
           auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
           if (description == "jsg.SyntaxError: \\8 and \\9 are not allowed in template strings.") {
@@ -1296,7 +1248,6 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
       reportStartupError(id,
                         lock,
                         isolate->impl->inspector,
-                        context,
                         isolate->getLimitEnforcer(),
                         kj::mv(maybeLimitError),
                         catcher,
@@ -1539,7 +1490,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       reportStartupError(script->id,
                         lock,
                         script->isolate->impl->inspector,
-                        context,
                         script->isolate->getLimitEnforcer(),
                         kj::mv(maybeLimitError),
                         catcher,
@@ -1785,7 +1735,7 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
     js.withinHandleScope([&] {
       auto context = getContext();
       auto contextScope = js.enterContextScope(context);
-      sendExceptionToInspector(*i->get(), context, description);
+      sendExceptionToInspector(js, *i->get(), description);
     });
   }
 
@@ -1794,17 +1744,16 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
 }
 
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
-                                        v8::Local<v8::Value> exception,
-                                        v8::Local<v8::Message> message) {
+                                        const jsg::JsValue& exception,
+                                        const jsg::JsMessage& message) {
   // Only add exception to trace when running within an I/O context with a tracer.
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
     KJ_IF_MAYBE(tracer, ioContext.getWorkerTracer()) {
       jsg::Lock& js = *this;
       js.withinHandleScope([&] {
-        auto context = getContext();
-        auto contextScope = js.enterContextScope(context);
-        addExceptionToTrace(impl->inner, ioContext, *tracer, context, source, exception,
+        auto contextScope = js.enterContextScope(getContext());
+        addExceptionToTrace(impl->inner, ioContext, *tracer, source, exception,
             worker.getIsolate().apiIsolate->getErrorInterfaceTypeHandler(*this));
       });
     }
@@ -1813,9 +1762,8 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
   KJ_IF_MAYBE(i, worker.script->isolate->impl->inspector) {
     jsg::Lock& js = *this;
     js.withinHandleScope([&] {
-      auto context = getContext();
-      auto contextScope = js.enterContextScope(context);
-      sendExceptionToInspector(*i->get(), context, source, exception, message);
+      auto contextScope = js.enterContextScope(getContext());
+      sendExceptionToInspector(js, *i->get(), source, exception, message);
     });
   }
 
@@ -2250,8 +2198,11 @@ public:
         inspector.contextCreated(
             v8_inspector::V8ContextInfo(dummyContext, 1, v8_inspector::StringView(
                 reinterpret_cast<const uint8_t*>("Worker"), 6)));
-        sendExceptionToInspector(inspector, dummyContext,
-            jsg::extractTunneledExceptionDescription(limitError->getDescription()));
+        {
+          auto contextScope = lock->enterContextScope(dummyContext);
+          sendExceptionToInspector(*lock, inspector,
+              jsg::extractTunneledExceptionDescription(limitError->getDescription()));
+        }
         inspector.contextDestroyed(dummyContext);
       });
     }

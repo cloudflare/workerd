@@ -584,8 +584,9 @@ public:
   void logUncaughtException(kj::StringPtr description);
 
   // Logs an exception to the debug console or trace, if active.
-  void logUncaughtException(UncaughtExceptionSource source, v8::Local<v8::Value> exception,
-                            v8::Local<v8::Message> message = {});
+  void logUncaughtException(UncaughtExceptionSource source,
+                            const jsg::JsValue& exception,
+                            const jsg::JsMessage& message = jsg::JsMessage());
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 

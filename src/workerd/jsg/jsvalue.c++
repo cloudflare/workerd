@@ -454,5 +454,72 @@ JsValue JsValue::structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTr
   return jsg::structuredClone(js, *this, kj::mv(maybeTransfers));
 }
 
+JsMessage JsMessage::create(Lock& js, const JsValue& exception) {
+  return JsMessage(v8::Exception::CreateMessage(js.v8Isolate, exception));
+}
+
+void JsMessage::addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines) {
+  if (inner.IsEmpty()) return;
+
+  // TODO(someday): Relying on v8::Message to pass around source locations means
+  // we can't provide the module name for errors like compiling wasm modules. We
+  // should have our own type, but it requires a refactor of how we pass around errors
+  // for script startup.
+
+  static constexpr auto addLineCol = [](kj::StringTree str, int line, int col) {
+    if (line != v8::Message::kNoLineNumberInfo) {
+      str = kj::strTree(kj::mv(str), ":", line);
+      if (col != v8::Message::kNoColumnInfo) {
+        str = kj::strTree(kj::mv(str), ":", col);
+      }
+    }
+    return str;
+  };
+
+  auto context = js.v8Context();
+  auto trace = inner->GetStackTrace();
+  if (trace.IsEmpty() || trace->GetFrameCount() == 0) {
+    kj::StringTree locationStr;
+
+    auto resourceNameVal = inner->GetScriptResourceName();
+    if (resourceNameVal->IsString()) {
+      auto resourceName = resourceNameVal.As<v8::String>();
+      if (!resourceName.IsEmpty() && resourceName->Length() != 0) {
+        locationStr = kj::strTree("  at ", resourceName);
+      }
+    }
+
+    auto lineNumber = jsg::check(inner->GetLineNumber(context));
+    auto columnNumber = jsg::check(inner->GetStartColumn(context));
+    locationStr = addLineCol(kj::mv(locationStr), lineNumber, columnNumber);
+
+    if (locationStr.size() > 0) {
+      lines.add(locationStr.flatten());
+    }
+  } else {
+    for (auto i: kj::zeroTo(trace->GetFrameCount())) {
+      auto frame = trace->GetFrame(context->GetIsolate(), i);
+      kj::StringTree locationStr;
+
+      auto scriptName = frame->GetScriptName();
+      if (!scriptName.IsEmpty() && scriptName->Length() != 0) {
+        locationStr = kj::strTree("  at ", scriptName);
+      } else {
+        locationStr = kj::strTree("  at worker.js");
+      }
+
+      auto lineNumber = frame->GetLineNumber();
+      auto columnNumber = frame->GetColumn();
+      locationStr = addLineCol(kj::mv(locationStr), lineNumber, columnNumber);
+
+      auto func = frame->GetFunctionName();
+      if (!func.IsEmpty() && func->Length() != 0) {
+        locationStr = kj::strTree(kj::mv(locationStr), " in ", func);
+      }
+
+      lines.add(locationStr.flatten());
+    }
+  }
+}
 
 }  // namespace workerd::jsg
