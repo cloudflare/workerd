@@ -105,6 +105,9 @@ git_repository(
 git_repository(
     name = "spirv_tools",
     commit = "a63ac9f73d29cd27cdb6e3388d98d1d934e512bb",
+    patches = [
+        "@//:patches/spirv_tools.patch",
+    ],
     remote = "https://github.com/KhronosGroup/SPIRV-Tools.git",
 )
 

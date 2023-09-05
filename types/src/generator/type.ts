@@ -296,6 +296,8 @@ export function createTypeNode(
           return f.createTypeReferenceNode("Uint8Array");
         case BuiltinType_Type.V8ARRAY_BUFFER_VIEW:
           return f.createTypeReferenceNode("ArrayBufferView");
+        case BuiltinType_Type.V8ARRAY_BUFFER:
+          return f.createTypeReferenceNode("ArrayBuffer");
         case BuiltinType_Type.JSG_BUFFER_SOURCE:
           return f.createUnionTypeNode([
             f.createTypeReferenceNode("ArrayBuffer"),
