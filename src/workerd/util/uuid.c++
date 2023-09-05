@@ -17,15 +17,12 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   } else {
     KJ_ASSERT(RAND_bytes(buffer, sizeof(buffer)) == 1);
   }
+  buffer[6] = kj::byte((buffer[6] & 0x0f) | 0x40);
+  buffer[8] = kj::byte((buffer[8] & 0x3f) | 0x80);
 
-  kj::Vector<char> result(37);
+  static constexpr char HEX_DIGITS[] = "0123456789abcdef";
 
-  constexpr auto HEX_DIGITS = "0123456789abcdef";
-
-  auto add = [&](kj::byte b) {
-    result.add(HEX_DIGITS[(b >> 4) & 0xf]);
-    result.add(HEX_DIGITS[b & 0xf]);
-  };
+#define HEX(b) (char)(HEX_DIGITS[(b >> 4) & 0xf]), (char)(HEX_DIGITS[b & 0xf])
 
   // The format for Random UUID's is established in
   // https://www.rfc-editor.org/rfc/rfc4122.txt
@@ -44,36 +41,31 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   // character of the fourth grouping is always either
   // an a, b, 8, or 9.
 
-  add(buffer[0]);
-  add(buffer[1]);
-  add(buffer[2]);
-  add(buffer[3]);
-  result.add('-');
+  return kj::String(kj::arr<char>(
+    HEX(buffer[0]),
+    HEX(buffer[1]),
+    HEX(buffer[2]),
+    HEX(buffer[3]),
+    '-',
+    HEX(buffer[4]),
+    HEX(buffer[5]),
+    '-',
+    HEX(buffer[6]),
+    HEX(buffer[7]),
+    '-',
+    HEX(buffer[8]),
+    HEX(buffer[9]),
+    '-',
+    HEX(buffer[10]),
+    HEX(buffer[11]),
+    HEX(buffer[12]),
+    HEX(buffer[13]),
+    HEX(buffer[14]),
+    HEX(buffer[15]),
+    '\0'
+  ));
 
-  add(buffer[4]);
-  add(buffer[5]);
-
-  result.add('-');
-
-  add(kj::byte((buffer[6] & 0x0f) | 0x40));
-  add(buffer[7]);
-
-  result.add('-');
-
-  add(kj::byte((buffer[8] & 0x3f) | 0x80));
-  add(buffer[9]);
-
-  result.add('-');
-
-  add(buffer[10]);
-  add(buffer[11]);
-  add(buffer[12]);
-  add(buffer[13]);
-  add(buffer[14]);
-  add(buffer[15]);
-
-  result.add('\0');
-  return kj::String(result.releaseAsArray());
+#undef HEX
 }
 
 }
