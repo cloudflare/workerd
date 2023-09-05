@@ -30,7 +30,7 @@ private:
                           jsg::Optional<GPUSize32> workgroupCountZ);
   void end();
   void setBindGroup(GPUIndex32 index, kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
-                    jsg::Optional<kj::Array<GPUBufferDynamicOffset>> dynamicOffsets);
+                    jsg::Optional<jsg::Sequence<GPUBufferDynamicOffset>> dynamicOffsets);
   // TODO(soon): overloads don't seem to be supported
   // void setBindGroup(GPUIndex32 index,
   //                  kj::Maybe<jsg::Ref<GPUBindGroup>> bindGroup,
@@ -50,7 +50,9 @@ struct GPUComputePassTimestampWrite {
 struct GPUComputePassDescriptor {
   jsg::Optional<kj::String> label;
 
-  kj::Array<GPUComputePassTimestampWrite> timestampWrites;
+  // TODO(someday): this part of the spec is changing, but implementations haven't caught up
+  // https://github.com/gpuweb/gpuweb/commit/bc76364f128f41efbf5584049757707bfb3a1715
+  jsg::Optional<kj::Array<GPUComputePassTimestampWrite>> timestampWrites;
 
   JSG_STRUCT(label, timestampWrites);
 };
