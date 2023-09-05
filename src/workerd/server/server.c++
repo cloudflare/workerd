@@ -2062,7 +2062,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       "the schema?"));
 }
 
-void startInspector(kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar);
+uint startInspector(kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar);
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -2578,11 +2578,14 @@ void Server::startAlarmScheduler(config::Config::Reader config) {
       .attach(kj::mv(vfs));
 }
 
-// Configure and start the inspector socket.
-void startInspector(kj::StringPtr inspectorAddress,
+// Configure and start the inspector socket, returning the port the socket started on.
+uint startInspector(kj::StringPtr inspectorAddress,
                     Server::InspectorServiceIsolateRegistrar& registrar) {
-  kj::MutexGuarded<bool> inspectorReady;
-  kj::Thread thread([inspectorAddress, &inspectorReady, &registrar](){
+  static constexpr uint UNASSIGNED_PORT = 0;
+  static constexpr uint DEFAULT_PORT = 9229;
+  kj::MutexGuarded<uint> inspectorPort(UNASSIGNED_PORT);
+
+  kj::Thread thread([inspectorAddress, &inspectorPort, &registrar](){
     kj::AsyncIoContext io = kj::setupAsyncIo();
 
     kj::HttpHeaderTable::Builder headerTableBuilder;
@@ -2592,11 +2595,7 @@ void startInspector(kj::StringPtr inspectorAddress,
         kj::heap<Server::InspectorService>(io.provider->getTimer(), headerTableBuilder, registrar));
     auto ownHeaderTable = headerTableBuilder.build();
 
-    // EW-7716: Signal to the thread that started the inspector service that the inspector is ready.
-    *inspectorReady.lockExclusive() = true;
-
     // Configure and start the inspector socket.
-    static constexpr uint DEFAULT_PORT = 9229;
 
     auto& network = io.provider->getNetwork();
 
@@ -2607,10 +2606,12 @@ void startInspector(kj::StringPtr inspectorAddress,
     // 2. Making the thread's lambda `noexcept` so that if it throws the process crashes
     // 3. Probably also throw if listen completes without an exception (even if unlikely to
     //    happen)
-    auto listen = (kj::coCapture([&network, &inspectorAddress, &inspectorService]()
-        -> kj::Promise<void> {
+    auto listen = (kj::coCapture([&network, &inspectorAddress, &inspectorPort,
+                                   &inspectorService]() -> kj::Promise<void> {
       auto parsed = co_await network.parseAddress(inspectorAddress, DEFAULT_PORT);
       auto listener = parsed->listen();
+      // EW-7716: Signal to thread that started the inspector service that the inspector is ready.
+      *inspectorPort.lockExclusive() = listener->getPort();
       KJ_LOG(INFO, "Inspector is listening");
       co_await inspectorService->listen(kj::mv(listener));
     }))();
@@ -2620,7 +2621,10 @@ void startInspector(kj::StringPtr inspectorAddress,
   thread.detach();
 
   // EW-7716: Wait for the InspectorService instance to be initialized before proceeding.
-  inspectorReady.when([](const bool& isReady) { return isReady; }, [](const bool&){});
+  return inspectorPort.when(
+    [](const uint& port) { return port != UNASSIGNED_PORT; },
+    [](const uint& port) { return port; }
+  );
 }
 
 void Server::startServices(jsg::V8System& v8System, config::Config::Reader config,
@@ -2693,7 +2697,15 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
   // with the inspector service.
   KJ_IF_MAYBE(inspectorAddress, inspectorOverride) {
     auto registrar = kj::heap<InspectorServiceIsolateRegistrar>();
-    startInspector(*inspectorAddress, *registrar);
+    auto port = startInspector(*inspectorAddress, *registrar);
+    KJ_IF_MAYBE(stream, controlOverride) {
+      auto message = kj::str("{\"event\":\"listen-inspector\",\"port\":\"", port, "}\n");
+      try {
+        (*stream)->write(message.begin(), message.size());
+      } catch (kj::Exception& e) {
+        KJ_LOG(ERROR, e);
+      }
+    }
     inspectorIsolateRegistrar = kj::mv(registrar);
   }
 
