@@ -82,9 +82,9 @@ void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
     jsg::Lock& js, SqliteDatabase::Query& source) {
   if (names == nullptr) {
     js.withinHandleScope([&] {
-      auto builder = kj::heapArrayBuilder<jsg::V8Ref<v8::String>>(source.columnCount());
+      auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(source.columnCount());
       for (auto i: kj::zeroTo(builder.capacity())) {
-        builder.add(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, source.getColumnName(i)));
+        builder.add(js, js.str(source.getColumnName(i)));
       }
       names = builder.finish();
     });
@@ -123,7 +123,7 @@ kj::Maybe<SqlStorage::Cursor::RowDict> SqlStorage::Cursor::rowIteratorNext(
       // A little trick here: We know there are no HandleScopes on the stack between JSG and here,
       // so we can return a dict keyed by local handles, which avoids constructing new V8Refs here
       // which would be relatively slower.
-      .name = jsg::JsString(names[i].getHandle(js).As<v8::String>()),
+      .name = names[i].getHandle(js),
       .value = kj::mv(value)
     };
   }).map([&](kj::Array<RowDict::Field>&& fields) {
@@ -138,7 +138,7 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
 // Returns the set of column names for the current Cursor. An exception will be thrown if the
 // iterator has already been fully consumed. The resulting columns may contain duplicate entries,
 // for instance a `SELECT *` across a join of two tables that share a column name.
-kj::Array<jsg::V8Ref<v8::String>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
+kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
   KJ_IF_MAYBE(s, state) {
     cachedColumnNames.ensureInitialized(js, (*s)->query);
     return KJ_MAP(name, this->cachedColumnNames.get()) {
