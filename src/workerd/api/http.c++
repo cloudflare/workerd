@@ -7,6 +7,7 @@
 #include "system-streams.h"
 #include "util.h"
 #include "queue.h"
+#include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/compat/url.h>
 #include <kj/memory.h>
@@ -119,15 +120,16 @@ Headers::Headers(jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
 
 Headers::Headers(const Headers& other)
     : guard(Guard::NONE) {
-  for (auto& header: other.headers) {
-    Header copy {
-      jsg::ByteString(kj::str(header.second.key)),
-      jsg::ByteString(kj::str(header.second.name)),
-      KJ_MAP(value, header.second.values) { return jsg::ByteString(kj::str(value)); },
-    };
-    kj::StringPtr keyRef = copy.key;
-    KJ_ASSERT(headers.insert(std::make_pair(keyRef, kj::mv(copy))).second);
-  }
+    KJ_FAIL_REQUIRE("NOT IMPLEMENTED");
+  // for (auto& header: other.headers) {
+    // Header copy {
+    //   jsg::ByteString(kj::str(header.second.key)),
+    //   jsg::ByteString(kj::str(header.second.name)),
+    //   KJ_MAP(value, header.second.values) { return jsg::ByteString(kj::str(value)); },
+    // };
+    // kj::StringPtr keyRef = copy.key;
+    // KJ_ASSERT(headers.insert(std::make_pair(keyRef, kj::mv(copy))).second);
+  // }
 }
 
 Headers::Headers(const kj::HttpHeaders& other, Guard guard)

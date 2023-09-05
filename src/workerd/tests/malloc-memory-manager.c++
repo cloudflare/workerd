@@ -27,6 +27,7 @@ void MallocMemoryManager::Start() {
 void MallocMemoryManager::Stop(benchmark::MemoryManager::Result& result) {
   result.total_allocated_bytes = allocSize;
   result.num_allocs = allocCount;
+  __malloc_hook = oldMallocHook;
 }
 
 void* MallocMemoryManager::mallocHook(size_t size, const void* caller) {

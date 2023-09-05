@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/util/abortable.h>
+#include <workerd/util/small-vector.h>
 #include <kj/compat/http.h>
 #include <map>
 #include "basics.h"
@@ -174,13 +175,13 @@ private:
     //
     // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
-    kj::Vector<jsg::ByteString> values;
+    SmallVector<jsg::ByteString, 1> values;
 
     explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
+                    SmallVector<jsg::ByteString, 1> values)
         : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
     explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
+        : key(kj::mv(key)), name(kj::mv(name)) {
       values.add(kj::mv(value));
     }
   };
