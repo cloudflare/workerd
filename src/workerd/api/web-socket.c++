@@ -578,7 +578,7 @@ void WebSocket::close(
   if (reason != kj::none) {
     // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
     // then there must be a code, too.
-    JSG_REQUIRE(code != nullptr, TypeError,
+    JSG_REQUIRE(code != kj::none, TypeError,
         "If you specify a WebSocket close reason, you must also specify a code.");
   }
 
