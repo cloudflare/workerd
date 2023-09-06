@@ -45,8 +45,8 @@ InputGate::Waiter::~Waiter() noexcept(false) {
 }
 
 kj::Promise<InputGate::Lock> InputGate::wait() {
-  KJ_IF_MAYBE(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(*e);
+  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+    return kj::cp(e);
   } else if (lockCount == 0) {
     return Lock(*this);
   } else {
@@ -55,8 +55,8 @@ kj::Promise<InputGate::Lock> InputGate::wait() {
 }
 
 kj::Promise<void> InputGate::onBroken() {
-  KJ_IF_MAYBE(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(*e);
+  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+    return kj::cp(e);
   } else {
     return brokenPromise.addBranch();
   }
@@ -66,12 +66,12 @@ InputGate::Lock::Lock(InputGate& gate)
     : gate(&gate),
       cs(gate.isCriticalSection
           ? kj::Maybe(kj::addRef(static_cast<CriticalSection&>(gate)))
-          : nullptr) {
+          : kj::none) {
   InputGate* gateToLock = &gate;
 
-  KJ_IF_MAYBE(c, cs) {
-    if (c->get()->state == CriticalSection::REPARENTED) {
-      gateToLock = &c->get()->parentAsInputGate();
+  KJ_IF_SOME(c, cs) {
+    if (c.get()->state == CriticalSection::REPARENTED) {
+      gateToLock = &c.get()->parentAsInputGate();
     }
   }
 
@@ -122,7 +122,7 @@ kj::Maybe<InputGate::CriticalSection&> InputGate::Lock::getCriticalSection() {
   if (gate->isCriticalSection) {
     return static_cast<CriticalSection&>(*gate);
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -171,10 +171,10 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait() {
       state = INITIAL_WAIT;
 
       auto& target = parentAsInputGate();
-      KJ_IF_MAYBE(e, target.brokenState.tryGet<kj::Exception>()) {
+      KJ_IF_SOME(e, target.brokenState.tryGet<kj::Exception>()) {
         // Oops, we're broken.
-        setBroken(*e);
-        return kj::cp(*e);
+        setBroken(e);
+        return kj::cp(e);
       }
 
       // Add ourselves to this parent's child waiter list.
@@ -242,7 +242,7 @@ InputGate::Lock InputGate::CriticalSection::succeeded() {
 
   state = REPARENTED;
   auto result = KJ_ASSERT_NONNULL(kj::mv(parentLock));
-  parentLock = nullptr;
+  parentLock = kj::none;
   return result;
 }
 
@@ -272,8 +272,8 @@ void InputGate::setBroken(const kj::Exception& e) {
     waiter.fulfiller.reject(kj::cp(e));
     waiters.remove(waiter);
   }
-  KJ_IF_MAYBE(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f->get()->reject(kj::cp(e));
+  KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
+    f.get()->reject(kj::cp(e));
   }
   brokenState = kj::cp(e);
 }
@@ -323,8 +323,8 @@ kj::Promise<void> OutputGate::onBroken() {
   KJ_REQUIRE(!brokenState.is<kj::Own<kj::PromiseFulfiller<void>>>(),
       "onBroken() can only be called once");
 
-  KJ_IF_MAYBE(e, brokenState.tryGet<kj::Exception>()) {
-    return kj::cp(*e);
+  KJ_IF_SOME(e, brokenState.tryGet<kj::Exception>()) {
+    return kj::cp(e);
   } else {
     auto paf = kj::newPromiseAndFulfiller<void>();
     brokenState = kj::mv(paf.fulfiller);
@@ -352,8 +352,8 @@ kj::Exception OutputGate::makeUnfulfilledException() {
 void OutputGate::setBroken(const kj::Exception& e) {
   // We assume the exception is already propagated into `pastLocksPromise`, so all we need to do
   // is handle onBroken().
-  KJ_IF_MAYBE(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
-    f->get()->reject(kj::cp(e));
+  KJ_IF_SOME(f, brokenState.tryGet<kj::Own<kj::PromiseFulfiller<void>>>()) {
+    f.get()->reject(kj::cp(e));
   }
   brokenState = kj::cp(e);
 }
