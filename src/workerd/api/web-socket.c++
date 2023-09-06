@@ -34,6 +34,7 @@ IoOwn<WebSocket::Native> WebSocket::initNative(
   // We might have called `close()` when this WebSocket was previously active.
   // If so, we want to prevent any future calls to `send()`.
   nativeObj->closedOutgoing = closedOutgoingConn;
+  autoResponseStatus.isClosed = nativeObj->closedOutgoing;
   return ioContext.addObject(kj::mv(nativeObj));
 }
 
@@ -531,7 +532,10 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
 
     KJ_UNREACHABLE;
   }();
-  outgoingMessages->insert(GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg)});
+
+  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
+  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
+  outgoingMessages->insert(GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
 
   ensurePumping(js);
 }
@@ -578,13 +582,21 @@ void WebSocket::close(
         "If you specify a WebSocket close reason, you must also specify a code.");
   }
 
+  // pendingAutoResponses stores the number of queuedAutoResponses that will be pumped before sending
+  // the current GatedMessage, guaranteeing order.
+  // queuedAutoResponses stores the total number of auto-response messages that are already in accounted
+  // for in previous GatedMessages. This is useful to easily calculate the number of pendingAutoResponses
+  // for each new GateMessage.
+  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() -
+      autoResponseStatus.queuedAutoResponses;
+  autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
   outgoingMessages->insert(GatedMessage{
       IoContext::current().waitForOutputLocksIfNecessary(),
       kj::WebSocket::Close {
         // Code 1005 actually translates to sending a close message with no body on the wire.
         static_cast<uint16_t>(code.orDefault(1005)),
         kj::mv(reason).orDefault(nullptr),
-      },
+      }, pendingAutoResponses
   });
 
   native.closedOutgoing = true;
@@ -670,10 +682,11 @@ void WebSocket::serializeAttachment(jsg::Lock& js, jsg::JsValue attachment) {
   serializedAttachment = kj::mv(released.data);
 }
 
-void WebSocket::setAutoResponseTimestamp(kj::Maybe<kj::Date> time) {
+void WebSocket::setAutoResponseStatus(kj::Maybe<kj::Date> time,
+    kj::Promise<void> autoResponsePromise) {
   autoResponseTimestamp = time;
+  autoResponseStatus.ongoingAutoResponse = kj::mv(autoResponsePromise);
 }
-
 
 kj::Maybe<kj::Date> WebSocket::getAutoResponseTimestamp() {
   return autoResponseTimestamp;
@@ -689,7 +702,8 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
     auto& context = IoContext::current();
     auto& accepted = KJ_ASSERT_NONNULL(native.state.tryGet<Accepted>());
     auto promise = kj::evalNow([&]() {
-      return accepted.canceler.wrap(pump(context, *outgoingMessages, *accepted.ws, native));
+      return accepted.canceler.wrap(pump(context, *outgoingMessages,
+        *accepted.ws, native, autoResponseStatus));
     });
 
     // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
@@ -729,6 +743,17 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
   }
 }
 
+kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
+  if (autoResponseStatus.isPumping) {
+    autoResponseStatus.pendingAutoResponseDeque.push_back(kj::mv(message));
+  } else if (!autoResponseStatus.isClosed){
+    auto p = ws.send(message).fork();
+    autoResponseStatus.ongoingAutoResponse = p.addBranch();
+    co_await p;
+    autoResponseStatus.ongoingAutoResponse = kj::READY_NOW;
+  }
+}
+
 namespace {
 
 size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
@@ -757,9 +782,11 @@ size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
 } // namespace
 
 kj::Promise<void> WebSocket::pump(
-    IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native) {
+    IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
+    AutoResponse& autoResponse) {
   KJ_ASSERT(!native.isPumping);
   native.isPumping = true;
+  autoResponse.isPumping = true;
   KJ_DEFER({
     // We use a KJ_DEFER to set native.isPumping = false to ensure that it happens -- we had a bug
     // in the past where this was handled by the caller of WebSocket::pump() and it allowed for
@@ -769,7 +796,18 @@ kj::Promise<void> WebSocket::pump(
     // Either we were already through all our outgoing messages or we experienced failure/
     // cancellation and cannot send these anyway.
     outgoingMessages.clear();
+
+    autoResponse.isPumping = false;
+
+    if (autoResponse.pendingAutoResponseDeque.size() > 0) {
+      autoResponse.pendingAutoResponseDeque.clear();
+    }
   });
+
+  // If we have a ongoingAutoResponse, we must co_await it here because there's a ws.send()
+  // in progress. Otherwise there can occur ws.send() race problems.
+  co_await autoResponse.ongoingAutoResponse;
+  autoResponse.ongoingAutoResponse = kj::READY_NOW;
 
   while (outgoingMessages.size() > 0) {
     GatedMessage gatedMessage = outgoingMessages.release(*outgoingMessages.ordered().begin());
@@ -778,6 +816,15 @@ kj::Promise<void> WebSocket::pump(
     }
 
     auto size = countBytesFromMessage(gatedMessage.message);
+
+    while (gatedMessage.pendingAutoResponses > 0) {
+      KJ_ASSERT(autoResponse.pendingAutoResponseDeque.size() >= gatedMessage.pendingAutoResponses);
+      auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
+      autoResponse.pendingAutoResponseDeque.pop_front();
+      gatedMessage.pendingAutoResponses--;
+      autoResponse.queuedAutoResponses--;
+      co_await ws.send(message);
+    }
 
     KJ_SWITCH_ONEOF(gatedMessage.message) {
       KJ_CASE_ONEOF(text, kj::String) {
@@ -790,6 +837,7 @@ kj::Promise<void> WebSocket::pump(
       }
       KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
         co_await ws.close(close.code, close.reason);
+        autoResponse.isClosed = true;
         break;
       }
     }
@@ -797,6 +845,13 @@ kj::Promise<void> WebSocket::pump(
     KJ_IF_SOME(a, context.getActor()) {
       a.getMetrics().sentWebSocketMessage(size);
     }
+  }
+  // If there are any auto-responses left to process, we should do it now.
+  // We should also check if the last sent message was a close. Shouldn't happen.
+  while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
+    auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
+    autoResponse.pendingAutoResponseDeque.pop_front();
+    co_await ws.send(message);
   }
 }
 
