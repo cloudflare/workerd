@@ -497,17 +497,17 @@ public:
   // DEPRECATED: Use version which passes a Lock.
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, false> awaitIo(kj::Promise<T> promise, Func&& func);
-  template <typename T, typename Func>
 
+  template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func);
-  template <typename T, typename Func, typename ErrorFunc>
 
+  template <typename T, typename Func, typename ErrorFunc>
   jsg::PromiseForResult<Func, T, true> awaitIo(
       jsg::Lock& js, kj::Promise<T> promise, Func&& func, ErrorFunc&& errorFunc);
-  template <typename T>
 
   // DEPRECATED: Use version which passes a Lock.
+  template <typename T>
   jsg::Promise<T> awaitIo(kj::Promise<T> promise);
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
