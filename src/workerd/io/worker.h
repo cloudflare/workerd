@@ -852,6 +852,8 @@ public:
     }
   }
 private:
+  kj::Promise<ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
+
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;
   struct Impl;

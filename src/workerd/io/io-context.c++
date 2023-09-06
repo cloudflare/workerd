@@ -169,16 +169,24 @@ IoContext::IoContext(ThreadContext& thread,
     auto promise = limitEnforcer->onLimitsExceeded();
     if (isInspectorEnabled()) {
       // Arrange to report the problem to the inspector in addition to aborting.
-      promise = promise.catch_([this](kj::Exception&& exception) {
-        return worker->takeAsyncLockWithoutRequest(nullptr)
-            .then([this, exception = kj::mv(exception)]
-                  (Worker::AsyncLock asyncLock) mutable -> kj::Promise<void> {
+      promise = (kj::coCapture([this, promise=kj::mv(promise)]() mutable -> kj::Promise<void> {
+        kj::Maybe<kj::Exception> maybeException;
+        try {
+          co_await promise;
+        } catch (...) {
+          // Just capture the exception here, we'll handle is below since we cannot have
+          // a co_await in the body of a catch clause.
+          maybeException = kj::getCaughtExceptionAsKj();
+        }
+
+        KJ_IF_MAYBE(exception, maybeException) {
+          Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
           Worker::Lock lock(*worker, asyncLock);
           lock.logUncaughtException(
-              jsg::extractTunneledExceptionDescription(exception.getDescription()));
-          return kj::mv(exception);
-        });
-      });
+              jsg::extractTunneledExceptionDescription(exception->getDescription()));
+          kj::throwFatalException(kj::mv(*exception));
+        }
+      }))();
     }
 
     return promise;
@@ -193,13 +201,18 @@ IoContext::IoContext(ThreadContext& thread,
 
     // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
     // or unintentional async work
-    localAbortPromise = localAbortPromise.catch_([this](kj::Exception&& e) -> kj::Promise<void> {
-      KJ_IF_MAYBE(a, actor) {
-        a->shutdownActorCache(e);
+    localAbortPromise = (kj::coCapture([this, promise = kj::mv(localAbortPromise)]() mutable
+        -> kj::Promise<void> {
+      try {
+        co_await promise;
+      } catch (...) {
+        auto exception = kj::getCaughtExceptionAsKj();
+        KJ_IF_MAYBE(a, actor) {
+          a->shutdownActorCache(exception);
+        }
+        kj::throwFatalException(kj::mv(exception));
       }
-
-      return kj::mv(e);
-    });
+    }))();
   }
 
   // Abort when the time limit expires, the isolate is terminated, the input gate is broken, or
@@ -1326,10 +1339,9 @@ public:
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return inner->tryRead(buffer, minBytes, maxBytes).then([this](size_t amount) {
-      quota -= amount > quota ? quota : amount;
-      return amount;
-    });
+    size_t amount = co_await inner->tryRead(buffer, minBytes, maxBytes);
+    quota -= amount > quota ? quota : amount;
+    co_return amount;
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
@@ -1338,10 +1350,9 @@ public:
 
   kj::Promise<uint64_t> pumpTo(
       kj::AsyncOutputStream& output, uint64_t amount) override {
-    return inner->pumpTo(output, amount).then([this](uint64_t amount) {
-      quota -= amount > quota ? quota : amount;
-      return amount;
-    });
+    amount = co_await inner->pumpTo(output, amount);
+    quota -= amount > quota ? quota : amount;
+    co_return amount;
   }
 
 private:
