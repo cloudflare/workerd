@@ -295,6 +295,10 @@ public:
   // Check for inconsistencies in the cache, e.g. redundant entries.
   void verifyConsistencyForTest();
 
+  // Our tests are fond of making gets to verify that a key is not in the cache. This allows us to
+  // avoid mocking the responses at the end of those tests.
+  void markPendingReadsAbsentForTest();
+
 private:
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {
@@ -354,6 +358,7 @@ private:
   };
 
   struct CountedDelete;
+  class GetWaiter;
 
   struct Entry: public kj::AtomicRefcounted {
     // A cache entry.
@@ -380,15 +385,8 @@ private:
 
   private:
     // The value associated with this key. If our `valueStatus` below is `ABSENT` or `UNKNOWN`, it
-    // will have size 0.
-    //
-    // `value` cannot change after the `Entry` is constructed. When a key is overwritten, the
-    // existing `Entry` is removed from the map and replaced with a new one, so that `value` does
-    // not need to be modified. This allows us to avoid copying `Entry` objects by refcounting
-    // them instead, especially in the case of a read operation which is only partially fulfilled
-    // from cache and needs to remember the original cached values even if they are overwritten
-    // before the read completes.
-    const Value value;
+    // will have size 0. This is allowed to change once in response to a read result.
+    Value value;
     EntryValueStatus valueStatus;
   public:
     auto getValueStatus() const {
@@ -396,10 +394,10 @@ private:
     }
 
     kj::Maybe<ValuePtr> getValuePtr() const {
-      if (valueStatus == EntryValueStatus::PRESENT) {
-        return value.asPtr();
-      } else {
-        return kj::none;
+      switch (valueStatus) {
+        case EntryValueStatus::PRESENT: return value.asPtr();
+        case EntryValueStatus::ABSENT: return kj::none;
+        case EntryValueStatus::UNKNOWN: KJ_FAIL_REQUIRE("Attempted to get unknown value", key);
       }
     }
     kj::Maybe<Value> getValue() const {
@@ -409,6 +407,13 @@ private:
         return kj::none;
       }
     }
+
+    const size_t valueSize() const {
+      return value.size();
+    }
+
+    void setPresentValue(Value newValue);
+    void setAbsentValue();
 
     // This enum indicates how synchronized this entry is with storage.
     EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
@@ -534,6 +539,33 @@ private:
   };
 
   kj::HashSet<CountedDelete*> countedDeletes;
+
+  class GetWaiter {
+  public:
+    explicit GetWaiter(ActorCache& cache, kj::Array<kj::Own<Entry>> entries)
+      : cache(cache), entries(kj::mv(entries)) {}
+    KJ_DISALLOW_COPY_AND_MOVE(GetWaiter);
+    ~GetWaiter() noexcept(false) {
+      for (auto& entry : entries) {
+        if (!entry->isShared()) {
+          // Ah, we're the last waiter. This probably means it was replaced by a dirty write in the
+          // cache.
+          if (entry->syncStatus == EntrySyncStatus::DIRTY) {
+            // We're still in the dirty list too, let's remove it and try to skip the get.
+            cache.dirtyList.remove(*entry);
+          }
+        }
+      }
+    }
+
+    auto getEntries() {
+      return KJ_MAP(entry, entries) { return kj::atomicAddRef(*entry); };
+    }
+
+  private:
+    ActorCache& cache;
+    kj::Array<kj::Own<Entry>> entries;
+  };
 
   rpc::ActorStorage::Stage::Client storage;
   const SharedLru& lru;
@@ -715,6 +747,10 @@ private:
     size_t pairCount = 0;
     size_t wordCount = 0;
   };
+  struct GetFlush {
+    kj::Vector<kj::Own<Entry>> entries;
+    kj::Vector<FlushBatch> batches;
+  };
   struct PutFlush {
     kj::Vector<kj::Own<Entry>> entries;
     kj::Vector<FlushBatch> batches;
@@ -736,6 +772,11 @@ private:
   kj::Promise<void> flushImplUsingTxn(
       PutFlush putFlush, MutedDeleteFlush mutedDeleteFlush,
       CountedDeleteFlushes countedDeleteFlushes, MaybeAlarmChange maybeAlarmChange);
+
+  kj::Promise<void> syncGet(
+      rpc::ActorStorage::Operations::Client client, kj::Own<Entry> entry);
+  kj::Promise<void> syncGets(
+      rpc::ActorStorage::Operations::Client client, GetFlush getFlush);
 
   // Carefully remove a clean entry from `currentValues`, making sure to update gaps.
   void evictEntry(Lock& lock, Entry& entry);
