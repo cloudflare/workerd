@@ -200,8 +200,11 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
         goto invalid;
       }
 
+      auto mainModule = modules[0].getName();
+      if (mainModule.startsWith("/")) mainModule = mainModule.slice(1);
+
       return Worker::Script::ModulesSource {
-        modules[0].getName(),
+        mainModule,
         [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
           return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
               .compileModules(lock, conf, errorReporter, extensions);
@@ -274,7 +277,9 @@ void WorkerdApiIsolate::compileModules(
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
     for (auto module: conf.getModules()) {
-      auto path = kj::Path::parse(module.getName());
+      auto pathInput = module.getName();
+      if (pathInput.startsWith("/")) pathInput = pathInput.slice(1);
+      auto path = kj::Path::parse(pathInput);
 
       switch (module.which()) {
         case config::Worker::Module::TEXT: {
