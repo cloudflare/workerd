@@ -121,8 +121,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::evictStale(kj::Date now) {
     }
   }
 
-  // Apply backpressure if we're over the soft limit.
-  return getBackpressure();
+  // Attempt to flush if we're over the soft limit of dirty entries.
+  return flushIfNeeded();
 }
 
 kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, bool noCache) {
@@ -166,26 +166,29 @@ void ActorCache::cancelDeferredAlarmDeletion() {
   }
 }
 
-kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
-  if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
+bool ActorCache::checkIfFlushNeeded() {
+  return dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush;
+}
+
+kj::Promise<void> ActorCache::flushWhileOverDirtyLimit() {
+  while (checkIfFlushNeeded()) {
     // Wait for dirty entries to be flushed.
-    return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
-      KJ_IF_SOME(p, getBackpressure()) {
-        return kj::mv(p);
-      } else {
-        return kj::READY_NOW;
-      }
-    });
+    co_await lastFlush.addBranch();
+  }
+}
+
+kj::Maybe<kj::Promise<void>> ActorCache::flushIfNeeded() {
+  if (checkIfFlushNeeded()) {
+    return flushWhileOverDirtyLimit();
   }
 
-  // At one point, we tried applying backpressure if the total cache size was greater than
-  // `softLimit`. This turned out to be a bad idea. If the cache is over the limit due to dirty
-  // entries waiting to be flushed, then `dirtyListByteLimit` will actually kick in first (since
-  // it's by default 8MB of data). So if the cache is over the soft limit (which is typically more
-  // like 16MB), it could only be because a very large read operation has loaded a bunch of entries
-  // into memory but hasn't delivered them to the app yet. In this case, if we apply backpressure,
-  // then the app cannot make progress and therefore cannot receive the result of these reads! So it
-  // will just deadlock.
+  // At one point, we tried flushing if the total cache size was greater than `softLimit`. This
+  // turned out to be a bad idea. If the cache is over the limit due to dirty entries waiting to be
+  // flushed, then `dirtyListByteLimit` will actually kick in first (since it's by default 8MB of
+  // data). So if the cache is over the soft limit (which is typically more like 16MB), it could
+  // only be because a very large read operation has loaded a bunch of entries into memory but
+  // hasn't delivered them to the app yet. In this case, if we flush, then the app cannot make
+  // progress and therefore cannot receive the result of these reads! So it will just deadlock.
   //
   // Hence, it only makes sense to wait for dirty entries to be flushed, not to wait for overall
   // size to go down.
@@ -1786,7 +1789,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(Key key, Value value, WriteOptions 
     putImpl(lock, kj::mv(entry), options, maybeCountedDelete);
     evictOrOomIfNeeded(lock);
   }
-  return getBackpressure();
+  return flushIfNeeded();
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
@@ -1801,7 +1804,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, Writ
     }
     evictOrOomIfNeeded(lock);
   }
-  return getBackpressure();
+  return flushIfNeeded();
 }
 
 kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
@@ -1832,7 +1835,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTi
 
   ensureFlushScheduled(options);
 
-  return getBackpressure();
+  return flushIfNeeded();
 }
 
 kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions options) {
@@ -1852,7 +1855,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
     // fulfiller.
     auto paf = kj::newPromiseAndFulfiller<uint>();
     countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_SOME(p, getBackpressure()) {
+    KJ_IF_SOME(p, flushIfNeeded()) {
       return p.then([promise = kj::mv(paf.promise)]() mutable {
         return promise.then([](uint i) { return i > 0; });
       });
@@ -1863,7 +1866,7 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
     // It looks like there was a pre-existing cache entry for this key, so we already know whether
     // there was a value to delete.
     bool result = countedDelete->countDeleted > 0;
-    KJ_IF_SOME(p, getBackpressure()) {
+    KJ_IF_SOME(p, flushIfNeeded()) {
       return p.then([result]() mutable {
         return result;
       });
@@ -1892,7 +1895,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     // Set up a fulfiller.
     auto paf = kj::newPromiseAndFulfiller<uint>();
     countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_SOME(p, getBackpressure()) {
+    KJ_IF_SOME(p, flushIfNeeded()) {
       return p.then([promise = kj::mv(paf.promise)]() mutable {
         return kj::mv(promise);
       });
@@ -1903,7 +1906,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     // It looks like the count of deletes is fully known based on cache content, so we don't need
     // to wait.
     uint result = countedDelete->countDeleted;
-    KJ_IF_SOME(p, getBackpressure()) {
+    KJ_IF_SOME(p, flushIfNeeded()) {
       return p.then([result]() mutable {
         return result;
       });
@@ -1983,7 +1986,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   }
 
   return DeleteAllResults {
-    .backpressure = getBackpressure(),
+    .backpressure = flushIfNeeded(),
     .count = kj::mv(result)
   };
 }
@@ -2963,7 +2966,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::commit() {
   }
   alarmChange = kj::none;
 
-  return cache.getBackpressure();
+  return cache.flushIfNeeded();
 }
 
 kj::Promise<void> ActorCache::Transaction::rollback() {
