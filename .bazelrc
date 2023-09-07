@@ -2,6 +2,9 @@ common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default
 
+# Enable webgpu
+common --//src/workerd/io:enable_experimental_webgpu=True
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
 build --host_per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'

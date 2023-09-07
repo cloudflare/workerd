@@ -35,6 +35,12 @@
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
 
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
+#include <workerd/api/gpu/gpu.h>
+#else
+#define EW_WEBGPU_ISOLATE_TYPES
+#endif
+
 #if !API_ENCODER_HDRS_ONLY
 
 #define EW_TYPE_GROUP_FOR_EACH(F)                                              \
@@ -64,7 +70,8 @@
   F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                   \
   F("sql", EW_SQL_ISOLATE_TYPES)                                               \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                       \
-  F("node", EW_NODE_ISOLATE_TYPES)
+  F("node", EW_NODE_ISOLATE_TYPES)                                             \
+  F("webgpu", EW_WEBGPU_ISOLATE_TYPES)
 
 namespace workerd::api {
 namespace {
