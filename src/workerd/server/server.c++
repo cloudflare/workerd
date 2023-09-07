@@ -59,7 +59,7 @@ static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
   byte* dataPtr = nullptr;
   long dataLen = 0;
   if (!PEM_read_bio(bio, &namePtr, &headerPtr, &dataPtr, &dataLen)) {
-    return nullptr;
+    return kj::none;
   }
   kj::Array<char> nameArr(namePtr, strlen(namePtr) + 1, disposer);
   KJ_DEFER(OPENSSL_free(headerPtr));
@@ -269,9 +269,9 @@ kj::Promise<kj::Own<kj::NetworkAddress>> Server::makeTlsNetworkAddress(
     kj::Maybe<kj::StringPtr> certificateHost, uint defaultPort) {
   auto context = makeTlsContext(conf);
 
-  KJ_IF_MAYBE(h, certificateHost) {
+  KJ_IF_SOME(h, certificateHost) {
     auto parsed = co_await network.parseAddress(addrStr, defaultPort);
-    co_return context->wrapAddress(kj::mv(parsed), *h).attach(kj::mv(context));
+    co_return context->wrapAddress(kj::mv(parsed), h).attach(kj::mv(context));
   }
 
   // Wrap the `Network` itself so we can use the TLS implementation's `parseAddress()` to extract
@@ -303,12 +303,12 @@ public:
   }
 
   bool hasCfBlobHeader() {
-    return cfBlobHeader != nullptr;
+    return cfBlobHeader != kj::none;
   }
 
   bool needsRewriteRequest() {
     return style == config::HttpOptions::Style::HOST
-        || cfBlobHeader != nullptr
+        || hasCfBlobHeader()
         || !requestInjector.empty();
   }
 
@@ -326,17 +326,17 @@ public:
       auto parsed = kj::Url::parse(url, kj::Url::HTTP_PROXY_REQUEST,
           kj::Url::Options {.percentDecode = false, .allowEmpty = true});
       result.headers->set(kj::HttpHeaderId::HOST, kj::mv(parsed.host));
-      KJ_IF_MAYBE(h, forwardedProtoHeader) {
-        result.headers->set(*h, kj::mv(parsed.scheme));
+      KJ_IF_SOME(h, forwardedProtoHeader) {
+        result.headers->set(h, kj::mv(parsed.scheme));
       }
       url = result.ownUrl = parsed.toString(kj::Url::HTTP_REQUEST);
     }
 
-    KJ_IF_MAYBE(h, cfBlobHeader) {
-      KJ_IF_MAYBE(b, cfBlobJson) {
-        result.headers->set(*h, *b);
+    KJ_IF_SOME(h, cfBlobHeader) {
+      KJ_IF_SOME(b, cfBlobJson) {
+        result.headers->set(h, b);
       } else {
-        result.headers->unset(*h);
+        result.headers->unset(h);
       }
     }
 
@@ -356,10 +356,10 @@ public:
           kj::Url::Options {.percentDecode = false, .allowEmpty = true});
       parsed.host = kj::str(KJ_UNWRAP_OR_RETURN(headers.get(kj::HttpHeaderId::HOST), nullptr));
 
-      KJ_IF_MAYBE(h, forwardedProtoHeader) {
-        KJ_IF_MAYBE(s, headers.get(*h)) {
-          parsed.scheme = kj::str(*s);
-          result.headers->unset(*h);
+      KJ_IF_SOME(h, forwardedProtoHeader) {
+        KJ_IF_SOME(s, headers.get(h)) {
+          parsed.scheme = kj::str(s);
+          result.headers->unset(h);
         }
       }
 
@@ -368,10 +368,10 @@ public:
       url = result.ownUrl = parsed.toString(kj::Url::HTTP_PROXY_REQUEST);
     }
 
-    KJ_IF_MAYBE(h, cfBlobHeader) {
-      KJ_IF_MAYBE(b, headers.get(*h)) {
-        cfBlobJson = kj::str(*b);
-        result.headers->unset(*h);
+    KJ_IF_SOME(h, cfBlobHeader) {
+      KJ_IF_SOME(b, headers.get(h)) {
+        cfBlobJson = kj::str(b);
+        result.headers->unset(h);
       }
     }
 
@@ -410,8 +410,8 @@ private:
 
     void apply(kj::HttpHeaders& headers) {
       for (auto& header: injectedHeaders) {
-        KJ_IF_MAYBE(v, header.value) {
-          headers.set(header.id, *v);
+        KJ_IF_SOME(v, header.value) {
+          headers.set(header.id, v);
         } else {
           headers.unset(header.id);
         }
@@ -464,8 +464,8 @@ public:
         }).fork()) {}
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
-    KJ_IF_MAYBE(a, addr) {
-      co_return co_await a->get()->connect();
+    KJ_IF_SOME(a, addr) {
+      co_return co_await a.get()->connect();
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(addr)->connect();
@@ -473,8 +473,8 @@ public:
   }
 
   kj::Promise<kj::AuthenticatedStream> connectAuthenticated() override {
-    KJ_IF_MAYBE(a, addr) {
-      co_return co_await a->get()->connectAuthenticated();
+    KJ_IF_SOME(a, addr) {
+      co_return co_await a.get()->connectAuthenticated();
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(addr)->connectAuthenticated();
@@ -535,7 +535,7 @@ private:
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
-      KJ_REQUIRE(wrappedResponse == nullptr, "object should only receive one request");
+      KJ_REQUIRE(wrappedResponse == kj::none, "object should only receive one request");
       wrappedResponse = response;
       if (parent.rewriter->needsRewriteRequest()) {
         auto rewrite = parent.rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
@@ -604,9 +604,9 @@ kj::Own<Server::Service> Server::makeExternalService(
   kj::StringPtr addrStr = nullptr;
   kj::String ownAddrStr = nullptr;
 
-  KJ_IF_MAYBE(override, externalOverrides.findEntry(name)) {
-    addrStr = ownAddrStr = kj::mv(override->value);
-    externalOverrides.erase(*override);
+  KJ_IF_SOME(override, externalOverrides.findEntry(name)) {
+    addrStr = ownAddrStr = kj::mv(override.value);
+    externalOverrides.erase(override);
   } else if (conf.hasAddress()) {
     addrStr = conf.getAddress();
   } else {
@@ -763,9 +763,10 @@ private:
 
     bool blockedPath = false;
     kj::Path path = nullptr;
-    KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       path = kj::Path(url.path.releaseAsArray());
     })) {
+      (void)exception; // squash compiler warning about unused var
       // If the Path constructor throws, this path is not valid (e.g. it contains "..").
       blockedPath = true;
     }
@@ -797,8 +798,8 @@ private:
           // TODO(someday): consider supporting multiple ranges with multipart/byteranges
           kj::Maybe<kj::HttpByteRange> range;
           if (method == kj::HttpMethod::GET) {
-            KJ_IF_MAYBE(header, requestHeaders.get(kj::HttpHeaderId::RANGE)) {
-              KJ_SWITCH_ONEOF(kj::tryParseHttpRangeHeader(header->asArray(), meta.size)) {
+            KJ_IF_SOME(header, requestHeaders.get(kj::HttpHeaderId::RANGE)) {
+              KJ_SWITCH_ONEOF(kj::tryParseHttpRangeHeader(header.asArray(), meta.size)) {
                 KJ_CASE_ONEOF(ranges, kj::Array<kj::HttpByteRange>) {
                   KJ_ASSERT(ranges.size() > 0);
                   if (ranges.size() == 1) range = ranges[0];
@@ -830,15 +831,15 @@ private:
             headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
             response.send(200, "OK", headers, meta.size);
             co_return;
-          } else KJ_IF_MAYBE(r, range) {
-            KJ_ASSERT(r->start <= r->end);
-            auto rangeSize = r->end - r->start + 1;
+          } else KJ_IF_SOME(r, range) {
+            KJ_ASSERT(r.start <= r.end);
+            auto rangeSize = r.end - r.start + 1;
             headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(rangeSize));
             headers.set(kj::HttpHeaderId::CONTENT_RANGE,
-              kj::str("bytes ", r->start, "-", r->end, "/", meta.size));
+              kj::str("bytes ", r.start, "-", r.end, "/", meta.size));
             auto out = response.send(206, "Partial Content", headers, rangeSize);
 
-            auto in = kj::heap<kj::FileInputStream>(*file, r->start);
+            auto in = kj::heap<kj::FileInputStream>(*file, r.start);
             co_return co_await in->pumpTo(*out, rangeSize).ignoreResult();
           } else {
             headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
@@ -965,9 +966,9 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(
   kj::StringPtr pathStr = nullptr;
   kj::String ownPathStr;
 
-  KJ_IF_MAYBE(override, directoryOverrides.findEntry(name)) {
-    pathStr = ownPathStr = kj::mv(override->value);
-    directoryOverrides.erase(*override);
+  KJ_IF_SOME(override, directoryOverrides.findEntry(name)) {
+    pathStr = ownPathStr = kj::mv(override.value);
+    directoryOverrides.erase(override);
   } else if (conf.hasPath()) {
     pathStr = conf.getPath();
   } else {
@@ -1051,22 +1052,20 @@ public:
   }
 
   ~InspectorService() {
-    KJ_IF_MAYBE(r, registrar) {
-      r->detach();
+    KJ_IF_SOME(r, registrar) {
+      r.detach();
     }
   }
 
   void invalidateRegistrar() {
-    registrar = nullptr;
+    registrar = kj::none;
   }
 
   kj::Promise<void> handleApplicationError(
       kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
     KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
-    KJ_IF_MAYBE(r, response) {
-      return r->sendError(500, "Internal Server Error", headerTable);
-    } else {
-      return kj::READY_NOW;
+    KJ_IF_SOME(r, response) {
+      co_return co_await r.sendError(500, "Internal Server Error", headerTable);
     }
   }
 
@@ -1084,35 +1083,36 @@ public:
     // actually connect the debug session.
     kj::HttpHeaders responseHeaders(headerTable);
     if (headers.isWebSocket()) {
-      KJ_IF_MAYBE(pos, url.findLast('/')) {
-        auto id = url.slice(*pos + 1);
+      KJ_IF_SOME(pos, url.findLast('/')) {
+        auto id = url.slice(pos + 1);
 
-        KJ_IF_MAYBE(isolate, isolates.find(id)) {
+        KJ_IF_SOME(isolate, isolates.find(id)) {
           // If getting the strong ref doesn't work it means that the Worker::Isolate
           // has already been cleaned up. We use a weak ref here in order to keep from
           // having the Worker::Isolate itself having to know anything at all about the
           // IsolateService and the registration process. So instead of having Isolate
           // explicitly clean up after itself we lazily evaluate the weak ref and clean
           // up when necessary.
-          KJ_IF_MAYBE(ref, (*isolate)->tryAddStrongRef()) {
+          KJ_IF_SOME(ref, isolate->tryAddStrongRef()) {
             // When using --verbose, we'll output some logging to indicate when the
             // inspector client is attached/detached.
             KJ_LOG(INFO, kj::str("Inspector client attaching [", id, "]"));
             auto webSocket = response.acceptWebSocket(responseHeaders);
             kj::Duration timerOffset = 0 * kj::MILLISECONDS;
-            return (*ref)->attachInspector(timer, timerOffset, *webSocket)
-                .attach(kj::mv(webSocket), kj::mv(*ref)).catch_([id=kj::str(id)](kj::Exception&& ex)
-                    -> kj::Promise<void> {
-              if (ex.getType() == kj::Exception::Type::DISCONNECTED) {
+            try {
+              co_return co_await ref->attachInspector(timer, timerOffset, *webSocket);
+            } catch (...) {
+              auto exception = kj::getCaughtExceptionAsKj();
+              if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
                 // This likely just means that the inspector client was closed.
                 // Nothing to do here but move along.
                 KJ_LOG(INFO, kj::str("Inspector client detached [", id, "]"));
-                return kj::READY_NOW;
+                co_return;
               } else {
                 // If it's any other kind of error, propagate it!
-                kj::throwFatalException(kj::mv(ex));
+                kj::throwFatalException(kj::mv(exception));
               }
-            });
+            }
           } else {
             // If we can't get a strong ref to the isolate here, it's been cleaned
             // up. The only thing we're going to do is clean up here and act like
@@ -1122,29 +1122,29 @@ public:
         }
 
         KJ_LOG(INFO, kj::str("Unknown worker session [", id, "]"));
-        return response.sendError(404, "Unknown worker session", responseHeaders);
+        co_return co_await response.sendError(404, "Unknown worker session", responseHeaders);
       }
 
       // No / in url!? That's weird
-      return response.sendError(400, "Invalid request", responseHeaders);
+      co_return co_await response.sendError(400, "Invalid request", responseHeaders);
     }
 
     // If the request is not a WebSocket request, it must be a GET to fetch details
     // about the implementation.
     if (method != kj::HttpMethod::GET) {
-      return response.sendError(501, "Unsupported Operation", responseHeaders);
+      co_return co_await response.sendError(501, "Unsupported Operation", responseHeaders);
     }
 
     if (url.endsWith("/json/version")) {
       responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
       auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
       auto out = response.send(200, "OK", responseHeaders, content.size());
-      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+      co_return co_await out->write(content.begin(), content.size());
     } else if (url.endsWith("/json") || url.endsWith("/json/list")) {
       responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
       auto baseWsUrl = KJ_UNWRAP_OR(headers.get(kj::HttpHeaderId::HOST), {
-        return response.sendError(400, "Bad Request", responseHeaders);
+        co_return co_await response.sendError(400, "Bad Request", responseHeaders);
       });
 
       kj::Vector<kj::String> entries(isolates.size());
@@ -1160,7 +1160,8 @@ public:
         // want to refactor this such thatthe WorkerService holds a handle to the registration
         // as opposed to using this lazy cleanup mechanism. For now, however, this is
         // sufficient.
-        KJ_IF_MAYBE(ref, entry.value->tryAddStrongRef()) {
+        KJ_IF_SOME(ref, entry.value->tryAddStrongRef()) {
+          (void)ref; // squash compiler warning about unused ref
           kj::Vector<kj::String> fields(9);
           fields.add(kj::str("\"id\":\"", entry.key ,"\""));
           fields.add(kj::str("\"title\":\"workerd: worker ", entry.key ,"\""));
@@ -1188,10 +1189,11 @@ public:
       auto content = kj::str('[', kj::strArray(entries, ","), ']');
 
       auto out = response.send(200, "OK", responseHeaders, content.size());
-      return out->write(content.begin(), content.size()).attach(kj::mv(content), kj::mv(out));
+      co_return co_await out->write(content.begin(), content.size()).attach(kj::mv(content),
+                                    kj::mv(out));
     }
 
-    return response.sendError(500, "Not yet implemented", responseHeaders);
+    co_return co_await response.sendError(500, "Not yet implemented", responseHeaders);
   }
 
   kj::Promise<void> listen(kj::Own<kj::ConnectionReceiver> listener) {
@@ -1207,7 +1209,7 @@ public:
     //   drain() requests. (However, our caller does cancel listening on the server port as soon
     //   as we begin draining, since we may want new connections to go to a new instance of the
     //   server.)
-    return server.listenHttp(*listener).attach(kj::mv(listener));
+    co_return co_await server.listenHttp(*listener);
   }
 
   void registerIsolate(kj::StringPtr name, Worker::Isolate* isolate) {
@@ -1295,10 +1297,10 @@ public:
   }
 
   kj::Maybe<ActorNamespace&> getActorNamespace(kj::StringPtr name) {
-    KJ_IF_MAYBE(a, actorNamespaces.find(name)) {
-      return **a;
+    KJ_IF_SOME(a, actorNamespaces.find(name)) {
+      return *a;
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -1308,12 +1310,12 @@ public:
 
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata) override {
-    return startRequest(kj::mv(metadata), nullptr);
+    return startRequest(kj::mv(metadata), kj::none);
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
-    KJ_IF_MAYBE(h, defaultEntrypointHandlers) {
-      return h->contains(handlerName);
+    KJ_IF_SOME(h, defaultEntrypointHandlers) {
+      return h.contains(handlerName);
     } else {
       return false;
     }
@@ -1321,7 +1323,7 @@ public:
 
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
-      kj::Maybe<kj::Own<Worker::Actor>> actor = nullptr) {
+      kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
     return WorkerEntrypoint::construct(
         threadContext,
         kj::atomicAddRef(*worker),
@@ -1333,7 +1335,7 @@ public:
         kj::refcounted<RequestObserver>(),  // default observer makes no observations
         waitUntilTasks,
         true,                      // tunnelExceptions
-        nullptr,                   // workerTracer
+        kj::none,                  // workerTracer
         kj::mv(metadata.cfBlobJson));
   }
 
@@ -1419,8 +1421,8 @@ public:
       }
 
       kj::Promise<void> setAlarm(kj::Maybe<kj::Date> newAlarmTime) override {
-        KJ_IF_MAYBE(scheduledTime, newAlarmTime) {
-          alarmScheduler.setAlarm(actor, *scheduledTime);
+        KJ_IF_SOME(scheduledTime, newAlarmTime) {
+          alarmScheduler.setAlarm(actor, scheduledTime);
         } else {
           alarmScheduler.deleteAlarm(actor);
         }
@@ -1459,12 +1461,12 @@ public:
                   ActorCache::Hooks& hooks) {
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
-              KJ_IF_MAYBE(as, channels.actorStorage) {
+              KJ_IF_SOME(as, channels.actorStorage) {
                 auto sqliteHooks = kj::heap<ActorSqliteHooks>(channels.alarmScheduler, ActorKey{
                   .uniqueKey = d.uniqueKey, .actorId = id
                 });
 
-                auto db = kj::heap<SqliteDatabase>(**as,
+                auto db = kj::heap<SqliteDatabase>(*as,
                     kj::Path({d.uniqueKey, kj::str(id, ".sqlite")}),
                     kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
                 return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
@@ -1494,9 +1496,9 @@ public:
           // work for local development we need to pass an event type.
           static constexpr uint16_t hibernationEventTypeId = 8;
           auto newActor = kj::refcounted<Worker::Actor>(
-              *service.worker, nullptr, kj::str(id), true, kj::mv(makeActorCache),
+              *service.worker, kj::none, kj::str(id), true, kj::mv(makeActorCache),
               className, kj::mv(makeStorage), lock, kj::mv(loopback),
-              timerChannel, kj::refcounted<ActorObserver>(), nullptr, hibernationEventTypeId);
+              timerChannel, kj::refcounted<ActorObserver>(), kj::none, hibernationEventTypeId);
 
           // If the actor becomes broken, remove it from the map, so a new one will be created
           // next time.
@@ -1604,7 +1606,7 @@ private:
                                        SpanParent parentSpan) override {
 
       return kj::heap<CacheHttpClientImpl>(
-          cacheService, cacheNamespaceHeader, nullptr, kj::mv(cfBlobJson), kj::mv(parentSpan));
+          cacheService, cacheNamespaceHeader, kj::none, kj::mv(cfBlobJson), kj::mv(parentSpan));
     }
 
     kj::Own<kj::HttpClient> getNamespace(kj::StringPtr cacheName,
@@ -1633,7 +1635,7 @@ private:
 
     Request request(kj::HttpMethod method, kj::StringPtr url,
                     const kj::HttpHeaders &headers,
-                    kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+                    kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
 
       return client->request(method, url, addCacheNameHeader(headers, cacheName),
                              expectedBodySize);
@@ -1647,8 +1649,8 @@ private:
     kj::HttpHeaders addCacheNameHeader(const kj::HttpHeaders& headers,
                                        kj::Maybe<kj::StringPtr> cacheName) {
       auto headersCopy = headers.cloneShallow();
-      KJ_IF_MAYBE (name, cacheName) {
-        headersCopy.set(cacheNamespaceHeader, *name);
+      KJ_IF_SOME (name, cacheName) {
+        headersCopy.set(cacheNamespaceHeader, name);
       }
 
       return headersCopy;
@@ -1671,7 +1673,7 @@ private:
     auto& context = IoContext::current();
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
-    auto client = context.getHttpClient(channel, true, nullptr, "writeLogfwdr"_kjc);
+    auto client = context.getHttpClient(channel, true, kj::none, "writeLogfwdr"_kjc);
 
     auto urlStr = kj::str("https://fake-host");
 
@@ -1760,7 +1762,7 @@ private:
   kj::Promise<void> limitDrain() override { return kj::NEVER_DONE; }
   kj::Promise<void> limitScheduled() override { return kj::NEVER_DONE; }
   size_t getBufferingLimit() override { return kj::maxValue; }
-  kj::Maybe<EventOutcome> getLimitsExceeded() override { return nullptr; }
+  kj::Maybe<EventOutcome> getLimitsExceeded() override { return kj::none; }
   kj::Promise<void> onLimitsExceeded() override { return kj::NEVER_DONE; }
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
@@ -1797,7 +1799,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
   switch (binding.which()) {
     case config::Worker::Binding::UNSPECIFIED:
       errorReporter.addError(kj::str(errorContext, " does not specify any binding value."));
-      return nullptr;
+      return kj::none;
 
     case config::Worker::Binding::PARAMETER:
       KJ_UNIMPLEMENTED("TODO(beta): parameters");
@@ -1817,7 +1819,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
             errorContext, " is a Wasm binding, but Wasm bindings are not allowed in "
             "modules-based scripts. Use Wasm modules instead."));
       }
-      return nullptr;
+      return kj::none;
 
     case config::Worker::Binding::CRYPTO_KEY: {
       auto keyConf = binding.getCryptoKey();
@@ -1853,13 +1855,13 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
           auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getPkcs8()), {
             errorReporter.addError(kj::str(
                 "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
-            return nullptr;
+            return kj::none;
           });
           if (pem.type != "PRIVATE KEY") {
             errorReporter.addError(kj::str(
                 "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
                 "expected \"PRIVATE KEY\" but got \"", pem.type, "\"."));
-            return nullptr;
+            return kj::none;
           }
           keyGlobal.keyData = kj::mv(pem.data);
           goto validFormat;
@@ -1869,13 +1871,13 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
           auto pem = KJ_UNWRAP_OR(decodePem(keyConf.getSpki()), {
             errorReporter.addError(kj::str(
                 "CryptoKey binding \"", binding.getName(), "\" contained invalid PEM format."));
-            return nullptr;
+            return kj::none;
           });
           if (pem.type != "PUBLIC KEY") {
             errorReporter.addError(kj::str(
                 "CryptoKey binding \"", binding.getName(), "\" contained wrong PEM type, "
                 "expected \"PUBLIC KEY\" but got \"", pem.type, "\"."));
-            return nullptr;
+            return kj::none;
           }
           keyGlobal.keyData = kj::mv(pem.data);
           goto validFormat;
@@ -1888,7 +1890,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       errorReporter.addError(kj::str(
           "Encountered unknown CryptoKey type for binding \"", binding.getName(),
           "\". Was the config compiled with a newer version of the schema?"));
-      return nullptr;
+      return kj::none;
     validFormat:
 
       auto algorithmConf = keyConf.getAlgorithm();
@@ -1905,14 +1907,14 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       errorReporter.addError(kj::str(
           "Encountered unknown CryptoKey algorithm type for binding \"", binding.getName(),
           "\". Was the config compiled with a newer version of the schema?"));
-      return nullptr;
+      return kj::none;
     validAlgorithm:
 
       keyGlobal.extractable = keyConf.getExtractable();
       keyGlobal.usages = KJ_MAP(usage, keyConf.getUsages()) { return kj::str(usage); };
 
       return makeGlobal(kj::mv(keyGlobal));
-      return nullptr;
+      return kj::none;
     }
 
     case config::Worker::Binding::SERVICE: {
@@ -1936,7 +1938,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
           errorReporter.addError(kj::str(
               errorContext, " refers to a service \"", actorBinding.getServiceName(),
               "\", but no such service is defined."));
-          return nullptr;
+          return kj::none;
         });
 
         actorConfig = &KJ_UNWRAP_OR(svcMap.find(actorBinding.getClassName()), {
@@ -1944,7 +1946,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
               errorContext, " refers to a Durable Object namespace named \"",
               actorBinding.getClassName(), "\" in service \"", actorBinding.getServiceName(),
               "\", but no such Durable Object namespace is defined by that service."));
-          return nullptr;
+          return kj::none;
         });
       } else {
           auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(workerName));
@@ -1953,7 +1955,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
               errorContext, " refers to a Durable Object namespace named \"",
               actorBinding.getClassName(), "\", but no such Durable Object namespace is defined "
               "by this Worker."));
-          return nullptr;
+          return kj::none;
         });
       }
 
@@ -1972,7 +1974,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
         }
       }
 
-      return nullptr;
+      return kj::none;
     }
 
     case config::Worker::Binding::KV_NAMESPACE: {
@@ -2017,12 +2019,12 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       auto wrapped = binding.getWrapped();
       kj::Vector<Global> innerGlobals;
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
-        KJ_IF_MAYBE(global, createBinding(workerName, conf, innerBinding,
+        KJ_IF_SOME(global, createBinding(workerName, conf, innerBinding,
             errorReporter, subrequestChannels, actorChannels, actorConfigs, experimental)) {
-          innerGlobals.add(kj::mv(*global));
+          innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
-          return nullptr;
+          return kj::none;
         }
       }
       return makeGlobal(Global::Wrapped {
@@ -2091,9 +2093,9 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
     void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
       kj::HashSet<kj::String>* set;
-      KJ_IF_MAYBE(e, exportName) {
-        set = &namedEntrypoints.findOrCreate(*e,
-            [&]() -> decltype(namedEntrypoints)::Entry { return { kj::str(*e), {} }; });
+      KJ_IF_SOME(e, exportName) {
+        set = &namedEntrypoints.findOrCreate(e,
+            [&]() -> decltype(namedEntrypoints)::Entry { return { kj::str(e), {} }; });
       } else {
         set = &defaultEntrypoint.emplace();
       }
@@ -2160,7 +2162,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
       featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
-  KJ_IF_MAYBE(inspector, inspectorOverride) {
+  if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
@@ -2173,8 +2175,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
-  KJ_IF_MAYBE(isolateRegistrar, inspectorIsolateRegistrar) {
-    (*isolateRegistrar)->registerIsolate(name, isolate.get());
+  KJ_IF_SOME(isolateRegistrar, inspectorIsolateRegistrar) {
+    isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
   auto script = isolate->newScript(
@@ -2188,10 +2190,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   using Global = WorkerdApiIsolate::Global;
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
-    KJ_IF_MAYBE(global, createBinding(name, conf, binding, errorReporter,
+    KJ_IF_SOME(global, createBinding(name, conf, binding, errorReporter,
                                      subrequestChannels, actorChannels, actorConfigs,
                                      experimental)) {
-      globals.add(kj::mv(*global));
+      globals.add(kj::mv(global));
     }
   }
 
@@ -2240,12 +2242,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       if (channel.designator.hasServiceName()) {
         auto& svc = KJ_UNWRAP_OR(this->services.find(channel.designator.getServiceName()), {
           // error was reported earlier
-          return nullptr;
+          return kj::none;
         });
         targetService = dynamic_cast<WorkerService*>(svc.get());
         if (targetService == nullptr) {
           // error was reported earlier
-          return nullptr;
+          return kj::none;
         }
       }
 
@@ -2261,13 +2263,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     auto actorStorageConf = conf.getDurableObjectStorage();
     if (actorStorageConf.isLocalDisk()) {
       kj::StringPtr diskName = actorStorageConf.getLocalDisk();
-      KJ_IF_MAYBE(svc, this->services.find(actorStorageConf.getLocalDisk())) {
-        auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc->get());
+      KJ_IF_SOME(svc, this->services.find(actorStorageConf.getLocalDisk())) {
+        auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc.get());
         if (diskSvc == nullptr) {
           reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
               "to the service \"", diskName, "\", but that service is not a local disk service."));
-        } else KJ_IF_MAYBE(dir, diskSvc->getWritable()) {
-          result.actorStorage = kj::heap<SqliteDatabase::Vfs>(*dir);
+        } else KJ_IF_SOME(dir, diskSvc->getWritable()) {
+          result.actorStorage = kj::heap<SqliteDatabase::Vfs>(dir);
         } else {
           reportConfigError(kj::str("service ", name, ": durableObjectStorage config refers "
               "to the disk service \"", diskName, "\", but that service is defined read-only."));
@@ -2280,10 +2282,10 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
     kj::HashMap<kj::StringPtr, WorkerService::ActorNamespace&> durableNamespacesByUniqueKey;
     for(auto& [className, ns] : workerService.getActorNamespaces()) {
-      KJ_IF_MAYBE(config, ns->getConfig().tryGet<Server::Durable>()) {
+      KJ_IF_SOME(config, ns->getConfig().tryGet<Server::Durable>()) {
         auto& actorNs = ns; // clangd gets confused trying to use ns directly in the capture below??
 
-        alarmScheduler->registerNamespace(config->uniqueKey,
+        alarmScheduler->registerNamespace(config.uniqueKey,
             [&actorNs](kj::String id) -> kj::Own<WorkerInterface> {
           return actorNs->getActor(kj::mv(id), IoChannelFactory::SubrequestMetadata{});
         });
@@ -2349,8 +2351,8 @@ Server::Service& Server::lookupService(
   if (designator.hasEntrypoint()) {
     kj::StringPtr entrypointName = designator.getEntrypoint();
     if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-      KJ_IF_MAYBE(ep, worker->getEntrypoint(entrypointName)) {
-        return *ep;
+      KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName)) {
+        return ep;
       } else {
         reportConfigError(kj::str(
             errorContext, " refers to service \"", targetName, "\" with a named entrypoint \"",
@@ -2391,9 +2393,9 @@ public:
 
         kj::PeerIdentity* peerId;
 
-        KJ_IF_MAYBE(tlsId,
+        KJ_IF_SOME(tlsId,
             kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
-          peerId = &tlsId->getNetworkIdentity();
+          peerId = &tlsId.getNetworkIdentity();
 
           // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
           //   supplies the common name, but that doesn't even seem to be one of the fields that
@@ -2402,19 +2404,19 @@ public:
           peerId = stream.peerIdentity;
         }
 
-        KJ_IF_MAYBE(remote,
+        KJ_IF_SOME(remote,
             kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
-          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote->toString()), "\"}");
-        } else KJ_IF_MAYBE(local,
+          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote.toString()), "\"}");
+        } else KJ_IF_SOME(local,
             kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
-          auto creds = local->getCredentials();
+          auto creds = local.getCredentials();
 
           kj::Vector<kj::String> parts;
-          KJ_IF_MAYBE(p, creds.pid) {
-            parts.add(kj::str("\"clientPid\":", *p));
+          KJ_IF_SOME(p, creds.pid) {
+            parts.add(kj::str("\"clientPid\":", p));
           }
-          KJ_IF_MAYBE(u, creds.uid) {
-            parts.add(kj::str("\"clientUid\":", *u));
+          KJ_IF_SOME(u, creds.uid) {
+            parts.add(kj::str("\"clientUid\":", u));
           }
 
           cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
@@ -2468,7 +2470,7 @@ private:
 
       kj::Own<kj::AsyncOutputStream> send(
           uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
-          kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+          kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
         auto rewrite = headers.cloneShallow();
         rewriter.rewriteResponse(rewrite);
         return inner.send(statusCode, statusText, rewrite, expectedBodySize);
@@ -2500,19 +2502,18 @@ private:
         wrappedResponse = ownResponse = kj::heap<ResponseWrapper>(response, *parent.rewriter);
       }
 
-      if (parent.rewriter->needsRewriteRequest() || cfBlobJson != nullptr) {
+      if (parent.rewriter->needsRewriteRequest() || cfBlobJson != kj::none) {
         auto rewrite = KJ_UNWRAP_OR(
             parent.rewriter->rewriteIncomingRequest(
                 url, parent.physicalProtocol, headers, metadata.cfBlobJson), {
-          return response.sendError(400, "Bad Request", parent.headerTable);
+          co_return co_await response.sendError(400, "Bad Request", parent.headerTable);
         });
         auto worker = parent.service.startRequest(kj::mv(metadata));
-        return worker->request(method, url, *rewrite.headers, requestBody, *wrappedResponse)
-            .attach(kj::mv(rewrite), kj::mv(worker), kj::mv(ownResponse));
+        co_return co_await worker->request(method, url, *rewrite.headers, requestBody,
+                                           *wrappedResponse);
       } else {
         auto worker = parent.service.startRequest(kj::mv(metadata));
-        return worker->request(method, url, headers, requestBody, *wrappedResponse)
-            .attach(kj::mv(worker), kj::mv(ownResponse));
+        co_return co_await worker->request(method, url, headers, requestBody, *wrappedResponse);
       }
     }
 
@@ -2522,10 +2523,8 @@ private:
     kj::Promise<void> handleApplicationError(
         kj::Exception exception, kj::Maybe<kj::HttpService::Response&> response) override {
       KJ_LOG(ERROR, kj::str("Uncaught exception: ", exception));
-      KJ_IF_MAYBE(r, response) {
-        return r->sendError(500, "Internal Server Error", parent.headerTable);
-      } else {
-        return kj::READY_NOW;
+      KJ_IF_SOME(r, response) {
+        co_return co_await r.sendError(500, "Internal Server Error", parent.headerTable);
       }
     }
   };
@@ -2537,7 +2536,7 @@ kj::Promise<void> Server::listenHttp(
   auto obj = kj::refcounted<HttpListener>(*this, kj::mv(listener), service,
                                           physicalProtocol, kj::mv(rewriter),
                                           globalContext->headerTable, timer);
-  return obj->run().attach(kj::mv(obj));
+  co_return co_await obj->run();
 }
 
 // =======================================================================================
@@ -2572,7 +2571,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
   // services take longer to get ready.
   auto ownHeaderTable = headerTableBuilder.build();
 
-  return listenPromise.exclusiveJoin(kj::mv(fatalPromise)).attach(kj::mv(ownHeaderTable));
+  co_return co_await listenPromise.exclusiveJoin(kj::mv(fatalPromise));
 }
 
 void Server::startAlarmScheduler(config::Config::Reader config) {
@@ -2703,13 +2702,13 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
-  KJ_IF_MAYBE(inspectorAddress, inspectorOverride) {
+  KJ_IF_SOME(inspectorAddress, inspectorOverride) {
     auto registrar = kj::heap<InspectorServiceIsolateRegistrar>();
-    auto port = startInspector(*inspectorAddress, *registrar);
-    KJ_IF_MAYBE(stream, controlOverride) {
+    auto port = startInspector(inspectorAddress, *registrar);
+    KJ_IF_SOME(stream, controlOverride) {
       auto message = kj::str("{\"event\":\"listen-inspector\",\"port\":\"", port, "}\n");
       try {
-        (*stream)->write(message.begin(), message.size());
+        stream->write(message.begin(), message.size());
       } catch (kj::Exception& e) {
         KJ_LOG(ERROR, e);
       }
@@ -2770,8 +2769,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 
     Service& service = lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
 
-    KJ_IF_MAYBE(override, socketOverrides.findEntry(name)) {
-      KJ_SWITCH_ONEOF(override->value) {
+    KJ_IF_SOME(override, socketOverrides.findEntry(name)) {
+      KJ_SWITCH_ONEOF(override.value) {
         KJ_CASE_ONEOF(str, kj::String) {
           addrStr = ownAddrStr = kj::mv(str);
           break;
@@ -2781,7 +2780,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
           break;
         }
       }
-      socketOverrides.erase(*override);
+      socketOverrides.erase(override);
     } else if (sock.hasAddress()) {
       addrStr = sock.getAddress();
     } else {
@@ -2818,8 +2817,8 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   validSocket:
     using PromisedReceived = kj::Promise<kj::Own<kj::ConnectionReceiver>>;
     PromisedReceived listener = nullptr;
-    KJ_IF_MAYBE(l, listenerOverride) {
-      listener = kj::mv(*l);
+    KJ_IF_SOME(l, listenerOverride) {
+      listener = kj::mv(l);
     } else {
       listener = ([](kj::Promise<kj::Own<kj::NetworkAddress>> promise) -> PromisedReceived {
         auto parsed = co_await promise;
@@ -2827,13 +2826,13 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       })(network.parseAddress(addrStr, defaultPort));
     }
 
-    KJ_IF_MAYBE(t, tls) {
+    KJ_IF_SOME(t, tls) {
       listener = ([](kj::Promise<kj::Own<kj::ConnectionReceiver>> promise,
                      kj::Own<kj::TlsContext> tls)
           -> PromisedReceived {
         auto port = co_await promise;
         co_return tls->wrapPort(kj::mv(port)).attach(kj::mv(tls));
-      })(kj::mv(listener), kj::mv(*t));
+      })(kj::mv(listener), kj::mv(t));
     }
 
     // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
@@ -2845,10 +2844,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
             mutable -> kj::Promise<void> {
       auto listener = co_await promise;
-      KJ_IF_MAYBE(stream, controlOverride) {
+      KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
         try {
-          (*stream)->write(message.begin(), message.size());
+          stream->write(message.begin(), message.size());
         } catch (kj::Exception& e) {
           KJ_LOG(ERROR, e);
         }
