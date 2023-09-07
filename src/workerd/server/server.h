@@ -142,6 +142,11 @@ private:
   // Reports an exception thrown by a task in `tasks`.
   void taskFailed(kj::Exception&& exception) override;
 
+  // Tell all HttpServers to drain once the drainWhen promise resolves.
+  // This causes them to disconnect any connections that do not have a
+  // request in flight.
+  kj::Promise<void> handleDrain(kj::Promise<void> drainWhen);
+
   kj::Own<kj::TlsContext> makeTlsContext(config::TlsOptions::Reader conf);
   kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(
       config::TlsOptions::Reader conf, kj::StringPtr addrStr,
