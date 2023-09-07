@@ -781,11 +781,11 @@ private:
 
     if (method == kj::HttpMethod::GET || method == kj::HttpMethod::HEAD) {
       if (blockedPath) {
-        return response.sendError(404, "Not Found", headerTable);
+        co_return co_await response.sendError(404, "Not Found", headerTable);
       }
 
       auto file = KJ_UNWRAP_OR(readable->tryOpenFile(path), {
-        return response.sendError(404, "Not Found", headerTable);
+        co_return co_await response.sendError(404, "Not Found", headerTable);
       });
 
       auto meta = file->stat();
@@ -807,7 +807,7 @@ private:
                 KJ_CASE_ONEOF(_, kj::HttpUnsatisfiableRange) {
                   kj::HttpHeaders headers(headerTable);
                   headers.set(kj::HttpHeaderId::CONTENT_RANGE, kj::str("bytes */", meta.size));
-                  return response.sendError(416, "Range Not Satisfiable", headers);
+                  co_return co_await response.sendError(416, "Range Not Satisfiable", headers);
                 }
               }
             }
@@ -829,7 +829,7 @@ private:
           if (method == kj::HttpMethod::HEAD) {
             headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
             response.send(200, "OK", headers, meta.size);
-            return kj::READY_NOW;
+            co_return;
           } else KJ_IF_MAYBE(r, range) {
             KJ_ASSERT(r->start <= r->end);
             auto rangeSize = r->end - r->start + 1;
@@ -839,17 +839,13 @@ private:
             auto out = response.send(206, "Partial Content", headers, rangeSize);
 
             auto in = kj::heap<kj::FileInputStream>(*file, r->start);
-            return in->pumpTo(*out, rangeSize)
-                .ignoreResult()
-                .attach(kj::mv(in), kj::mv(out), kj::mv(file));
+            co_return co_await in->pumpTo(*out, rangeSize).ignoreResult();
           } else {
             headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(meta.size));
             auto out = response.send(200, "OK", headers, meta.size);
 
             auto in = kj::heap<kj::FileInputStream>(*file);
-            return in->pumpTo(*out, meta.size)
-                .ignoreResult()
-                .attach(kj::mv(in), kj::mv(out), kj::mv(file));
+            co_return co_await in->pumpTo(*out, meta.size).ignoreResult();
           }
         }
         case kj::FsNode::Type::DIRECTORY: {
@@ -866,7 +862,7 @@ private:
           auto out = response.send(200, "OK", headers);
 
           if (method == kj::HttpMethod::HEAD) {
-            return kj::READY_NOW;
+            co_return;
           } else {
             auto entries = dir->listEntries();
             kj::Vector<kj::String> jsonEntries(entries.size());
@@ -894,39 +890,38 @@ private:
 
             auto content = kj::str('[', kj::strArray(jsonEntries, ","), ']');
 
-            return out->write(content.begin(), content.size())
-                .attach(kj::mv(content), kj::mv(out));
+            co_return co_await out->write(content.begin(), content.size());
           }
         }
         default:
-          return response.sendError(406, "Not Acceptable", headerTable);
+          co_return co_await response.sendError(406, "Not Acceptable", headerTable);
       }
     } else if (method == kj::HttpMethod::PUT) {
       auto& w = KJ_UNWRAP_OR(writable, {
-        return response.sendError(405, "Method Not Allowed", headerTable);
+        co_return co_await response.sendError(405, "Method Not Allowed", headerTable);
       });
 
       if (blockedPath || path.size() == 0) {
-        return response.sendError(403, "Unauthorized", headerTable);
+        co_return co_await response.sendError(403, "Unauthorized", headerTable);
       }
 
       auto replacer = w.replaceFile(path,
           kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
       auto stream = kj::heap<kj::FileOutputStream>(replacer->get());
 
-      return requestBody.pumpTo(*stream).attach(kj::mv(stream))
-          .then([this, replacer = kj::mv(replacer), &response](uint64_t) mutable {
-        replacer->commit();
-        kj::HttpHeaders headers(headerTable);
-        response.send(204, "No Content", headers);
-      });
+      co_await requestBody.pumpTo(*stream);
+
+      replacer->commit();
+      kj::HttpHeaders headers(headerTable);
+      response.send(204, "No Content", headers);
+      co_return;
     } else if (method == kj::HttpMethod::DELETE) {
       auto& w = KJ_UNWRAP_OR(writable, {
-        return response.sendError(405, "Method Not Allowed", headerTable);
+        co_return co_await response.sendError(405, "Method Not Allowed", headerTable);
       });
 
       if (blockedPath || path.size() == 0) {
-        return response.sendError(403, "Unauthorized", headerTable);
+        co_return co_await response.sendError(403, "Unauthorized", headerTable);
       }
 
       auto found = w.tryRemove(path);
@@ -934,12 +929,12 @@ private:
       kj::HttpHeaders headers(headerTable);
       if (found) {
         response.send(204, "No Content", headers);
-        return kj::READY_NOW;
+        co_return;
       } else {
-        return response.sendError(404, "Not Found", headers);
+        co_return co_await response.sendError(404, "Not Found", headers);
       }
     } else {
-      return response.sendError(501, "Not Implemented", headerTable);
+      co_return co_await response.sendError(501, "Not Implemented", headerTable);
     }
   }
 
@@ -1368,12 +1363,8 @@ public:
 
     kj::Own<WorkerInterface> getActor(kj::String id,
         IoChannelFactory::SubrequestMetadata metadata) {
-      auto promise = getActorImpl(kj::mv(id))
-          .then([this, metadata = kj::mv(metadata)](kj::Own<Worker::Actor> actor) mutable {
-        return service.startRequest(kj::mv(metadata), className, kj::mv(actor));
-      });
-
-      return newPromisedWorkerInterface(service.waitUntilTasks, kj::mv(promise));
+      return newPromisedWorkerInterface(service.waitUntilTasks,
+          getActorThenStartRequest(kj::mv(id), kj::mv(metadata)));
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
@@ -1386,6 +1377,13 @@ public:
     const ActorConfig& config;
     kj::HashMap<kj::String, kj::Own<Worker::Actor>> actors;
     kj::TaskSet onBrokenTasks;
+
+    kj::Promise<kj::Own<WorkerInterface>> getActorThenStartRequest(
+        kj::String id,
+        IoChannelFactory::SubrequestMetadata metadata) {
+      kj::Own<Worker::Actor> actor = co_await getActorImpl(kj::mv(id));
+      co_return service.startRequest(kj::mv(metadata), className, kj::mv(actor));
+    }
 
     // Error from `actors.erase()`?
     void taskFailed(kj::Exception&& exception) override {
@@ -1502,11 +1500,7 @@ public:
 
           // If the actor becomes broken, remove it from the map, so a new one will be created
           // next time.
-          onBrokenTasks.add(newActor->onBroken()
-              .catch_([](kj::Exception&&) {})
-              .then([this, id = id.asPtr(), &actor = *newActor]() {
-            actors.erase(id);
-          }));
+          onBrokenTasks.add(onActorBroken(newActor->onBroken(), id.asPtr()));
 
           // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
           //   a minute of inactivity...
@@ -1517,6 +1511,18 @@ public:
 
         return kj::mv(actor);
       });
+    }
+
+    kj::Promise<void> onActorBroken(kj::Promise<void> broken, kj::StringPtr id) {
+      try {
+        // It's possible for this to never resolve if the actor never breaks,
+        // in which case the returned promise will just be canceled.
+        co_await broken;
+      } catch (...) {
+        // We are intentionally ignoring any errors here. We just want to ensure
+        // that the actor is removed if the onBroken promise is resolved or errors.
+      }
+      actors.erase(id);
     }
   };
 
@@ -2537,6 +2543,15 @@ kj::Promise<void> Server::listenHttp(
 // =======================================================================================
 // Server::run()
 
+kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
+  co_await drainWhen;
+  // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
+  // have a request in-flight.
+  for (auto& httpServer: httpServers) {
+    httpServer.httpServer.drain();
+  }
+}
+
 kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config,
                               kj::Promise<void> drainWhen) {
   kj::HttpHeaderTable::Builder headerTableBuilder;
@@ -2546,14 +2561,7 @@ kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader co
   auto [ fatalPromise, fatalFulfiller ] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
 
-  auto forkedDrainWhen = drainWhen
-      .then([this]() mutable {
-    // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
-    // have a request in-flight.
-    for (auto& httpServer: httpServers) {
-      httpServer.httpServer.drain();
-    }
-  }).fork();
+  auto forkedDrainWhen = handleDrain(kj::mv(drainWhen)).fork();
 
   startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
