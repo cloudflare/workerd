@@ -291,7 +291,7 @@ kj::Maybe<IcuDecoder> IcuDecoder::create(Encoding encoding, bool fatal, bool ign
   if (fatal) {
     status = U_ZERO_ERROR;
     ucnv_setToUCallBack(inner, UCNV_TO_U_CALLBACK_STOP, nullptr, nullptr, nullptr, &status);
-    if (U_FAILURE(status)) return nullptr;
+    if (U_FAILURE(status)) return kj::none;
   }
 
   return IcuDecoder(encoding, inner, ignoreBom);
@@ -381,7 +381,7 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
       flush,
       &status);
 
-  if (U_FAILURE(status)) return nullptr;
+  if (U_FAILURE(status)) return kj::none;
 
   auto omitInitialBom = false;
   auto length = std::distance(result.begin(), dest);
@@ -423,13 +423,13 @@ TextDecoder::constructor(jsg::Optional<kj::String> maybeLabel,
     return kj::str("\"", label, "\" is not a valid encoding.");
   };
 
-  KJ_IF_MAYBE(label, maybeLabel) {
-    encoding = getEncodingForLabel(*label);
+  KJ_IF_SOME(label, maybeLabel) {
+    encoding = getEncodingForLabel(label);
     JSG_REQUIRE(encoding != Encoding::Replacement &&
                  encoding != Encoding::X_User_Defined &&
                  encoding != Encoding::INVALID,
                  RangeError,
-                 errorMessage(*label));
+                 errorMessage(label));
   }
 
   if (encoding == Encoding::Windows_1252) {
