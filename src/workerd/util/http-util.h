@@ -13,11 +13,12 @@ namespace workerd {
 template<typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
   req.body = req.body.attach(kj::addRef(*rcAttachment));
-  req.response = req.response
-      .then([rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
+  req.response = ([](auto promise, T&& rcAttachment) mutable
+      -> kj::Promise<kj::HttpClient::Response> {
+    kj::HttpClient::Response response = co_await promise;
     response.body = response.body.attach(kj::mv(rcAttachment));
-    return kj::mv(response);
-  });
+    co_return kj::mv(response);
+  })(kj::mv(req.response), kj::mv(rcAttachment));
   return req;
 }
 
@@ -26,18 +27,16 @@ kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttac
 template<typename T>
 kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
     kj::Promise<kj::HttpClient::WebSocketResponse> promise, T&& attachment) {
-  return promise.then([attachment = kj::mv(attachment)](
-      kj::HttpClient::WebSocketResponse&& response) mutable {
-    KJ_SWITCH_ONEOF(response.webSocketOrBody) {
-      KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncInputStream>) {
-        response.webSocketOrBody = stream.attach(kj::mv(attachment));
-      }
-      KJ_CASE_ONEOF(ws, kj::Own<kj::WebSocket>) {
-        response.webSocketOrBody = ws.attach(kj::mv(attachment));
-      }
+  kj::HttpClient::WebSocketResponse&& response = co_await promise;
+  KJ_SWITCH_ONEOF(response.webSocketOrBody) {
+    KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncInputStream>) {
+      response.webSocketOrBody = stream.attach(kj::mv(attachment));
     }
-    return kj::mv(response);
-  });
+    KJ_CASE_ONEOF(ws, kj::Own<kj::WebSocket>) {
+      response.webSocketOrBody = ws.attach(kj::mv(attachment));
+    }
+  }
+  co_return kj::mv(response);
 }
 
 }  // namespace workerd
