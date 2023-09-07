@@ -65,16 +65,16 @@ EventTarget::~EventTarget() noexcept(false) {
   // let's go ahead and detach those.
   for (auto& entry : typeMap) {
     for (auto& handler : entry.value.handlers) {
-      KJ_IF_MAYBE(native, handler.handler.tryGet<EventHandler::NativeHandlerRef>()) {
-        native->handler.detach();
+      KJ_IF_SOME(native, handler.handler.tryGet<EventHandler::NativeHandlerRef>()) {
+        native.handler.detach();
       }
     }
   }
 }
 
 size_t EventTarget::getHandlerCount(kj::StringPtr type) const {
-  KJ_IF_MAYBE(handlerSet, typeMap.find(type)) {
-    return handlerSet->handlers.size();
+  KJ_IF_SOME(handlerSet, typeMap.find(type)) {
+    return handlerSet.handlers.size();
   } else {
     return 0;
   }
@@ -112,8 +112,8 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
 
     bool once = false;
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
-    KJ_IF_MAYBE(value, maybeOptions) {
-      KJ_SWITCH_ONEOF(*value) {
+    KJ_IF_SOME(value, maybeOptions) {
+      KJ_SWITCH_ONEOF(value) {
         KJ_CASE_ONEOF(b, bool) {
           JSG_REQUIRE(!b, TypeError, "addEventListener(): useCapture must be false.");
         }
@@ -127,10 +127,10 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
         }
       }
     }
-    KJ_IF_MAYBE(signal, maybeSignal) {
+    KJ_IF_SOME(signal, maybeSignal) {
       // If the AbortSignal has already been triggered, then we need to stop here.
       // Return without adding the event listener.
-      if ((*signal)->getAborted()) {
+      if (signal->getAborted()) {
         return;
       }
     }
@@ -164,8 +164,8 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
 void EventTarget::removeEventListener(jsg::Lock& js, kj::String type,
                                       jsg::HashableV8Ref<v8::Object> handler,
                                       jsg::Optional<EventListenerOpts> maybeOptions) {
-  KJ_IF_MAYBE(value, maybeOptions) {
-    KJ_SWITCH_ONEOF(*value) {
+  KJ_IF_SOME(value, maybeOptions) {
+    KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(b, bool) {
         JSG_REQUIRE(!b, TypeError, "removeEventListener(): useCapture must be false.");
       }
@@ -177,8 +177,8 @@ void EventTarget::removeEventListener(jsg::Lock& js, kj::String type,
   }
 
   js.withinHandleScope([&] {
-    KJ_IF_MAYBE(handlerSet, typeMap.find(type)) {
-      handlerSet->handlers.eraseMatch(handler);
+    KJ_IF_SOME(handlerSet, typeMap.find(type)) {
+      handlerSet.handlers.eraseMatch(handler);
     }
   });
 }
@@ -197,8 +197,8 @@ void EventTarget::addNativeListener(jsg::Lock& js, NativeHandler& handler) {
 }
 
 bool EventTarget::removeNativeListener(EventTarget::NativeHandler& handler) {
-  KJ_IF_MAYBE(handlerSet, typeMap.find(handler.type)) {
-    return handlerSet->handlers.eraseMatch(handler);
+  KJ_IF_SOME(handlerSet, typeMap.find(handler.type)) {
+    return handlerSet.handlers.eraseMatch(handler);
   }
   return false;
 }
@@ -227,13 +227,13 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
 
     // Check if there is an `on<event>` property on this object. If so, we treat that as an event
     // handler, in addition to the ones registered with addEventListener().
-    KJ_IF_MAYBE(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
+    KJ_IF_SOME(onProp, onEvents.get(js, kj::str("on", event->getType()))) {
       // If the on-event is not a function, we silently ignore it rather than raise an error.
-      KJ_IF_MAYBE(cb, onProp->tryGet<HandlerFunction>()) {
+      KJ_IF_SOME(cb, onProp.tryGet<HandlerFunction>()) {
         callbacks.add(Callback {
           .handler = EventHandler::JavaScriptHandler {
             .identity = nullptr,  // won't be used below if oldStyle is true and once is false
-            .callback = kj::mv(*cb),
+            .callback = kj::mv(cb),
           },
           .oldStyle = true,
         });
@@ -241,8 +241,8 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
     }
 
     auto maybeHandlerSet = typeMap.find(event->getType());
-    KJ_IF_MAYBE(handlerSet, maybeHandlerSet) {
-      for (auto& handler: handlerSet->handlers.ordered<kj::InsertionOrderIndex>()) {
+    KJ_IF_SOME(handlerSet, maybeHandlerSet) {
+      for (auto& handler: handlerSet.handlers.ordered<kj::InsertionOrderIndex>()) {
         KJ_SWITCH_ONEOF(handler.handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
             callbacks.add(Callback {
@@ -274,10 +274,10 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       auto& handlerSet = KJ_ASSERT_NONNULL(maybeHandlerSet);
       KJ_SWITCH_ONEOF(handler) {
         KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-          return handlerSet.handlers.find(js.identity) == nullptr;
+          return handlerSet.handlers.find(js.identity) == kj::none;
         }
         KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          return handlerSet.handlers.find(native.handler) == nullptr;
+          return handlerSet.handlers.find(native.handler) == kj::none;
         }
       }
       KJ_UNREACHABLE;
@@ -329,10 +329,10 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
           //   consistency, we should probably trigger fallback behavior if any handler throws, so
           //   again it doesn't matter. For other types of handlers, e.g. WebSocket 'message', it's
           //   not clear why one would ever register multiple handlers.
-          if (warnOnHandlerReturn) KJ_IF_MAYBE(r, ret) {
+          if (warnOnHandlerReturn) KJ_IF_SOME(r, ret) {
             warnOnHandlerReturn = false;
             // To help make debugging easier, let's tailor the warning a bit if it was a promise.
-            auto handle = r->getHandle(js);
+            auto handle = r.getHandle(js);
             if (handle->IsPromise()) {
               js.logWarning(
                   kj::str("An event handler returned a promise that will be ignored. Event handlers "
@@ -362,8 +362,8 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
 kj::Exception AbortSignal::abortException(
     jsg::Lock& js,
     jsg::Optional<jsg::JsValue> maybeReason) {
-  KJ_IF_MAYBE(reason, maybeReason) {
-    return js.exceptionToKj(*reason);
+  KJ_IF_SOME(reason, maybeReason) {
+    return js.exceptionToKj(reason);
   }
 
   return JSG_KJ_EXCEPTION(DISCONNECTED, DOMAbortError, "The operation was aborted");
@@ -373,16 +373,16 @@ jsg::Ref<AbortSignal> AbortSignal::abort(
     jsg::Lock& js,
     jsg::Optional<jsg::JsValue> maybeReason) {
   auto exception = abortException(js, maybeReason);
-  KJ_IF_MAYBE(reason, maybeReason) {
-    return jsg::alloc<AbortSignal>(kj::mv(exception), reason->addRef(js));
+  KJ_IF_SOME(reason, maybeReason) {
+    return jsg::alloc<AbortSignal>(kj::mv(exception), reason.addRef(js));
   }
   return jsg::alloc<AbortSignal>(kj::cp(exception), js.exceptionToJsValue(kj::mv(exception)));
 }
 
 void AbortSignal::throwIfAborted(jsg::Lock& js) {
   if (canceler->isCanceled()) {
-    KJ_IF_MAYBE(r, reason) {
-      js.throwException(r->getHandle(js));
+    KJ_IF_SOME(r, reason) {
+      js.throwException(r.getHandle(js));
     } else {
       js.throwException(abortException(js));
     }
@@ -478,8 +478,8 @@ void AbortSignal::triggerAbort(
     return;
   }
   auto exception = AbortSignal::abortException(js, maybeReason);
-  KJ_IF_MAYBE(r, maybeReason) {
-    reason = r->addRef(js);
+  KJ_IF_SOME(r, maybeReason) {
+    reason = r.addRef(js);
   } else {
     reason = js.exceptionToJsValue(kj::mv(exception));
   }
@@ -521,10 +521,10 @@ kj::Promise<void> Scheduler::wait(
     jsg::Lock& js,
     double delay,
     jsg::Optional<WaitOptions> maybeOptions) {
-  KJ_IF_MAYBE(options, maybeOptions) {
-    KJ_IF_MAYBE(s, options->signal) {
-      if ((*s)->getAborted()) {
-        return js.exceptionToKj((*s)->getReason(js));
+  KJ_IF_SOME(options, maybeOptions) {
+    KJ_IF_SOME(s, options.signal) {
+      if (s->getAborted()) {
+        return js.exceptionToKj(s->getReason(js));
       }
     }
   }
@@ -546,9 +546,9 @@ kj::Promise<void> Scheduler::wait(
 
   auto promise = kj::mv(paf.promise);
 
-  KJ_IF_MAYBE(options, maybeOptions) {
-    KJ_IF_MAYBE(s, options->signal) {
-      promise = (*s)->wrap(kj::mv(promise));
+  KJ_IF_SOME(options, maybeOptions) {
+    KJ_IF_SOME(s, options.signal) {
+      promise = s->wrap(kj::mv(promise));
     }
   }
 
