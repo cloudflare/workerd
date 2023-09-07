@@ -62,7 +62,7 @@ kj::Maybe<uint16_t> defaultPortForScheme(jsg::UsvStringPtr scheme) {
   if (scheme == getCommonStrings().SCHEME_FTP) return 21;
   if (scheme == getCommonStrings().SCHEME_WS) return 80;
   if (scheme == getCommonStrings().SCHEME_WSS) return 443;
-  return nullptr;
+  return kj::none;
 }
 
 static kj::Maybe<jsg::UsvString> domainToAscii(jsg::UsvStringPtr input) {
@@ -73,7 +73,7 @@ static kj::Maybe<jsg::UsvString> domainToAscii(jsg::UsvStringPtr input) {
       UIDNA_NONTRANSITIONAL_TO_ASCII;
 
   UIDNA* uidna = uidna_openUTS46(options, &status);
-  if (U_FAILURE(status)) return nullptr;
+  if (U_FAILURE(status)) return kj::none;
   KJ_DEFER(uidna_close(uidna));
   UIDNAInfo info = UIDNA_INFO_INITIALIZER;
 
@@ -87,7 +87,7 @@ static kj::Maybe<jsg::UsvString> domainToAscii(jsg::UsvStringPtr input) {
       storage.size(),
       nullptr, 0, &info, &status);
 
-  if (len == 0) return nullptr;
+  if (len == 0) return kj::none;
 
   if (status == U_BUFFER_OVERFLOW_ERROR) {
     status = U_ZERO_ERROR;
@@ -127,7 +127,7 @@ static kj::Maybe<jsg::UsvString> domainToAscii(jsg::UsvStringPtr input) {
 
     if (U_FAILURE(status) || info.errors != 0) {
       // Failed!
-      return nullptr;
+      return kj::none;
     }
 
     return jsg::usv(kj::mv(dest));
@@ -135,7 +135,7 @@ static kj::Maybe<jsg::UsvString> domainToAscii(jsg::UsvStringPtr input) {
 
   // If we get here, then we errored during pre-flight.
   KJ_ASSERT(U_FAILURE(status));
-  return nullptr;
+  return kj::none;
 }
 
 struct UrlRecordBuilder {
@@ -453,9 +453,9 @@ jsg::UsvString percentDecode(jsg::UsvStringPtr input) {
 UrlRecord handleConstructorParse(
     jsg::UsvStringPtr url,
     jsg::Optional<jsg::UsvStringPtr> maybeBase) {
-  KJ_IF_MAYBE(base, maybeBase) {
+  KJ_IF_SOME(base, maybeBase) {
     UrlRecord baseRecord =
-        JSG_REQUIRE_NONNULL(URL::parse(*base), TypeError, "Invalid base URL string.");
+        JSG_REQUIRE_NONNULL(URL::parse(base), TypeError, "Invalid base URL string.");
     return JSG_REQUIRE_NONNULL(URL::parse(url, baseRecord), TypeError, "Invalid URL string.");
   }
   return JSG_REQUIRE_NONNULL(URL::parse(url), TypeError, "Invalid URL string.");
@@ -463,8 +463,8 @@ UrlRecord handleConstructorParse(
 
 bool cannotHaveUsernamePasswordOrPort(UrlRecord& record) {
   if (record.scheme == getCommonStrings().SCHEME_FILE) return true;
-  KJ_IF_MAYBE(host, record.host) {
-    return *host == getCommonStrings().EMPTY_STRING;
+  KJ_IF_SOME(host, record.host) {
+    return host == getCommonStrings().EMPTY_STRING;
   }
   return true;
 }
@@ -526,7 +526,7 @@ jsg::UsvString UrlRecord::getHref(GetHrefOption option) {
   jsg::UsvStringBuilder builder(255);
   builder.addAll(scheme);
   builder.add(':');
-  KJ_IF_MAYBE(h, host) {
+  KJ_IF_SOME(h, host) {
     builder.add('/', '/');
     if (!username.empty() || !password.empty()) {
       builder.addAll(username);
@@ -536,27 +536,27 @@ jsg::UsvString UrlRecord::getHref(GetHrefOption option) {
       }
       builder.add('@');
     }
-    builder.addAll(*h);
-    KJ_IF_MAYBE(p, port) {
+    builder.addAll(h);
+    KJ_IF_SOME(p, port) {
       builder.add(':');
-      builder.addAll(kj::toCharSequence(*p));
+      builder.addAll(kj::toCharSequence(p));
     }
   } else {
-    KJ_IF_MAYBE(segments, path.tryGet<kj::Array<jsg::UsvString>>()) {
-      if (segments->size() > 1 && (*segments)[0].empty()) {
+    KJ_IF_SOME(segments, path.tryGet<kj::Array<jsg::UsvString>>()) {
+      if (segments.size() > 1 && segments[0].empty()) {
         builder.add('/', '.');
       }
     }
   }
   builder.addAll(getPathname());
-  KJ_IF_MAYBE(q, query) {
+  KJ_IF_SOME(q, query) {
     builder.add('?');
-    builder.addAll(*q);
+    builder.addAll(q);
   }
   if (option != GetHrefOption::EXCLUDE_FRAGMENT) {
-    KJ_IF_MAYBE(f, fragment) {
+    KJ_IF_SOME(f, fragment) {
       builder.add('#');
-      builder.addAll(*f);
+      builder.addAll(f);
     }
   }
   return builder.finish();
@@ -623,7 +623,7 @@ kj::Maybe<UrlRecord> URL::parse(
 
     // If the existing URL record is not provided, we trim off leading and
     // trailing whitespace... otherwise we leave it.
-    if (maybeRecord == nullptr) {
+    if (maybeRecord == kj::none) {
       while (start && isControlOrSpaceCodepoint(*start)) { ++start; }
       while (end && end > start && isControlOrSpaceCodepoint(*end)) { --end; }
 
@@ -702,7 +702,7 @@ kj::Maybe<UrlRecord> URL::parse(
       if (pieces[n] == 0) {
         if (!prevWasZero) {
           // We're starting a new span.
-          if (maybeIndex == nullptr) maybeIndex = n;
+          if (maybeIndex == kj::none) maybeIndex = n;
           prevWasZero = true;
           currentIndex = n;
           count = 1;
@@ -725,7 +725,7 @@ kj::Maybe<UrlRecord> URL::parse(
       maybeIndex = currentIndex;
       prevCount = count;
     }
-    return prevCount > 1 ? maybeIndex : nullptr;
+    return prevCount > 1 ? maybeIndex : kj::none;
   };
 
   const auto ipv6Parse =
@@ -738,7 +738,7 @@ kj::Maybe<UrlRecord> URL::parse(
     auto str = input.toStr();
 
     auto ret = inet_pton(AF_INET6, str.begin(), buf);
-    if (ret != 1) return nullptr;
+    if (ret != 1) return kj::none;
     for (int i = 0; i < 16; i += 2) {
       pieces[i >> 1] = (buf[i] << 8) | buf[i + 1];
     }
@@ -754,8 +754,8 @@ kj::Maybe<UrlRecord> URL::parse(
       } else if (ignore0) {
         ignore0 = false;
       }
-      KJ_IF_MAYBE(compress, maybeCompress) {
-        if (*compress == n) {
+      KJ_IF_SOME(compress, maybeCompress) {
+        if (compress == n) {
           if (n == 0) {
             builder.add(':', ':');
           } else {
@@ -800,16 +800,16 @@ kj::Maybe<UrlRecord> URL::parse(
       }
       switch (r) {
         case 8: {
-          if (c < '0' || c > '7') return nullptr;
+          if (c < '0' || c > '7') return kj::none;
           break;
         }
         case 10: {
-          if (!isAsciiDigitCodepoint(c)) return nullptr;
+          if (!isAsciiDigitCodepoint(c)) return kj::none;
           break;
         }
         case 16:
           if (!isHexDigit(c)) {
-            return nullptr;
+            return kj::none;
           }
           break;
       }
@@ -841,7 +841,7 @@ kj::Maybe<UrlRecord> URL::parse(
     it = last.begin();
     while (it) {
       if (!isAsciiDigitCodepoint(*it)) {
-        return parseNumber(last) != nullptr;
+        return parseNumber(last) != kj::none;
       }
       ++it;
     }
@@ -869,28 +869,28 @@ kj::Maybe<UrlRecord> URL::parse(
         // If the empty segment is the last segment, ignore it.
         if (!it) break;
         // Otherwise fail the parse.
-        return nullptr;
+        return kj::none;
       }
 
-      KJ_IF_MAYBE(number, parseNumber(input.slice(start, end))) {
-        if (*number > 255) tooBig++;
-        numbers.add(*number);
+      KJ_IF_SOME(number, parseNumber(input.slice(start, end))) {
+        if (number > 255) tooBig++;
+        numbers.add(number);
       } else {
-        return nullptr;
+        return kj::none;
       }
 
       if (!it) break; // Reached the end.
       start = ++it;
     }
 
-    if (numbers.size() > 4) return nullptr;
+    if (numbers.size() > 4) return kj::none;
 
     uint64_t ipv4 = numbers.back();
 
     if (tooBig > 1 ||
         (tooBig == 1 && ipv4 <= 255) ||
         ipv4 >= std::pow(256, 5 - numbers.size())) {
-      return nullptr;
+      return kj::none;
     }
 
     numbers.removeLast();
@@ -925,7 +925,7 @@ kj::Maybe<UrlRecord> URL::parse(
     auto it = input.begin();
     while (it) {
       auto c = *it;
-      if (isForbiddenHostCodepoint(c, true /* Ignore % */)) return nullptr;
+      if (isForbiddenHostCodepoint(c, true /* Ignore % */)) return kj::none;
       percentEncodeCodepoint(builder, c, &controlPercentEncodeSet);
       ++it;
     }
@@ -938,19 +938,19 @@ kj::Maybe<UrlRecord> URL::parse(
     KJ_DEFER(buffer.clear());
     auto string = buffer.asPtr();
     if (!string.empty() && string.first() == '[') {
-      if (string.last() != ']') return nullptr;
+      if (string.last() != ']') return kj::none;
       return ipv6Parse(string.slice(1, string.size() - 1));
     }
     if (notSpecial) return opaqueHostParse(string);
-    if (string.empty()) return nullptr;
-    KJ_IF_MAYBE(asciiDomain, domainToAscii(percentDecode(string))) {
+    if (string.empty()) return kj::none;
+    KJ_IF_SOME(asciiDomain, domainToAscii(percentDecode(string))) {
       // Can't be zero-length or contain invalid codepoints
-      if (!asciiDomain->empty() && !containsForbiddenHostCodePoint(*asciiDomain)) {
-        return endsWithNumber(*asciiDomain) ? ipv4Parse(*asciiDomain) : kj::mv(*asciiDomain);
+      if (!asciiDomain.empty() && !containsForbiddenHostCodePoint(asciiDomain)) {
+        return endsWithNumber(asciiDomain) ? ipv4Parse(asciiDomain) : kj::mv(asciiDomain);
       }
     }
     // Failed!
-    return nullptr;
+    return kj::none;
   };
 
   const auto appendToPath = [&record](jsg::UsvString str = jsg::usv()) {
@@ -975,7 +975,7 @@ kj::Maybe<UrlRecord> URL::parse(
           }
           break;
       }
-      return nullptr;
+      return kj::none;
     }
     return count;
   };
@@ -983,8 +983,8 @@ kj::Maybe<UrlRecord> URL::parse(
   const auto isDoubleDotSegment = [&countOnlyDots](jsg::UsvStringPtr string) {
     auto size = string.size();
     if (size < 2 || size > 6) return false;
-    KJ_IF_MAYBE(count, countOnlyDots(string)) {
-      return *count == 2;
+    KJ_IF_SOME(count, countOnlyDots(string)) {
+      return count == 2;
     }
     return false;
   };
@@ -992,8 +992,8 @@ kj::Maybe<UrlRecord> URL::parse(
   const auto isSingleDotSegment = [&countOnlyDots](jsg::UsvStringPtr string) {
     auto size = string.size();
     if (size < 1 || size > 3) return false;
-    KJ_IF_MAYBE(count, countOnlyDots(string)) {
-      return *count == 1;
+    KJ_IF_SOME(count, countOnlyDots(string)) {
+      return count == 1;
     }
     return false;
   };
@@ -1021,12 +1021,12 @@ kj::Maybe<UrlRecord> URL::parse(
           buffer.add(c | 0x20);  // Append the lower-case
           state = ParseState::SCHEME;
           break;
-        } else if (maybeStateOverride == nullptr) {
+        } else if (maybeStateOverride == kj::none) {
           state = ParseState::NO_SCHEME;
           it = processed.begin();  // Start over!
           continue;
         }
-        return nullptr;
+        return kj::none;
       }
       case ParseState::SCHEME: {
         if (isAsciiAlphaNumCodepoint(c) || c == '+' || c == '-' || c == '.') {
@@ -1036,13 +1036,13 @@ kj::Maybe<UrlRecord> URL::parse(
           KJ_DEFER(buffer.clear());
           auto temp = buffer.asPtr();
           auto tempSpecial = isSpecialScheme(temp);
-          if (maybeStateOverride != nullptr) {
+          if (maybeStateOverride != kj::none) {
             if (record.special != tempSpecial) {
               return UrlRecord(record);
             }
             if ((!record.username.empty() ||
                  !record.password.empty() ||
-                 record.port != nullptr) &&
+                 record.port != kj::none) &&
                  temp == getCommonStrings().SCHEME_FILE) {
               return UrlRecord(record);
             }
@@ -1053,10 +1053,10 @@ kj::Maybe<UrlRecord> URL::parse(
           }
           record.scheme = jsg::usv(temp);
           record.special = tempSpecial;
-          if (maybeStateOverride != nullptr) {
-            KJ_IF_MAYBE(port, record.port) {
-              if (defaultPortForScheme(record.scheme) == *port) {
-                record.port = nullptr;
+          if (maybeStateOverride != kj::none) {
+            KJ_IF_SOME(port, record.port) {
+              if (defaultPortForScheme(record.scheme) == port) {
+                record.port = kj::none;
               }
             }
             return UrlRecord(record);
@@ -1079,10 +1079,10 @@ kj::Maybe<UrlRecord> URL::parse(
             break;
           }
           if (record.special) {
-            KJ_IF_MAYBE(baseRecord, maybeBase) {
-              if (!baseRecord->special)
-                return nullptr;
-              if (baseRecord->scheme == record.scheme) {
+            KJ_IF_SOME(baseRecord, maybeBase) {
+              if (!baseRecord.special)
+                return kj::none;
+              if (baseRecord.scheme == record.scheme) {
                 state = ParseState::SPECIAL_RELATIVE_OR_AUTHORITY;
                 break;
               }
@@ -1100,36 +1100,36 @@ kj::Maybe<UrlRecord> URL::parse(
           ++it;
           break;
         }
-        if (maybeStateOverride == nullptr) {
+        if (maybeStateOverride == kj::none) {
           buffer.clear();
           state = ParseState::NO_SCHEME;
           it = processed.begin();  // Start over!
           continue;
         }
-        return nullptr;
+        return kj::none;
       }
       case ParseState::NO_SCHEME: {
-        KJ_IF_MAYBE(baseRecord, maybeBase) {
-          KJ_IF_MAYBE(opaquePath, baseRecord->path.tryGet<jsg::UsvString>()) {
-            if (c != '#') return nullptr;
-            record.scheme = jsg::usv(baseRecord->scheme);
+        KJ_IF_SOME(baseRecord, maybeBase) {
+          if (baseRecord.path.tryGet<jsg::UsvString>() != kj::none) {
+            if (c != '#') return kj::none;
+            record.scheme = jsg::usv(baseRecord.scheme);
             record.special = isSpecialScheme(record.scheme);
-            record.path = UrlRecordBuilder::copyPath(baseRecord->path);
-            KJ_IF_MAYBE(q, baseRecord->query) {
+            record.path = UrlRecordBuilder::copyPath(baseRecord.path);
+            KJ_IF_SOME(q, baseRecord.query) {
               jsg::UsvStringBuilder query;
-              KJ_IF_MAYBE(q, baseRecord->query) { query.addAll(*q); }
+              query.addAll(q);
               record.query = kj::mv(query);
             }
             record.fragment = jsg::UsvStringBuilder();
             state = ParseState::FRAGMENT;
             break;
           }
-          state = baseRecord->scheme == getCommonStrings().SCHEME_FILE ?
+          state = baseRecord.scheme == getCommonStrings().SCHEME_FILE ?
               ParseState::FILE :
               ParseState::RELATIVE;
           continue;  // Continue without incrementing the iterator.
         }
-        return nullptr;
+        return kj::none;
       }
       case ParseState::SPECIAL_RELATIVE_OR_AUTHORITY: {
         if (c == '/' && nextCodepointIs(it, '/')) {
@@ -1169,16 +1169,16 @@ kj::Maybe<UrlRecord> URL::parse(
         record.host = baseRecord.host.map([](jsg::UsvString& str) { return jsg::usv(str); });
         record.port = baseRecord.port;
         record.path = UrlRecordBuilder::copyPath(baseRecord.path);
-        KJ_IF_MAYBE(q, baseRecord.query) {
+        KJ_IF_SOME(q, baseRecord.query) {
           if (c != '?') {
-            auto query = jsg::UsvStringBuilder(q->size());
-            query.addAll(*q);
+            auto query = jsg::UsvStringBuilder(q.size());
+            query.addAll(q);
             record.query = kj::mv(query);
           }
         }
         if (c == '?') {
-          KJ_IF_MAYBE(q, record.query) {
-            q->clear();
+          KJ_IF_SOME(q, record.query) {
+            q.clear();
           } else {
             record.query = jsg::UsvStringBuilder();
           }
@@ -1191,7 +1191,7 @@ kj::Maybe<UrlRecord> URL::parse(
           break;
         }
         if (it) {
-          record.query = nullptr;
+          record.query = kj::none;
           shortenPath(record);
           state = ParseState::PATH;
           continue; // Continue without incrementing the iterator.
@@ -1210,13 +1210,13 @@ kj::Maybe<UrlRecord> URL::parse(
         }
         record.username.clear();
         record.password.clear();
-        record.host = nullptr;
-        record.port = nullptr;
-        KJ_IF_MAYBE(baseRecord, maybeBase) {
-          record.username.addAll(baseRecord->username);
-          record.password.addAll(baseRecord->password);
-          record.host = baseRecord->host.map([](jsg::UsvString& str) { return jsg::usv(str); });
-          record.port = baseRecord->port;
+        record.host = kj::none;
+        record.port = kj::none;
+        KJ_IF_SOME(baseRecord, maybeBase) {
+          record.username.addAll(baseRecord.username);
+          record.password.addAll(baseRecord.password);
+          record.host = baseRecord.host.map([](jsg::UsvString& str) { return jsg::usv(str); });
+          record.port = baseRecord.port;
         }
         state = ParseState::PATH;
         continue; // Continue without incrementing the iterator.
@@ -1267,7 +1267,7 @@ kj::Maybe<UrlRecord> URL::parse(
         }
         if ((!it || c == '/' || c == '?' || c == '#') || (record.special && c == '\\')) {
           if (atSignSeen && buffer.empty()) {
-            return nullptr;
+            return kj::none;
           }
           it -= buffer.size() + 1;
           buffer.clear();
@@ -1275,7 +1275,7 @@ kj::Maybe<UrlRecord> URL::parse(
           break;
         }
         // Reached the end of the input unexpectedly.
-        if (!it) return nullptr;
+        if (!it) return kj::none;
         buffer.add(c);
         break;
       }
@@ -1283,35 +1283,35 @@ kj::Maybe<UrlRecord> URL::parse(
         KJ_FALLTHROUGH;
       }
       case ParseState::HOSTNAME: {
-        if (maybeStateOverride != nullptr && record.scheme == getCommonStrings().SCHEME_FILE) {
+        if (maybeStateOverride != kj::none && record.scheme == getCommonStrings().SCHEME_FILE) {
           state = ParseState::FILE_HOST;
           continue;  // Continue without incrementing the iterator.
         }
         if (c == ':' && !insideBrackets) {
           if (buffer.empty()) {
             // Validation error and failure.
-            return nullptr;
+            return kj::none;
           }
-          KJ_IF_MAYBE(stateOverride, maybeStateOverride) {
+          if (maybeStateOverride != kj::none) {
             if (state == ParseState::HOSTNAME) {
               return UrlRecord(record);
             }
           }
-          KJ_IF_MAYBE(host, hostParseBuffer(!record.special)) {
-            record.host = kj::mv(*host);
+          KJ_IF_SOME(host, hostParseBuffer(!record.special)) {
+            record.host = kj::mv(host);
           } else {
-            return nullptr;
+            return kj::none;
           }
           state = ParseState::PORT;
           break;
         } else if ((!it || c == '/' || c == '?' || c == '#') || (record.special && c == '\\')) {
           if (record.special && buffer.empty()) {
-            return nullptr;
+            return kj::none;
           }
-          if (maybeStateOverride != nullptr &&
+          if (maybeStateOverride != kj::none &&
               buffer.empty() &&
               ((!record.username.empty() || !record.password.empty()) ||
-               record.port != nullptr)) {
+               record.port != kj::none)) {
             return UrlRecord(record);
           }
           // There's a subtle detail here that appears to be omitted from the URL spec.
@@ -1322,14 +1322,14 @@ kj::Maybe<UrlRecord> URL::parse(
           // but that's kind of stretching assumptions a bit. To handle both cases, if
           // state override is given and the scheme is an empty string, we assume that
           // isNotSpecial is false.
-          auto isNotSpecial = (maybeStateOverride != nullptr && record.scheme.empty()) ?
+          auto isNotSpecial = (maybeStateOverride != kj::none && record.scheme.empty()) ?
               false : !record.special;
-          KJ_IF_MAYBE(host, hostParseBuffer(isNotSpecial)) {
-            record.host = kj::mv(*host);
+          KJ_IF_SOME(host, hostParseBuffer(isNotSpecial)) {
+            record.host = kj::mv(host);
           } else {
-            return nullptr;
+            return kj::none;
           }
-          if (maybeStateOverride != nullptr) {
+          if (maybeStateOverride != kj::none) {
             return UrlRecord(record);
           }
           state = ParseState::PATH_START;
@@ -1346,7 +1346,7 @@ kj::Maybe<UrlRecord> URL::parse(
           break;
         } else if ((!it || c == '/' || c == '?' || c == '#') ||
                    (record.special && c == '\\') ||
-                   maybeStateOverride != nullptr) {
+                   maybeStateOverride != kj::none) {
           if (!buffer.empty()) {
             uint64_t port = 0;
             auto temp = buffer.asPtr();
@@ -1357,26 +1357,26 @@ kj::Maybe<UrlRecord> URL::parse(
             }
             buffer.clear();
             if (port > 0xffff) {
-              KJ_IF_MAYBE(override, maybeStateOverride) {
-                if (*override == ParseState::HOST) {
+              KJ_IF_SOME(override_, maybeStateOverride) {
+                if (override_ == ParseState::HOST) {
                   return UrlRecord(record);
                 }
               }
-              return nullptr;
+              return kj::none;
             }
             if (defaultPortForScheme(record.scheme) == port) {
-              record.port = nullptr;
+              record.port = kj::none;
             } else {
               record.port = port;
             }
           }
-          if (maybeStateOverride != nullptr) {
+          if (maybeStateOverride != kj::none) {
             return UrlRecord(record);
           }
           state = ParseState::PATH_START;
           continue; // Continue without incrementing the iterator.
         }
-        return nullptr;
+        return kj::none;
       }
       case ParseState::FILE: {
         record.scheme = jsg::usv(getCommonStrings().SCHEME_FILE);
@@ -1385,14 +1385,14 @@ kj::Maybe<UrlRecord> URL::parse(
         if (c == '/' || c == '\\') {
           state = ParseState::FILE_SLASH;
           break;
-        } else KJ_IF_MAYBE(baseRecord, maybeBase) {
-          if (baseRecord->scheme == getCommonStrings().SCHEME_FILE) {
-            record.host = baseRecord->host.map([](jsg::UsvString& str) { return jsg::usv(str); });
-            record.path = UrlRecordBuilder::copyPath(baseRecord->path);
+        } else KJ_IF_SOME(baseRecord, maybeBase) {
+          if (baseRecord.scheme == getCommonStrings().SCHEME_FILE) {
+            record.host = baseRecord.host.map([](jsg::UsvString& str) { return jsg::usv(str); });
+            record.path = UrlRecordBuilder::copyPath(baseRecord.path);
             jsg::UsvStringBuilder query;
             if (c != '?') {
-              KJ_IF_MAYBE(q, baseRecord->query) {
-                query.addAll(*q);
+              KJ_IF_SOME(q, baseRecord.query) {
+                query.addAll(q);
               }
             }
             record.query = kj::mv(query);
@@ -1410,7 +1410,7 @@ kj::Maybe<UrlRecord> URL::parse(
               // Reached the end!
               return UrlRecord(record);
             }
-            record.query = nullptr;
+            record.query = kj::none;
             auto slice = processed.slice(it, processed.end());
             if (!startsWithWindowsDriveLetter(slice, false)) {
               shortenPath(record);
@@ -1427,12 +1427,12 @@ kj::Maybe<UrlRecord> URL::parse(
           state = ParseState::FILE_HOST;
           break;
         }
-        KJ_IF_MAYBE(baseRecord, maybeBase) {
-          if (baseRecord->scheme == getCommonStrings().SCHEME_FILE) {
-            record.host = baseRecord->host.map([](jsg::UsvString& str) { return jsg::usv(str); });
+        KJ_IF_SOME(baseRecord, maybeBase) {
+          if (baseRecord.scheme == getCommonStrings().SCHEME_FILE) {
+            record.host = baseRecord.host.map([](jsg::UsvString& str) { return jsg::usv(str); });
             auto slice = processed.slice(it, processed.end());
             if (!startsWithWindowsDriveLetter(slice, false)) {
-              KJ_SWITCH_ONEOF(baseRecord->path) {
+              KJ_SWITCH_ONEOF(baseRecord.path) {
                 KJ_CASE_ONEOF(string, jsg::UsvString) {
                   if (isWindowsDriveLetter(string, true)) {
                     appendToPath(jsg::usv(string));
@@ -1452,25 +1452,25 @@ kj::Maybe<UrlRecord> URL::parse(
       }
       case ParseState::FILE_HOST: {
         if (!it || c == '/' || c == '\\' || c == '?' || c == '#') {
-          if (maybeStateOverride == nullptr &&
+          if (maybeStateOverride == kj::none &&
               isWindowsDriveLetterFileQuirk(buffer.storage())) {
             state = ParseState::PATH;
             continue;
           }
           if (buffer.empty()) {
             record.host = jsg::usv();
-            if (maybeStateOverride != nullptr) {
+            if (maybeStateOverride != kj::none) {
               return UrlRecord(record);
             }
             state = ParseState::PATH_START;
             continue;
           }
-          KJ_IF_MAYBE(host, hostParseBuffer(!record.special)) {
-            record.host = (*host == getCommonStrings().LOCALHOST) ? jsg::usv() : kj::mv(*host);
+          KJ_IF_SOME(host, hostParseBuffer(!record.special)) {
+            record.host = (host == getCommonStrings().LOCALHOST) ? jsg::usv() : kj::mv(host);
           } else {
-            return nullptr;
+            return kj::none;
           }
-          if (maybeStateOverride != nullptr) {
+          if (maybeStateOverride != kj::none) {
             return UrlRecord(record);
           }
           state = ParseState::PATH_START;
@@ -1487,12 +1487,12 @@ kj::Maybe<UrlRecord> URL::parse(
           }
           break;  // Increment the iterator.
         }
-        if (maybeStateOverride == nullptr && c == '?') {
+        if (maybeStateOverride == kj::none && c == '?') {
           record.query = jsg::UsvStringBuilder();
           state = ParseState::QUERY;
           break;
         }
-        if (maybeStateOverride == nullptr && c == '#') {
+        if (maybeStateOverride == kj::none && c == '#') {
           record.fragment = jsg::UsvStringBuilder();
           state = ParseState::FRAGMENT;
           break;
@@ -1504,8 +1504,8 @@ kj::Maybe<UrlRecord> URL::parse(
           }
           break;  // Increment the iterator and continue.
         }
-        KJ_IF_MAYBE(o, maybeStateOverride) {
-          if (record.host == nullptr) {
+        if (maybeStateOverride != kj::none) {
+          if (record.host == kj::none) {
             appendToPath();
           }
         }
@@ -1521,7 +1521,7 @@ kj::Maybe<UrlRecord> URL::parse(
         // If scheme is special and c == \, or
         // state override is not given and c is either ? or #.
         if (!it || c == '/' || specialBackSlash ||
-            (maybeStateOverride == nullptr && (c == '?' || c == '#'))) {
+            (maybeStateOverride == kj::none && (c == '?' || c == '#'))) {
           // if special and c == \, validation error
           KJ_DEFER(buffer.clear());
           auto temp = buffer.asPtr();
@@ -1587,7 +1587,7 @@ kj::Maybe<UrlRecord> URL::parse(
         break;
       }
       case ParseState::QUERY: {
-        if ((maybeStateOverride == nullptr && c == '#') || !it) {
+        if ((maybeStateOverride == kj::none && c == '#') || !it) {
           // Either state override is not provided and we hit a hash character
           // or we hit the end of the input string...
 
@@ -1640,29 +1640,23 @@ URL::URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base)
     : inner(handleConstructorParse(url, kj::mv(base))) {}
 
 URL::~URL() noexcept(false) {
-  KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-    (*searchParams)->maybeUrl = nullptr;
+  KJ_IF_SOME(searchParams, maybeSearchParams) {
+    searchParams->maybeUrl = nullptr;
   }
 }
 
 bool URL::canParse(jsg::UsvString url, jsg::Optional<jsg::UsvString> maybeBase) {
-  KJ_IF_MAYBE(base, maybeBase) {
-    KJ_IF_MAYBE(parsedBase, URL::parse(*base)) {
-      KJ_IF_MAYBE(parsed, URL::parse(url, *parsedBase)) {
-        return true;
-      }
-    }
-  } else {
-    KJ_IF_MAYBE(parsed, URL::parse(url)) {
-      return true;
+  KJ_IF_SOME(base, maybeBase) {
+    KJ_IF_SOME(parsedBase, URL::parse(base)) {
+      return URL::parse(url, parsedBase) != kj::none;
     }
   }
-  return false;
+  return URL::parse(url) != kj::none;
 }
 
 jsg::Ref<URLSearchParams> URL::getSearchParams() {
-  KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-    return searchParams->addRef();
+  KJ_IF_SOME(searchParams, maybeSearchParams) {
+    return searchParams.addRef();
   }
   auto searchParams = jsg::alloc<URLSearchParams>(inner.query, *this);
   maybeSearchParams = searchParams.addRef();
@@ -1680,9 +1674,9 @@ jsg::UsvString URL::getOrigin() {
       builder.addAll(tuple.scheme);
       builder.add(':', '/', '/');
       builder.addAll(tuple.host);
-      KJ_IF_MAYBE(port, tuple.port) {
+      KJ_IF_SOME(port, tuple.port) {
         builder.add(':');
-        builder.addAll(kj::toCharSequence(*port));
+        builder.addAll(kj::toCharSequence(port));
       }
       return builder.finish();
     }
@@ -1694,8 +1688,8 @@ jsg::UsvString URL::getHref() { return inner.getHref(); }
 
 void URL::setHref(jsg::UsvString value) {
   inner = JSG_REQUIRE_NONNULL(parse(value), TypeError, "Invalid URL string.");
-  KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-    (*searchParams)->reset(toMaybePtr(inner.query));
+  KJ_IF_SOME(searchParams, maybeSearchParams) {
+    searchParams->reset(toMaybePtr(inner.query));
   }
 }
 
@@ -1711,8 +1705,8 @@ void URL::setProtocol(jsg::UsvString value) {
   jsg::UsvStringBuilder builder(value.size() + 1);
   builder.addAll(value);
   builder.add(':');
-  KJ_IF_MAYBE(record, parse(builder.finish(), nullptr, inner, ParseState::SCHEME_START)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(builder.finish(), nullptr, inner, ParseState::SCHEME_START)) {
+    inner = kj::mv(record);
   }
 }
 
@@ -1735,44 +1729,44 @@ void URL::setPassword(jsg::UsvString value) {
 }
 
 jsg::UsvString URL::getHost() {
-  KJ_IF_MAYBE(host, inner.host) {
-    KJ_IF_MAYBE(port, inner.port) {
+  KJ_IF_SOME(host, inner.host) {
+    KJ_IF_SOME(port, inner.port) {
       // The additional 6 here is for the port prefix and possible port
-      jsg::UsvStringBuilder builder(host->size() + 6);
-      builder.addAll(*host);
+      jsg::UsvStringBuilder builder(host.size() + 6);
+      builder.addAll(host);
       builder.add(':');
-      builder.addAll(kj::toCharSequence(*port));
+      builder.addAll(kj::toCharSequence(port));
       return builder.finish();
     }
-    return jsg::usv(*host);
+    return jsg::usv(host);
   }
   return jsg::usv();
 }
 
 void URL::setHost(jsg::UsvString value) {
   if (inner.path.is<jsg::UsvString>()) return;
-  KJ_IF_MAYBE(record, parse(value, nullptr, inner, ParseState::HOST)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(value, kj::none, inner, ParseState::HOST)) {
+    inner = kj::mv(record);
   }
 }
 
 jsg::UsvStringPtr URL::getHostname() {
-  KJ_IF_MAYBE(host, inner.host) {
-    return *host;
+  KJ_IF_SOME(host, inner.host) {
+    return host;
   }
   return getCommonStrings().EMPTY_STRING;
 }
 
 void URL::setHostname(jsg::UsvString value) {
   if (inner.path.is<jsg::UsvString>()) return;
-  KJ_IF_MAYBE(record, parse(value, nullptr, inner, ParseState::HOSTNAME)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(value, kj::none, inner, ParseState::HOSTNAME)) {
+    inner = kj::mv(record);
   }
 }
 
 jsg::UsvString URL::getPort() {
-  KJ_IF_MAYBE(port, inner.port) {
-    return jsg::usv(kj::toCharSequence(*port));
+  KJ_IF_SOME(port, inner.port) {
+    return jsg::usv(kj::toCharSequence(port));
   }
   return jsg::usv();
 }
@@ -1780,11 +1774,11 @@ jsg::UsvString URL::getPort() {
 void URL::setPort(jsg::UsvString port) {
   if (cannotHaveUsernamePasswordOrPort(inner)) return;
   if (port == getCommonStrings().EMPTY_STRING) {
-    inner.port = nullptr;
+    inner.port = kj::none;
     return;
   }
-  KJ_IF_MAYBE(record, parse(port, nullptr, inner, ParseState::PORT)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(port, kj::none, inner, ParseState::PORT)) {
+    inner = kj::mv(record);
   }
 }
 
@@ -1793,17 +1787,17 @@ jsg::UsvString URL::getPathname() { return inner.getPathname(); }
 void URL::setPathname(jsg::UsvString value) {
   if (inner.path.is<jsg::UsvString>()) return;
   inner.path = kj::Array<jsg::UsvString>();
-  KJ_IF_MAYBE(record, parse(value, nullptr, inner, ParseState::PATH_START)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(value, kj::none, inner, ParseState::PATH_START)) {
+    inner = kj::mv(record);
   }
 }
 
 jsg::UsvString URL::getSearch() {
-  KJ_IF_MAYBE(query, inner.query) {
-    if (!query->empty()) {
-      jsg::UsvStringBuilder builder(query->size() + 1);
+  KJ_IF_SOME(query, inner.query) {
+    if (!query.empty()) {
+      jsg::UsvStringBuilder builder(query.size() + 1);
       builder.add('?');
-      builder.addAll(*query);
+      builder.addAll(query);
       return builder.finish();
     }
   }
@@ -1812,28 +1806,28 @@ jsg::UsvString URL::getSearch() {
 
 void URL::setSearch(jsg::UsvString query) {
   if (query == getCommonStrings().EMPTY_STRING) {
-    inner.query = nullptr;
-    KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-      (*searchParams)->reset();
+    inner.query = kj::none;
+    KJ_IF_SOME(searchParams, maybeSearchParams) {
+      searchParams->reset();
     }
     return;
   }
   auto sliced = query.first() == '?' ? query.slice(1) : query.asPtr();
   inner.query = jsg::usv();
-  KJ_IF_MAYBE(record, parse(sliced, nullptr, inner, ParseState::QUERY)) {
-    inner = kj::mv(*record);
-    KJ_IF_MAYBE(searchParams, maybeSearchParams) {
-      (*searchParams)->reset(toMaybePtr(inner.query));
+  KJ_IF_SOME(record, parse(sliced, kj::none, inner, ParseState::QUERY)) {
+    inner = kj::mv(record);
+    KJ_IF_SOME(searchParams, maybeSearchParams) {
+      searchParams->reset(toMaybePtr(inner.query));
     }
   }
 }
 
 jsg::UsvString URL::getHash() {
-  KJ_IF_MAYBE(fragment, inner.fragment) {
-    if (!fragment->empty()) {
-      jsg::UsvStringBuilder builder(fragment->size() + 1);
+  KJ_IF_SOME(fragment, inner.fragment) {
+    if (!fragment.empty()) {
+      jsg::UsvStringBuilder builder(fragment.size() + 1);
       builder.add('#');
-      builder.addAll(*fragment);
+      builder.addAll(fragment);
       return builder.finish();
     }
   }
@@ -1842,13 +1836,13 @@ jsg::UsvString URL::getHash() {
 
 void URL::setHash(jsg::UsvString hash) {
   if (hash == getCommonStrings().EMPTY_STRING) {
-    inner.fragment = nullptr;
+    inner.fragment = kj::none;
     return;
   }
   auto sliced = hash.first() == '#' ? hash.slice(1) : hash.asPtr();
   inner.fragment = jsg::usv();
-  KJ_IF_MAYBE(record, parse(sliced, nullptr, inner, ParseState::FRAGMENT)) {
-    inner = kj::mv(*record);
+  KJ_IF_SOME(record, parse(sliced, kj::none, inner, ParseState::FRAGMENT)) {
+    inner = kj::mv(record);
   }
 }
 
@@ -1925,23 +1919,23 @@ URLSearchParams::URLSearchParams(Initializer initializer) {
 }
 
 URLSearchParams::URLSearchParams(kj::Maybe<jsg::UsvString>& maybeQuery, URL& url) : maybeUrl(url) {
-  KJ_IF_MAYBE(query, maybeQuery) { parse(*query); }
+  KJ_IF_SOME(query, maybeQuery) { parse(query); }
 }
 
 void URLSearchParams::update() {
-  KJ_IF_MAYBE(url, maybeUrl) {
+  KJ_IF_SOME(url, maybeUrl) {
     auto serialized = toString();
     if (serialized == getCommonStrings().EMPTY_STRING) {
-      url->inner.query = nullptr;
+      url.inner.query = kj::none;
     } else {
-      url->inner.query = kj::mv(serialized);
+      url.inner.query = kj::mv(serialized);
     }
   }
 }
 
 void URLSearchParams::reset(kj::Maybe<jsg::UsvStringPtr> value) {
-  KJ_IF_MAYBE(val, value) {
-    parse(*val);
+  KJ_IF_SOME(val, value) {
+    parse(val);
   } else {
     parse(getCommonStrings().EMPTY_STRING);
   }
@@ -1959,9 +1953,9 @@ void URLSearchParams::delete_(jsg::Lock& js, jsg::UsvString name,
     // and has(). While it was determined that it likely didn't break browser users,
     // the change could break at least a couple existing deployed workers so we have
     // to gate support behind a compat flag.
-    KJ_IF_MAYBE(v, value) {
+    KJ_IF_SOME(v, value) {
       auto pivot = std::remove_if(list.begin(), list.end(),
-                                  [&name,&v=*v](auto& kv) {
+                                  [&name,&v](auto& kv) {
         return kv.name == name && kv.value == v;
       });
       list.truncate(pivot - list.begin());
@@ -1979,7 +1973,7 @@ kj::Maybe<jsg::UsvStringPtr> URLSearchParams::get(jsg::UsvString name) {
   for (auto& entry : list) {
     if (entry.name == name) return entry.value.asPtr();
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Array<jsg::UsvStringPtr> URLSearchParams::getAll(jsg::UsvString name) {
@@ -1996,9 +1990,9 @@ bool URLSearchParams::has(jsg::Lock& js, jsg::UsvString name, jsg::Optional<jsg:
     // and has(). While it was determined that it likely didn't break browser users,
     // the change could break at least a couple existing deployed workers so we have
     // to gate support behind a compat flag.
-    KJ_IF_MAYBE(v, value) {
+    KJ_IF_SOME(v, value) {
       for (auto& entry : list) {
-        if (entry.name == name && entry.value == *v) return true;
+        if (entry.name == name && entry.value == v) return true;
       }
       return false;
     }
@@ -2081,8 +2075,8 @@ void URLSearchParams::forEach(
     jsg::Function<void(jsg::UsvStringPtr, jsg::UsvStringPtr, jsg::Ref<URLSearchParams>)> callback,
     jsg::Optional<jsg::Value> thisArg) {
   auto receiver = js.v8Undefined();
-  KJ_IF_MAYBE(arg, thisArg) {
-    auto handle = arg->getHandle(js);
+  KJ_IF_SOME(arg, thisArg) {
+    auto handle = arg.getHandle(js);
     if (!handle->IsNullOrUndefined()) {
       receiver = handle;
     }
