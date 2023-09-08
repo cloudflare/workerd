@@ -12,9 +12,9 @@ Serializer::Serializer(Lock& js, kj::Maybe<Options> maybeOptions)
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
 #endif
   auto options = maybeOptions.orDefault({});
-  KJ_IF_MAYBE(version, options.version) {
-    KJ_ASSERT(*version >= 13, "The minimum serialization version is 13.");
-    KJ_ASSERT(jsg::check(ser.SetWriteVersion(*version)));
+  KJ_IF_SOME(version, options.version) {
+    KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
+    KJ_ASSERT(jsg::check(ser.SetWriteVersion(version)));
   }
   if (!options.omitHeader) {
     ser.WriteHeader();
@@ -121,14 +121,14 @@ void Deserializer::init(
   if (options.readHeader) {
     check(deser.ReadHeader(js.v8Context()));
   }
-  KJ_IF_MAYBE(version, options.version) {
-    KJ_ASSERT(*version >= 13, "The minimum serialization version is 13.");
-    deser.SetWireFormatVersion(*version);
+  KJ_IF_SOME(version, options.version) {
+    KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
+    deser.SetWireFormatVersion(version);
   }
-  KJ_IF_MAYBE(arrayBuffers, transferedArrayBuffers) {
-    for (auto n : kj::indices(*arrayBuffers)) {
+  KJ_IF_SOME(arrayBuffers, transferedArrayBuffers) {
+    for (auto n : kj::indices(arrayBuffers)) {
       deser.TransferArrayBuffer(n,
-          v8::ArrayBuffer::New(js.v8Isolate, kj::mv((*arrayBuffers)[n])));
+          v8::ArrayBuffer::New(js.v8Isolate, kj::mv((arrayBuffers)[n])));
     }
   }
 }
@@ -140,9 +140,9 @@ JsValue Deserializer::readValue(Lock& js) {
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
     v8::Isolate* isolate,
     uint32_t clone_id) {
-  KJ_IF_MAYBE(backingStores, sharedBackingStores) {
-    KJ_ASSERT(clone_id < backingStores->size());
-    return v8::SharedArrayBuffer::New(isolate, (*backingStores)[clone_id]);
+  KJ_IF_SOME(backingStores, sharedBackingStores) {
+    KJ_ASSERT(clone_id < backingStores.size());
+    return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
   }
   return v8::MaybeLocal<v8::SharedArrayBuffer>();
 }
@@ -160,15 +160,15 @@ JsValue structuredClone(
     Lock& js,
     const JsValue& value,
     kj::Maybe<kj::Array<JsValue>> maybeTransfer) {
-  Serializer ser(js, nullptr);
-  KJ_IF_MAYBE(transfers, maybeTransfer) {
-    for (auto& item : *transfers) {
+  Serializer ser(js, kj::none);
+  KJ_IF_SOME(transfers, maybeTransfer) {
+    for (auto& item : transfers) {
       ser.transfer(js, item);
     }
   }
   ser.write(js, value);
   auto released = ser.release();
-  Deserializer des(js, released, nullptr);
+  Deserializer des(js, released, kj::none);
   return des.readValue(js);
 }
 

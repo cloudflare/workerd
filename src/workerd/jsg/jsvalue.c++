@@ -228,13 +228,13 @@ bool JsString::containsOnlyOneByte() const {
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
-  if (result->IsNullOrUndefined()) return nullptr;
+  if (result->IsNullOrUndefined()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, kj::StringPtr input) const {
   auto result = check(inner->Exec(js.v8Context(), js.str(input)));
-  if (result->IsNullOrUndefined()) return nullptr;
+  if (result->IsNullOrUndefined()) return kj::none;
   return JsArray(result.As<v8::Array>());
 }
 
@@ -365,9 +365,9 @@ JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
 JsRegExp Lock::regexp(kj::StringPtr str,
                       RegExpFlags flags,
                       kj::Maybe<uint32_t> backtrackLimit) {
-  KJ_IF_MAYBE(limit, backtrackLimit) {
+  KJ_IF_SOME(limit, backtrackLimit) {
     return JsRegExp(check(v8::RegExp::NewWithBacktrackLimit(v8Context(), v8Str(v8Isolate, str),
-        static_cast<v8::RegExp::Flags>(flags), *limit)));
+        static_cast<v8::RegExp::Flags>(flags), limit)));
   }
   return JsRegExp(check(v8::RegExp::New(v8Context(), v8Str(v8Isolate, str),
       static_cast<v8::RegExp::Flags>(flags))));

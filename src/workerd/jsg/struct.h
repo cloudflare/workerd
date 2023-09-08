@@ -105,7 +105,7 @@ public:
                                     "undefined or null value.");
     }
 
-    if (!handle->IsObject()) return nullptr;
+    if (!handle->IsObject()) return kj::none;
 
     v8::HandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
@@ -129,8 +129,8 @@ private:
   kj::Maybe<kj::Tuple<FieldWrappers...>> lazyFields;
 
   kj::Tuple<FieldWrappers...>& getFields(v8::Isolate* isolate) {
-    KJ_IF_MAYBE(f, lazyFields) {
-      return *f;
+    KJ_IF_SOME(f, lazyFields) {
+      return f;
     } else {
       return lazyFields.emplace(kj::tuple(FieldWrappers(isolate)...));
     }

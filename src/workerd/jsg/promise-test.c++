@@ -58,12 +58,12 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
   void testConsumeResolved(jsg::Lock& js) {
     auto [ promise, resolver ] = js.newPromiseAndResolver<int>();
-    KJ_EXPECT(promise.tryConsumeResolved(js) == nullptr);
+    KJ_EXPECT(promise.tryConsumeResolved(js) == kj::none);
     resolver.resolve(123);
     KJ_EXPECT(KJ_ASSERT_NONNULL(promise.tryConsumeResolved(js)) == 123);
 
     KJ_EXPECT(js.rejectedPromise<kj::String>(v8StrIntern(js.v8Isolate, "foo"))
-        .tryConsumeResolved(js) == nullptr);
+        .tryConsumeResolved(js) == kj::none);
   }
 
   void whenResolved(jsg::Lock& js, jsg::Promise<int> promise) {

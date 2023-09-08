@@ -28,7 +28,7 @@ public:
     kj::Array<std::shared_ptr<v8::BackingStore>> transferedArrayBuffers;
   };
 
-  explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = nullptr);
+  explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = kj::none);
   inline ~Serializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
   KJ_DISALLOW_COPY_AND_MOVE(Serializer);
@@ -68,14 +68,14 @@ public:
   explicit Deserializer(
       Lock& js,
       kj::ArrayPtr<const kj::byte> data,
-      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = nullptr,
-      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = nullptr,
-      kj::Maybe<Options> maybeOptions = nullptr);
+      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = kj::none,
+      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = kj::none,
+      kj::Maybe<Options> maybeOptions = kj::none);
 
   explicit Deserializer(
       Lock& js,
       Serializer::Released& released,
-      kj::Maybe<Options> maybeOptions = nullptr);
+      kj::Maybe<Options> maybeOptions = kj::none);
 
   ~Deserializer() noexcept(true) {}  // noexcept(true) because Delegate's is noexcept
 
@@ -88,8 +88,8 @@ public:
 private:
   void init(
       Lock& js,
-      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = nullptr,
-      kj::Maybe<Options> maybeOptions = nullptr);
+      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = kj::none,
+      kj::Maybe<Options> maybeOptions = kj::none);
 
   v8::MaybeLocal<v8::SharedArrayBuffer> GetSharedArrayBufferFromId(
       v8::Isolate* isolate,
@@ -110,6 +110,6 @@ constexpr SerializedBufferDisposer SERIALIZED_BUFFER_DISPOSER;
 JsValue structuredClone(
     Lock& js,
     const JsValue& value,
-    kj::Maybe<kj::Array<JsValue>> maybeTransfer = nullptr);
+    kj::Maybe<kj::Array<JsValue>> maybeTransfer = kj::none);
 
 }  // namespace workerd::jsg

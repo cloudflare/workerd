@@ -109,8 +109,8 @@ void dropOpaque(v8::Isolate* isolate, v8::Local<v8::Value> handle) {
   static_assert(!kj::isReference<T>());
   static_assert(!isV8Ref<T>());
 
-  KJ_IF_MAYBE(wrappable, Wrappable::tryUnwrapOpaque(isolate, handle)) {
-    OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(wrappable);
+  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, handle)) {
+    OpaqueWrappable<T>* holder = dynamic_cast<OpaqueWrappable<T>*>(&wrappable);
     if (holder != nullptr) {
       holder->movedAway = true;
       auto drop KJ_UNUSED = kj::mv(holder->value);
@@ -222,7 +222,7 @@ public:
   Promise(v8::Isolate* isolate, v8::Local<v8::Promise> v8Promise)
       : deprecatedIsolate(isolate), v8Promise(V8Ref<v8::Promise>(isolate, v8Promise)) {}
 
-  Promise(decltype(nullptr)): deprecatedIsolate(nullptr), v8Promise(nullptr) {}
+  Promise(decltype(nullptr)): deprecatedIsolate(nullptr), v8Promise(kj::none) {}
   // For use when you're declaring a local variable that will be initialized later.
 
   void markAsHandled(Lock& js) {
@@ -291,7 +291,7 @@ public:
 
   v8::Local<v8::Promise> consumeHandle(Lock& js) {
     auto result = getInner(js);
-    v8Promise = nullptr;
+    v8Promise = kj::none;
     return result;
   }
 
@@ -305,9 +305,9 @@ public:
       switch (handle->State()) {
         case v8::Promise::kPending:
         case v8::Promise::kRejected:
-          return nullptr;
+          return kj::none;
         case v8::Promise::kFulfilled:
-          v8Promise = nullptr;
+          v8Promise = kj::none;
           return unwrapOpaque<T>(js.v8Isolate, handle->Result());
       }
     });
@@ -609,7 +609,7 @@ void thenWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
       v8::Isolate* isolate = args.GetIsolate();
       auto& wrapper = TypeWrapper::from(isolate);
       auto context = isolate->GetCurrentContext();
-      return wrapper.wrap(context, nullptr, unwrapOpaque<Input>(isolate, args[0]));
+      return wrapper.wrap(context, kj::none, unwrapOpaque<Input>(isolate, args[0]));
     });
   }
 }
@@ -697,12 +697,12 @@ public:
         return resolvedPromise(context->GetIsolate());
       } else {
         auto& wrapper = *static_cast<TypeWrapper*>(this);
-        KJ_IF_MAYBE(value,
+        KJ_IF_SOME(value,
             wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-          return resolvedPromise<T>(context->GetIsolate(), kj::mv(*value));
+          return resolvedPromise<T>(context->GetIsolate(), kj::mv(value));
         } else {
           // Wrong type.
-          return nullptr;
+          return kj::none;
         }
       }
     }

@@ -307,7 +307,7 @@ public:
 
     ModuleInfo(jsg::Lock& js,
                v8::Local<v8::Module> module,
-               kj::Maybe<SyntheticModuleInfo> maybeSynthetic = nullptr);
+               kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
     ModuleInfo(jsg::Lock& js,
                kj::StringPtr name,
@@ -409,7 +409,7 @@ public:
     // We need to make sure there is not an existing worker bundle module with the same
     // name if type == Type::BUILTIN
     auto path = kj::Path::parse(specifier);
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
       return;
     }
 
@@ -426,7 +426,7 @@ public:
 
     // We need to make sure there is not an existing worker bundle module with the same
     // name if type == Type::BUILTIN
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != nullptr) {
+    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
       return;
     }
 
@@ -437,8 +437,8 @@ public:
   void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
     addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
-      auto wrap = wrapper.wrap(js.v8Context(), nullptr, alloc<T>());
-      return ModuleInfo(js, specifier, nullptr, ObjectModuleInfo(js, wrap));
+      auto wrap = wrapper.wrap(js.v8Context(), kj::none, alloc<T>());
+      return ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap));
     }, type);
   }
 
@@ -447,22 +447,22 @@ public:
                                  ResolveOption option = ResolveOption::DEFAULT) override {
     using Key = typename Entry::Key;
     if (option == ResolveOption::INTERNAL_ONLY) {
-      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::INTERNAL))) {
-        return entry->module(js, observer);
+      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
+        return entry.module(js, observer);
       }
     } else {
       if (option == ResolveOption::DEFAULT) {
         // First, we try to resolve a worker bundle version of the module.
-        KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUNDLE))) {
-          return entry->module(js, observer);
+        KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUNDLE))) {
+          return entry.module(js, observer);
         }
       }
       // Then we look for a built-in version of the module.
-      KJ_IF_MAYBE(entry, entries.find(Key(specifier, Type::BUILTIN))) {
-        return entry->module(js, observer);
+      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
+        return entry.module(js, observer);
       }
     }
-    return nullptr;
+    return kj::none;
   }
 
   kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
@@ -470,17 +470,17 @@ public:
       // Unfortunately we cannot use entries.find(...) in here because the module info can
       // be initialized lazily at any point after the entry is indexed, making the lookup
       // by module a bit problematic. Iterating through the entries is slower but it works.
-      KJ_IF_MAYBE(info, entry.info.template tryGet<ModuleInfo>()) {
-        if (info->hashCode() == module->GetIdentityHash()) {
+      KJ_IF_SOME(info, entry.info.template tryGet<ModuleInfo>()) {
+        if (info.hashCode() == module->GetIdentityHash()) {
           return ModuleRef {
             .specifier = entry.specifier,
             .type = entry.type,
-            .module = const_cast<ModuleInfo&>(*info),
+            .module = const_cast<ModuleInfo&>(info),
           };
         }
       }
     }
-    return nullptr;
+    return kj::none;
   }
 
   size_t size() const { return entries.size(); }
@@ -495,19 +495,19 @@ public:
     // be found.
     using Key = typename Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
-    KJ_IF_MAYBE(entry, entries.find(Key(referrer, Type::BUILTIN))) {
+    if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
-    KJ_IF_MAYBE(info, resolve(js, specifier, resolveOption)) {
-      KJ_IF_MAYBE(func, dynamicImportHandler) {
-        auto handler = [&info = *info, isolate = js.v8Isolate]() -> Value {
+    KJ_IF_SOME(info, resolve(js, specifier, resolveOption)) {
+      KJ_IF_SOME(func, dynamicImportHandler) {
+        auto handler = [&info, isolate = js.v8Isolate]() -> Value {
           auto& js = Lock::from(isolate);
           auto module = info.module.getHandle(js);
           instantiateModule(js, module);
           return js.v8Ref(module->GetModuleNamespace());
         };
-        return (*func)(js, kj::mv(handler));
+        return func(js, kj::mv(handler));
       }
 
       // If there is no dynamicImportHandler set, then we are going to handle that as if
@@ -644,22 +644,22 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     try {
       return kj::Path::parse(kj::str(resource_name));
     } catch (kj::Exception& ex) {
-      return nullptr;
+      return kj::none;
     }
   })();
 
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
-    KJ_IF_MAYBE(referrerPath, maybeReferrerPath) {
+    KJ_IF_SOME(referrerPath, maybeReferrerPath) {
       try {
-        return referrerPath->parent().eval(kj::str(specifier));
+        return referrerPath.parent().eval(kj::str(specifier));
       } catch (kj::Exception& ex) {
-        return nullptr;
+        return kj::none;
       }
     }
-    return nullptr;
+    return kj::none;
   })();
 
-  if (maybeReferrerPath == nullptr || maybeSpecifierPath == nullptr) {
+  if (maybeReferrerPath == kj::none || maybeSpecifierPath == kj::none) {
     // If either of these are nullptr it means the kj::Path::parse or
     // kj::Path::eval failed. We want to handle these as No such module
     // errors.
@@ -670,7 +670,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
   auto& specifierPath = KJ_ASSERT_NONNULL(maybeSpecifierPath);
 
   try {
-    return wrapper.wrap(context, nullptr,
+    return wrapper.wrap(context, kj::none,
         registry->resolveDynamicImport(js, specifierPath, referrerPath));
   } catch (JsExceptionThrown&) {
     // If the tryCatch.Exception().IsEmpty() here is true, no JavaScript error

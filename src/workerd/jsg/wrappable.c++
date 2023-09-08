@@ -67,7 +67,7 @@ void HeapTracer::clearWrappers() {
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
 public:
   CppgcShim(Wrappable& wrappable): state(Active { kj::addRef(wrappable) }) {
-    KJ_DASSERT(wrappable.cppgcShim == nullptr);
+    KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
 
@@ -88,9 +88,9 @@ public:
       KJ_CASE_ONEOF(freelisted, Freelisted) {
         KJ_DASSERT(&KJ_ASSERT_NONNULL(*freelisted.prev) == this);
         *freelisted.prev = freelisted.next;
-        KJ_IF_MAYBE(next, freelisted.next) {
-          KJ_DASSERT(next->state.get<Freelisted>().prev == &freelisted.next);
-          next->state.get<Freelisted>().prev = freelisted.prev;
+        KJ_IF_SOME(next, freelisted.next) {
+          KJ_DASSERT(next.state.get<Freelisted>().prev == &freelisted.next);
+          next.state.get<Freelisted>().prev = freelisted.prev;
         }
       }
       KJ_CASE_ONEOF(d, Dead) {}
@@ -134,23 +134,23 @@ public:
 void HeapTracer::addToFreelist(Wrappable::CppgcShim& shim) {
   auto& freelisted = shim.state.init<Wrappable::CppgcShim::Freelisted>();
   freelisted.next = freelistedShims;
-  KJ_IF_MAYBE(next, freelisted.next) {
-    next->state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
+  KJ_IF_SOME(next, freelisted.next) {
+    next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
   }
   freelisted.prev = &freelistedShims;
   freelistedShims = shim;
 }
 
 Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
-  KJ_IF_MAYBE(shim, freelistedShims) {
-    freelistedShims = shim->state.get<Wrappable::CppgcShim::Freelisted>().next;
-    KJ_IF_MAYBE(next, freelistedShims) {
-      next->state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+  KJ_IF_SOME(shim, freelistedShims) {
+    freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
+    KJ_IF_SOME(next, freelistedShims) {
+      next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
     }
-    shim->state = Wrappable::CppgcShim::Active { kj::addRef(wrappable) };
-    KJ_DASSERT(wrappable.cppgcShim == nullptr);
-    wrappable.cppgcShim = *shim;
-    return shim;
+    shim.state = Wrappable::CppgcShim::Active { kj::addRef(wrappable) };
+    KJ_DASSERT(wrappable.cppgcShim == kj::none);
+    wrappable.cppgcShim = shim;
+    return &shim;
   } else {
     auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
     return cppgc::MakeGarbageCollected<Wrappable::CppgcShim>(cppgcAllocHandle, wrappable);
@@ -159,9 +159,9 @@ Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
 
 void HeapTracer::clearFreelistedShims() {
   for (;;) {
-    KJ_IF_MAYBE(shim, freelistedShims) {
-      freelistedShims = shim->state.get<Wrappable::CppgcShim::Freelisted>().next;
-      shim->state = Wrappable::CppgcShim::Dead {};
+    KJ_IF_SOME(shim, freelistedShims) {
+      freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
+      shim.state = Wrappable::CppgcShim::Dead {};
     } else {
       break;
     }
@@ -169,22 +169,22 @@ void HeapTracer::clearFreelistedShims() {
 }
 
 kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
-  KJ_IF_MAYBE(shim, cppgcShim) {
+  KJ_IF_SOME(shim, cppgcShim) {
     auto& tracer = HeapTracer::getTracer(isolate);
-    auto result = kj::mv(KJ_ASSERT_NONNULL(shim->state.tryGet<CppgcShim::Active>()).wrappable);
+    auto result = kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<CppgcShim::Active>()).wrappable);
     if (shouldFreelistShim) {
-      tracer.addToFreelist(*shim);
+      tracer.addToFreelist(shim);
     } else {
-      shim->state = CppgcShim::Dead {};
+      shim.state = CppgcShim::Dead {};
     }
-    wrapper = nullptr;
-    cppgcShim = nullptr;
+    wrapper = kj::none;
+    cppgcShim = kj::none;
     strongWrapper.Reset();
     tracer.removeWrapper({}, *this);
     if (strongRefcount > 0) {
       // Need to visit child references in order to convert them to strong references, since we
       // no longer have an intervening wrapper.
-      GcVisitor visitor(*this, nullptr);
+      GcVisitor visitor(*this, kj::none);
       jsgVisitForGc(visitor);
     }
     return result;
@@ -204,14 +204,14 @@ void Wrappable::addStrongRef() {
       "referencing wrapper without isolate lock");
   if (strongRefcount++ == 0) {
     // This object previously had no strong references, but now it has one.
-    KJ_IF_MAYBE(w, wrapper) {
+    KJ_IF_SOME(w, wrapper) {
       // Copy the traced reference into the strong reference.
       v8::HandleScope scope(isolate);
-      strongWrapper.Reset(isolate, w->Get(isolate));
+      strongWrapper.Reset(isolate, w.Get(isolate));
     } else {
       // Since we have no JS wrapper, we're forced to recursively mark all references reachable
       // through this wrapper as strong.
-      GcVisitor visitor(*this, nullptr);
+      GcVisitor visitor(*this, kj::none);
       jsgVisitForGc(visitor);
     }
   }
@@ -221,14 +221,14 @@ void Wrappable::removeStrongRef() {
               "destroying wrapper without isolate lock");
   if (--strongRefcount == 0) {
     // This was the last strong reference.
-    if (wrapper == nullptr) {
+    if (wrapper == kj::none) {
       // We have no wrapper. We need to mark all references held by this object as weak.
       if (isolate != nullptr) {
         // But only if the current isolate isn't null. If strong ref count is zero,
         // the wrapper is empty, and isolate is null, then the child handles it has will
         // be released anyway (since we're about to be destroyed), thus this visitation
         // isn't required (and may be buggy, since it may happen outside the isolate lock).
-        GcVisitor visitor(*this, nullptr);
+        GcVisitor visitor(*this, kj::none);
         jsgVisitForGc(visitor);
       }
     } else {
@@ -264,7 +264,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
                               v8::Local<v8::Object> object, bool needsGcTracing) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
-  KJ_REQUIRE(wrapper == nullptr);
+  KJ_REQUIRE(wrapper == kj::none);
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
   auto& wrapperRef = wrapper.emplace(isolate, object);
@@ -298,7 +298,7 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
     // transitively reachable through the reference are strong. Now that a wrapper exists, the
     // refs will be traced when the wrapper is traced, so they should be converted to traced
     // references. Performing a visitation pass will update them.
-    GcVisitor visitor(*this, nullptr);
+    GcVisitor visitor(*this, kj::none);
     jsgVisitForGc(visitor);
   }
 }
@@ -323,7 +323,7 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
     }
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 void Wrappable::jsgVisitForGc(GcVisitor& visitor) {
@@ -331,8 +331,8 @@ void Wrappable::jsgVisitForGc(GcVisitor& visitor) {
 }
 
 void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, bool& refStrong) {
-  KJ_IF_MAYBE(p, refParent) {
-    KJ_ASSERT(p == &visitor.parent);
+  KJ_IF_SOME(p, refParent) {
+    KJ_ASSERT(&p == &visitor.parent);
   } else {
     refParent = visitor.parent;
   }
@@ -342,7 +342,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
   }
 
   // Make ref strength match the parent.
-  if (visitor.parent.strongRefcount > 0 && visitor.parent.wrapper == nullptr) {
+  if (visitor.parent.strongRefcount > 0 && visitor.parent.wrapper == kj::none) {
     // This reference should be strong, because the parent has strong refs and does not have its
     // own wrapper that will be traced.
 
@@ -351,7 +351,7 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
       //
       // This should never happen during a GC pass, since we should only be visiting traced
       // references then.
-      KJ_ASSERT(visitor.cppgcVisitor == nullptr);
+      KJ_ASSERT(visitor.cppgcVisitor == kj::none);
       addStrongRef();
       refStrong = true;
     }
@@ -368,10 +368,10 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
     }
   }
 
-  KJ_IF_MAYBE(cgv, visitor.cppgcVisitor) {
+  KJ_IF_SOME(cgv, visitor.cppgcVisitor) {
     // We're visiting for the purpose of a GC trace.
-    KJ_IF_MAYBE(w, wrapper) {
-      cgv->Trace(*w);
+    KJ_IF_SOME(w, wrapper) {
+      cgv.Trace(w);
     } else {
       // This object doesn't currently have a wrapper, so traces must transitively trace through
       // it. However, as an optimization, we can skip the trace if we've already been traced in
@@ -385,17 +385,17 @@ void Wrappable::visitRef(GcVisitor& visitor, kj::Maybe<Wrappable&>& refParent, b
 void GcVisitor::visit(Data& value) {
   if (!value.handle.IsEmpty()) {
     // Make ref strength match the parent.
-    if (parent.strongRefcount > 0 && parent.wrapper == nullptr) {
+    if (parent.strongRefcount > 0 && parent.wrapper == kj::none) {
       // This is directly reachable by a strong ref, so mark the handle strong.
-      if (value.tracedHandle != nullptr) {
+      if (value.tracedHandle != kj::none) {
         // Convert the handle back to strong and discard the traced reference.
         value.handle.ClearWeak();
-        value.tracedHandle = nullptr;
+        value.tracedHandle = kj::none;
       }
     } else {
       // This is only reachable via traced objects, so the handle should be weak, and we should
       // hold a TracedReference alongside it.
-      if (value.tracedHandle == nullptr) {
+      if (value.tracedHandle == kj::none) {
         // Create the TracedReference.
         v8::HandleScope scope(parent.isolate);
         value.tracedHandle = v8::TracedReference<v8::Data>(
@@ -406,9 +406,9 @@ void GcVisitor::visit(Data& value) {
       }
     }
 
-    KJ_IF_MAYBE(c, cppgcVisitor) {
-      KJ_IF_MAYBE(t, value.tracedHandle) {
-        c->Trace(*t);
+    KJ_IF_SOME(c, cppgcVisitor) {
+      KJ_IF_SOME(t, value.tracedHandle) {
+        c.Trace(t);
       }
     }
   }

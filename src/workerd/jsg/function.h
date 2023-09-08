@@ -190,7 +190,7 @@ public:
   kj::Maybe<v8::Local<v8::Function>> tryGetHandle(v8::Isolate* isolate) {
     KJ_SWITCH_ONEOF(impl) {
       KJ_CASE_ONEOF(native, Ref<NativeFunction>) {
-        return nullptr;
+        return kj::none;
       }
       KJ_CASE_ONEOF(js, JsImpl) {
         return js.handle.getHandle(isolate);
@@ -235,8 +235,8 @@ public:
   }
 
   inline void setReceiver(Value receiver) {
-    KJ_IF_MAYBE(i, impl.template tryGet<JsImpl>()) {
-      i->receiver = kj::mv(receiver);
+    KJ_IF_SOME(i, impl.template tryGet<JsImpl>()) {
+      i.receiver = kj::mv(receiver);
     }
   }
 
@@ -295,7 +295,7 @@ public:
     v8::Isolate* isolate = context->GetIsolate();
     return func.getOrCreateHandle(isolate, [&](Ref<WrappableFunction<Signature>>& ref) {
       v8::Local<v8::Object> data;
-      KJ_IF_MAYBE(h, ref->tryGetHandle(isolate)) {
+      KJ_IF_SOME(h, ref->tryGetHandle(isolate)) {
         // Apparently, this function has been wrapped before and already has an opaque handle.
         // That's interesting. However, unfortunately, we don't have a handle to the v8::Function
         // that was created last time, so we can't return the same function instance. This is
@@ -319,7 +319,7 @@ public:
         //
         // In practice, it probably never matters that returning the same jsg::Function twice
         // produces exactly the same JavaScript handle. So... screw it.
-        data = *h;
+        data = h;
       } else {
         data = ref->attachOpaqueWrapper(context, ref->needsGcTracing);
       }
@@ -338,7 +338,7 @@ public:
         v8::Local<v8::Context> context, v8::Local<v8::Value> handle, Constructor<Ret(Args...)>*,
         kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsFunction()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto isolate = context->GetIsolate();
@@ -353,7 +353,7 @@ public:
       return js.withinHandleScope([&] {
         auto context = js.v8Context();
         v8::Local<v8::Value> argv[sizeof...(Args)] {
-          typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
+          typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))...
         };
 
         v8::Local<v8::Object> result = check(func->NewInstance(context, sizeof...(Args), argv));
@@ -375,7 +375,7 @@ public:
       Function<Ret(Args...)>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsFunction()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto isolate = context->GetIsolate();
@@ -390,7 +390,7 @@ public:
       return js.withinHandleScope([&] {
         auto context = js.v8Context();
         v8::Local<v8::Value> argv[sizeof...(Args)] {
-          typeWrapper.wrap(context, nullptr, kj::fwd<Args>(args))...
+          typeWrapper.wrap(context, kj::none, kj::fwd<Args>(args))...
         };
 
         auto result = check(func->Call(context, receiver, sizeof...(Args), argv));
@@ -416,7 +416,7 @@ public:
       Function<Ret(Arguments<Value>)>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsFunction()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto isolate = context->GetIsolate();

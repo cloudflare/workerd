@@ -104,7 +104,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
       };
     }
 
-    return nullptr;
+    return kj::none;
   };
 
   auto makeDefaultError = [](kj::StringPtr msg, Properties properties) {
@@ -123,8 +123,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
     auto idx = findDelim(internalMessage);
     while(idx) {
       internalMessage = internalMessage.slice(idx);
-      KJ_IF_MAYBE(e, tryExtractError(internalMessage, properties)) {
-        return kj::mv(*e);
+      KJ_IF_SOME(e, tryExtractError(internalMessage, properties)) {
+        return kj::mv(e);
       }
       idx = findDelim(internalMessage);
     }
@@ -141,8 +141,8 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   }
 
   // There are no prefixes left, just try to extract the error.
-  KJ_IF_MAYBE(e, tryExtractError(internalMessage, properties)) {
-    return kj::mv(*e);
+  KJ_IF_SOME(e, tryExtractError(internalMessage, properties)) {
+    return kj::mv(e);
   } else {
     return makeDefaultError(internalMessage, properties);
   }

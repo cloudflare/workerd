@@ -66,10 +66,10 @@ struct OptionalContext: public ContextGlobalObject {
     return kj::mv(arg).orDefault(kj::str("(absent)")).orDefault(kj::str("(null)"));
   }
   Optional<Ref<NumberBox>> returnOptional(double value) {
-    if (value == 321) return nullptr; else return jsg::alloc<NumberBox>(value);
+    if (value == 321) return kj::none; else return jsg::alloc<NumberBox>(value);
   }
   kj::Maybe<Ref<NumberBox>> returnMaybe(double value) {
-    if (value == 321) return nullptr; else return jsg::alloc<NumberBox>(value);
+    if (value == 321) return kj::none; else return jsg::alloc<NumberBox>(value);
   }
 
   kj::String readTestOptionalFields(TestOptionalFields s) {
@@ -224,12 +224,12 @@ struct OneOfContext: public ContextGlobalObject {
   kj::OneOf<double, kj::String, Ref<NumberBox>> returnOneOf(
       kj::Maybe<double> num, kj::Maybe<kj::String> str, kj::Maybe<Ref<NumberBox>> box) {
     kj::OneOf<double, kj::String, Ref<NumberBox>> result;
-    KJ_IF_MAYBE(n, num) {
-      result.init<double>(*n);
-    } else KJ_IF_MAYBE(s, str) {
-      result.init<kj::String>(kj::mv(*s));
-    } else KJ_IF_MAYBE(b, box) {
-      result.init<Ref<NumberBox>>(b->addRef());
+    KJ_IF_SOME(n, num) {
+      result.init<double>(n);
+    } else KJ_IF_SOME(s, str) {
+      result.init<kj::String>(kj::mv(s));
+    } else KJ_IF_SOME(b, box) {
+      result.init<Ref<NumberBox>>(b.addRef());
     }
     return result;
   }
@@ -1062,8 +1062,8 @@ struct NonCoercibleContext: public ContextGlobalObject {
   }
 
   bool testMaybeString(Optional<NonCoercible<kj::String>> value) {
-    KJ_IF_MAYBE(v, value) {
-      KJ_ASSERT(v->value != "null"_kj);
+    KJ_IF_SOME(v, value) {
+      KJ_ASSERT(v.value != "null"_kj);
     }
     return true;
   }

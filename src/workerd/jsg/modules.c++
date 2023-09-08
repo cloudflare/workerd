@@ -68,11 +68,11 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         ref.specifier.parent().eval(spec) :
         kj::Path::parse(spec);
 
-    KJ_IF_MAYBE(resolved, registry->resolve(js, targetPath,
+    KJ_IF_SOME(resolved, registry->resolve(js, targetPath,
         internalOnly ?
             ModuleRegistry::ResolveOption::INTERNAL_ONLY :
             ModuleRegistry::ResolveOption::DEFAULT)) {
-      result = resolved->module.getHandle(js);
+      result = resolved.module.getHandle(js);
     } else {
       // This is a bit annoying. If the module was not found, then
       // we need to check to see if it is a prefixed specifier. If it is,
@@ -81,9 +81,9 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
       // is using the prefix itself. (which isn't likely but is possible).
       // We only need to do this if internalOnly is false.
       if (!internalOnly && (spec.startsWith("node:") || spec.startsWith("cloudflare:"))) {
-        KJ_IF_MAYBE(resolve, registry->resolve(js, kj::Path::parse(spec),
+        KJ_IF_SOME(resolve, registry->resolve(js, kj::Path::parse(spec),
              ModuleRegistry::ResolveOption::DEFAULT)) {
-          result = resolve->module.getHandle(js);
+          result = resolve.module.getHandle(js);
           return;
         }
       }
@@ -110,7 +110,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   v8::EscapableHandleScope scope(js.v8Isolate);
   v8::MaybeLocal<v8::Value> result;
 
-  KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
     auto registry = getModulesForResolveCallback(js.v8Isolate);
     auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, module),
         "module passed to evaluateSyntheticModuleCallback isn't in modules table");
@@ -226,7 +226,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
     // I.e. NOT a rejected promise. OK...
-    context->GetIsolate()->ThrowException(makeInternalError(js.v8Isolate, kj::mv(*exception)));
+    context->GetIsolate()->ThrowException(makeInternalError(js.v8Isolate, kj::mv(exception)));
     result = v8::Local<v8::Promise>();
   }
 
@@ -382,8 +382,8 @@ v8::Local<v8::Module> compileEsmModule(
     // TODO(bug): The cache is failing under certain conditions. Disabling this logic
     // for now until it can be debugged.
     // const auto& compileCache = CompileCache::get();
-    // KJ_IF_MAYBE(cached, compileCache.find(content.begin())) {
-    //   v8::ScriptCompiler::Source source(contentStr, origin, cached);
+    // KJ_IF_SOME(cached, compileCache.find(content.begin())) {
+    //   v8::ScriptCompiler::Source source(contentStr, origin, &cached);
     //   v8::ScriptCompiler::CompileOptions options = v8::ScriptCompiler::kConsumeCodeCache;
     //   KJ_DEFER(if (source.GetCachedData()->rejected) {
     //     KJ_LOG(ERROR, kj::str("Failed to load module '", name ,"' using compile cache"));
@@ -415,8 +415,8 @@ v8::Local<v8::Module> createSyntheticModule(
     kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports) {
   std::vector<v8::Local<v8::String>> exportNames;
   exportNames.push_back(v8StrIntern(js.v8Isolate, "default"_kj));
-  KJ_IF_MAYBE(exports, maybeExports) {
-    for (auto& name : *exports) {
+  KJ_IF_SOME(exports, maybeExports) {
+    for (auto& name : exports) {
       exportNames.push_back(v8StrIntern(js.v8Isolate, name));
     }
   }

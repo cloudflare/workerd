@@ -525,8 +525,8 @@ jsg::Ref<Foo> foo = jsg::alloc<Foo>();
 jsg::Ref<Foo> foo2 = foo.addRef();
 
 js.withinHandleScope([&] {
-  KJ_IF_MAYBE(handle, foo.tryGetHandle(js.v8Isolate)) {
-    // If handle is non-null, it is the Foo instance's JavaScript wrapper.
+  KJ_IF_SOME(handle, foo.tryGetHandle(js.v8Isolate)) {
+    // handle is the Foo instance's JavaScript wrapper.
   }
 });
 ```
@@ -627,8 +627,8 @@ included in the JavaScript object.)
 ```cpp
 Foo someFunction(Foo foo) {
   KJ_DBG(foo.abc);  // a
-  KJ_IF_MAYBE(xyz, foo.xyz) {
-    KJ_DBG(*xyz);  // true
+  KJ_IF_SOME(xyz, foo.xyz) {
+    KJ_DBG(xyz);  // true
   }
   KJ_DBG(val); // [object Object]
   KJ_DBG(onlyInternal); 1

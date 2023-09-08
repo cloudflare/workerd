@@ -125,7 +125,7 @@ public:
   // the root AsyncContextFrame will be entered.
   static v8::Local<v8::Function> wrapRoot(
       Lock& js, v8::Local<v8::Function> fn,
-      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
 
   // Returns a function that captures the current frame and calls the function passed
   // in as an argument within that captured context. Equivalent to wrapping a function
@@ -137,14 +137,14 @@ public:
   // when the wrapper function is called.
   v8::Local<v8::Function> wrap(
       Lock& js, V8Ref<v8::Function>& fn,
-      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
 
   // Associates the given JavaScript function with this AsyncContextFrame, returning
   // a wrapper function that will ensure appropriate propagation of the async context
   // when the wrapper function is called.
   v8::Local<v8::Function> wrap(
       Lock& js, v8::Local<v8::Function> fn,
-      kj::Maybe<v8::Local<v8::Value>> thisArg = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> thisArg = kj::none);
 
   // AsyncContextFrame::Scope makes the given AsyncContextFrame the current in the
   // stack until the scope is destroyed.
@@ -152,9 +152,9 @@ public:
     v8::Isolate* isolate;
     kj::Maybe<AsyncContextFrame&> prior;
     // If frame is nullptr, the root frame is assumed.
-    Scope(Lock& js, kj::Maybe<AsyncContextFrame&> frame = nullptr);
+    Scope(Lock& js, kj::Maybe<AsyncContextFrame&> frame = kj::none);
     // If frame is nullptr, the root frame is assumed.
-    Scope(v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> frame = nullptr);
+    Scope(v8::Isolate* isolate, kj::Maybe<AsyncContextFrame&> frame = kj::none);
     // If frame is nullptr, the root frame is assumed.
     Scope(Lock& js, kj::Maybe<Ref<AsyncContextFrame>>& frame);
     ~Scope() noexcept(false);

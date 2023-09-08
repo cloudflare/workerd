@@ -327,8 +327,8 @@ KJ_TEST("symbol table") {
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable\", "
       "tsRoot = false)");
 
-  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable"_kj) != nullptr);
-  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestResource"_kj) != nullptr);
+  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestSymbolTable"_kj) != kj::none);
+  KJ_EXPECT(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestResource"_kj) != kj::none);
   KJ_EXPECT(KJ_REQUIRE_NONNULL(builder.structure("workerd::jsg::rtti::(anonymous namespace)::TestResource"_kj)).getMembers().size() > 0);
 }
 

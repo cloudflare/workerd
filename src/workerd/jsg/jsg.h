@@ -629,8 +629,8 @@ public:
     destroy();
   }
   Data(Data&& other): isolate(other.isolate), handle(kj::mv(other.handle)) {
-    KJ_IF_MAYBE(t, other.tracedHandle) {
-      moveFromTraced(other, *t);
+    KJ_IF_SOME(t, other.tracedHandle) {
+      moveFromTraced(other, t);
     }
     other.isolate = nullptr;
     assertInvariant();
@@ -642,8 +642,8 @@ public:
       isolate = other.isolate;
       handle = kj::mv(other.handle);
       other.isolate = nullptr;
-      KJ_IF_MAYBE(t, other.tracedHandle) {
-        moveFromTraced(other, *t);
+      KJ_IF_SOME(t, other.tracedHandle) {
+        moveFromTraced(other, t);
       }
     }
     assertInvariant();
@@ -1483,16 +1483,16 @@ public:
 
   template <typename T>
   void visit(kj::Maybe<Ref<T>>& maybeRef) {
-    KJ_IF_MAYBE(ref, maybeRef) {
-      visit(*ref);
+    KJ_IF_SOME(ref, maybeRef) {
+      visit(ref);
     }
   }
 
   void visit(Data& data);
 
   void visit(kj::Maybe<Data>& maybeData) {
-    KJ_IF_MAYBE(data, maybeData) {
-      visit(*data);
+    KJ_IF_SOME(data, maybeData) {
+      visit(data);
     }
   }
 
@@ -1503,8 +1503,8 @@ public:
 
   template <typename T>
   void visit(kj::Maybe<V8Ref<T>>& maybeValue) {
-    KJ_IF_MAYBE(value, maybeValue) {
-      visit(*value);
+    KJ_IF_SOME(value, maybeValue) {
+      visit(value);
     }
   }
 
@@ -1517,8 +1517,8 @@ public:
 
   template <typename T, typename = kj::EnableIf<hasPublicVisitForGc<T>()>()>
   void visit(kj::Maybe<T>& maybeSupportsVisit) {
-    KJ_IF_MAYBE(supportsVisit, maybeSupportsVisit) {
-      supportsVisit->visitForGc(*this);
+    KJ_IF_SOME(supportsVisit, maybeSupportsVisit) {
+      supportsVisit.visitForGc(*this);
     }
   }
 
@@ -1566,10 +1566,10 @@ constexpr bool isGcVisitable() { return isGcVisitable_((T*)nullptr); }
 //     void myMethod(v8::Local<v8::Value> handle,
 //                   const TypeHandler<MyType1>& wrapper,
 //                   const TypeHandler<MyType2>& wrapper) {
-//       KJ_IF_MAYBE(value1, wrapper.tryUnwrap(handle)) {
-//         value1->someMyType1Method();
-//       } KJ_IF_MAYBE(value2, wrapper.tryUnwrap(handle)) {
-//         value2->someMyType2Method();
+//       KJ_IF_SOME(value1, wrapper.tryUnwrap(handle)) {
+//         value1.someMyType1Method();
+//       } KJ_IF_SOME(value2, wrapper.tryUnwrap(handle)) {
+//         value2.someMyType2Method();
 //       }
 //     }
 //
@@ -1628,9 +1628,9 @@ public:
   // Read the property of this object called `name`, unwraping it as type `T`.
   kj::Maybe<T> get(v8::Isolate* isolate, kj::StringPtr name) {
     v8::HandleScope scope(isolate);
-    KJ_IF_MAYBE(s, self) {
-      KJ_IF_MAYBE(h, s->tryGetHandle(isolate)) {
-        return unwrapper(isolate, *h, name);
+    KJ_IF_SOME(s, self) {
+      KJ_IF_SOME(h, s.tryGetHandle(isolate)) {
+        return unwrapper(isolate, h, name);
       }
     }
     return nullptr;
@@ -2192,7 +2192,7 @@ public:
 
   JsRegExp regexp(kj::StringPtr pattern,
                   RegExpFlags flags = RegExpFlags::kNONE,
-                  kj::Maybe<uint32_t> backtrackLimit = nullptr)
+                  kj::Maybe<uint32_t> backtrackLimit = kj::none)
                   KJ_WARN_UNUSED_RESULT;
 
   template <typename...Args> requires (std::assignable_from<JsValue&, Args> && ...)

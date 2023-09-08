@@ -92,13 +92,13 @@ public:
     exportCommonJsDefault = exportDefault;
   }
 
-  inline bool areWarningsLogged() const { return maybeLogger != nullptr; }
+  inline bool areWarningsLogged() const { return maybeLogger != kj::none; }
 
   // The logger will be optionally set by the isolate setup logic if there is anywhere
   // for the log to go (for instance, if debug logging is enabled or the inspector is
   // being used).
   inline void logWarning(Lock& js, kj::StringPtr message) {
-    KJ_IF_MAYBE(logger, maybeLogger) { (*logger)(js, message); }
+    KJ_IF_SOME(logger, maybeLogger) { logger(js, message); }
   }
 
   // Returns a random UUID for this isolate instance.

@@ -13,8 +13,8 @@ inline void maybeSetV8ContinuationContext(
     v8::Isolate* isolate,
     kj::Maybe<AsyncContextFrame&> maybeFrame) {
   v8::Local<v8::Value> value;
-  KJ_IF_MAYBE(frame, maybeFrame) {
-    value = frame->getJSWrapper(isolate);
+  KJ_IF_SOME(frame, maybeFrame) {
+    value = frame.getJSWrapper(isolate);
   } else {
     value = v8::Undefined(isolate);
   }
@@ -23,12 +23,12 @@ inline void maybeSetV8ContinuationContext(
 }  // namespace
 
 AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
-  KJ_IF_MAYBE(frame, current(js)) {
+  KJ_IF_SOME(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
     // frame and there is no storage to propagate.
-    frame->storage.eraseAll([](const auto& entry) { return entry.key->isDead(); });
-    for (auto& entry : frame->storage) {
+    frame.storage.eraseAll([](const auto& entry) { return entry.key->isDead(); });
+    for (auto& entry : frame.storage) {
       storage.insert(entry.clone(js));
     }
   }
@@ -54,12 +54,12 @@ kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(Lock& js) {
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
   auto value = isolate->GetCurrentContext()->GetContinuationPreservedEmbedderData();
-  KJ_IF_MAYBE(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
-    AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(wrappable);
+  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
+    AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(&wrappable);
     KJ_ASSERT(frame != nullptr);
     return *frame;
   }
-  return nullptr;
+  return kj::none;
 }
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
@@ -139,7 +139,7 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
       argv.add(args[n]);
     }
 
-    AsyncContextFrame::Scope scope(js, nullptr);
+    AsyncContextFrame::Scope scope(js, kj::none);
     return check(function->Call(context, thisArg.getHandle(js), args.Length(), argv.begin()));
   }));
 }
@@ -179,8 +179,8 @@ AsyncContextFrame::StorageScope::StorageScope(
       scope(js, *frame) {}
 
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {
-  KJ_IF_MAYBE(handle, tryGetHandle(isolate)) {
-    return *handle;
+  KJ_IF_SOME(handle, tryGetHandle(isolate)) {
+    return handle;
   }
   return attachOpaqueWrapper(isolate->GetCurrentContext(), true);
 }

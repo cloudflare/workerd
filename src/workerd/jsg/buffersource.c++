@@ -88,7 +88,7 @@ kj::Maybe<BufferSource> BufferSource::tryAlloc(Lock& js, size_t size) {
   if (v8::ArrayBuffer::MaybeNew(js.v8Isolate, size).ToLocal(&buffer)) {
     return BufferSource(js, v8::Uint8Array::New(buffer, 0, size).As<v8::Value>());
   }
-  return nullptr;
+  return kj::none;
 }
 
 BufferSource::BufferSource(Lock& js, v8::Local<v8::Value> handle)
@@ -116,7 +116,7 @@ BackingStore BufferSource::detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> mayb
       kj::mv(JSG_REQUIRE_NONNULL(maybeBackingStore,
                                   TypeError,
                                   "This BufferSource has already been detached."));
-  maybeBackingStore = nullptr;
+  maybeBackingStore = kj::none;
 
   v8::Local<v8::Value> key = maybeKey.orDefault(v8::Local<v8::Value>());
 

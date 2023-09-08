@@ -454,9 +454,9 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
     }
 
     case v8::JitCodeEvent::CODE_MOVED:
-      KJ_IF_MAYBE(entry, codeMap.findEntry(startAddr)) {
-        auto info = kj::mv(entry->value);
-        codeMap.erase(*entry);
+      KJ_IF_SOME(entry, codeMap.findEntry(startAddr)) {
+        auto info = kj::mv(entry.value);
+        codeMap.erase(entry);
         codeMap.upsert(reinterpret_cast<uintptr_t>(event->new_code_start), kj::mv(info),
             [&](CodeBlockInfo& existing, CodeBlockInfo&& replacement) {
           // It seems sometimes V8 tells us that it "moved" a block to a location that already
@@ -465,7 +465,7 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
           // (E.g. maybe the reason the block already exists is because CODE_ADDED or
           // CODE_END_LINE_INFO_RECORDING was already delivered to the new location for some
           // reason...)
-          if (replacement.type != nullptr) {
+          if (replacement.type != kj::none) {
             existing.size = replacement.size;
             existing.type = replacement.type;
             existing.name = kj::mv(replacement.name);
@@ -542,11 +542,11 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 #else
 kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch) {
   if (!v8Initialized) {
-    return nullptr;
+    return kj::none;
   }
   v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
   if (isolate == nullptr) {
-    return nullptr;
+    return kj::none;
   }
 
   char* pos = scratch.begin();
@@ -649,8 +649,8 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
 
 kj::StringPtr IsolateBase::getUuid() {
   // Lazily create a random UUID for this isolate.
-  KJ_IF_MAYBE(u, uuid) { return *u; }
-  return uuid.emplace(randomUUID(nullptr));
+  KJ_IF_SOME(u, uuid) { return u; }
+  return uuid.emplace(randomUUID(kj::none));
 }
 
 }  // namespace workerd::jsg

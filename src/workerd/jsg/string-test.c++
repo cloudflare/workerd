@@ -335,8 +335,8 @@ KJ_TEST("UsvString from kj::String") {
     auto str = usv("abc:xyz:123");
     KJ_ASSERT(str.lastIndexOf(':') == 7);
     KJ_ASSERT(str.asPtr().lastIndexOf(':') == 7);
-    KJ_ASSERT(str.lastIndexOf('#') == nullptr);
-    KJ_ASSERT(str.asPtr().lastIndexOf('#') == nullptr);
+    KJ_ASSERT(str.lastIndexOf('#') == kj::none);
+    KJ_ASSERT(str.asPtr().lastIndexOf('#') == kj::none);
 
     auto str2 = usv("#abc:xyz:123");
     KJ_ASSERT(str2.lastIndexOf('#') == 0);
