@@ -77,8 +77,8 @@ KJ_TEST("Basic MimeType parsing works") {
     KJ_ASSERT(mimeType.subtype() == test.subtype);
     KJ_ASSERT(mimeType.toString() == test.output);
 
-    KJ_IF_MAYBE(params, test.params) {
-      for (auto& param : *params) {
+    KJ_IF_SOME(params, test.params) {
+      for (auto& param : params) {
         auto& value = KJ_ASSERT_NONNULL(mimeType.params().find(param.key));
         KJ_ASSERT(value == param.value);
       }
@@ -104,7 +104,7 @@ KJ_TEST("Basic MimeType parsing works") {
   };
 
   for (auto& test : kErrorTests) {
-    KJ_ASSERT(MimeType::tryParse(test.input) == nullptr, test.input);
+    KJ_ASSERT(MimeType::tryParse(test.input) == kj::none, test.input);
   }
 }
 
@@ -121,9 +121,9 @@ KJ_TEST("Building MimeType works") {
 
   KJ_ASSERT(type.toString() == "text/plain;a=b");
 
-  KJ_ASSERT(type.params().find("a"_kj) != nullptr);
-  KJ_ASSERT(type.params().find("b"_kj) == nullptr);
-  KJ_ASSERT(type.params().find("z"_kj) == nullptr);
+  KJ_ASSERT(type.params().find("a"_kj) != kj::none);
+  KJ_ASSERT(type.params().find("b"_kj) == kj::none);
+  KJ_ASSERT(type.params().find("z"_kj) == kj::none);
 
   // Comparing based solely on type/subtype works
   KJ_ASSERT(MimeType::PLAINTEXT == type);
@@ -382,11 +382,11 @@ KJ_TEST("WHATWG tests") {
   };
 
   for (const auto& test : kTests) {
-    KJ_IF_MAYBE(output, test.output) {
+    KJ_IF_SOME(output, test.output) {
       auto result = KJ_ASSERT_NONNULL(MimeType::tryParse(test.input));
-      KJ_ASSERT(result.toString() == *output);
+      KJ_ASSERT(result.toString() == output);
     } else {
-      KJ_ASSERT(MimeType::tryParse(test.input) == nullptr);
+      KJ_ASSERT(MimeType::tryParse(test.input) == kj::none);
     }
   }
 

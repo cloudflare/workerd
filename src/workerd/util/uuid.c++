@@ -12,8 +12,8 @@ namespace workerd {
 kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   kj::byte buffer[16];
 
-  KJ_IF_MAYBE(entropySource, optionalEntropySource) {
-    entropySource->generate(buffer);
+  KJ_IF_SOME(entropySource, optionalEntropySource) {
+    entropySource.generate(buffer);
   } else {
     KJ_ASSERT(RAND_bytes(buffer, sizeof(buffer)) == 1);
   }

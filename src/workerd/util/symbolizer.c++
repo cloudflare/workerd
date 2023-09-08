@@ -35,11 +35,11 @@ struct Subprocess {
 
     if (pipe(in)) {
       KJ_LOG(ERROR, "can't allocate in pipe", strerror(errno));
-      return nullptr;
+      return kj::none;
     }
     if (pipe(out)){
       KJ_LOG(ERROR, "can't allocate out pipe", strerror(errno));
-      return nullptr;
+      return kj::none;
     }
 
     auto pid = fork();
@@ -114,7 +114,7 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
     return false;
   }();
 
-  KJ_IF_MAYBE(subprocess, Subprocess::exec(argv)) {
+  KJ_IF_SOME(subprocess, Subprocess::exec(argv)) {
     // write addresses as "CODE <file_name> <hex_address>" lines.
     auto addrs = strArray(KJ_MAP(addr, trace) {
       Dl_info info;
@@ -126,17 +126,17 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
         return kj::str("CODE 0x", reinterpret_cast<void*>(addr));
       }
     }, "\n");
-    if (write(subprocess->in, addrs.cStr(), addrs.size()) != addrs.size()) {
+    if (write(subprocess.in, addrs.cStr(), addrs.size()) != addrs.size()) {
       // Ignore EPIPE, which means the process exited early. We'll deal with it below, presumably.
       if (errno != EPIPE) {
         KJ_LOG(ERROR, "write error", strerror(errno));
         return nullptr;
       }
     }
-    close(subprocess->in);
+    close(subprocess.in);
 
     // read result
-    auto out = fdopen(subprocess->out, "r");
+    auto out = fdopen(subprocess.out, "r");
     if (!out) {
       KJ_LOG(ERROR, "fdopen error", strerror(errno));
       return nullptr;
@@ -149,7 +149,7 @@ String stringifyStackTrace(ArrayPtr<void* const> trace) {
         lines[i++] = kj::str(line);
       }
     }
-    int status = subprocess->closeAndWait();
+    int status = subprocess.closeAndWait();
     if (WIFEXITED(status)) {
       if (WEXITSTATUS(status) != 0) {
         if (WEXITSTATUS(status) == 2) {
