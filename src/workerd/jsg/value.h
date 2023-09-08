@@ -772,7 +772,7 @@ public:
     v8::EscapableHandleScope handleScope(isolate);
 
     auto len = array.size();
-    kj::SmallArray<v8::Local<v8::Value>, MAX_STACK> items(len);
+    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, len, MAX_STACK, MAX_STACK);
     for (auto n = 0; n < len; n++) {
       items[n] = static_cast<TypeWrapper*>(this)->wrap(
           context, creator, kj::mv(array[n])).template As<v8::Value>();
@@ -789,7 +789,7 @@ public:
     v8::EscapableHandleScope handleScope(isolate);
 
     auto len = array.size();
-    kj::SmallArray<v8::Local<v8::Value>, MAX_STACK> items(len);
+    KJ_STACK_ARRAY(v8::Local<v8::Value>, items, len, MAX_STACK, MAX_STACK);
     for (auto n = 0; n < len; n++) {
       items[n] = static_cast<TypeWrapper*>(this)->wrap(
           context, creator, kj::mv(array[n])).template As<v8::Value>();
