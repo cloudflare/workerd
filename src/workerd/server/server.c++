@@ -2706,7 +2706,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
     auto registrar = kj::heap<InspectorServiceIsolateRegistrar>();
     auto port = startInspector(inspectorAddress, *registrar);
     KJ_IF_SOME(stream, controlOverride) {
-      auto message = kj::str("{\"event\":\"listen-inspector\",\"port\":\"", port, "}\n");
+      auto message = kj::str("{\"event\":\"listen-inspector\",\"port\":", port, "}\n");
       try {
         stream->write(message.begin(), message.size());
       } catch (kj::Exception& e) {
