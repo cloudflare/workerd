@@ -885,7 +885,7 @@ public:
 
   void writeLogfwdr(uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage);
 
-  v8::Local<v8::Object> getPromiseContextTag(jsg::Lock& js);
+  jsg::JsObject getPromiseContextTag(jsg::Lock& js);
 
 private:
   ThreadContext& thread;
@@ -1040,7 +1040,7 @@ private:
   void requireCurrent();
   void checkFarGet(const DeleteQueue* expectedQueue);
 
-  kj::Maybe<jsg::V8Ref<v8::Object>> promiseContextTag;
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> promiseContextTag;
 
   class Runnable {
   public:

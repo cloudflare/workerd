@@ -1306,7 +1306,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     runImpl(runnable, false, asyncLock, nullptr, true);
   }
 
-  promiseContextTag = nullptr;
+  promiseContextTag = kj::none;
 }
 
 #ifdef KJ_DEBUG
@@ -1429,9 +1429,9 @@ void IoContext::requireCurrentOrThrowJs() {
       "of Cloudflare Workers which allows us to improve overall performance.");
 }
 
-v8::Local<v8::Object> IoContext::getPromiseContextTag(jsg::Lock& js) {
-  if (promiseContextTag == nullptr) {
-    promiseContextTag = js.v8Ref(v8::Object::New(js.v8Isolate));
+jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
+  if (promiseContextTag == kj::none) {
+    promiseContextTag = jsg::JsRef(js, js.obj());
   }
   return KJ_REQUIRE_NONNULL(promiseContextTag).getHandle(js);
 }
