@@ -1,0 +1,18 @@
+--- src/dawn/native/vulkan/ShaderModuleVk.cpp	2023-09-08 14:15:24.834407128 +0000
++++ src/dawn/native/vulkan/ShaderModuleVk.cpp	2023-09-08 14:51:26.318407128 +0000
+@@ -14,7 +14,6 @@
+
+ #include "dawn/native/vulkan/ShaderModuleVk.h"
+
+-#include <spirv-tools/libspirv.hpp>
+
+ #include <map>
+ #include <string>
+@@ -22,7 +21,6 @@
+
+ #include "dawn/native/CacheRequest.h"
+ #include "dawn/native/Serializable.h"
+-#include "dawn/native/SpirvValidation.h"
+ #include "dawn/native/TintUtils.h"
+ #include "dawn/native/vulkan/BindGroupLayoutVk.h"
+ #include "dawn/native/vulkan/DeviceVk.h"
