@@ -125,8 +125,8 @@ jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   desc.compare = parseCompareFunction(descriptor.compare);
   desc.maxAnisotropy = descriptor.maxAnisotropy.orDefault(1);
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   auto sampler = device_.CreateSampler(&desc);
@@ -137,8 +137,8 @@ jsg::Ref<GPUBindGroupLayout>
 GPUDevice::createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor) {
   wgpu::BindGroupLayoutDescriptor desc{};
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   kj::Vector<wgpu::BindGroupLayoutEntry> layoutEntries;
@@ -155,8 +155,8 @@ GPUDevice::createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor) {
 jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
   wgpu::BindGroupDescriptor desc{};
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   desc.layout = *descriptor.layout;
@@ -178,8 +178,8 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
   desc.nextInChain = &wgsl_desc;
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   wgsl_desc.code = descriptor.code.cStr();
@@ -192,8 +192,8 @@ jsg::Ref<GPUPipelineLayout>
 GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor descriptor) {
   wgpu::PipelineLayoutDescriptor desc{};
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   kj::Vector<wgpu::BindGroupLayout> bindGroupLayouts;
@@ -213,9 +213,9 @@ GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descr
   wgpu::CommandEncoderDescriptor desc{};
 
   kj::String label = kj::str("");
-  KJ_IF_MAYBE (d, descriptor) {
-    KJ_IF_MAYBE (l, d->label) {
-      label = kj::mv(*l);
+  KJ_IF_SOME (d, descriptor) {
+    KJ_IF_SOME (l, d.label) {
+      label = kj::mv(l);
       desc.label = label.cStr();
     }
   }
@@ -228,16 +228,16 @@ wgpu::ComputePipelineDescriptor
 parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   wgpu::ComputePipelineDescriptor desc{};
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   desc.compute.module = *descriptor.compute.module;
   desc.compute.entryPoint = descriptor.compute.entryPoint.cStr();
 
   kj::Vector<wgpu::ConstantEntry> constants;
-  KJ_IF_MAYBE (cDict, descriptor.compute.constants) {
-    for (auto& f : cDict->fields) {
+  KJ_IF_SOME (cDict, descriptor.compute.constants) {
+    for (auto& f : cDict.fields) {
       wgpu::ConstantEntry e;
       e.key = f.name.cStr();
       e.value = f.value;
@@ -286,7 +286,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> GPUDevice::popErrorScope() {
         auto c = std::unique_ptr<Context>(static_cast<Context*>(userdata));
         switch (type) {
         case WGPUErrorType::WGPUErrorType_NoError:
-          c->fulfiller->fulfill(nullptr);
+          c->fulfiller->fulfill(kj::none);
           break;
         case WGPUErrorType::WGPUErrorType_OutOfMemory: {
           jsg::Ref<GPUError> err = jsg::alloc<GPUOutOfMemoryError>(kj::str(message));
@@ -449,8 +449,8 @@ GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
 jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
   wgpu::QuerySetDescriptor desc{};
 
-  KJ_IF_MAYBE (label, descriptor.label) {
-    desc.label = label->cStr();
+  KJ_IF_SOME (label, descriptor.label) {
+    desc.label = label.cStr();
   }
 
   desc.count = descriptor.count;

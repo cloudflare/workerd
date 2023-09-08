@@ -69,13 +69,13 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
   wgpu::DeviceDescriptor desc{};
   kj::Vector<wgpu::FeatureName> requiredFeatures;
   wgpu::RequiredLimits limits;
-  KJ_IF_MAYBE (d, descriptor) {
-    KJ_IF_MAYBE (label, d->label) {
-      desc.label = label->cStr();
+  KJ_IF_SOME (d, descriptor) {
+    KJ_IF_SOME (label, d.label) {
+      desc.label = label.cStr();
     }
 
-    KJ_IF_MAYBE (features, d->requiredFeatures) {
-      for (auto& required : *features) {
+    KJ_IF_SOME (features, d.requiredFeatures) {
+      for (auto& required : features) {
         requiredFeatures.add(parseFeatureName(required));
       }
 
@@ -83,8 +83,8 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
       desc.requiredFeatures = requiredFeatures.begin();
     }
 
-    KJ_IF_MAYBE (requiredLimits, d->requiredLimits) {
-      for (auto& f : requiredLimits->fields) {
+    KJ_IF_SOME (requiredLimits, d.requiredLimits) {
+      for (auto& f : requiredLimits.fields) {
         setLimit(limits, f.name, f.value);
       }
       desc.requiredLimits = &limits;

@@ -524,20 +524,20 @@ wgpu::BindGroupLayoutEntry parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry& en
   e.binding = entry.binding;
   e.visibility = static_cast<wgpu::ShaderStage>(entry.visibility);
 
-  KJ_IF_MAYBE (buffer, entry.buffer) {
-    e.buffer = parseBufferBindingLayout(*buffer);
+  KJ_IF_SOME (buffer, entry.buffer) {
+    e.buffer = parseBufferBindingLayout(buffer);
   }
 
-  KJ_IF_MAYBE (sampler, entry.sampler) {
-    e.sampler = parseSamplerBindingLayout(*sampler);
+  KJ_IF_SOME (sampler, entry.sampler) {
+    e.sampler = parseSamplerBindingLayout(sampler);
   }
 
-  KJ_IF_MAYBE (texture, entry.texture) {
-    e.texture = parseTextureBindingLayout(*texture);
+  KJ_IF_SOME (texture, entry.texture) {
+    e.texture = parseTextureBindingLayout(texture);
   }
 
-  KJ_IF_MAYBE (storage, entry.storageTexture) {
-    e.storageTexture = parseStorageTextureBindingLayout(*storage);
+  KJ_IF_SOME (storage, entry.storageTexture) {
+    e.storageTexture = parseStorageTextureBindingLayout(storage);
   }
 
   return kj::mv(e);

@@ -22,19 +22,19 @@ void GPUQueue::writeBuffer(jsg::Ref<GPUBuffer> buffer, GPUSize64 bufferOffset,
   wgpu::Buffer buf = *buffer;
 
   uint64_t dataOffset = 0;
-  KJ_IF_MAYBE (offset, dataOffsetElements) {
+  KJ_IF_SOME (offset, dataOffsetElements) {
     // In the JS semantics of WebGPU, writeBuffer works in number of
     // elements of the typed arrays.
-    dataOffset = *offset * data.getElementSize();
+    dataOffset = offset * data.getElementSize();
     JSG_REQUIRE(dataOffset <= data.size(), TypeError, "dataOffset is larger than data's size.");
   }
 
   auto dataPtr = reinterpret_cast<uint8_t*>(data.asArrayPtr().begin()) + dataOffset;
   size_t dataSize = data.size() - dataOffset;
-  KJ_IF_MAYBE (size, sizeElements) {
-    JSG_REQUIRE(*size <= std::numeric_limits<uint64_t>::max() / data.getElementSize(), TypeError,
+  KJ_IF_SOME (size, sizeElements) {
+    JSG_REQUIRE(size <= std::numeric_limits<uint64_t>::max() / data.getElementSize(), TypeError,
                 "size overflows.");
-    dataSize = *size * data.getElementSize();
+    dataSize = size * data.getElementSize();
     JSG_REQUIRE(dataOffset + dataSize <= data.size(), TypeError,
                 "size + dataOffset is larger than data's size.");
 
