@@ -368,7 +368,7 @@ kj::Maybe<jsg::JsString> IcuDecoder::decode(
               buffer.size(),
               static_cast<size_t>(ucnv_toUCountPending(inner.get(), &status))));
 
-  kj::SmallArray<UChar, 512> result(limit);
+  KJ_STACK_ARRAY(UChar, result, limit, 512, 4096);
 
   auto dest = result.begin();
   auto source = reinterpret_cast<const char*>(buffer.begin());

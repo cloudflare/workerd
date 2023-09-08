@@ -206,7 +206,7 @@ uint32_t writeInto(
           str.size());
     }
     case Encoding::HEX: {
-      kj::SmallArray<kj::byte, 1024> buf(string.length(js));
+      KJ_STACK_ARRAY(kj::byte, buf, string.length(js), 1024, 536870888);
       static constexpr jsg::JsString::WriteOptions options =
           static_cast<jsg::JsString::WriteOptions>(jsg::JsString::NO_NULL_TERMINATION |
                                                    jsg::JsString::REPLACE_INVALID_UTF8);
@@ -256,7 +256,7 @@ kj::Array<kj::byte> decodeStringImpl(
     case Encoding::BASE64URL: {
       // We do not use the kj::String conversion here because inline null-characters
       // need to be ignored.
-      kj::SmallArray<kj::byte, 1024> buf(length);
+      KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       auto result = string.writeInto(js, buf, options);
       auto len = result.written;
       auto dest = kj::heapArray<kj::byte>(base64_decoded_size(buf.begin(), len));
@@ -268,7 +268,7 @@ kj::Array<kj::byte> decodeStringImpl(
       return dest.slice(0, len).attach(kj::mv(dest));
     }
     case Encoding::HEX: {
-      kj::SmallArray<kj::byte, 1024> buf(length);
+      KJ_STACK_ARRAY(kj::byte, buf, length, 1024, 536870888);
       string.writeInto(js, buf, options);
       return decodeHexTruncated(buf, strict);
     }
