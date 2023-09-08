@@ -31,10 +31,10 @@ const bool verboseLog = ([]() {
 kj::Own<config::Config::Reader> parseConfig(kj::StringPtr text, kj::SourceLocation loc) {
   capnp::MallocMessageBuilder builder;
   auto root = builder.initRoot<config::Config>();
-  KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&]() {
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
     TEXT_CODEC.decode(text, root);
   })) {
-    KJ_FAIL_REQUIRE_AT(loc, *exception);
+    KJ_FAIL_REQUIRE_AT(loc, exception);
   }
 
   return capnp::clone(root.asReader());
@@ -130,7 +130,7 @@ public:
 
   // Return true if the stream is at EOF.
   bool isEof() {
-    if (premature != nullptr) {
+    if (premature != kj::none) {
       // We still have unread data so we're definitely not at EOF.
       return false;
     }
@@ -163,8 +163,8 @@ private:
 
   kj::String readAllAvailable() {
     kj::Vector<char> buffer(256);
-    KJ_IF_MAYBE(p, premature) {
-      buffer.add(*p);
+    KJ_IF_SOME(p, premature) {
+      buffer.add(p);
     }
 
     // Continuously try to read until there's nothing to read (or we've gone way past the size
@@ -225,15 +225,15 @@ public:
 
     if (!unwindDetector.isUnwinding()) {
       // Make sure any errors are reported.
-      KJ_IF_MAYBE(t, runTask) {
-        t->poll(ws);
+      KJ_IF_SOME(t, runTask) {
+        t.poll(ws);
       }
     }
   }
 
   // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
-    KJ_REQUIRE(runTask == nullptr);
+    KJ_REQUIRE(runTask == kj::none);
     auto task = server.run(v8System, *config, kj::mv(drainWhen))
         .eagerlyEvaluate([](kj::Exception&& e) {
       KJ_FAIL_EXPECT(e);
@@ -363,7 +363,7 @@ private:
       auto pipe = kj::newCapabilityPipe();
       auto receiver = kj::heap<kj::CapabilityStreamConnectionReceiver>(*pipe.ends[0])
           .attach(kj::mv(pipe.ends[0]));
-      auto sender = kj::heap<kj::CapabilityStreamNetworkAddress>(nullptr, *pipe.ends[1])
+      auto sender = kj::heap<kj::CapabilityStreamNetworkAddress>(kj::none, *pipe.ends[1])
           .attach(kj::mv(pipe.ends[1]));
       test.sockets.insert(kj::str(address), kj::mv(sender));
       return receiver;

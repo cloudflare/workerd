@@ -168,7 +168,7 @@ public:
 
         if (event.len > 0 && event.name[0] != '\0') {
           auto& watched = KJ_ASSERT_NONNULL(filesWatched.find(event.wd));
-          if (watched.find(kj::StringPtr(event.name)) != nullptr) {
+          if (watched.find(kj::StringPtr(event.name)) != kj::none) {
             // HIT! We saw a change.
             co_return;
           }
@@ -212,12 +212,12 @@ public:
   bool isSupported() { return true; }
 
   void watch(kj::PathPtr path, kj::Maybe<const kj::ReadableFile&> file) {
-    KJ_IF_MAYBE(f, file) {
-      KJ_IF_MAYBE(fd, f->getFd()) {
+    KJ_IF_SOME(f, file) {
+      KJ_IF_SOME(fd, f.getFd()) {
         // We need to duplicate the FD becasue the original will probably be closed later and
         // closing the FD unregisters it from kqueue.
         int duped;
-        KJ_SYSCALL(duped = dup(*fd));
+        KJ_SYSCALL(duped = dup(fd));
         watchFd(kj::AutoCloseFd(duped));
         return;
       }
@@ -344,8 +344,8 @@ public:
       displayName = fullPath.toNativeString(true);
     }
 
-    KJ_IF_MAYBE(w, watcher) {
-      w->watch(fullPath, *file);
+    KJ_IF_SOME(w, watcher) {
+      w.watch(fullPath, *file);
     }
   }
 
@@ -363,10 +363,10 @@ public:
       for (auto& candidate: importPath) {
         auto newFullPath = candidate.append(parsedPath);
 
-        KJ_IF_MAYBE(newFile, root.tryOpenFile(newFullPath)) {
+        KJ_IF_SOME(newFile, root.tryOpenFile(newFullPath)) {
           return kj::implicitCast<kj::Own<SchemaFile>>(kj::heap<SchemaFileImpl>(
               root, current, kj::mv(newFullPath), candidate, importPath,
-              kj::mv(*newFile), watcher, errorReporter));
+              kj::mv(newFile), watcher, errorReporter));
         }
       }
       // No matching file found. Check if we have a builtin.
@@ -376,12 +376,12 @@ public:
       auto parsed = relativeTo.parent().eval(target);
       auto newFullPath = basePath.append(parsed);
 
-      KJ_IF_MAYBE(newFile, root.tryOpenFile(newFullPath)) {
+      KJ_IF_SOME(newFile, root.tryOpenFile(newFullPath)) {
         return kj::implicitCast<kj::Own<SchemaFile>>(kj::heap<SchemaFileImpl>(
-            root, current, kj::mv(newFullPath), basePath, importPath, kj::mv(*newFile),
+            root, current, kj::mv(newFullPath), basePath, importPath, kj::mv(newFile),
             watcher, errorReporter));
       } else {
-        return nullptr;
+        return kj::none;
       }
     }
   }
@@ -476,7 +476,7 @@ kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name) {
   } else if (name == "/workerd/workerd.capnp") {
     return kj::heap<BuiltinSchemaFileImpl>("/workerd/workerd.capnp", WORKERD_CAPNP_SCHEMA);
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -488,7 +488,7 @@ public:
       : context(context), argv(argv),
         server(*fs, io.provider->getTimer(), io.provider->getNetwork(), entropySource,
             [&](kj::String error) {
-          if (watcher == nullptr) {
+          if (watcher == kj::none) {
             // TODO(someday): Don't just fail on the first error, keep going in order to report
             //   additional errors. The tricky part is we don't currently have any signal of when
             //   the server has completely finished loading, and also we probably don't want to
@@ -502,8 +502,8 @@ public:
             context.error(error);
           }
         }) {
-    KJ_IF_MAYBE(e, exeInfo) {
-      auto& exe = *e->file;
+    KJ_IF_SOME(e, exeInfo) {
+      auto& exe = *e.file;
       auto size = exe.stat().size;
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
       kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)];
@@ -538,7 +538,7 @@ public:
   }
 
   kj::MainFunc getMain() {
-    if (config == nullptr) {
+    if (config == kj::none) {
       return kj::MainBuilder(context, getVersionString(),
             "Runs the Workers JavaScript/Wasm runtime.")
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe),
@@ -679,7 +679,7 @@ public:
 
   void addImportPath(kj::StringPtr pathStr) {
     auto path = fs->getCurrentPath().evalNative(pathStr);
-    KJ_IF_MAYBE(dir, fs->getRoot().tryOpenSubdir(path)) {
+    if (fs->getRoot().tryOpenSubdir(path) != kj::none) {
       importPath.add(kj::mv(path));
     } else {
       CLI_ERROR("No such directory.");
@@ -784,8 +784,8 @@ public:
       CLI_ERROR("File watching is not yet implemented on your OS. Sorry! Pull requests welcome!");
     }
 
-    KJ_IF_MAYBE(e, exeInfo) {
-      w.watch(fs->getCurrentPath().eval(e->path), nullptr);
+    KJ_IF_SOME(e, exeInfo) {
+      w.watch(fs->getCurrentPath().eval(e.path), kj::none);
     } else {
       CLI_ERROR("Can't use --watch when we're unable to find our own executable.");
     }
@@ -880,9 +880,9 @@ public:
     kj::Vector<kj::String> parts;
 
     for (;;) {
-      KJ_IF_MAYBE(pos, filter.findFirst(':')) {
-        parts.add(kj::str(filter.slice(0, *pos)));
-        filter = filter.slice(*pos + 1);
+      KJ_IF_SOME(pos, filter.findFirst(':')) {
+        parts.add(kj::str(filter.slice(0, pos)));
+        filter = filter.slice(pos + 1);
       } else {
         parts.add(kj::str(filter));
         break;
@@ -1008,12 +1008,12 @@ public:
   [[noreturn]] void serveImpl(Func&& func) noexcept {
     if (hadErrors) {
       // Can't start, stuff is broken.
-      KJ_IF_MAYBE(w, watcher) {
+      KJ_IF_SOME(w, watcher) {
         // In --watch mode, it's annoying if the server exits and stops watching. Let's wait for
         // someone to fix the config.
         context.warning(
             "Can't start server due to config errors, waiting for config files to change...");
-        waitForChanges(*w).wait(io.waitScope);
+        waitForChanges(w).wait(io.waitScope);
         reloadFromConfigChange();
       } else {
         // Errors were reported earlier, so context.exit() will exit with a non-zero status.
@@ -1026,8 +1026,8 @@ public:
       jsg::V8System v8System(v8Platform,
           KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; });
       auto promise = func(v8System, config);
-      KJ_IF_MAYBE(w, watcher) {
-        promise = promise.exclusiveJoin(waitForChanges(*w).then([this]() {
+      KJ_IF_SOME(w, watcher) {
+        promise = promise.exclusiveJoin(waitForChanges(w).then([this]() {
           // Watch succeeded.
           reloadFromConfigChange();
         }));
@@ -1063,7 +1063,7 @@ public:
           context.error("Tests failed!");
         }
 
-        if (watcher == nullptr) {
+        if (watcher == kj::none) {
           return kj::READY_NOW;
         } else {
           // Pause forever waiting for watcher.
@@ -1159,10 +1159,10 @@ private:
     // TODO(bug): Like with Unix below, we should probably use native CreateFile() here, but it has
     // sooooo many arguments, I don't want to deal with it.
     auto parsedPath = fs.getCurrentPath().evalNative(path);
-    KJ_IF_MAYBE(file, fs.getRoot().tryOpenFile(parsedPath)) {
-      return ExeInfo { kj::str(path), kj::mv(*file) };
+    KJ_IF_SOME(file, fs.getRoot().tryOpenFile(parsedPath)) {
+      return ExeInfo { kj::str(path), kj::mv(file) };
     }
-    return nullptr;
+    return kj::none;
   }
 #else
   static kj::Maybe<ExeInfo> tryOpenExe(kj::Filesystem& fs, kj::StringPtr path) {
@@ -1170,7 +1170,7 @@ private:
     // path resolution here, not KJ's logical path resolution.
     int fd = open(path.cStr(), O_RDONLY);
     if (fd < 0) {
-      return nullptr;
+      return kj::none;
     }
     return ExeInfo { kj::str(path), kj::newDiskFile(kj::AutoCloseFd(fd)) };
   }
@@ -1186,8 +1186,8 @@ private:
   #endif
 
   #if __linux__
-    KJ_IF_MAYBE(link, fs.getRoot().tryReadlink(kj::Path({"proc", "self", "exe"}))) {
-      return tryOpenExe(fs, *link);
+    KJ_IF_SOME(link, fs.getRoot().tryReadlink(kj::Path({"proc", "self", "exe"}))) {
+      return tryOpenExe(fs, link);
     }
   #endif
 
@@ -1211,12 +1211,12 @@ private:
   #endif
 
     // TODO(beta): Fall back to searching $PATH.
-    return nullptr;
+    return kj::none;
   }
 
   config::Config::Reader getConfig() {
-    KJ_IF_MAYBE(c, config) {
-      return *c;
+    KJ_IF_SOME(c, config) {
+      return c;
     } else {
       // The optional `<const-name>` parameter must not have been given -- otherwise we would have
       // a non-null `config` by this point. See if we can infer the correct constant...

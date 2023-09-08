@@ -84,17 +84,17 @@ void AlarmScheduler::registerNamespace(kj::StringPtr uniqueKey, GetActorFn getAc
 }
 
 kj::Maybe<kj::Date> AlarmScheduler::getAlarm(ActorKey actor) {
-  KJ_IF_MAYBE(alarm, alarms.find(actor)) {
-    if (alarm->status == AlarmStatus::STARTED) {
+  KJ_IF_SOME(alarm, alarms.find(actor)) {
+    if (alarm.status == AlarmStatus::STARTED) {
       // getAlarm() when the alarm handler is running should return null,
       // unless an alarm is queued;
-      return alarm->queuedAlarm;
+      return alarm.queuedAlarm;
     } else {
-      return alarm->scheduledTime;
+      return alarm.scheduledTime;
     }
   } else {
     // We currently retain the entire set of queued alarms in memory, no need to hit sqlite
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -131,18 +131,18 @@ bool AlarmScheduler::setAlarm(ActorKey actor, kj::Date scheduledTime) {
 bool AlarmScheduler::deleteAlarm(ActorKey actor) {
   auto query = stmtDeleteAlarm.run(actor.uniqueKey, actor.actorId);
 
-  KJ_IF_MAYBE(entry, alarms.findEntry(actor)) {
-    KJ_IF_MAYBE(queued, entry->value.queuedAlarm) {
-      if ((*entry).value.status == AlarmStatus::STARTED) {
+  KJ_IF_SOME(entry, alarms.findEntry(actor)) {
+    KJ_IF_SOME(queued, entry.value.queuedAlarm) {
+      if (entry.value.status == AlarmStatus::STARTED) {
         // If we are currently running an alarm, we want to delete the queued instead of current.
-        entry->value.queuedAlarm = nullptr;
+        entry.value.queuedAlarm = kj::none;
       } else {
-        entry->value = scheduleAlarm(clock.now(), kj::mv(entry->value.actor), *queued);
+        entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), queued);
       }
     } else {
-      if ((*entry).value.status != AlarmStatus::STARTED) {
+      if (entry.value.status != AlarmStatus::STARTED) {
         // We can't remove running alarms.
-        alarms.erase(*entry);
+        alarms.erase(entry);
       }
     }
   }
@@ -152,8 +152,8 @@ bool AlarmScheduler::deleteAlarm(ActorKey actor) {
 
 kj::Promise<AlarmScheduler::RetryInfo> AlarmScheduler::runAlarm(
     const ActorKey& actor, kj::Date scheduledTime) {
-  KJ_IF_MAYBE(ns, namespaces.find(actor.uniqueKey)) {
-    auto result = co_await ns->getActor(kj::str(actor.actorId))->runAlarm(scheduledTime);
+  KJ_IF_SOME(ns, namespaces.find(actor.uniqueKey)) {
+    auto result = co_await ns.getActor(kj::str(actor.actorId))->runAlarm(scheduledTime);
 
     co_return RetryInfo {
       .retry = result.outcome != EventOutcome::OK && result.retry,
@@ -222,10 +222,10 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(kj::Duration delay,
 
     // If an alarm is queued, there's no point in retrying the current one -- proceed
     // to running the queued alarm instead.
-    KJ_IF_MAYBE(a, entry.value.queuedAlarm) {
+    KJ_IF_SOME(a, entry.value.queuedAlarm) {
       // creating a new alarm and overwriting the old one will reset
       // `status` to WAITING and `queuedAlarm` to null
-      entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), *a);
+      entry.value = scheduleAlarm(clock.now(), kj::mv(entry.value.actor), a);
       co_return;
     }
 
@@ -267,7 +267,7 @@ kj::Promise<void> AlarmScheduler::makeAlarmTask(kj::Duration delay,
 
       entry.value.task = makeAlarmTask(delay, actorRef, scheduledTime);
     } else {
-      KJ_ASSERT(entry.value.queuedAlarm == nullptr);
+      KJ_ASSERT(entry.value.queuedAlarm == kj::none);
       deleteAlarm(actorRef);
     }
   } catch (...) {
