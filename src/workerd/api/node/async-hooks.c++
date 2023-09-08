@@ -38,17 +38,17 @@ v8::Local<v8::Value> AsyncLocalStorage::exit(
 }
 
 v8::Local<v8::Value> AsyncLocalStorage::getStore(jsg::Lock& js) {
-  KJ_IF_MAYBE(context, jsg::AsyncContextFrame::current(js)) {
-    KJ_IF_MAYBE(value, context->get(*key)) {
-      return value->getHandle(js);
+  KJ_IF_SOME(context, jsg::AsyncContextFrame::current(js)) {
+    KJ_IF_SOME(value, context.get(*key)) {
+      return value.getHandle(js);
     }
   }
   return js.v8Undefined();
 }
 
 v8::Local<v8::Function> AsyncLocalStorage::bind(jsg::Lock& js, v8::Local<v8::Function> fn) {
-  KJ_IF_MAYBE(frame, jsg::AsyncContextFrame::current(js)) {
-    return frame->wrap(js, fn);
+  KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+    return frame.wrap(js, fn);
   } else {
     return jsg::AsyncContextFrame::wrapRoot(js, fn);
   }
@@ -101,8 +101,8 @@ v8::Local<v8::Function> AsyncResource::bind(
     jsg::Optional<v8::Local<v8::Value>> thisArg,
     const jsg::TypeHandler<jsg::Ref<AsyncResource>>& handler) {
   v8::Local<v8::Function> bound;
-  KJ_IF_MAYBE(frame, getFrame()) {
-    bound = frame->wrap(js, fn, thisArg);
+  KJ_IF_SOME(frame, getFrame()) {
+    bound = frame.wrap(js, fn, thisArg);
   } else {
     bound = jsg::AsyncContextFrame::wrapRoot(js, fn, thisArg);
   }
@@ -120,8 +120,8 @@ v8::Local<v8::Value> AsyncResource::runInAsyncScope(
     jsg::Optional<v8::Local<v8::Value>> thisArg,
     jsg::Arguments<jsg::Value> args) {
   v8::Local<v8::Value> receiver = js.v8Context()->Global();
-  KJ_IF_MAYBE(arg, thisArg) {
-    receiver = *arg;
+  KJ_IF_SOME(arg, thisArg) {
+    receiver = arg;
   }
   fn.setReceiver(js.v8Ref<v8::Value>(receiver));
   jsg::AsyncContextFrame::Scope scope(js, getFrame());

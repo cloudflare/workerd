@@ -150,7 +150,7 @@ public:
   // for anything. We'll just ignore the value and not store it, but we at least need to
   // accept the argument and validate that it is a string.
   static jsg::Ref<AsyncResource> constructor(jsg::Lock& js, jsg::Optional<kj::String> type,
-                                             jsg::Optional<Options> options = nullptr);
+                                             jsg::Optional<Options> options = kj::none);
 
   // The Node.js API uses numeric identifiers for all async resources. We do not
   // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.

@@ -23,9 +23,9 @@ int CryptoImpl::HashHandle::update(jsg::Lock& js, kj::Array<kj::byte> data) {
 }
 
 kj::Array<kj::byte> CryptoImpl::HashHandle::digest(jsg::Lock& js) {
-  KJ_IF_MAYBE(_existing_digest, _digest) {
+  KJ_IF_SOME(_existing_digest, _digest) {
     // Allow calling the internal digest several times, for the streams interface
-    return kj::heapArray<kj::byte>(_existing_digest->asPtr());
+    return kj::heapArray<kj::byte>(_existing_digest.asPtr());
   } else {
     unsigned len = md_len;
     auto digest = kj::heapArray<kj::byte>(md_len);
@@ -52,10 +52,10 @@ void CryptoImpl::HashHandle::checkDigestLength(const EVP_MD* md, kj::Maybe<uint3
   md_ctx = OSSL_NEW(EVP_MD_CTX);
   OSSLCALL(EVP_DigestInit(md_ctx.get(), md));
   md_len = EVP_MD_size(md);
-  KJ_IF_MAYBE(xof_md_len, xofLen) {
-    if (*xof_md_len != md_len) {
+  KJ_IF_SOME(xof_md_len, xofLen) {
+    if (xof_md_len != md_len) {
       JSG_REQUIRE((EVP_MD_flags(md) & EVP_MD_FLAG_XOF) != 0, Error, "invalid digest size");
-      md_len = *xof_md_len;
+      md_len = xof_md_len;
     }
   }
 }
