@@ -63,9 +63,6 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
-          # Upgrade to LLVM 16.0.6, default install is currently 15 (https://github.com/actions/runner-images/issues/8125).
-          # When we need to upgrade beyond LLVM 16.0.6, ${WORKSPACE}/.bazelrc will need updating.
-          choco upgrade llvm --version=16.0.6
           # Work around bazel clang 16 include path bug (https://github.com/bazelbuild/bazel/issues/17863)
           Move-Item -Path "C:\Program Files\LLVM\lib\clang\16" -Destination "C:\Program Files\LLVM\lib\clang\16.0.6"
       - name: Bazel build
