@@ -88,7 +88,7 @@ public:
 
   static jsg::Ref<IdentityTransformStream> constructor(
       jsg::Lock& js,
-      jsg::Optional<QueuingStrategy> queuingStrategy = nullptr);
+      jsg::Optional<QueuingStrategy> queuingStrategy = kj::none);
 
   JSG_RESOURCE_TYPE(IdentityTransformStream) {
     JSG_INHERIT(TransformStream);
@@ -107,7 +107,7 @@ public:
   static jsg::Ref<FixedLengthStream> constructor(
       jsg::Lock& js,
       uint64_t expectedLength,
-      jsg::Optional<QueuingStrategy> queuingStrategy = nullptr);
+      jsg::Optional<QueuingStrategy> queuingStrategy = kj::none);
 
   JSG_RESOURCE_TYPE(FixedLengthStream) {
     JSG_INHERIT(IdentityTransformStream);

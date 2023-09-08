@@ -11,11 +11,11 @@ WritableStreamDefaultWriter::WritableStreamDefaultWriter()
     : ioContext(tryGetIoContext()) {}
 
 WritableStreamDefaultWriter::~WritableStreamDefaultWriter() noexcept(false) {
-  KJ_IF_MAYBE(stream, state.tryGet<Attached>()) {
+  KJ_IF_SOME(stream, state.tryGet<Attached>()) {
     // Because this can be called during gc or other cleanup, it is important
     // that releasing the writer does not cause the closed promise be resolved
     // since that requires v8 heap allocations.
-    (*stream)->getController().releaseWriter(*this, nullptr);
+    stream->getController().releaseWriter(*this, kj::none);
   }
 }
 

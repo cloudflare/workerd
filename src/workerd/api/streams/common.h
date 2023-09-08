@@ -231,7 +231,7 @@ public:
   };
 
   // Implement this if your ReadableStreamSource has a better way to tee a stream than the naive
-  // method, which relies upon `tryRead()`. The default implementation returns nullptr.
+  // method, which relies upon `tryRead()`. The default implementation returns kj::none.
   virtual kj::Maybe<Tee> tryTee(uint64_t limit);
 };
 
@@ -400,7 +400,7 @@ public:
 
     virtual void ensurePulling(jsg::Lock& js) = 0;
 
-    // maybeJs will be nullptr when the isolate lock is not available.
+    // maybeJs will be kj::none when the isolate lock is not available.
     // If maybeJs is set, any operations pending for the branch will be canceled.
     virtual void removeBranch(Branch* branch, kj::Maybe<jsg::Lock&> maybeJs) = 0;
   };
@@ -417,7 +417,7 @@ public:
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
     virtual void release(jsg::Lock& js,
-                         kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) = 0;
+                         kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) = 0;
     virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
@@ -471,7 +471,7 @@ public:
   virtual bool lockReader(jsg::Lock& js, Reader& reader) = 0;
 
   // Removes the lock and releases the reader from this controller.
-  // maybeJs will be nullptr when the isolate lock is not available.
+  // maybeJs will be kj::none when the isolate lock is not available.
   // If maybeJs is set, the reader's closed promise will be resolved.
   virtual void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
@@ -644,7 +644,7 @@ public:
       PipeToOptions options) = 0;
 
   // Only byte-oriented WritableStreamController implementations will have a WritableStreamSink
-  // that can be detached using removeSink. A nullptr should be returned by any controller that
+  // that can be detached using removeSink. A kj::none should be returned by any controller that
   // does not support removing the sink. After the WritableStreamSink has been released, all other
   // methods on the controller should fail with an exception as the WritableStreamSink should be
   // the only way to interact with the underlying sink.
@@ -660,7 +660,7 @@ public:
   virtual bool lockWriter(jsg::Lock& js, Writer& writer) = 0;
 
   // Removes the lock and releases the writer from this controller.
-  // maybeJs will be nullptr when the isolate lock is not available.
+  // maybeJs will be kj::none when the isolate lock is not available.
   // If maybeJs is set, the writer's closed and ready promises will be resolved.
   virtual void releaseWriter(Writer& writer, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
@@ -679,7 +679,7 @@ kj::Own<WritableStreamController> newWritableStreamJsController();
 kj::Own<WritableStreamController> newWritableStreamInternalController(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> source,
-    kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
+    kj::Maybe<uint64_t> maybeHighWaterMark = kj::none);
 
 struct Unlocked {};
 struct Locked {};
@@ -691,14 +691,14 @@ public:
   ReaderLocked(
       ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<IoOwn<kj::Canceler>> canceler = nullptr)
+      kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
       : reader(reader),
         closedFulfiller(kj::mv(closedFulfiller)),
         canceler(kj::mv(canceler)) {}
 
   ReaderLocked(ReaderLocked&&) = default;
   ~ReaderLocked() noexcept(false) {
-    KJ_IF_MAYBE(r, reader) { r->detach(); }
+    KJ_IF_SOME(r, reader) { r.detach(); }
   }
   KJ_DISALLOW_COPY(ReaderLocked);
 
@@ -731,14 +731,14 @@ public:
   WriterLocked(
       WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = nullptr)
+      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
       : writer(writer),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
-    KJ_IF_MAYBE(w, writer) { w->detach(); }
+    KJ_IF_SOME(w, writer) { w.detach(); }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -758,9 +758,9 @@ public:
   }
 
   void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
-    KJ_IF_MAYBE(w, writer) {
+    KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w->replaceReadyPromise(kj::mv(pair.promise));
+      w.replaceReadyPromise(kj::mv(pair.promise));
     }
   }
 
@@ -775,18 +775,18 @@ void maybeResolvePromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     T&& t) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve(js, kj::fwd<T>(t));
-    maybeResolver = nullptr;
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js, kj::fwd<T>(t));
+    maybeResolver = kj::none;
   }
 }
 
 inline void maybeResolvePromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve(js);
-    maybeResolver = nullptr;
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js);
+    maybeResolver = kj::none;
   }
 }
 
@@ -795,9 +795,9 @@ void maybeRejectPromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     v8::Local<v8::Value> reason) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->reject(js, reason);
-    maybeResolver = nullptr;
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.reject(js, reason);
+    maybeResolver = kj::none;
   }
 }
 
@@ -818,7 +818,7 @@ inline kj::Maybe<IoContext&> tryGetIoContext() {
   if (IoContext::hasCurrent()) {
     return IoContext::current();
   }
-  return nullptr;
+  return kj::none;
 }
 
 }  // namespace workerd::api

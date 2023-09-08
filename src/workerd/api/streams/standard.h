@@ -132,7 +132,7 @@ public:
   kj::Maybe<T&> tryGet() { return ref; }
   kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
 private:
-  void reset() { ref = nullptr; }
+  void reset() { ref = kj::none; }
   kj::Maybe<T&> ref;
   friend T;
 };
@@ -220,10 +220,10 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      start = nullptr;
-      pull = nullptr;
-      cancel = nullptr;
-      size = nullptr;
+      start = kj::none;
+      pull = kj::none;
+      cancel = kj::none;
+      size = kj::none;
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -296,12 +296,12 @@ public:
   void finishInFlightClose(
       jsg::Lock& js,
       jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   void finishInFlightWrite(
       jsg::Lock& js,
       jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   ssize_t getDesiredSize();
 
@@ -347,10 +347,10 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      abort = nullptr;
-      close = nullptr;
-      size = nullptr;
-      write = nullptr;
+      abort = kj::none;
+      close = kj::none;
+      size = kj::none;
+      write = kj::none;
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -672,8 +672,8 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     inline void clear() {
-      transform = nullptr;
-      flush = nullptr;
+      transform = kj::none;
+      flush = kj::none;
     }
 
     inline void visitForGc(jsg::GcVisitor& visitor) {
