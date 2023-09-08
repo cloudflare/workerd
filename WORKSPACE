@@ -85,6 +85,9 @@ git_repository(
     name = "dawn",
     build_file = "//:build/BUILD.dawn",
     commit = "fd61f6244fb00ea42390f5a77267a4c195d90a06",
+    patches = [
+        "@//:patches/dawn_spirv.patch",
+    ],
     remote = "https://dawn.googlesource.com/dawn.git",
 )
 
@@ -100,15 +103,6 @@ git_repository(
     build_file = "//:build/BUILD.vulkan_headers",
     commit = "c1a8560c5cf5e7bd6dbc71fe69b1a317411c36b8",
     remote = "https://github.com/KhronosGroup/Vulkan-Headers.git",
-)
-
-git_repository(
-    name = "spirv_tools",
-    commit = "a63ac9f73d29cd27cdb6e3388d98d1d934e512bb",
-    patches = [
-        "@//:patches/spirv_tools.patch",
-    ],
-    remote = "https://github.com/KhronosGroup/SPIRV-Tools.git",
 )
 
 git_repository(

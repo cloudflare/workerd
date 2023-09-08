@@ -678,8 +678,6 @@ DAWN_DIRECTX_SRCS = [
 
 DAWN_VULKAN_SRCS = [
     # From dawn/src/dawn/native/BUILD.gn:sources (dawn_enable_vulkan)
-    "src/dawn/native/SpirvValidation.cpp",
-    "src/dawn/native/SpirvValidation.h",
     "src/dawn/native/vulkan/BackendVk.cpp",
     "src/dawn/native/vulkan/BackendVk.h",
     "src/dawn/native/vulkan/BindGroupLayoutVk.cpp",
@@ -1483,31 +1481,9 @@ TINT_SRCS = [
     "src/tint/writer/writer.h",
 
     # Dawn sets the following tint GN variables
-    #    tint_build_spv_reader = true
     #    tint_build_spv_writer = true
     #    tint_build_wgsl_reader = true
     #    tint_build_wgsl_writer = true
-    # From dawn/src/tint/BUILD.gn:libtint_spv_reader_src
-    "src/tint/reader/spirv/attributes.h",
-    "src/tint/reader/spirv/construct.cc",
-    "src/tint/reader/spirv/construct.h",
-    "src/tint/reader/spirv/entry_point_info.cc",
-    "src/tint/reader/spirv/entry_point_info.h",
-    "src/tint/reader/spirv/enum_converter.cc",
-    "src/tint/reader/spirv/enum_converter.h",
-    "src/tint/reader/spirv/fail_stream.h",
-    "src/tint/reader/spirv/function.cc",
-    "src/tint/reader/spirv/function.h",
-    "src/tint/reader/spirv/namer.cc",
-    "src/tint/reader/spirv/namer.h",
-    "src/tint/reader/spirv/parser.cc",
-    "src/tint/reader/spirv/parser.h",
-    "src/tint/reader/spirv/parser_impl.cc",
-    "src/tint/reader/spirv/parser_impl.h",
-    "src/tint/reader/spirv/parser_type.cc",
-    "src/tint/reader/spirv/parser_type.h",
-    "src/tint/reader/spirv/usage.cc",
-    "src/tint/reader/spirv/usage.h",
     # From dawn/src/tint/BUILD.gn:libtint_spv_writer_src
     "src/tint/writer/spirv/binary_writer.cc",
     "src/tint/writer/spirv/binary_writer.h",
@@ -1561,7 +1537,6 @@ cc_library(
     hdrs = TINT_HDRS,
     defines = [
         # From dawn/src/tint/BUILD.gn:tint_public_config
-        "TINT_BUILD_SPV_READER=1",
         "TINT_BUILD_SPV_WRITER=1",
         "TINT_BUILD_WGSL_READER=1",
         "TINT_BUILD_WGSL_WRITER=1",
@@ -1575,8 +1550,6 @@ cc_library(
     deps = [
         # Tint depends on abseil-cpp:strings for absl/strings/charconv.h
         "@com_google_absl//absl/strings",
-        # Tint specifically depends on spirv-tools/BUILD.gn:spirv_opt
-        "@spirv_tools//:spirv_tools_opt",
         # Tint requires "include/spirv/unified1/spirv.hpp11", which is provided
         # by this rule
         "@spirv_headers//:spirv_cpp11_headers",
