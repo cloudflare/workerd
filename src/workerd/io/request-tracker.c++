@@ -15,23 +15,23 @@ RequestTracker::ActiveRequest::ActiveRequest(kj::Badge<RequestTracker>, RequestT
   parent.requestActive();
 }
 RequestTracker::ActiveRequest::~ActiveRequest() noexcept(false) {
-  KJ_IF_MAYBE(p, maybeParent) {
-    p->get()->requestInactive();
+  KJ_IF_SOME(p, maybeParent) {
+    p.get()->requestInactive();
   }
 }
 
 void RequestTracker::requestActive() {
   if (activeRequests++ == 0) {
-    KJ_IF_MAYBE(h, hooks) {
-      h->active();
+    KJ_IF_SOME(h, hooks) {
+      h.active();
     }
   }
 }
 
 void RequestTracker::requestInactive() {
-  KJ_IF_MAYBE(h, hooks) {
+  KJ_IF_SOME(h, hooks) {
     if (--activeRequests == 0) {
-      h->inactive();
+      h.inactive();
     }
   }
 }

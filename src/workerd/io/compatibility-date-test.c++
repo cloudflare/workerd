@@ -13,16 +13,16 @@ namespace {
 
 KJ_TEST("compatibility date parsing") {
   auto expectParseTo = [](kj::StringPtr input, kj::StringPtr expected) {
-    KJ_IF_MAYBE(actual, normalizeCompatDate(input)) {
-      KJ_EXPECT(*actual == expected);
+    KJ_IF_SOME(actual, normalizeCompatDate(input)) {
+      KJ_EXPECT(actual == expected);
     } else {
       KJ_FAIL_EXPECT("couldn't parse", input);
     }
   };
 
   auto expectNoParse = [](kj::StringPtr input) {
-    KJ_IF_MAYBE(actual, normalizeCompatDate(input)) {
-      KJ_FAIL_EXPECT("expected couldn't parse", input, *actual);
+    KJ_IF_SOME(actual, normalizeCompatDate(input)) {
+      KJ_FAIL_EXPECT("expected couldn't parse", input, actual);
     }
   };
 
