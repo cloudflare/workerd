@@ -218,9 +218,9 @@ public:
     NativeHandler& operator=(NativeHandler&&) = default;
 
     inline void detach(bool deferClearData = false) {
-      KJ_IF_MAYBE(t, target) {
-        t->removeNativeListener(*this);
-        target = nullptr;
+      KJ_IF_SOME(t, target) {
+        t.removeNativeListener(*this);
+        target = kj::none;
         // If deferClearData is true, we're going to wait to clear
         // the maybeData field until after the func is invoked. This
         // is because detach will be called immediately before the
@@ -243,7 +243,7 @@ public:
       }
     }
 
-    inline bool isAttached() { return target != nullptr; }
+    inline bool isAttached() { return target != kj::none; }
 
     inline uint hashCode() const {
       return kj::hashCode(this);
@@ -376,15 +376,15 @@ private:
     }
 
     inline bool matches(const EventHandler& a, const jsg::HashableV8Ref<v8::Object>& b) const {
-      KJ_IF_MAYBE(jsA, a.handler.tryGet<EventHandler::JavaScriptHandler>()) {
-        return jsA->identity == b;
+      KJ_IF_SOME(jsA, a.handler.tryGet<EventHandler::JavaScriptHandler>()) {
+        return jsA.identity == b;
       }
       return false;
     }
 
     inline bool matches(const EventHandler& a, const NativeHandler& b) const {
-      KJ_IF_MAYBE(ref, a.handler.tryGet<EventHandler::NativeHandlerRef>()) {
-        return &ref->handler == &b;
+      KJ_IF_SOME(ref, a.handler.tryGet<EventHandler::NativeHandlerRef>()) {
+        return &ref.handler == &b;
       }
       return false;
     }
@@ -469,8 +469,8 @@ class AbortSignal final: public EventTarget {
 public:
   enum class Flag { NONE, NEVER_ABORTS };
 
-  AbortSignal(kj::Maybe<kj::Exception> exception = nullptr,
-              jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = nullptr,
+  AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
+              jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
               Flag flag = Flag::NONE) :
       canceler(IoContext::current().addObject(
           kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
@@ -484,8 +484,8 @@ public:
   bool getAborted() { return canceler->isCanceled(); }
 
   jsg::JsValue getReason(jsg::Lock& js) {
-    KJ_IF_MAYBE(r, reason) {
-      return r->getHandle(js);
+    KJ_IF_SOME(r, reason) {
+      return r.getHandle(js);
     }
     return js.undefined();
   }
@@ -539,8 +539,8 @@ public:
   static kj::Promise<T> maybeCancelWrap(
       kj::Maybe<jsg::Ref<AbortSignal>>& signal,
       kj::Promise<T> promise) {
-    KJ_IF_MAYBE(s, signal) {
-      return (*s)->wrap(kj::mv(promise));
+    KJ_IF_SOME(s, signal) {
+      return s->wrap(kj::mv(promise));
     } else {
       return kj::mv(promise);
     }
@@ -548,7 +548,7 @@ public:
 
   static kj::Exception abortException(
       jsg::Lock& js,
-      jsg::Optional<jsg::JsValue> reason = nullptr);
+      jsg::Optional<jsg::JsValue> reason = kj::none);
 
   RefcountedCanceler& getCanceler();
 
