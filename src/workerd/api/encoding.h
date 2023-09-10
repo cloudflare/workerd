@@ -220,6 +220,13 @@ public:
     } else {
       JSG_READONLY_INSTANCE_PROPERTY(encoding, getEncoding);
     }
+
+    // `encode()` returns `jsg::BufferSource`, which may be an `ArrayBuffer` or `ArrayBufferView`,
+    // but the implementation uses `jsg::BufferSource::tryAlloc()` which always tries to allocate a
+    // `Uint8Array`. The spec defines that this function returns a `Uint8Array` too.
+    JSG_TS_OVERRIDE({
+      encode(input?: string): Uint8Array;
+    });
   }
 };
 
