@@ -844,8 +844,8 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
                 jsg::alloc<MessageEvent>(js, js.str(text)));
           }
           KJ_CASE_ONEOF(data, kj::Array<byte>) {
-            dispatchEventImpl(js,
-                jsg::alloc<MessageEvent>(js, jsg::JsValue(js.bytes(kj::mv(data)).getHandle(js))));
+            dispatchEventImpl(js, jsg::alloc<MessageEvent>(js,
+                jsg::JsValue(js.arrayBuffer(kj::mv(data)).getHandle(js))));
           }
           KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
             native.closedIncoming = true;

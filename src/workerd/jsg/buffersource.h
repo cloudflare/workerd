@@ -408,4 +408,8 @@ public:
   }
 };
 
+inline BufferSource Lock::arrayBuffer(kj::Array<kj::byte> data) {
+  return BufferSource(*this, BackingStore::from<v8::ArrayBuffer>(kj::mv(data)));
+}
+
 }  // namespace workerd::jsg
