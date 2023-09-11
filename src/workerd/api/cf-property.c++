@@ -109,13 +109,22 @@ kj::Maybe<kj::String> CfProperty::serialize(jsg::Lock& js) {
 }
 
 CfProperty CfProperty::deepClone(jsg::Lock& js) {
+  // By default, when CfProperty is lazily parsed, the resulting JS object
+  // will be recursively frozen, preventing edits. However, when the CfProperty
+  // is cloned and the clone is lazily parsed, the resulting JS object must not
+  // be frozen! So, to ensure that, we'll force the parse to occur here if it
+  // hasn't been parsed already, this will ensure that the clone receives the
+  // parsed object via json cloning below rather than the raw string.
+  // TODO(cleanup): With a bit of refactoring we can preserve the lazy parsing
+  // optimization through the clone. But for now, let's just do the easy thing.
+  getRef(js);
   KJ_IF_MAYBE(cf, value) {
     KJ_SWITCH_ONEOF(*cf) {
       KJ_CASE_ONEOF(parsed, jsg::JsRef<jsg::JsObject>) {
         return CfProperty(jsg::JsRef(js, parsed.getHandle(js).jsonClone(js)));
       }
       KJ_CASE_ONEOF(unparsed, kj::String) {
-        return CfProperty(unparsed.asPtr());
+        KJ_FAIL_REQUIRE("The cf property should have been lazily parsed!");
       }
     }
   }
