@@ -63,12 +63,18 @@ wd_cc_capnp_library(
 ) for f in glob(
     ["**/*-test.c++"],
     exclude = [
+        "cf-property-test.c++",
         "node/*-test.c++",
     ],
 )]
 
 kj_test(
     src = "node/buffer-test.c++",
+    deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
 
@@ -79,3 +85,5 @@ kj_test(
 ) for f in glob(
     ["**/*.wd-test"],
 )]
+
+
