@@ -2170,7 +2170,12 @@ public:
   JsDate date(kj::Date date) KJ_WARN_UNUSED_RESULT;
   JsDate date(kj::StringPtr date) KJ_WARN_UNUSED_RESULT;
 
+  // Returns a jsg::BufferSource whose underlying JavaScript handle is a Uint8Array.
   BufferSource bytes(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
+
+  // Returns a jsg::BufferSource whose underlying JavaScript handle is an ArrayBuffer
+  // as opposed to the default Uint8Array.
+  BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
   enum RegExpFlags {
     kNONE = v8::RegExp::Flags::kNone,
