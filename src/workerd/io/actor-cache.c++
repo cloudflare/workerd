@@ -305,24 +305,7 @@ void ActorCache::evictEntry(Lock& lock, Entry& entry) {
     prev->get()->gapIsKnownEmpty = false;
   }
 
-  // If this entry has gapIsKnownEmpty and the next entry is UNKNOWN, we should delete the
-  // UNKNOWN, because it no longer serves a purpose.
-  kj::Maybe<kj::Own<Entry>> eraseLater;
-  if (iter->get()->gapIsKnownEmpty) {
-    auto next = iter;
-    ++next;
-    if (next != ordered.end() && next->get()->valueStatus == EntryValueStatus::UNKNOWN) {
-      // Erasing invalidates iterators, so we have to delay...
-      eraseLater = kj::atomicAddRef(**next);
-    }
-  }
-
   map.erase(*iter);
-
-  KJ_IF_SOME(e, eraseLater) {
-    lock->remove(*e);
-    map.eraseMatch(e->key);
-  }
 }
 
 void ActorCache::verifyConsistencyForTest() {
@@ -347,9 +330,6 @@ void ActorCache::verifyConsistencyForTest() {
         break;
       }
       case EntryValueStatus::UNKNOWN: {
-        // Verify that this actually marks the end of a known-empty gap.
-        KJ_ASSERT(prevGapIsKnownEmpty,
-            "entry should only appear after known-empty gap", key);
         KJ_ASSERT(!entry->gapIsKnownEmpty,
             "entry can't be followed by known-empty gap", key);
         break;
