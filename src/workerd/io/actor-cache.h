@@ -305,9 +305,9 @@ private:
     // the whole object.
     void disposeImpl(void* pointer) const {
       auto p = reinterpret_cast<ActorCache*>(pointer);
-      KJ_IF_MAYBE(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-        d->status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions { .noCache = d->noCache });
+      KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+        d.status = DeferredAlarmDelete::Status::READY;
+        p->ensureFlushScheduled(WriteOptions { .noCache = d.noCache });
       }
     }
   };
@@ -413,8 +413,8 @@ private:
       }
     }
     kj::Maybe<Value> getValue() const {
-      KJ_IF_MAYBE(ptr, getValuePtr()) {
-        return ptr->attach(kj::atomicAddRef(*this));
+      KJ_IF_SOME(ptr, getValuePtr()) {
+        return ptr.attach(kj::atomicAddRef(*this));
       } else {
         return kj::none;
       }

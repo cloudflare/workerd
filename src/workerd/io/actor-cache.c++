@@ -52,8 +52,8 @@ void ActorCache::clear(Lock& lock) {
 ActorCache::Entry::Entry(ActorCache& cache, Key key, Value value)
     : maybeCache(cache), key(kj::mv(key)), value(kj::mv(value)),
       valueStatus(EntryValueStatus::PRESENT) {
-  KJ_IF_MAYBE(c, maybeCache) {
-    c->lru.size.fetch_add(size(), std::memory_order_relaxed);
+  KJ_IF_SOME(c, maybeCache) {
+    c.lru.size.fetch_add(size(), std::memory_order_relaxed);
   }
 }
 
@@ -62,8 +62,8 @@ ActorCache::Entry::Entry(ActorCache& cache, Key key, EntryValueStatus valueStatu
   KJ_IASSERT(
     valueStatus != EntryValueStatus::PRESENT,
     "Pass a serialized empty v8 value if you want a present but empty entry!");
-  KJ_IF_MAYBE(c, maybeCache) {
-    c->lru.size.fetch_add(size(), std::memory_order_relaxed);
+  KJ_IF_SOME(c, maybeCache) {
+    c.lru.size.fetch_add(size(), std::memory_order_relaxed);
   }
 }
 
@@ -73,16 +73,16 @@ ActorCache::Entry::Entry(Key key, EntryValueStatus valueStatus)
   : key(kj::mv(key)), valueStatus(valueStatus) {}
 
 ActorCache::Entry::~Entry() noexcept(false) {
-  KJ_IF_MAYBE(c, maybeCache) {
+  KJ_IF_SOME(c, maybeCache) {
     size_t size = this->size();
 
-    size_t before = c->lru.size.fetch_sub(size, std::memory_order_relaxed);
+    size_t before = c.lru.size.fetch_sub(size, std::memory_order_relaxed);
 
     if (KJ_UNLIKELY(before < size)) {
       // underflow -- shouldn't happen, but just in case, let's fix
       KJ_LOG(ERROR, "SharedLru size tracking inconsistency detected",
             before, size, kj::getStackTrace());
-      c->lru.size.store(0, std::memory_order_relaxed);
+      c.lru.size.store(0, std::memory_order_relaxed);
     }
 
     KJ_REQUIRE(!link.isLinked(),
@@ -130,9 +130,9 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
 
   KJ_ASSERT(!currentAlarmTime.is<DeferredAlarmDelete>());
   bool alarmDeleteNeeded = true;
-  KJ_IF_MAYBE(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
-    if (t->time != scheduledTime) {
-      if (t->status == KnownAlarmTime::Status::CLEAN) {
+  KJ_IF_SOME(t, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+    if (t.time != scheduledTime) {
+      if (t.status == KnownAlarmTime::Status::CLEAN) {
         // If there's a clean scheduledTime that is different from ours, this run should be
         // canceled.
         return kj::none;
@@ -157,11 +157,11 @@ kj::Maybe<kj::Own<void>> ActorCache::armAlarmHandler(kj::Date scheduledTime, boo
 }
 
 void ActorCache::cancelDeferredAlarmDeletion() {
-  KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+  KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
     currentAlarmTime = KnownAlarmTime {
       .status = KnownAlarmTime::Status::CLEAN,
-      .time = deferredDelete->timeToDelete,
-      .noCache = deferredDelete->noCache
+      .time = deferredDelete.timeToDelete,
+      .noCache = deferredDelete.noCache
     };
   }
 }
@@ -170,8 +170,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
   if (dirtyList.sizeInBytes() > lru.options.dirtyListByteLimit && !lru.options.neverFlush) {
     // Wait for dirty entries to be flushed.
     return lastFlush.addBranch().then([this]() -> kj::Promise<void> {
-      KJ_IF_MAYBE(p, getBackpressure()) {
-        return kj::mv(*p);
+      KJ_IF_SOME(p, getBackpressure()) {
+        return kj::mv(p);
       } else {
         return kj::READY_NOW;
       }
@@ -193,7 +193,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::getBackpressure() {
 }
 
 void ActorCache::requireNotTerminal() {
-  KJ_IF_MAYBE(e, maybeTerminalException) {
+  KJ_IF_SOME(e, maybeTerminalException) {
     if (!gate.isBroken()) {
       // We've tried to use storage after shutdown, break the output gate via `flushImpl()` so that
       // we don't let the worker return stale state. This isn't strictly necessary but it does
@@ -202,7 +202,7 @@ void ActorCache::requireNotTerminal() {
       ensureFlushScheduled({});
     }
 
-    kj::throwFatalException(kj::cp(*e));
+    kj::throwFatalException(kj::cp(e));
   }
 }
 
@@ -319,9 +319,9 @@ void ActorCache::evictEntry(Lock& lock, Entry& entry) {
 
   map.erase(*iter);
 
-  KJ_IF_MAYBE(e, eraseLater) {
-    lock->remove(**e);
-    map.eraseMatch(e->get()->key);
+  KJ_IF_SOME(e, eraseLater) {
+    lock->remove(*e);
+    map.eraseMatch(e->key);
   }
 }
 
@@ -331,8 +331,8 @@ void ActorCache::verifyConsistencyForTest() {
   bool prevGapIsKnownEmpty = false;
   kj::Maybe<kj::StringPtr> prevKey = kj::none;
   for (auto& entry: currentValues.get(lock).ordered()) {
-    KJ_IF_MAYBE(p, prevKey) {
-      KJ_ASSERT(entry->key > *p, "keys out of order?", *p, entry->key);
+    KJ_IF_SOME(p, prevKey) {
+      KJ_ASSERT(entry->key > p, "keys out of order?", p, entry->key);
     }
     prevKey = entry->key;
     auto& key = entry->key;
@@ -671,37 +671,37 @@ namespace {
 // sorts after all other keys.
 
 inline bool operator==(const ActorCache::Key& a, const kj::Maybe<ActorCache::Key>& b) {
-  KJ_IF_MAYBE(bb, b) {
-    return a == *bb;
+  KJ_IF_SOME(bb, b) {
+    return a == bb;
   } else {
     return false;
   }
 }
 inline bool operator<(const ActorCache::Key& a, const kj::Maybe<ActorCache::Key>& b) {
-  KJ_IF_MAYBE(bb, b) {
-    return a < *bb;
+  KJ_IF_SOME(bb, b) {
+    return a < bb;
   } else {
     return true;
   }
 }
 inline bool operator>=(const ActorCache::Key& a, const kj::Maybe<ActorCache::Key>& b) {
-  KJ_IF_MAYBE(bb, b) {
-    return a >= *bb;
+  KJ_IF_SOME(bb, b) {
+    return a >= bb;
   } else {
     return false;
   }
 }
 inline bool operator>(const ActorCache::Key& a, const kj::Maybe<ActorCache::KeyPtr>& b) {
-  KJ_IF_MAYBE(bb, b) {
-    return a > *bb;
+  KJ_IF_SOME(bb, b) {
+    return a > bb;
   } else {
     return false;
   }
 }
 
 inline auto seekOrEnd(auto& map, kj::Maybe<ActorCache::KeyPtr> key) {
-  KJ_IF_MAYBE(k, key) {
-    return map.seek(*k);
+  KJ_IF_SOME(k, key) {
+    return map.seek(k);
   } else {
     return map.ordered().end();
   }
@@ -1041,17 +1041,17 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
       }
     }
 
-    KJ_IF_MAYBE(e, streamServerRef.endKey) {
-      req.setEnd(e->asBytes());
+    KJ_IF_SOME(e, streamServerRef.endKey) {
+      req.setEnd(e.asBytes());
     }
 
-    KJ_IF_MAYBE(l, streamServerRef.adjustedLimit) {
-      if (streamServerRef.fetchedEntries.size() >= *l) {
+    KJ_IF_SOME(l, streamServerRef.adjustedLimit) {
+      if (streamServerRef.fetchedEntries.size() >= l) {
         // Oh it turns out we actually satisfied the limit already so we don't actually have to
         // retry. The fulfiller would have already been fulfilled.
         return kj::READY_NOW;
       }
-      req.setLimit(*l - streamServerRef.fetchedEntries.size());
+      req.setLimit(l - streamServerRef.fetchedEntries.size());
     }
 
     req.setStream(streamClient);
@@ -1362,17 +1362,17 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
     if (streamServerRef.beginKey.size() > 0) {
       req.setStart(streamServerRef.beginKey.asBytes());
     }
-    KJ_IF_MAYBE(e, streamServerRef.endKey) {
-      req.setEnd(e->asBytes());
+    KJ_IF_SOME(e, streamServerRef.endKey) {
+      req.setEnd(e.asBytes());
     }
     req.setReverse(true);
-    KJ_IF_MAYBE(l, streamServerRef.adjustedLimit) {
-      if (streamServerRef.fetchedEntries.size() >= *l) {
+    KJ_IF_SOME(l, streamServerRef.adjustedLimit) {
+      if (streamServerRef.fetchedEntries.size() >= l) {
         // Oh it turns out we actually satisfied the limit already so we don't actually have to
         // retry. The fulfiller would have already been fulfilled.
         return kj::READY_NOW;
       }
-      req.setLimit(*l - streamServerRef.fetchedEntries.size());
+      req.setLimit(l - streamServerRef.fetchedEntries.size());
     }
     req.setStream(streamClient);
     return req.send().ignoreResult();
@@ -1433,8 +1433,8 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
     Lock& lock, Key key, kj::Maybe<capnp::Data::Reader> maybeReader, const ReadOptions& options) {
   if (options.noCache) {
     // We don't actually want to add this to the cache, just return the entry.
-    KJ_IF_MAYBE(reader, maybeReader) {
-      return kj::atomicRefcounted<Entry>(kj::mv(key), kj::heapArray(*reader));
+    KJ_IF_SOME(reader, maybeReader) {
+      return kj::atomicRefcounted<Entry>(kj::mv(key), kj::heapArray(reader));
     } else {
       return kj::atomicRefcounted<Entry>(kj::mv(key), EntryValueStatus::ABSENT);
     }
@@ -1443,8 +1443,8 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
   auto& map = currentValues.get(lock);
 
   kj::Own<Entry> entry;
-  KJ_IF_MAYBE(reader, maybeReader) {
-    entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::heapArray(*reader));
+  KJ_IF_SOME(reader, maybeReader) {
+    entry = kj::atomicRefcounted<Entry>(*this, kj::mv(key), kj::heapArray(reader));
   } else {
     // Inserting a negative entry. Let's check if the new insertion is redundant due to the
     // previous entry having `gapIsKnownEmpty`.
@@ -1589,8 +1589,8 @@ void ActorCache::markGapsEmpty(Lock& lock, KeyPtr beginKey, kj::Maybe<KeyPtr> en
         // is already marked.
       } else {
         // We must insert an UNKNOWN entry to cap our range.
-        KJ_IF_MAYBE(k, endKey) {
-          auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(*k), EntryValueStatus::UNKNOWN);
+        KJ_IF_SOME(k, endKey) {
+          auto entry = kj::atomicRefcounted<Entry>(*this, cloneKey(k), EntryValueStatus::UNKNOWN);
           entry->syncStatus = EntrySyncStatus::CLEAN;
           lock->add(*entry);
           map.insert(kj::mv(entry));
@@ -1734,11 +1734,11 @@ ActorCache::GetResultList::GetResultList(
   // Verify sort.
   kj::Maybe<KeyPtr> prev;
   for (auto& entry: entries) {
-    KJ_IF_MAYBE(p, prev) {
+    KJ_IF_SOME(p, prev) {
       if (order == REVERSE) {
-        KJ_ASSERT(entry->key < *p);
+        KJ_ASSERT(entry->key < p);
       } else {
-        KJ_ASSERT(entry->key > *p);
+        KJ_ASSERT(entry->key > p);
       }
     }
     prev = entry->key;
@@ -1788,8 +1788,8 @@ kj::Promise<void> ActorCache::waitForPastReads() {
 }
 
 ActorCache::ReadCompletionChain::~ReadCompletionChain() noexcept(false) {
-  KJ_IF_MAYBE(f, fulfiller) {
-    f->get()->fulfill();
+  KJ_IF_SOME(f, fulfiller) {
+    f->fulfill();
   }
 }
 
@@ -1826,7 +1826,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::put(kj::Array<KeyValuePair> pairs, Writ
 
 kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
-  KJ_IF_MAYBE(time, currentAlarmTime.tryGet<KnownAlarmTime>()) {
+  KJ_IF_SOME(time, currentAlarmTime.tryGet<KnownAlarmTime>()) {
     // If we're in the alarm handler and haven't set the time yet,
     // we can't perform this optimization as currentAlarmTime will be equal
     // to the currently running time but we indicate to the actor in getAlarm() that there
@@ -1838,7 +1838,7 @@ kj::Maybe<kj::Promise<void>> ActorCache::setAlarm(kj::Maybe<kj::Date> newAlarmTi
     //
     // So, we only apply this for KnownAlarmTime.
 
-    if (time->time == newAlarmTime) {
+    if (time.time == newAlarmTime) {
       // No change! May as well skip the storage operation.
       return kj::none;
     }
@@ -1872,8 +1872,8 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
     // fulfiller.
     auto paf = kj::newPromiseAndFulfiller<uint>();
     countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_MAYBE(p, getBackpressure()) {
-      return p->then([promise = kj::mv(paf.promise)]() mutable {
+    KJ_IF_SOME(p, getBackpressure()) {
+      return p.then([promise = kj::mv(paf.promise)]() mutable {
         return promise.then([](uint i) { return i > 0; });
       });
     } else {
@@ -1883,8 +1883,8 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::delete_(Key key, WriteOptions opt
     // It looks like there was a pre-existing cache entry for this key, so we already know whether
     // there was a value to delete.
     bool result = countedDelete->countDeleted > 0;
-    KJ_IF_MAYBE(p, getBackpressure()) {
-      return p->then([result]() mutable {
+    KJ_IF_SOME(p, getBackpressure()) {
+      return p.then([result]() mutable {
         return result;
       });
     } else {
@@ -1912,8 +1912,8 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     // Set up a fulfiller.
     auto paf = kj::newPromiseAndFulfiller<uint>();
     countedDelete->resultFulfiller = kj::mv(paf.fulfiller);
-    KJ_IF_MAYBE(p, getBackpressure()) {
-      return p->then([promise = kj::mv(paf.promise)]() mutable {
+    KJ_IF_SOME(p, getBackpressure()) {
+      return p.then([promise = kj::mv(paf.promise)]() mutable {
         return kj::mv(promise);
       });
     } else {
@@ -1923,8 +1923,8 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::delete_(kj::Array<Key> keys, Writ
     // It looks like the count of deletes is fully known based on cache content, so we don't need
     // to wait.
     uint result = countedDelete->countDeleted;
-    KJ_IF_MAYBE(p, getBackpressure()) {
-      return p->then([result]() mutable {
+    KJ_IF_SOME(p, getBackpressure()) {
+      return p.then([result]() mutable {
         return result;
       });
     } else {
@@ -2030,9 +2030,9 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
           return;
         }
 
-        KJ_IF_MAYBE(c, countedDelete) {
+        KJ_IF_SOME(c, countedDelete) {
           // Overwrote an entry that was in cache, so we can count it now.
-          ++c->countDeleted;
+          ++c.countDeleted;
         }
         break;
       }
@@ -2049,10 +2049,10 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
       case EntryValueStatus::UNKNOWN: {
         // This was a list end marker, we should just overwrite it.
 
-        KJ_IF_MAYBE(c, countedDelete) {
+        KJ_IF_SOME(c, countedDelete) {
           // Despite an entry being present, we don't know if the key exists, because it's just an
           // UNKNOWN entry. So we will still have to arrange to count the delete later.
-          newEntry->countedDelete = kj::addRef(*c);
+          newEntry->countedDelete = kj::addRef(c);
         }
         break;
       }
@@ -2102,8 +2102,8 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
     //   inserting a new entry, to avoid repeating the lookup.
     auto& slot = map.insert(kj::mv(newEntry));
     slot->gapIsKnownEmpty = previousGapKnownEmpty;
-    KJ_IF_MAYBE(c, countedDelete) {
-      slot->countedDelete = kj::addRef(*c);
+    KJ_IF_SOME(c, countedDelete) {
+      slot->countedDelete = kj::addRef(c);
     }
     slot->syncStatus = EntrySyncStatus::DIRTY;
     dirtyList.add(*slot);
@@ -2204,9 +2204,9 @@ kj::Maybe<kj::Promise<void>> ActorCache::onNoPendingFlush() {
 void ActorCache::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
   if (maybeTerminalException == kj::none) {
     auto exception = [&]() {
-      KJ_IF_MAYBE(e, maybeException) {
+      KJ_IF_SOME(e, maybeException) {
         // We were given an exception, use it.
-        return kj::cp(*e);
+        return kj::cp(e);
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.
@@ -2248,11 +2248,11 @@ using RpcDeleteRequest = capnp::Request<rpc::ActorStorage::Operations::DeletePar
 }
 
 kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
-  KJ_IF_MAYBE(e, maybeTerminalException) {
+  KJ_IF_SOME(e, maybeTerminalException) {
     // If we have a terminal exception, throw here to break the output gate and prevent any calls
     // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
     // flushes.
-    kj::throwFatalException(kj::cp(*e));
+    kj::throwFatalException(kj::cp(e));
   }
 
   // Whenever we flush, we MUST write ALL dirty entries in a single transaction. This is necessary
@@ -2323,8 +2323,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
-    KJ_IF_MAYBE(c, entry.countedDelete) {
-      if (c->get()->resultFulfiller->isWaiting()) {
+    KJ_IF_SOME(c, entry.countedDelete) {
+      if (c->resultFulfiller->isWaiting()) {
         // A delete() call on this key is waiting to find out if the key existed in storage. Since
         // each delete() call needs to return the count of keys deleted, we must issue
         // corresponding delete calls to storage with the same batching, so that storage returns
@@ -2336,12 +2336,12 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
         // have to perform the delete first in order to determine the count that the delete() call
         // should return.
         CountedDeleteFlush* countedDeleteFlush;
-        KJ_IF_MAYBE(i, c->get()->flushIndex) {
-          countedDeleteFlush = &countedDeleteFlushes[*i];
+        KJ_IF_SOME(i, c->flushIndex) {
+          countedDeleteFlush = &countedDeleteFlushes[i];
         } else {
-          c->get()->flushIndex = countedDeleteFlushes.size();
+          c->flushIndex = countedDeleteFlushes.size();
           countedDeleteFlush = &countedDeleteFlushes.add(CountedDeleteFlush{
-            .countedDelete = kj::addRef(**c).attach(kj::defer([&cd = *c->get()]() mutable {
+            .countedDelete = kj::addRef(*c).attach(kj::defer([&cd = *c]() mutable {
               // Note that this is attached to the `Own`, not the value. We actually want this,
               // because it allows us to reset the `flushIndex` when *this flush* finishes,
               // regardless of if we need to retry.
@@ -2358,8 +2358,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       }
     }
 
-    KJ_IF_MAYBE(v, entry.getValuePtr()) {
-      auto words = keySizeInWords + bytesToWordsRoundUp(v->size()) +
+    KJ_IF_SOME(v, entry.getValuePtr()) {
+      auto words = keySizeInWords + bytesToWordsRoundUp(v.size()) +
           capnp::sizeInWords<rpc::ActorStorage::KeyValue>();
       includeInCurrentBatch(putFlush.batches, words);
       putFlush.entries.add(&entry);
@@ -2394,8 +2394,8 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   // `requestedDeleteAll` might be non-null afterwards, but that would not indicate that we were
   // ready to issue the delete-all.
   bool deleteAllUpcoming = requestedDeleteAll != kj::none;
-  KJ_IF_MAYBE(r, requestedDeleteAll) {
-    for (auto& entry: r->deletedDirty) {
+  KJ_IF_SOME(r, requestedDeleteAll) {
+    for (auto& entry: r.deletedDirty) {
       countEntry(*entry);
     }
   } else {
@@ -2485,19 +2485,19 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
     auto lock = lru.cleanList.lockExclusive();
 
-    KJ_IF_MAYBE(r, requestedDeleteAll) {
+    KJ_IF_SOME(r, requestedDeleteAll) {
       // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
       // time that we were waiting for the flushImpl(). We want to remove the `FLUSHING` entries
       // from that vector now.
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
-      auto dst = r->deletedDirty.begin();
-      for (auto src = r->deletedDirty.begin(); src != r->deletedDirty.end(); ++src) {
+      auto dst = r.deletedDirty.begin();
+      for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
         if (src->get()->syncStatus == EntrySyncStatus::DIRTY) {
           if (dst != src) *dst = kj::mv(*src);
           ++dst;
         }
       }
-      r->deletedDirty.resize(dst - r->deletedDirty.begin());
+      r.deletedDirty.resize(dst - r.deletedDirty.begin());
     } else {
       // Mark all `FLUSHING` entries as `CLEAN`. Note that we know that all `FLUSHING` must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
@@ -2667,27 +2667,27 @@ kj::Promise<void> ActorCache::flushImplAlarmOnly(DirtyAlarm dirty) {
 
   // TODO(someday) This could be templated to reuse the same code for this and the transaction case.
   // Handle alarm writes first, since they're simplest.
-  KJ_IF_MAYBE(newTime, dirty.newTime) {
+  KJ_IF_SOME(newTime, dirty.newTime) {
     auto req = storage.setAlarmRequest();
-    req.setScheduledTimeMs((*newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+    req.setScheduledTimeMs((newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
     co_await req.send().ignoreResult();
     co_return;
   } else {
     // Alarm deletes are a bit trickier because we have to take DeferredAlarmDeletes into account.
     auto req = storage.deleteAlarmRequest();
-    KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-      if (deferredDelete->status == DeferredAlarmDelete::Status::FLUSHING) {
-        req.setTimeToDeleteMs((deferredDelete->timeToDelete - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+    KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+      if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
+        req.setTimeToDeleteMs((deferredDelete.timeToDelete - kj::UNIX_EPOCH) / kj::MILLISECONDS);
         auto response = co_await req.send();
-        KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-          if (deferredDelete->status == DeferredAlarmDelete::Status::FLUSHING) {
+        KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+          if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
             // We always update wasDeleted regardless of whether or not it is true
             // because this continuation can succeed even if the greater transaction fails,
             // and so we want to make sure we end up with the correct value if the first
             // attempt succeeds to delete, the txn fails, and the retry fails to delete.
             // The early update is OK because we don't actually use the incorrect state until
             // the transaction succeeds in the .then() below.
-            deferredDelete->wasDeleted = response.getDeleted();
+            deferredDelete.wasDeleted = response.getDeleted();
           }
         }
       } else {
@@ -2859,25 +2859,25 @@ kj::Promise<void> ActorCache::flushImplUsingTxn(
 
   KJ_SWITCH_ONEOF(maybeAlarmChange) {
     KJ_CASE_ONEOF(dirty, DirtyAlarm) {
-      KJ_IF_MAYBE(newTime, dirty.newTime) {
+      KJ_IF_SOME(newTime, dirty.newTime) {
         auto req = txn.setAlarmRequest();
-        req.setScheduledTimeMs((*newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        req.setScheduledTimeMs((newTime - kj::UNIX_EPOCH) / kj::MILLISECONDS);
         promises.add(req.send().ignoreResult());
       } else {
         auto req = txn.deleteAlarmRequest();
-        KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-          if (deferredDelete->status == DeferredAlarmDelete::Status::FLUSHING) {
-            req.setTimeToDeleteMs((deferredDelete->timeToDelete - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+          if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
+            req.setTimeToDeleteMs((deferredDelete.timeToDelete - kj::UNIX_EPOCH) / kj::MILLISECONDS);
             auto prom = req.send().then([this](auto response) {
-              KJ_IF_MAYBE(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-                if (deferredDelete->status == DeferredAlarmDelete::Status::FLUSHING) {
+              KJ_IF_SOME(deferredDelete, currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+                if (deferredDelete.status == DeferredAlarmDelete::Status::FLUSHING) {
                   // We always update wasDeleted regardless of whether or not it is true
                   // because this continuation can succeed even if the greater transaction fails,
                   // and so we want to make sure we end up with the correct value if the first
                   // attempt succeeds to delete, the txn fails, and the retry fails to delete.
                   // The early update is OK because we don't actually use the incorrect state until
                   // the transaction succeeds in the .then() below.
-                  deferredDelete->wasDeleted = response.getDeleted();
+                  deferredDelete.wasDeleted = response.getDeleted();
                 }
               }
             });
@@ -2974,8 +2974,8 @@ kj::Maybe<kj::Promise<void>> ActorCache::Transaction::commit() {
     cache.evictOrOomIfNeeded(lock);
   }
 
-  KJ_IF_MAYBE(change, alarmChange) {
-    cache.setAlarm(change->newTime, change->options);
+  KJ_IF_SOME(change, alarmChange) {
+    cache.setAlarm(change.newTime, change.options);
   }
   alarmChange = kj::none;
 
@@ -2994,8 +2994,8 @@ kj::Promise<void> ActorCache::Transaction::rollback() {
 kj::OneOf<kj::Maybe<ActorCache::Value>, kj::Promise<kj::Maybe<ActorCache::Value>>>
     ActorCache::Transaction::get(Key key, ReadOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
-  KJ_IF_MAYBE(change, entriesToWrite.find(key)) {
-    return change->entry->getValue();
+  KJ_IF_SOME(change, entriesToWrite.find(key)) {
+    return change.entry->getValue();
   } else {
     return cache.get(kj::mv(key), options);
   }
@@ -3009,8 +3009,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
   kj::Vector<Key> keysToFetch;
 
   for (auto& key: keys) {
-    KJ_IF_MAYBE(change, entriesToWrite.find(key)) {
-      changedEntries.add(kj::atomicAddRef(*change->entry));
+    KJ_IF_SOME(change, entriesToWrite.find(key)) {
+      changedEntries.add(kj::atomicAddRef(*change.entry));
     } else {
       keysToFetch.add(kj::mv(key));
     }
@@ -3026,8 +3026,8 @@ kj::OneOf<ActorCache::GetResultList, kj::Promise<ActorCache::GetResultList>>
 kj::OneOf<kj::Maybe<kj::Date>, kj::Promise<kj::Maybe<kj::Date>>> ActorCache::Transaction::getAlarm(
     ReadOptions options) {
   options.noCache = options.noCache || cache.lru.options.noCache;
-  KJ_IF_MAYBE(a, alarmChange) {
-    return a->newTime;
+  KJ_IF_SOME(a, alarmChange) {
+    return a.newTime;
   } else {
     return cache.getAlarm(options);
   }
@@ -3160,9 +3160,9 @@ kj::OneOf<bool, kj::Promise<bool>> ActorCache::Transaction::delete_(
     keyToCount = putImpl(lock, kj::mv(entry), options, count);
   }
 
-  KJ_IF_MAYBE(k, keyToCount) {
+  KJ_IF_SOME(k, keyToCount) {
     // Unfortunately, to find out the count, we have to do a read.
-    KJ_SWITCH_ONEOF(cache.get(cloneKey(*k), {})) {
+    KJ_SWITCH_ONEOF(cache.get(cloneKey(k), {})) {
       KJ_CASE_ONEOF(value, kj::Maybe<ActorCache::Value>) {
         return value != kj::none;
       }
@@ -3197,11 +3197,11 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
     auto lock = cache.lru.cleanList.lockExclusive();
     for (auto& key: keys) {
       auto entry = kj::atomicRefcounted<Entry>(cache, kj::mv(key), EntryValueStatus::ABSENT);
-      KJ_IF_MAYBE(keyToCount, putImpl(lock, kj::mv(entry), options, count)) {
+      KJ_IF_SOME(keyToCount, putImpl(lock, kj::mv(entry), options, count)) {
         if (currentBatch->size() >= cache.lru.options.maxKeysPerRpc) {
           currentBatch = startNewBatch();
         }
-        currentBatch->add(cloneKey(*keyToCount));
+        currentBatch->add(cloneKey(keyToCount));
       }
     }
   }
@@ -3236,8 +3236,8 @@ kj::OneOf<uint, kj::Promise<uint>> ActorCache::Transaction::delete_(
       }
     }
 
-    KJ_IF_MAYBE(totalPromise, maybeTotalPromise) {
-      return totalPromise->then([count](uint result){
+    KJ_IF_SOME(totalPromise, maybeTotalPromise) {
+      return totalPromise.then([count](uint result){
         return count + result;
       });
     } else {
@@ -3256,8 +3256,8 @@ kj::Maybe<ActorCache::KeyPtr> ActorCache::Transaction::putImpl(
   bool replaced = false;
   auto& slot = entriesToWrite.upsert(kj::mv(change), [&](auto& existing, auto&& replacement) {
     replaced = true;
-    KJ_IF_MAYBE(c, count) {
-      *c += existing.entry->valueStatus == EntryValueStatus::PRESENT;
+    KJ_IF_SOME(c, count) {
+      c += existing.entry->valueStatus == EntryValueStatus::PRESENT;
     }
     existing = kj::mv(replacement);
   });
