@@ -211,7 +211,7 @@ public:
   // the alarm handler's execution.
   //
   // The returned object will schedule a write to clear the alarm time if no alarm writes have been
-  // made while it exists. If nullptr is returned, the alarm run should be canceled.
+  // made while it exists. If kj::none is returned, the alarm run should be canceled.
   virtual kj::Maybe<kj::Own<void>> armAlarmHandler(
       kj::Date scheduledTime, bool noCache = false) = 0;
 
@@ -265,7 +265,7 @@ public:
       Hooks& hooks = Hooks::DEFAULT);
   ~ActorCache() noexcept(false);
 
-  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return nullptr; }
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return kj::none; }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(
@@ -409,14 +409,14 @@ private:
       if (valueStatus == EntryValueStatus::PRESENT) {
         return value.asPtr();
       } else {
-        return nullptr;
+        return kj::none;
       }
     }
     kj::Maybe<Value> getValue() const {
       KJ_IF_MAYBE(ptr, getValuePtr()) {
         return ptr->attach(kj::atomicAddRef(*this));
       } else {
-        return nullptr;
+        return kj::none;
       }
     }
 
@@ -503,7 +503,7 @@ private:
     kj::Own<kj::PromiseFulfiller<uint>> resultFulfiller;
 
     // During `flushImpl()`, when this CountedDelete is first encountered, `flushIndex` will be set
-    // to track this delete batch. It will be set back to `nullptr` before `flushImpl()` returns.
+    // to track this delete batch. It will be set back to `kj::none` before `flushImpl()` returns.
     // This field exists here to avoid the need for a HashMap<CountedDelete*, ...> in `flushImpl()`.
     kj::Maybe<size_t> flushIndex;
   };
@@ -740,7 +740,7 @@ public:
   public:
     KeyValuePtrPairWithCache operator*() {
       KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
-      return { ptr->get()->key, ptr->get()->getValuePtr().orDefault(nullptr), *statusPtr };
+      return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
     }
     Iterator& operator++() {
       ++ptr;
@@ -793,7 +793,7 @@ private:
   // `fetchedEntries` is the set read from storage.
   explicit GetResultList(kj::Vector<kj::Own<Entry>> cachedEntries,
                          kj::Vector<kj::Own<Entry>> fetchedEntries,
-                         Order order, kj::Maybe<uint> limit = nullptr);
+                         Order order, kj::Maybe<uint> limit = kj::none);
 
   friend class ActorCache;
 };
@@ -932,7 +932,7 @@ private:
   // incremented if it was a positive entry. If no existing entry is replaced, then the key
   // is returned, indicating that if a count is needed, we'll need to inspect cache/disk.
   kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Own<Entry> entry,
-                            const WriteOptions& options, kj::Maybe<uint&> count = nullptr);
+                            const WriteOptions& options, kj::Maybe<uint&> count = kj::none);
 };
 
 }  // namespace workerd
