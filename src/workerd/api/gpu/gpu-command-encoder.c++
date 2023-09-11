@@ -11,9 +11,9 @@ jsg::Ref<GPUCommandBuffer>
 GPUCommandEncoder::finish(jsg::Optional<GPUCommandBufferDescriptor> descriptor) {
   wgpu::CommandBufferDescriptor desc{};
 
-  KJ_IF_MAYBE (d, descriptor) {
-    KJ_IF_MAYBE (label, d->label) {
-      desc.label = label->cStr();
+  KJ_IF_SOME (d, descriptor) {
+    KJ_IF_SOME (label, d.label) {
+      desc.label = label.cStr();
     }
   }
 
@@ -34,13 +34,13 @@ GPUCommandEncoder::beginComputePass(jsg::Optional<GPUComputePassDescriptor> desc
   wgpu::ComputePassDescriptor desc{};
 
   kj::Vector<wgpu::ComputePassTimestampWrite> timestamps;
-  KJ_IF_MAYBE (d, descriptor) {
-    KJ_IF_MAYBE (label, d->label) {
-      desc.label = label->cStr();
+  KJ_IF_SOME (d, descriptor) {
+    KJ_IF_SOME (label, d.label) {
+      desc.label = label.cStr();
     }
 
-    KJ_IF_MAYBE (timestampWrites, d->timestampWrites) {
-      for (auto& timestamp : *timestampWrites) {
+    KJ_IF_SOME (timestampWrites, d.timestampWrites) {
+      for (auto& timestamp : timestampWrites) {
         wgpu::ComputePassTimestampWrite t{};
         t.querySet = *timestamp.querySet;
         t.queryIndex = timestamp.queryIndex;

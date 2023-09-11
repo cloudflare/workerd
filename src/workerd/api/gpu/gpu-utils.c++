@@ -72,7 +72,7 @@ kj::Maybe<GPUFeatureName> getFeatureName(wgpu::FeatureName& feature) {
     break;
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 } // namespace workerd::api::gpu

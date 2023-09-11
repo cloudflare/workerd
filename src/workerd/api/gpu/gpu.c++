@@ -55,10 +55,10 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   auto adapters = instance_.GetAdapters();
   if (adapters.empty()) {
     KJ_LOG(WARNING, "no webgpu adapters found");
-    return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(nullptr));
+    return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
   }
 
-  kj::Maybe<dawn::native::Adapter> adapter = nullptr;
+  kj::Maybe<dawn::native::Adapter> adapter;
   for (auto& a : adapters) {
     wgpu::AdapterProperties props;
     a.GetProperties(&props);
@@ -72,13 +72,13 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
     break;
   }
 
-  KJ_IF_MAYBE (a, adapter) {
-    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(*a);
+  KJ_IF_SOME (a, adapter) {
+    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a);
     return js.resolvedPromise(kj::mv(gpuAdapter));
   }
 
   KJ_LOG(WARNING, "did not find an adapter that matched what we wanted");
-  return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(nullptr));
+  return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
 }
 
 } // namespace workerd::api::gpu

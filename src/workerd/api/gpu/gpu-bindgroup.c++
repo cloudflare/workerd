@@ -13,11 +13,11 @@ wgpu::BindGroupEntry parseBindGroupEntry(GPUBindGroupEntry& entry) {
   KJ_SWITCH_ONEOF(entry.resource) {
     KJ_CASE_ONEOF(buffer, GPUBufferBinding) {
       e.buffer = *buffer.buffer;
-      KJ_IF_MAYBE (offset, buffer.offset) {
-        e.offset = *offset;
+      KJ_IF_SOME (offset, buffer.offset) {
+        e.offset = offset;
       }
-      KJ_IF_MAYBE (size, buffer.size) {
-        e.size = *size;
+      KJ_IF_SOME (size, buffer.size) {
+        e.size = size;
       }
     }
     KJ_CASE_ONEOF(sampler, jsg::Ref<GPUSampler>) {
