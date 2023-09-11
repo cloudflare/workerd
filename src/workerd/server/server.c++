@@ -1379,6 +1379,9 @@ public:
       return kj::heap<ActorChannelImpl>(*this, kj::mv(id));
     }
 
+    // Forward declaration.
+    class ActorContainerRef;
+
     // ActorContainer mostly serves as a wrapper around Worker::Actor.
     // We use it to associate a HibernationManager with the Worker::Actor, since the
     // Worker::Actor can be destroyed during periods of prolonged inactivity.
@@ -1393,11 +1396,24 @@ public:
           : key(key),
             tracker(kj::refcounted<RequestTracker>(*this)),
             parent(parent),
-            timer(timer) {}
+            timer(timer),
+            lastAccess(timer.now()) {}
 
       ~ActorContainer() noexcept(false) {
         // Shutdown the tracker so we don't use active/inactive hooks anymore.
         tracker->shutdown();
+
+        KJ_IF_SOME(a, actor) {
+          // Unknown broken reason.
+          auto reason = 0;
+          a->shutdown(reason);
+        }
+
+        KJ_IF_SOME(ref, containerRef) {
+          // We're being destroyed before the ActorContainerRef, probably because the actor broke.
+          // Let's drop the ActorContainerRef's reference to us to prevent another eviction attempt.
+          ref.container = kj::none;
+        }
 
         // Don't erase the onBrokenTask if it is the reason we are being destroyed.
         if (!onBrokenTriggered) {
@@ -1461,6 +1477,8 @@ public:
             Worker::Lock lock(*workerStrongRef, asyncLock);
             m->hibernateWebSockets(lock);
           }
+          a->shutdown(0, KJ_EXCEPTION(DISCONNECTED,
+              "broken.dropped; Actor freed due to inactivity"));
         }
         // Destory the last strong Worker::Actor reference.
         actor = kj::none;
@@ -1473,6 +1491,11 @@ public:
           return kj::addRef(*m);
         });
       }
+      void updateAccessTime() { lastAccess = timer.now(); }
+      kj::TimePoint getLastAccess() { return lastAccess; }
+
+      bool hasClients() { return containerRef != kj::none; }
+      kj::Maybe<ActorContainerRef&> getContainerRef() { return containerRef; }
 
       // `onBrokenTriggered` indicates the actor has been broken.
       void setOnBroken() { onBrokenTriggered = true; }
@@ -1484,9 +1507,43 @@ public:
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
       kj::Timer& timer;
+      kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       bool onBrokenTriggered = false;
+
+      // Non-empty if at least one client has a reference to this actor.
+      // If no clients are connected, we may be evicted by `cleanupLoop`.
+      kj::Maybe<ActorContainerRef&> containerRef;
+      friend class ActorContainerRef;
+    };
+
+    // This class tracks clients that a have reference to the given actor.
+    // Upon destruction, we update the lastAccess time for the actor and
+    // `ActorContainer::hasClients()` starts returning false. After 70 seconds, the cleanupLoop
+    // will remove the `ActorContainer` from `actors`.
+    class ActorContainerRef: public kj::Refcounted {
+    public:
+      ActorContainerRef(ActorContainer& container): container(container) {
+        // Link this ref to the actual ActorContainer.
+        container.containerRef = *this;
+      }
+      ~ActorContainerRef() noexcept(false) {
+        KJ_IF_SOME(ref, container) {
+          ref.updateAccessTime();
+          ref.containerRef = kj::none;
+        }
+      }
+
+      kj::Own<ActorContainerRef> addRef() {
+        return kj::addRef(*this);
+      }
+
+    private:
+      // This is a maybe because the ActorContainer could be destroyed before ActorContainerRef
+      // if the actor is broken.
+      kj::Maybe<ActorContainer&> container;
+      friend class ActorContainer;
     };
 
   private:
@@ -1498,13 +1555,47 @@ public:
     // request comes in, we recreate the Own<Worker::Actor>.
     kj::HashMap<kj::String, kj::Own<ActorContainer>> actors;
     kj::HashMap<kj::String, kj::Maybe<kj::Promise<void>>> onBrokenTasks;
+    kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
+
+    // An owned actor and an ActorContainerRef
+    // used to track the client that requested it.
+    struct GetActorResult {
+      kj::Own<Worker::Actor> actor;
+      kj::Own<ActorContainerRef> ref;
+    };
 
     kj::Promise<kj::Own<WorkerInterface>> getActorThenStartRequest(
         kj::String id,
         IoChannelFactory::SubrequestMetadata metadata) {
-      kj::Own<Worker::Actor> actor = co_await getActorImpl(kj::mv(id));
-      co_return service.startRequest(kj::mv(metadata), className, kj::mv(actor));
+      auto [actor, refTracker] = co_await getActorImpl(kj::mv(id));
+
+      if (cleanupTask == kj::none) {
+        // Need to start the cleanup loop.
+        cleanupTask = cleanupLoop();
+      }
+
+      co_return service.startRequest(kj::mv(metadata), className, kj::mv(actor))
+          .attach(kj::mv(refTracker));
+    }
+
+    // Removes actors from `actors` after 70 seconds of last access.
+    kj::Promise<void> cleanupLoop() {
+      constexpr auto EXPIRATION = 70 * kj::SECONDS;
+
+      while (true) {
+        auto now = timer.now();
+        actors.eraseAll([&](auto&, kj::Own<ActorContainer>& entry) {
+          if (entry->hasClients()) {
+            // We are still using the actor so we cannot remove it!
+            return false;
+          }
+
+          return (now - entry->getLastAccess()) > EXPIRATION;
+        });
+
+        co_await timer.afterDelay(EXPIRATION).eagerlyEvaluate(nullptr);
+      }
     }
 
     // Implements actor loopback, which is used by websocket hibernation to deliver events to the
@@ -1560,29 +1651,35 @@ public:
       ActorKey actor;
     };
 
-    kj::Promise<kj::Own<Worker::Actor>> getActorImpl(kj::String id) {
+    kj::Promise<GetActorResult> getActorImpl(kj::String id) {
       // `getActor()` is often called with the calling isolate's lock held. We need to drop that
       // lock and take a lock on the target isolate before constructing the actor. Even if these
       // are the same isolate (as is commonly the case), we really don't want to do this stuff
       // synchronously, so this has the effect of pushing off to a later turn of the event loop.
       return service.worker->takeAsyncLockWithoutRequest(nullptr).then(
-          [this, id = kj::mv(id)]
-          (Worker::AsyncLock asyncLock) mutable -> kj::Own<Worker::Actor> {
+          [this, id = kj::mv(id)] (Worker::AsyncLock asyncLock) mutable -> GetActorResult {
         kj::StringPtr idPtr = id;
         auto& actorContainer = actors.findOrCreate(id, [&]() mutable {
           auto container = kj::heap<ActorContainer>(idPtr, *this, timer);
 
-          // TODO(sqlite): Now that actors are backed by real disk, we should shut them down after
-          //   a minute of inactivity...
           return kj::HashMap<kj::String, kj::Own<ActorContainer>>::Entry {
             kj::mv(id), kj::mv(container)
           };
         });
 
+        // If we don't have an ActorContainerRef, we'll create one to track the client.
         auto actor = [&]() mutable {
           KJ_IF_SOME(a, actorContainer->actor) {
             // This actor was used recently and hasn't been evicted, let's reuse it.
-            return a->addRef();
+            KJ_IF_SOME(ref, actorContainer->getContainerRef()) {
+              return GetActorResult { .actor = a->addRef(), .ref = ref.addRef() };
+            }
+            // We have an actor, but all the clients dropped their reference to the DO so we need
+            // make a new `ActorContainerRef`. Note that `hasClients()` will return true now,
+            // preventing cleanupLoop from evicting us.
+            return GetActorResult {
+                .actor = a->addRef(),
+                .ref = kj::refcounted<ActorContainerRef>(*actorContainer) };
           }
           // We don't have an actor so we need to create it.
           auto& channels = KJ_ASSERT_NONNULL(service.ioChannels.tryGet<LinkedIoChannels>());
@@ -1645,7 +1742,10 @@ public:
           entry.value = onActorBroken(actorRef->onBroken(), *actorContainer)
               .eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
 
-          return actorRef->addRef();
+          // `hasClients()` will return true now, preventing cleanupLoop from evicting us.
+          return GetActorResult {
+              .actor = actorRef->addRef(),
+              .ref = kj::refcounted<ActorContainerRef>(*actorContainer) };
         }();
 
         return kj::mv(actor);

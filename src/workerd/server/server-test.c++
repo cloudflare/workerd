@@ -1790,6 +1790,154 @@ KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   connTwo.httpGet200("/checkEvicted", "OK");
 }
 
+KJ_TEST("Server: Durable Object evictions when callback scheduled") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2023-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName("59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234");
+                `    let obj = env.ns.get(id)
+                `    return await obj.fetch(request.url);
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.defaultMessage = false; // Set to true on first "setup" request
+                `    this.storage = state.storage;
+                `    this.count = 0;
+                `  }
+                `  async fetch(request) {
+                `    if (request.url.endsWith("/15Seconds")) {
+                `      // Schedule a callback to run in 15 seconds.
+                `      // The DO should NOT be evicted by the inactivity timeout before this runs.
+                `      this.defaultMessage = true;
+                `      let id = setInterval(() => { clearInterval(id); }, 15000);
+                `      return new Response("OK");
+                `    } else if (request.url.endsWith("/20Seconds")) {
+                `      // Schedule a callback to run every 20 seconds.
+                `      // The DO should expire after 70 seconds.
+                `      this.defaultMessage = true;
+                `      this.count = 0;
+                `      await this.storage.put("count", this.count);
+                `      let id = setInterval(() => {
+                `        // Increment number of times we ran this.
+                `        this.count += 1;
+                `        this.storage.put("count", this.count);
+                `      }, 20000);
+                `      return new Response("OK");
+                `    } else if (request.url.endsWith("/assertActive")) {
+                `      // Assert that actor is still in alive (defaultMessage is still true).
+                `      if (this.defaultMessage) {
+                `        // Actor is still alive and we did not re-run the constructor
+                `        return new Response("OK");
+                `      }
+                `      throw new Error("Error: Actor was evicted!");
+                `    } else if (request.url.endsWith("/assertEvicted")) {
+                `      // Check if the defaultMessage has been set to false,
+                `      // indicating the actor was evicted
+                `      if (!this.defaultMessage) {
+                `        // Actor was evicted and we re-ran the constructor!
+                `        return new Response("OK");
+                `      }
+                `      throw new Error("Error: Actor was not evicted! We were still alive.");
+                `    } else if (request.url.endsWith("/assertEvictedAndCount")) {
+                `      // Check if the defaultMessage has been set to false,
+                `      // indicating the actor was evicted
+                `      if (!this.defaultMessage) {
+                `        var count = await this.storage.get("count");
+                `        if (!(4 < count && count < 8)) {
+                `          // Something must have gone wrong. We have a 70 sec expiration,
+                `          // and worst case is it takes ~140 seconds to evict. The callback runs
+                `          // every 20 seconds, so it has to be evicted before the 8th callback.
+                `          throw new Error(`Callback ran ${count} times, expected between 4 to 8!`);
+                `        }
+                `        // Actor was evicted and we had the right count!
+                `        return new Response("OK");
+                `      }
+                `      throw new Error("Error: Actor was not evicted! We were still alive.");
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../var/do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  // Create a directory outside of the test scope which we can use across multiple TestServers.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  {
+      TestServer test(config);
+      // Link our directory into the test filesystem.
+      test.root->transfer(
+          kj::Path({"var"_kj, "do-storage"_kj}), kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT,
+          *dir, nullptr, kj::TransferMode::LINK);
+
+      test.start();
+      auto conn = test.connect("test-addr");
+      // Setup a callback that will run in 15 seconds.
+      // This callback should prevent the DO from being evicted.
+      conn.httpGet200("/15Seconds", "OK");
+
+      // If we weren't waiting on anything, the DO would be evicted after 10 seconds,
+      // however, it will actually be evicted in 25 seconds (15 seconds until setInterval is cleared +
+      // 10 seconds for inactivity timer).
+
+      test.wait(15);
+      // The `setInterval()` will be cleared around now. Let's verify that we didn't get evicted.
+
+      // Need a new connection because of 5 second HTTP timeout.
+      auto connTwo = test.connect("test-addr");
+      connTwo.httpGet200("/assertActive", "OK");
+
+      // Force hibernation by waiting at least 10 seconds since we haven't scheduled any new work.
+      test.wait(10);
+
+      // Need a new connection because of 5 second HTTP timeout.
+      auto connThree = test.connect("test-addr");
+      connThree.httpGet200("/assertEvicted", "OK");
+
+      // Now we know we aren't evicting DOs early if they have future work scheduled. Next, let's
+      // ensure we ARE evicting DOs if there are no connected clients for 70 seconds.
+      // Note that the `/20seconds` path calls setInterval to run every 20 seconds, and never clears.
+      auto connFour = test.connect("test-addr");
+      connFour.httpGet200("/20Seconds", "OK");
+      // It's unlikely, but the worst case is the cleanupLoop checks just before the 70 sec expiration,
+      // and has to wait another 70 seconds before trying to remove again. We'll wait for 142 seconds
+      // to account for this.
+      test.wait(142);
+
+      auto connFive = test.connect("test-addr");
+      connFive.httpGet200("/assertEvictedAndCount", "OK");
+  }
+}
+
 KJ_TEST("Server: Durable Objects websocket") {
   TestServer test(R"((
     services = [
