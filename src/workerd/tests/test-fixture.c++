@@ -345,7 +345,7 @@ TestFixture::Response TestFixture::runRequest(
         requestHeaders,
         requestBody,
         response,
-        nullptr,
+        "{}"_kj,
         env.lock,
         env.lock.getExportedHandler(nullptr, nullptr));
   });
