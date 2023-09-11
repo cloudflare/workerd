@@ -283,7 +283,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::TextModuleInfo(lock,
                       Impl::compileTextGlobal(lock, module.getText()))));
           break;
@@ -294,7 +294,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::DataModuleInfo(
                       lock,
                       Impl::compileDataGlobal(lock, module.getData()).As<v8::ArrayBuffer>())));
@@ -306,7 +306,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::WasmModuleInfo(lock,
                       Impl::compileWasmGlobal(lock, module.getWasm(), modules->getObserver()))));
           break;
@@ -317,7 +317,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::JsonModuleInfo(lock,
                       Impl::compileJsonGlobal(lock, module.getJson()))));
           break;
@@ -339,7 +339,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::CommonJsModuleInfo(
                       lock,
                       module.getName(),
@@ -354,7 +354,7 @@ void WorkerdApiIsolate::compileModules(
               jsg::ModuleRegistry::ModuleInfo(
                   lock,
                   module.getName(),
-                  nullptr,
+                  kj::none,
                   jsg::ModuleRegistry::NodeJsModuleInfo(
                       lock,
                       module.getName(),
@@ -412,7 +412,7 @@ public:
   };
 
   kj::Own<ActorId> newUniqueId(kj::Maybe<kj::StringPtr> jurisdiction) override {
-    JSG_REQUIRE(jurisdiction == nullptr, Error,
+    JSG_REQUIRE(jurisdiction == kj::none, Error,
         "Jurisdiction restrictions are not implemented in workerd.");
 
     // We want to randomly-generate the first 16 bytes, then HMAC those to produce the latter
@@ -430,7 +430,7 @@ public:
     }
 
     computeMac(id);
-    return kj::heap<ActorIdImpl>(id, nullptr);
+    return kj::heap<ActorIdImpl>(id, kj::none);
   }
 
   kj::Own<ActorId> idFromName(kj::String name) override {
@@ -462,7 +462,7 @@ public:
                 decoded.size() - BASE_LENGTH) == 0,
                 TypeError, "Durable Object ID is not valid for this namespace.");
 
-    return kj::heap<ActorIdImpl>(id, nullptr);
+    return kj::heap<ActorIdImpl>(id, kj::none);
   }
 
   kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) override {
@@ -589,10 +589,10 @@ static v8::Local<v8::Value> createBindingValue(
       auto moduleName = kj::Path::parse(wrapped.moduleName);
 
       // wrapped bindings can be produced by internal modules only
-      KJ_IF_MAYBE(moduleInfo, moduleRegistry->resolve(lock, moduleName,
+      KJ_IF_SOME(moduleInfo, moduleRegistry->resolve(lock, moduleName,
            jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
         // obtain the module
-        auto module = moduleInfo->module.getHandle(lock);
+        auto module = moduleInfo.module.getHandle(lock);
         jsg::instantiateModule(lock, module);
 
         // build env object with inner bindings
