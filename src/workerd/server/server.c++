@@ -2876,6 +2876,16 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
   }
 
   co_await tasks.onEmpty();
+
+  // Give a chance for any errors to bubble up before we return success. In particular
+  // Server::taskFailed() fulfills `fatalFulfiller`, which causes the server to exit with an error.
+  // But the `TaskSet` may have become empty at the same time. We want the error to win the race
+  // against the success.
+  //
+  // TODO(cleanup): A better solution wolud be for `TaskSet` to have a new variant of the
+  //   `onEmpty()` method like `onEmptyOrException()`, which propagates any exception thrown by
+  //   any task.
+  co_await kj::evalLast([]() {});
 }
 
 // =======================================================================================
