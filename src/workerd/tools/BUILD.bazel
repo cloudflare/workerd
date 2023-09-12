@@ -14,10 +14,11 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 wd_cc_library(
     name = "api_encoder_lib",
     deps = [
+        "//src/workerd/api:html-rewriter",
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/jsg:rtti",
-        "@capnp-cpp//src/capnp:capnpc",
+        "@capnp-cpp//src/capnp",
     ],
 )
 

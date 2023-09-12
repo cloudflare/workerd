@@ -72,7 +72,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@com_cloudflare_lol_html//:lolhtml",
     ] + select({
         ":set_enable_experimental_webgpu": ["@dawn"],
         "//conditions:default": [],
