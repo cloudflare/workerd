@@ -2335,6 +2335,7 @@ kj::Own<Server::Service> Server::makeService(
 }
 
 void Server::taskFailed(kj::Exception&& exception) {
+  KJ_LOG(ERROR, exception);
   fatalFulfiller->reject(kj::mv(exception));
 }
 
