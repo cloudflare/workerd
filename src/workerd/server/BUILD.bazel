@@ -50,6 +50,7 @@ wd_cc_binary(
         ":server",
         ":workerd-meta_capnp",
         ":workerd_capnp",
+        "@capnp-cpp//src/capnp:capnpc",
     ] + select({
         "@platforms//os:windows": [],
         "//conditions:default": ["@workerd//src/workerd/util:symbolizer"],
@@ -93,9 +94,10 @@ wd_cc_library(
     deps = [
         ":alarm-scheduler",
         ":workerd_capnp",
+        "//src/workerd/api:html-rewriter",
+        "//src/workerd/api:rtti",
         "//src/workerd/io",
         "//src/workerd/jsg",
-        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 

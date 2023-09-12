@@ -76,9 +76,13 @@ wd_cc_library(
     deps = [
         ":rtti_capnp",
         ":jsg",
-        # todo: move text encoding out
-        "@capnp-cpp//src/capnp:capnpc",
     ],
+)
+
+wd_cc_library(
+    name = "macro-meta",
+    hdrs = ["macro-meta.h"],
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_capnp_library(
@@ -106,10 +110,21 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
     ],
 )]
+
+# Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
+# smaller.
+kj_test(
+    src = "macro-meta-test.c++",
+    tags = ["no-arm64"],
+    deps = [
+        ":macro-meta",
+    ],
+)
 
 kj_test(
     src = "rtti-test.c++",
@@ -117,6 +132,8 @@ kj_test(
     deps = [
         ":rtti",
         ":rtti_test_capnp",
+        # todo: move text encoding out
+        "@capnp-cpp//src/capnp:capnpc",
     ],
 )
 
