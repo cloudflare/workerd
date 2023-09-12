@@ -4,10 +4,15 @@ wd_ts_bundle(
     name = "cloudflare",
     eslintrc_json = ".eslintrc.json",
     import_name = "cloudflare",
-    internal_modules = glob([
-        "internal/*.ts",
-        "internal/*.js",
-    ]),
+    internal_modules = glob(
+        [
+            "internal/*.ts",
+            "internal/*.js",
+        ],
+        exclude = [
+            "internal/test/*",
+        ],
+    ),
     modules = glob([
         "*.ts",
         "*.js",

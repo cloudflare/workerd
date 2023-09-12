@@ -292,6 +292,8 @@
         "src/workerd/api/streams/identitytransformstream-backpressure-test.wd-test",
         "src/workerd/server/tests/extensions/extensions-test.wd-test",
         "src/workerd/tests/performance-test.wd-test",
+        "src/cloudflare/internal/test/d1/d1-api-test.wd-test",
+        "src/cloudflare/internal/test/vectorize/vectorize-api-test.wd-test",
         // The following tests are not supported yet in vscode. They require
         // TEST_TMPDIR to be defined, usually this comes from bazel. There needs to
         // be some logic to create the test directory and set the environment variable

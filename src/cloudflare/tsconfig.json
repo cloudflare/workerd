@@ -18,6 +18,7 @@
     "noUnusedParameters": true,
     "strictNullChecks": true,
     "esModuleInterop": true,
+    "moduleResolution": "node",
     "declaration": true,
     "types": [
       // todo: consume generated workerd types
@@ -32,4 +33,7 @@
     "*.ts",
     "internal/*.ts"
   ],
+  "files": [
+    "./internal/vectorize.d.ts"
+  ]
 }
