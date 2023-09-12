@@ -3960,6 +3960,47 @@ KJ_TEST("ActorCache timeout entry with known-empty gaps") {
   expectUncached(test.get("fo"));
 }
 
+
+KJ_TEST("ActorCache evictStale entire list with end marker") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto timePoint = kj::UNIX_EPOCH;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+
+  {
+    // Populate a decent list.
+    auto promise = expectUncached(test.list("bar", "qux"));
+
+    mockStorage->expectCall("list", ws)
+        .withParams(CAPNP(start = "bar", end = "qux"), "stream"_kj)
+        .useCallback("stream", [&](MockClient stream) {
+      stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
+                                          (key = "baz", value = "789"),
+                                          (key = "corge", value = "555"),
+                                          (key = "foo", value = "123")]))
+          .expectReturns(CAPNP(), ws);
+      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+    }).expectCanceled();
+
+    KJ_ASSERT(promise.wait(ws) ==
+        kvs({{"bar", "456"}, {"baz", "789"}, {"corge", "555"}, {"foo", "123"}}));
+  }
+
+  KJ_EXPECT(test.lru.currentSize() > 0);
+
+  // First mark the entire cache as stale.
+  timePoint += 1 * kj::SECONDS;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+  KJ_EXPECT(test.lru.currentSize() > 0);
+
+  // Evict the entire cache.
+  timePoint += 1 * kj::SECONDS;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+  KJ_EXPECT(test.lru.currentSize() == 0);
+}
+
 KJ_TEST("ActorCache purge everything while listing") {
   ActorCacheTest test({.softLimit = 1});  // evict everything immediately
   auto& ws = test.ws;
