@@ -90,22 +90,24 @@ private:
     size_t amountToRead = kj::min(MAX_BUFFER_CHUNK,
         input.tryGetLength(StreamEncoding::IDENTITY).orDefault(DEFAULT_BUFFER_CHUNK));
 
-    for (;;) {
-      // TODO(perf): We can likely further optimize this loop by checking to see
-      // how much of the buffer was filled and using the remaining buffer space if
-      // it is not completely filled by the previous iteration. Doing so makes this
-      // loop a bit more complicated tho, so for now let's keep things simple.
-      auto bytes = kj::heapArray<T>(amountToRead);
-      size_t amount = co_await input.tryRead(bytes.begin(), 1, bytes.size());
+    if (amountToRead > 0) {
+      for (;;) {
+        // TODO(perf): We can likely further optimize this loop by checking to see
+        // how much of the buffer was filled and using the remaining buffer space if
+        // it is not completely filled by the previous iteration. Doing so makes this
+        // loop a bit more complicated tho, so for now let's keep things simple.
+        auto bytes = kj::heapArray<T>(amountToRead);
+        size_t amount = co_await input.tryRead(bytes.begin(), 1, bytes.size());
 
-      if (amount == 0) {
-        break;
-      }
+        if (amount == 0) {
+          break;
+        }
 
-      runningTotal += amount;
-      JSG_REQUIRE(runningTotal < limit, TypeError, "Memory limit exceeded before EOF.");
-      parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
-    };
+        runningTotal += amount;
+        JSG_REQUIRE(runningTotal < limit, TypeError, "Memory limit exceeded before EOF.");
+        parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
+      };
+    }
 
     if (option == ReadOption::NULL_TERMINATE) {
       auto out = kj::heapArray<T>(runningTotal + 1);
