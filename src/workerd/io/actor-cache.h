@@ -627,8 +627,8 @@ private:
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
-  // the LRU queue (unless the options say otherwise).
-  void touchEntry(Lock& lock, Entry& entry, const ReadOptions& options);
+  // the LRU queue.
+  void touchEntry(Lock& lock, Entry& entry);
 
   // TODO(soon) This function mostly belongs on the SharedLru, not the ActorCache. Notably,
   // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
@@ -853,7 +853,7 @@ private:
   // most-recently-used.
   kj::MutexGuarded<kj::List<Entry, &Entry::link>> cleanList;
 
-  // Total byte size of everything that is cached, including dirty values that are not in `list`.
+  // Total byte size of everything that is cached, including dirty values that aren't in `cleanList`.
   mutable std::atomic<size_t> size = 0;
 
   // TimePoint when we should next evict stale entries. Represented as an int64_t of nanoseconds
