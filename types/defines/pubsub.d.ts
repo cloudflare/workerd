@@ -1,12 +1,7 @@
-// Copyright (c) 2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-
-// https://developers.cloudflare.com/pub-sub/
-
 // PubSubMessage represents an incoming PubSub message.
 // The message includes metadata about the broker, the client, and the payload
 // itself.
+// https://developers.cloudflare.com/pub-sub/
 interface PubSubMessage {
     // Message ID
     readonly mid: number;
