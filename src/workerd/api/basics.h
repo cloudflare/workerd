@@ -506,7 +506,8 @@ public:
   // Returns an AbortSignal that is triggered after delay milliseconds.
   static jsg::Ref<AbortSignal> timeout(jsg::Lock& js, double delay);
 
-  void triggerAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
+  void triggerAbort(jsg::Lock& js,
+                    jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> maybeReason);
 
   static jsg::Ref<AbortSignal> any(
       jsg::Lock& js,
@@ -548,7 +549,7 @@ public:
 
   static kj::Exception abortException(
       jsg::Lock& js,
-      jsg::Optional<jsg::JsValue> reason = kj::none);
+      jsg::Optional<kj::OneOf<kj::Exception, jsg::JsValue>> reason = kj::none);
 
   RefcountedCanceler& getCanceler();
 
