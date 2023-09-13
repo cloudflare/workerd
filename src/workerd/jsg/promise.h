@@ -231,6 +231,9 @@ public:
     markedAsHandled = true;
   }
 
+  // Attach a continuation function and error handler to be called when this promise
+  // is fulfilled. It is important to remember that then(...) can synchronously throw
+  // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <bool passLock = true, typename Func, typename ErrorFunc>
   PromiseForResult<Func, T, passLock> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
     typedef ReturnType<Func, T, passLock> Output;
@@ -244,6 +247,9 @@ public:
         &promiseContinuation<FuncPair, passLock, true, Value, Output>);
   }
 
+  // Attach a continuation function to be called when this promise is fulfilled.
+  // It is important to remember that then(...) can synchronously throw
+  // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <bool passLock = true, typename Func>
   PromiseForResult<Func, T, passLock> then(Lock& js, Func&& func) {
     typedef ReturnType<Func, T, passLock> Output;
