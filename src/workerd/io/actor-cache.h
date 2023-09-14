@@ -402,8 +402,12 @@ private:
     // from cache and needs to remember the original cached values even if they are overwritten
     // before the read completes.
     const Value value;
-  public:
     EntryValueStatus valueStatus;
+  public:
+    auto getValueStatus() const {
+      return valueStatus;
+    }
+
     kj::Maybe<ValuePtr> getValuePtr() const {
       if (valueStatus == EntryValueStatus::PRESENT) {
         return value.asPtr();
@@ -740,7 +744,7 @@ public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
-      KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
+      KJ_IREQUIRE(ptr->get()->getValueStatus() == ActorCache::EntryValueStatus::PRESENT);
       return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
     }
     Iterator& operator++() {
