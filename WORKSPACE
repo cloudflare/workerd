@@ -319,6 +319,7 @@ http_archive(
         "//:patches/v8/0010-Implement-Promise-Context-Tagging.patch",
         "//:patches/v8/0011-Enable-V8-shared-linkage.patch",
         "//:patches/v8/0012-Fix-ICU-build.patch",
+        "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     ],
     strip_prefix = "v8-v8-97c6f93",
     type = "tgz",

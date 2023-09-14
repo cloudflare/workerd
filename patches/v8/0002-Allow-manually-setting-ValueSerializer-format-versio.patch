@@ -1,4 +1,4 @@
-From e480982cb9311de5092093b267b81b94ed416834 Mon Sep 17 00:00:00 2001
+From db9013995a63651e6ad3c979842a29aa6a2a52de Mon Sep 17 00:00:00 2001
 From: James M Snell <jasnell@gmail.com>
 Date: Wed, 16 Mar 2022 08:59:21 -0700
 Subject: Allow manually setting ValueSerializer format version
