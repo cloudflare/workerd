@@ -16,6 +16,8 @@
 #include "gpu-queue.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
+#include "gpu-supported-features.h"
+#include "gpu-supported-limits.h"
 #include "workerd/jsg/promise.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -44,6 +46,8 @@ public:
     JSG_METHOD(popErrorScope);
     JSG_READONLY_PROTOTYPE_PROPERTY(queue, getQueue);
     JSG_READONLY_PROTOTYPE_PROPERTY(lost, getLost);
+    JSG_READONLY_PROTOTYPE_PROPERTY(features, getFeatures);
+    JSG_READONLY_PROTOTYPE_PROPERTY(limits, getLimits);
   }
 
   // The GPUDevice explicitly does not expose a constructor(). It is
@@ -73,6 +77,8 @@ private:
   void pushErrorScope(GPUErrorFilter filter);
   jsg::Promise<kj::Maybe<jsg::Ref<GPUError>>> popErrorScope();
   jsg::MemoizedIdentity<jsg::Promise<jsg::Ref<GPUDeviceLostInfo>>>& getLost();
+  jsg::Ref<GPUSupportedFeatures> getFeatures();
+  jsg::Ref<GPUSupportedLimits> getLimits();
 };
 
 struct GPUQueueDescriptor {

@@ -31,7 +31,6 @@ export class DurableObjectExample {
     ok(adapter.limits.maxBufferSize);
 
     const requiredFeatures = [];
-    requiredFeatures.push("texture-compression-astc");
     requiredFeatures.push("depth-clip-control");
     const device = await adapter.requestDevice({
       requiredFeatures,
@@ -39,6 +38,12 @@ export class DurableObjectExample {
     ok(device);
 
     ok(device.lost);
+
+    ok(device.features.keys());
+    ok(device.features.has("depth-clip-control"));
+
+    ok(device.limits);
+    ok(device.limits.maxBufferSize);
 
     const firstMatrix = new Float32Array([
       2 /* rows */, 4 /* columns */, 1, 2, 3, 4, 5, 6, 7, 8,

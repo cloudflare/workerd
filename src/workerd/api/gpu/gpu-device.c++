@@ -483,4 +483,18 @@ void GPUDevice::pushErrorScope(GPUErrorFilter filter) {
   device_.PushErrorScope(f);
 }
 
+jsg::Ref<GPUSupportedFeatures> GPUDevice::getFeatures() {
+  wgpu::Device device(device_.Get());
+  size_t count = device.EnumerateFeatures(nullptr);
+  kj::Array<wgpu::FeatureName> features = kj::heapArray<wgpu::FeatureName>(count);
+  device.EnumerateFeatures(&features[0]);
+  return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
+}
+
+jsg::Ref<GPUSupportedLimits> GPUDevice::getLimits() {
+  wgpu::SupportedLimits limits{};
+  JSG_REQUIRE(device_.GetLimits(&limits), TypeError, "failed to get device limits");
+  return jsg::alloc<GPUSupportedLimits>(kj::mv(limits));
+}
+
 } // namespace workerd::api::gpu
