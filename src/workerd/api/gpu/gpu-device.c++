@@ -125,7 +125,7 @@ jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   desc.compare = parseCompareFunction(descriptor.compare);
   desc.maxAnisotropy = descriptor.maxAnisotropy.orDefault(1);
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -137,7 +137,7 @@ jsg::Ref<GPUBindGroupLayout>
 GPUDevice::createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor) {
   wgpu::BindGroupLayoutDescriptor desc{};
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -155,7 +155,7 @@ GPUDevice::createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor) {
 jsg::Ref<GPUBindGroup> GPUDevice::createBindGroup(GPUBindGroupDescriptor descriptor) {
   wgpu::BindGroupDescriptor desc{};
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -178,7 +178,7 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
   desc.nextInChain = &wgsl_desc;
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -192,7 +192,7 @@ jsg::Ref<GPUPipelineLayout>
 GPUDevice::createPipelineLayout(GPUPipelineLayoutDescriptor descriptor) {
   wgpu::PipelineLayoutDescriptor desc{};
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -213,8 +213,8 @@ GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descr
   wgpu::CommandEncoderDescriptor desc{};
 
   kj::String label = kj::str("");
-  KJ_IF_SOME (d, descriptor) {
-    KJ_IF_SOME (l, d.label) {
+  KJ_IF_SOME(d, descriptor) {
+    KJ_IF_SOME(l, d.label) {
       label = kj::mv(l);
       desc.label = label.cStr();
     }
@@ -228,7 +228,7 @@ wgpu::ComputePipelineDescriptor
 parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   wgpu::ComputePipelineDescriptor desc{};
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 
@@ -236,7 +236,7 @@ parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   desc.compute.entryPoint = descriptor.compute.entryPoint.cStr();
 
   kj::Vector<wgpu::ConstantEntry> constants;
-  KJ_IF_SOME (cDict, descriptor.compute.constants) {
+  KJ_IF_SOME(cDict, descriptor.compute.constants) {
     for (auto& f : cDict.fields) {
       wgpu::ConstantEntry e;
       e.key = f.name.cStr();
@@ -249,8 +249,9 @@ parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   desc.compute.constantCount = constants.size();
 
   KJ_SWITCH_ONEOF(descriptor.layout) {
-    KJ_CASE_ONEOF(autoLayoutMode, kj::String) {
-      JSG_REQUIRE(autoLayoutMode == "auto", TypeError, "unknown auto layout mode", autoLayoutMode);
+    KJ_CASE_ONEOF(autoLayoutMode, jsg::NonCoercible<kj::String>) {
+      JSG_REQUIRE(autoLayoutMode.value == "auto", TypeError, "unknown auto layout mode",
+                  autoLayoutMode.value);
       desc.layout = nullptr;
     }
     KJ_CASE_ONEOF(layout, jsg::Ref<GPUPipelineLayout>) {
@@ -449,7 +450,7 @@ GPUDevice::GPUDevice(jsg::Lock& js, wgpu::Device d)
 jsg::Ref<GPUQuerySet> GPUDevice::createQuerySet(GPUQuerySetDescriptor descriptor) {
   wgpu::QuerySetDescriptor desc{};
 
-  KJ_IF_SOME (label, descriptor.label) {
+  KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
   }
 

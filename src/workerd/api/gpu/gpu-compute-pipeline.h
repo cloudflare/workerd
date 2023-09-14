@@ -37,7 +37,8 @@ struct GPUProgrammableStage {
   JSG_STRUCT(module, entryPoint, constants);
 };
 
-using GPUComputePipelineLayout = kj::OneOf<kj::String, jsg::Ref<GPUPipelineLayout>>;
+using GPUComputePipelineLayout =
+    kj::OneOf<jsg::NonCoercible<kj::String>, jsg::Ref<GPUPipelineLayout>>;
 
 struct GPUComputePipelineDescriptor {
   jsg::Optional<kj::String> label;
