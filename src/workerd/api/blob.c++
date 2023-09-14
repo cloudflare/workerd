@@ -59,17 +59,10 @@ static kj::Array<byte> concat(jsg::Optional<Blob::Bits> maybeBits) {
 }
 
 static kj::String normalizeType(kj::String type) {
-  // TODO(soon): Add temporary logging if the type is not a valid mime type.
   // This does not properly parse mime types. We have the new workerd::MimeType impl
-  // but that handles mime types a bit more strictly than this. We can/should switch
-  // over to it but there's a non-zero risk of breaking running code. We might need
-  // a compat flag to switch. To know for sure, we temporarily add logging here to
-  // see if anyone in the wild is relying on the incorrect parsing.
-  // If we see this log even once in production then we cannot switch normalizeType
-  // for MimeType::tryParse without a compatibility flag.
-  if (MimeType::tryParse(type) == nullptr) {
-    LOG_WARNING_ONCE("Blob created with invalid/unparseable content type");
-  }
+  // but that handles mime types a bit more strictly than this. Ideally we'd be able to
+  // switch over to it but there's a non-zero risk of breaking running code. We might need
+  // a compat flag to switch at some point but for now we'll keep this as it is.
 
   // https://www.w3.org/TR/FileAPI/#constructorBlob step 3 inexplicably insists that if the
   // type contains non-printable-ASCII characters we should discard it, and otherwise we should
