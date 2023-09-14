@@ -22,6 +22,13 @@ export class DurableObjectExample {
       usage: GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC,
     });
     ok(gpuWriteBuffer);
+
+    deepEqual(gpuWriteBuffer.size, 4n);
+
+    deepEqual(gpuWriteBuffer.usage, 6);
+
+    deepEqual(gpuWriteBuffer.mapState, "mapped");
+
     const arrayBuffer = gpuWriteBuffer.getMappedRange();
     ok(arrayBuffer);
 
