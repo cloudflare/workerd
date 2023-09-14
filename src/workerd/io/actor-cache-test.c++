@@ -3497,8 +3497,9 @@ KJ_TEST("ActorCache listReverse() retry on failure") {
 // =======================================================================================
 // LRU purge
 
+constexpr size_t ENTRY_SIZE = 128;
 KJ_TEST("ActorCache LRU purge") {
-  ActorCacheTest test({.softLimit = 128});  // big enough for one entry with small key/value
+  ActorCacheTest test({.softLimit = 1 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3527,7 +3528,7 @@ KJ_TEST("ActorCache LRU purge") {
 }
 
 KJ_TEST("ActorCache LRU purge ordering") {
-  ActorCacheTest test({.softLimit = 512});  // big enough for four entries
+  ActorCacheTest test({.softLimit = 4 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3562,7 +3563,7 @@ KJ_TEST("ActorCache LRU purge ordering") {
 }
 
 KJ_TEST("ActorCache LRU purge larger") {
-  ActorCacheTest test({.softLimit = 4096});
+  ActorCacheTest test({.softLimit = 32 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3699,8 +3700,7 @@ KJ_TEST("ActorCache evict on timeout") {
 }
 
 KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
-  // Each Entry below ends up being about ~126 bytes, so a limit of 256 allows for 2 entries.
-  ActorCacheTest test({.dirtyListByteLimit = 256});
+  ActorCacheTest test({.dirtyListByteLimit = 2 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3754,7 +3754,7 @@ KJ_TEST("ActorCache backpressure due to dirtyPressureThreshold") {
 }
 
 KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3781,9 +3781,9 @@ KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
       kvs({{"bar", "456"}, {"baz", "789"}, {"corge", "555"}, {"foo", "123"}}));
 
   // touch some stuff so that "corge" is the oldest entry.
+  expectCached(test.list("foo", "qux"));
   expectCached(test.get("bar"));
   expectCached(test.get("baz"));
-  expectCached(test.get("foo"));
 
   // do a put() to force an eviction.
   {
@@ -3806,8 +3806,57 @@ KJ_TEST("ActorCache lru evict entry with known-empty gaps") {
   expectUncached(test.get("fo"));
 }
 
+KJ_TEST("ActorCache lru evict gap entry with known-empty gaps") {
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  // Populate cache.
+  {
+    auto promise = expectUncached(test.list("bar", "qux"));
+
+    mockStorage->expectCall("list", ws)
+        .withParams(CAPNP(start = "bar", end = "qux"), "stream"_kj)
+        .useCallback("stream", [&](MockClient stream) {
+      stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
+                                          (key = "baz", value = "789"),
+                                          (key = "corge", value = "555"),
+                                          (key = "foo", value = "123")]))
+          .expectReturns(CAPNP(), ws);
+      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+    }).expectCanceled();
+
+    KJ_ASSERT(promise.wait(ws) ==
+        kvs({{"bar", "456"}, {"baz", "789"}, {"corge", "555"}, {"foo", "123"}}));
+  }
+
+  KJ_ASSERT(expectCached(test.list("bar", "qux")) ==
+      kvs({{"bar", "456"}, {"baz", "789"}, {"corge", "555"}, {"foo", "123"}}));
+
+  // touch some stuff so that "qux" is the oldest entry.
+  expectCached(test.get("bar"));
+  expectCached(test.get("baz"));
+  expectCached(test.get("corge"));
+  expectCached(test.get("foo"));
+
+  // We still have a cached gap between "foo" and "qux".
+  KJ_ASSERT(expectCached(test.get("foo+1")) == nullptr);
+
+  // do a put() to force an eviction.
+  {
+    test.put("xyzzy", "x");
+
+    mockStorage->expectCall("put", ws)
+        .withParams(CAPNP(entries = [(key = "xyzzy", value = "x")]))
+        .thenReturn(CAPNP());
+  }
+
+  // Okay, that gap is gone now.
+  expectUncached(test.get("foo+1"));
+}
+
 KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by END_GAP)") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3859,7 +3908,7 @@ KJ_TEST("ActorCache lru evict entry with trailing known-empty gap (followed by E
 }
 
 KJ_TEST("ActorCache timeout entry with known-empty gaps") {
-  ActorCacheTest test({.softLimit = 700});  // just big enough for the first list results
+  ActorCacheTest test({.softLimit = 5 * ENTRY_SIZE});
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -3892,9 +3941,9 @@ KJ_TEST("ActorCache timeout entry with known-empty gaps") {
   test.cache.evictStale(startTime + 1 * kj::SECONDS);
 
   // touch some stuff so that "corge" is the only STALE entry.
+  expectCached(test.list("foo", "qux"));
   expectCached(test.get("bar"));
   expectCached(test.get("baz"));
-  expectCached(test.get("foo"));
 
   // Time out "corge".
   test.cache.evictStale(startTime + 2 * kj::SECONDS);
@@ -3909,6 +3958,47 @@ KJ_TEST("ActorCache timeout entry with known-empty gaps") {
   expectUncached(test.get("baza"));
   expectUncached(test.get("corge"));
   expectUncached(test.get("fo"));
+}
+
+
+KJ_TEST("ActorCache evictStale entire list with end marker") {
+  ActorCacheTest test;
+  auto& ws = test.ws;
+  auto& mockStorage = test.mockStorage;
+
+  auto timePoint = kj::UNIX_EPOCH;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+
+  {
+    // Populate a decent list.
+    auto promise = expectUncached(test.list("bar", "qux"));
+
+    mockStorage->expectCall("list", ws)
+        .withParams(CAPNP(start = "bar", end = "qux"), "stream"_kj)
+        .useCallback("stream", [&](MockClient stream) {
+      stream.call("values", CAPNP(list = [(key = "bar", value = "456"),
+                                          (key = "baz", value = "789"),
+                                          (key = "corge", value = "555"),
+                                          (key = "foo", value = "123")]))
+          .expectReturns(CAPNP(), ws);
+      stream.call("end", CAPNP()).expectReturns(CAPNP(), ws);
+    }).expectCanceled();
+
+    KJ_ASSERT(promise.wait(ws) ==
+        kvs({{"bar", "456"}, {"baz", "789"}, {"corge", "555"}, {"foo", "123"}}));
+  }
+
+  KJ_EXPECT(test.lru.currentSize() > 0);
+
+  // First mark the entire cache as stale.
+  timePoint += 1 * kj::SECONDS;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+  KJ_EXPECT(test.lru.currentSize() > 0);
+
+  // Evict the entire cache.
+  timePoint += 1 * kj::SECONDS;
+  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+  KJ_EXPECT(test.lru.currentSize() == 0);
 }
 
 KJ_TEST("ActorCache purge everything while listing") {
@@ -3974,7 +4064,11 @@ KJ_TEST("ActorCache purge everything while listing; has previous entry") {
 }
 
 KJ_TEST("ActorCache exceed hard limit on read") {
-  ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
+  ActorCacheTest test({
+    .monitorOutputGate = false,
+    .softLimit = 2 * ENTRY_SIZE,
+    .hardLimit = 2 * ENTRY_SIZE
+  });
   auto& ws = test.ws;
   auto& mockStorage = test.mockStorage;
 
@@ -4019,7 +4113,11 @@ KJ_TEST("ActorCache exceed hard limit on read") {
 }
 
 KJ_TEST("ActorCache exceed hard limit on write") {
-  ActorCacheTest test({.monitorOutputGate = false, .softLimit = 256, .hardLimit = 256});
+  ActorCacheTest test({
+    .monitorOutputGate = false,
+    .softLimit = 2 * ENTRY_SIZE,
+    .hardLimit = 2 * ENTRY_SIZE
+  });
   auto& ws = test.ws;
 
   auto brokenPromise = test.gate.onBroken();

@@ -211,7 +211,7 @@ public:
   // the alarm handler's execution.
   //
   // The returned object will schedule a write to clear the alarm time if no alarm writes have been
-  // made while it exists. If nullptr is returned, the alarm run should be canceled.
+  // made while it exists. If kj::none is returned, the alarm run should be canceled.
   virtual kj::Maybe<kj::Own<void>> armAlarmHandler(
       kj::Date scheduledTime, bool noCache = false) = 0;
 
@@ -265,7 +265,7 @@ public:
       Hooks& hooks = Hooks::DEFAULT);
   ~ActorCache() noexcept(false);
 
-  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return nullptr; }
+  kj::Maybe<SqliteDatabase&> getSqliteDatabase() override { return kj::none; }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(
@@ -305,15 +305,14 @@ private:
     // the whole object.
     void disposeImpl(void* pointer) const {
       auto p = reinterpret_cast<ActorCache*>(pointer);
-      KJ_IF_MAYBE(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
-        d->status = DeferredAlarmDelete::Status::READY;
-        p->ensureFlushScheduled(WriteOptions { .noCache = d->noCache });
+      KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
+        d.status = DeferredAlarmDelete::Status::READY;
+        p->ensureFlushScheduled(WriteOptions { .noCache = d.noCache });
       }
     }
   };
 
-  // States that a cache entry may be in.
-  enum EntryState {
+  enum class EntrySyncStatus : int8_t {
     // The value was set by the app via put() or delete(), and we have not yet initiated a write
     // to disk. The entry is appended to `dirtyList` whenever entering this state.
     //
@@ -337,25 +336,9 @@ private:
     // The entry matches what is currently on disk. The entry is currently present in the LRU
     // queue.
     //
-    // Next state: STALE (if not accessed for a while), NOT_IN_CACHE (if a new put()/delete()
-    // overwrites the entry), or deleted (if evicted due to memory pressure).
+    // Next state: NOT_IN_CACHE (if a new put()/delete() overwrites the entry), or deleted (if
+    // evicted due to memory pressure).
     CLEAN,
-
-    // Same as CLEAN, except that the entry has not been accessed since the last staleness check.
-    // If it is not accessed before the next check, it will time out and be evicted.
-    //
-    // Next state: CLEAN (if accessed again before eviction), NOT_IN_CACHE (if a new put()/delete()
-    // overwrites the entry), or deleted (if evicted due to either timeout or memory pressure).
-    STALE,
-
-    // This entry exists solely to mark the end of a known-empty gap. The value for this entry
-    // is not known, but the previous entry has `gapIsKnownEmpty = true`. Such entries are
-    // created as a result of list() operations, to mark the endpoint of the list range. List
-    // ranges are exclusive of their endpoint, hence the value associated with this key is commonly
-    // unknown.
-    //
-    // Next state: NOT_IN_CACHE, if someone get()s or put()s the real value.
-    END_GAP,
 
     // This entry is not currently in the cache -- it is an orphaned object. This happens e.g. if
     // a put() or delete() overwrote the entry, in which case the `Entry` object is removed from
@@ -369,39 +352,49 @@ private:
     NOT_IN_CACHE
   };
 
+  enum class EntryValueStatus : uint8_t {
+    // This entry has a known value. (Note that while there is nothing wrong per say with a value
+    // size of zero, v8 serialized data will always have a greater size.)
+    PRESENT,
+
+    // This entry is known to be absent.
+    ABSENT,
+
+    // This entry has not been fetched into cache yet, but the previous entry has `gapIsKnownEmpty =
+    // true`. Such entries are created as a result of list() operations, to mark the endpoint of the
+    // list range. List ranges are exclusive of their endpoint, hence the value associated with this
+    // key is commonly unknown.
+    UNKNOWN,
+  };
+
   struct CountedDelete;
 
-  // A cache entry.
-  //
-  // Entries are refcounted so that an operation which cares about a particular entry can keep
-  // it live even after it has been evicted or overwritten. In particular, because read
-  // operations are consistent with the time when read() was called, they may need to hold
-  // strong references to the entries they are reading, so that if the entries are overwritten,
-  // the read operation still has the original value from when it was called.
-  //
-  // The mutable content of an `Entry` is protected by the same mutex that protects
-  // `lru.cleanList`. `key` and `value` are declared `const` so that they can safely be used
-  // without a lock.
   struct Entry: public kj::AtomicRefcounted {
+    // A cache entry.
+    //
+    // Entries are refcounted so that an operation which cares about a particular entry can keep
+    // it live even after it has been evicted or overwritten. In particular, because read
+    // operations are consistent with the time when read() was called, they may need to hold
+    // strong references to the entries they are reading, so that if the entries are overwritten,
+    // the read operation still has the original value from when it was called.
+    //
+    // The mutable content of an `Entry` is protected by the same mutex that protects
+    // `lru.cleanList`. `key` and `value` are declared `const` so that they can safely be used
+    // without a lock.
 
-    // Use makeEntry() to construct! (The Badge<> is a reminder, though obviously doesn't enforce
-    // anything since Entry is already private to ActorCache.)
-    Entry(kj::Badge<ActorCache>, ActorCache& cache, Key keyParam,
-          kj::Maybe<Value> valueParam, EntryState state);
-
-    // Makes an entry not tied to a cache. Used by GetResultList<kj::Vector<KeyValuePair>>
-    // constructor.
-    Entry(kj::Badge<GetResultList>, Key keyParam, kj::Maybe<Value> valueParam);
-
+    Entry(ActorCache& cache, Key key, Value value);
+    Entry(ActorCache& cache, Key key, EntryValueStatus status);
+    Entry(Key key, Value value);
+    Entry(Key key, EntryValueStatus status);
     ~Entry() noexcept(false);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
 
-    kj::Maybe<ActorCache&> cache;
+    kj::Maybe<ActorCache&> maybeCache;
     const Key key;
 
-    // The value associated with this key. null means the key is known not to be set -- except in
-    // the END_GAP state, where `value` is always null, and this doesn't indicate any knowledge
-    // about what's on disk.
+  private:
+    // The value associated with this key. If our `valueStatus` below is `ABSENT` or `UNKNOWN`, it
+    // will have size 0.
     //
     // `value` cannot change after the `Entry` is constructed. When a key is overwritten, the
     // existing `Entry` is removed from the map and replaced with a new one, so that `value` does
@@ -409,10 +402,43 @@ private:
     // them instead, especially in the case of a read operation which is only partially fulfilled
     // from cache and needs to remember the original cached values even if they are overwritten
     // before the read completes.
-    const kj::Maybe<Value> value;
+    const Value value;
+  public:
+    EntryValueStatus valueStatus;
+    kj::Maybe<ValuePtr> getValuePtr() const {
+      if (valueStatus == EntryValueStatus::PRESENT) {
+        return value.asPtr();
+      } else {
+        return kj::none;
+      }
+    }
+    kj::Maybe<Value> getValue() const {
+      KJ_IF_SOME(ptr, getValuePtr()) {
+        return ptr.attach(kj::atomicAddRef(*this));
+      } else {
+        return kj::none;
+      }
+    }
 
-    // State of this key/value pair.
-    EntryState state;
+    // This enum indicates how synchronized this entry is with storage.
+    EntrySyncStatus syncStatus = EntrySyncStatus::NOT_IN_CACHE;
+
+    bool isDirty() const {
+      switch(syncStatus) {
+        case EntrySyncStatus::DIRTY:
+        case EntrySyncStatus::FLUSHING: {
+          return true;
+        }
+        case EntrySyncStatus::CLEAN: {
+          return false;
+        }
+        case EntrySyncStatus::NOT_IN_CACHE: {
+          KJ_FAIL_ASSERT("NOT_IN_CACHE entries should not be in the map or flushing");
+        }
+      }
+    }
+
+    bool isStale = false;
 
     // If true, then a past list() operation covered the space between this entry and the following
     // entry, meaning that we know for sure that there are no other keys on disk between them.
@@ -438,15 +464,13 @@ private:
     // to the replacement entry, so that it can be retried.)
     kj::Maybe<kj::Own<CountedDelete>> countedDelete;
 
-    // If CLEAN or STALE, the entry will be in the SharedLru's `cleanList`.
+    // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
     // If DIRTY or FLUSHING, the entry will be in `dirtyList`.
     kj::ListLink<Entry> link;
 
     size_t size() const {
-      size_t result = sizeof(*this) + key.size();
-      KJ_IF_MAYBE(v, value) result += v->size();
-      return result;
+      return sizeof(*this) + key.size() + value.size();
     }
   };
 
@@ -479,7 +503,7 @@ private:
     kj::Own<kj::PromiseFulfiller<uint>> resultFulfiller;
 
     // During `flushImpl()`, when this CountedDelete is first encountered, `flushIndex` will be set
-    // to track this delete batch. It will be set back to `nullptr` before `flushImpl()` returns.
+    // to track this delete batch. It will be set back to `kj::none` before `flushImpl()` returns.
     // This field exists here to avoid the need for a HashMap<CountedDelete*, ...> in `flushImpl()`.
     kj::Maybe<size_t> flushIndex;
   };
@@ -599,23 +623,21 @@ private:
   // Type of a lock on `SharedLru::cleanList`. We use the same lock to protect `currentValues`.
   typedef kj::Locked<kj::List<Entry, &Entry::link>> Lock;
 
-  kj::Own<Entry> makeEntry(Lock& lock, EntryState state, Key keyParam, kj::Maybe<Value> valueParam);
-
   // Indicate that an entry was observed by a read operation and so should be moved to the end of
   // the LRU queue (unless the options say otherwise).
   void touchEntry(Lock& lock, Entry& entry, const ReadOptions& options);
 
+  // TODO(soon) This function mostly belongs on the SharedLru, not the ActorCache. Notably,
+  // `removeEntry()` has to do with the shared clean list but `evictEntry()` has to do with
+  // the non-shared map. It is like this for now because generalizing the SharedLru into an
+  // IsolateCache is bigger work.
+  void removeEntry(Lock& lock, Entry& entry);
+
   // Look for a key in cache, returning a strong reference on the matching entry.
   //
-  // Returns null if the key isn't in cache, and must be looked up on disk.
-  //
-  // This will never return an entry of type END_GAP -- it'll return null instead.
-  //
-  // In cases where the key doesn't match a specific entry, but does match a gap between entries
-  // which is known to be empty, and thus the key is known not to exist on disk but has no specific
-  // entry in cache, this will return a new temporary object with null `value` instead, so that
-  // the calling code doesn't need to think about this case.
-  kj::Maybe<kj::Own<Entry>> findInCache(Lock& lock, KeyPtr key, const ReadOptions& options);
+  // Note that the returned entry could have `EntryValueStatus::UNKNOWN` which means we do not know
+  // if it is in storage or `EntryValueStatus::ABSENT` which means we know it is not in storage.
+  kj::Own<Entry> findInCache(Lock& lock, KeyPtr key, const ReadOptions& options);
 
   // Add an entry to the cache, where the entry was the result of reading from storage. If another
   // entry with the same key has been inserted in the meantime, then the new entry will not be
@@ -630,12 +652,10 @@ private:
   void markGapsEmpty(Lock& lock, KeyPtr begin, kj::Maybe<KeyPtr> end, const ReadOptions& options);
 
   // Implements put() or delete(). Multi-key variants call this for each key.
-  void putImpl(Lock& lock, Key key, kj::Maybe<Value> value,
-               const WriteOptions& options, kj::Maybe<CountedDelete&> counted);
-
-  // Implements put() or delete(). Multi-key variants call this for each key.
   void putImpl(Lock& lock, kj::Own<Entry> newEntry,
                const WriteOptions& options,  kj::Maybe<CountedDelete&> counted);
+
+  kj::Promise<kj::Maybe<Value>> getImpl(kj::Own<Entry> entry, ReadOptions options);
 
   // Ensure that we will flush dirty entries soon.
   void ensureFlushScheduled(const WriteOptions& options);
@@ -719,8 +739,8 @@ public:
   class Iterator {
   public:
     KeyValuePtrPairWithCache operator*() {
-      KJ_IREQUIRE(ptr->get()->value != nullptr);
-      return { ptr->get()->key, ptr->get()->value.orDefault(nullptr), *statusPtr };
+      KJ_IREQUIRE(ptr->get()->valueStatus == ActorCache::EntryValueStatus::PRESENT);
+      return { ptr->get()->key, ptr->get()->getValuePtr().orDefault({}), *statusPtr };
     }
     Iterator& operator++() {
       ++ptr;
@@ -773,7 +793,7 @@ private:
   // `fetchedEntries` is the set read from storage.
   explicit GetResultList(kj::Vector<kj::Own<Entry>> cachedEntries,
                          kj::Vector<kj::Own<Entry>> fetchedEntries,
-                         Order order, kj::Maybe<uint> limit = nullptr);
+                         Order order, kj::Maybe<uint> limit = kj::none);
 
   friend class ActorCache;
 };
@@ -827,8 +847,7 @@ private:
   Options options;
 
   // List of clean values, across all caches, ordered from least-recently-used to
-  // most-recently-used. Note that due to the ordering, all STALE entries will appear before all
-  // CLEAN entries.
+  // most-recently-used.
   kj::MutexGuarded<kj::List<Entry, &Entry::link>> cleanList;
 
   // Total byte size of everything that is cached, including dirty values that are not in `list`.
@@ -912,8 +931,8 @@ private:
   // Adds the given key/value pair to `changes`. If an existing entry is replaced, *count is
   // incremented if it was a positive entry. If no existing entry is replaced, then the key
   // is returned, indicating that if a count is needed, we'll need to inspect cache/disk.
-  kj::Maybe<KeyPtr> putImpl(Lock& lock, Key key, kj::Maybe<Value> value,
-                            const WriteOptions& options, kj::Maybe<uint&> count = nullptr);
+  kj::Maybe<KeyPtr> putImpl(Lock& lock, kj::Own<Entry> entry,
+                            const WriteOptions& options, kj::Maybe<uint&> count = kj::none);
 };
 
 }  // namespace workerd
