@@ -219,11 +219,10 @@ public:
 
   virtual kj::Maybe<kj::Promise<void>> onNoPendingFlush() = 0;
 
-  virtual kj::Promise<kj::String> getCurrentBookmark();
-  virtual kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
-
   // Implements the respective PITR API calls. The default implementations throw JSG errors saying
   // PITR is not implemented.
+  virtual kj::Promise<kj::String> getCurrentBookmark();
+  virtual kj::Promise<kj::String> getBookmarkForTime(kj::Date timestamp);
   virtual kj::Promise<kj::String> onNextSessionRestoreBookmark(kj::StringPtr bookmark);
 };
 
