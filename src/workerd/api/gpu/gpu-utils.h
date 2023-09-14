@@ -31,6 +31,7 @@ using GPUPowerPreference = kj::String;
 using GPUErrorFilter = kj::String;
 using GPUDeviceLostReason = kj::String;
 using GPUCompilationMessageType = kj::String;
+using GPUBufferMapState = kj::String;
 
 struct GPUMapMode : public jsg::Object {
   static constexpr GPUFlagsConstant READ = 0x0001;

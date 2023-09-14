@@ -24,6 +24,9 @@ public:
     JSG_METHOD(unmap);
     JSG_METHOD(destroy);
     JSG_METHOD(mapAsync);
+    JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
+    JSG_READONLY_PROTOTYPE_PROPERTY(usage, getUsage);
+    JSG_READONLY_PROTOTYPE_PROPERTY(mapState, getMapState);
   }
 
 private:
@@ -55,6 +58,28 @@ private:
 
   v8::Local<v8::ArrayBuffer> getMappedRange(jsg::Lock&, jsg::Optional<GPUSize64> offset,
                                             jsg::Optional<GPUSize64> size);
+
+  GPUSize64 getSize() {
+    return buffer_.GetSize();
+  }
+
+  GPUFlagsConstant getUsage() {
+    return GPUFlagsConstant(buffer_.GetUsage());
+  }
+
+  GPUBufferMapState getMapState() {
+    switch (buffer_.GetMapState()) {
+    case wgpu::BufferMapState::Unmapped:
+      return kj::str("unmapped");
+    case wgpu::BufferMapState::Pending:
+      return kj::str("pending");
+    case wgpu::BufferMapState::Mapped:
+      return kj::str("mapped");
+    };
+
+    KJ_UNREACHABLE;
+  }
+
   void unmap(jsg::Lock& js);
   void destroy(jsg::Lock& js);
   jsg::Promise<void> mapAsync(GPUFlagsConstant mode, jsg::Optional<GPUSize64> offset,
