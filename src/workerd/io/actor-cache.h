@@ -465,17 +465,15 @@ private:
     // In the DIRTY state, if this entry was originally created as the result of a
     // `delete()` call, and as such the caller needs to receive a count of deletions, then this
     // tracks that need. Note that only one caller could ever be waiting on this, because
-    // subsequent delete() calls can be counted based on the cache content. This can be null
+    // subsequent delete() calls can be counted based on the cache content. This can be false
     // if no delete operations need a count from this entry.
-    //
-    // If an entry is overwritten, `countedDelete` needs to be inherited by the replacement entry,
-    // so that the delete is still counted upon `flushImpl()`. (If the entry being replaced is
-    // already flushing, and that flush succeeds, then countedDelete->fulfiller will be fulfilled.
-    // In that case, it's no longer relevant to have `countedDelete` on the replacement entry,
-    // because it's already fulfilled and so will be ignored anyway. However, in the unlikely case
-    // that the flush failed, then it is actually important that the `countedDelete` has been moved
-    // to the replacement entry, so that it can be retried.)
-    kj::Maybe<kj::Own<CountedDelete>> countedDelete;
+    bool isCountedDelete = false;
+
+    // This Entry is part of a CountedDelete, but has since been overwritten via a put().
+    // This is really only useful in determining if we need to retry the deletion of this entry from
+    // storage, since we're interested in the number of deleted records. If we already got the count,
+    // we won't include this entry as part of our retried delete.
+    bool overwritingCountedDelete = false;
 
     // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
@@ -508,18 +506,68 @@ private:
   // This object can only be manipulated in the thread that owns the specific actor that made
   // the request. That works out fine since CountedDelete only ever exists for dirty entries,
   // which won't be touched cross-thread by the LRU.
-  struct CountedDelete: public kj::Refcounted {
+  struct CountedDelete final: public kj::Refcounted {
+    CountedDelete() = default;
+    KJ_DISALLOW_COPY_AND_MOVE(CountedDelete);
+
+    kj::Promise<void> forgiveIfFinished(kj::Promise<void> promise) {
+      try {
+        co_await promise;
+      } catch (...) {
+        if (isFinished) {
+          // We already flushed, so it's okay that the promise threw.
+          co_return;
+        } else {
+          throw;
+        }
+      }
+    }
+
     // Running count of entries that existed before the delete.
     uint countDeleted = 0;
 
-    // When `countOutstanding` reaches zero, fulfill this with `countDeleted`.
-    kj::Own<kj::PromiseFulfiller<uint>> resultFulfiller;
+    // Did this particular counted delete succeed within a transaction? In other words, did we
+    // already get the count? Even if we got the count, we may need to retry if the transaction
+    // itself failed, though we won't need to get the count again.
+    bool completedInTransaction = false;
 
-    // During `flushImpl()`, when this CountedDelete is first encountered, `flushIndex` will be set
-    // to track this delete batch. It will be set back to `kj::none` before `flushImpl()` returns.
-    // This field exists here to avoid the need for a HashMap<CountedDelete*, ...> in `flushImpl()`.
-    kj::Maybe<size_t> flushIndex;
+    // Did this particular counted delete succeed? Note that this can be true even if the flush
+    // failed on a different batch of operations.
+    bool isFinished = false;
+
+    // The entries are associated with this counted delete.
+    kj::Vector<kj::Own<Entry>> entries;
   };
+
+  class CountedDeleteWaiter {
+  public:
+    explicit CountedDeleteWaiter(ActorCache& cache, kj::Own<CountedDelete> state)
+      : cache(cache), state(kj::mv(state)) {
+      // Register this operation so that we can batch it properly during flush.
+      cache.countedDeletes.insert(this->state.get());
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(CountedDeleteWaiter);
+    ~CountedDeleteWaiter() noexcept(false) {
+      for (auto& entry : state->entries) {
+        // Let each entry associated with this counted delete know that we aren't waiting anymore.
+        entry->isCountedDelete = false;
+      }
+
+      // Since the count of deleted pairs is no longer required, we don't need to batch the ops.
+      // Note that we're doing eraseMatch since the pointer is a temporary literal.
+      cache.countedDeletes.eraseMatch(state.get());
+    }
+
+    const CountedDelete& getCountedDelete() const {
+      return *state;
+    }
+
+  private:
+    ActorCache& cache;
+    kj::Own<CountedDelete> state;
+  };
+
+  kj::HashSet<CountedDelete*> countedDeletes;
 
   rpc::ActorStorage::Stage::Client storage;
   const SharedLru& lru;
@@ -725,7 +773,6 @@ private:
   };
   struct CountedDeleteFlush {
     kj::Own<CountedDelete> countedDelete;
-    kj::Vector<kj::Own<Entry>> entries;
     kj::Vector<FlushBatch> batches;
   };
   using CountedDeleteFlushes = kj::Array<CountedDeleteFlush>;
