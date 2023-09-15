@@ -319,22 +319,9 @@ private:
     // The value was set by the app via put() or delete(), and we have not yet initiated a write
     // to disk. The entry is appended to `dirtyList` whenever entering this state.
     //
-    // Next state: FLUSHING (if we begin flushing to disk) or NOT_IN_CACHE (if a new put()/delete()
+    // Next state: CLEAN (if the flush succeeds) or NOT_IN_CACHE (if a new put()/delete()
     // overwrites this entry first).
     DIRTY,
-
-    // The value is dirty but an RPC is in-flight to write this value to disk. If the value is
-    // overwritten in the meantime, or the write fails, then the state needs to change back to
-    // DIRTY. If the write completes successfully and the state is still FLUSHING, then the state
-    // can progress to CLEAN.
-    //
-    // The entry remains in `dirtyList` while in this state. Since newly-dirty entries are always
-    // appended to `dirtyList`, it's guaranteed that all `FLUSHING` entries in `dirtyList` come
-    // before all `DIRTY` entries.
-    //
-    // Next state: CLEAN (if the flush completes) or NOT_IN_CACHE (if a new put()/delete()
-    // overwrites the entry first).
-    FLUSHING,
 
     // The entry matches what is currently on disk. The entry is currently present in the LRU
     // queue.
@@ -432,8 +419,7 @@ private:
 
     bool isDirty() const {
       switch(syncStatus) {
-        case EntrySyncStatus::DIRTY:
-        case EntrySyncStatus::FLUSHING: {
+        case EntrySyncStatus::DIRTY: {
           return true;
         }
         case EntrySyncStatus::CLEAN: {
@@ -446,17 +432,18 @@ private:
     }
 
     bool isStale = false;
+    bool flushStarted = false;
 
     // If true, then a past list() operation covered the space between this entry and the following
     // entry, meaning that we know for sure that there are no other keys on disk between them.
     bool gapIsKnownEmpty = false;
 
     // If true, then this entry should be evicted from cache immediately when it becomes CLEAN.
-    // The entry still needs to reside in cache while DIRTY/FLUSHING since we need to store it
+    // The entry still needs to reside in cache while DIRTY since we need to store it
     // somewhere, and so we might as well serve cache hits based on it in the meantime.
     bool noCache = false;
 
-    // In the DIRTY or FLUSHING state, if this entry was originally created as the result of a
+    // In the DIRTY state, if this entry was originally created as the result of a
     // `delete()` call, and as such the caller needs to receive a count of deletions, then this
     // tracks that need. Note that only one caller could ever be waiting on this, because
     // subsequent delete() calls can be counted based on the cache content. This can be null
@@ -473,7 +460,7 @@ private:
 
     // If CLEAN, the entry will be in the SharedLru's `cleanList`.
     //
-    // If DIRTY or FLUSHING, the entry will be in `dirtyList`.
+    // If DIRTY, the entry will be in `dirtyList`.
     kj::ListLink<Entry> link;
 
     size_t size() const {
@@ -546,8 +533,8 @@ private:
     size_t innerSize = 0;
   };
 
-  // List of entries in DIRTY or FLUSHING state. New dirty entries are added to the end. If any
-  // FLUSHING entries are present, they always appear strictly before DIRTY entries.
+  // List of entries in DIRTY state. New dirty entries are added to the end. If any
+  // flushing entries are present, they always appear strictly before non-flushing entries.
   DirtyList dirtyList;
 
   // Map of current known values for keys. Searchable by key, including ordered iteration.
