@@ -12,6 +12,7 @@
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/server/workerd-api.h>
+#include <workerd/util/stream-utils.h>
 
 #include "test-fixture.h"
 
@@ -229,20 +230,6 @@ struct MockResponse final: public kj::HttpService::Response {
     KJ_FAIL_REQUIRE("NOT SUPPORTED");
   }
 };
-
-struct MemoryInputStream final: public kj::AsyncInputStream {
-  kj::ArrayPtr<const byte> data;
-
-  MemoryInputStream(kj::ArrayPtr<const byte> data) : data(data) { }
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    auto toRead = kj::min(data.size(), maxBytes);
-    memcpy(buffer, data.begin(), toRead);
-    data = data.slice(toRead, data.size());
-    return toRead;
-  }
-};
-
 } // namespace
 
 
@@ -335,7 +322,7 @@ TestFixture::Response TestFixture::runRequest(
     kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body) {
   kj::HttpHeaders requestHeaders(*headerTable);
   MockResponse response;
-  MemoryInputStream requestBody(body.asBytes());
+  auto requestBody = newMemoryInputStream(body);
 
   runInIoContext([&](const TestFixture::Environment& env) {
     auto& globalScope = env.lock.getGlobalScope();
@@ -343,7 +330,7 @@ TestFixture::Response TestFixture::runRequest(
         method,
         url,
         requestHeaders,
-        requestBody,
+        *requestBody,
         response,
         "{}"_kj,
         env.lock,

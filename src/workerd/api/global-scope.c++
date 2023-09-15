@@ -20,76 +20,32 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/util.h>
+#include <workerd/util/stream-utils.h>
 
 namespace workerd::api {
 
 namespace {
 
-// An InputStream that can be disconnected. Used for request body, which becomes invalid as
-// soon as the response is returned.
-class NeuterableInputStream: public kj::AsyncInputStream, public kj::Refcounted {
-public:
-  NeuterableInputStream(kj::AsyncInputStream& inner): inner(&inner) {}
-
-  enum NeuterReason {
-    SENT_RESPONSE,
-    THREW_EXCEPTION,
-    CLIENT_DISCONNECTED
-  };
-
-  void neuter(NeuterReason reason) {
-    if (inner.is<kj::AsyncInputStream*>()) {
-      inner = reason;
-      if (!canceler.isEmpty()) {
-        canceler.cancel(makeException(reason));
-      }
-    }
-  }
-
-  kj::Promise<size_t> read(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().read(buffer, minBytes, maxBytes));
-  }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return canceler.wrap(getStream().tryRead(buffer, minBytes, maxBytes));
-  }
-  kj::Maybe<uint64_t> tryGetLength() override {
-    return getStream().tryGetLength();
-  }
-  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
-    return canceler.wrap(getStream().pumpTo(output, amount));
-  }
-
-private:
-  kj::OneOf<kj::AsyncInputStream*, NeuterReason> inner;
-  kj::Canceler canceler;
-
-  kj::AsyncInputStream& getStream() {
-    KJ_SWITCH_ONEOF(inner) {
-      KJ_CASE_ONEOF(stream, kj::AsyncInputStream*) {
-        return *stream;
-      }
-      KJ_CASE_ONEOF(reason, NeuterReason) {
-        kj::throwFatalException(makeException(reason));
-      }
-    }
-    KJ_UNREACHABLE;
-  }
-
-  kj::Exception makeException(NeuterReason reason) {
-    switch (reason) {
-      case SENT_RESPONSE:
-        return JSG_KJ_EXCEPTION(FAILED, TypeError,
-            "Can't read from request stream after response has been sent.");
-      case THREW_EXCEPTION:
-        return JSG_KJ_EXCEPTION(FAILED, TypeError,
-            "Can't read from request stream after responding with an exception.");
-      case CLIENT_DISCONNECTED:
-        return JSG_KJ_EXCEPTION(DISCONNECTED, TypeError,
-            "Can't read from request stream because client disconnected.");
-    }
-    KJ_UNREACHABLE;
-  }
+enum class NeuterReason {
+  SENT_RESPONSE,
+  THREW_EXCEPTION,
+  CLIENT_DISCONNECTED
 };
+
+kj::Exception makeNeuterException(NeuterReason reason) {
+  switch (reason) {
+    case NeuterReason::SENT_RESPONSE:
+      return JSG_KJ_EXCEPTION(FAILED, TypeError,
+          "Can't read from request stream after response has been sent.");
+    case NeuterReason::THREW_EXCEPTION:
+      return JSG_KJ_EXCEPTION(FAILED, TypeError,
+          "Can't read from request stream after responding with an exception.");
+    case NeuterReason::CLIENT_DISCONNECTED:
+      return JSG_KJ_EXCEPTION(DISCONNECTED, TypeError,
+          "Can't read from request stream because client disconnected.");
+  }
+  KJ_UNREACHABLE;
+}
 
 kj::String getEventName(v8::PromiseRejectEvent type) {
   switch (type) {
@@ -151,14 +107,14 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   // that it can drop the reference whenever it gets GC'd. But in this case the stream's lifetime
   // is not under our control -- it's attached to the request. So, we wrap it in a
   // NeuterableInputStream which allows us to disconnect the stream before it becomes invalid.
-  auto ownRequestBody = kj::refcounted<NeuterableInputStream>(requestBody);
+  auto ownRequestBody = newNeuterableInputStream(requestBody);
   auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
     // Make sure to cancel the request body stream since the native stream is no longer valid once
     // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
     // haven't consumed the entire request body.
-    ownRequestBody->neuter(NeuterableInputStream::CLIENT_DISCONNECTED);
+    ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
   });
-  KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(NeuterableInputStream::THREW_EXCEPTION));
+  KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
@@ -311,9 +267,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
       // task finishes.
       deferredProxy.proxyTask = deferredProxy.proxyTask
           .then([body = kj::addRef(*ownRequestBody)]() mutable {
-        body->neuter(NeuterableInputStream::SENT_RESPONSE);
+        body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
       }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
-        body->neuter(NeuterableInputStream::THREW_EXCEPTION);
+        body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
         kj::throwFatalException(kj::mv(e));
       }).attach(kj::mv(deferredNeuter));
 
@@ -321,7 +277,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     }, [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
       // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
       //   so `deferredNeuter` hasn't been destroyed yet.
-      body->neuter(NeuterableInputStream::THREW_EXCEPTION);
+      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
       kj::throwFatalException(kj::mv(e));
     });
   } else {

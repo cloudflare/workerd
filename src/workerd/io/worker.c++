@@ -8,6 +8,7 @@
 #include "actor-cache.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/xthreadnotifier.h>
 #include <workerd/api/actor-state.h>
@@ -3368,20 +3369,6 @@ double getWallTimeForProcessSandboxOnly() {
   auto timePoint = kj::systemPreciseCalendarClock().now();
   return (timePoint - kj::UNIX_EPOCH) / kj::MILLISECONDS / 1e3;
 }
-
-class NullOutputStream final: public kj::AsyncOutputStream {
-public:
-  kj::Promise<void> write(const void* buffer, size_t size) override {
-    return kj::READY_NOW;
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return kj::READY_NOW;
-  }
-  kj::Promise<void> whenWriteDisconnected() override {
-    return kj::NEVER_DONE;
-  }
-};
-
 }  // namespace
 
 class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream {
@@ -3679,7 +3666,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(
       // TODO(someday): Support sending WebSocket frames over CDP. For now we fake an empty
       //   response.
       signalResponse(kj::mv(requestId), 101, "Switching Protocols", headers,
-                     kj::heap<NullOutputStream>());
+                     newNullOutputStream());
       return kj::mv(webSocket);
     }
 
