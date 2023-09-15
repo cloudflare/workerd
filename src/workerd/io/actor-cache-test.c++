@@ -1038,10 +1038,8 @@ KJ_TEST("ActorCache get-put ordering") {
   auto mockGet2 = mockStorage->expectCall("getMultiple", ws)
       .withParams(CAPNP(keys = ["baz"]), "stream"_kj);
 
-  // The flush transaction's capability will be created but no writes will be done on it until our
-  // reads finish!
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // No writes will be done until our reads finish!
+  mockStorage->expectNoActivity(ws);
 
   // Let's have the second read complete first.
   kj::mv(mockGet2).useCallback("stream", [&](MockClient stream) {
@@ -1059,8 +1057,8 @@ KJ_TEST("ActorCache get-put ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("bar"))) == "456");
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
 
-  // The transaction still isn't doing anything because the first read is still outstanding.
-  mockTxn->expectNoActivity(ws);
+  // Still no writes because the first read is still outstanding.
+  mockStorage->expectNoActivity(ws);
 
   // Finally, have the first read complete.
   kj::mv(mockGet1).useCallback("stream", [&](MockClient stream) {
@@ -1080,6 +1078,7 @@ KJ_TEST("ActorCache get-put ordering") {
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectCached(test.get("baz"))) == "987");
 
   // Next up, the flush transaction proceeds.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["bar"]))
       .thenReturn(CAPNP(numDeleted = 1));
@@ -1374,9 +1373,8 @@ KJ_TEST("ActorCache read retry") {
   auto mockGet = mockStorage->expectCall("get", ws)
       .withParams(CAPNP(key = "foo"));
 
-  // No activity on the transaction yet, because reads are outstanding.
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // No activity because reads are outstanding.
+  mockStorage->expectNoActivity(ws);
 
   // Fail out the read with a disconnect.
   kj::mv(mockGet).thenThrow(KJ_EXCEPTION(DISCONNECTED, "read failed"));
@@ -1385,13 +1383,14 @@ KJ_TEST("ActorCache read retry") {
   auto mockGet2 = mockStorage->expectCall("get", ws)
       .withParams(CAPNP(key = "foo"));
 
-  // Still no transaction activity.
-  mockTxn->expectNoActivity(ws);
+  // Still no activity because of the read.
+  mockStorage->expectNoActivity(ws);
 
   // Finish it.
   kj::mv(mockGet2).thenReturn(CAPNP(value = "123"));
 
   // Now the transaction starts actually writing (and completes).
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["baz"]))
       .thenReturn(CAPNP(numDeleted = 0));
@@ -1457,9 +1456,8 @@ KJ_TEST("ActorCache read hard fail") {
   auto mockGet = mockStorage->expectCall("get", ws)
       .withParams(CAPNP(key = "foo"));
 
-  // The transaction won't write anything until the read completes.
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
 
   // Fail out the read with non-disconnect.
   kj::mv(mockGet).thenThrow(KJ_EXCEPTION(FAILED, "read failed"));
@@ -1468,6 +1466,7 @@ KJ_TEST("ActorCache read hard fail") {
   KJ_EXPECT_THROW_MESSAGE("read failed", promise.wait(ws));
 
   // The read is NOT retried, so expect the transaction to run now.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["baz"]))
       .thenReturn(CAPNP(numDeleted = 0));
@@ -1494,15 +1493,15 @@ KJ_TEST("ActorCache read cancel") {
   auto mockGet = mockStorage->expectCall("get", ws)
       .withParams(CAPNP(key = "foo"));
 
-  // The transaction won't write anything until the read completes.
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // We won't write anything until the read completes.
+  mockStorage->expectNoActivity(ws);
 
   // Cancel the read.
   promise = nullptr;
   mockGet.expectCanceled();
 
-  // The tansaction proceeds.
+  // The transaction proceeds.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["baz"]))
       .thenReturn(CAPNP(numDeleted = 0));
@@ -1934,9 +1933,8 @@ KJ_TEST("ActorCache list() with seemingly-redundant dirty entries") {
   auto listCall = mockStorage->expectCall("list", ws)
       .withParams(CAPNP(start = "aaa", end = "fff"), "stream"_kj);
 
-  // The delete transaction won't do any work until the list completes.
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // The delete won't do any work until the list completes.
+  mockStorage->expectNoActivity(ws);
 
   // Now write some contradictory values.
   test.put("bbb", "bval");
@@ -1958,6 +1956,7 @@ KJ_TEST("ActorCache list() with seemingly-redundant dirty entries") {
 
   // Now the transaction runs, notably containing only the original writes, not the later writes,
   // despite our flush being delayed by the reads.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["bbb"]))
       .thenReturn(CAPNP(numDeleted = 1));
@@ -2936,9 +2935,8 @@ KJ_TEST("ActorCache listReverse() with seemingly-redundant dirty entries") {
   auto listCall = mockStorage->expectCall("list", ws)
       .withParams(CAPNP(start = "aaa", end = "fff", reverse = true), "stream"_kj);
 
-  // The transaction will be created but not do any work because the list is outstanding.
-  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
-  mockTxn->expectNoActivity(ws);
+  // We won't do any work while the list is outstanding.
+  mockStorage->expectNoActivity(ws);
 
   // Now write some contradictory values.
   test.put("bbb", "bval");
@@ -2959,6 +2957,7 @@ KJ_TEST("ActorCache listReverse() with seemingly-redundant dirty entries") {
   KJ_ASSERT(expectCached(test.get("ccc")) == nullptr);
 
   // The transaction completes now.
+  auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
   mockTxn->expectCall("delete", ws)
       .withParams(CAPNP(keys = ["bbb"]))
       .thenReturn(CAPNP(numDeleted = 1));
