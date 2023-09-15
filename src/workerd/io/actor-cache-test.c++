@@ -750,7 +750,7 @@ KJ_TEST("ActorCache deleteAll()") {
   {
     auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
     mockTxn->expectCall("delete", ws)
-        .withParams(CAPNP(keys = ["bar", "baz", "grault"]))
+        .withParams(CAPNP(keys = ["bar", "grault", "baz"]))
         .thenReturn(CAPNP(numDeleted = 2));
     mockTxn->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["garply"]))
@@ -862,7 +862,7 @@ KJ_TEST("ActorCache deleteAll() again when previous one isn't done yet") {
   {
     auto mockTxn = mockStorage->expectCall("txn", ws).returnMock("transaction");
     mockTxn->expectCall("delete", ws)
-        .withParams(CAPNP(keys = ["bar", "baz", "grault"]))
+        .withParams(CAPNP(keys = ["bar", "grault", "baz"]))
         .thenReturn(CAPNP(numDeleted = 2));
     mockTxn->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["garply"]))
