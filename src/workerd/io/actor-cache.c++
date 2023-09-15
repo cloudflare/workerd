@@ -53,14 +53,7 @@ ActorCache::~ActorCache() noexcept(false) {
 
 void ActorCache::clear(Lock& lock) {
   for (auto& entry: currentValues.get(lock)) {
-    if (entry->link.isLinked()) {
-      if (entry->isDirty()) {
-        dirtyList.remove(*entry);
-        entry->setNotInCache();
-      } else {
-        removeEntry(lock, *entry);
-      }
-    }
+    removeEntry(lock, *entry);
   }
   currentValues.get(lock).clear();
 }
@@ -101,8 +94,25 @@ ActorCache::Entry::~Entry() noexcept(false) {
       c.lru.size.store(0, std::memory_order_relaxed);
     }
 
-    KJ_REQUIRE(!link.isLinked(),
-        "must remove Entry from lists before destroying", static_cast<int>(getSyncStatus()));
+    if (link.isLinked()) {
+      switch(getSyncStatus()) {
+        case EntrySyncStatus::CLEAN: {
+          KJ_LOG(WARNING, "Entry destructed while still in the clean list");
+          break;
+        }
+        case EntrySyncStatus::DIRTY: {
+          // Ah, we don't need a lock so we can just unlink ourselves. This is safe because we will
+          // only destruct a DIRTY entry on the actor's event loop. (We can destruct a CLEAN entry
+          // as part of evicting entries from the shared lru on a different event loop.)
+          c.dirtyList.remove(*this);
+          break;
+        }
+        case EntrySyncStatus::NOT_IN_CACHE: {
+          KJ_LOG(WARNING, "Entry with sync status NOT_IN_CACHE still in a list");
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -278,7 +288,7 @@ bool ActorCache::SharedLru::evictIfNeeded(Lock& lock) const {
 }
 
 void ActorCache::touchEntry(Lock& lock, Entry& entry) {
-  if (!entry.isDirty()) {
+  if (entry.getSyncStatus() == EntrySyncStatus::CLEAN) {
     entry.isStale = false;
     lock->remove(entry);
     addToCleanList(lock, entry);
@@ -293,8 +303,21 @@ void ActorCache::touchEntry(Lock& lock, Entry& entry) {
 }
 
 void ActorCache::removeEntry(Lock& lock, Entry& entry) {
-  KJ_IASSERT(!entry.isDirty());
-  lock->remove(entry);
+  switch (entry.getSyncStatus()) {
+    case EntrySyncStatus::DIRTY: {
+      dirtyList.remove(entry);
+      break;
+    }
+    case EntrySyncStatus::CLEAN: {
+      lock->remove(entry);
+      break;
+    }
+    case EntrySyncStatus::NOT_IN_CACHE: {
+      // Nothing to do!
+      break;
+    }
+  }
+
   entry.setNotInCache();
 }
 
@@ -1521,7 +1544,7 @@ kj::Own<ActorCache::Entry> ActorCache::addReadResultToCache(
         //   process of building a transaction that wrote some other value to this specific key, but
         //   hasn't been committed yet, probably because it is waiting for this read operation to
         //   complete. Meanwhile, another put() or delete() could have just been performed
-        //   momentarily ago that changed the FLUSHING entry back to DIRTY and changed its value to
+        //   momentarily ago that changed the flushing entry back to DIRTY and changed its value to
         //   one that coincidentally matches what we pulled off disk. However, the open transaction
         //   is still going to be committed, writing the intermediate value, so we still need to plan
         //   to write this value again in the next transaction.
@@ -1959,17 +1982,15 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
     auto& map = currentValues.get(lock);
 
     kj::Vector<kj::Own<Entry>> deletedDirty;
+    for (auto& entry: dirtyList) {
+      // We will be removing all entries from their respective lists soon, so let's preserve the
+      // dirty list so we can run it before our delete all.
+      deletedDirty.add(kj::atomicAddRef(entry));
+    };
+
+    // Clear out the entire map.
     for (auto& entry: map) {
-      if (entry->isDirty()) {
-        // Note that we intentionally keep entry->state as-is because if an entry is currently
-        // flushing, we'll need the opportunity to remove it from `requestedDeleteAll` when that
-        // flush completes... it turns out it's not _really_ necessary to set an entry to
-        // NOT_IN_CACHE state when it's not in the cache.
-        dirtyList.remove(*entry);
-        deletedDirty.add(kj::mv(entry));
-      } else {
-        removeEntry(lock, *entry);
-      }
+      removeEntry(lock, *entry);
     }
     map.clear();
 
@@ -2060,13 +2081,12 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
       }
     }
 
+    KJ_DASSERT(slot->key == newEntry->key);
+
     // Inherit gap state.
     newEntry->gapIsKnownEmpty = slot->gapIsKnownEmpty;
 
     if (slot->isDirty()) {
-      dirtyList.remove(*slot);
-      slot->setNotInCache();
-
       // Entry may have `countedDelete` indicating we're still waiting to get a count from a
       // previous delete operation. If so, we'll need to inherit it in case that delete operation
       // fails and we end up retrying. Note that the new entry could be a positive entry rather
@@ -2074,12 +2094,11 @@ void ActorCache::putImpl(Lock& lock, kj::Own<Entry> newEntry,
       // we will still see the presence of `countedDelete` and realize we have to issue a delete
       // on the key before we issue a put, just for the sake of counting it.
       newEntry->countedDelete = kj::mv(slot->countedDelete);
-    } else {
-      removeEntry(lock, *slot);
     }
 
     // Swap in the new entry.
-    KJ_DASSERT(slot->key == newEntry->key);
+    removeEntry(lock, *slot);
+
     slot = kj::mv(newEntry);
     addToDirtyList(*slot);
   } else {
@@ -2318,7 +2337,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
   auto countEntry = [&](Entry& entry) {
     // Counts up the number of operations and RPC message sizes we'll need to cover this entry.
 
-    entry.setFlushing();
+    entry.flushStarted = true;
 
     auto keySizeInWords = bytesToWordsRoundUp(entry.key.size());
 
@@ -2486,27 +2505,27 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
 
     KJ_IF_SOME(r, requestedDeleteAll) {
       // It would appear that all dirty entries were moved into `requestedDeleteAll` during the
-      // time that we were waiting for the flushImpl(). We want to remove the `FLUSHING` entries
+      // time that we were waiting for the flushImpl(). We want to remove the flushing entries
       // from that vector now.
       // TODO(cleanup): kj::Vector<T>::filter() would be nice to have here.
       auto dst = r.deletedDirty.begin();
       for (auto src = r.deletedDirty.begin(); src != r.deletedDirty.end(); ++src) {
-        if (src->get()->getSyncStatus() == EntrySyncStatus::DIRTY) {
+        if (!src->get()->flushStarted) {
           if (dst != src) *dst = kj::mv(*src);
           ++dst;
         }
       }
       r.deletedDirty.resize(dst - r.deletedDirty.begin());
     } else {
-      // Mark all `FLUSHING` entries as `CLEAN`. Note that we know that all `FLUSHING` must
+      // Mark all flushing entries as `CLEAN`. Note that we know that all flushing entries must
       // form a prefix of `dirtyList` since any new entries would have been added to the end.
       for (auto& entry: dirtyList) {
-        if (entry.getSyncStatus() == EntrySyncStatus::DIRTY) {
-          // Completed all FLUSHING entries.
+        if (!entry.flushStarted) {
+          // Completed all flushing entries.
           break;
         }
 
-        KJ_ASSERT(entry.getSyncStatus() == EntrySyncStatus::FLUSHING);
+        KJ_ASSERT(entry.flushStarted);
 
         // We know all `countedDelete` operations were satisfied so we can remove this if it's
         // present. Note that if, during the flush, the entry was overwritten, then the new entry
