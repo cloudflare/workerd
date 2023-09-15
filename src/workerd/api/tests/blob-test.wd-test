@@ -8,6 +8,10 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "blob-test.js")
         ],
         compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "request-blob", service = "blob-test")
+        ]
       )
     ),
   ],
