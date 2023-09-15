@@ -683,19 +683,20 @@ private:
     size_t wordCount = 0;
   };
   struct PutFlush {
-    kj::Vector<Entry*> entries;
+    kj::Vector<kj::Own<Entry>> entries;
     kj::Vector<FlushBatch> batches;
   };
   struct MutedDeleteFlush {
-    kj::Vector<Entry*> entries;
+    kj::Vector<kj::Own<Entry>> entries;
     kj::Vector<FlushBatch> batches;
   };
   struct CountedDeleteFlush {
     kj::Own<CountedDelete> countedDelete;
-    kj::Vector<Entry*> entries;
+    kj::Vector<kj::Own<Entry>> entries;
     kj::Vector<FlushBatch> batches;
   };
   using CountedDeleteFlushes = kj::Array<CountedDeleteFlush>;
+  kj::Promise<void> startFlushTransaction();
   kj::Promise<void> flushImplUsingSinglePut(PutFlush putFlush);
   kj::Promise<void> flushImplUsingSingleMutedDelete(MutedDeleteFlush mutedFlush);
   kj::Promise<void> flushImplUsingSingleCountedDelete(CountedDeleteFlush countedFlush);
