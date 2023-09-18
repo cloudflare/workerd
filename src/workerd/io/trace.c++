@@ -174,11 +174,11 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
-  KJ_IF_MAYBE(s, scriptName) {
-    builder.setScriptName(*s);
+  KJ_IF_SOME(s, scriptName) {
+    builder.setScriptName(s);
   }
-  KJ_IF_MAYBE(s, dispatchNamespace) {
-    builder.setDispatchNamespace(*s);
+  KJ_IF_SOME(s, dispatchNamespace) {
+    builder.setDispatchNamespace(s);
   }
 
   {
@@ -190,8 +190,8 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   builder.setEventTimestampNs((eventTimestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
 
   auto eventInfoBuilder = builder.initEventInfo();
-  KJ_IF_MAYBE(e, eventInfo) {
-    KJ_SWITCH_ONEOF(*e) {
+  KJ_IF_SOME(e, eventInfo) {
+    KJ_SWITCH_ONEOF(e) {
       KJ_CASE_ONEOF(fetch, FetchEventInfo) {
         auto fetchBuilder = eventInfoBuilder.initFetch();
         fetch.copyTo(fetchBuilder);
@@ -220,9 +220,9 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
     eventInfoBuilder.setNone();
   }
 
-  KJ_IF_MAYBE(fetchResponseInfo, this->fetchResponseInfo) {
+  KJ_IF_SOME(fetchResponseInfo, this->fetchResponseInfo) {
     auto fetchResponseInfoBuilder = builder.initResponse();
-    fetchResponseInfo->copyTo(fetchResponseInfoBuilder);
+    fetchResponseInfo.copyTo(fetchResponseInfoBuilder);
   }
 }
 
@@ -270,7 +270,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
 
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
-    eventInfo = nullptr;
+    eventInfo = kj::none;
   } else {
     auto e = reader.getEventInfo();
     switch (e.which()) {
@@ -293,7 +293,7 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         eventInfo = CustomEventInfo(e.getCustom());
         break;
       case rpc::Trace::EventInfo::Which::NONE:
-        eventInfo = nullptr;
+        eventInfo = kj::none;
         break;
     }
   }
@@ -324,25 +324,25 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 }
 
 void SpanBuilder::end() {
-  KJ_IF_MAYBE(o, observer) {
-    KJ_IF_MAYBE(s, span) {
-      s->endTime = kj::systemPreciseCalendarClock().now();
-      (**o).report(*s);
-      span = nullptr;
+  KJ_IF_SOME(o, observer) {
+    KJ_IF_SOME(s, span) {
+      s.endTime = kj::systemPreciseCalendarClock().now();
+      o->report(s);
+      span = kj::none;
     }
   }
 }
 
 void SpanBuilder::setOperationName(kj::ConstString operationName) {
-  KJ_IF_MAYBE(s, span) {
-    s->operationName = kj::mv(operationName);
+  KJ_IF_SOME(s, span) {
+    s.operationName = kj::mv(operationName);
   }
 }
 
 void SpanBuilder::setTag(kj::ConstString key, TagValue value) {
-  KJ_IF_MAYBE(s, span) {
+  KJ_IF_SOME(s, span) {
     auto keyPtr = key.asPtr();
-    s->tags.upsert(kj::mv(key), kj::mv(value), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
+    s.tags.upsert(kj::mv(key), kj::mv(value), [keyPtr](TagValue& existingValue, TagValue&& newValue) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
       [[maybe_unused]] static auto logged = [keyPtr]() {
@@ -355,11 +355,11 @@ void SpanBuilder::setTag(kj::ConstString key, TagValue value) {
 }
 
 void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value) {
-  KJ_IF_MAYBE(s, span) {
-    if (s->logs.size() >= Span::MAX_LOGS) {
-      ++s->droppedLogs;
+  KJ_IF_SOME(s, span) {
+    if (s.logs.size() >= Span::MAX_LOGS) {
+      ++s.droppedLogs;
     } else {
-      s->logs.add(Span::Log {
+      s.logs.add(Span::Log {
         .timestamp = timestamp,
         .tag = {
           .key = kj::mv(key),
@@ -371,18 +371,18 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 }
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_MAYBE(p, parentTracer) {
+  KJ_IF_SOME(p, parentTracer) {
     for (auto& t: traces) {
-      (*p)->traces.add(kj::addRef(*t));
+      p->traces.add(kj::addRef(*t));
     }
   }
-  KJ_IF_MAYBE(f, completeFulfiller) {
-    f->get()->fulfill(traces.releaseAsArray());
+  KJ_IF_SOME(f, completeFulfiller) {
+    f.get()->fulfill(traces.releaseAsArray());
   }
 }
 
 kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
-  KJ_REQUIRE(completeFulfiller == nullptr, "onComplete() can only be called once");
+  KJ_REQUIRE(completeFulfiller == kj::none, "onComplete() can only be called once");
 
   auto paf = kj::newPromiseAndFulfiller<kj::Array<kj::Own<Trace>>>();
   completeFulfiller = kj::mv(paf.fulfiller);
@@ -469,7 +469,7 @@ void WorkerTracer::addDiagnosticChannelEvent(kj::Date timestamp,
 }
 
 void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
-  KJ_ASSERT(trace->eventInfo == nullptr, "tracer can only be used for a single event");
+  KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for event info vs.
@@ -522,14 +522,14 @@ void WorkerTracer::setWallTime(kj::Duration wallTime) {
 
 void WorkerTracer::setFetchResponseInfo(Trace::FetchResponseInfo&& info) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
-  // in setEventInfo() that are related to this check whill probably also affect
+  // in setEventInfo() that are related to this check while probably also affect
   // this function.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<Trace::FetchEventInfo>());
-  KJ_ASSERT(trace->fetchResponseInfo == nullptr,
+  KJ_ASSERT(trace->fetchResponseInfo == kj::none,
             "setFetchResponseInfo can only be called once");
   trace->fetchResponseInfo = kj::mv(info);
 }
