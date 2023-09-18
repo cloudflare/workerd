@@ -159,10 +159,10 @@ public:
   // Closes the queue. The close is forwarded on to all consumers.
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the close callback, invalidating the iterator.
-      auto consumers = ready->consumers;
+      auto consumers = ready.consumers;
       for (auto consumer : consumers) {
         consumer->close(js);
       }
@@ -183,10 +183,10 @@ public:
   // all pending consume promises.
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::Value reason) {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the error callback, invalidating the iterator.
-      auto consumers = ready->consumers;
+      auto consumers = ready.consumers;
       for (auto consumer : consumers) {
         consumer->error(js, reason.addRef(js));
       }
@@ -199,8 +199,8 @@ public:
   // If we are already closed or errored, set totalQueueSize to zero.
   void maybeUpdateBackpressure() {
     totalQueueSize = 0;
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      for (auto consumer : ready->consumers) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+      for (auto consumer : ready.consumers) {
         totalQueueSize = kj::max(totalQueueSize, consumer->size());
       }
     }
@@ -218,8 +218,8 @@ public:
         "The queue is closed or errored.");
 
     for (auto consumer : ready.consumers) {
-      KJ_IF_MAYBE(skip, skipConsumer) {
-        if (&(*skip) == consumer) {
+      KJ_IF_SOME(skip, skipConsumer) {
+        if (&skip == consumer) {
           continue;
         }
       }
@@ -257,10 +257,10 @@ public:
   // Specific queue implementations may provide additional state that is attached
   // to the Ready struct.
   kj::Maybe<State&> getState() KJ_LIFETIMEBOUND {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      return *ready;
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+      return ready;
     }
-    return nullptr;
+    return kj::none;
   }
 
 private:
@@ -276,14 +276,14 @@ private:
   kj::OneOf<Ready, Closed, Errored> state = Ready();
 
   void addConsumer(ConsumerImpl* consumer) {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.insert(consumer);
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+      ready.consumers.insert(consumer);
     }
   }
 
   void removeConsumer(ConsumerImpl* consumer) {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
-      ready->consumers.erase(consumer);
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
+      ready.consumers.erase(consumer);
       maybeUpdateBackpressure();
     }
   }
@@ -320,7 +320,7 @@ public:
   using Entry = typename Self::Entry;
   using QueueEntry = typename Self::QueueEntry;
 
-  ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr)
+  ConsumerImpl(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none)
     : queue(queue), stateListener(stateListener) {
     queue.addConsumer(this);
   }
@@ -349,10 +349,10 @@ public:
 
   void close(jsg::Lock& js) {
   // If we are already closed or errored, then we do nothing here.
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
-        ready->buffer.push_back(Close {});
+        ready.buffer.push_back(Close {});
       }
 
       // Then check to see if we need to drain pending reads and
@@ -366,7 +366,7 @@ public:
   void error(jsg::Lock& js, jsg::Value reason) {
     // If we are already closed or errored, then we do nothing here.
     // The new error doesn't matter.
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    if (state.template tryGet<Ready>() != kj::none) {
       maybeDrainAndSetState(js, kj::mv(reason));
     }
   }
@@ -402,10 +402,10 @@ public:
   }
 
   void reset() {
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       UpdateBackpressureScope scope(queue);
-      ready->buffer.clear();
-      ready->queueTotalSize = 0;
+      ready.buffer.clear();
+      ready.queueTotalSize = 0;
     }
   }
 
@@ -524,20 +524,20 @@ private:
     KJ_UNREACHABLE;
   }
 
-  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = nullptr) {
+  void maybeDrainAndSetState(jsg::Lock& js, kj::Maybe<jsg::Value> maybeReason = kj::none) {
     // If the state is already errored or closed then there is nothing to drain.
-    KJ_IF_MAYBE(ready, state.template tryGet<Ready>()) {
+    KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       UpdateBackpressureScope scope(queue);
-      KJ_IF_MAYBE(reason, maybeReason) {
+      KJ_IF_SOME(reason, maybeReason) {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
         // pending read requests using the given reason.
-        for (auto& request : ready->readRequests) {
-          request.reject(js, *reason);
+        for (auto& request : ready.readRequests) {
+          request.reject(js, reason);
         }
-        state = reason->addRef(js);
-        KJ_IF_MAYBE(listener, stateListener) {
-          listener->onConsumerError(js, kj::mv(*reason));
+        state = reason.addRef(js);
+        KJ_IF_SOME(listener, stateListener) {
+          listener.onConsumerError(js, kj::mv(reason));
           // After this point, we should not assume that this consumer can
           // be safely used at all. It's most likely the stateListener has
           // released it.
@@ -545,7 +545,7 @@ private:
       } else {
         // Otherwise, if isClosing() is true...
         if (isClosing()) {
-          if (!empty() && !Self::handleMaybeClose(js, *ready, *this, queue)) {
+          if (!empty() && !Self::handleMaybeClose(js, ready, *this, queue)) {
             // If the queue is not empty, we'll have the implementation see
             // if it can drain the remaining data into pending reads. If handleMaybeClose
             // returns false, then it could not and we can't yet close. If it returns true,
@@ -555,13 +555,13 @@ private:
           }
 
           KJ_ASSERT(empty());
-          KJ_REQUIRE(ready->buffer.size() == 1); // The close should be the only item remaining.
-          for (auto& request : ready->readRequests) {
+          KJ_REQUIRE(ready.buffer.size() == 1); // The close should be the only item remaining.
+          for (auto& request : ready.readRequests) {
             request.resolveAsDone(js);
           }
           state.template init<Closed>();
-          KJ_IF_MAYBE(listener, stateListener) {
-            listener->onConsumerClose(js);
+          KJ_IF_SOME(listener, stateListener) {
+            listener.onConsumerClose(js);
             // After this point, we should not assume that this consumer can
             // be safely used at all. It's most likely the stateListener has
             // released it.
@@ -620,8 +620,8 @@ public:
 
   class Consumer final {
   public:
-    Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
+    Consumer(ValueQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -644,7 +644,7 @@ public:
     size_t size();
 
     kj::Own<Consumer> clone(jsg::Lock& js,
-                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
+                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
 
     bool hasReadRequests();
 
@@ -766,7 +766,7 @@ public:
     // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
     void invalidate();
 
-    inline bool isInvalidated() const { return request == nullptr; }
+    inline bool isInvalidated() const { return request == kj::none; }
 
     bool isPartiallyFulfilled();
 
@@ -811,8 +811,8 @@ public:
 
   class Consumer {
   public:
-    Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
+    Consumer(ByteQueue& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
+    Consumer(QueueImpl& queue, kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     Consumer(Consumer&&) = delete;
     Consumer(Consumer&) = delete;
     Consumer& operator=(Consumer&&) = delete;
@@ -835,8 +835,7 @@ public:
     size_t size() const;
 
     kj::Own<Consumer> clone(jsg::Lock& js,
-                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = nullptr);
-
+                            kj::Maybe<ConsumerImpl::StateListener&> stateListener = kj::none);
     bool hasReadRequests();
 
     void visitForGc(jsg::GcVisitor& visitor);
