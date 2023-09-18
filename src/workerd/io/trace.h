@@ -46,7 +46,7 @@ enum class PipelineLogLevel {
 
 // TODO(cleanup) - worth separating into immutable Trace vs. mutable TraceBuilder?
 
-// Collects trace information about the handling of a worker/pipline fetch event.
+// Collects trace information about the handling of a worker/pipeline fetch event.
 class Trace final : public kj::Refcounted {
 public:
   explicit Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags);
@@ -252,7 +252,7 @@ class WorkerTracer;
 class PipelineTracer final : public kj::Refcounted {
 public:
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = nullptr)
+  explicit PipelineTracer(kj::Maybe<kj::Own<PipelineTracer>> parentPipeline = kj::none)
       : parentTracer(kj::mv(parentPipeline)) {}
 
   ~PipelineTracer() noexcept(false);
@@ -355,7 +355,7 @@ inline kj::String truncateScriptId(kj::StringPtr id) {
 //   However, we might potentially want to give trace workers some access to span tracing as well.
 //   But, that hasn't been designed yet, and it's not clear if that would be based on the same
 //   concept of spans or completely separate. In the latter case, these classes should probably
-//   move to a diffeent header.
+//   move to a different header.
 
 class SpanBuilder;
 class SpanObserver;
@@ -420,7 +420,7 @@ public:
       kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Useful to skip unnecessary code when not observed.
-  bool isObserved() { return observer != nullptr; }
+  bool isObserved() { return observer != kj::none; }
 
   // Get the underlying SpanObserver representing the parent span.
   //
@@ -452,7 +452,7 @@ public:
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName,
                        kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
-    if (observer != nullptr) {
+    if (observer != kj::none) {
       this->observer = kj::mv(observer);
       span.emplace(kj::mv(operationName), startTime);
     }
@@ -473,7 +473,7 @@ public:
   void end();
 
   // Useful to skip unnecessary code when not observed.
-  bool isObserved() { return observer != nullptr; }
+  bool isObserved() { return observer != kj::none; }
 
   // Get the underlying SpanObserver representing the span.
   //
@@ -515,7 +515,7 @@ private:
 
 // Abstract interface for observing trace spans reported by the runtime. Different
 // implementations might support different tracing back-ends, e.g. Trace Workers, Jaeger, or
-// whatever infrastrure you prefer to use for this.
+// whatever infrastructure you prefer to use for this.
 //
 // A new SpanObserver is created at the start of each Span. The observer is used to report the
 // span data at the end of the span, as well as to construct child observers.
