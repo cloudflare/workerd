@@ -458,22 +458,41 @@ private:
       Lock& js, FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
-    return js.withinHandleScope([&] {
-      auto context = js.v8Context();
+    using Type = RemovePromise<Result>;
+    v8::TryCatch tryCatch(js.v8Isolate);
+    try {
+      return js.withinHandleScope([&] {
+        auto context = js.v8Context();
 
-      auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
+        auto funcPairHandle = wrapOpaque(context, kj::mv(funcPair));
 
-      auto then = check(v8::Function::New(
-          context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
+        auto then = check(v8::Function::New(
+            context, thenCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-      auto errThen = check(v8::Function::New(
-          context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
+        auto errThen = check(v8::Function::New(
+            context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-      using Type = RemovePromise<Result>;
+        return Promise<Type>(js.v8Isolate,
+            check(consumeHandle(js)->Then(context, then, errThen)));
+      });
+    } catch (JsExceptionThrown&) {
+      // The calls to check in this function can fail in certain circumstances.
+      // These are almost certainly fatal conditions for the isolate.
+      if (tryCatch.HasCaught() && tryCatch.CanContinue() && !tryCatch.Exception().IsEmpty()) {
+        // In the odd case where the tryCatch indicates we can continue (which)
+        // really shouldn't happen here, we'll just go ahead and convert the
+        // exception into a rejected promise. In case it does happen, let's
+        // log this so we know.
+        LOG_ERROR_PERIODICALLY("jsg::Promise::then failed synchronously with non-fatal error",
+                               tryCatch.Exception());
+        return js.rejectedPromise<Type>(tryCatch.Exception());
+      }
 
-      return Promise<Type>(js.v8Isolate,
-          check(consumeHandle(js)->Then(context, then, errThen)));
-    });
+      // Otherwise, we treat this case as fatal, but throw an appropriate kj
+      // exception rather than propagating the JsExceptionThrown.
+      kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
+          "Failed to attach continuation function to JavaScript promise."));
+    }
   }
 
   friend class Lock;

@@ -91,6 +91,22 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
     }
   }
 
+  void errorThen(jsg::Lock& js, jsg::Promise<void> promise) {
+    // Simulate a fatal termination of the isolate so that the call to then
+    // fails.
+    js.v8Isolate->TerminateExecution();
+    KJ_ON_SCOPE_SUCCESS({
+      js.v8Isolate->CancelTerminateExecution();
+    });
+    try {
+      promise.then(js, [](jsg::Lock& js) {});
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "Should have failed"));
+    } catch (kj::Exception& ex) {
+      KJ_ASSERT(ex.getDescription() ==
+                "jsg.Error: Failed to attach continuation function to JavaScript promise.");
+    }
+  }
+
   JSG_RESOURCE_TYPE(PromiseContext) {
     JSG_READONLY_PROTOTYPE_PROPERTY(promise, makePromise);
     JSG_METHOD(resolvePromise);
@@ -102,6 +118,8 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
 
     JSG_METHOD(testConsumeResolved);
     JSG_METHOD(whenResolved);
+
+    JSG_METHOD(errorThen);
   }
 
   kj::Maybe<Promise<int>::Resolver> resolver;
@@ -170,6 +188,14 @@ KJ_TEST("whenResolved") {
   Evaluator<PromiseContext, PromiseIsolate> e(v8System);
 
   e.expectEval("whenResolved(Promise.resolve(1))", "undefined", "undefined");
+}
+
+KJ_TEST("then exception") {
+  Evaluator<PromiseContext, PromiseIsolate> e(v8System);
+
+try {
+  e.expectEval("errorThen(Promise.resolve(1))", "undefined", "undefined");
+} catch (kj::Exception& ex) {}
 }
 
 }  // namespace
