@@ -74,7 +74,7 @@ kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& 
   } catch (...) {
     maybeException = kj::getCaughtExceptionAsKj();
   }
-  handleSocketTermination(refToHibernatable, maybeException);
+  co_await handleSocketTermination(refToHibernatable, maybeException);
 }
 
 kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(

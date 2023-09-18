@@ -165,7 +165,8 @@ private:
   // dispatch a close event (if we haven't already), or an error event.
   // We will also remove the HibernatableWebSocket from the HibernationManager's collections.
   kj::Promise<void> handleSocketTermination(
-      HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError);
+      HibernatableWebSocket& hib, kj::Maybe<kj::Exception>& maybeError)
+      KJ_WARN_UNUSED_RESULT;
 
   // Like the api::WebSocket readLoop(), but we dispatch different types of events.
   kj::Promise<void> readLoop(HibernatableWebSocket& hib);
