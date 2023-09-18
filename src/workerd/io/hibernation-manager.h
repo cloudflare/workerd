@@ -50,8 +50,6 @@ public:
 private:
   class HibernatableWebSocket;
 
-  kj::Promise<void> handleReadLoop(HibernatableWebSocket& refToHibernatable);
-
   // Each HibernatableWebSocket can have multiple tags, so we want to store a reference
   // in our kj::List.
   struct TagListItem {
