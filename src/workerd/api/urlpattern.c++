@@ -96,8 +96,8 @@ struct CompileOptions {
   kj::Maybe<uint32_t> delimiterCodePoint;
   kj::Maybe<uint32_t> prefixCodePoint;
 
-  CompileOptions(kj::Maybe<uint32_t> delimiterCodePoint = nullptr,
-                 kj::Maybe<uint32_t> prefixCodePoint = nullptr)
+  CompileOptions(kj::Maybe<uint32_t> delimiterCodePoint = kj::none,
+                 kj::Maybe<uint32_t> prefixCodePoint = kj::none)
       : delimiterCodePoint(kj::mv(delimiterCodePoint)),
         prefixCodePoint(kj::mv(prefixCodePoint)) {}
 
@@ -106,7 +106,7 @@ struct CompileOptions {
   static const CompileOptions PATHNAME;
 };
 
-const CompileOptions CompileOptions::DEFAULT(nullptr, nullptr);
+const CompileOptions CompileOptions::DEFAULT(kj::none, kj::none);
 const CompileOptions CompileOptions::HOSTNAME('.');
 const CompileOptions CompileOptions::PATHNAME('/', '/');
 
@@ -341,20 +341,20 @@ kj::Maybe<uint32_t> modifierToCodepoint(Part::Modifier modifier) {
     case Part::Modifier::ZERO_OR_MORE: return '*';
     case Part::Modifier::OPTIONAL: return '?';
     case Part::Modifier::ONE_OR_MORE: return '+';
-    case Part::Modifier::NONE: return nullptr;
+    case Part::Modifier::NONE: return kj::none;
   }
   KJ_UNREACHABLE;
 };
 
 Part::Modifier maybeTokenToModifier(kj::Maybe<Token&> modifierToken) {
-  KJ_IF_MAYBE(token, modifierToken) {
-    KJ_ASSERT(token->type == Token::Type::OTHER_MODIFIER ||
-              token->type == Token::Type::ASTERISK);
-    if (*token == '?') {
+  KJ_IF_SOME(token, modifierToken) {
+    KJ_ASSERT(token.type == Token::Type::OTHER_MODIFIER ||
+              token.type == Token::Type::ASTERISK);
+    if (token == '?') {
       return Part::Modifier::OPTIONAL;
-    } else if (*token == '*') {
+    } else if (token == '*') {
       return Part::Modifier::ZERO_OR_MORE;
-    } else if (*token == '+') {
+    } else if (token == '+') {
       return Part::Modifier::ONE_OR_MORE;
     }
     KJ_UNREACHABLE;
@@ -380,7 +380,7 @@ bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& c
   auto handle = component.regex.getHandle(js);
 
   return js.tryCatch([&] {
-#define V(name) if (handle(js, #name) != nullptr) return true;
+#define V(name) if (handle(js, #name) != kj::none) return true;
   SPECIAL_SCHEME(V)
 #undef V
     return false;
@@ -392,8 +392,8 @@ bool protocolComponentMatchesSpecialScheme(jsg::Lock& js, URLPatternComponent& c
 #undef SPECIAL_SCHEME
 
 bool isSpecialSchemeDefaultPort(jsg::UsvStringPtr protocol, jsg::UsvStringPtr port) {
-  KJ_IF_MAYBE(defaultPort, url::URL::defaultPortForScheme(protocol)) {
-    return port == jsg::usv(kj::toCharSequence(*defaultPort));
+  KJ_IF_SOME(defaultPort, url::URL::defaultPortForScheme(protocol)) {
+    return port == jsg::usv(kj::toCharSequence(defaultPort));
   }
   return false;
 }
@@ -422,7 +422,7 @@ jsg::UsvString canonicalizeProtocol(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   auto str = builder.finish();
 
   auto result = JSG_REQUIRE_NONNULL(
-      url::URL::parse(str, nullptr, dummyUrl),
+      url::URL::parse(str, kj::none, dummyUrl),
       TypeError,
       "Invalid protocol scheme.");
 
@@ -465,7 +465,7 @@ jsg::UsvString canonicalizeHostname(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   }
 
   auto result = JSG_REQUIRE_NONNULL(
-      url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::HOSTNAME),
+      url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::HOSTNAME),
       TypeError,
       "Invalid URL hostname component.");
 
@@ -490,8 +490,8 @@ jsg::UsvString canonicalizePort(
     kj::Maybe<jsg::UsvStringPtr> maybeProtocol) {
   if (input.size() == 0) return jsg::usv();
   url::UrlRecord dummyUrl;
-  KJ_IF_MAYBE(protocol, maybeProtocol) {
-    dummyUrl.scheme = jsg::usv(*protocol);
+  KJ_IF_SOME(protocol, maybeProtocol) {
+    dummyUrl.scheme = jsg::usv(protocol);
   }
 
   // This following scan is not explicitly in the spec, which doesn't seem
@@ -507,7 +507,7 @@ jsg::UsvString canonicalizePort(
   JSG_REQUIRE(input.size() < 6, TypeError, "Invalid URL port component.");
 
   auto result = JSG_REQUIRE_NONNULL(
-    url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::PORT),
+    url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::PORT),
     TypeError,
     "Invalid URL port component.");
 
@@ -519,8 +519,8 @@ jsg::UsvString canonicalizePort(
   // scheme. This doesn't seem to be accounted for in the specs! So we're
   // adding an additional couple of checks here to ensure that the web
   // platform tests pass!
-  KJ_IF_MAYBE(protocol, maybeProtocol) {
-    if (!isSpecialSchemeDefaultPort(*protocol, input)) {
+  KJ_IF_SOME(protocol, maybeProtocol) {
+    if (!isSpecialSchemeDefaultPort(protocol, input)) {
       // In this case, we require that the port return not null! If the input
       // did equal the default port, then we'd fully expect it to be null!
       auto port = JSG_REQUIRE_NONNULL(result.port, TypeError, "Invalid URL port.");
@@ -536,8 +536,8 @@ jsg::UsvString canonicalizePort(
 
   // Here, it's ok for the result.port to be null because it's likely the
   // default port for the protocol scheme specified.
-  KJ_IF_MAYBE(port, result.port) {
-    return jsg::usv(kj::toCharSequence(*port));
+  KJ_IF_SOME(port, result.port) {
+    return jsg::usv(kj::toCharSequence(port));
   }
   return jsg::usv();
 }
@@ -546,7 +546,7 @@ jsg::UsvString canonicalizePathname(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   if (input.size() == 0) return jsg::usv();
   url::UrlRecord dummyUrl;
   auto result = JSG_REQUIRE_NONNULL(
-    url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::PATH_START),
+    url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::PATH_START),
     TypeError,
     "Invalid URL pathname component.");
 
@@ -566,7 +566,7 @@ jsg::UsvString canonicalizeOpaquePathname(
   url::UrlRecord dummyUrl;
   dummyUrl.path = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
-      url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::OPAQUE_PATH),
+      url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::OPAQUE_PATH),
       TypeError,
       "Invalid URL opaque path component.");
   return result.getPathname();
@@ -577,11 +577,11 @@ jsg::UsvString canonicalizeSearch(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStr
   url::UrlRecord dummyUrl;
   dummyUrl.query = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
-    url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::QUERY),
+    url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::QUERY),
     TypeError,
     "Invalid URL search component.");
-  KJ_IF_MAYBE(query, result.query) {
-    return kj::mv(*query);
+  KJ_IF_SOME(query, result.query) {
+    return kj::mv(query);
   }
   return jsg::usv();
 }
@@ -591,11 +591,11 @@ jsg::UsvString canonicalizeHash(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStrin
   url::UrlRecord dummyUrl;
   dummyUrl.fragment = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
-    url::URL::parse(input, nullptr, dummyUrl, url::URL::ParseState::FRAGMENT),
+    url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::FRAGMENT),
     TypeError,
     "Invalid URL hash component.");
-  KJ_IF_MAYBE(fragment, result.fragment) {
-    return kj::mv(*fragment);
+  KJ_IF_SOME(fragment, result.fragment) {
+    return kj::mv(fragment);
   }
   return jsg::usv();
 }
@@ -633,8 +633,8 @@ jsg::UsvString escapePatternString(jsg::UsvStringPtr str) {
 jsg::UsvString generateSegmentWildcardRegexp(const CompileOptions& options) {
   jsg::UsvStringBuilder result(6);
   result.add('[', '^');
-  KJ_IF_MAYBE(codepoint, options.delimiterCodePoint) {
-    result.add('\\', *codepoint);
+  KJ_IF_SOME(codepoint, options.delimiterCodePoint) {
+    result.add('\\', codepoint);
   }
   result.add(']', '+');
   return result.finish();
@@ -835,22 +835,22 @@ kj::Array<Part> parsePatternString(
     KJ_ASSERT(index < tokenList.size());
     auto& nextToken = tokenList[index];
     if (nextToken.type != type) {
-      return nullptr;
+      return kj::none;
     }
     index++;
     return nextToken;
   };
 
   const auto tryConsumeModifierToken = [&tryConsumeToken]() -> kj::Maybe<Token&> {
-    KJ_IF_MAYBE(token, tryConsumeToken(Token::Type::OTHER_MODIFIER)) {
-      return *token;
+    KJ_IF_SOME(token, tryConsumeToken(Token::Type::OTHER_MODIFIER)) {
+      return token;
     }
     return tryConsumeToken(Token::Type::ASTERISK);
   };
 
   const auto tryConsumeRegexOrWildcardToken = [&tryConsumeToken](kj::Maybe<Token&>& nameToken) {
     auto token = tryConsumeToken(Token::Type::REGEXP);
-    if (nameToken == nullptr && token == nullptr) {
+    if (nameToken == kj::none && token == kj::none) {
       token = tryConsumeToken(Token::Type::ASTERISK);
     }
     return token;
@@ -890,14 +890,14 @@ kj::Array<Part> parsePatternString(
         jsg::UsvString suffix,
         kj::Maybe<Token&> modifierToken) {
     auto modifier = maybeTokenToModifier(modifierToken);
-    if (nameToken == nullptr &&
-        regexOrWildcardToken == nullptr &&
+    if (nameToken == kj::none &&
+        regexOrWildcardToken == kj::none &&
         modifier == Part::Modifier::NONE) {
       pendingFixedValue.addAll(prefix);
       return;
     }
     maybeAddPartFromPendingFixedValue();
-    if (nameToken == nullptr && regexOrWildcardToken == nullptr) {
+    if (nameToken == kj::none && regexOrWildcardToken == kj::none) {
       KJ_ASSERT(suffix.size() == 0);
       if (prefix.size() == 0) {
         return;
@@ -911,11 +911,11 @@ kj::Array<Part> parsePatternString(
       return;
     }
     auto regexValue = jsg::usv();
-    KJ_IF_MAYBE(token, regexOrWildcardToken) {
-      if (token->type == Token::Type::ASTERISK) {
+    KJ_IF_SOME(token, regexOrWildcardToken) {
+      if (token.type == Token::Type::ASTERISK) {
         regexValue = jsg::usv(getCommonStrings().FULL_WILDCARD);
       } else {
-        regexValue = token->tokenValue();
+        regexValue = token.tokenValue();
       }
     } else {
       regexValue = jsg::usv(segmentWildcardRegex);
@@ -929,9 +929,9 @@ kj::Array<Part> parsePatternString(
       regexValue = jsg::usv();
     }
     auto name = jsg::usv();
-    KJ_IF_MAYBE(token, nameToken) {
-      name = token->tokenValue();
-    } else KJ_IF_MAYBE(token, regexOrWildcardToken) {
+    KJ_IF_SOME(token, nameToken) {
+      name = token.tokenValue();
+    } else if (regexOrWildcardToken != kj::none) {
       name = jsg::usv(kj::toCharSequence(nextNumericName++));
     }
 
@@ -942,18 +942,18 @@ kj::Array<Part> parsePatternString(
       .modifier = modifier,
       .value = kj::mv(regexValue),
       .name = kj::mv(name),
-      .prefix = encodingCallback(prefix, nullptr),
-      .suffix = encodingCallback(suffix, nullptr),
+      .prefix = encodingCallback(prefix, kj::none),
+      .suffix = encodingCallback(suffix, kj::none),
     });
   };
 
   const auto consumeText = [&tryConsumeToken]() -> jsg::UsvString {
     jsg::UsvStringBuilder result(64);
     while (true) {
-      KJ_IF_MAYBE(token, tryConsumeToken(Token::Type::CHAR)) {
-        result.addAll(token->tokenValue());
-      } else KJ_IF_MAYBE(token, tryConsumeToken(Token::Type::ESCAPED_CHAR)) {
-        result.addAll(token->tokenValue());
+      KJ_IF_SOME(token, tryConsumeToken(Token::Type::CHAR)) {
+        result.addAll(token.tokenValue());
+      } else KJ_IF_SOME(token, tryConsumeToken(Token::Type::ESCAPED_CHAR)) {
+        result.addAll(token.tokenValue());
       } else {
         break;
       }
@@ -965,14 +965,14 @@ kj::Array<Part> parsePatternString(
     auto charToken = tryConsumeToken(Token::Type::CHAR);
     auto nameToken = tryConsumeToken(Token::Type::NAME);
     auto regexOrWildcardToken = tryConsumeRegexOrWildcardToken(nameToken);
-    if (nameToken != nullptr || regexOrWildcardToken != nullptr) {
+    if (nameToken != kj::none || regexOrWildcardToken != kj::none) {
       auto prefix = jsg::usv();
-      KJ_IF_MAYBE(token, charToken) {
-        prefix = token->tokenValue();
+      KJ_IF_SOME(token, charToken) {
+        prefix = token.tokenValue();
       }
       if (prefix.size() > 0) {
-        KJ_IF_MAYBE(codepoint, options.prefixCodePoint) {
-          if (prefix.first() != *codepoint) {
+        KJ_IF_SOME(codepoint, options.prefixCodePoint) {
+          if (prefix.first() != codepoint) {
             pendingFixedValue.addAll(prefix);
             prefix = jsg::usv();
           }
@@ -992,14 +992,14 @@ kj::Array<Part> parsePatternString(
     }
 
     auto fixedToken = charToken;
-    if (fixedToken == nullptr) {
+    if (fixedToken == kj::none) {
       fixedToken = tryConsumeToken(Token::Type::ESCAPED_CHAR);
     }
-    KJ_IF_MAYBE(token, fixedToken) {
-      pendingFixedValue.addAll(token->tokenValue());
+    KJ_IF_SOME(token, fixedToken) {
+      pendingFixedValue.addAll(token.tokenValue());
       continue;
     }
-    KJ_IF_MAYBE(openToken, tryConsumeToken(Token::Type::OPEN)) {
+    if (tryConsumeToken(Token::Type::OPEN) != kj::none) {
       auto prefix = consumeText();
       auto nameToken = tryConsumeToken(Token::Type::NAME);
       regexOrWildcardToken = tryConsumeRegexOrWildcardToken(nameToken);
@@ -1037,8 +1037,8 @@ RegexAndNameList generateRegularExpressionAndNameList(
         result.add('(', '?', ':');
         result.addAll(escaped);
         result.add(')');
-        KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-          result.add(*codepoint);
+        KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+          result.add(codepoint);
         }
       }
       continue;
@@ -1056,15 +1056,15 @@ RegexAndNameList generateRegularExpressionAndNameList(
         result.add('(');
         result.addAll(regexValue);
         result.add(')');
-        KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-          result.add(*codepoint);
+        KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+          result.add(codepoint);
         }
       } else {
         result.add('(', '(', '?', ':');
         result.addAll(regexValue);
         result.add(')');
-        KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-          result.add(*codepoint);
+        KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+          result.add(codepoint);
         }
         result.add(')');
       }
@@ -1082,8 +1082,8 @@ RegexAndNameList generateRegularExpressionAndNameList(
       result.add(')');
       result.addAll(escapedSuffix);
       result.add(')');
-      KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-        result.add(*codepoint);
+      KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+        result.add(codepoint);
       }
       continue;
     }
@@ -1128,8 +1128,8 @@ jsg::UsvString generatePatternString(kj::ArrayPtr<Part> partList, const CompileO
   const auto checkNeedsGrouping = [&options](Part& part) {
     if (part.suffix.size() > 0) return true;
     if (part.prefix.size() > 0) {
-      KJ_IF_MAYBE(codepoint, options.prefixCodePoint) {
-        return part.prefix.first() != *codepoint;
+      KJ_IF_SOME(codepoint, options.prefixCodePoint) {
+        return part.prefix.first() != codepoint;
       }
     }
     return false;
@@ -1155,8 +1155,8 @@ jsg::UsvString generatePatternString(kj::ArrayPtr<Part> partList, const CompileO
       result.add('{');
       result.addAll(escapePatternString(part.value));
       result.add('}');
-      KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-        result.add(*codepoint);
+      KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+        result.add(codepoint);
       }
       continue;
     }
@@ -1230,8 +1230,8 @@ jsg::UsvString generatePatternString(kj::ArrayPtr<Part> partList, const CompileO
     if (needsGrouping) {
       result.add('}');
     }
-    KJ_IF_MAYBE(codepoint, modifierToCodepoint(part.modifier)) {
-      result.add(*codepoint);
+    KJ_IF_SOME(codepoint, modifierToCodepoint(part.modifier)) {
+      result.add(codepoint);
     }
   }
   return result.finish();
@@ -1267,14 +1267,14 @@ compileHostnameComponent(jsg::Lock& js,
 URLPattern::URLPatternInit processPatternInit(
     URLPattern::URLPatternInit& init,
     ProcessPatternInitType type,
-    kj::Maybe<jsg::UsvString> protocol = nullptr,
-    kj::Maybe<jsg::UsvString> username = nullptr,
-    kj::Maybe<jsg::UsvString> password = nullptr,
-    kj::Maybe<jsg::UsvString> hostname = nullptr,
-    kj::Maybe<jsg::UsvString> port = nullptr,
-    kj::Maybe<jsg::UsvString> pathname = nullptr,
-    kj::Maybe<jsg::UsvString> search = nullptr,
-    kj::Maybe<jsg::UsvString> hash = nullptr) {
+    kj::Maybe<jsg::UsvString> protocol = kj::none,
+    kj::Maybe<jsg::UsvString> username = kj::none,
+    kj::Maybe<jsg::UsvString> password = kj::none,
+    kj::Maybe<jsg::UsvString> hostname = kj::none,
+    kj::Maybe<jsg::UsvString> port = kj::none,
+    kj::Maybe<jsg::UsvString> pathname = kj::none,
+    kj::Maybe<jsg::UsvString> search = kj::none,
+    kj::Maybe<jsg::UsvString> hash = kj::none) {
 
   const auto isAbsolutePathname = [&type](jsg::UsvStringPtr str) {
     if (str.size() == 0) return false;
@@ -1297,111 +1297,111 @@ URLPattern::URLPatternInit processPatternInit(
     .hash = kj::mv(hash),
   };
   kj::Maybe<url::UrlRecord> maybeBaseUrl;
-  KJ_IF_MAYBE(baseURL, init.baseURL) {
-    auto url = JSG_REQUIRE_NONNULL(url::URL::parse(*baseURL), TypeError, "Invalid base URL.");
+  KJ_IF_SOME(baseURL, init.baseURL) {
+    auto url = JSG_REQUIRE_NONNULL(url::URL::parse(baseURL), TypeError, "Invalid base URL.");
     result.protocol = jsg::usv(url.scheme);
     result.username = jsg::usv(url.username);
     result.password = jsg::usv(url.password);
-    KJ_IF_MAYBE(host, url.host) {
-      result.hostname = jsg::usv(*host);
+    KJ_IF_SOME(host, url.host) {
+      result.hostname = jsg::usv(host);
     } else {
       result.hostname = jsg::usv();
     }
-    KJ_IF_MAYBE(port, url.port) {
-      result.port = jsg::usv(kj::toCharSequence(*port));
+    KJ_IF_SOME(port, url.port) {
+      result.port = jsg::usv(kj::toCharSequence(port));
     } else {
       result.port = jsg::usv();
     }
     result.pathname = url.getPathname();
-    KJ_IF_MAYBE(query, url.query) {
-      result.search = jsg::usv(*query);
+    KJ_IF_SOME(query, url.query) {
+      result.search = jsg::usv(query);
     } else {
       result.search = jsg::usv();
     }
-    KJ_IF_MAYBE(fragment, url.fragment) {
-      result.hash = jsg::usv(*fragment);
+    KJ_IF_SOME(fragment, url.fragment) {
+      result.hash = jsg::usv(fragment);
     } else {
       result.hash = jsg::usv();
     }
     maybeBaseUrl = kj::mv(url);
   }
 
-  KJ_IF_MAYBE(protocol, init.protocol) {
-    auto strippedValue = (protocol->size() > 0 && protocol->last() == ':') ?
-        protocol->slice(0, protocol->size() - 1) :
-        protocol->asPtr();
+  KJ_IF_SOME(protocol, init.protocol) {
+    auto strippedValue = (protocol.size() > 0 && protocol.last() == ':') ?
+        protocol.slice(0, protocol.size() - 1) :
+        protocol.asPtr();
     result.protocol = type == ProcessPatternInitType::PATTERN ?
         jsg::usv(strippedValue) :
-        canonicalizeProtocol(strippedValue, nullptr);
+        canonicalizeProtocol(strippedValue, kj::none);
   }
-  KJ_IF_MAYBE(username, init.username) {
+  KJ_IF_SOME(username, init.username) {
     result.username = type == ProcessPatternInitType::PATTERN ?
-        jsg::usv(*username) :
-        canonicalizeUsername(*username, nullptr);
+        jsg::usv(username) :
+        canonicalizeUsername(username, kj::none);
   }
-  KJ_IF_MAYBE(password, init.password) {
+  KJ_IF_SOME(password, init.password) {
     result.password = type == ProcessPatternInitType::PATTERN ?
-        jsg::usv(*password) :
-        canonicalizePassword(*password, nullptr);
+        jsg::usv(password) :
+        canonicalizePassword(password, kj::none);
   }
-  KJ_IF_MAYBE(hostname, init.hostname) {
+  KJ_IF_SOME(hostname, init.hostname) {
     result.hostname = type == ProcessPatternInitType::PATTERN ?
-        jsg::usv(*hostname) :
-        canonicalizeHostname(*hostname, nullptr);
+        jsg::usv(hostname) :
+        canonicalizeHostname(hostname, kj::none);
   }
-  KJ_IF_MAYBE(port, init.port) {
+  KJ_IF_SOME(port, init.port) {
     result.port = type == ProcessPatternInitType::PATTERN ?
-        jsg::usv(*port) :
-        canonicalizePort(*port,
+        jsg::usv(port) :
+        canonicalizePort(port,
                          init.protocol.map([](jsg::UsvString& str) { return str.asPtr(); }));
   }
-  KJ_IF_MAYBE(pathname, init.pathname) {
-    auto temppath = jsg::usv(*pathname);
-    KJ_IF_MAYBE(baseUrl, maybeBaseUrl) {
-      if (!isAbsolutePathname(*pathname)) {
-        auto baseUrlPath = baseUrl->getPathname();
-        KJ_IF_MAYBE(index, baseUrlPath.lastIndexOf('/')) {
-          jsg::UsvStringBuilder result(*index + 1 + pathname->size());
-          result.addAll(baseUrlPath.slice(0, (*index) + 1));
-          result.addAll(*pathname);
+  KJ_IF_SOME(pathname, init.pathname) {
+    auto temppath = jsg::usv(pathname);
+    KJ_IF_SOME(baseUrl, maybeBaseUrl) {
+      if (!isAbsolutePathname(pathname)) {
+        auto baseUrlPath = baseUrl.getPathname();
+        KJ_IF_SOME(index, baseUrlPath.lastIndexOf('/')) {
+          jsg::UsvStringBuilder result(index + 1 + pathname.size());
+          result.addAll(baseUrlPath.slice(0, (index) + 1));
+          result.addAll(pathname);
           temppath = result.finish();
         }
       }
     }
 
     if (type != ProcessPatternInitType::PATTERN) {
-      KJ_IF_MAYBE(protocol, result.protocol) {
-        if (protocol->empty() || url::URL::isSpecialScheme(*protocol)) {
-          result.pathname = canonicalizePathname(temppath, nullptr);
+      KJ_IF_SOME(protocol, result.protocol) {
+        if (protocol.empty() || url::URL::isSpecialScheme(protocol)) {
+          result.pathname = canonicalizePathname(temppath, kj::none);
         } else {
-          result.pathname = canonicalizeOpaquePathname(temppath, nullptr);
+          result.pathname = canonicalizeOpaquePathname(temppath, kj::none);
         }
       } else {
         // When protocol is not specified it is equivalent to the zero-length string.
-        result.pathname = canonicalizePathname(temppath, nullptr);
+        result.pathname = canonicalizePathname(temppath, kj::none);
       }
     } else {
       result.pathname = kj::mv(temppath);
     }
   }
-  KJ_IF_MAYBE(search, init.search) {
-    auto strippedValue = (search->size() > 0 && search->first() == '?') ?
-        jsg::usv(search->slice(1)) :
-        jsg::usv(*search);
+  KJ_IF_SOME(search, init.search) {
+    auto strippedValue = (search.size() > 0 && search.first() == '?') ?
+        jsg::usv(search.slice(1)) :
+        jsg::usv(search);
     if (type == ProcessPatternInitType::PATTERN) {
       result.search = kj::mv(strippedValue);
     } else {
-      result.search = canonicalizeSearch(strippedValue, nullptr);
+      result.search = canonicalizeSearch(strippedValue, kj::none);
     }
   }
-  KJ_IF_MAYBE(hash, init.hash) {
-    auto strippedValue = (hash->size() > 0 && hash->first() == '#') ?
-        jsg::usv(hash->slice(1)) :
-        jsg::usv(*hash);
+  KJ_IF_SOME(hash, init.hash) {
+    auto strippedValue = (hash.size() > 0 && hash.first() == '#') ?
+        jsg::usv(hash.slice(1)) :
+        jsg::usv(hash);
     if (type == ProcessPatternInitType::PATTERN) {
       result.hash = kj::mv(strippedValue);
     } else {
-      result.hash = canonicalizeHash(strippedValue, nullptr);
+      result.hash = canonicalizeHash(strippedValue, kj::none);
     }
   }
 
@@ -1742,8 +1742,8 @@ URLPattern::URLPatternInit parseConstructorString(
     tokenIndex += tokenIncrement;
   }
 
-  JSG_REQUIRE(result.protocol != nullptr ||
-               result.baseURL != nullptr,
+  JSG_REQUIRE(result.protocol != kj::none ||
+               result.baseURL != kj::none,
                TypeError,
                kj::str(SYNTAX_ERROR, ": A relative pattern must have a baseURL."));
 
@@ -1751,10 +1751,10 @@ URLPattern::URLPatternInit parseConstructorString(
 }
 
 URLPatternComponents init(jsg::Lock& js, URLPattern::URLPatternInit&& init) {
-  KJ_IF_MAYBE(protocol, init.protocol) {
-    KJ_IF_MAYBE(port, init.port) {
-      if (url::URL::isSpecialScheme(*protocol) &&
-          isSpecialSchemeDefaultPort(*protocol, *port)) {
+  KJ_IF_SOME(protocol, init.protocol) {
+    KJ_IF_SOME(port, init.port) {
+      if (url::URL::isSpecialScheme(protocol) &&
+          isSpecialSchemeDefaultPort(protocol, port)) {
         init.port = jsg::usv();
       }
     }
@@ -1818,15 +1818,15 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
   using Groups = jsg::Dict<jsg::UsvString, jsg::UsvString>;
 
   auto handle = component.regex.getHandle(js);
-  KJ_IF_MAYBE(array, handle(js, input.toStr())) {
+  KJ_IF_SOME(array, handle(js, input.toStr())) {
     // Starting at 1 here looks a bit odd but it is intentional. The result of the regex
     // is an array and we're skipping the first element.
     uint32_t index = 1;
-    uint32_t length = array->size();
+    uint32_t length = array.size();
     kj::Vector<Groups::Field> fields(length - 1);
 
     while (index < length) {
-      auto value = array->get(js, index);
+      auto value = array.get(js, index);
       fields.add(Groups::Field {
         .name = jsg::usv(component.nameList[index - 1]),
         .value = value.isUndefined() ? jsg::usv() : jsg::usv(js, value),
@@ -1841,7 +1841,7 @@ kj::Maybe<URLPattern::URLPatternComponentResult> execRegex(
 
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 }  // namespace
@@ -1883,7 +1883,7 @@ bool URLPattern::test(
     jsg::Lock& js,
     jsg::Optional<URLPatternInput> input,
     jsg::Optional<jsg::UsvString> baseURL) {
-  return exec(js, kj::mv(input), kj::mv(baseURL)) != nullptr;
+  return exec(js, kj::mv(input), kj::mv(baseURL)) != kj::none;
 }
 
 kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
@@ -1907,24 +1907,24 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
     protocol = jsg::usv(url.scheme);
     username = jsg::usv(url.username);
     password = jsg::usv(url.password);
-    KJ_IF_MAYBE(host, url.host) {
-      hostname = jsg::usv(*host);
+    KJ_IF_SOME(host, url.host) {
+      hostname = jsg::usv(host);
     } else {
       hostname = jsg::usv();
     }
-    KJ_IF_MAYBE(p, url.port) {
-      port = jsg::usv(kj::toCharSequence(*p));
+    KJ_IF_SOME(p, url.port) {
+      port = jsg::usv(kj::toCharSequence(p));
     } else {
       port = jsg::usv();
     }
     pathname = url.getPathname();
-    KJ_IF_MAYBE(query, url.query) {
-      search = jsg::usv(*query);
+    KJ_IF_SOME(query, url.query) {
+      search = jsg::usv(query);
     } else {
       search = jsg::usv();
     }
-    KJ_IF_MAYBE(fragment, url.fragment) {
-      hash = jsg::usv(*fragment);
+    KJ_IF_SOME(fragment, url.fragment) {
+      hash = jsg::usv(fragment);
     } else {
       hash = jsg::usv();
     }
@@ -1939,25 +1939,25 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
   KJ_SWITCH_ONEOF(input) {
     KJ_CASE_ONEOF(string, jsg::UsvString) {
       inputs.add(jsg::usv(string));
-      KJ_IF_MAYBE(baseURL, baseURLString) {
-        inputs.add(jsg::usv(*baseURL));
-        KJ_IF_MAYBE(base, url::URL::parse(*baseURL)) {
-          KJ_IF_MAYBE(url, url::URL::parse(string, *base)) {
-            setURLComponents(*url);
+      KJ_IF_SOME(baseURL, baseURLString) {
+        inputs.add(jsg::usv(baseURL));
+        KJ_IF_SOME(base, url::URL::parse(baseURL)) {
+          KJ_IF_SOME(url, url::URL::parse(string, base)) {
+            setURLComponents(url);
           } else {
-            return nullptr;
+            return kj::none;
           }
         } else {
-          return nullptr;
+          return kj::none;
         }
-      } else KJ_IF_MAYBE(url, url::URL::parse(string)) {
-        setURLComponents(*url);
+      } else KJ_IF_SOME(url, url::URL::parse(string)) {
+        setURLComponents(url);
       } else {
-        return nullptr;
+        return kj::none;
       }
     }
     KJ_CASE_ONEOF(i, URLPattern::URLPatternInit) {
-      JSG_REQUIRE(baseURLString == nullptr, TypeError, BASEURL_ERROR);
+      JSG_REQUIRE(baseURLString == kj::none, TypeError, BASEURL_ERROR);
       // The URLPattern specification explicitly says to catch any exceptions
       // thrown here and return null instead of throwing.
 
@@ -1987,7 +1987,7 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
         return false;
       })) {
         // If the tryCatch returns false, we're exiting early.
-        return nullptr;
+        return kj::none;
       }
     }
   }
@@ -2001,15 +2001,15 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
   auto searchExecResult = execRegex(js, components.search, search);
   auto hashExecResult = execRegex(js, components.hash, hash);
 
-  if (protocolExecResult == nullptr ||
-      usernameExecResult == nullptr ||
-      passwordExecResult == nullptr ||
-      hostnameExecResult == nullptr ||
-      portExecResult == nullptr ||
-      pathnameExecResult == nullptr ||
-      searchExecResult == nullptr ||
-      hashExecResult == nullptr) {
-    return nullptr;
+  if (protocolExecResult == kj::none ||
+      usernameExecResult == kj::none ||
+      passwordExecResult == kj::none ||
+      hostnameExecResult == kj::none ||
+      portExecResult == kj::none ||
+      pathnameExecResult == kj::none ||
+      searchExecResult == kj::none ||
+      hashExecResult == kj::none) {
+    return kj::none;
   }
 
   return URLPattern::URLPatternResult {
