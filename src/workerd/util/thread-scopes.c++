@@ -92,14 +92,14 @@ ThreadProgressCounter::~ThreadProgressCounter() noexcept(false) {
 }
 
 bool ThreadProgressCounter::hasProgress() {
-  KJ_IF_MAYBE(progressCounter, activeProgressCounter) {
+  KJ_IF_SOME(progressCounter, activeProgressCounter) {
     // The counter itself may be incremented by any thread, but there's no real synchronization
     // concern, so we can use relaxed memory ordering. If the machine is so bogged down that a
     // stale value causes a false positive, then crashing seems reasonable.
-    auto currentValue = __atomic_load_n(&progressCounter->counter, __ATOMIC_RELAXED);
+    auto currentValue = __atomic_load_n(&progressCounter.counter, __ATOMIC_RELAXED);
 
     // `savedValue` is only ever accessed by our own thread, so no need for atomics here.
-    if (progressCounter->savedValue != currentValue) {
+    if (progressCounter.savedValue != currentValue) {
       return true;
     }
   }
@@ -108,8 +108,8 @@ bool ThreadProgressCounter::hasProgress() {
 }
 
 void ThreadProgressCounter::acknowledgeProgress() {
-  KJ_IF_MAYBE(progressCounter, activeProgressCounter) {
-    progressCounter->savedValue = __atomic_load_n(&progressCounter->counter, __ATOMIC_RELAXED);
+  KJ_IF_SOME(progressCounter, activeProgressCounter) {
+    progressCounter.savedValue = __atomic_load_n(&progressCounter.counter, __ATOMIC_RELAXED);
   }
 }
 

@@ -38,7 +38,7 @@ public:
     friend class RefcountedCanceler;
   };
 
-  RefcountedCanceler(kj::Maybe<kj::Exception> reason = nullptr): reason(kj::mv(reason)) {}
+  RefcountedCanceler(kj::Maybe<kj::Exception> reason = kj::none): reason(kj::mv(reason)) {}
 
   ~RefcountedCanceler() noexcept(false) {
     // `listeners` has to be empty since each listener should have held a strong reference.
@@ -53,21 +53,21 @@ public:
 
   template <typename T>
   kj::Promise<T> wrap(kj::Promise<T> promise) {
-    KJ_IF_MAYBE(ex, reason) {
-      return kj::cp(*ex);
+    KJ_IF_SOME(ex, reason) {
+      return kj::cp(ex);
     }
     return canceler.wrap(kj::mv(promise));
   }
 
   void cancel(kj::StringPtr cancelReason) {
-    if (reason == nullptr) {
+    if (reason == kj::none) {
       cancel(kj::Exception(kj::Exception::Type::DISCONNECTED, __FILE__, __LINE__,
                            kj::str(cancelReason)));
     }
   }
 
   void cancel(const kj::Exception& exception) {
-    if (reason == nullptr) {
+    if (reason == kj::none) {
       reason = kj::cp(exception);
       canceler.cancel(exception);
       for (auto& listener : listeners) {
@@ -79,12 +79,12 @@ public:
   bool isEmpty() const { return canceler.isEmpty(); }
 
   void throwIfCanceled() {
-    KJ_IF_MAYBE(ex, reason) {
-      kj::throwFatalException(kj::cp(*ex));
+    KJ_IF_SOME(ex, reason) {
+      kj::throwFatalException(kj::cp(ex));
     }
   }
 
-  bool isCanceled() const { return reason != nullptr; }
+  bool isCanceled() const { return reason != kj::none; }
 
   void addListener(Listener& listener) {
     listeners.add(listener);

@@ -57,8 +57,8 @@ struct TestFixture {
       -> typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
-    KJ_IF_MAYBE(ws, params.waitScope) {
-      waitScope = ws;
+    KJ_IF_SOME(ws, params.waitScope) {
+      waitScope = &ws;
     } else {
       waitScope = &KJ_REQUIRE_NONNULL(io).waitScope;
     }

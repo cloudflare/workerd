@@ -109,11 +109,11 @@ private:
 
 template <typename T>
 BatchQueue<T>::Batch::~Batch() noexcept(false) {
-  KJ_IF_MAYBE(bq, batchQueue) {
-    bq->popBuffer.clear();
-    if (auto capacity = bq->popBuffer.capacity(); capacity > bq->maxCapacity) {
+  KJ_IF_SOME(bq, batchQueue) {
+    bq.popBuffer.clear();
+    if (auto capacity = bq.popBuffer.capacity(); capacity > bq.maxCapacity) {
       // Reset the queue to avoid letting it grow unbounded.
-      bq->popBuffer = kj::Vector<T>(bq->initialCapacity);
+      bq.popBuffer = kj::Vector<T>(bq.initialCapacity);
     }
   }
 }

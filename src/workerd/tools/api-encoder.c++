@@ -182,8 +182,8 @@ struct ApiEncoderMain {
 
     capnp::MallocMessageBuilder flagsMessage;
     CompatibilityFlags::Reader flags;
-    KJ_IF_MAYBE (date, compatibilityDate) {
-      flags = compileFlags(flagsMessage, *date, false, {});
+    KJ_IF_SOME (date, compatibilityDate) {
+      flags = compileFlags(flagsMessage, date, false, {});
     } else {
       flags = compileAllFlags(flagsMessage);
     }
@@ -208,9 +208,9 @@ struct ApiEncoderMain {
 #undef EW_TYPE_GROUP_WRITE
 
     // Write structure groups to a file or stdout if none specifed
-    KJ_IF_MAYBE (value, output) {
+    KJ_IF_SOME (value, output) {
       auto fs = kj::newDiskFilesystem();
-      auto path = kj::Path::parse(*value);
+      auto path = kj::Path::parse(value);
       auto writeMode = kj::WriteMode::CREATE | kj::WriteMode::MODIFY |
                        kj::WriteMode::CREATE_PARENT;
       auto file = fs->getCurrent().openFile(path, writeMode);

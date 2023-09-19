@@ -28,7 +28,7 @@ public:
 
   void clear() {
     // Must call in main thread before it drops its reference.
-    paf = nullptr;
+    paf = kj::none;
   }
 
   kj::Promise<void> awaitNotification() {
@@ -39,8 +39,8 @@ public:
 
   void notify() const {
     executor.executeAsync([ref = kj::atomicAddRef(*this)]() {
-      KJ_IF_MAYBE(p, ref->paf) {
-        p->fulfiller->fulfill();
+      KJ_IF_SOME(p, ref->paf) {
+        p.fulfiller->fulfill();
       }
     }).detach([](kj::Exception&& exception) {
       KJ_LOG(ERROR, exception);
