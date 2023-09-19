@@ -749,10 +749,10 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
       case 128:
       case 192:
       case 256:
-        KJ_IF_MAYBE(alg, keyDataJwk.alg) {
+        KJ_IF_SOME(alg, keyDataJwk.alg) {
           auto expectedAlg = kj::str("A", keyDataArray.size() * 8, aesMode);
-          JSG_REQUIRE(*alg == expectedAlg, DOMDataError,
-              "Symmetric \"jwk\" key contains invalid \"alg\" value \"", *alg, "\", expected \"",
+          JSG_REQUIRE(alg == expectedAlg, DOMDataError,
+              "Symmetric \"jwk\" key contains invalid \"alg\" value \"", alg, "\", expected \"",
               expectedAlg, "\".");
         }
         break;
@@ -763,25 +763,25 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     }
 
     if (keyUsages.size() != 0) {
-      KJ_IF_MAYBE(u, keyDataJwk.use) {
-        JSG_REQUIRE(*u == "enc", DOMDataError,
-            "Symmetric \"jwk\" key must have a \"use\" of \"enc\", not \"", *u, "\".");
+      KJ_IF_SOME(u, keyDataJwk.use) {
+        JSG_REQUIRE(u == "enc", DOMDataError,
+            "Symmetric \"jwk\" key must have a \"use\" of \"enc\", not \"", u, "\".");
       }
     }
 
-    KJ_IF_MAYBE(ops, keyDataJwk.key_ops) {
-      std::sort(ops->begin(), ops->end());
+    KJ_IF_SOME(ops, keyDataJwk.key_ops) {
+      std::sort(ops.begin(), ops.end());
       // Don't want to use the trick above to use a red-black tree because that constructs the set
       // once ever for the process, but this path is dependent on user input. Could write things
       // without the sort but it makes the enforcement from Section 4.2 below a 1-liner.
 
-      auto duplicate = std::adjacent_find(ops->begin(), ops->end());
-      JSG_REQUIRE(duplicate == ops->end(), DOMDataError,
+      auto duplicate = std::adjacent_find(ops.begin(), ops.end());
+      JSG_REQUIRE(duplicate == ops.end(), DOMDataError,
           "Symmetric \"jwk\" key contains duplicate value \"", *duplicate, "\", in \"key_op\".");
       // https://tools.ietf.org/html/rfc7517#section-4.2 - no duplicate values in key_ops.
 
       for (const auto& usage: keyUsages) {
-        JSG_REQUIRE(std::binary_search(ops->begin(), ops->end(), usage), DOMDataError,
+        JSG_REQUIRE(std::binary_search(ops.begin(), ops.end(), usage), DOMDataError,
             "\"jwk\" key missing usage \"", usage, "\", in \"key_ops\".");
       }
     }
@@ -793,9 +793,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importAes(
     //   be interpreted? What constitutes "inconsistentcy"? Is that implicit in enforcing that "enc"
     //   must be the value for `use'? Or is there something else?
 
-    KJ_IF_MAYBE(e, keyDataJwk.ext) {
-      JSG_REQUIRE(*e || !extractable, DOMDataError,
-          "\"jwk\" key has value \"", *e ? "true" : "false", "\", for \"ext\" that is incompatible "
+    KJ_IF_SOME(e, keyDataJwk.ext) {
+      JSG_REQUIRE(e || !extractable, DOMDataError,
+          "\"jwk\" key has value \"", e ? "true" : "false", "\", for \"ext\" that is incompatible "
           "with import extractability value \"", extractable ? "true" : "false", "\".");
     }
   } else {

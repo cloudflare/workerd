@@ -194,8 +194,8 @@ public:
   virtual kj::Array<kj::byte> exportKeyExt(
       kj::StringPtr format,
       kj::StringPtr type,
-      jsg::Optional<kj::String> cipher = nullptr,
-      jsg::Optional<kj::Array<kj::byte>> passphrase = nullptr) const {
+      jsg::Optional<kj::String> cipher = kj::none,
+      jsg::Optional<kj::Array<kj::byte>> passphrase = kj::none) const {
     JSG_FAIL_REQUIRE(DOMNotSupportedError,
         "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
   }
