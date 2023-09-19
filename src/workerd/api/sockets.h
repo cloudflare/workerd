@@ -126,8 +126,8 @@ private:
   void handleProxyError(jsg::Lock& js, kj::Exception e);
 
   void resolveFulfiller(jsg::Lock& js, kj::Maybe<kj::Exception> maybeErr) {
-    KJ_IF_MAYBE(err, maybeErr) {
-      closedResolver.reject(js, kj::cp(*err));
+    KJ_IF_SOME(err, maybeErr) {
+      closedResolver.reject(js, kj::cp(err));
     } else {
       closedResolver.resolve(js);
     }
@@ -161,7 +161,7 @@ class SocketsModule final: public jsg::Object {
 public:
   jsg::Ref<Socket> connect(jsg::Lock& js, AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
-    return connectImpl(js, nullptr, kj::mv(address), kj::mv(options));
+    return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
   }
 
   JSG_RESOURCE_TYPE(SocketsModule) {

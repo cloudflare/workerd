@@ -42,8 +42,8 @@ bool isValidHost(kj::StringPtr host) {
   return true;
 }
 
-SecureTransportKind parseSecureTransport(SocketOptions* opts) {
-  auto value = KJ_UNWRAP_OR_RETURN(opts->secureTransport, SecureTransportKind::OFF).begin();
+SecureTransportKind parseSecureTransport(SocketOptions& opts) {
+  auto value = KJ_UNWRAP_OR_RETURN(opts.secureTransport, SecureTransportKind::OFF).begin();
   if (value == "off"_kj) {
     return SecureTransportKind::OFF;
   } else if (value == "starttls"_kj) {
@@ -57,8 +57,8 @@ SecureTransportKind parseSecureTransport(SocketOptions* opts) {
 }
 
 bool getAllowHalfOpen(jsg::Optional<SocketOptions>& opts) {
-  KJ_IF_MAYBE(o, opts) {
-    return o->allowHalfOpen;
+  KJ_IF_SOME(o, opts) {
+    return o.allowHalfOpen;
   }
 
   // The allowHalfOpen flag is false by default.
@@ -157,8 +157,8 @@ jsg::Ref<Socket> setupSocket(
       isSecureSocket,
       kj::mv(domain),
       isDefaultFetchPort);
-  KJ_IF_MAYBE(p, eofPromise) {
-    result->handleReadableEof(js, kj::mv(*p));
+  KJ_IF_SOME(p, eofPromise) {
+    result->handleReadableEof(js, kj::mv(p));
   }
   return result;
 }
@@ -209,20 +209,20 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
 
   jsg::Ref<Fetcher> actualFetcher = nullptr;
-  KJ_IF_MAYBE(f, fetcher) {
-    actualFetcher = kj::mv(*f);
+  KJ_IF_SOME(f, fetcher) {
+    actualFetcher = kj::mv(f);
   } else {
     // Support calling into arbitrary callbacks for any registered "magic" addresses for which
     // custom connect() logic is needed. Note that these overrides should only apply to calls of the
     // global connect() method, not for fetcher->connect(), hence why we check for them here.
-    KJ_IF_MAYBE(fn, ioContext.getCurrentLock().getWorker().getConnectOverride(addressStr)) {
-      return (*fn)(js);
+    KJ_IF_SOME(fn, ioContext.getCurrentLock().getWorker().getConnectOverride(addressStr)) {
+      return fn(js);
     }
     actualFetcher = jsg::alloc<Fetcher>(
         IoContext::NULL_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
   }
 
-  auto jsRequest = Request::constructor(js, kj::str(addressStr), nullptr);
+  auto jsRequest = Request::constructor(js, kj::str(addressStr), kj::none);
   kj::Own<WorkerInterface> client = actualFetcher->getClient(
       ioContext, jsRequest->serializeCfBlobJson(js), "connect"_kjc);
 
@@ -230,7 +230,7 @@ jsg::Ref<Socket> connectImplNoOutputLock(
   auto headers = kj::heap<kj::HttpHeaders>(ioContext.getHeaderTable());
   auto httpClient = asHttpClient(kj::mv(client));
   kj::HttpConnectSettings httpConnectSettings = { .useTls = false };
-  KJ_IF_MAYBE(opts, options) {
+  KJ_IF_SOME(opts, options) {
     httpConnectSettings.useTls =
         parseSecureTransport(opts) == SecureTransportKind::ON;
   }
@@ -259,12 +259,12 @@ jsg::Ref<Socket> connectImpl(
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
   // Forcibly close the readable/writable streams.
-  auto cancelPromise = readable->getController().cancel(js, nullptr);
-  auto abortPromise = writable->getController().abort(js, nullptr);
+  auto cancelPromise = readable->getController().cancel(js, kj::none);
+  auto abortPromise = writable->getController().abort(js, kj::none);
   // The below is effectively `Promise.all(cancelPromise, abortPromise)`
   return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise), this](jsg::Lock& js) mutable {
     return abortPromise.then(js, [this](jsg::Lock& js) {
-      resolveFulfiller(js, nullptr);
+      resolveFulfiller(js, kj::none);
       return js.resolvedPromise();
     }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
   }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
@@ -276,7 +276,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   JSG_REQUIRE(domain != nullptr, TypeError, "startTls can only be called once.");
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
-  KJ_IF_MAYBE(opts, options) {
+  KJ_IF_SOME(opts, options) {
     JSG_REQUIRE(parseSecureTransport(opts) == SecureTransportKind::STARTTLS,
         TypeError, invalidOptKindMsg);
   } else {
@@ -298,9 +298,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
     closedResolver.resolve(js);
 
     auto acceptedHostname = domain.asPtr();
-    KJ_IF_MAYBE(s, tlsOptions) {
-      KJ_IF_MAYBE(expectedHost, s->expectedServerHostname) {
-        acceptedHostname = *expectedHost;
+    KJ_IF_SOME(s, tlsOptions) {
+      KJ_IF_SOME(expectedHost, s.expectedServerHostname) {
+        acceptedHostname = expectedHost;
       }
     }
 
@@ -355,7 +355,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
         return KJ_EXCEPTION(FAILED, "connectResult raised an error");
       }),
       [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
-    KJ_IF_MAYBE(e, result) {
+    if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     }
   });
@@ -364,7 +364,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, kj::mv(e));
-  readable->getController().cancel(js, nullptr).markAsHandled(js);
+  readable->getController().cancel(js, kj::none).markAsHandled(js);
   writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }
 
