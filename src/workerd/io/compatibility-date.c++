@@ -38,30 +38,30 @@ struct CompatDate {
     // Basic sanity check that years are 4-digit in the [2000,2999] range. If it is the year 3000
     // and this code broke, all I can say is: haha, take that robots, humans screwed you over yet
     // again, you can Roko's basilisk me all you want I don't care.
-    if (!text.startsWith("2")) return nullptr;
+    if (!text.startsWith("2")) return kj::none;
     // Force 4-digit year, 2-digit month, and 2-digit day.
     if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
-      return nullptr;
+      return kj::none;
     }
     // Validate the date contains only digits and dashes.
     for (char c: text) {
-      if ((c < '0' || '9' < c) && c != '-') return nullptr;
+      if ((c < '0' || '9' < c) && c != '-') return kj::none;
     }
     uint year, month, day;
     // TODO(someday): use `kj::parse` here instead
     auto result = sscanf(text.cStr(), "%d-%d-%d", &year, &month, &day);
-    if (result == EOF) return nullptr;
+    if (result == EOF) return kj::none;
     // Basic validation, notably this will happily accept invalid dates like 2022-02-30
-    if (year < 2000 || year >= 3000) return nullptr;
-    if (month < 1 || month > 12) return nullptr;
-    if (day < 1 || day > 31) return nullptr;
+    if (year < 2000 || year >= 3000) return kj::none;
+    if (month < 1 || month > 12) return kj::none;
+    if (day < 1 || day > 31) return kj::none;
     return CompatDate { year, month, day };
   }
 
   static CompatDate parse(kj::StringPtr text, Worker::ValidationErrorReporter& errorReporter) {
     static constexpr CompatDate DEFAULT_DATE { 2021, 5, 1 };
-    KJ_IF_MAYBE(v, parse(text)) {
-      return *v;
+    KJ_IF_SOME(v, parse(text)) {
+      return v;
     } else {
       errorReporter.addError(kj::str("Invalid compatibility date: ", text));
       return DEFAULT_DATE;
@@ -142,15 +142,15 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
     for (auto annotation: field.getProto().getAnnotations()) {
       if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
         enableFlagName = annotation.getValue().getText();
-        KJ_IF_MAYBE(entry, flagSet.find(enableFlagName)) {
+        KJ_IF_SOME(entry, flagSet.find(enableFlagName)) {
           enableByFlag = true;
-          flagSet.erase(*entry);
+          flagSet.erase(entry);
         }
       } else if (annotation.getId() == COMPAT_DISABLE_FLAG_ANNOTATION_ID) {
         disableFlagName = annotation.getValue().getText();
-        KJ_IF_MAYBE(entry, flagSet.find(disableFlagName)) {
+        KJ_IF_SOME(entry, flagSet.find(disableFlagName)) {
           disableByFlag = true;
-          flagSet.erase(*entry);
+          flagSet.erase(entry);
         }
       } else if (annotation.getId() == COMPAT_ENABLE_DATE_ANNOTATION_ID) {
         auto parsedDate = KJ_ASSERT_NONNULL(CompatDate::parse(annotation.getValue().getText()));
@@ -170,10 +170,10 @@ void compileCompatibilityFlags(kj::StringPtr compatDate, capnp::List<capnp::Text
           enableFlagName, " vs ", disableFlagName));
     }
     if (enableByFlag && enableByDate) {
-      KJ_IF_MAYBE(d, enableDate) {
+      KJ_IF_SOME(d, enableDate) {
         errorReporter.addError(kj::str(
             "The compatibility flag ", enableFlagName, " became the default as of ",
-            *d, " so does not need to be specified anymore."));
+            d, " so does not need to be specified anymore."));
       } else {
         errorReporter.addError(kj::str(
             "The compatibility flag ", enableFlagName,

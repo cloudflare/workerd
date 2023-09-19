@@ -134,7 +134,7 @@ public:
   // Construct a LockTiming if config.reportScriptLockTiming is true, or if the
   // request (if any) is being traced.
   virtual kj::Maybe<kj::Own<LockTiming>> tryCreateLockTiming(
-      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return nullptr; }
+      kj::OneOf<SpanParent, kj::Maybe<RequestObserver&>> parentOrRequest) const { return kj::none; }
 
   // Use like so:
   //
@@ -153,16 +153,16 @@ public:
   public:
     explicit LockRecord(kj::Maybe<kj::Own<LockTiming>> lockTimingParam)
         : lockTiming(kj::mv(lockTimingParam)) {
-      KJ_IF_MAYBE(l, lockTiming) l->get()->start();
+      KJ_IF_SOME(l, lockTiming) l.get()->start();
     }
     ~LockRecord() noexcept(false) {
-      KJ_IF_MAYBE(l, lockTiming) l->get()->stop();
+      KJ_IF_SOME(l, lockTiming) l.get()->stop();
     }
     KJ_DISALLOW_COPY_AND_MOVE(LockRecord);
 
-    void locked() { KJ_IF_MAYBE(l, lockTiming) l->get()->locked(); }
-    void gcPrologue() { KJ_IF_MAYBE(l, lockTiming) l->get()->gcPrologue(); }
-    void gcEpilogue() { KJ_IF_MAYBE(l, lockTiming) l->get()->gcEpilogue(); }
+    void locked() { KJ_IF_SOME(l, lockTiming) l.get()->locked(); }
+    void gcPrologue() { KJ_IF_SOME(l, lockTiming) l.get()->gcPrologue(); }
+    void gcEpilogue() { KJ_IF_SOME(l, lockTiming) l.get()->gcEpilogue(); }
 
   private:
     // The presence of `lockTiming` determines whether or not we need to record timing data. If
