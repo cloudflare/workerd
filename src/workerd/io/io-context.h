@@ -313,7 +313,7 @@ public:
   }
 
   const kj::Maybe<WorkerTracer&> getWorkerTracer() {
-    if (incomingRequests.empty()) return nullptr;
+    if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();
   }
 
@@ -415,7 +415,7 @@ public:
   // before executing the callback.
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> run(
-      Func&& func, kj::Maybe<InputGate::Lock> inputLock = nullptr)
+      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none)
       KJ_WARN_UNUSED_RESULT;
 
   // Like run() but executes within the given critical section, if it is non-null. If
@@ -462,8 +462,8 @@ public:
     // again in the next continuation to re-check if the `IoContext` is still around.
     template<typename F>
     bool runIfAlive(F&& f) {
-      KJ_IF_MAYBE(context, maybeContext) {
-        kj::fwd<F>(f)(*context);
+      KJ_IF_SOME(context, maybeContext) {
+        kj::fwd<F>(f)(context);
         return true;
       }
 
@@ -817,7 +817,7 @@ public:
   // Like getSubrequestChannel() but doesn't enforce limits. Use for trusted paths only.
   kj::Own<WorkerInterface> getSubrequestChannelNoChecks(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = nullptr);
+      kj::Maybe<kj::ConstString> operationName = kj::none);
 
   // Convenience methods that call getSubrequest*() and adapt the returned WorkerInterface objects
   // to HttpClient.
@@ -828,7 +828,7 @@ public:
   // to HttpClient.
   kj::Own<kj::HttpClient> getHttpClientNoChecks(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson,
-      kj::Maybe<kj::ConstString> operationName = nullptr);
+      kj::Maybe<kj::ConstString> operationName = kj::none);
   // TODO(cleanup): Make it the caller's job to call asHttpClient() on the result of
   //   getSubrequest*().
 
@@ -853,7 +853,7 @@ public:
   // Returns an object that ensures an async JS operation started in the current scope captures the
   // given trace span, or the current request's trace span, if no span is given.
   jsg::AsyncContextFrame::StorageScope makeAsyncTraceScope(
-      Worker::Lock& lock, kj::Maybe<SpanParent> spanParent = nullptr) KJ_WARN_UNUSED_RESULT;
+      Worker::Lock& lock, kj::Maybe<SpanParent> spanParent = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
@@ -867,7 +867,7 @@ public:
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
   //
-  // The returned promise is fulfilled with nullptr if the Cache API PUT quota is already exceeded,
+  // The returned promise is fulfilled with kj::none if the Cache API PUT quota is already exceeded,
   // or if the passed stream would cause it to be exceeded. If the stream has an unknown length, you
   // will get a wrapped stream back that tracks how many bytes are read/pumped out of the stream,
   // then decrements the per-IoContext quota on destruction.
@@ -960,7 +960,7 @@ private:
     };
 
     // Pointers from IoOwns that were dropped in other threads, and therefore should be deleted
-    // whenever the IoContext gets around to it. The maybe is changed to nullptr when the
+    // whenever the IoContext gets around to it. The maybe is changed to kj::none when the
     // IoContext goes away, at which point all OwnedObjects have already been deleted so
     // cross-thread deletions can just be ignored.
     kj::MutexGuarded<kj::Maybe<State>> crossThreadDeleteQueue;
@@ -981,7 +981,7 @@ private:
     ~DeleteQueuePtr() noexcept(false) {
       auto ptr = get();
       if (ptr != nullptr) {
-        *ptr->crossThreadDeleteQueue.lockExclusive() = nullptr;
+        *ptr->crossThreadDeleteQueue.lockExclusive() = kj::none;
       }
     }
   };
@@ -1173,8 +1173,8 @@ kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
-  KJ_IF_MAYBE(cs, criticalSection) {
-    return cs->get()->wait()
+  KJ_IF_SOME(cs, criticalSection) {
+    return cs.get()->wait()
         .then([this,func=kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
       return run(kj::fwd<Func>(func), kj::mv(inputLock));
     });
@@ -1187,15 +1187,15 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
     Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
-  KJ_IF_MAYBE(a, actor) {
-    if (inputLock == nullptr) {
-      return a->getInputGate().wait()
+  KJ_IF_SOME(a, actor) {
+    if (inputLock == kj::none) {
+      return a.getInputGate().wait()
           .then([this,func=kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
 
-    asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), *a, getMetrics());
+    asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
   } else {
     asyncLockPromise = worker->takeAsyncLock(getMetrics());
   }
@@ -1229,8 +1229,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 
       RunnableImpl runnable { kj::fwd<Func>(func) };
       runImpl(runnable, true, lock, kj::mv(inputLock), false);
-      KJ_IF_MAYBE(r, runnable.result) {
-        return kj::mv(*r);
+      KJ_IF_SOME(r, runnable.result) {
+        return kj::mv(r);
       } else {
         KJ_UNREACHABLE;
       }
@@ -1355,7 +1355,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 
   if constexpr (jsg::isVoid<T>()) {
     addTask(promise.then([]() -> kj::Maybe<kj::Exception> {
-      return nullptr;
+      return kj::none;
     }, [](kj::Exception&& exception) -> kj::Maybe<kj::Exception> {
       return kj::mv(exception);
     }).then([this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
@@ -1365,8 +1365,8 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
                   maybeException = kj::mv(maybeException),
                   maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
-        KJ_IF_MAYBE(exception, maybeException) {
-          resolver.reject(lock, kj::mv(*exception));
+        KJ_IF_SOME(exception, maybeException) {
+          resolver.reject(lock, kj::mv(exception));
         } else {
           resolver.resolve(lock);
         }
@@ -1435,7 +1435,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
                 "cannot possibly ever resolve because all code and events related to the "
                 "Promise's I/O context have already finished."_kj;
       } else {
-        return nullptr;
+        return kj::none;
       }
     }
   };

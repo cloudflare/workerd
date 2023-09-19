@@ -28,8 +28,8 @@ void IoContext::DeleteQueue::scheduleDeletion(OwnedObject* object) const {
     OwnedObjectList::unlink(*object);
   } else {
     auto lock = crossThreadDeleteQueue.lockExclusive();
-    KJ_IF_MAYBE(state, *lock) {
-      state->queue.add(object);
+    KJ_IF_SOME(state, *lock) {
+      state.queue.add(object);
     }
   }
 }
@@ -58,7 +58,7 @@ public:
 
   kj::Maybe<kj::Date> getNextTimeout() const override {
     if (timeoutTimes.size() == 0) {
-      return nullptr;
+      return kj::none;
     } else {
       return timeoutTimes.begin()->key.when;
     }
@@ -179,12 +179,12 @@ IoContext::IoContext(ThreadContext& thread,
           maybeException = kj::getCaughtExceptionAsKj();
         }
 
-        KJ_IF_MAYBE(exception, maybeException) {
+        KJ_IF_SOME(exception, maybeException) {
           Worker::AsyncLock asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
           Worker::Lock lock(*worker, asyncLock);
           lock.logUncaughtException(
-              jsg::extractTunneledExceptionDescription(exception->getDescription()));
-          kj::throwFatalException(kj::mv(*exception));
+              jsg::extractTunneledExceptionDescription(exception.getDescription()));
+          kj::throwFatalException(kj::mv(exception));
         }
       }))();
     }
@@ -194,10 +194,10 @@ IoContext::IoContext(ThreadContext& thread,
 
   localAbortPromise = localAbortPromise.exclusiveJoin(makeLimitsPromise());
 
-  KJ_IF_MAYBE(a, actor) {
+  KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
     // and the actor can no longer be used.
-    localAbortPromise = localAbortPromise.exclusiveJoin(a->getInputGate().onBroken());
+    localAbortPromise = localAbortPromise.exclusiveJoin(a.getInputGate().onBroken());
 
     // Stop the ActorCache from flushing any scheduled write operations to prevent any unnecessary
     // or unintentional async work
@@ -207,8 +207,8 @@ IoContext::IoContext(ThreadContext& thread,
         co_await promise;
       } catch (...) {
         auto exception = kj::getCaughtExceptionAsKj();
-        KJ_IF_MAYBE(a, actor) {
-          a->shutdownActorCache(exception);
+        KJ_IF_SOME(a, actor) {
+          a.shutdownActorCache(exception);
         }
         kj::throwFatalException(kj::mv(exception));
       }
@@ -221,7 +221,7 @@ IoContext::IoContext(ThreadContext& thread,
 
   // We don't construct `tasks` for actor requests because we put all tasks into `waitUntilTasks`
   // in that case.
-  if (actor == nullptr) {
+  if (actor == kj::none) {
     kj::TaskSet::ErrorHandler& errorHandler = *this;
     tasks.emplace(errorHandler);
   }
@@ -248,10 +248,10 @@ void IoContext::IncomingRequest::delivered() {
     auto& oldFront = context->incomingRequests.front();
     context->limitEnforcer->reportMetrics(*oldFront.metrics);
 
-    KJ_IF_MAYBE(f, oldFront.drainFulfiller) {
+    KJ_IF_SOME(f, oldFront.drainFulfiller) {
       // Allow the previous current IncomingRequest to finish draining, because the new request
       // will take over responsibility for completing any tasks that aren't done yet.
-      f->get()->fulfill();
+      f.get()->fulfill();
     }
   }
 
@@ -259,16 +259,16 @@ void IoContext::IncomingRequest::delivered() {
   wasDelivered = true;
   metrics->delivered();
 
-  KJ_IF_MAYBE(a, context->actor) {
+  KJ_IF_SOME(a, context->actor) {
     // Re-synchronize the timer and top up limits for every new incoming request to an actor.
     ioChannelFactory->getTimer().syncTime();
     context->limitEnforcer->topUpActor();
 
     // Run the Actor's constructor if it hasn't been run already.
-    a->ensureConstructed(*context);
+    a.ensureConstructed(*context);
 
     // Record a new incoming request to actor metrics.
-    a->getMetrics().startRequest();
+    a.getMetrics().startRequest();
   }
 }
 
@@ -290,8 +290,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
 
   context->incomingRequests.remove(*this);
 
-  KJ_IF_MAYBE(a, context->actor) {
-    a->getMetrics().endRequest();
+  KJ_IF_SOME(a, context->actor) {
+    a.getMetrics().endRequest();
   }
   context->worker->getIsolate().completedRequest();
   metrics->jsDone();
@@ -308,24 +308,24 @@ InputGate::Lock IoContext::getInputLock() {
 }
 
 kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
-  KJ_IF_MAYBE(l, currentInputLock) {
-    return l->getCriticalSection()
+  KJ_IF_SOME(l, currentInputLock) {
+    return l.getCriticalSection()
         .map([](InputGate::CriticalSection& cs) { return kj::addRef(cs); });
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
 kj::Promise<void> IoContext::waitForOutputLocks() {
-  KJ_IF_MAYBE(p, waitForOutputLocksIfNecessary()) {
-    return kj::mv(*p);
+  KJ_IF_SOME(p, waitForOutputLocksIfNecessary()) {
+    return kj::mv(p);
   } else {
     return kj::READY_NOW;
   }
 }
 
 bool IoContext::hasOutputGate() {
-  return actor != nullptr;
+  return actor != kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> IoContext::waitForOutputLocksIfNecessary() {
@@ -341,8 +341,8 @@ kj::Maybe<IoOwn<kj::Promise<void>>> IoContext::waitForOutputLocksIfNecessaryIoOw
 }
 
 bool IoContext::isOutputGateBroken() {
-  KJ_IF_MAYBE(a, actor) {
-    return a->getOutputGate().isBroken();
+  KJ_IF_SOME(a, actor) {
+    return a.getOutputGate().isBroken();
   } else {
     return false;
   }
@@ -380,13 +380,13 @@ void IoContext::logUncaughtException(UncaughtExceptionSource source,
 
 void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
                                                kj::Exception&& exception) {
-  if (getWorkerTracer() == nullptr &&
+  if (getWorkerTracer() == kj::none &&
       !worker->getIsolate().isInspectorEnabled()) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription()) &&
-        // TODO(soon): Figure out why client disconncects are getting logged here if we don't
+        // TODO(soon): Figure out why client disconnects are getting logged here if we don't
         // ignore DISCONNECTED. If we fix that, do we still want to filter these?
         exception.getType() != kj::Exception::Type::DISCONNECTED) {
       LOG_EXCEPTION("jsgInternalError", exception);
@@ -422,7 +422,7 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
   kj::Maybe<RequestObserver&> metrics;
   if (!incomingRequests.empty()) metrics = getMetrics();
-  runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), nullptr, true);
+  runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
 }
 
 void IoContext::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {
@@ -434,14 +434,14 @@ void IoContext::addTask(kj::Promise<void> promise) {
 
   // In Actors, we treat all tasks as wait-until tasks, because it's perfectly legit to start a
   // task under one request and then expect some other request to handle it later.
-  if (actor != nullptr) {
+  if (actor != kj::none) {
     addWaitUntil(kj::mv(promise));
     return;
   }
 
   auto& tasks = KJ_ASSERT_NONNULL(this->tasks, "I/O context finalized");
 
-  if (actor == nullptr) {
+  if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors. (Actually this code path
     // is not even executed in the actor case but I'm leaving the check in just in case that ever
@@ -459,7 +459,7 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  if (actor == nullptr) {
+  if (actor == kj::none) {
     // This metric won't work correctly in actors since it's being tracked per-request, but tasks
     // are not tied to requests in actors. So we just skip it in actors.
     auto& metrics = getMetrics();
@@ -484,11 +484,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
-  KJ_IF_MAYBE(a, context->actor) {
+  KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a->onShutdown();
+    timeoutPromise = a.onShutdown();
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.
@@ -551,19 +551,19 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
 }
 
 kj::Own<void> IoContext::registerPendingEvent() {
-  if (actor != nullptr) {
+  if (actor != kj::none) {
     // Actors don't use the pending event system, because different requests to the same Actor are
     // explicitly allowed to resolve each other's promises.
     return {};
   }
 
-  KJ_IF_MAYBE(pe, pendingEvent) {
-    return kj::addRef(*pe);
+  KJ_IF_SOME(pe, pendingEvent) {
+    return kj::addRef(pe);
   } else {
     KJ_REQUIRE(!isFinalized(), "request has already been finalized");
 
     // Cancel any already-scheduled finalization.
-    runFinalizersTask = nullptr;
+    runFinalizersTask = kj::none;
 
     auto result = kj::refcounted<PendingEvent>(*this);
     pendingEvent = *result;
@@ -604,8 +604,8 @@ void IoContext::TimeoutManagerImpl::TimeoutState::trigger(Worker::Lock& lock) {
   });
 
   // Now it's safe to call the user's callback.
-  KJ_IF_MAYBE(function, params.function) {
-    (*function)(lock);
+  KJ_IF_SOME(function, params.function) {
+    (function)(lock);
   }
 }
 
@@ -618,8 +618,8 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
   isCanceled = true;
 
   if (!isRunning && !wasCanceled) {
-    params.function = nullptr;
-    maybePromise = nullptr;
+    params.function = kj::none;
+    maybePromise = kj::none;
   }
 
   ++manager.timeoutsFinished;
@@ -650,7 +650,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   auto& state = it->second;
 
   auto stateGuard = kj::defer([&]() {
-    if (state.maybePromise == nullptr) {
+    if (state.maybePromise == kj::none) {
       // Something threw, erase the state.
       timeouts.erase(it);
     }
@@ -670,7 +670,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
       auto& state = it->second;
 
       auto stateGuard = kj::defer([&] {
-        if (state.maybePromise == nullptr) {
+        if (state.maybePromise == kj::none) {
           // At the end of this block, there was no new timeout, so we should remove the state.
           // Note that this can happen from cancelTimeout or a non-repeating timeout.
           timeouts.erase(it);
@@ -683,7 +683,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
         return;
       }
 
-      KJ_IF_MAYBE(promise, state.maybePromise) {
+      KJ_IF_SOME(promise, state.maybePromise) {
         // We could KJ_ASSERT_NONNULL(iter->second) instead if we are sure clearTimeout() couldn't
         // race us. However, I'm not sure about that.
 
@@ -692,11 +692,11 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
         // be able to detect whether the user does call clearInterval(). We leave the actual map
         // entry in place because this aids in reporting cross-request-context timeout cancellation
         // errors to the user.
-        context.addTask(kj::mv(*promise));
+        context.addTask(kj::mv(promise));
 
         // Because Promise has an underspecified move ctor, we need to explicitly nullify the Maybe
         // to indicate that we've consumed the promise.
-        state.maybePromise = nullptr;
+        state.maybePromise = kj::none;
 
         // The user's callback might throw, but we need to at least attempt to reschedule interval
         // callbacks even if they throw. This deferred action takes care of that. Note that we don't
@@ -716,7 +716,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
             // If this is an interval task and the script has CPU time left, reschedule the task;
             // otherwise leave the dead map entry in place.
-            if (state.params.repeat && context.limitEnforcer->getLimitsExceeded() == nullptr) {
+            if (state.params.repeat && context.limitEnforcer->getLimitsExceeded() == kj::none) {
               setTimeoutImpl(context, it);
             }
           });
@@ -738,7 +738,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
     // canceled anyway.
-    if (context.selfRef->maybeContext != nullptr) {
+    if (context.selfRef->maybeContext != kj::none) {
       bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
       if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
@@ -750,7 +750,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   }
   promise = promise.attach(kj::mv(deferredTimeoutTimeRemoval));
 
-  if (context.actor != nullptr) {
+  if (context.actor != kj::none) {
     // Add a wait-until task which resolves when this timer completes. This ensures that
     // `IncomingRequest::drain()` waits until all timers finish.
     auto paf = kj::newPromiseAndFulfiller<void>();
@@ -822,12 +822,12 @@ size_t IoContext::getTimeoutCount() {
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
   kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
 
-  KJ_IF_MAYBE (maybeNextTimeout, timeoutManager->getNextTimeout()) {
+  KJ_IF_SOME (maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
     // ensures that Date.now() inside the callback itself always returns exactly the time at which
     // the callback was scheduled (hiding non-determinism which could contain side channels), and
     // that the time returned by Date.now() never goes backwards.
-    return kj::min(adjustedTime, *maybeNextTimeout);
+    return kj::min(adjustedTime, maybeNextTimeout);
   } else {
     return adjustedTime;
   }
@@ -841,8 +841,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(SpanBuilder&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   SpanBuilder span = nullptr;
-  KJ_IF_MAYBE(n, options.operationName) {
-    span = makeTraceSpan(kj::mv(*n));
+  KJ_IF_SOME(n, options.operationName) {
+    span = makeTraceSpan(kj::mv(n));
   }
 
   auto ret = func(span, getIoChannelFactory());
@@ -934,8 +934,8 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
   jsg::Lock& js = lock;
   kj::Own<SpanParent> spanParent;
-  KJ_IF_MAYBE (spo, kj::mv(spanParentOverride)) {
-    spanParent = kj::heap(kj::mv(*spo));
+  KJ_IF_SOME (spo, kj::mv(spanParentOverride)) {
+    spanParent = kj::heap(kj::mv(spo));
   } else {
     spanParent = kj::heap(getMetrics().getSpan());
   }
@@ -947,11 +947,11 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
 
 SpanParent IoContext::getCurrentTraceSpan() {
   // If called while lock is held, try to use the trace info stored in the async context.
-  KJ_IF_MAYBE (lock, currentLock) {
-    KJ_IF_MAYBE (frame, jsg::AsyncContextFrame::current(*lock)) {
-      KJ_IF_MAYBE (value, frame->get(lock->getTraceAsyncContextKey())) {
-        auto handle = value->getHandle(*lock);
-        jsg::Lock& js = *lock;
+  KJ_IF_SOME (lock, currentLock) {
+    KJ_IF_SOME (frame, jsg::AsyncContextFrame::current(lock)) {
+      KJ_IF_SOME (value, frame.get(lock.getTraceAsyncContextKey())) {
+        auto handle = value.getHandle(lock);
+        jsg::Lock& js = lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
         return spanParent->addRef();
       }
@@ -969,8 +969,8 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 
 void IoContext::taskFailed(kj::Exception&& exception) {
   if (waitUntilStatusValue == EventOutcome::OK) {
-    KJ_IF_MAYBE(status, limitEnforcer->getLimitsExceeded()) {
-      waitUntilStatusValue = *status;
+    KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {
+      waitUntilStatusValue = status;
     } else {
       waitUntilStatusValue = EventOutcome::EXCEPTION;
     }
@@ -978,10 +978,10 @@ void IoContext::taskFailed(kj::Exception&& exception) {
 
   // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
   // happen.
-  KJ_IF_MAYBE(e, kj::runCatchingExceptions([&]() {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
     logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception));
   })) {
-    KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", *e);
+    KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", e);
   }
 }
 
@@ -995,7 +995,7 @@ void IoContext::checkFarGet(const DeleteQueue* expectedQueue) {
 
   if (expectedQueue == deleteQueue.get()) {
     // same request or same actor, success
-  } else if (actor != nullptr) {
+  } else if (actor != kj::none) {
     JSG_FAIL_REQUIRE(
         Error, "Cannot perform I/O on behalf of a different Durable Object. I/O objects "
         "(such as streams, request/response bodies, and others) created in the context of one "
@@ -1012,10 +1012,10 @@ void IoContext::checkFarGet(const DeleteQueue* expectedQueue) {
 }
 
 IoContext::OwnedObjectList::~OwnedObjectList() noexcept(false) {
-  while (head != nullptr) {
+  while (head != kj::none) {
     // We want to have the same order of operations as the recursive destructor here. Without this
     // optimization, `~SpecificOwnedObject<T>` is invoked first, then `~OwnedObject()` which
-    // destructs the next node which continues the process. The key takeway is that we destroy each
+    // destructs the next node which continues the process. The key takeaway is that we destroy each
     // node's `T` before we move onto the next node. This duplicates that behavior by unlinking
     // forward through the list, which hopefully should keep our stack size low no matter how many
     // `OwnedObject` instances we have.
@@ -1024,24 +1024,24 @@ IoContext::OwnedObjectList::~OwnedObjectList() noexcept(false) {
 }
 
 void IoContext::OwnedObjectList::unlink(OwnedObject& object) {
-  KJ_IF_MAYBE(next, object.next) {
-    next->get()->prev = object.prev;
+  KJ_IF_SOME(next, object.next) {
+    next.get()->prev = object.prev;
   }
   *object.prev = kj::mv(object.next);
 }
 
 void IoContext::OwnedObjectList::link(kj::Own<OwnedObject> object) {
-  KJ_IF_MAYBE(f, object->finalizer) {
+  KJ_IF_SOME(f, object->finalizer) {
     if (finalizersRan) {
       KJ_LOG(ERROR, "somehow new objects are being added after finalizers already ran",
              kj::getStackTrace());
-      f->finalize();
+      f.finalize();
     }
   }
 
   object->next = kj::mv(head);
-  KJ_IF_MAYBE(next, object->next) {
-    next->get()->prev = &object->next;
+  KJ_IF_SOME(next, object->next) {
+    next.get()->prev = &object->next;
   }
   object->prev = &head;
   head = kj::mv(object);
@@ -1053,14 +1053,14 @@ kj::Vector<kj::StringPtr> IoContext::OwnedObjectList::finalize() {
 
   kj::Vector<kj::StringPtr> warnings;
   auto* link = &head;
-  while (*link != nullptr) {
+  while (*link != kj::none) {
     auto& l = KJ_ASSERT_NONNULL(*link);
-    KJ_IF_MAYBE(f, l->finalizer) {
-      KJ_IF_MAYBE(w, f->finalize()) {
-        warnings.add(*w);
+    KJ_IF_SOME(f, l->finalizer) {
+      KJ_IF_SOME(w, f.finalize()) {
+        warnings.add(w);
       }
 #ifdef KJ_DEBUG
-      f->finalized = true;
+      f.finalized = true;
 #endif
     }
     link = &l->next;
@@ -1113,7 +1113,7 @@ public:
     context.currentInputLock = kj::mv(inputLock);
     context.currentLock = workerLock;
 
-    KJ_ON_SCOPE_FAILURE(context.currentLock = nullptr; context.currentInputLock = nullptr);
+    KJ_ON_SCOPE_FAILURE(context.currentLock = kj::none; context.currentInputLock = kj::none);
 
     {
       // Handle any pending deletions that arrived while the worker was processing a different
@@ -1128,7 +1128,7 @@ public:
   }
   ~Scope() {
     context.currentLock = nullptr;
-    context.currentInputLock = nullptr;
+    context.currentInputLock = kj::none;
   }
 
   Worker::Lock& getWorkerLock() { return workerLock; }
@@ -1146,8 +1146,8 @@ private:
 void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
                              Worker::LockType lockType, kj::Maybe<InputGate::Lock> inputLock,
                              bool allowPermanentException) {
-  KJ_IF_MAYBE(l, inputLock) {
-    KJ_REQUIRE(l->isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
+  KJ_IF_SOME(l, inputLock) {
+    KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
 
   getIoChannelFactory().getTimer().syncTime();
@@ -1262,21 +1262,21 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
   if (hasCurrent()) {
     return IoContext::current().getWeakRef();
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
 void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
   KJ_ASSERT(actor == nullptr);  // we don't finalize actor requests
 
-  tasks = nullptr;
+  tasks = kj::none;
   // Tasks typically have callbacks that dereference IoOwns. Since those callbacks
   // will throw after request finalization, we should cancel them now.
 
   if (abortFulfiller->isWaiting()) {
-    // Don't bother fullfilling `abortFulfiller` if limits were exceeded because in that case the
+    // Don't bother fulfilling `abortFulfiller` if limits were exceeded because in that case the
     // abort promise will be fulfilled shortly anyway.
-    if (limitEnforcer->getLimitsExceeded() == nullptr) {
+    if (limitEnforcer->getLimitsExceeded() == kj::none) {
       abortFulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
           "The script will never generate a response."));
     }
@@ -1303,7 +1303,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
     };
 
     RunnableImpl runnable(*this, kj::mv(warnings));
-    runImpl(runnable, false, asyncLock, nullptr, true);
+    runImpl(runnable, false, asyncLock, kj::none, true);
   }
 
   promiseContextTag = kj::none;
@@ -1312,7 +1312,7 @@ void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
 #ifdef KJ_DEBUG
 
 IoContext::Finalizeable::Finalizeable(): context(IoContext::current()) {
-  if (context.actor != nullptr) {
+  if (context.actor != kj::none) {
     // Disable the destructor check because finalization doesn't apply to actors.
     finalized = true;
   }
@@ -1365,10 +1365,10 @@ private:
 
 jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStream(
     jsg::Lock& js, kj::Own<kj::AsyncInputStream> stream) {
-  KJ_IF_MAYBE(length, stream->tryGetLength()) {
-    if (*length > MAX_INDIVIDUAL_PUT_SIZE) {
+  KJ_IF_SOME(length, stream->tryGetLength()) {
+    if (length > MAX_INDIVIDUAL_PUT_SIZE) {
       // This Cache API subrequest would exceed the individual PUT quota.
-      return js.resolvedPromise(kj::Maybe<IoOwn<kj::AsyncInputStream>>(nullptr));
+      return js.resolvedPromise(kj::Maybe<IoOwn<kj::AsyncInputStream>>(kj::none));
     }
   }
 
@@ -1382,20 +1382,20 @@ jsg::Promise<kj::Maybe<IoOwn<kj::AsyncInputStream>>> IoContext::makeCachePutStre
     if (quota == 0) {
       fulfiller->fulfill(kj::cp(quota));
       // Total PUT quota already exceeded.
-      return nullptr;
+      return kj::none;
     }
 
-    KJ_IF_MAYBE(length, stream->tryGetLength()) {
+    KJ_IF_SOME(length, stream->tryGetLength()) {
       // PUT with Content-Length. We rely on kj-http to enforce that the expected length is
       // respected, and can just return the new quota immediately, allowing the next PUT to start.
-      KJ_DASSERT(*length <= MAX_INDIVIDUAL_PUT_SIZE);
+      KJ_DASSERT(length <= MAX_INDIVIDUAL_PUT_SIZE);
       KJ_DEFER(fulfiller->fulfill(kj::cp(quota)));
-      if (quota >= *length) {
-        quota -= *length;
+      if (quota >= length) {
+        quota -= length;
         return kj::mv(stream);
       } else {
         // This Cache API subrequest would exceed the total PUT quota.
-        return nullptr;
+        return kj::none;
       }
     } else {
       // PUT with Transfer-Encoding: chunked. We have no idea how big this request body is going to
