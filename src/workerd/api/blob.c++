@@ -81,9 +81,9 @@ static kj::String normalizeType(kj::String type) {
 
 jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
-  KJ_IF_MAYBE(o, options) {
-    KJ_IF_MAYBE(t, o->type) {
-      type = normalizeType(kj::mv(*t));
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(t, o.type) {
+      type = normalizeType(kj::mv(t));
     }
   }
 
@@ -156,7 +156,7 @@ public:
     if (encoding == StreamEncoding::IDENTITY) {
       return unread.size();
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -196,16 +196,16 @@ jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
     kj::String name, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
   kj::Maybe<double> maybeLastModified;
-  KJ_IF_MAYBE(o, options) {
-    KJ_IF_MAYBE(t, o->type) {
-      type = normalizeType(kj::mv(*t));
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(t, o.type) {
+      type = normalizeType(kj::mv(t));
     }
-    maybeLastModified = o->lastModified;
+    maybeLastModified = o.lastModified;
   }
 
   double lastModified;
-  KJ_IF_MAYBE(m, maybeLastModified) {
-    lastModified = *m;
+  KJ_IF_SOME(m, maybeLastModified) {
+    lastModified = m;
   } else {
     lastModified = dateNow();
   }

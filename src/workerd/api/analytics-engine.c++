@@ -25,15 +25,15 @@ void AnalyticsEngine::writeDataPoint(jsg::Lock& js,
     aeEvent.setIndex1(""_kj.asBytes());
 
     kj::StringPtr errorPrefix = "writeDataPoint(): "_kj;
-    KJ_IF_MAYBE(ev, event) {
-      KJ_IF_MAYBE(indexes, ev->indexes) {
-        setIndexes<api::AnalyticsEngineEvent::Builder>(aeEvent, *indexes, errorPrefix);
+    KJ_IF_SOME(ev, event) {
+      KJ_IF_SOME(indexes, ev.indexes) {
+        setIndexes<api::AnalyticsEngineEvent::Builder>(aeEvent, indexes, errorPrefix);
       }
-      KJ_IF_MAYBE(blobs, ev->blobs) {
-        setBlobs<api::AnalyticsEngineEvent::Builder>(aeEvent, *blobs, errorPrefix);
+      KJ_IF_SOME(blobs, ev.blobs) {
+        setBlobs<api::AnalyticsEngineEvent::Builder>(aeEvent, blobs, errorPrefix);
       }
-      KJ_IF_MAYBE(doubles, ev->doubles) {
-        setDoubles<api::AnalyticsEngineEvent::Builder>(aeEvent, *doubles, errorPrefix);
+      KJ_IF_SOME(doubles, ev.doubles) {
+        setDoubles<api::AnalyticsEngineEvent::Builder>(aeEvent, doubles, errorPrefix);
       }
     }
   });

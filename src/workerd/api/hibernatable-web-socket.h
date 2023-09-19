@@ -56,7 +56,7 @@ public:
       uint16_t typeId,
       kj::TaskSet& waitUntilTasks,
       kj::Own<HibernationReader> params,
-      kj::Maybe<Worker::Actor::HibernationManager&> manager=nullptr)
+      kj::Maybe<Worker::Actor::HibernationManager&> manager=kj::none)
     : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)) {}
   HibernatableWebSocketCustomEventImpl(
       uint16_t typeId,
@@ -83,10 +83,10 @@ private:
   // Returns `params`, but if we have a HibernationReader we convert it to a
   // HibernatableSocketParams first.
   HibernatableSocketParams consumeParams() {
-    KJ_IF_MAYBE(p, params.tryGet<kj::Own<HibernationReader>>()) {
+    KJ_IF_SOME(p, params.tryGet<kj::Own<HibernationReader>>()) {
       kj::Maybe<HibernatableSocketParams> eventParameters;
-      auto websocketId = kj::str((*p)->getMessage().getWebsocketId());
-      auto payload = (*p)->getMessage().getPayload();
+      auto websocketId = kj::str(p->getMessage().getWebsocketId());
+      auto payload = p->getMessage().getPayload();
       switch(payload.which()) {
         case rpc::HibernatableWebSocketEventMessage::Payload::TEXT: {
           eventParameters.emplace(kj::str(payload.getText()), kj::mv(websocketId));

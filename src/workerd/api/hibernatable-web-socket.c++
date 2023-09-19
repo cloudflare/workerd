@@ -66,7 +66,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   // We definitely have an actor by this point. Let's set the hibernation manager on the actor
   // before we start running any events that might need to access it.
   auto& a = KJ_REQUIRE_NONNULL(context.getActor());
-  if (a.getHibernationManager() == nullptr) {
+  if (a.getHibernationManager() == kj::none) {
     a.setHibernationManager(kj::addRef(KJ_REQUIRE_NONNULL(manager)));
   }
 
@@ -130,8 +130,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   auto req = dispatcher.castAs<
       rpc::HibernatableWebSocketEventDispatcher>().hibernatableWebSocketEventRequest();
 
-  KJ_IF_MAYBE(rpcParameters, params.tryGet<kj::Own<HibernationReader>>()) {
-    req.setMessage((*rpcParameters)->getMessage());
+  KJ_IF_SOME(rpcParameters, params.tryGet<kj::Own<HibernationReader>>()) {
+    req.setMessage(rpcParameters->getMessage());
   } else {
     auto message = req.initMessage();
     auto payload = message.initPayload();

@@ -39,8 +39,8 @@ static void handleDefaultBotManagement(jsg::Lock& js, jsg::JsObject handle) {
 }
 
 CfProperty::CfProperty(kj::Maybe<kj::StringPtr> unparsed) {
-  KJ_IF_MAYBE(str, unparsed) {
-    value = kj::str(*str);
+  KJ_IF_SOME(str, unparsed) {
+    value = kj::str(str);
   }
 }
 
@@ -48,8 +48,8 @@ CfProperty::CfProperty(jsg::Lock& js, const jsg::JsObject& object)
     : CfProperty(kj::Maybe(jsg::JsRef(js, object))) {}
 
 CfProperty::CfProperty(kj::Maybe<jsg::JsRef<jsg::JsObject>>&& parsed) {
-  KJ_IF_MAYBE(v, parsed) {
-    value = kj::mv(*v);
+  KJ_IF_SOME(v, parsed) {
+    value = kj::mv(v);
   }
 }
 
@@ -60,8 +60,8 @@ jsg::Optional<jsg::JsObject> CfProperty::get(jsg::Lock& js) {
 }
 
 jsg::Optional<jsg::JsRef<jsg::JsObject>> CfProperty::getRef(jsg::Lock& js) {
-  KJ_IF_MAYBE(cf, value) {
-    KJ_SWITCH_ONEOF(*cf) {
+  KJ_IF_SOME(cf, value) {
+    KJ_SWITCH_ONEOF(cf) {
       KJ_CASE_ONEOF(parsed, jsg::JsRef<jsg::JsObject>) {
         return parsed.addRef(js);
       }
@@ -82,13 +82,13 @@ jsg::Optional<jsg::JsRef<jsg::JsObject>> CfProperty::getRef(jsg::Lock& js) {
     }
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 
 kj::Maybe<kj::String> CfProperty::serialize(jsg::Lock& js) {
-  KJ_IF_MAYBE(cf, value) {
-    KJ_SWITCH_ONEOF(*cf) {
+  KJ_IF_SOME(cf, value) {
+    KJ_SWITCH_ONEOF(cf) {
       KJ_CASE_ONEOF(parsed, jsg::JsRef<jsg::JsObject>) {
         return jsg::JsValue(parsed.getHandle(js)).toJson(js);
       }
@@ -105,7 +105,7 @@ kj::Maybe<kj::String> CfProperty::serialize(jsg::Lock& js) {
     }
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 CfProperty CfProperty::deepClone(jsg::Lock& js) {
@@ -118,8 +118,8 @@ CfProperty CfProperty::deepClone(jsg::Lock& js) {
   // TODO(cleanup): With a bit of refactoring we can preserve the lazy parsing
   // optimization through the clone. But for now, let's just do the easy thing.
   getRef(js);
-  KJ_IF_MAYBE(cf, value) {
-    KJ_SWITCH_ONEOF(*cf) {
+  KJ_IF_SOME(cf, value) {
+    KJ_SWITCH_ONEOF(cf) {
       KJ_CASE_ONEOF(parsed, jsg::JsRef<jsg::JsObject>) {
         return CfProperty(jsg::JsRef(js, parsed.getHandle(js).jsonClone(js)));
       }
@@ -133,8 +133,8 @@ CfProperty CfProperty::deepClone(jsg::Lock& js) {
 }
 
 void CfProperty::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_MAYBE(cf, value) {
-    KJ_SWITCH_ONEOF(*cf) {
+  KJ_IF_SOME(cf, value) {
+    KJ_SWITCH_ONEOF(cf) {
       KJ_CASE_ONEOF(parsed, jsg::JsRef<jsg::JsObject>) {
         visitor.visit(parsed);
       }

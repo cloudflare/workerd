@@ -163,7 +163,7 @@ void parseFormData(kj::Vector<FormData::Entry>& data, kj::StringPtr boundary,
       message = message.slice(0, message.size() - uint(message.back() == '\r'));
     }
 
-    if (filename == nullptr || convertFilesToStrings) {
+    if (filename == kj::none || convertFilesToStrings) {
       data.add(FormData::Entry { kj::mv(name), kj::str(message) });
     } else {
       data.add(FormData::Entry {
@@ -180,8 +180,8 @@ blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::Str
            jsg::Optional<kj::String> filename) {
   auto fromBlob = [&](jsg::Ref<Blob> blob) {
     kj::String fn;
-    KJ_IF_MAYBE(f, filename) {
-      fn = kj::mv(*f);
+    KJ_IF_SOME(f, filename) {
+      fn = kj::mv(f);
     } else {
       fn = kj::str(name);
     }
@@ -191,7 +191,7 @@ blobToFile(kj::StringPtr name, kj::OneOf<jsg::Ref<File>, jsg::Ref<Blob>, kj::Str
 
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(file, jsg::Ref<File>) {
-      if (filename == nullptr) {
+      if (filename == kj::none) {
         return kj::mv(file);
       } else {
         // Need to substitute filename.
@@ -300,21 +300,21 @@ FormData::EntryType FormData::clone(FormData::EntryType& value) {
 
 void FormData::parse(kj::ArrayPtr<const char> rawText, kj::StringPtr contentType,
                      bool convertFilesToStrings) {
-  KJ_IF_MAYBE(parsed, MimeType::tryParse(contentType)) {
-    auto& params = parsed->params();
-    if (MimeType::FORM_DATA == *parsed) {
+  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
+    auto& params = parsed.params();
+    if (MimeType::FORM_DATA == parsed) {
       auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
           "No boundary string in Content-Type header. The multipart/form-data MIME "
           "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
           "boundary=\"abcd\"'. See RFC 7578, section 4.");
       parseFormData(data, boundary, rawText, convertFilesToStrings);
       return;
-    } else if (MimeType::FORM_URLENCODED == *parsed) {
+    } else if (MimeType::FORM_URLENCODED == parsed) {
       // Let's read the charset so we can barf if the body isn't UTF-8.
       //
       // TODO(conform): Transcode to UTF-8, like the spec tells us to.
-      KJ_IF_MAYBE(charsetParam, params.find("charset"_kj)) {
-        auto charset = kj::str(*charsetParam);
+      KJ_IF_SOME(charsetParam, params.find("charset"_kj)) {
+        auto charset = kj::str(charsetParam);
         JSG_REQUIRE(strcasecmp(charset.cStr(), "utf-8") == 0 ||
                     strcasecmp(charset.cStr(), "utf8") == 0 ||
                     strcasecmp(charset.cStr(), "unicode-1-1-utf-8") == 0,
@@ -359,7 +359,7 @@ kj::Maybe<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::get(kj::String name) 
       return clone(v);
     }
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Array<kj::OneOf<jsg::Ref<File>, kj::String>> FormData::getAll(kj::String name) {
@@ -415,8 +415,8 @@ void FormData::forEach(
   // Here, if the thisArg is not passed, or is passed explicitly as a null or
   // undefined, then undefined is used as the thisArg.
   auto receiver = js.v8Undefined();
-  KJ_IF_MAYBE(arg, thisArg) {
-    auto handle = arg->getHandle(js);
+  KJ_IF_SOME(arg, thisArg) {
+    auto handle = arg.getHandle(js);
     if (!handle->IsNullOrUndefined()) {
       receiver = handle;
     }

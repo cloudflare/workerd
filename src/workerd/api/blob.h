@@ -66,8 +66,8 @@ private:
   kj::String type;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_MAYBE(b, ownData.tryGet<jsg::Ref<Blob>>()) {
-      visitor.visit(*b);
+    KJ_IF_SOME(b, ownData.tryGet<jsg::Ref<Blob>>()) {
+      visitor.visit(b);
     }
   }
 

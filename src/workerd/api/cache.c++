@@ -44,13 +44,15 @@ kj::StringPtr validateUrl(kj::StringPtr url) {
   //   But, that might mean e.g. discarding fragments ("hashes", stuff after a '#'), which would
   //   be a change in behavior that could subtly affect production workers...
 
-  constexpr auto urlOptions = kj::Url::Options { .percentDecode = false, .allowEmpty = true };
-  KJ_IF_MAYBE(parsed, kj::Url::tryParse(url, kj::Url::HTTP_PROXY_REQUEST, urlOptions)) {
-    return url;
-  } else {
-    JSG_FAIL_REQUIRE(TypeError,
-                      "Invalid URL. Cache API keys must be fully-qualified, valid URLs.");
-  }
+  static constexpr auto urlOptions = kj::Url::Options {
+    .percentDecode = false,
+    .allowEmpty = true,
+  };
+
+  JSG_REQUIRE(kj::Url::tryParse(url, kj::Url::HTTP_PROXY_REQUEST, urlOptions) != kj::none,
+              TypeError, "Invalid URL. Cache API keys must be fully-qualified, valid URLs.");
+
+  return url;
 }
 
 }  // namespace
@@ -99,8 +101,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       response.body = response.body.attach(kj::mv(httpClient));
 
       kj::StringPtr cacheStatus;
-      KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-        cacheStatus = *cs;
+      KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
+        cacheStatus = cs;
       } else {
         // This is an internal error representing a violation of the contract between us and
         // the cache. Since it is always conformant to return undefined from Cache::match()
@@ -131,7 +133,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return makeHttpResponse(
           js, kj::HttpMethod::GET, {},
           response.statusCode, response.statusText, *response.headers,
-          kj::mv(response.body), nullptr);
+          kj::mv(response.body), kj::none);
     });
   });
 }
@@ -179,8 +181,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       kj::String contentLength;
 
       kj::StringPtr connectionHeaders[kj::HttpHeaders::CONNECTION_HEADERS_COUNT];
-      KJ_IF_MAYBE(ebs, expectedBodySize) {
-        contentLength = kj::str(*ebs);
+      KJ_IF_SOME(ebs, expectedBodySize) {
+        contentLength = kj::str(ebs);
         connectionHeaders[kj::HttpHeaders::BuiltinIndices::CONTENT_LENGTH] = contentLength;
       } else {
         connectionHeaders[kj::HttpHeaders::BuiltinIndices::TRANSFER_ENCODING] = "chunked";
@@ -248,8 +250,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
         TypeError, "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
-    KJ_IF_MAYBE(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
-      JSG_REQUIRE(vary->findFirst('*') == nullptr,
+    KJ_IF_SOME(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
+      JSG_REQUIRE(vary.findFirst('*') == nullptr,
           TypeError, "Cannot cache response with 'Vary: *' header.");
     }
 
@@ -278,7 +280,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     // We need to send the response to our serializer immediately in order to fulfill Cache.put()'s
     // contract: the caller should be able to observe that the response body is disturbed as soon
     // as put() returns.
-    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr);
+    auto serializePromise = jsResponse->send(js, serializer, {}, kj::none);
     auto payload = serializer.getPayload();
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,
@@ -296,8 +298,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     auto makeCachePutStream = [&context, stream = kj::mv(payload.stream)](jsg::Lock& js) mutable {
       return context.makeCachePutStream(js, kj::mv(stream));
     };
-    KJ_IF_MAYBE(p, context.waitForOutputLocksIfNecessary()) {
-      startStreamPromise = context.awaitIo(js, kj::mv(*p), kj::mv(makeCachePutStream));
+    KJ_IF_SOME(p, context.waitForOutputLocksIfNecessary()) {
+      startStreamPromise = context.awaitIo(js, kj::mv(p), kj::mv(makeCachePutStream));
     } else {
       startStreamPromise = makeCachePutStream(js);
     }
@@ -308,7 +310,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
          writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise)]
         (jsg::Lock& js, kj::Maybe<IoOwn<kj::AsyncInputStream>> maybeStream) mutable
         -> jsg::Promise<void> {
-      if (maybeStream == nullptr) {
+      if (maybeStream == kj::none) {
         // Cache API PUT quota must have been exceeded.
         return js.resolvedPromise();
       }
