@@ -22,9 +22,9 @@ int CryptoImpl::HmacHandle::update(jsg::Lock& js, kj::Array<kj::byte> data) {
 }
 
 kj::Array<kj::byte> CryptoImpl::HmacHandle::digest(jsg::Lock& js) {
-  KJ_IF_MAYBE(_existing_digest, _digest) {
+  KJ_IF_SOME(_existing_digest, _digest) {
     // Allow calling the internal digest several times, for the streams interface
-    return kj::heapArray<kj::byte>(_existing_digest->asPtr());
+    return kj::heapArray<kj::byte>(_existing_digest.asPtr());
   } else {
     unsigned digest_size = HMAC_size(hmac_ctx.get());
     unsigned len;

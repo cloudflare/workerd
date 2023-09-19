@@ -19,7 +19,7 @@ private:
   };
 
 public:
-  MIMEParams(kj::Maybe<MimeType&> mimeType = nullptr);
+  MIMEParams(kj::Maybe<MimeType&> mimeType = kj::none);
 
   static jsg::Ref<MIMEParams> constructor();
 
@@ -60,7 +60,7 @@ private:
   template <typename T>
   static kj::Maybe<T> iteratorNext(jsg::Lock& js, IteratorState<T>& state) {
     if (state.index >= state.values.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& item = state.values[state.index++];
     if constexpr (kj::isSameType<T, kj::Array<kj::String>>()) {

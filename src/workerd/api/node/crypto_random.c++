@@ -24,14 +24,14 @@ namespace workerd::api::node {
 
   BIGNUM* add = nullptr;
   auto _add = maybeOwnBignum(add_buf);
-  KJ_IF_MAYBE(a, _add) {
-      add = a->get();
+  KJ_IF_SOME(a, _add) {
+      add = a.get();
   }
 
   BIGNUM* rem = nullptr;
   auto _rem = maybeOwnBignum(rem_buf);
-  KJ_IF_MAYBE(r, _rem) {
-      rem = r->get();
+  KJ_IF_SOME(r, _rem) {
+      rem = r.get();
   }
 
   if (add != nullptr) {

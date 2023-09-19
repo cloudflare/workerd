@@ -121,9 +121,8 @@ kj::Maybe<uint> tryFromHexDigit(char c) {
     return c - ('a' - 10);
   } else if ('A' <= c && c <= 'F') {
     return c - ('A' - 10);
-  } else {
-    return nullptr;
   }
+  return kj::none;
 }
 
 kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = false) {
@@ -141,16 +140,16 @@ kj::Array<byte> decodeHexTruncated(kj::ArrayPtr<kj::byte> text, bool strict = fa
 
   for (size_t i = 0; i < text.size(); i += 2) {
     byte b = 0;
-    KJ_IF_MAYBE(d1, tryFromHexDigit(text[i])) {
-      b = *d1 << 4;
+    KJ_IF_SOME(d1, tryFromHexDigit(text[i])) {
+      b = d1 << 4;
     } else {
       if (strict) {
         JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
       }
       break;
     }
-    KJ_IF_MAYBE(d2, tryFromHexDigit(text[i+1])) {
-      b |= *d2;
+    KJ_IF_SOME(d2, tryFromHexDigit(text[i+1])) {
+      b |= d2;
     } else {
       if (strict) {
         JSG_FAIL_REQUIRE(TypeError, "The text is not valid hex");
@@ -290,12 +289,12 @@ int BufferUtil::compare(
   kj::ArrayPtr<kj::byte> ptrTwo = two;
 
   // The options allow comparing subranges within the two inputs.
-  KJ_IF_MAYBE(options, maybeOptions) {
-    auto end = options->aEnd.orDefault(ptrOne.size());
-    auto start = kj::min(end, options->aStart.orDefault(0));
+  KJ_IF_SOME(options, maybeOptions) {
+    auto end = options.aEnd.orDefault(ptrOne.size());
+    auto start = kj::min(end, options.aStart.orDefault(0));
     ptrOne = ptrOne.slice(start, end);
-    end = options->bEnd.orDefault(ptrTwo.size());
-    start = kj::min(end, options->bStart.orDefault(0));
+    end = options.bEnd.orDefault(ptrTwo.size());
+    start = kj::min(end, options.bStart.orDefault(0));
     ptrTwo = ptrTwo.slice(start, end);
   }
 
@@ -433,13 +432,13 @@ jsg::Optional<uint32_t> indexOfBuffer(
       optOffset <= -1 ||
       (isForward && needle.size() + optOffset > hayStack.size()) ||
       needle.size() > hayStack.size()) {
-    return nullptr;
+    return kj::none;
   }
 
   auto result = hayStack.size();
   if (enc == Encoding::UTF16LE) {
     if (hayStack.size() < 2 || needle.size() < 2) {
-      return nullptr;
+      return kj::none;
     }
     result = SearchString(
       reinterpret_cast<const uint16_t*>(hayStack.asChars().begin()),
@@ -459,7 +458,7 @@ jsg::Optional<uint32_t> indexOfBuffer(
       isForward);
   }
 
-  if (result == hayStack.size()) return nullptr;
+  if (result == hayStack.size()) return kj::none;
 
   return result;
 }
@@ -487,14 +486,14 @@ jsg::Optional<uint32_t> indexOfString(
       optOffset <= -1 ||
       (isForward && decodedNeedle.size() + optOffset > hayStackLength) ||
       decodedNeedle.size() > hayStackLength) {
-    return nullptr;
+    return kj::none;
   }
 
   auto result = hayStackLength;
 
   if (enc == Encoding::UTF16LE) {
     if (hayStack.size() < 2 || decodedNeedle.size() < 2) {
-      return nullptr;
+      return kj::none;
     }
     result = SearchString(
       reinterpret_cast<const uint16_t*>(hayStack.asChars().begin()),
@@ -514,7 +513,7 @@ jsg::Optional<uint32_t> indexOfString(
       isForward);
   }
 
-  if (result == hayStackLength) return nullptr;
+  if (result == hayStackLength) return kj::none;
 
   return result;
 }
