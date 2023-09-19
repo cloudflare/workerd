@@ -188,10 +188,10 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     }
     return length;
   } else if (*algIter == "HMAC") {
-    KJ_IF_MAYBE(length, derivedKeyAlgorithm.length) {
+    KJ_IF_SOME(length, derivedKeyAlgorithm.length) {
       // If the user requested a specific HMAC key length, honor it.
-      if (*length > 0) {
-        return *length;
+      if (length > 0) {
+        return length;
       }
       JSG_FAIL_REQUIRE(TypeError, "HMAC key length must be a non-zero unsigned long integer.");
     }
@@ -206,12 +206,12 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     // operations. This is the entire reason getKeyLength() returns a Maybe<uint32_t> rather than a
     // uint32_t (and also why we do not throw an OperationError here but rather later on in
     // deriveBitsPbkdf2Impl()).
-    return nullptr;
+    return kj::none;
   }
 }
 
 auto webCryptoOperationBegin(
-    const char *operation, kj::StringPtr algorithm, kj::Maybe<kj::StringPtr> context = nullptr) {
+    const char *operation, kj::StringPtr algorithm, kj::Maybe<kj::StringPtr> context = kj::none) {
   // This clears all OpenSSL errors & errno at the start & returns a deferred evaluation to make
   // sure that, when the WebCrypto entrypoint completes, there are no errors hanging around.
   // Context is used for adding contextual information (e.g. the algorithm name of the key being
@@ -237,8 +237,8 @@ auto webCryptoOperationBegin(
       };
 
       kj::String stringifiedOperation;
-      KJ_IF_MAYBE(c, context) {
-        stringifiedOperation = kj::str(operation, "(", *c, ")");
+      KJ_IF_SOME(c, context) {
+        stringifiedOperation = kj::str(operation, "(", c, ")");
       } else {
         stringifiedOperation = kj::str(operation);
       }
@@ -256,7 +256,7 @@ auto webCryptoOperationBegin(
 template <typename T, typename = kj::EnableIf<kj::isSameType<
     kj::String, decltype(kj::instance<T>().name)>()>>
 [[gnu::always_inline]] auto webCryptoOperationBegin(const char *operation, const T& algorithm,
-    kj::Maybe<kj::StringPtr> context = nullptr) {
+    kj::Maybe<kj::StringPtr> context = kj::none) {
   return kj::defer([operation, algorithm = kj::str(algorithm.name), context] {
     // We need a copy of the algorithm name as this defer runs after the EncryptAlgorithm struct
     // is destroyed.
@@ -574,8 +574,8 @@ jsg::Ref<CryptoKey> SubtleCrypto::importKeySync(
   } else if (format == "jwk") {
     JSG_REQUIRE(keyData.is<JsonWebKey>(), TypeError,
         "Import data provided for \"jwk\" import format must be a JsonWebKey.");
-    KJ_IF_MAYBE(ext, keyData.get<JsonWebKey>().ext) {
-      JSG_REQUIRE(*ext || !extractable,
+    KJ_IF_SOME(ext, keyData.get<JsonWebKey>().ext) {
+      JSG_REQUIRE(ext || !extractable,
           DOMDataError, "JWK ext field for \"", algorithm.name, "\" is set to false but "
           "extractable is true");
     }

@@ -166,12 +166,12 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
     keyDataArray = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.k), DOMDataError,
         "HMAC \"jwk\" key import requires a base64Url encoding of the key");
 
-    KJ_IF_MAYBE(alg, keyDataJwk.alg) {
+    KJ_IF_SOME(alg, keyDataJwk.alg) {
       if (hash.startsWith("SHA-")) {
         auto expectedAlg = kj::str("HS", hash.slice(4));
-        JSG_REQUIRE(*alg == expectedAlg, DOMDataError,
+        JSG_REQUIRE(alg == expectedAlg, DOMDataError,
             "HMAC \"jwk\" key import specifies \"alg\" that is incompatible with the hash name "
-            "(encountered \"", *alg, "\", expected \"", expectedAlg, "\").");
+            "(encountered \"", alg, "\", expected \"", expectedAlg, "\").");
       } else {
         // TODO(conform): Spec says this for non-SHA hashes:
         //     > Perform any key import steps defined by other applicable specifications, passing
@@ -179,7 +179,7 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importHmac(
         //   What other hashes should be supported (if any)? For example, technically we support MD5
         //   below in `lookupDigestAlgorithm` for "raw" keys...
         JSG_FAIL_REQUIRE(DOMNotSupportedError,
-            "Unrecognized or unimplemented hash algorithm requested", *alg);
+            "Unrecognized or unimplemented hash algorithm requested", alg);
       }
     }
   } else {
