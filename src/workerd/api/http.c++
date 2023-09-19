@@ -14,6 +14,7 @@
 #include <workerd/io/features.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/io/io-context.h>
@@ -1448,17 +1449,6 @@ void FetchEvent::passThroughOnException() {
 
 namespace {
 
-class NullInputStream final: public kj::AsyncInputStream {
-public:
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return size_t(0);
-  }
-
-  kj::Maybe<uint64_t> tryGetLength() override {
-    return uint64_t(0);
-  }
-};
-
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
@@ -1552,7 +1542,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(
           return js.resolvedPromise(makeHttpResponse(js,
               jsRequest->getMethodEnum(), kj::mv(urlList),
               response.statusCode, response.statusText, *response.headers,
-              kj::heap<NullInputStream>(),
+              newNullInputStream(),
               jsg::alloc<WebSocket>(kj::mv(webSocket), WebSocket::REMOTE),
               Response::BodyEncoding::AUTO,
               kj::mv(signal)));
@@ -1899,7 +1889,7 @@ static jsg::Promise<Fetcher::GetResult> parseResponse(
       return js.resolvedPromise(
           Fetcher::GetResult(jsg::alloc<ReadableStream>(
               IoContext::current(),
-              newSystemStream(kj::heap<NullInputStream>(), StreamEncoding::IDENTITY))));
+              newSystemStream(newNullInputStream(), StreamEncoding::IDENTITY))));
     }
   }
 
