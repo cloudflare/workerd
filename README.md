@@ -77,7 +77,7 @@ To build `workerd`, you need:
   * LLD 11+ (e.g. package `lld` on Debian Bullseye)
   * `python3` and `python3-distutils`
 * On macOS:
-  * Xcode 13+ installation (or equivalent command line tools version)
+  * Xcode 13+ installation
   * macOS 11 or higher
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
