@@ -45,7 +45,7 @@ kj::StringPtr validateUrl(kj::StringPtr url) {
   //   be a change in behavior that could subtly affect production workers...
 
   constexpr auto urlOptions = kj::Url::Options { .percentDecode = false, .allowEmpty = true };
-  KJ_IF_MAYBE(parsed, kj::Url::tryParse(url, kj::Url::HTTP_PROXY_REQUEST, urlOptions)) {
+  if (kj::Url::tryParse(url, kj::Url::HTTP_PROXY_REQUEST, urlOptions) != kj::none) {
     return url;
   } else {
     JSG_FAIL_REQUIRE(TypeError,
@@ -99,8 +99,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       response.body = response.body.attach(kj::mv(httpClient));
 
       kj::StringPtr cacheStatus;
-      KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-        cacheStatus = *cs;
+      KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
+        cacheStatus = cs;
       } else {
         // This is an internal error representing a violation of the contract between us and
         // the cache. Since it is always conformant to return undefined from Cache::match()
@@ -131,7 +131,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       return makeHttpResponse(
           js, kj::HttpMethod::GET, {},
           response.statusCode, response.statusText, *response.headers,
-          kj::mv(response.body), nullptr);
+          kj::mv(response.body), kj::none);
     });
   });
 }
@@ -162,7 +162,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       kj::Own<kj::AsyncInputStream> stream;
 
       // A promise which resolves once the payload's headers have been written. Normally, this
-      // couldn't possibly resolve until the body has been written, and jsRepsonse->send() won't
+      // couldn't possibly resolve until the body has been written, and jsResponse->send() won't
       // complete until then -- except if the body is empty, in which case jsResponse->send() may
       // return immediately.
       kj::Promise<void> writeHeadersPromise;
@@ -179,8 +179,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       kj::String contentLength;
 
       kj::StringPtr connectionHeaders[kj::HttpHeaders::CONNECTION_HEADERS_COUNT];
-      KJ_IF_MAYBE(ebs, expectedBodySize) {
-        contentLength = kj::str(*ebs);
+      KJ_IF_SOME(ebs, expectedBodySize) {
+        contentLength = kj::str(ebs);
         connectionHeaders[kj::HttpHeaders::BuiltinIndices::CONTENT_LENGTH] = contentLength;
       } else {
         connectionHeaders[kj::HttpHeaders::BuiltinIndices::TRANSFER_ENCODING] = "chunked";
@@ -248,8 +248,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
         TypeError, "Cannot cache response to a range request (206 Partial Content).");
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
-    KJ_IF_MAYBE(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
-      JSG_REQUIRE(vary->findFirst('*') == nullptr,
+    KJ_IF_SOME(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
+      JSG_REQUIRE(vary.findFirst('*') == nullptr,
           TypeError, "Cannot cache response with 'Vary: *' header.");
     }
 
@@ -278,7 +278,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     // We need to send the response to our serializer immediately in order to fulfill Cache.put()'s
     // contract: the caller should be able to observe that the response body is disturbed as soon
     // as put() returns.
-    auto serializePromise = jsResponse->send(js, serializer, {}, nullptr);
+    auto serializePromise = jsResponse->send(js, serializer, {}, kj::none);
     auto payload = serializer.getPayload();
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,
@@ -296,8 +296,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
     auto makeCachePutStream = [&context, stream = kj::mv(payload.stream)](jsg::Lock& js) mutable {
       return context.makeCachePutStream(js, kj::mv(stream));
     };
-    KJ_IF_MAYBE(p, context.waitForOutputLocksIfNecessary()) {
-      startStreamPromise = context.awaitIo(js, kj::mv(*p), kj::mv(makeCachePutStream));
+    KJ_IF_SOME(p, context.waitForOutputLocksIfNecessary()) {
+      startStreamPromise = context.awaitIo(js, kj::mv(p), kj::mv(makeCachePutStream));
     } else {
       startStreamPromise = makeCachePutStream(js);
     }
@@ -308,7 +308,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
          writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise)]
         (jsg::Lock& js, kj::Maybe<IoOwn<kj::AsyncInputStream>> maybeStream) mutable
         -> jsg::Promise<void> {
-      if (maybeStream == nullptr) {
+      if (maybeStream == kj::none) {
         // Cache API PUT quota must have been exceeded.
         return js.resolvedPromise();
       }
@@ -367,7 +367,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
       // backend to respond. At that point, we *are* awaiting I/O, and want to record that
       // correctly.
       //
-      // So basically, we have an asynchorous promise we need to wait for, and for the first part
+      // So basically, we have an asynchronous promise we need to wait for, and for the first part
       // of that wait, we don't want to count it as pending I/O, but for the second part, we do.
       // How do we accomplish this?
       //
@@ -456,7 +456,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
           // If the origin or the cache disconnected, we don't treat this as an error, as put()
           // doesn't guarantee that it stores anything anyway.
           //
-          // TODO(someday): I (Kenton) don't undestand why we'd explicitly want to hide this
+          // TODO(someday): I (Kenton) don't understand why we'd explicitly want to hide this
           //   error, even though hiding it is technically not a violation of the contract. To me
           //   this seems undesirable, especially when it was the origin that failed. The caller
           //   can always choose to ignore errors if they want (and many do, by passing to

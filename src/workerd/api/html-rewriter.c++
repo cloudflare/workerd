@@ -75,7 +75,7 @@ public:
     if (chars.begin() != nullptr) {
       return kj::str(chars);
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -89,7 +89,7 @@ private:
 kj::Maybe<kj::Exception> tryGetLastError() {
   auto maybeErrorString = lol_html_take_last_error();
   if (maybeErrorString.data == nullptr) {
-    return nullptr;
+    return kj::none;
   }
   auto errorString = LolString(maybeErrorString);
   return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
@@ -146,12 +146,12 @@ public:
   explicit TokenScope(jsg::Ref<T>& value)
       : contentToken(value.addRef()) {}
   ~TokenScope() noexcept(false) {
-    KJ_IF_MAYBE(token, contentToken) {
-      (*token)->htmlContentScopeEnd();
+    KJ_IF_SOME(token, contentToken) {
+      token->htmlContentScopeEnd();
     }
   }
   TokenScope(TokenScope&& o) : contentToken(kj::mv(o.contentToken)) {
-    o.contentToken = nullptr;
+    o.contentToken = kj::none;
   }
   KJ_DISALLOW_COPY(TokenScope);
 
@@ -239,7 +239,7 @@ private:
       // We canceled this, which means we used LOL_HTML_STOP. That means we have an error sitting
       // in the error buffer in the lol-html C API. Let's make sure our return code is -1 and get
       // rid of that error value to make sure nobody picks it up later on accident and thinks an
-      // error occured.
+      // error occurred.
       KJ_ASSERT(rc == -1);
       discardLastError();
 
@@ -300,13 +300,13 @@ private:
     // If a call to `lol-html` returned an error or propagated a user error from a handler
     // (LOL_HTML_STOP for instance); we consider its instance as poisoned. Future calls to
     // `lol_html_rewriter_write` and `lol_html_rewriter_end` will probably throw.
-    return maybeException != nullptr;
+    return maybeException != kj::none;
   }
 
   void maybePoison(kj::Exception exception) {
     // Ignore this error if maybeException is already populated -- this error is probably just a
     // secondary effect.
-    if (maybeException == nullptr) {
+    if (maybeException == kj::none) {
       maybeException = kj::mv(exception);
     }
   }
@@ -332,11 +332,11 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
         check(lol_html_rewriter_builder_add_element_content_handlers(
             builder,
             elementHandlers.selector,
-            element == nullptr ? nullptr : &Rewriter::thunk<Element>,
+            element == kj::none ? nullptr : &Rewriter::thunk<Element>,
             element.orDefault(nullptr),
-            comments == nullptr ? nullptr : &Rewriter::thunk<Comment>,
+            comments == kj::none ? nullptr : &Rewriter::thunk<Comment>,
             comments.orDefault(nullptr),
-            text == nullptr ? nullptr : &Rewriter::thunk<Text>,
+            text == kj::none ? nullptr : &Rewriter::thunk<Text>,
             text.orDefault(nullptr)));
       }
       KJ_CASE_ONEOF(documentHandlers, UnregisteredDocumentHandlers) {
@@ -348,13 +348,13 @@ kj::Own<lol_html_HtmlRewriter> Rewriter::buildRewriter(
         // Adding document content handlers cannot fail, so no need for check().
         lol_html_rewriter_builder_add_document_content_handlers(
             builder,
-            doctype == nullptr ? nullptr : &Rewriter::thunk<Doctype>,
+            doctype == kj::none ? nullptr : &Rewriter::thunk<Doctype>,
             doctype.orDefault(nullptr),
-            comments == nullptr ? nullptr : &Rewriter::thunk<Comment>,
+            comments == kj::none ? nullptr : &Rewriter::thunk<Comment>,
             comments.orDefault(nullptr),
-            text == nullptr ? nullptr : &Rewriter::thunk<Text>,
+            text == kj::none ? nullptr : &Rewriter::thunk<Text>,
             text.orDefault(nullptr),
-            end == nullptr ? nullptr : &Rewriter::thunk<DocumentEnd>,
+            end == kj::none ? nullptr : &Rewriter::thunk<DocumentEnd>,
             end.orDefault(nullptr));
       }
     }
@@ -406,7 +406,7 @@ const kj::FiberPool& getFiberPool() {
 } // namespace
 
 kj::Promise<void> Rewriter::write(const void* buffer, size_t size) {
-  KJ_ASSERT(maybeWaitScope == nullptr);
+  KJ_ASSERT(maybeWaitScope == kj::none);
   return getFiberPool().startFiber([this, buffer, size](kj::WaitScope& scope) {
     maybeWaitScope = scope;
     if (!isPoisoned()) {
@@ -423,7 +423,7 @@ kj::Promise<void> Rewriter::write(const void* buffer, size_t size) {
 
 kj::Promise<void> Rewriter::write(
     kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
-  KJ_ASSERT(maybeWaitScope == nullptr);
+  KJ_ASSERT(maybeWaitScope == kj::none);
   return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
     maybeWaitScope = scope;
     if (!isPoisoned()) {
@@ -444,7 +444,7 @@ kj::Promise<void> Rewriter::write(
 }
 
 kj::Promise<void> Rewriter::end() {
-  KJ_ASSERT(maybeWaitScope == nullptr);
+  KJ_ASSERT(maybeWaitScope == kj::none);
   return getFiberPool().startFiber([this](kj::WaitScope& scope) {
     maybeWaitScope = scope;
     if (!isPoisoned()) {
@@ -471,17 +471,17 @@ kj::Promise<void> Rewriter::finishWrite() {
   auto checkException = [this]() -> kj::Promise<void> {
     KJ_ASSERT(writePromise == nullptr);
 
-    KJ_IF_MAYBE(exception, maybeException) {
-      inner->abort(kj::cp(*exception));
-      return kj::cp(*exception);
+    KJ_IF_SOME(exception, maybeException) {
+      inner->abort(kj::cp(exception));
+      return kj::cp(exception);
     }
 
     return kj::READY_NOW;
   };
 
-  KJ_IF_MAYBE(wp, writePromise) {
-    KJ_DEFER(writePromise = nullptr);
-    return wp->then([checkException]() {
+  KJ_IF_SOME(wp, writePromise) {
+    KJ_DEFER(writePromise = kj::none);
+    return wp.then([checkException]() {
       return checkException();
     });
   }
@@ -505,7 +505,7 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
   }
 
   try {
-    KJ_IF_MAYBE(exception, kj::runCatchingExceptions([&] {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
       // V8 has a thread local pointer that points to where the stack limit is on this thread which
       // is tested for overflows when we enter any JS code. However since we're running in a fiber
       // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
@@ -518,7 +518,7 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
       // need to unwind the stack because we're probably still inside a cool_thing_rewriter_write().
       // We can't unwind with an exception across the Rust/C++ boundary, so instead we'll keep this
       // exception around and disable all later handlers.
-      maybePoison(kj::mv(*exception));
+      maybePoison(kj::mv(exception));
       return LOL_HTML_STOP;
     }
   } catch (kj::CanceledException) {
@@ -602,8 +602,8 @@ void Rewriter::outputImpl(const char* buffer, size_t size) {
   }
 
   auto bufferCopy = kj::heapArray(buffer, size);
-  KJ_IF_MAYBE(wp, writePromise) {
-    *wp = wp->then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
+  KJ_IF_SOME(wp, writePromise) {
+    wp = wp.then([this, bufferCopy = kj::mv(bufferCopy)]() mutable {
       return inner->write(bufferCopy.begin(), bufferCopy.size()).attach(kj::mv(bufferCopy));
     });
   } else {
@@ -654,16 +654,16 @@ kj::Maybe<kj::String> Element::getAttribute(kj::String name) {
       &checkToken(impl).element, name.cStr(), name.size()));
     // TODO(perf): We could construct a v8::String directly here, saving a copy.
   kj::Maybe kjAttr = attr.asKjString();
-  if (kjAttr != nullptr) {
+  if (kjAttr != kj::none) {
     return kj::mv(kjAttr);
   }
 
-  KJ_IF_MAYBE(exception, tryGetLastError()) {
-    kj::throwFatalException(kj::mv(*exception));
+  KJ_IF_SOME(exception, tryGetLastError()) {
+    kj::throwFatalException(kj::mv(exception));
   }
 
   // No error, just doesn't exist.
-  return nullptr;
+  return kj::none;
 }
 
 bool Element::hasAttribute(kj::String name) {
@@ -771,7 +771,7 @@ jsg::Ref<EndTag> EndTag::remove() {
 }
 
 void Element::htmlContentScopeEnd() {
-  impl = nullptr;
+  impl = kj::none;
 }
 
 Element::Impl::Impl(CType& element, Rewriter& rewriter): element(element), rewriter(rewriter) {}
@@ -809,7 +809,7 @@ Element::AttributesIterator::Next Element::AttributesIterator::next() {
 }
 
 void Element::AttributesIterator::htmlContentScopeEnd() {
-  impl = nullptr;
+  impl = kj::none;
 }
 
 // =======================================================================================
@@ -1026,7 +1026,7 @@ jsg::Ref<HTMLRewriter> HTMLRewriter::onDocument(DocumentContentHandlers&& handle
 jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> response) {
   auto maybeInput = response->getBody();
 
-  if (maybeInput == nullptr) {
+  if (maybeInput == kj::none) {
     // That was easy!
     return kj::mv(response);
   }
@@ -1042,12 +1042,12 @@ jsg::Ref<Response> HTMLRewriter::transform(jsg::Lock& js, jsg::Ref<Response> res
   kj::String ownContentType;
   kj::String encoding = kj::str("utf-8");
   auto contentTypeKey = jsg::ByteString(kj::str("content-type"));
-  KJ_IF_MAYBE(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
+  KJ_IF_SOME(contentType, response->getHeaders(js)->get(kj::mv(contentTypeKey))) {
     // TODO(cleanup): readContentTypeParameter can be replaced with using
     // workerd/util/mimetype.h directly.
-    KJ_IF_MAYBE(charset, readContentTypeParameter(*contentType, "charset")) {
-      ownContentType = kj::mv(*contentType);
-      encoding = kj::mv(*charset);
+    KJ_IF_SOME(charset, readContentTypeParameter(contentType, "charset")) {
+      ownContentType = kj::mv(contentType);
+      encoding = kj::mv(charset);
     }
   }
 

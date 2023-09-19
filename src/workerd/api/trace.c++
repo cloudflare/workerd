@@ -28,7 +28,7 @@ kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
 namespace {
 kj::Maybe<double> getTraceTimestamp(const Trace& trace) {
   if (trace.eventTimestamp == kj::UNIX_EPOCH) {
-    return nullptr;
+    return kj::none;
   }
   if (isPredictableModeForTest()) {
     return 0.0;
@@ -136,8 +136,8 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
 }
 
 kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace) {
-  KJ_IF_MAYBE(e, trace.eventInfo) {
-    KJ_SWITCH_ONEOF(*e) {
+  KJ_IF_SOME(e, trace.eventInfo) {
+    KJ_SWITCH_ONEOF(e) {
       KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::FetchEventInfo>(js, trace, fetch, trace.fetchResponseInfo));
       }
@@ -158,7 +158,7 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       }
     }
   }
-  return nullptr;
+  return kj::none;
 }
 }  // namespace
 
