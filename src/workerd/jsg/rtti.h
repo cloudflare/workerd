@@ -49,8 +49,8 @@ public:
   template<typename T>
   Structure::Reader structure() {
     auto name = jsg::fullyQualifiedTypeName(typeid(T));
-    KJ_IF_MAYBE(builder, symbols.find(name)) {
-      return (*builder)->template getRoot<Structure>();
+    KJ_IF_SOME(builder, symbols.find(name)) {
+      return builder->template getRoot<Structure>();
     }
 
     auto& builder = symbols.insert(

@@ -99,10 +99,10 @@ struct JsValueWrapper;
 // JS type is compatible.
 //
 //   JsValue val = js.str("foo");
-//   KJ_IF_MAYBE(str, val.tryCast<JsString>()) {
-//     // str is a JsString*
+//   KJ_IF_SOME(str, val.tryCast<JsString>()) {
+//     // str is a JsString
 //   }
-//   KJ_IF_MAYBE(num, val.tryCast<JsNumber>()) {
+//   KJ_IF_SOME(num, val.tryCast<JsNumber>()) {
 //     // never happens since val is not a number
 //   }
 //
@@ -137,7 +137,7 @@ public:
 
   JsRef<JsValue> addRef(Lock& js) KJ_WARN_UNUSED_RESULT;
 
-  JsValue structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = nullptr)
+  JsValue structuredClone(Lock& js, kj::Maybe<kj::Array<JsValue>> maybeTransfers = kj::none)
       KJ_WARN_UNUSED_RESULT;
 
   template <typename T>
@@ -311,17 +311,17 @@ inline kj::Maybe<T> JsValue::tryCast() const {
   if constexpr (kj::isSameType<T, JsValue>()) { return JsValue(inner); }
 #define V(Name) \
   else if constexpr (kj::isSameType<T, Js##Name>()) { \
-    if (!inner->Is##Name()) return nullptr; \
+    if (!inner->Is##Name()) return kj::none; \
     return T(inner.template As<v8::Name>()); \
   }
   JS_TYPE_CLASSES(V)
 #undef V
-  else { return nullptr; }
+  else { return kj::none; }
 }
 
 template <typename T>
 inline kj::Maybe<T&> JsValue::tryGetExternal(Lock& js, const JsValue& value) {
-  if (!value.isExternal()) return nullptr;
+  if (!value.isExternal()) return kj::none;
   return kj::Maybe<T&>(*static_cast<T*>(value.inner.As<v8::External>()->Value()));
 }
 
@@ -469,10 +469,10 @@ struct JsValueWrapper {
       return T(handle->ToBoolean(context->GetIsolate()));
     } else {
       JsValue value(handle);
-      KJ_IF_MAYBE(t, value.tryCast<T>()) {
-        return *t;
+      KJ_IF_SOME(t, value.tryCast<T>()) {
+        return t;
       }
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -483,11 +483,11 @@ struct JsValueWrapper {
                                 kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = context->GetIsolate();
     auto& js = Lock::from(isolate);
-    KJ_IF_MAYBE(result, TypeWrapper::from(isolate)
+    KJ_IF_SOME(result, TypeWrapper::from(isolate)
         .tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-      return JsRef(js, *result);
+      return JsRef(js, result);
     }
-    return nullptr;
+    return kj::none;
   }
 };
 

@@ -300,7 +300,7 @@ public:
   KJ_DISALLOW_COPY(BufferSource);
 
   // True if the BackingStore has been removed from this BufferSource.
-  inline bool isDetached() const { return maybeBackingStore == nullptr; }
+  inline bool isDetached() const { return maybeBackingStore == kj::none; }
 
   bool canDetach(Lock& js);
 
@@ -309,7 +309,7 @@ public:
   // It's worth mentioning that detach can throw application-visible exceptions
   // in the case the ArrayBuffer cannot be detached. Any detaching should be
   // performed as early as possible in an API method implementation.
-  BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = nullptr);
+  BackingStore detach(Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeKey = kj::none);
 
   v8::Local<v8::Value> getHandle(Lock& js);
 
@@ -333,7 +333,7 @@ public:
 
   inline kj::Maybe<size_t> underlyingArrayBufferSize(Lock& js) {
     if (isDetached()) {
-      return nullptr;
+      return kj::none;
     }
     auto h = getHandle(js);
     if (h->IsArrayBuffer()) {
@@ -402,7 +402,7 @@ public:
       BufferSource*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsArrayBuffer() && !handle->IsArrayBufferView()) {
-      return nullptr;
+      return kj::none;
     }
     return BufferSource(Lock::from(context->GetIsolate()), handle);
   }

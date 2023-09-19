@@ -33,7 +33,7 @@ class GeneratorContext final {
 public:
   // Signal early return on the generator. The value given will be returned by the
   // generator's forEach once the generator completes returning.
-  void return_(Lock& js, kj::Maybe<T> maybeValue = nullptr) {
+  void return_(Lock& js, kj::Maybe<T> maybeValue = kj::none) {
     returning = true;
     if (state.template is<Init>()) {
       state = kj::mv(maybeValue);
@@ -61,13 +61,13 @@ private:
   bool returning = false;
 
   kj::Maybe<kj::Maybe<T>> tryClearPendingReturn(Lock& js) {
-    KJ_IF_MAYBE(pending, state.template tryGet<Returning>()) {
+    KJ_IF_SOME(pending, state.template tryGet<Returning>()) {
       // pending here is a kj::Maybe<T> which might be nullptr.
-      auto value = kj::mv(*pending);
+      auto value = kj::mv(pending);
       state.template init<Init>();
       return kj::Maybe<kj::Maybe<T>>(kj::mv(value));
     }
-    return nullptr;
+    return kj::none;
   }
 
   inline void setErroring() { state.template init<Erroring>(); }
@@ -100,7 +100,7 @@ public:
           .maybeThrow = tryGetFunction<ThrowSignature>(isolate, object, "throw"_kj, typeWrapper)
         }) {
     // If there is no next function, there's nothing to do. Go ahead and mark finished.
-    if (state.template get<Active>().maybeNext == nullptr) {
+    if (state.template get<Active>().maybeNext == kj::none) {
       setFinished();
     }
   }
@@ -108,8 +108,8 @@ public:
   inline bool isFinished() const { return state.template is<Finished>(); }
 
   void visitForGc(GcVisitor& visitor) {
-    KJ_IF_MAYBE(active, state) {
-      visitor.visit(active->maybeNext, active->maybeReturn, active->maybeThrow);
+    KJ_IF_SOME(active, state) {
+      visitor.visit(active.maybeNext, active.maybeReturn, active.maybeThrow);
     }
   }
 
@@ -138,7 +138,7 @@ private:
                              object);
   }
 
-  void setFinished(kj::Maybe<T> maybeReturnValue = nullptr) {
+  void setFinished(kj::Maybe<T> maybeReturnValue = kj::none) {
     returnValue = kj::mv(maybeReturnValue);
     state.template init<Finished>();
   }
@@ -186,17 +186,17 @@ public:
   // Func should have a signature of void(Lock&, T, GeneratorContext<T>&)
   template <GeneratorCallback<T> Func>
   kj::Maybe<T> forEach(Lock& js, Func func) {
-    KJ_IF_MAYBE(i, this->impl) {
-      auto& impl = *i;
+    KJ_IF_SOME(i, this->impl) {
+      auto& impl = i;
       KJ_SWITCH_ONEOF(impl->state) {
         KJ_CASE_ONEOF(finished, typename Impl::Finished) {
-          return nullptr;
+          return kj::none;
         }
         KJ_CASE_ONEOF(active, typename Impl::Active) {
-          KJ_IF_MAYBE(next, active.maybeNext) {
+          KJ_IF_SOME(next, active.maybeNext) {
             while(!impl->isFinished()) {
               js.tryCatch([&] {
-                auto result = (*next)(js);
+                auto result = next(js);
                 if (impl->processResultMaybeDone(js, func, result)) {
                   return;
                 }
@@ -205,16 +205,16 @@ public:
                 // check to see if early return has been indicated. That will
                 // return a result that might indicate done. If it does, we
                 // return, otherwise we continue the loop until done is signaled.
-                KJ_IF_MAYBE(returned, active.context.tryClearPendingReturn(js)) {
+                KJ_IF_SOME(returned, active.context.tryClearPendingReturn(js)) {
                   // returned here is a kj::Maybe<T> ...
                   // If a return() handler is not provided by the generator, then
                   // we will set the return value and break out early. Otherwise,
                   // we let the return() handler tell us what to do next.
-                  KJ_IF_MAYBE(return_, active.maybeReturn) {
-                    auto result = (*return_)(js, kj::mv(*returned));
+                  KJ_IF_SOME(return_, active.maybeReturn) {
+                    auto result = return_(js, kj::mv(returned));
                     impl->processResultMaybeDone(js, func, result);
                   } else {
-                    impl->setFinished(kj::mv(*returned));
+                    impl->setFinished(kj::mv(returned));
                   }
                 }
               }, [&](Value exception) {
@@ -242,8 +242,8 @@ public:
                 // again will return { done: false, value: 'd' }. Calling next() again
                 // after that will result in the pending 'boom' exception being thrown.
 
-                KJ_IF_MAYBE(throw_, active.maybeThrow) {
-                  auto result = (*throw_)(js, kj::mv(exception));
+                KJ_IF_SOME(throw_, active.maybeThrow) {
+                  auto result = throw_(js, kj::mv(exception));
                   active.context.setErroring();
                   // The throw_() handler could just end up throwing the exception
                   // synchronously, in which case we break out here and do nothing
@@ -272,8 +272,8 @@ public:
   }
 
   void visitForGc(GcVisitor& visitor) {
-    KJ_IF_MAYBE(i, impl) {
-      (*i)->visitForGc(visitor);
+    KJ_IF_SOME(i, impl) {
+      i->visitForGc(visitor);
     }
   }
 
@@ -309,24 +309,24 @@ public:
   // Func should have a signature of Promise<void>(Lock&, T, GeneratorContext<T>&)
   template <AsyncGeneratorCallback<T> Func>
   Promise<kj::Maybe<T>> forEach(Lock& js, Func func) {
-    KJ_IF_MAYBE(i, this->impl) {
+    KJ_IF_SOME(i, this->impl) {
       // It is important to note that the returned Promise takes over ownership
       // of the underlying Impl state here, keeping it alive until the async
       // generator completes. Once the generator is consumed once, it cannot
       // be consumed again.
-      return loop(js, **i, kj::mv(func)).then(js,
-          JSG_VISITABLE_LAMBDA((impl = kj::mv(*i)), (impl), (auto& js) mutable {
+      return loop(js, *i, kj::mv(func)).then(js,
+          JSG_VISITABLE_LAMBDA((impl = kj::mv(i)), (impl), (auto& js) mutable {
         return js.resolvedPromise(kj::mv(impl->returnValue));
       }));
     } else {
-      return js.template resolvedPromise<kj::Maybe<T>>(nullptr);
+      return js.template resolvedPromise<kj::Maybe<T>>(kj::none);
     }
-    return js.template resolvedPromise<kj::Maybe<T>>(nullptr);
+    return js.template resolvedPromise<kj::Maybe<T>>(kj::none);
   }
 
   void visitForGc(GcVisitor& visitor) {
-    KJ_IF_MAYBE(i, impl) {
-      i->visitForGc(visitor);
+    KJ_IF_SOME(i, impl) {
+      i.visitForGc(visitor);
     }
   }
 
@@ -355,9 +355,9 @@ private:
         return js.resolvedPromise();
       }
       KJ_CASE_ONEOF(active, typename Impl::Active) {
-        KJ_IF_MAYBE(next, active.maybeNext) {
+        KJ_IF_SOME(next, active.maybeNext) {
           // Call next to get the next item...
-          return (*next)(js).then(js, [&impl, func = kj::mv(func)](auto& js, auto result) {
+          return next(js).then(js, [&impl, func = kj::mv(func)](auto& js, auto result) {
             // Impl should still be active here because nothing should have been able
             // to invalidate it yet.
             auto& active = impl.state.template get<typename Impl::Active>();
@@ -382,9 +382,9 @@ private:
               auto& active = impl.state.template get<typename Impl::Active>();
 
               // If we got this far, we check to see if early return was requested.
-              KJ_IF_MAYBE(returned, active.context.tryClearPendingReturn(js)) {
-                KJ_IF_MAYBE(return_, active.maybeReturn) {
-                  return js.evalNow([&] { return (*return_)(js, kj::mv(*returned)); })
+              KJ_IF_SOME(returned, active.context.tryClearPendingReturn(js)) {
+                KJ_IF_SOME(return_, active.maybeReturn) {
+                  return js.evalNow([&] { return return_(js, kj::mv(returned)); })
                       .then(js, [&impl, func = kj::cp(func)](auto& js, auto result) {
                     if (impl.isFinished()) {
                       return js.resolvedPromise();
@@ -396,9 +396,9 @@ private:
                   }, [&impl, func = kj::mv(func)](auto& js, Value exception) {
                     if (!impl.isFinished()) {
                       auto& active = impl.state.template get<typename Impl::Active>();
-                      KJ_IF_MAYBE(throw_, active.maybeThrow) {
+                      KJ_IF_SOME(throw_, active.maybeThrow) {
                         active.context.setErroring();
-                        return js.evalNow([&] { return (*throw_)(js, kj::mv(exception)); })
+                        return js.evalNow([&] { return throw_(js, kj::mv(exception)); })
                             .then(js, [&impl, func = kj::mv(func)](auto& js, auto result) {
                           if (impl.processResultMaybeDone(js, func, result)) {
                             return js.resolvedPromise();
@@ -411,7 +411,7 @@ private:
                   });
                 }
 
-                impl.setFinished(kj::mv(*returned));
+                impl.setFinished(kj::mv(returned));
                 return js.resolvedPromise();
               }
 
@@ -419,9 +419,9 @@ private:
             }, [&impl, func = kj::mv(func)](auto& js, Value exception) {
               if (!impl.isFinished()) {
                 auto& active = impl.state.template get<typename Impl::Active>();
-                KJ_IF_MAYBE(throw_, active.maybeThrow) {
+                KJ_IF_SOME(throw_, active.maybeThrow) {
                   active.context.setErroring();
-                  return js.evalNow([&] { return (*throw_)(js, kj::mv(exception)); })
+                  return js.evalNow([&] { return throw_(js, kj::mv(exception)); })
                       .then(js, [&impl, func = kj::mv(func)](auto& js, auto result) {
                     if (impl.processResultMaybeDone(js, func, result)) {
                       return js.resolvedPromise();
@@ -506,7 +506,7 @@ public:
         if (value->IsUndefined()) {
           return GeneratorNext<T> {
             .done = true,
-            .value = nullptr,
+            .value = kj::none,
           };
         } else {
           return GeneratorNext<T> {
@@ -516,10 +516,10 @@ public:
         }
       }
 
-      KJ_IF_MAYBE(v, typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject)) {
+      KJ_IF_SOME(v, typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject)) {
         return GeneratorNext<T> {
           .done = false,
-          .value = kj::mv(*v),
+          .value = kj::mv(v),
         };
       } else {
         throwTypeError(context->GetIsolate(),
@@ -528,7 +528,7 @@ public:
       }
     }
 
-    return nullptr;
+    return kj::none;
   }
 
   template <typename T>
@@ -549,7 +549,7 @@ public:
         }
       }
     }
-    return nullptr;
+    return kj::none;
   }
 
   template <typename T>
@@ -570,7 +570,7 @@ public:
         }
       }
     }
-    return nullptr;
+    return kj::none;
   }
 };
 
@@ -633,15 +633,15 @@ public:
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = context->GetIsolate();
     auto& typeWrapper = TypeWrapper::from(isolate);
-    KJ_IF_MAYBE(gen, typeWrapper.tryUnwrap(context, handle, (Generator<U>*)nullptr, parentObject)) {
+    KJ_IF_SOME(gen, typeWrapper.tryUnwrap(context, handle, (Generator<U>*)nullptr, parentObject)) {
       kj::Vector<U> items;
       // We intentionally ignore the forEach return value.
-      gen->forEach(Lock::from(isolate), [&items](Lock&, U item, auto&) {
+      gen.forEach(Lock::from(isolate), [&items](Lock&, U item, auto&) {
         items.add(kj::mv(item));
       });
       return Sequence<U>(items.releaseAsArray());
     }
-    return nullptr;
+    return kj::none;
   }
 };
 
@@ -674,10 +674,10 @@ private:
   State state;
 
   Next nextImpl(Lock& js, NextSignature nextFunc) {
-    KJ_IF_MAYBE(value, nextFunc(js, state)) {
-      return Next { .done = false, .value = kj::mv(*value) };
+    KJ_IF_SOME(value, nextFunc(js, state)) {
+      return Next { .done = false, .value = kj::mv(value) };
     }
-    return Next { .done = true, .value = nullptr, };
+    return Next { .done = true, .value = kj::none, };
   }
 
   friend SelfType;
@@ -772,11 +772,11 @@ public:
   }
 
   void visitForGc(GcVisitor& visitor) {
-    KJ_IF_MAYBE(inner, state.template tryGet<InnerState>()) {
+    KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
       if constexpr (hasPublicVisitForGc<State>()) {
-        visitor.visit(inner->state);
+        visitor.visit(inner.state);
       }
-      visitor.visit(inner->impl);
+      visitor.visit(inner.impl);
     }
   }
 
@@ -793,13 +793,13 @@ private:
     inner.impl.pushCurrent(promise.whenResolved(js).then(js,
         [this, self = JSG_THIS](jsg::Lock& js) {
       // If state is Finished, then there's nothing we need to do here.
-      KJ_IF_MAYBE(inner, state.template tryGet<InnerState>()) {
-        inner->impl.popCurrent();
+      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+        inner.impl.popCurrent();
       }
       return js.resolvedPromise();
     }, [this, self = JSG_THIS](jsg::Lock& js, jsg::Value value) {
-      KJ_IF_MAYBE(inner, state.template tryGet<InnerState>()) {
-        inner->impl.popCurrent();
+      KJ_IF_SOME(inner, state.template tryGet<InnerState>()) {
+        inner.impl.popCurrent();
       }
       return js.rejectedPromise<void>(kj::mv(value));
     }));
@@ -829,8 +829,8 @@ private:
               pushCurrent(js, promise.whenResolved(js));
               return promise.then(js,
                   [this, self = kj::mv(self)](Lock& js, kj::Maybe<Type> maybeResult) mutable {
-                KJ_IF_MAYBE(result, maybeResult) {
-                  return js.resolvedPromise(Next { .done = false, .value = kj::mv(*result) });
+                KJ_IF_SOME(result, maybeResult) {
+                  return js.resolvedPromise(Next { .done = false, .value = kj::mv(result) });
                 } else {
                   state.template init<Finished>();
                   return js.resolvedPromise(Next { .done = true });
@@ -841,8 +841,8 @@ private:
           KJ_UNREACHABLE;
         };
 
-        KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          auto promise = current->whenResolved(js).then(js, kj::mv(callNext));
+        KJ_IF_SOME(current, inner.impl.maybeCurrent()) {
+          auto promise = current.whenResolved(js).then(js, kj::mv(callNext));
           pushCurrent(js, promise.whenResolved(js));
           return kj::mv(promise);
         }
@@ -897,8 +897,8 @@ private:
 
         // If there is something on the pending stack, we are going to wait for that promise
         // to resolve then call callReturn.
-        KJ_IF_MAYBE(current, inner.impl.maybeCurrent()) {
-          return current->whenResolved(js).then(js, kj::mv(callReturn));
+        KJ_IF_SOME(current, inner.impl.maybeCurrent()) {
+          return current.whenResolved(js).then(js, kj::mv(callReturn));
         }
 
         // Otherwise, we call callReturn immediately.

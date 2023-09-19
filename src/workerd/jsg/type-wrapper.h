@@ -80,7 +80,7 @@ public:
       if (handle->Is##type()) { \
         return handle.As<v8::type>(); \
       } \
-      return nullptr; \
+      return kj::none; \
     } \
     \
     kj::Maybe<v8::Global<v8::type>> tryUnwrap( \
@@ -89,7 +89,7 @@ public:
       if (handle->Is##type()) { \
         return v8::Global<v8::type>(context->GetIsolate(), handle.As<v8::type>()); \
       } \
-      return nullptr; \
+      return kj::none; \
     } \
     \
     kj::Maybe<V8Ref<v8::type>> tryUnwrap( \
@@ -98,7 +98,7 @@ public:
       if (handle->Is##type()) { \
         return V8Ref<v8::type>(context->GetIsolate(), handle.As<v8::type>()); \
       } \
-      return nullptr; \
+      return kj::none; \
     } \
     template <typename T = v8::type, typename = decltype(&T::GetIdentityHash)> \
     kj::Maybe<HashableV8Ref<T>> tryUnwrap( \
@@ -107,7 +107,7 @@ public:
       if (handle->Is##type()) { \
         return HashableV8Ref<v8::type>(context->GetIsolate(), handle.As<v8::type>()); \
       } \
-      return nullptr; \
+      return kj::none; \
     }
 
   JSG_FOR_EACH_V8_VALUE_SUBCLASS(JSG_DEFINE_TRY_UNWRAP)
@@ -160,7 +160,7 @@ public:
     if (handle->IsUndefined()) {
       return Unimplemented();
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 };
@@ -482,11 +482,11 @@ public:
   template <typename U>
   auto unwrap(v8::Local<v8::Context> context, v8::Local<v8::Value> handle,
               TypeErrorContext errorContext,
-              kj::Maybe<v8::Local<v8::Object>> parentObject = nullptr)
+              kj::Maybe<v8::Local<v8::Object>> parentObject = kj::none)
            -> RemoveRvalueRef<U> {
     auto maybe = this->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject);
-    KJ_IF_MAYBE(result, maybe) {
-      return kj::fwd<RemoveMaybe<decltype(maybe)>>(*result);
+    KJ_IF_SOME(result, maybe) {
+      return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
     } else {
       throwTypeError(context->GetIsolate(), errorContext,
                      TypeWrapper::getName((kj::Decay<U>*)nullptr));

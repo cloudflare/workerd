@@ -65,15 +65,15 @@ kj::String typeName(const std::type_info& type) {
   auto result = fullyQualifiedTypeName(type);
 
   // Strip namespace, if any.
-  KJ_IF_MAYBE(pos, result.findLast(':')) {
-    result = kj::str(result.slice(*pos + 1));
+  KJ_IF_SOME(pos, result.findLast(':')) {
+    result = kj::str(result.slice(pos + 1));
   }
 
   // Strip template args, if any.
   //
   // TODO(someday): Maybe just strip namespaces from each arg?
-  KJ_IF_MAYBE(pos, result.findFirst('<')) {
-    result = kj::str(result.slice(0, *pos));
+  KJ_IF_SOME(pos, result.findFirst('<')) {
+    result = kj::str(result.slice(0, pos));
   }
 
   return kj::mv(result);
@@ -126,7 +126,7 @@ kj::Maybe<v8::Local<v8::Value>> tryMakeDomException(v8::Isolate* isolate,
     }
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 v8::Local<v8::Value> tryMakeDomExceptionOrDefaultError(
@@ -225,9 +225,9 @@ DecodedException decodeTunneledException(v8::Isolate* isolate,
       if (errorType.startsWith("DOMException(")) {
         errorType = errorType.slice(strlen("DOMException("));
         // Check for closing brace
-        KJ_IF_MAYBE(closeParen, errorType.findFirst(')')) {
-          auto errorName = kj::str(errorType.slice(0, *closeParen));
-          auto message = appMessage(errorType.slice(1 + *closeParen));
+        KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
+          auto errorName = kj::str(errorType.slice(0, closeParen));
+          auto message = appMessage(errorType.slice(1 + closeParen));
           result.handle = tryMakeDomExceptionOrDefaultError(isolate, message, errorName);
           break;
         }
@@ -326,7 +326,7 @@ void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
 }
 
 void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
-  KJ_IF_MAYBE(renderingError, kj::runCatchingExceptions([&]() {
+  KJ_IF_SOME(renderingError, kj::runCatchingExceptions([&]() {
     isolate->ThrowException(makeInternalError(isolate, kj::mv(exception)));
   })) {
     KJ_LOG(ERROR, "error rendering exception", renderingError);
@@ -338,8 +338,8 @@ void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
 static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {
   kj::String type;
 
-  KJ_IF_MAYBE(t, c.type) {
-    type = typeName(*t);
+  KJ_IF_SOME(t, c.type) {
+    type = typeName(t);
   }
 
   switch (c.kind) {
@@ -391,8 +391,8 @@ static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType)
 static kj::String unimplementedErrorMessage(TypeErrorContext c) {
   kj::String type;
 
-  KJ_IF_MAYBE(t, c.type) {
-    type = typeName(*t);
+  KJ_IF_SOME(t, c.type) {
+    type = typeName(t);
   }
 
   switch (c.kind) {

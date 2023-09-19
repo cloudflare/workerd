@@ -10,7 +10,7 @@ kj::Maybe<jsg::Promise<void>&> AsyncIteratorImpl::maybeCurrent() {
   if (!pendingStack.empty()) {
     return pendingStack.back();
   }
-  return nullptr;
+  return kj::none;
 }
 
 void AsyncIteratorImpl::pushCurrent(Promise<void> promise) {

@@ -402,11 +402,11 @@ public:
     // Since most things are coercible to a string, this ought to catch pretty much
     // any value other than symbol
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    KJ_IF_MAYBE(string, wrapper.tryUnwrap(context, handle, (kj::String*)nullptr, parentObject)) {
-      return Name(kj::mv(*string));
+    KJ_IF_SOME(string, wrapper.tryUnwrap(context, handle, (kj::String*)nullptr, parentObject)) {
+      return Name(kj::mv(string));
     }
 
-    return nullptr;
+    return kj::none;
   }
 };
 
@@ -498,8 +498,8 @@ public:
   v8::Local<v8::Value> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
       Optional<U> ptr) {
-    KJ_IF_MAYBE(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(*p));
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(context->GetIsolate());
     }
@@ -530,8 +530,8 @@ public:
   v8::Local<v8::Value> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
       LenientOptional<U> ptr) {
-    KJ_IF_MAYBE(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(*p));
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(p));
     } else {
       return v8::Undefined(context->GetIsolate());
     }
@@ -542,13 +542,13 @@ public:
       v8::Local<v8::Context> context, v8::Local<v8::Value> handle, LenientOptional<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsUndefined()) {
-      return LenientOptional<U>(nullptr);
+      return LenientOptional<U>(kj::none);
     } else {
-      KJ_IF_MAYBE(unwrapped, static_cast<TypeWrapper*>(this)
+      KJ_IF_SOME(unwrapped, static_cast<TypeWrapper*>(this)
           ->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject)) {
-        return LenientOptional<U>(kj::mv(*unwrapped));
+        return LenientOptional<U>(kj::mv(unwrapped));
       } else {
-        return LenientOptional<U>(nullptr);
+        return LenientOptional<U>(kj::none);
       }
     }
   }
@@ -583,8 +583,8 @@ public:
   v8::Local<v8::Value> wrap(
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
       kj::Maybe<U> ptr) {
-    KJ_IF_MAYBE(p, ptr) {
-      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(*p));
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::fwd<U>(p));
     } else {
       return v8::Null(context->GetIsolate());
     }
@@ -672,8 +672,8 @@ public:
         return true;
       }
     } else if constexpr(Predicate<kj::Decay<U>>::value) {
-      KJ_IF_MAYBE(val, static_cast<TypeWrapper*>(this)->tryUnwrap(context, in, (U*)nullptr, nullptr)) {
-        out.template init<U>(kj::mv(*val));
+      KJ_IF_SOME(val, static_cast<TypeWrapper*>(this)->tryUnwrap(context, in, (U*)nullptr, nullptr)) {
+        out.template init<U>(kj::mv(val));
         return true;
       }
     }
@@ -923,7 +923,7 @@ public:
     } else if (handle->IsArrayBuffer()) {
       return asBytes(handle.As<v8::ArrayBuffer>());
     }
-    return nullptr;
+    return kj::none;
   }
 
   kj::Maybe<kj::Array<const byte>> tryUnwrap(
@@ -1006,13 +1006,13 @@ public:
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
         // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
         auto unwrappedName = wrapper.tryUnwrap(context, name, (K*)nullptr, object);
-        if (unwrappedName == nullptr) {
+        if (unwrappedName == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictKey(strName.cStr()),
               TypeWrapper::getName((K*)nullptr));
         }
         auto unwrappedValue = wrapper.tryUnwrap(context, value, (V*)nullptr, object);
-        if (unwrappedValue == nullptr) {
+        if (unwrappedValue == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(context->GetIsolate(), TypeErrorContext::dictField(strName.cStr()),
               TypeWrapper::getName((V*)nullptr));
@@ -1054,7 +1054,7 @@ public:
       double millis = handle.template As<v8::Number>()->Value();
       return toKjDate(millis);
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 private:
@@ -1104,9 +1104,9 @@ public:
     auto& wrapper = static_cast<TypeWrapper&>(*this);
     if constexpr (kj::isSameType<kj::String, T>()) {
       if (!handle->IsString()) return nullptr;
-      KJ_IF_MAYBE(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+      KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T> {
-          .value = kj::mv(*value),
+          .value = kj::mv(value),
         };
       }
       return nullptr;
@@ -1287,12 +1287,12 @@ public:
     // introduced, they'll need to be handled explicitly here also.
     auto& js = Lock::from(context->GetIsolate());
     auto& wrapper = TypeWrapper::from(js.v8Isolate);
-    KJ_IF_MAYBE(domException, wrapper.tryUnwrap(context, handle,
+    KJ_IF_SOME(domException, wrapper.tryUnwrap(context, handle,
                                                 (DOMException*)nullptr,
                                                 parentObject)) {
       return KJ_EXCEPTION(FAILED,
-          kj::str("jsg.DOMException(", domException->getName(), "): ",
-                  domException->getMessage()));
+          kj::str("jsg.DOMException(", domException.getName(), "): ",
+                  domException.getMessage()));
     } else {
 
       static const constexpr kj::StringPtr PREFIXES[] = {

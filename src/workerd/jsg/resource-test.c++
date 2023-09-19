@@ -254,7 +254,7 @@ struct IterableContext: public ContextGlobalObject {
 
       NextValue next() {
         if (cursor == parent->values + sizeof(parent->values) / sizeof(*parent->values)) {
-          return {.done = true, .value = nullptr};
+          return {.done = true, .value = kj::none};
         }
         return {.done = false, .value = *cursor++};
       }
@@ -523,8 +523,8 @@ struct ReflectionContext: public ContextGlobalObject {
       auto result = jsg::alloc<Reflector>();
 
       // Check reflection returns null when wrapper isn't allocated.
-      KJ_EXPECT(result->intReflector.get(isolate, "foo") == nullptr);
-      KJ_EXPECT(result->stringReflector.get(isolate, "foo") == nullptr);
+      KJ_EXPECT(result->intReflector.get(isolate, "foo") == kj::none);
+      KJ_EXPECT(result->stringReflector.get(isolate, "foo") == kj::none);
 
       return result;
     }

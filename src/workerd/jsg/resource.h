@@ -290,7 +290,7 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
         (*method)(wrapper.template unwrap<Args>(context, args, indexes,
             TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(context, nullptr, (*method)(
+        return wrapper.wrap(context, kj::none, (*method)(
             wrapper.template unwrap<Args>(context, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
@@ -315,7 +315,7 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
         (*method)(lock, wrapper.template unwrap<Args>(context, args, indexes,
             TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(context, nullptr, (*method)(lock,
+        return wrapper.wrap(context, kj::none, (*method)(lock,
             wrapper.template unwrap<Args>(context, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
@@ -340,7 +340,7 @@ struct StaticMethodCallback<TypeWrapper, methodName, T,
         (*method)(args, wrapper.template unwrap<Args>(context, args, indexes,
             TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
       } else {
-        return wrapper.wrap(context, nullptr, (*method)(args,
+        return wrapper.wrap(context, kj::none, (*method)(args,
             wrapper.template unwrap<Args>(context, args, indexes,
                 TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
       }
@@ -576,8 +576,8 @@ private:
 
   DynamicTypeInfo getDynamicTypeInfo(
       v8::Isolate* isolate, const std::type_info& type) {
-    KJ_IF_MAYBE(f, resourceTypeMap.find(std::type_index(type))) {
-      return (**f)(static_cast<TypeWrapper&>(*this), isolate);
+    KJ_IF_SOME(f, resourceTypeMap.find(std::type_index(type))) {
+      return (*f)(static_cast<TypeWrapper&>(*this), isolate);
     } else {
       KJ_FAIL_REQUIRE(
           "cannot wrap object type that was not registered with JSG_DECLARE_ISOLATE_TYPE",
@@ -699,7 +699,7 @@ struct ResourceTypeBuilder {
   template<typename T>
   inline void registerReadonlyInstanceProperty(kj::StringPtr name, T value) {
     auto v8Name = v8StrIntern(isolate, name);
-    auto v8Value = typeWrapper.wrap(isolate, nullptr, kj::mv(value));
+    auto v8Value = typeWrapper.wrap(isolate, kj::none, kj::mv(value));
     instance->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
   }
 
@@ -742,7 +742,7 @@ struct ResourceTypeBuilder {
     // getter but is simply a primitive value set at constructor creation time.
 
     auto v8Name = v8StrIntern(isolate, name);
-    auto v8Value = typeWrapper.wrap(isolate, nullptr, kj::mv(value));
+    auto v8Value = typeWrapper.wrap(isolate, kj::none, kj::mv(value));
 
     constructor->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
     constructor->PrototypeTemplate()->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
@@ -943,8 +943,8 @@ public:
 
     auto isolate = context->GetIsolate();
 
-    KJ_IF_MAYBE(h, value->tryGetHandle(isolate)) {
-      return *h;
+    KJ_IF_SOME(h, value->tryGetHandle(isolate)) {
+      return h;
     } else {
       auto& type = typeid(*value);
       auto& wrapper = static_cast<TypeWrapper&>(*this);
@@ -959,8 +959,8 @@ public:
       } else {
         auto info = wrapper.getDynamicTypeInfo(isolate, type);
         tmpl = info.tmpl;
-        KJ_IF_MAYBE(i, info.reflectionInitializer) {
-          (*i)(*value, wrapper);
+        KJ_IF_SOME(i, info.reflectionInitializer) {
+          i(*value, wrapper);
         }
       }
       v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
@@ -1041,7 +1041,7 @@ public:
       }
     }
 
-    return nullptr;
+    return kj::none;
   }
 
   kj::Maybe<Ref<T>> tryUnwrap(
@@ -1049,10 +1049,10 @@ public:
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Try to unwrap a value of type Ref<T>.
 
-    KJ_IF_MAYBE(p, tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
-      return Ref<T>(kj::addRef(*p));
+    KJ_IF_SOME(p, tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
+      return Ref<T>(kj::addRef(p));
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -1143,8 +1143,8 @@ public:
       Ref<Object>&& value) {
     auto isolate = context->GetIsolate();
 
-    KJ_IF_MAYBE(h, value->tryGetHandle(isolate)) {
-      return *h;
+    KJ_IF_SOME(h, value->tryGetHandle(isolate)) {
+      return h;
     } else {
       auto& valueRef = *value;  // avoid compiler warning about typeid(*value) having side effects
       auto& type = typeid(valueRef);
@@ -1154,8 +1154,8 @@ public:
       // always a subclass, because `jsg::Object` cannot be constructed directly.
       auto info = wrapper.getDynamicTypeInfo(isolate, type);
       v8::Local<v8::FunctionTemplate> tmpl = info.tmpl;
-      KJ_IF_MAYBE(i, info.reflectionInitializer) {
-        (*i)(*value, wrapper);
+      KJ_IF_SOME(i, info.reflectionInitializer) {
+        i(*value, wrapper);
       }
       v8::Local<v8::Object> object = check(tmpl->InstanceTemplate()->NewInstance(context));
       value.attachWrapper(isolate, object);

@@ -60,9 +60,9 @@ void Data::destroy() {
       // - If the `Data` is being destroyed _not_ as part of GC, e.g. it's being destroyed because
       //   the data structure holding it is being modified in a way that drops the reference, then
       //   that implies that the reference is still reachable, so must still be valid.
-      KJ_IF_MAYBE(t, tracedHandle) {
+      KJ_IF_SOME(t, tracedHandle) {
         if (!HeapTracer::isInCppgcDestructor()) {
-          t->Reset();
+          t.Reset();
         }
       }
     } else {
@@ -112,7 +112,7 @@ void Data::moveFromTraced(Data& other, v8::TracedReference<v8::Data>& otherTrace
   // `TracedReference` so that V8 knows it's gone, which might make minor GCs more effective.
   otherTracedRef.Reset();
 
-  other.tracedHandle = nullptr;
+  other.tracedHandle = kj::none;
 }
 
 Lock::Lock(v8::Isolate* v8Isolate)

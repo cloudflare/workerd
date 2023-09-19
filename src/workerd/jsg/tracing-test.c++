@@ -42,12 +42,12 @@ class GcDetector: public jsg::Object {
 
 public:
   ~GcDetector() noexcept(false) {
-    KJ_IF_MAYBE(s, sibling) s->sibling = nullptr;
+    KJ_IF_SOME(s, sibling) s.sibling = kj::none;
   }
 
   kj::Maybe<GcDetector&> sibling;
 
-  bool getSiblingCollected() { return sibling == nullptr; }
+  bool getSiblingCollected() { return sibling == kj::none; }
 
   bool touch() { return true; }
 
