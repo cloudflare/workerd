@@ -78,35 +78,125 @@ private:
 
   template <typename T>
   kj::Promise<kj::Array<T>> read(ReadOption option = ReadOption::NONE) {
+    // There are a few complexities in this operation that make it difficult to completely
+    // optimize. The most important is that even if a stream reports an expected length
+    // using tryGetLength, we really don't know how much data the stream will produce until
+    // we try to read it. The only signal we have that the stream is done producing data
+    // is a zero-length result from tryRead. Unfortuntately, we have to allocate a buffer
+    // in advance of calling tryRead so we have to guess a bit at the size of the buffer
+    // to allocate.
+    //
+    // In the previous implementation of this method, we would just blindly allocate a
+    // 4096 byte buffer on every allocation, limiting each read iteration to a maximum
+    // of 4096 bytes. This works fine for streams producing a small amount of data but
+    // risks requiring a greater number of loop iterations and small allocations for streams
+    // that produce larger amounts of data. Also in the previous implementation, every
+    // loop iteration would allocate a new buffer regardless of how much of the previous
+    // allocation was actually used -- so a stream that produces only 4000 bytes total
+    // but only provides 10 bytes per iteration would end up with 400 reads and 400 4096
+    // byte allocations. Doh! Fortunately our stream implementations tend to be a bit
+    // smarter than that but it's still a worst case possibility that it's likely better
+    // to avoid.
+    //
+    // So this implementation does things a bit differently.
+    // First, we check to see if the stream can give an estimate on how much data it
+    // expects to produce. If that length is within a given threshold, then best case
+    // is we can perform the entire read with at most two allocations and two calls to
+    // tryRead. The first allocation will be for the entire expected size of the stream,
+    // which the first tryRead will attempt to fulfill completely. In the best case the
+    // stream provides all of the data. The next allocation would be smaller and would
+    // end up resulting in a zero-length read signaling that we are done. Hooray!
+    //
+    // Not everything can be best case scenario tho, unfortunately. If our first tryRead
+    // does not fully consume the stream or fully fill the desination buffer, we're
+    // going to need to try again. It is possible that the new allocation in the next
+    // iteration will be wasted if the stream doesn't have any more data so it's important
+    // for us to try to be conservative with the allocation. If the running total of data
+    // we've seen so far is equal to or greater than the expected total length of the stream,
+    // then the most likely case is that the next read will be zero-length -- but unfortunately
+    // we can't know for sure! So for this we will fall back to a more conservative allocation
+    // which is either 4096 bytes or the calculated amountToRead, whichever is the lower number.
+
     kj::Vector<kj::Array<T>> parts;
     uint64_t runningTotal = 0;
-    static constexpr size_t DEFAULT_BUFFER_CHUNK = 4096;
-    static constexpr size_t MAX_BUFFER_CHUNK = DEFAULT_BUFFER_CHUNK * 4;
+    static constexpr uint64_t MIN_BUFFER_CHUNK = 1024;
+    static constexpr uint64_t DEFAULT_BUFFER_CHUNK = 4096;
+    static constexpr uint64_t MAX_BUFFER_CHUNK = DEFAULT_BUFFER_CHUNK * 4;
 
     // If we know in advance how much data we'll be reading, then we can attempt to
     // optimize the loop here by setting the value specifically so we are only
-    // allocating once. But, to be safe, let's enforce an upper bound on each allocation
-    // even if we do know the total.
-    size_t amountToRead = kj::min(MAX_BUFFER_CHUNK,
-        input.tryGetLength(StreamEncoding::IDENTITY).orDefault(DEFAULT_BUFFER_CHUNK));
+    // allocating at most twice. But, to be safe, let's enforce an upper bound on each
+    // allocation even if we do know the total.
+    kj::Maybe<uint64_t> maybeLength = input.tryGetLength(StreamEncoding::IDENTITY);
 
+    // The amountToRead is the regular allocation size we'll use right up until we've
+    // read the number of expected bytes (if known). This number is calculated as the
+    // minimum of (limit, MAX_BUFFER_CHUNK, maybeLength or DEFAULT_BUFFER_CHUNK). In
+    // the best case scenario, this number is calculated such that we can read the
+    // entire stream in one go if the amount of data is small enough and the stream
+    // is well behaved.
+    // If the stream does report a length, once we've read that number of bytes, we'll
+    // fallback to the conservativeAllocation.
+    uint64_t amountToRead = kj::min(limit,
+                                    kj::min(MAX_BUFFER_CHUNK,
+                                            maybeLength.orDefault(DEFAULT_BUFFER_CHUNK)));
+    // amountToRead can be zero if the stream reported a zero-length. While the stream could
+    // be lying about it's length, let's skip reading anything in this case.
     if (amountToRead > 0) {
       for (;;) {
-        // TODO(perf): We can likely further optimize this loop by checking to see
-        // how much of the buffer was filled and using the remaining buffer space if
-        // it is not completely filled by the previous iteration. Doing so makes this
-        // loop a bit more complicated tho, so for now let's keep things simple.
         auto bytes = kj::heapArray<T>(amountToRead);
-        size_t amount = co_await input.tryRead(bytes.begin(), 1, bytes.size());
-
-        if (amount == 0) {
-          break;
-        }
+        // Note that we're passing amountToRead as the *minBytes* here so the tryRead should
+        // attempt to fill the entire buffer. If it doesn't, the implication is that we read
+        // everything.
+        uint64_t amount = co_await input.tryRead(bytes.begin(), amountToRead, amountToRead);
+        KJ_DASSERT(amount <= amountToRead);
 
         runningTotal += amount;
         JSG_REQUIRE(runningTotal < limit, TypeError, "Memory limit exceeded before EOF.");
-        parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
-      };
+
+        if (amount < amountToRead) {
+          // The stream has indicated that we're all done by returning a value less than the
+          // full buffer length.
+          // It is possible/likely that at least some amount of data was written to the buffer.
+          // In which case we want to add that subset to the parts list here before we exit
+          // the loop.
+          if (amount > 0) {
+            parts.add(bytes.slice(0, amount).attach(kj::mv(bytes)));
+          }
+          break;
+        }
+
+        // Because we specify minSize equal to maxSize in the tryRead above, we should only
+        // get here if the buffer was completely filled by the read. If it wasn't completely
+        // filled, that is an indication that the stream is complete which is handled above.
+        KJ_DASSERT(amount == bytes.size());
+        parts.add(kj::mv(bytes));
+
+        // If the stream provided an expected length and our running total is equal to
+        // or greater than that length then we assume we're done.
+        KJ_IF_SOME(length, maybeLength) {
+          if (runningTotal >= length) {
+            // We've read everything we expect to read but some streams need to be read
+            // completely in order to properly finish and other streams might lie (although
+            // they shouldn't). Sigh. So we're going to make the next allocation potentially
+            // smaller and keep reading until we get a zero length. In the best case, the next
+            // read is going to be zero length but we have to try which will require at least
+            // one additional (potentially wasted) allocation. (If we don't there are multiple
+            // test failures).
+            amountToRead = kj::min(MIN_BUFFER_CHUNK, amountToRead);
+            continue;
+          }
+        }
+      }
+    }
+
+    KJ_IF_SOME(length, maybeLength) {
+      if (runningTotal > length) {
+        // Realistically runningTotal should never be more than length so we'll emit
+        // a warning if it is just so we know. It would be indicative of a bug somewhere
+        // in the implementation.
+        KJ_LOG(WARNING, "ReadableStream provided more data than advertised", runningTotal, length);
+      }
     }
 
     if (option == ReadOption::NULL_TERMINATE) {
