@@ -16,7 +16,7 @@ export class BurritoShop {
   }
 
   makeBurrito(type) {
-    if (!type in this.#recipes) {
+    if (!(type in this.#recipes)) {
       throw new Error(`recipe not found: ${type}`);
     }
     return makeBurritoImpl(this.#recipes[type]);
