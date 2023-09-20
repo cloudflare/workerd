@@ -302,10 +302,10 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {
 SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
 
 SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path) {
-  KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
+  KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
     // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
     // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
+    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db,
                                     SQLITE_OPEN_READONLY, nullptr));
   } else {
     SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
@@ -330,10 +330,10 @@ SqliteDatabase::SqliteDatabase(const Vfs& vfs, kj::PathPtr path, kj::WriteMode m
   }
   KJ_REQUIRE(kj::has(mode, kj::WriteMode::MODIFY), "SQLite doesn't support create-exclusive mode");
 
-  KJ_IF_MAYBE(rootedPath, vfs.tryAppend(path)) {
+  KJ_IF_SOME(rootedPath, vfs.tryAppend(path)) {
     // If we can get the path rooted in the VFS's directory, use the system's default VFS instead
     // TODO(bug): This doesn't honor vfs.options. (This branch is only used on Windows.)
-    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath->toString().cStr(), &db,
+    SQLITE_CALL_NODB(sqlite3_open_v2(rootedPath.toString().cStr(), &db,
                                     flags, nullptr));
   } else {
     SQLITE_CALL_NODB(sqlite3_open_v2(path.toString().cStr(), &db,
@@ -358,14 +358,14 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
 }
 
 void SqliteDatabase::notifyWrite() {
-  KJ_IF_MAYBE(cb, onWriteCallback) {
-    (*cb)();
+  KJ_IF_SOME(cb, onWriteCallback) {
+    cb();
   }
 }
 
 kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
-  KJ_IF_MAYBE(s, currentStatement) {
-    return sqlite3_normalized_sql(s);
+  KJ_IF_SOME(s, currentStatement) {
+    return sqlite3_normalized_sql(&s);
   } else {
     return "(no statement is running)";
   }
@@ -404,13 +404,13 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
               "can have parameters.");
 
           // Be sure to call the onWrite callback if necessary for this statement.
-          KJ_IF_MAYBE(cb, onWriteCallback) {
+          KJ_IF_SOME(cb, onWriteCallback) {
             if (!sqlite3_stmt_readonly(result)) {
               // The callback is allowed to invoke queries of its own, so we have to un-set the
               // regulator while we call it.
               currentRegulator = nullptr;
               KJ_DEFER(currentRegulator = regulator);
-              (*cb)();
+              cb();
             }
           }
 
@@ -445,11 +445,11 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     return false;
   });
 
-  KJ_IF_MAYBE(t, triggerName) {
-    if (!regulator.isAllowedTrigger(*t)) {
+  KJ_IF_SOME(t, triggerName) {
+    if (!regulator.isAllowedTrigger(t)) {
       // Log an error because it seems really suspicious if a trigger runs when it's not allowed.
       // I want to understand if this can even happen.
-      KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", *t, kj::getStackTrace());
+      KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", t, kj::getStackTrace());
 
       // TODO(security): Is it better to return SQLITE_IGNORE to ignore the trigger? I don't fully
       //   understand the implications of SQLITE_IGNORE. The documentation mentions that in the
@@ -475,10 +475,10 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     dbName = swap;
   }
 
-  KJ_IF_MAYBE(d, dbName) {
-    if (*d == "temp"_kj) {
+  KJ_IF_SOME(d, dbName) {
+    if (d == "temp"_kj) {
       return isAuthorizedTemp(actionCode, param1, param2, regulator);
-    } else if (*d != "main"_kj) {
+    } else if (d != "main"_kj) {
       // We don't allow opening multiple databases (except for 'main' and the 'temp'
       // temporary database), as our storage engine is not designed to track multiple
       // files on-disk.
@@ -559,8 +559,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
           // respectively
         } else if (pragma == "table_info" || pragma == "table_xinfo") {
           // Allow if the specific named table is not protected.
-          KJ_IF_MAYBE (name, param2) {
-            return regulator.isAllowedName(*name);
+          KJ_IF_SOME (name, param2) {
+            return regulator.isAllowedName(name);
           } else {
             return false; // shouldn't happen?
           }
@@ -639,8 +639,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
     case SQLITE_DROP_VTABLE        :   /* Table Name      Module Name     */
       // Virtual tables are tables backed by some native-code callbacks. We don't support these except for FTS5 (Full Text Search) https://www.sqlite.org/fts5.html
       {
-        KJ_IF_MAYBE (moduleName, param2) {
-          if (*moduleName == "fts5") {
+        KJ_IF_SOME (moduleName, param2) {
+          if (moduleName == "fts5") {
             return true;
           }
         }
@@ -804,9 +804,9 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
   SQLITE_REQUIRE(size == sqlite3_bind_parameter_count(statement),
       "Wrong number of parameter bindings for SQL query.");
 
-  KJ_IF_MAYBE(cb, db.onWriteCallback) {
+  KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {
-      (*cb)();
+      cb();
     }
   }
 }
@@ -1830,8 +1830,8 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, Options options)
 #if _WIN32
   vfs = kj::heap(makeKjVfs());
 #else
-  KJ_IF_MAYBE(fd, directory.getFd()) {
-    rootFd = *fd;
+  KJ_IF_SOME(fd, directory.getFd()) {
+    rootFd = fd;
     vfs = kj::heap(makeWrappedNativeVfs());
   } else {
     vfs = kj::heap(makeKjVfs());

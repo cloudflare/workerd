@@ -129,12 +129,12 @@ public:
       received.expectedCall = this;
     }
     ExpectedCall(ExpectedCall&& other): maybeReceived(kj::mv(other.maybeReceived)) {
-      KJ_IF_MAYBE(r, maybeReceived) r->expectedCall = *this;
+      KJ_IF_SOME(r, maybeReceived) r.expectedCall = *this;
     }
     ~ExpectedCall() noexcept(false) {
-      KJ_IF_MAYBE(r, maybeReceived) {
-        KJ_ASSERT(&KJ_ASSERT_NONNULL(r->expectedCall) == this);
-        r->expectedCall = nullptr;
+      KJ_IF_SOME(r, maybeReceived) {
+        KJ_ASSERT(&KJ_ASSERT_NONNULL(r.expectedCall) == this);
+        r.expectedCall = nullptr;
       }
     }
 
@@ -218,7 +218,7 @@ public:
     }
 
     void expectCanceled(kj::SourceLocation location = {}) {
-      KJ_ASSERT_AT(maybeReceived == nullptr, location, "call has not been canceled");
+      KJ_ASSERT_AT(maybeReceived == kj::none, location, "call has not been canceled");
     }
 
   private:
@@ -281,16 +281,16 @@ private:
                  capnp::CallContext<capnp::DynamicStruct, capnp::DynamicStruct> context)
         : fulfiller(fulfiller), mock(mock), method(method), context(kj::mv(context)) {
       mock.receivedCalls.add(*this);
-      KJ_IF_MAYBE(w, mock.waiter) {
-        w->get()->fulfill();
+      KJ_IF_SOME(w, mock.waiter) {
+        w.get()->fulfill();
       }
     }
     ~ReceivedCall() noexcept(false) {
       if (link.isLinked()) {
         mock.receivedCalls.remove(*this);
       }
-      KJ_IF_MAYBE(e, expectedCall) {
-        e->maybeReceived = nullptr;
+      KJ_IF_SOME(e, expectedCall) {
+        e.maybeReceived = nullptr;
       }
     }
     KJ_DISALLOW_COPY_AND_MOVE(ReceivedCall);
@@ -327,8 +327,8 @@ private:
           mock(kj::addRef(mock)) {}
     ~Server() noexcept(false) {
       mock->dropped = true;
-      KJ_IF_MAYBE(w, mock->waiter) {
-        w->get()->fulfill();
+      KJ_IF_SOME(w, mock->waiter) {
+        w.get()->fulfill();
       }
     }
 

@@ -153,29 +153,29 @@ uint SqliteKv::list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, 
   };
 
   if (order == Order::FORWARD) {
-    KJ_IF_MAYBE(e, end) {
-      KJ_IF_MAYBE(l, limit) {
-        return iterate(stmtListEndLimit.run(begin, *e, (int64_t)*l));
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return iterate(stmtListEndLimit.run(begin, e, (int64_t)l));
       } else {
-        return iterate(stmtListEnd.run(begin, *e));
+        return iterate(stmtListEnd.run(begin, e));
       }
     } else {
-      KJ_IF_MAYBE(l, limit) {
-        return iterate(stmtListLimit.run(begin, (int64_t)*l));
+      KJ_IF_SOME(l, limit) {
+        return iterate(stmtListLimit.run(begin, (int64_t)l));
       } else {
         return iterate(stmtList.run(begin));
       }
     }
   } else {
-    KJ_IF_MAYBE(e, end) {
-      KJ_IF_MAYBE(l, limit) {
-        return iterate(stmtListEndLimitReverse.run(begin, *e, (int64_t)*l));
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return iterate(stmtListEndLimitReverse.run(begin, e, (int64_t)l));
       } else {
-        return iterate(stmtListEndReverse.run(begin, *e));
+        return iterate(stmtListEndReverse.run(begin, e));
       }
     } else {
-      KJ_IF_MAYBE(l, limit) {
-        return iterate(stmtListLimitReverse.run(begin, (int64_t)*l));
+      KJ_IF_SOME(l, limit) {
+        return iterate(stmtListLimitReverse.run(begin, (int64_t)l));
       } else {
         return iterate(stmtListReverse.run(begin));
       }
