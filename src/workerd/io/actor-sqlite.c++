@@ -24,12 +24,12 @@ ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent)
   parent.currentTxn = this;
 }
 ActorSqlite::ImplicitTxn::~ImplicitTxn() noexcept(false) {
-  KJ_IF_MAYBE(c, parent.currentTxn.tryGet<ImplicitTxn*>()) {
-    if (*c == this) {
+  KJ_IF_SOME(c, parent.currentTxn.tryGet<ImplicitTxn*>()) {
+    if (c == this) {
       parent.currentTxn.init<NoTxn>();
     }
   }
-  if (!committed && parent.broken == nullptr) {
+  if (!committed && parent.broken == kj::none) {
     // Failed to commit, so roll back.
     //
     // This should only happen in cases of catastrophic error. Since this is rarely actually
@@ -81,9 +81,9 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
     KJ_ASSERT(!hasChild);
     auto cur = KJ_ASSERT_NONNULL(actorSqlite.currentTxn.tryGet<ExplicitTxn*>());
     KJ_ASSERT(cur == this);
-    KJ_IF_MAYBE(p, parent) {
-      p->get()->hasChild = false;
-      actorSqlite.currentTxn = p->get();
+    KJ_IF_SOME(p, parent) {
+      p.get()->hasChild = false;
+      actorSqlite.currentTxn = p.get();
     } else {
       actorSqlite.currentTxn.init<NoTxn>();
     }
@@ -103,7 +103,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
-  if (parent == nullptr) {
+  if (parent == kj::none) {
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
     actorSqlite.commitTasks.add(
@@ -111,7 +111,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
   }
 
   // No backpressure for SQLite.
-  return nullptr;
+  return kj::none;
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
@@ -166,14 +166,14 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
   // The output gate should already have been broken since it wraps all commits tasks. So, we
   // don't have to report anything here, the exception will already propagate elsewhere. We
   // should block further operations, though.
-  if (broken == nullptr) {
+  if (broken == kj::none) {
     broken = kj::mv(exception);
   }
 }
 
 void ActorSqlite::requireNotBroken() {
-  KJ_IF_MAYBE(e, broken) {
-    kj::throwFatalException(kj::cp(*e));
+  KJ_IF_SOME(e, broken) {
+    kj::throwFatalException(kj::cp(e));
   }
 }
 
@@ -245,7 +245,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
   requireNotBroken();
 
   kv.put(key, value);
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(
@@ -255,7 +255,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(
   for (auto& pair: pairs) {
     kv.put(pair.key, pair.value);
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions options) {
@@ -293,24 +293,24 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
 
   uint count = kv.deleteAll();
   return {
-    .backpressure = nullptr,
+    .backpressure = kj::none,
     .count = count,
   };
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::evictStale(kj::Date now) {
   // This implementation never needs to apply backpressure.
-  return nullptr;
+  return kj::none;
 }
 
 void ActorSqlite::shutdown(kj::Maybe<const kj::Exception&> maybeException) {
   // TODO(cleanup): Logic copied from ActorCache::shutdown(). Should they share somehow?
 
-  if (broken == nullptr) {
+  if (broken == kj::none) {
     auto exception = [&]() {
-      KJ_IF_MAYBE(e, maybeException) {
+      KJ_IF_SOME(e, maybeException) {
         // We were given an exception, use it.
-        return kj::cp(*e);
+        return kj::cp(e);
       }
 
       // Use the direct constructor so that we can reuse the constexpr message variable for testing.

@@ -148,21 +148,21 @@ struct ActorCacheConvenienceWrappers {
   }
 
   auto list(kj::StringPtr begin, kj::StringPtr end,
-            kj::Maybe<uint> limit = nullptr, ActorCache::ReadOptions options = {}) {
+            kj::Maybe<uint> limit = kj::none, ActorCache::ReadOptions options = {}) {
     return stringifyValues(target.list(kj::str(begin), kj::str(end), limit, options));
   }
   auto listReverse(kj::StringPtr begin, kj::StringPtr end,
-                   kj::Maybe<uint> limit = nullptr, ActorCache::ReadOptions options = {}) {
+                   kj::Maybe<uint> limit = kj::none, ActorCache::ReadOptions options = {}) {
     return stringifyValues(target.listReverse(kj::str(begin), kj::str(end), limit, options));
   }
 
   auto list(kj::StringPtr begin, decltype(nullptr),
-            kj::Maybe<uint> limit = nullptr, ActorCache::ReadOptions options = {}) {
-    return stringifyValues(target.list(kj::str(begin), nullptr, limit, options));
+            kj::Maybe<uint> limit = kj::none, ActorCache::ReadOptions options = {}) {
+    return stringifyValues(target.list(kj::str(begin), kj::none, limit, options));
   }
   auto listReverse(kj::StringPtr begin, decltype(nullptr),
-                   kj::Maybe<uint> limit = nullptr, ActorCache::ReadOptions options = {}) {
-    return stringifyValues(target.listReverse(kj::str(begin), nullptr, limit, options));
+                   kj::Maybe<uint> limit = kj::none, ActorCache::ReadOptions options = {}) {
+    return stringifyValues(target.listReverse(kj::str(begin), kj::none, limit, options));
   }
 
   auto put(kj::StringPtr key, kj::StringPtr value, ActorCache::WriteOptions options = {}) {
@@ -4210,7 +4210,7 @@ KJ_TEST("ActorCache skip cache") {
 
   // Do an uncached list.
   {
-    auto promise = expectUncached(test.list("bar", "qux", nullptr, {.noCache = true}));
+    auto promise = expectUncached(test.list("bar", "qux", kj::none, {.noCache = true}));
 
     mockStorage->expectCall("list", ws)
         .withParams(CAPNP(start = "bar", end = "qux"), "stream"_kj)
@@ -4238,7 +4238,7 @@ KJ_TEST("ActorCache skip cache") {
 
   // Again, but reverse list.
   {
-    auto promise = expectUncached(test.listReverse("bar", "qux", nullptr, {.noCache = true}));
+    auto promise = expectUncached(test.listReverse("bar", "qux", kj::none, {.noCache = true}));
 
     mockStorage->expectCall("list", ws)
         .withParams(CAPNP(start = "bar", end = "qux", reverse = true), "stream"_kj)
@@ -4881,7 +4881,7 @@ KJ_TEST("ActorCache alarm get/put") {
 
   {
     // Test clearing alarm
-    test.setAlarm(nullptr);
+    test.setAlarm(kj::none);
 
     // When there are no other storage operations to be flushed, alarm modifications can be flushed
     // without a wrapping txn.
@@ -5087,16 +5087,16 @@ KJ_TEST("ActorCache can wait for flush") {
     scheduledPromise.wait(ws);
     inFlightPromise.wait(ws);
 
-    KJ_IF_MAYBE(secondOperation, maybeSecondOperation) {
+    KJ_IF_SOME(secondOperation, maybeSecondOperation) {
       // This promise is for a later flush, so it should not have resolved yet.
-      KJ_ASSERT(!secondOperation->scheduledPromise.poll(ws));
+      KJ_ASSERT(!secondOperation.scheduledPromise.poll(ws));
 
       // Finish our secondary put and observe the second flush resolving.
       auto params =
-          kj::str(R"((entries = [(key = ")", secondOperation->key, R"(", value = "bar")]))");
+          kj::str(R"((entries = [(key = ")", secondOperation.key, R"(", value = "bar")]))");
       mockStorage->expectCall("put", ws).withParams(params).thenReturn(CAPNP());
 
-      secondOperation->scheduledPromise.wait(ws);
+      secondOperation.scheduledPromise.wait(ws);
     }
 
     // We finished our flush, nothing left to do.
@@ -5270,10 +5270,10 @@ KJ_TEST("ActorCache can shutdown") {
       KJ_EXPECT_THROW_MESSAGE(errorMessage, shutdownPromise.wait(ws));
       KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
       KJ_EXPECT_THROW_MESSAGE(errorMessage, test.gate.wait().wait(ws));
-    } else KJ_IF_MAYBE(promise, maybeShutdownPromise) {
+    } else KJ_IF_SOME(promise, maybeShutdownPromise) {
       // The in-flight flush should resolve cleanly without any follow on or breaking the output
       // gate.
-      promise->wait(ws);
+      promise.wait(ws);
       KJ_EXPECT(test.cache.onNoPendingFlush() == nullptr);
       test.gate.wait().wait(ws);
     }
@@ -5294,14 +5294,14 @@ KJ_TEST("ActorCache can shutdown") {
   };
 
   auto verify = [&](auto&& beforeShutdown, auto&& afterShutdown) {
-    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = nullptr});
+    verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = kj::none});
     verifyWithOptions(beforeShutdown, afterShutdown, {.maybeError = KJ_EXCEPTION(FAILED, "Nope.")});
   };
 
   verify([](ActorCacheTest& test){
     // Do nothing and expect nothing!
     return BeforeShutdownResult{
-      .maybeReq = nullptr,
+      .maybeReq = kj::none,
       .shouldBreakOutputGate = false,
     };
   }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){
@@ -5315,7 +5315,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     // Expect the put to be cancelled and break the gate.
     return BeforeShutdownResult{
-      .maybeReq = nullptr,
+      .maybeReq = kj::none,
       .shouldBreakOutputGate = true,
     };
   }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){
@@ -5329,7 +5329,7 @@ KJ_TEST("ActorCache can shutdown") {
 
     // Expect the put to be cancelled and break the gate.
     return BeforeShutdownResult{
-      .maybeReq = nullptr,
+      .maybeReq = kj::none,
       .shouldBreakOutputGate = true,
     };
   }, [](ActorCacheTest& test, kj::Maybe<InFlightRequest>){

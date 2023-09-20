@@ -24,8 +24,8 @@ public:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, Response& response) override {
-    KJ_IF_MAYBE(w, worker) {
-      co_await w->get()->request(method, url, headers, requestBody, response);
+    KJ_IF_SOME(w, worker) {
+      co_await w.get()->request(method, url, headers, requestBody, response);
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
@@ -35,8 +35,8 @@ public:
   kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection, ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
-    KJ_IF_MAYBE(w, worker) {
-      co_await w->get()->connect(host, headers, connection, response, kj::mv(settings));
+    KJ_IF_SOME(w, worker) {
+      co_await w.get()->connect(host, headers, connection, response, kj::mv(settings));
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->connect(
@@ -45,8 +45,8 @@ public:
   }
 
   void prewarm(kj::StringPtr url) override {
-    KJ_IF_MAYBE(w, worker) {
-      w->get()->prewarm(url);
+    KJ_IF_SOME(w, worker) {
+      w.get()->prewarm(url);
     } else {
       static auto constexpr handlePrewarm =
           [](kj::Promise<void> promise,
@@ -62,8 +62,8 @@ public:
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->runScheduled(scheduledTime, cron);
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w.get()->runScheduled(scheduledTime, cron);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
@@ -71,8 +71,8 @@ public:
   }
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
-    KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->runAlarm(scheduledTime);
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w.get()->runAlarm(scheduledTime);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runAlarm(scheduledTime);
@@ -80,8 +80,8 @@ public:
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
-    KJ_IF_MAYBE(w, worker) {
-      co_return co_await w->get()->customEvent(kj::mv(event));
+    KJ_IF_SOME(w, worker) {
+      co_return co_await w.get()->customEvent(kj::mv(event));
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
@@ -109,8 +109,8 @@ public:
   RevocableWebSocket(kj::Own<WebSocket> ws, kj::Promise<void> revokeProm)
       : ws(kj::mv(ws)), revokeProm(revokeProm.catch_([this](kj::Exception&& e) -> kj::Promise<void> {
         canceler.cancel(kj::cp(e));
-        KJ_IF_MAYBE(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
-          (*ws)->abort();
+        KJ_IF_SOME(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
+          (ws)->abort();
         }
         this->ws = kj::mv(e);
         return kj::READY_NOW;
@@ -128,15 +128,15 @@ public:
   }
 
   kj::Promise<void> disconnect() override {
-    KJ_IF_MAYBE(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
-      return wrap<void>((*ws)->disconnect());
+    KJ_IF_SOME(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
+      return wrap<void>((ws)->disconnect());
     }
     return kj::READY_NOW;
   }
 
   void abort() override {
-    KJ_IF_MAYBE(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
-      return (*ws)->abort();
+    KJ_IF_SOME(ws, this->ws.tryGet<kj::Own<kj::WebSocket>>()) {
+      return (ws)->abort();
     }
   }
 
@@ -192,7 +192,7 @@ public:
 
   kj::Own<kj::AsyncOutputStream> send(
       uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
