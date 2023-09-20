@@ -85,7 +85,7 @@ public:
                       v8::Local<v8::Object> target)> compileBindings,
                   IsolateObserver::StartType startType,
                   SpanParent parentSpan, LockType lockType,
-                  kj::Maybe<ValidationErrorReporter&> errorReporter = nullptr);
+                  kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none);
   // `compileBindings()` is a callback that constructs all of the bindings and adds them as
   // properties to `target`.
 
@@ -286,7 +286,7 @@ public:
   kj::Own<const Worker::Script> newScript(
       kj::StringPtr id, Script::Source source,
       IsolateObserver::StartType startType, bool logNewScript = false,
-      kj::Maybe<ValidationErrorReporter&> errorReporter = nullptr) const;
+      kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
   const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
   const ApiIsolate& getApiIsolate() const { return *apiIsolate; }
@@ -363,7 +363,7 @@ public:
     kj::Maybe<kj::Own<const Worker::Isolate>> tryAddStrongRef() const {
       auto lock = this_.lockShared();
       if (*lock == nullptr) {
-        return nullptr;
+        return kj::none;
       }
 
       return kj::atomicAddRefWeak(**lock);
@@ -415,7 +415,7 @@ private:
   kj::Maybe<InspectorChannelImpl&> currentInspectorSession;
 
   struct AsyncWaiterList {
-    kj::Maybe<AsyncWaiter&> head = nullptr;
+    kj::Maybe<AsyncWaiter&> head = kj::none;
     kj::Maybe<AsyncWaiter&>* tail = &head;
 
     ~AsyncWaiterList() noexcept;
@@ -518,7 +518,7 @@ public:
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
-    return nullptr;
+    return kj::none;
   }
 };
 
@@ -724,7 +724,7 @@ public:
   // IoContext objects prolong the lifetime of their Actor.
   //
   // `reasonCode` is passed back to the WorkerObserver.
-  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = nullptr);
+  void shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error = kj::none);
 
   // Stops new work on behalf of the ActorCache. This does not cancel any ongoing flushes.
   // TODO(soon) This should probably be folded into shutdown(). We'd need a piece that converts
@@ -800,23 +800,23 @@ public:
     AlarmFulfiller(AlarmFulfiller&&) = default;
     AlarmFulfiller& operator=(AlarmFulfiller&&) = default;
     ~AlarmFulfiller() noexcept(false) {
-      KJ_IF_MAYBE(fulfiller, getFulfiller()) {
-        fulfiller->reject(KJ_EXCEPTION(FAILED, "AlarmFulfiller destroyed without resolution"));
+      KJ_IF_SOME(fulfiller, getFulfiller()) {
+        fulfiller.reject(KJ_EXCEPTION(FAILED, "AlarmFulfiller destroyed without resolution"));
       }
     }
     void fulfill(const AlarmResult& result) {
-      KJ_IF_MAYBE(fulfiller, getFulfiller()) {
-        fulfiller->fulfill(kj::cp(result));
+      KJ_IF_SOME(fulfiller, getFulfiller()) {
+        fulfiller.fulfill(kj::cp(result));
       }
     }
     void reject(const kj::Exception& e) {
-      KJ_IF_MAYBE(fulfiller, getFulfiller()) {
-        fulfiller->reject(kj::cp(e));
+      KJ_IF_SOME(fulfiller, getFulfiller()) {
+        fulfiller.reject(kj::cp(e));
       }
     }
     void cancel() {
-      KJ_IF_MAYBE(fulfiller, getFulfiller()) {
-        fulfiller->fulfill(AlarmResult{
+      KJ_IF_SOME(fulfiller, getFulfiller()) {
+        fulfiller.fulfill(AlarmResult{
           .retry = false,
           .outcome = EventOutcome::CANCELED,
         });
@@ -826,13 +826,13 @@ public:
   private:
     kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
     kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller() {
-      KJ_IF_MAYBE(fulfiller, maybeFulfiller) {
-        if (fulfiller->get()->isWaiting()) {
-          return **fulfiller;
+      KJ_IF_SOME(fulfiller, maybeFulfiller) {
+        if (fulfiller.get()->isWaiting()) {
+          return *fulfiller;
         }
       }
 
-      return nullptr;
+      return kj::none;
     }
   };
   using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
@@ -845,8 +845,8 @@ public:
   kj::Promise<ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
 
   kj::Own<Worker::Actor> addRef() {
-    KJ_IF_MAYBE(t, tracker) {
-      return kj::addRef(*this).attach(t->get()->startRequest());
+    KJ_IF_SOME(t, tracker) {
+      return kj::addRef(*this).attach(t.get()->startRequest());
     } else {
       return kj::addRef(*this);
     }

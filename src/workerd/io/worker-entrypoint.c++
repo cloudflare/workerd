@@ -24,7 +24,7 @@ public:
 
   kj::Own<kj::AsyncOutputStream> send(
       uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
-      kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
     sent = true;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
@@ -95,12 +95,12 @@ void WorkerEntrypoint::init(
   };
 
   kj::Own<IoContext> context;
-  KJ_IF_MAYBE(a, actor) {
-    KJ_IF_MAYBE(rc, a->get()->getIoContext()) {
-      context = kj::addRef(*rc);
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(rc, a.get()->getIoContext()) {
+      context = kj::addRef(rc);
     } else {
       context = newContext();
-      a->get()->setIoContext(kj::addRef(*context));
+      a.get()->setIoContext(kj::addRef(*context));
     }
   } else {
     context = newContext();
@@ -117,19 +117,19 @@ kj::Promise<void> WorkerEntrypoint::request(
     kj::AsyncInputStream& requestBody, Response& response) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "request() can only be called once"));
-  this->incomingRequest = nullptr;
+  this->incomingRequest = kj::none;
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
 
-  bool isActor = context.getActor() != nullptr;
+  bool isActor = context.getActor() != kj::none;
 
-  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     auto timestamp = context.now();
     kj::String cfJson;
-    KJ_IF_MAYBE(c, cfBlobJson) {
-      cfJson = kj::str(*c);
+    KJ_IF_SOME(c, cfBlobJson) {
+      cfJson = kj::str(c);
     }
 
     // To match our historical behavior (when we used to pull the headers from the JavaScript
@@ -150,7 +150,7 @@ kj::Promise<void> WorkerEntrypoint::request(
           kj::strArray(entry.value, ", "));
     };
 
-    t->setEventInfo(timestamp, Trace::FetchEventInfo(method, kj::str(url),
+    t.setEventInfo(timestamp, Trace::FetchEventInfo(method, kj::str(url),
         kj::mv(cfJson), kj::mv(traceHeadersArray)));
   }
 
@@ -194,14 +194,14 @@ kj::Promise<void> WorkerEntrypoint::request(
   })).then([this]() -> kj::Promise<void> {
     // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
     // without pinning it or the isolate into memory.
-    KJ_IF_MAYBE(p, proxyTask) {
-      return kj::mv(*p);
+    KJ_IF_SOME(p, proxyTask) {
+      return kj::mv(p);
     } else {
       return kj::READY_NOW;
     }
   }).attach(kj::defer([this]() mutable {
     // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
-    proxyTask = nullptr;
+    proxyTask = kj::none;
   })).catch_([this,wrappedResponse = kj::mv(wrappedResponse),isActor,
               method, url, &headers, &requestBody, metrics = kj::mv(metricsForCatch)]
              (kj::Exception&& exception) mutable -> kj::Promise<void> {
@@ -248,7 +248,7 @@ kj::Promise<void> WorkerEntrypoint::request(
     if (wrappedResponse->isSent()) {
       // We can't fail open if the response was already sent, so set `failOpenService` null so that
       // that branch isn't taken below.
-      failOpenService = nullptr;
+      failOpenService = kj::none;
     }
 
     if (isActor) {
@@ -257,17 +257,17 @@ kj::Promise<void> WorkerEntrypoint::request(
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
       // up error handling more generally.
       return exceptionToPropagate();
-    } else KJ_IF_MAYBE(service, failOpenService) {
+    } else KJ_IF_SOME(service, failOpenService) {
       // Fall back to origin.
 
       // We're catching the exception, but metrics should still indicate an exception.
       metrics->reportFailure(exception);
 
       auto promise = kj::evalNow([&] {
-        auto promise = service->get()->request(
+        auto promise = service.get()->request(
             method, url, headers, requestBody, *wrappedResponse);
         metrics->setFailedOpen(true);
-        return promise.attach(kj::mv(*service));
+        return promise.attach(kj::mv(service));
       });
       return promise.catch_([this,wrappedResponse = kj::mv(wrappedResponse),
                              metrics = kj::mv(metrics)]
@@ -338,7 +338,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     kj::StringPtr cron) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "runScheduled() can only be called once"));
-  this->incomingRequest = nullptr;
+  this->incomingRequest = kj::none;
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
@@ -347,9 +347,9 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.
 
-  KJ_IF_MAYBE(t, context.getWorkerTracer()) {
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
     double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-    t->setEventInfo(context.now(), Trace::ScheduledEventInfo(eventTime, kj::str(cron)));
+    t.setEventInfo(context.now(), Trace::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
   // Scheduled handlers run entirely in waitUntil() tasks.
@@ -390,20 +390,20 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   auto& context = incomingRequest->getContext();
   auto& actor = KJ_REQUIRE_NONNULL(context.getActor(), "alarm() should only work with actors");
 
-  KJ_IF_MAYBE(promise, actor.getAlarm(scheduledTime)) {
+  KJ_IF_SOME(promise, actor.getAlarm(scheduledTime)) {
     // There is a pre-existing alarm for `scheduledTime`, we can just wait for its result.
     // TODO(someday) If the request responsible for fulfilling this alarm were to be cancelled, then
     // we could probably take over and try to fulfill it ourselves. Maybe we'd want to loop on
     // `actor.getAlarm()`? We'd have to distinguish between rescheduling and request cancellation.
-    auto result = co_await *promise;
+    auto result = co_await promise;
     co_return result;
   }
 
   // There isn't a pre-existing alarm, we can call `delivered()` (and emit metrics events).
   incomingRequest->delivered();
 
-  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
-    t->setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(context.now(), Trace::AlarmEventInfo(scheduledTime));
   }
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
@@ -455,7 +455,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
     kj::Date scheduledTime) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "runAlarm() can only be called once"));
-  this->incomingRequest = nullptr;
+  this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime);
@@ -465,7 +465,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 kj::Promise<bool> WorkerEntrypoint::test() {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "test() can only be called once"));
-  this->incomingRequest = nullptr;
+  this->incomingRequest = kj::none;
   incomingRequest->delivered();
 
   auto& context = incomingRequest->getContext();
@@ -494,7 +494,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     WorkerEntrypoint::customEvent(kj::Own<CustomEvent> event) {
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "customEvent() can only be called once"));
-  this->incomingRequest = nullptr;
+  this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
   auto promise = event->run(kj::mv(incomingRequest), entrypointName).attach(kj::mv(event));

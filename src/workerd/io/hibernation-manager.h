@@ -89,11 +89,11 @@ private:
       // This removal is fast because we have direct access to each kj::List, as well as direct
       // access to each TagListItem we want to remove.
       for (auto& item: tagItems) {
-        KJ_IF_MAYBE(list, item.list) {
+        KJ_IF_SOME(list, item.list) {
           // The list reference is non-null, so we still have a valid reference to this
           // TagListItem in the list, which we will now remove.
-          list->remove(item);
-          if (list->empty()) {
+          list.remove(item);
+          if (list.empty()) {
             // Remove the bucket in tagToWs if the tag has no more websockets.
             manager.tagToWs.erase(kj::mv(item.tag));
           }
@@ -107,9 +107,9 @@ private:
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
     // to the api::WebSocket.
     jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js) {
-      KJ_IF_MAYBE(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+      KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
-            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(*package))
+            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package))
         )->setAutoResponseTimestamp(autoResponseTimestamp);
         // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
         // that was stored in the corresponding HibernatableWebSocket.
