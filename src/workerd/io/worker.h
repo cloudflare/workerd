@@ -469,6 +469,7 @@ private:
 
   size_t nextRequestId = 0;
   kj::Own<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
+  kj::Own<jsg::AsyncContextFrame::StorageKey> requestContextKey;
 
   friend class Worker;
 };
@@ -608,6 +609,9 @@ public:
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
+
+  // Get the opaque storage key to use for accessing request context and env.
+  jsg::AsyncContextFrame::StorageKey& getRequestContextKey();
 
 private:
   struct Impl;

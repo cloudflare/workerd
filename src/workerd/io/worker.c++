@@ -1033,7 +1033,8 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(kj::atomicRefcounted<WeakIsolateRef>(this)),
-      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+      traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()),
+      requestContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::V8StackScope stackScope;
@@ -1706,6 +1707,12 @@ jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
   // const_cast OK because we are a lock on this isolate.
   auto& isolate = const_cast<Isolate&>(worker.getIsolate());
   return *(isolate.traceAsyncContextKey);
+}
+
+jsg::AsyncContextFrame::StorageKey& Worker::Lock::getRequestContextKey() {
+  // const_cast OK because we are a lock on this isolate.
+  auto& isolate = const_cast<Isolate&>(worker.getIsolate());
+  return *(isolate.requestContextKey);
 }
 
 bool Worker::Lock::isInspectorEnabled() {

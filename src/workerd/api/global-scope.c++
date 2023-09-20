@@ -59,6 +59,38 @@ kj::String getEventName(v8::PromiseRejectEvent type) {
   }
 }
 
+jsg::AsyncContextFrame::StorageScope captureRequestContext(
+    jsg::Lock& js, Worker::Lock& lock,
+    jsg::Ref<jsg::Object> req,
+    jsg::Value& env,
+    kj::Maybe<jsg::Ref<ExecutionContext>>& ctx) {
+  auto ctxCapture = js.arr(jsg::JsValue(js.wrapJsgObject(kj::mv(req))),
+                           jsg::JsValue(env.getHandle(js)),
+                           ctx != kj::none ?
+                               jsg::JsValue(js.wrapJsgObject(KJ_ASSERT_NONNULL(ctx).addRef())) :
+                               js.undefined());
+  return jsg::AsyncContextFrame::StorageScope(js, lock.getRequestContextKey(),
+                                              js.v8Ref<v8::Value>(ctxCapture));
+}
+
+jsg::AsyncContextFrame::StorageScope captureRequestContext(
+    jsg::Lock& js, Worker::Lock& lock,
+    kj::ArrayPtr<jsg::Ref<TraceItem>> req,
+    jsg::Value& env,
+    kj::Maybe<jsg::Ref<ExecutionContext>>& ctx) {
+  kj::Vector<jsg::JsValue> items;
+  for (auto& item : req) {
+    items.add(jsg::JsValue(js.wrapJsgObject(item.addRef())));
+  }
+  auto ctxCapture = js.arr(js.arr(items.asPtr()),
+                           jsg::JsValue(env.getHandle(js)),
+                           ctx != kj::none ?
+                               jsg::JsValue(js.wrapJsgObject(KJ_ASSERT_NONNULL(ctx).addRef())) :
+                               js.undefined());
+  return jsg::AsyncContextFrame::StorageScope(js, lock.getRequestContextKey(),
+                                              js.v8Ref<v8::Value>(ctxCapture));
+}
+
 }  // namespace
 
 PromiseRejectionEvent::PromiseRejectionEvent(
@@ -187,7 +219,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
   bool useDefaultHandling;
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->fetch) {
-      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(js), h->getCtx());
+      // Stores the request, env, and ctx in the async context frame.
+      auto ctx = h->getCtx();
+      auto ctxCapture = captureRequestContext(js, lock, event->getRequest(), h->env, ctx);
+
+      auto promise = (*f)(lock, event->getRequest(), h->env.addRef(js), kj::mv(ctx));
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
     } else {
@@ -292,13 +328,21 @@ void ServiceWorkerGlobalScope::sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
   auto isolate = lock.getIsolate();
 
   KJ_IF_MAYBE(h, exportedHandler) {
+    auto ctx = h->getCtx();
     KJ_IF_MAYBE(f, h->tail) {
       auto tailEvent = jsg::alloc<TailEvent>(lock, "tail"_kj, traces);
-      auto promise = (*f)(lock, tailEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
+      auto events = tailEvent->getEvents();
+      // Stores the request, env, and ctx in the async context frame.
+      auto ctxCapture = captureRequestContext(lock, lock, events, h->env, ctx);
+
+      auto promise = (*f)(lock, kj::mv(events), h->env.addRef(isolate), kj::mv(ctx));
       tailEvent->waitUntil(kj::mv(promise));
     } else KJ_IF_MAYBE(f, h->trace) {
       auto traceEvent = jsg::alloc<TailEvent>(lock, "trace"_kj, traces);
-      auto promise = (*f)(lock, traceEvent->getEvents(), h->env.addRef(isolate), h->getCtx());
+      auto events = traceEvent->getEvents();
+      auto ctxCapture = captureRequestContext(lock, lock, events, h->env, ctx);
+
+      auto promise = (*f)(lock, kj::mv(events), h->env.addRef(isolate), kj::mv(ctx));
       traceEvent->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -332,8 +376,11 @@ void ServiceWorkerGlobalScope::startScheduled(
 
   KJ_IF_MAYBE(h, exportedHandler) {
     KJ_IF_MAYBE(f, h->scheduled) {
-      auto promise = (*f)(lock, jsg::alloc<ScheduledController>(event.addRef()),
-                          h->env.addRef(isolate), h->getCtx());
+      auto ctrl = jsg::alloc<ScheduledController>(event.addRef());
+      auto ctx = h->getCtx();
+      // Stores the request, env, and ctx in the async context frame.
+      auto ctxCapture = captureRequestContext(lock, lock, ctrl.addRef(), h->env, ctx);
+      auto promise = (*f)(lock, kj::mv(ctrl), h->env.addRef(isolate), kj::mv(ctx));
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -449,7 +496,11 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   auto& testHandler = JSG_REQUIRE_NONNULL(eh.test, Error,
       "Entrypoint does not export a test() function.");
 
-  return testHandler(lock, jsg::alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
+  auto ctrl = jsg::alloc<TestController>();
+  // Stores the request, env, and ctx in the async context frame.
+  auto ctx = eh.getCtx();
+  auto ctxCapture = captureRequestContext(lock, lock, ctrl.addRef(), eh.env, ctx);
+  return testHandler(lock, kj::mv(ctrl), eh.env.addRef(lock), kj::mv(ctx));
 }
 
 void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(
@@ -695,5 +746,21 @@ jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
   return jsg::alloc<api::gpu::GPU>();
 }
 #endif
+
+kj::Maybe<jsg::JsArray> RequestContextModule::getRequestContext(jsg::Lock& js) {
+  if (IoContext::hasCurrent()) {
+    auto& context = IoContext::current();
+    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(js)) {
+      KJ_IF_SOME(stored, frame.get(KJ_ASSERT_NONNULL(context.getRequestContextKey()))) {
+        // TODO(cleanup): AsyncContextFrame::get currently returns jsg::Value. Later
+        // it will be updated to return jsg::JsRef<jsg::JsValue>
+        auto value = stored.getHandle(js);
+        KJ_ASSERT(value->IsArray());
+        return jsg::JsArray(value.As<v8::Array>());
+      }
+    }
+  }
+  return kj::none;
+}
 
 } // namespace workerd::api

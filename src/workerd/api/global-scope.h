@@ -627,6 +627,15 @@ private:
   // be monkeypatchable / mutable at the global scope.
 };
 
+class RequestContextModule: public jsg::Object {
+public:
+  kj::Maybe<jsg::JsArray> getRequestContext(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(RequestContextModule) {
+    JSG_METHOD(getRequestContext);
+  }
+};
+
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                    \
   api::WorkerGlobalScope,                                \
   api::ServiceWorkerGlobalScope,                         \
@@ -636,6 +645,7 @@ private:
   api::ServiceWorkerGlobalScope::StructuredCloneOptions, \
   api::PromiseRejectionEvent,                            \
   api::Navigator,                                        \
-  api::Performance
+  api::Performance,                                      \
+  api::RequestContextModule
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

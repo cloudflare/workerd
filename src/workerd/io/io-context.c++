@@ -967,6 +967,13 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
+kj::Maybe<jsg::AsyncContextFrame::StorageKey&> IoContext::getRequestContextKey() {
+  KJ_IF_SOME(lock, currentLock) {
+    return lock.getRequestContextKey();
+  }
+  return kj::none;
+}
+
 void IoContext::taskFailed(kj::Exception&& exception) {
   if (waitUntilStatusValue == EventOutcome::OK) {
     KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {

@@ -7,6 +7,7 @@
 #include <workerd/api/node/node.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/global-scope.h>
 #include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
@@ -21,6 +22,9 @@ void registerModules(Registry& registry, auto featureFlags) {
   }
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
+
+  registry.template addBuiltinModule<RequestContextModule>("cloudflare-internal:request-context",
+      workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 
 }  // namespace workerd::api

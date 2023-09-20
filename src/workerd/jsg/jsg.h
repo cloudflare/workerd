@@ -2072,6 +2072,8 @@ public:
 
   virtual v8::Local<v8::Promise> wrapSimplePromise(Promise<Value> promise) = 0;
 
+  virtual v8::Local<v8::Value> wrapJsgObject(Ref<Object> obj) = 0;
+
   bool toBool(v8::Local<v8::Value> value);
   virtual kj::String toString(v8::Local<v8::Value> value) = 0;
   virtual jsg::Dict<v8::Local<v8::Value>> toDict(v8::Local<v8::Value> value) = 0;

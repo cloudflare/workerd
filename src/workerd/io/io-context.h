@@ -859,6 +859,8 @@ public:
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
 
+  kj::Maybe<jsg::AsyncContextFrame::StorageKey&> getRequestContextKey();
+
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
