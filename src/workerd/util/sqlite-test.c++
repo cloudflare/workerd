@@ -249,11 +249,11 @@ void doLockTest(bool walMode) {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
       SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
       while (!stop.load(std::memory_order_relaxed)) {
-        KJ_IF_MAYBE(e, kj::runCatchingExceptions([&]() {
+        KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
           db2.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(kj::_::hasSubstring(e->getDescription(), "database is locked"), *e);
+          KJ_EXPECT(kj::_::hasSubstring(e.getDescription(), "database is locked"), e);
           break;
         }
       }
@@ -263,11 +263,11 @@ void doLockTest(bool walMode) {
       KJ_DEFER(stop.store(true, std::memory_order_relaxed););
 
       while (!stop.load(std::memory_order_relaxed)) {
-        KJ_IF_MAYBE(e, kj::runCatchingExceptions([&]() {
+        KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
           db.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(kj::_::hasSubstring(e->getDescription(), "database is locked"), *e);
+          KJ_EXPECT(kj::_::hasSubstring(e.getDescription(), "database is locked"), e);
           break;
         }
       }
