@@ -7,7 +7,7 @@ import {
 // Test for the AbortSignal and AbortController standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
 
-export const abortcontrollerAlreadyAborted = {
+export const abortControllerAlreadyAborted = {
   async test(ctrl, env) {
     const ac = new AbortController();
     ac.abort();
@@ -44,7 +44,7 @@ export const timedAbort = {
   }
 };
 
-export const abortcontrollerSyncAbort = {
+export const abortControllerSyncAbort = {
   async test(ctrl, env) {
     const ac = new AbortController();
     try {
