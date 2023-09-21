@@ -218,8 +218,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     if (jsStream->isDisturbed()) {
       lock.logUncaughtException(
           "Script consumed request body but didn't call respondWith(). Can't forward request.");
-      response.sendError(500, "Internal Server Error", ioContext.getHeaderTable());
-      return addNoopDeferredProxy(kj::READY_NOW);
+      return addNoopDeferredProxy(
+        response.sendError(500, "Internal Server Error", ioContext.getHeaderTable()));
     } else {
       auto client = ioContext.getHttpClient(
           IoContext::NEXT_CLIENT_CHANNEL, false,
