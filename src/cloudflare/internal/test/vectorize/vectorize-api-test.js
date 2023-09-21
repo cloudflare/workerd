@@ -120,6 +120,38 @@ export const test_vector_search_vector_insert = {
   },
 };
 
+export const test_vector_search_vector_insert_error = {
+  /**
+   * @param {unknown} ctr
+   * @param {Env} env
+   */
+  async test(ctr, env) {
+    const IDX = env["vector-search"];
+    {
+      /** @type {Array<VectorizeVector>}  */
+      const newVectors = [
+        {
+          id: "fail-with-test-error",
+          values: new Float32Array(),
+        },
+      ];
+
+      /** @type {Error | null} */
+      let error = null;
+      try {
+        await IDX.insert(newVectors);
+      } catch (e) {
+        error = e;
+      }
+
+      assert.equal(
+        error && error.message,
+        "VECTOR_INSERT_ERROR (code = 9999): You asked me for this error"
+      );
+    }
+  },
+}
+
 export const test_vector_search_vector_upsert = {
   /**
    * @param {unknown} ctr

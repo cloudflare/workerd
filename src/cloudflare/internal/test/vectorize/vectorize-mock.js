@@ -121,6 +121,15 @@ export default {
       } else if (request.method === "POST" && pathname.endsWith("/insert")) {
         /** @type {{vectors: Array<VectorizeVector>}} */
         const data = await request.json();
+        if (data.vectors.find((v) => v.id == 'fail-with-test-error')) {
+          return Response.json({
+            code: 9999,
+            error: 'You asked me for this error',
+          }, {
+            status: 400
+          });
+        };
+
         return Response.json({
           ids: [
             ...data.vectors.map(({ id }) => id),

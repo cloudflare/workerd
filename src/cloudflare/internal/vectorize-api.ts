@@ -160,17 +160,22 @@ class VectorizeIndexImpl implements VectorizeIndex {
       init
     );
     if (res.status !== 200) {
+      let err: Error | null = null;
+
       try {
-        const err = (await res.json()) as VectorizeError;
-        throw new Error(
-          `${Operation[operation]}_ERROR ${
-            typeof err.code === "number" ? ` (code = ${err.code})` : ""
-          }: ${err.error}`,
+        const errResponse = (await res.json()) as VectorizeError;
+        err = new Error(
+          `${Operation[operation]}_ERROR ${typeof errResponse.code === "number" ? `(code = ${errResponse.code})` : ""
+          }: ${errResponse.error}`,
           {
-            cause: new Error(err.error),
+            cause: new Error(errResponse.error),
           }
         );
-      } catch (e) {
+      } catch (e) { }
+
+      if (err) {
+        throw err;
+      } else {
         throw new Error(
           `${Operation[operation]}_ERROR: Status + ${res.status}`,
           {
