@@ -1109,23 +1109,35 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
                                                      v8::Local<v8::Promise> promise,
                                                      v8::Local<v8::Object> tag) ->
                                                        v8::MaybeLocal<v8::Promise> {
-    auto& js = jsg::Lock::from(context->GetIsolate());
+    try {
+      auto& js = jsg::Lock::from(context->GetIsolate());
 
-    // Generally this condition is only going to happen when using dynamic imports.
-    // It should not be common.
-    JSG_REQUIRE(IoContext::hasCurrent(), Error,
-        "Unable to wait on a promise created within a request when not running within a "
-        "request.");
+      // Generally this condition is only going to happen when using dynamic imports.
+      // It should not be common.
+      JSG_REQUIRE(IoContext::hasCurrent(), Error,
+          "Unable to wait on a promise created within a request when not running within a "
+          "request.");
 
-    return js.wrapSimplePromise(addCrossThreadPromiseWaiter(js, promise).then(js,
-        [promise=js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
-      // Once the waiter has been resolved, return the now settled promise.
-      // Since the promise has been settled, it is now safe to access from
-      // other requests. Note that the resolved value of the promise still
-      // might not be safe to access! (e.g. if it contains any IoOwns attached
-      // to the other request IoContext).
-      return kj::mv(promise);
-    }));
+      return js.wrapSimplePromise(addCrossThreadPromiseWaiter(js, promise).then(js,
+          [promise=js.v8Ref(promise.As<v8::Value>())](auto& js) mutable {
+        // Once the waiter has been resolved, return the now settled promise.
+        // Since the promise has been settled, it is now safe to access from
+        // other requests. Note that the resolved value of the promise still
+        // might not be safe to access! (e.g. if it contains any IoOwns attached
+        // to the other request IoContext).
+        return kj::mv(promise);
+      }));
+    } catch (jsg::JsExceptionThrown&) {
+      // Exceptions here are generally unexpected but possible because the jsg::Promise
+      // then can fail if the isolate is in the process of being torn down. Let's just
+      // return control back to V8 which should handle the case.
+      return v8::MaybeLocal<v8::Promise>();
+    } catch (...) {
+      auto ex = kj::getCaughtExceptionAsKj();
+      KJ_LOG(ERROR, "Setting promise cross context follower failed unexpectedly", ex);
+      jsg::throwInternalError(context->GetIsolate(), kj::mv(ex));
+      return v8::MaybeLocal<v8::Promise>();
+    }
   });
 }
 
