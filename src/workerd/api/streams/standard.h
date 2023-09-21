@@ -153,7 +153,7 @@ public:
   // Invokes the start algorithm to initialize the underlying source.
   void start(jsg::Lock& js, jsg::Ref<Self> self);
 
-  // If the readable is not already closed or errored, initiates a cancelation.
+  // If the readable is not already closed or errored, initiates a cancellation.
   jsg::Promise<void> cancel(jsg::Lock& js,
                              jsg::Ref<Self> self,
                              v8::Local<v8::Value> maybeReason);
@@ -220,10 +220,10 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      start = nullptr;
-      pull = nullptr;
-      cancel = nullptr;
-      size = nullptr;
+      start = kj::none;
+      pull = kj::none;
+      cancel = kj::none;
+      size = kj::none;
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -296,12 +296,12 @@ public:
   void finishInFlightClose(
       jsg::Lock& js,
       jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   void finishInFlightWrite(
       jsg::Lock& js,
       jsg::Ref<Self> self,
-      kj::Maybe<v8::Local<v8::Value>> reason = nullptr);
+      kj::Maybe<v8::Local<v8::Value>> reason = kj::none);
 
   ssize_t getDesiredSize();
 
@@ -325,7 +325,7 @@ public:
   // is equal to or above the highwatermark, then backpressure is applied.
   void updateBackpressure(jsg::Lock& js);
 
-  // Writes a chunk to the Writable, possibly queing the chunk in the internal buffer
+  // Writes a chunk to the Writable, possibly queueing the chunk in the internal buffer
   // if there are already other writes pending.
   jsg::Promise<void> write(jsg::Lock& js, jsg::Ref<Self> self, v8::Local<v8::Value> value);
 
@@ -347,10 +347,10 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     void clear() {
-      abort = nullptr;
-      close = nullptr;
-      size = nullptr;
-      write = nullptr;
+      abort = kj::none;
+      close = kj::none;
+      size = kj::none;
+      write = kj::none;
     }
 
     void visitForGc(jsg::GcVisitor& visitor) {
@@ -672,8 +672,8 @@ private:
     Algorithms& operator=(Algorithms&& other) = default;
 
     inline void clear() {
-      transform = nullptr;
-      flush = nullptr;
+      transform = kj::none;
+      flush = kj::none;
     }
 
     inline void visitForGc(jsg::GcVisitor& visitor) {
