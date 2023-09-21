@@ -69,10 +69,10 @@ private:
     bool isClosed() override { return inner.state.template is<StreamStates::Closed>(); }
 
     kj::Maybe<v8::Local<v8::Value>> tryGetErrored(jsg::Lock& js) override {
-      KJ_IF_MAYBE(errored, inner.state.template tryGet<StreamStates::Errored>()) {
-        return errored->getHandle(js);
+      KJ_IF_SOME(errored, inner.state.template tryGet<StreamStates::Errored>()) {
+        return errored.getHandle(js);
       }
-      return nullptr;
+      return kj::none;
     }
 
     void cancel(jsg::Lock& js, v8::Local<v8::Value> reason) override {
@@ -90,9 +90,9 @@ private:
     }
 
     void release(jsg::Lock& js,
-                 kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) override {
-      KJ_IF_MAYBE(error, maybeError) {
-        cancel(js, *error);
+                 kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) override {
+      KJ_IF_SOME(error, maybeError) {
+        cancel(js, error);
       }
       inner.lock.state.template init<Unlocked>();
     }
@@ -153,10 +153,10 @@ private:
   kj::OneOf<Unlocked, Locked, WriterLocked, PipeLocked> state = Unlocked();
 
   inline kj::Maybe<PipeLocked&> tryGetPipe() {
-    KJ_IF_MAYBE(locked, state.template tryGet<PipeLocked>()) {
-      return *locked;
+    KJ_IF_SOME(locked, state.template tryGet<PipeLocked>()) {
+      return locked;
     }
-    return nullptr;
+    return kj::none;
   }
 
   friend Controller;
@@ -190,8 +190,8 @@ bool ReadableLockImpl<Controller>::lockReader(
 
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
-  } else KJ_IF_MAYBE(errored, self.state.template tryGet<StreamStates::Errored>()) {
-    maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored->getHandle(js));
+  } else KJ_IF_SOME(errored, self.state.template tryGet<StreamStates::Errored>()) {
+    maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
   }
 
   state = kj::mv(lock);
@@ -204,30 +204,30 @@ void ReadableLockImpl<Controller>::releaseReader(
     Controller& self,
     Reader& reader,
     kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_MAYBE(locked, state.template tryGet<ReaderLocked>()) {
-    KJ_ASSERT(&locked->getReader() == &reader);
+  KJ_IF_SOME(locked, state.template tryGet<ReaderLocked>()) {
+    KJ_ASSERT(&locked.getReader() == &reader);
 
-    KJ_IF_MAYBE(js, maybeJs) {
+    KJ_IF_SOME(js, maybeJs) {
       JSG_REQUIRE(!self.hasPendingReadRequests(),
                   TypeError,
                   "Cannot call releaseLock() on a reader with outstanding read promises.");
 
-      maybeRejectPromise<void>(*js,
-          locked->getClosedFulfiller(),
-          js->v8TypeError("This ReadableStream reader has been released."_kj));
+      maybeRejectPromise<void>(js,
+          locked.getClosedFulfiller(),
+          js.v8TypeError("This ReadableStream reader has been released."_kj));
     }
 
     // Keep the kj::mv(locked) after the isolate and hasPendingReadRequests check above.
     // Moving will release the references and we don't want to do that if the hasPendingReadRequests
     // check fails.
-    auto lock = kj::mv(*locked);
+    auto lock = kj::mv(locked);
 
     // When maybeJs is nullptr, that means releaseReader was called when the reader is
     // being deconstructed and not as the result of explicitly calling releaseLock and
     // we do not have an isolate lock. In that case, we don't want to change the lock
     // state itself. Moving the lock above will free the lock state while keeping the
     // ReadableStream marked as locked.
-    if (maybeJs != nullptr) {
+    if (maybeJs != kj::none) {
       state.template init<Unlocked>();
     }
   }
@@ -238,7 +238,7 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableLockImpl<Controller
     Controller& self,
     jsg::Ref<WritableStream> destination) {
   if (isLockedToReader()) {
-    return nullptr;
+    return kj::none;
   }
   state.template init<PipeLocked>(self, kj::mv(destination));
   return state.template get<PipeLocked>();
@@ -290,7 +290,7 @@ template <typename Controller>
 kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo(
     WritableStreamSink& sink, bool end) {
   // We return nullptr here because this controller does not support kj's pumpTo.
-  return nullptr;
+  return kj::none;
 }
 
 template <typename Controller>
@@ -326,9 +326,9 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   if (self.state.template is<StreamStates::Closed>()) {
     maybeResolvePromise(js, lock.getClosedFulfiller());
     maybeResolvePromise(js, lock.getReadyFulfiller());
-  } else KJ_IF_MAYBE(errored, self.state.template tryGet<StreamStates::Errored>()) {
-    maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored->getHandle(js));
-    maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored->getHandle(js));
+  } else KJ_IF_SOME(errored, self.state.template tryGet<StreamStates::Errored>()) {
+    maybeRejectPromise<void>(js, lock.getClosedFulfiller(), errored.getHandle(js));
+    maybeRejectPromise<void>(js, lock.getReadyFulfiller(), errored.getHandle(js));
   } else {
     if (self.isStarted()) {
       maybeResolvePromise(js, lock.getReadyFulfiller());
@@ -347,10 +347,10 @@ void WritableLockImpl<Controller>::releaseWriter(
     kj::Maybe<jsg::Lock&> maybeJs) {
   auto& locked = state.template get<WriterLocked>();
   KJ_ASSERT(&locked.getWriter() == &writer);
-  KJ_IF_MAYBE(js, maybeJs) {
-    maybeRejectPromise<void>(*js,
+  KJ_IF_SOME(js, maybeJs) {
+    maybeRejectPromise<void>(js,
         locked.getClosedFulfiller(),
-        js->v8TypeError("This WritableStream writer has been released."_kj));
+        js.v8TypeError("This WritableStream writer has been released."_kj));
   }
   auto lock = kj::mv(locked);
 
@@ -359,7 +359,7 @@ void WritableLockImpl<Controller>::releaseWriter(
   // we do not have an isolate lock. In that case, we don't want to change the lock
   // state itself. Moving the lock above will free the lock state while keeping the
   // WritableStream marked as locked.
-  if (maybeJs != nullptr) {
+  if (maybeJs != kj::none) {
     state.template init<Unlocked>();
   }
 }
@@ -404,8 +404,8 @@ void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
     }
     KJ_CASE_ONEOF(locked, PipeLocked) {
       visitor.visit(locked.readableStreamRef);
-      KJ_IF_MAYBE(signal, locked.maybeSignal) {
-        visitor.visit(*signal);
+      KJ_IF_SOME(signal, locked.maybeSignal) {
+        visitor.visit(signal);
       }
     }
   }
@@ -415,9 +415,9 @@ template <typename Controller>
 kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSignal(
     jsg::Lock& js,
     Controller& self) {
-  KJ_IF_MAYBE(signal, maybeSignal) {
-    if ((*signal)->getAborted()) {
-      auto reason = (*signal)->getReason(js);
+  KJ_IF_SOME(signal, maybeSignal) {
+    if ((signal)->getAborted()) {
+      auto reason = signal->getReason(js);
       if (!preventCancel) {
         source.release(js, v8::Local<v8::Value>(reason));
       } else {
@@ -436,7 +436,7 @@ kj::Maybe<jsg::Promise<void>> WritableLockImpl<Controller>::PipeLocked::checkSig
       return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
     }
   }
-  return nullptr;
+  return kj::none;
 }
 
 auto maybeAddFunctor(jsg::Lock& js, auto promise, auto onSuccess, auto onFailure) {
@@ -525,8 +525,8 @@ struct ReadPendingScope {
     // pending close or errored state.
     --controller.pendingReadCount;
     if (!controller.isReadPending()) {
-      KJ_IF_MAYBE(state, controller.maybePendingState) {
-        KJ_SWITCH_ONEOF(*state) {
+      KJ_IF_SOME(state, controller.maybePendingState) {
+        KJ_SWITCH_ONEOF(state) {
           KJ_CASE_ONEOF(closed, StreamStates::Closed) {
             controller.doClose(js);
           }
@@ -535,7 +535,7 @@ struct ReadPendingScope {
           }
         }
       }
-      controller.maybePendingState = nullptr;
+      controller.maybePendingState = kj::none;
     }
   }
 };
@@ -671,10 +671,10 @@ private:
 
   bool disturbed = false;
   size_t pendingReadCount = 0;
-  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = nullptr;
+  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
 
   void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
-    if (maybePendingState == nullptr) {
+    if (maybePendingState == kj::none) {
       maybePendingState = kj::mv(pending);
     }
   }
@@ -825,7 +825,7 @@ void ReadableImpl<Self>::start(jsg::Lock& js, jsg::Ref<Self> self) {
   });
 
   maybeRunAlgorithm(js, algorithms.start, kj::mv(onSuccess), kj::mv(onFailure), kj::mv(self));
-  algorithms.start = nullptr;
+  algorithms.start = kj::none;
 }
 
 template <typename Self>
@@ -869,11 +869,11 @@ jsg::Promise<void> ReadableImpl<Self>::cancel(
 
       // Otherwise, there should be exactly one consumer at this point.
       KJ_ASSERT(consumerCount == 1);
-      KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
+      KJ_IF_SOME(pendingCancel, maybePendingCancel) {
         // If we're already waiting for cancel to complete, just return the
         // already existing pending promise.
         // This shouldn't happen but we handle the case anyway, just to be safe.
-        return pendingCancel->promise.whenResolved(js);
+        return pendingCancel.promise.whenResolved(js);
       }
 
       auto prp = js.newPromiseAndResolver<void>();
@@ -908,8 +908,10 @@ void ReadableImpl<Self>::doCancel(
 
   auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self), (jsg::Lock& js) {
     doClose(js);
-    KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
-      maybeResolvePromise(js, pendingCancel->fulfiller);
+    KJ_IF_SOME(pendingCancel, maybePendingCancel) {
+      maybeResolvePromise(js, pendingCancel.fulfiller);
+    } else {
+      // Else block to avert dangling else compiler warning.
     }
   });
   auto onFailure = JSG_VISITABLE_LAMBDA((this, self = self.addRef()), (self),
@@ -918,8 +920,10 @@ void ReadableImpl<Self>::doCancel(
     // that cares about the state of this controller impl has signaled that it
     // no longer cares and has gone away.
     doClose(js);
-    KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
-      maybeRejectPromise<void>(js, pendingCancel->fulfiller, reason.getHandle(js));
+    KJ_IF_SOME(pendingCancel, maybePendingCancel) {
+      maybeRejectPromise<void>(js, pendingCancel.fulfiller, reason.getHandle(js));
+    } else {
+      // Else block to avert dangling else compiler warning.
     }
   });
 
@@ -988,7 +992,7 @@ kj::Maybe<int> ReadableImpl<Self>::getDesiredSize() {
       return 0;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return nullptr;
+      return kj::none;
     }
     KJ_CASE_ONEOF(queue, Queue) {
       return queue.desiredSize();
@@ -1048,8 +1052,8 @@ void ReadableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(queue);
     }
   }
-  KJ_IF_MAYBE(pendingCancel, maybePendingCancel) {
-    visitor.visit(pendingCancel->fulfiller, pendingCancel->promise);
+  KJ_IF_SOME(pendingCancel, maybePendingCancel) {
+    visitor.visit(pendingCancel.fulfiller, pendingCancel.promise);
   }
   visitor.visit(algorithms);
 }
@@ -1063,8 +1067,8 @@ ReadableImpl<Self>::getConsumer(kj::Maybe<ReadableImpl<Self>::StateListener&> li
 
 template <typename Self>
 bool ReadableImpl<Self>::hasPendingReadRequests() {
-  KJ_IF_MAYBE(queue, state.template tryGet<Queue>()) {
-    return queue->wantsRead();
+  KJ_IF_SOME(queue, state.template tryGet<Queue>()) {
+    return queue.wantsRead();
   }
   return false;
 }
@@ -1088,10 +1092,10 @@ jsg::Promise<void> WritableImpl<Self>::abort(
     return js.resolvedPromise();
   }
 
-  KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
+  KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     // Notice here that, per the spec, the reason given in this call of abort is
     // intentionally ignored if there is already an abort pending.
-    return pendingAbort->whenResolved(js);
+    return pendingAbort.whenResolved(js);
   }
 
   bool wasAlreadyErroring = false;
@@ -1122,7 +1126,7 @@ ssize_t WritableImpl<Self>::getDesiredSize() {
 
 template <typename Self>
 void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self) {
-  if (!started || inFlightWrite != nullptr) {
+  if (!started || inFlightWrite != kj::none) {
     return;
   }
   KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
@@ -1132,7 +1136,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
   }
 
   if (writeRequests.empty()) {
-    KJ_IF_MAYBE(req, closeRequest) {
+    if (closeRequest != kj::none) {
       KJ_ASSERT(inFlightClose == nullptr);
       KJ_ASSERT_NONNULL(closeRequest);
       inFlightClose = kj::mv(closeRequest);
@@ -1191,8 +1195,8 @@ jsg::Promise<void> WritableImpl<Self>::close(jsg::Lock& js, jsg::Ref<Self> self)
   closeRequest = kj::mv(prp.resolver);
 
   if (backpressure && isWritable()) {
-    KJ_IF_MAYBE(owner, tryGetOwner()) {
-      owner->maybeResolveReadyPromise(js);
+    KJ_IF_SOME(owner, tryGetOwner()) {
+      owner.maybeResolveReadyPromise(js);
     }
   }
 
@@ -1230,8 +1234,8 @@ void WritableImpl<Self>::doClose(jsg::Lock& js) {
   state.template init<StreamStates::Closed>();
   algorithms.clear();
 
-  KJ_IF_MAYBE(owner, tryGetOwner()) {
-    owner->doClose(js);
+  KJ_IF_SOME(owner, tryGetOwner()) {
+    owner.doClose(js);
   }
 }
 
@@ -1245,8 +1249,8 @@ void WritableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   state = js.v8Ref(reason);
   algorithms.clear();
 
-  KJ_IF_MAYBE(owner, tryGetOwner()) {
-    owner->doError(js, reason);
+  KJ_IF_SOME(owner, tryGetOwner()) {
+    owner.doError(js, reason);
   }
 }
 
@@ -1274,9 +1278,9 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   }
   KJ_ASSERT(writeRequests.empty());
 
-  KJ_IF_MAYBE(pendingAbort, maybePendingAbort) {
-    if (pendingAbort->reject) {
-      pendingAbort->fail(js, reason);
+  KJ_IF_SOME(pendingAbort, maybePendingAbort) {
+    if (pendingAbort.reject) {
+      pendingAbort.fail(js, reason);
       return rejectCloseAndClosedPromiseIfNeeded(js);
     }
 
@@ -1309,22 +1313,22 @@ void WritableImpl<Self>::finishInFlightClose(
   KJ_ASSERT_NONNULL(inFlightClose);
   KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
 
-  KJ_IF_MAYBE(reason, maybeReason) {
-    maybeRejectPromise<void>(js, inFlightClose, *reason);
+  KJ_IF_SOME(reason, maybeReason) {
+    maybeRejectPromise<void>(js, inFlightClose, reason);
 
-    KJ_IF_MAYBE(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
-      pendingAbort->fail(js, *reason);
+    KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
+      pendingAbort.fail(js, reason);
     }
 
-    return dealWithRejection(js, kj::mv(self), *reason);
+    return dealWithRejection(js, kj::mv(self), reason);
   }
 
   maybeResolvePromise(js, inFlightClose);
 
   if (state.template is<StreamStates::Erroring>()) {
-    KJ_IF_MAYBE(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
-      pendingAbort->reject = false;
-      pendingAbort->complete(js);
+    KJ_IF_SOME(pendingAbort, PendingAbort::dequeue(maybePendingAbort)) {
+      pendingAbort.reject = false;
+      pendingAbort.complete(js);
     }
   }
   KJ_ASSERT(maybePendingAbort == nullptr);
@@ -1340,20 +1344,20 @@ void WritableImpl<Self>::finishInFlightWrite(
     kj::Maybe<v8::Local<v8::Value>> maybeReason) {
   auto& write = KJ_ASSERT_NONNULL(inFlightWrite);
 
-  KJ_IF_MAYBE(reason, maybeReason) {
-    write.resolver.reject(js, *reason);
-    inFlightWrite = nullptr;
+  KJ_IF_SOME(reason, maybeReason) {
+    write.resolver.reject(js, reason);
+    inFlightWrite = kj::none;
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
-    return dealWithRejection(js, kj::mv(self), *reason);
+    return dealWithRejection(js, kj::mv(self), reason);
   }
 
   write.resolver.resolve(js);
-  inFlightWrite = nullptr;
+  inFlightWrite = kj::none;
 }
 
 template <typename Self>
 bool WritableImpl<Self>::isCloseQueuedOrInFlight() {
-  return closeRequest != nullptr || inFlightClose != nullptr;
+  return closeRequest != kj::none || inFlightClose != kj::none;
 }
 
 template <typename Self>
@@ -1388,8 +1392,10 @@ void WritableImpl<Self>::setup(
     if (isWritable()) {
       // Only resolve the ready promise if an abort is not pending.
       // It will have been rejected already.
-      KJ_IF_MAYBE(owner, tryGetOwner()) {
-        owner->maybeResolveReadyPromise(js);
+      KJ_IF_SOME(owner, tryGetOwner()) {
+        owner.maybeResolveReadyPromise(js);
+      } else {
+      // Else block to avert dangling else compiler warning.
       }
     }
 
@@ -1402,8 +1408,10 @@ void WritableImpl<Self>::setup(
                                         (jsg::Lock& js, jsg::Value reason) {
     auto handle = reason.getHandle(js);
     KJ_ASSERT(isWritable() || state.template is<StreamStates::Erroring>());
-    KJ_IF_MAYBE(owner, tryGetOwner()) {
-      owner->maybeRejectReadyPromise(js, handle);
+    KJ_IF_SOME(owner, tryGetOwner()) {
+      owner.maybeRejectReadyPromise(js, handle);
+    } else {
+      // Else block to avert dangling else compiler warning.
     }
     started = true;
     starting = false;
@@ -1421,11 +1429,11 @@ void WritableImpl<Self>::startErroring(
     jsg::Ref<Self> self,
     v8::Local<v8::Value> reason) {
   KJ_ASSERT(isWritable());
-  KJ_IF_MAYBE(owner, tryGetOwner()) {
-    owner->maybeRejectReadyPromise(js, reason);
+  KJ_IF_SOME(owner, tryGetOwner()) {
+    owner.maybeRejectReadyPromise(js, reason);
   }
   state.template init<StreamStates::Erroring>(js.v8Ref(reason));
-  if (inFlightWrite == nullptr && inFlightClose == nullptr && started) {
+  if (inFlightWrite == kj::none && inFlightClose == kj::none && started) {
     finishErroring(js, kj::mv(self));
   }
 }
@@ -1437,8 +1445,8 @@ void WritableImpl<Self>::updateBackpressure(jsg::Lock& js) {
   bool bp = getDesiredSize() < 0;
   if (bp != backpressure) {
     backpressure = bp;
-    KJ_IF_MAYBE(owner, tryGetOwner()) {
-      owner->updateBackpressure(js, backpressure);
+    KJ_IF_SOME(owner, tryGetOwner()) {
+      owner.updateBackpressure(js, backpressure);
     }
   }
 }
@@ -1450,29 +1458,29 @@ jsg::Promise<void> WritableImpl<Self>::write(
     v8::Local<v8::Value> value) {
 
   size_t size = 1;
-  KJ_IF_MAYBE(sizeFunc, algorithms.size) {
+  KJ_IF_SOME(sizeFunc, algorithms.size) {
     kj::Maybe<jsg::Value> failure;
     js.tryCatch([&] {
-      size = (*sizeFunc)(js, value);
+      size = sizeFunc(js, value);
     }, [&](jsg::Value exception) {
       startErroring(js, self.addRef(), exception.getHandle(js));
       failure = kj::mv(exception);
     });
-    KJ_IF_MAYBE(exception, failure) {
-      return js.rejectedPromise<void>(kj::mv(*exception));
+    KJ_IF_SOME(exception, failure) {
+      return js.rejectedPromise<void>(kj::mv(exception));
     }
   }
 
-  KJ_IF_MAYBE(error, state.template tryGet<StreamStates::Errored>()) {
-    return js.rejectedPromise<void>(error->addRef(js));
+  KJ_IF_SOME(error, state.template tryGet<StreamStates::Errored>()) {
+    return js.rejectedPromise<void>(error.addRef(js));
   }
 
   if (isCloseQueuedOrInFlight() || state.template is<StreamStates::Closed>()) {
     return js.rejectedPromise<void>(js.v8TypeError("This ReadableStream is closed."_kj));
   }
 
-  KJ_IF_MAYBE(erroring, state.template tryGet<StreamStates::Erroring>()) {
-    return js.rejectedPromise<void>(erroring->reason.addRef(js));
+  KJ_IF_SOME(erroring, state.template tryGet<StreamStates::Erroring>()) {
+    return js.rejectedPromise<void>(erroring.reason.addRef(js));
   }
 
   KJ_ASSERT(isWritable());
@@ -1521,10 +1529,10 @@ bool WritableImpl<Self>::isWritable() const {
 namespace {
 template <typename T>
 kj::Maybe<T&> tryGetAs(auto& ref) {
-  KJ_IF_MAYBE(ptr, ref->tryGet()) {
-    return kj::dynamicDowncastIfAvailable<T>(*ptr);
+  KJ_IF_SOME(ptr, ref->tryGet()) {
+    return kj::dynamicDowncastIfAvailable<T>(ptr);
   }
-  return nullptr;
+  return kj::none;
 }
 
 class AllReaderBase {
@@ -1576,14 +1584,14 @@ struct ReadableState {
   }
 
   void consumerClose(jsg::Lock& js) {
-    KJ_IF_MAYBE(o, owner) {
-      KJ_SWITCH_ONEOF(*o) {
+    KJ_IF_SOME(o, owner) {
+      KJ_SWITCH_ONEOF(o) {
         KJ_CASE_ONEOF(controller, ReadableStreamJsController*) {
           return controller->doClose(js);
         }
         KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
-          KJ_IF_MAYBE(base, reader->tryGet()) {
-            base->doClose(js);
+          KJ_IF_SOME(base, reader->tryGet()) {
+            base.doClose(js);
           }
           return;
         }
@@ -1593,14 +1601,14 @@ struct ReadableState {
   }
 
   void consumerError(jsg::Lock& js, jsg::Value reason) {
-    KJ_IF_MAYBE(o, owner) {
-      KJ_SWITCH_ONEOF(*o) {
+    KJ_IF_SOME(o, owner) {
+      KJ_SWITCH_ONEOF(o) {
         KJ_CASE_ONEOF(controller, ReadableStreamJsController*) {
           return controller->doError(js, reason.getHandle(js));
         }
         KJ_CASE_ONEOF(reader, AllReaderWeakRef) {
-          KJ_IF_MAYBE(base, reader->tryGet()) {
-            base->doError(js, reason.getHandle(js));
+          KJ_IF_SOME(base, reader->tryGet()) {
+            base.doError(js, reason.getHandle(js));
           }
           return;
         }
@@ -1656,7 +1664,7 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
   }
 
   void setOwner(auto newOwner) {
-    KJ_IF_MAYBE(s, state) { s->setOwner(kj::mv(newOwner)); }
+    KJ_IF_SOME(s, state) { s.setOwner(kj::mv(newOwner)); }
   }
 
   kj::Own<ValueReadable> clone(jsg::Lock& js, ReadableStreamJsController* owner) {
@@ -1669,9 +1677,9 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
   }
 
   jsg::Promise<ReadResult> read(jsg::Lock& js) {
-    KJ_IF_MAYBE(s, state) {
+    KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
-      s->consumer->read(js, ValueQueue::ReadRequest {
+      s.consumer->read(js, ValueQueue::ReadRequest {
         .resolver = kj::mv(prp.resolver),
       });
       return kj::mv(prp.promise);
@@ -1689,11 +1697,11 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
     // the underlying controller only when the last reader is canceled.
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
-    KJ_IF_MAYBE(s, state) {
+    KJ_IF_SOME(s, state) {
       KJ_DEFER({
-        state = nullptr;
+        state = kj::none;
       });
-      return s->cancel(js, kj::mv(maybeReason));
+      return s.cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
@@ -1702,25 +1710,25 @@ struct ValueReadable final: public api::ValueQueue::ConsumerImpl::StateListener 
   void onConsumerClose(jsg::Lock& js) override {
     // Called by the consumer when a state change to closed happens.
     // We need to notify the owner
-    KJ_IF_MAYBE(s, state) { s->consumerClose(js); }
+    KJ_IF_SOME(s, state) { s.consumerClose(js); }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::Value reason) override {
     // Called by the consumer when a state change to errored happens.
     // We need to noify the owner
-    KJ_IF_MAYBE(s, state) { s->consumerError(js, kj::mv(reason)); }
+    KJ_IF_SOME(s, state) { s.consumerError(js, kj::mv(reason)); }
   }
 
   void onConsumerWantsData(jsg::Lock& js) override {
     // Called by the consumer when it has a queued pending read and needs
     // data to be provided to fulfill it. We need to notify the controller
     // to initiate pulling to provide the data.
-    KJ_IF_MAYBE(s, state) { s->consumerWantsData(js); }
+    KJ_IF_SOME(s, state) { s.consumerWantsData(js); }
   }
 
   kj::Maybe<int> getDesiredSize() {
-    KJ_IF_MAYBE(s, state) { return s->getDesiredSize(); }
-    return nullptr;
+    KJ_IF_SOME(s, state) { return s.getDesiredSize(); }
+    return kj::none;
   }
 
   bool canCloseOrEnqueue() {
@@ -1759,7 +1767,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   }
 
   void setOwner(auto newOwner) {
-    KJ_IF_MAYBE(s, state) { s->setOwner(kj::mv(newOwner)); }
+    KJ_IF_SOME(s, state) { s.setOwner(kj::mv(newOwner)); }
   }
 
   // A single ReadableByteStreamController can have multiple consumers.
@@ -1774,17 +1782,17 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   jsg::Promise<ReadResult> read(
       jsg::Lock& js,
       kj::Maybe<ReadableStreamController::ByobOptions> byobOptions) {
-    KJ_IF_MAYBE(s, state) {
+    KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
 
-      KJ_IF_MAYBE(byob, byobOptions) {
-        jsg::BufferSource source(js, byob->bufferView.getHandle(js));
+      KJ_IF_SOME(byob, byobOptions) {
+        jsg::BufferSource source(js, byob.bufferView.getHandle(js));
         // If atLeast is not given, then by default it is the element size of the view
         // that we were given. If atLeast is given, we make sure that it is aligned
         // with the element size. No matter what, atLeast cannot be less than 1.
-        auto atLeast = kj::max(source.getElementSize(), byob->atLeast.orDefault(1));
+        auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
         atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
-        s->consumer->read(js, ByteQueue::ReadRequest(
+        s.consumer->read(js, ByteQueue::ReadRequest(
           kj::mv(prp.resolver),
           {
             .store = source.detach(js),
@@ -1793,7 +1801,7 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
           }
         ));
       } else {
-        s->consumer->read(js, ByteQueue::ReadRequest(
+        s.consumer->read(js, ByteQueue::ReadRequest(
           kj::mv(prp.resolver),
           {
             .store = jsg::BackingStore::alloc(js, autoAllocateChunkSize),
@@ -1806,10 +1814,10 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
     }
 
     // We are canceled! There's nothing else to do.
-    KJ_IF_MAYBE(byob, byobOptions) {
+    KJ_IF_SOME(byob, byobOptions) {
       // If a BYOB buffer was given, we need to give it back wrapped in a TypedArray
       // whose size is set to zero.
-      jsg::BufferSource source(js, byob->bufferView.getHandle(js));
+      jsg::BufferSource source(js, byob.bufferView.getHandle(js));
       auto store = source.detach(js);
       store.consume(store.size());
       return js.resolvedPromise(ReadResult {
@@ -1829,38 +1837,38 @@ struct ByteReadable final: public api::ByteQueue::ConsumerImpl::StateListener {
   // Here, we rely on the controller implementing the correct behavior since it owns
   // the queue that knows about all of the attached consumers.
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-    KJ_IF_MAYBE(s, state) {
+    KJ_IF_SOME(s, state) {
       KJ_DEFER({
         // Clear the references to the controller, free the consumer, and the
         // owner state once this scope exits. This ByteReadable will no longer
         // be usable once this is done.
-        state = nullptr;
+        state = kj::none;
       });
 
-      return s->cancel(js, kj::mv(maybeReason));
+      return s.cancel(js, kj::mv(maybeReason));
     }
 
     return js.resolvedPromise();
   }
 
   void onConsumerClose(jsg::Lock& js) override {
-    KJ_IF_MAYBE(s, state) { s->consumerClose(js); }
+    KJ_IF_SOME(s, state) { s.consumerClose(js); }
   }
 
   void onConsumerError(jsg::Lock& js, jsg::Value reason) override {
-    KJ_IF_MAYBE(s, state) { s->consumerError(js, kj::mv(reason)); };
+    KJ_IF_SOME(s, state) { s.consumerError(js, kj::mv(reason)); };
   }
 
   // Called by the consumer when it has a queued pending read and needs
   // data to be provided to fulfill it. We need to notify the controller
   // to initiate pulling to provide the data.
   void onConsumerWantsData(jsg::Lock& js) override {
-    KJ_IF_MAYBE(s, state) { s->consumerWantsData(js); }
+    KJ_IF_SOME(s, state) { s.consumerWantsData(js); }
   }
 
   kj::Maybe<int> getDesiredSize() {
-    KJ_IF_MAYBE(s, state) { return s->getDesiredSize(); }
-    return nullptr;
+    KJ_IF_SOME(s, state) { return s.getDesiredSize(); }
+    return kj::none;
   }
 
   bool canCloseOrEnqueue() {
@@ -1933,9 +1941,9 @@ void ReadableStreamDefaultController::enqueue(
 
   size_t size = 1;
   bool errored = false;
-  KJ_IF_MAYBE(sizeFunc, impl.algorithms.size) {
+  KJ_IF_SOME(sizeFunc, impl.algorithms.size) {
     js.tryCatch([&] {
-      size = (*sizeFunc)(js, value);
+      size = sizeFunc(js, value);
     }, [&](jsg::Value exception) {
       impl.doError(js, kj::mv(exception));
       errored = true;
@@ -1979,8 +1987,8 @@ void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
 }
 
 void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_MAYBE(impl, maybeImpl) {
-      visitor.visit(impl->view, impl->controller);
+    KJ_IF_SOME(impl, maybeImpl) {
+      visitor.visit(impl.view, impl.controller);
     }
   }
 
@@ -1992,28 +2000,28 @@ ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(
       maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
 kj::Maybe<int> ReadableStreamBYOBRequest::getAtLeast() {
-  KJ_IF_MAYBE(impl, maybeImpl) {
-    return impl->readRequest->getAtLeast();
+  KJ_IF_SOME(impl, maybeImpl) {
+    return impl.readRequest->getAtLeast();
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<jsg::V8Ref<v8::Uint8Array>> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
-  KJ_IF_MAYBE(impl, maybeImpl) {
-    return impl->view.addRef(js);
+  KJ_IF_SOME(impl, maybeImpl) {
+    return impl.view.addRef(js);
   }
-  return nullptr;
+  return kj::none;
 }
 
 void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
-  KJ_IF_MAYBE(impl, maybeImpl) {
+  KJ_IF_SOME(impl, maybeImpl) {
     // If the user code happened to have retained a reference to the view or
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
-    jsg::check(impl->view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
-    impl->controller->maybeByobRequest = nullptr;
+    jsg::check(impl.view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
+    impl.controller->maybeByobRequest = kj::none;
   }
-  maybeImpl = nullptr;
+  maybeImpl = kj::none;
 }
 
 void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
@@ -2097,8 +2105,8 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSou
 }
 
 bool ReadableStreamBYOBRequest::isPartiallyFulfilled() {
-  KJ_IF_MAYBE(impl, maybeImpl) {
-    return impl->readRequest->isPartiallyFulfilled();
+  KJ_IF_SOME(impl, maybeImpl) {
+    return impl.readRequest->isPartiallyFulfilled();
   }
   return false;
 }
@@ -2139,17 +2147,17 @@ void ReadableByteStreamController::visitForGc(jsg::GcVisitor& visitor) {
 jsg::Promise<void> ReadableByteStreamController::cancel(
     jsg::Lock& js,
     jsg::Optional<v8::Local<v8::Value>> maybeReason) {
-  KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
+  KJ_IF_SOME(byobRequest, maybeByobRequest) {
     if (impl.consumerCount() == 1) {
-      (*byobRequest)->invalidate(js);
+      byobRequest->invalidate(js);
     }
   }
   return impl.cancel(js, JSG_THIS, maybeReason.orDefault(js.v8Undefined()));
 }
 
 void ReadableByteStreamController::close(jsg::Lock& js) {
-  KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
-    JSG_REQUIRE(!(*byobRequest)->isPartiallyFulfilled(), TypeError,
+  KJ_IF_SOME(byobRequest, maybeByobRequest) {
+    JSG_REQUIRE(!byobRequest->isPartiallyFulfilled(), TypeError,
         "This ReadableStream was closed with a partial read pending.");
   }
   impl.close(js);
@@ -2161,12 +2169,12 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::BufferSource chun
                "The provided ArrayBuffer must be detachable.");
   JSG_REQUIRE(impl.canCloseOrEnqueue(), TypeError, "This ReadableByteStreamController is closed.");
 
-  KJ_IF_MAYBE(byobRequest, maybeByobRequest) {
-    KJ_IF_MAYBE(view, (*byobRequest)->getView(js)) {
-      JSG_REQUIRE(view->getHandle(js)->ByteLength() > 0, TypeError,
+  KJ_IF_SOME(byobRequest, maybeByobRequest) {
+    KJ_IF_SOME(view, byobRequest->getView(js)) {
+      JSG_REQUIRE(view.getHandle(js)->ByteLength() > 0, TypeError,
           "The byobRequest.view is zero-length or was detached");
     }
-    (*byobRequest)->invalidate(js);
+    byobRequest->invalidate(js);
   }
 
   impl.enqueue(js, kj::heap<ByteQueue::Entry>(chunk.detach(js)), JSG_THIS);
@@ -2178,14 +2186,14 @@ void ReadableByteStreamController::error(jsg::Lock& js, v8::Local<v8::Value> rea
 
 kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>>
 ReadableByteStreamController::getByobRequest(jsg::Lock& js) {
-  if (maybeByobRequest == nullptr) {
-    KJ_IF_MAYBE(queue, impl.state.tryGet<ByteQueue>()) {
-      KJ_IF_MAYBE(pendingByob, queue->nextPendingByobReadRequest()) {
+  if (maybeByobRequest == kj::none) {
+    KJ_IF_SOME(queue, impl.state.tryGet<ByteQueue>()) {
+      KJ_IF_SOME(pendingByob, queue.nextPendingByobReadRequest()) {
         maybeByobRequest = jsg::alloc<ReadableStreamBYOBRequest>(js,
-            kj::mv(*pendingByob), JSG_THIS);
+            kj::mv(pendingByob), JSG_THIS);
       }
     } else {
-      return nullptr;
+      return kj::none;
     }
   }
 
@@ -2251,8 +2259,8 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
     return consumer->cancel(js, reason.getHandle(js));
   };
 
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(*pendingState) {
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return js.resolvedPromise();
       }
@@ -2329,7 +2337,7 @@ bool ReadableStreamJsController::isByteOriented() const {
 }
 
 bool ReadableStreamJsController::isClosedOrErrored() const {
-  KJ_IF_MAYBE(pending, maybePendingState) {
+  if (maybePendingState != kj::none) {
     return true;
   }
   return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
@@ -2353,8 +2361,8 @@ jsg::Promise<void> ReadableStreamJsController::pipeTo(
   KJ_DASSERT(!destination.isLockedToWriter());
 
   disturbed = true;
-  KJ_IF_MAYBE(promise, destination.tryPipeFrom(js, addRef(), kj::mv(options))) {
-    return kj::mv(*promise);
+  KJ_IF_SOME(promise, destination.tryPipeFrom(js, addRef(), kj::mv(options))) {
+    return kj::mv(promise);
   }
 
   return js.rejectedPromise<void>(
@@ -2366,9 +2374,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     kj::Maybe<ByobOptions> maybeByobOptions) {
   disturbed = true;
 
-  KJ_IF_MAYBE(byobOptions, maybeByobOptions) {
-    byobOptions->detachBuffer = true;
-    auto view = byobOptions->bufferView.getHandle(js);
+  KJ_IF_SOME(byobOptions, maybeByobOptions) {
+    byobOptions.detachBuffer = true;
+    auto view = byobOptions.bufferView.getHandle(js);
     if (!view->Buffer()->IsDetachable()) {
       return js.rejectedPromise<ReadResult>(
           js.v8TypeError("Unabled to use non-detachable ArrayBuffer."_kj));
@@ -2379,9 +2387,9 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
           js.v8TypeError("Unable to use a zero-length ArrayBuffer."_kj));
     }
 
-    if (state.is<StreamStates::Closed>() || maybePendingState != nullptr) {
-      KJ_IF_MAYBE(pendingState, maybePendingState) {
-        KJ_SWITCH_ONEOF(*pendingState) {
+    if (state.is<StreamStates::Closed>() || maybePendingState != kj::none) {
+      KJ_IF_SOME(pendingState, maybePendingState) {
+        KJ_SWITCH_ONEOF(pendingState) {
           KJ_CASE_ONEOF(closed, StreamStates::Closed) {
             // Fall through to the BYOB read case below.
           }
@@ -2393,7 +2401,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
       // If it is a BYOB read, then the spec requires that we return an empty
       // view of the same type provided, that uses the same backing memory
       // as that provided, but with zero-length.
-      auto source = jsg::BufferSource(js, byobOptions->bufferView.getHandle(js));
+      auto source = jsg::BufferSource(js, byobOptions.bufferView.getHandle(js));
       auto store = source.detach(js);
       store.consume(store.size());
       return js.resolvedPromise(ReadResult {
@@ -2403,8 +2411,8 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     }
   }
 
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(*pendingState) {
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         // The closed state for BYOB reads is handled in the maybeByobOptions check above.
         KJ_ASSERT(maybeByobOptions == nullptr);
@@ -2451,8 +2459,8 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
   lock.state.init<Locked>();
   disturbed = true;
 
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(*pendingState) {
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         return Tee {
           .branch1 = jsg::alloc<ReadableStream>(
@@ -2553,8 +2561,8 @@ kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsController:
 }
 
 void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(*pendingState) {
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
       KJ_CASE_ONEOF(error, StreamStates::Errored) {
         visitor.visit(error);
@@ -2578,13 +2586,13 @@ void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
 };
 
 kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    return nullptr;
+  if (maybePendingState != kj::none) {
+    return kj::none;
   }
 
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return nullptr; }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return kj::none; }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return kj::none; }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       return consumer->getDesiredSize();
     }
@@ -2596,9 +2604,9 @@ kj::Maybe<int> ReadableStreamJsController::getDesiredSize() {
 }
 
 kj::Maybe<v8::Local<v8::Value>> ReadableStreamJsController::isErrored(jsg::Lock& js) {
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    KJ_SWITCH_ONEOF(*pendingState) {
-      KJ_CASE_ONEOF(closed, StreamStates::Closed) { return nullptr; }
+  KJ_IF_SOME(pendingState, maybePendingState) {
+    KJ_SWITCH_ONEOF(pendingState) {
+      KJ_CASE_ONEOF(closed, StreamStates::Closed) { return kj::none; }
       KJ_CASE_ONEOF(error, StreamStates::Errored) {
         return error.getHandle(js);
       }
@@ -2610,7 +2618,7 @@ kj::Maybe<v8::Local<v8::Value>> ReadableStreamJsController::isErrored(jsg::Lock&
 }
 
 bool ReadableStreamJsController::canCloseOrEnqueue() {
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
+  if (maybePendingState != kj::none) {
     return false;
   }
 
@@ -2628,19 +2636,19 @@ bool ReadableStreamJsController::canCloseOrEnqueue() {
 }
 
 bool ReadableStreamJsController::hasBackpressure() {
-  KJ_IF_MAYBE(size, getDesiredSize()) { return *size <= 0; }
+  KJ_IF_SOME(size, getDesiredSize()) { return size <= 0; }
   return false;
 }
 
 kj::Maybe<kj::OneOf<jsg::Ref<ReadableStreamDefaultController>,
                     jsg::Ref<ReadableByteStreamController>>>
 ReadableStreamJsController::getController() {
-  KJ_IF_MAYBE(pendingState, maybePendingState) {
-    return nullptr;
+  if (maybePendingState != kj::none) {
+    return kj::none;
   }
   KJ_SWITCH_ONEOF(state) {
-    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return nullptr; }
-    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return nullptr; }
+    KJ_CASE_ONEOF(closed, StreamStates::Closed) { return kj::none; }
+    KJ_CASE_ONEOF(errored, StreamStates::Errored) { return kj::none; }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       return consumer->getControllerRef();
     }
@@ -2720,13 +2728,13 @@ private:
   uint64_t runningTotal = 0;
 
   size_t pendingReadCount = 0;
-  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = nullptr;
+  kj::Maybe<kj::OneOf<StreamStates::Closed, StreamStates::Errored>> maybePendingState = kj::none;
 
   jsg::Promise<PartList> loop(jsg::Lock& js) {
     // It really shouldn't be possible for this to be called here given how we are sequencing
     // out reads, but let's handle it just to be safe.
-    KJ_IF_MAYBE(pendingState, maybePendingState) {
-      KJ_SWITCH_ONEOF(*pendingState) {
+    KJ_IF_SOME(pendingState, maybePendingState) {
+      KJ_SWITCH_ONEOF(pendingState) {
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {
           return js.resolvedPromise(KJ_MAP(p, parts) { return p.asArrayPtr(); });
         }
@@ -2747,7 +2755,7 @@ private:
         const auto read = [&](auto& js) {
           ReadPendingScope scope(js, *this);
           if constexpr (kj::isSameType<T, ByteReadable>()) {
-            return readable->read(js, nullptr);
+            return readable->read(js, kj::none);
           } else {
             return readable->read(js);
           }
@@ -2818,7 +2826,7 @@ private:
   }
 
   void setPendingState(kj::OneOf<StreamStates::Closed, StreamStates::Errored> pending) {
-    if (maybePendingState == nullptr) {
+    if (maybePendingState == kj::none) {
       maybePendingState = kj::mv(pending);
     }
   }
@@ -2938,7 +2946,7 @@ private:
           // calls to doClose/doError will not impact the lifetime of the readable
           // state.
           if constexpr (kj::isSameType<T, ByteReadable>()) {
-            return readable->read(js, nullptr);
+            return readable->read(js, kj::none);
           } else {
             return readable->read(js);
           }
@@ -3034,18 +3042,18 @@ private:
                 (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
                 (readable),
                 (jsg::Lock& js, Result result) mutable {
-          KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
+          KJ_IF_SOME(reader, tryGetAs<PumpToReader>(pumpToReader)) {
             // Oh good, if we got here it means we're in the right IoContext and
             // the PumpToReader is still alive. Let's process the result.
-            reader->ioContext.requireCurrentOrThrowJs();
+            reader.ioContext.requireCurrentOrThrowJs();
             auto& ioContext = IoContext::current();
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
                 // We received bytes to write. Do so...
-                // (It's safe to directly access reader->sink here --it's an kj::Own--
+                // (It's safe to directly access reader.sink here --it's an kj::Own--
                 // because we accessed the reader through an IoOwn, proving that
                 // we're in the correct IoContext...)
-                auto promise = reader->sink->write(bytes.begin(), bytes.size())
+                auto promise = reader.sink->write(bytes.begin(), bytes.size())
                     .attach(kj::mv(bytes));
                 // Wrap the write promise in a canceler that will be triggered when the
                 // PumpToReader is dropped. While the write promise is pending, it is
@@ -3053,10 +3061,10 @@ private:
                 // dropped causing the hold on the sink to be released. If that is
                 // released while the write is still pending we can end up with an
                 // error further up the destruct chain.
-                return ioContext.awaitIo(js, reader->canceler.wrap(kj::mv(promise)),
+                return ioContext.awaitIo(js, reader.canceler.wrap(kj::mv(promise)),
                     [](jsg::Lock& js) -> kj::Maybe<jsg::Value> {
                   // The write completed successfully.
-                  return kj::Maybe<jsg::Value>(nullptr);
+                  return kj::Maybe<jsg::Value>(kj::none);
                 }, [](jsg::Lock& js, jsg::Value exception) mutable -> kj::Maybe<jsg::Value> {
                   // The write failed.
                   return kj::mv(exception);
@@ -3065,15 +3073,17 @@ private:
                       (readable=kj::mv(readable),pumpToReader=kj::mv(pumpToReader)),
                       (readable),
                       (jsg::Lock& js, kj::Maybe<jsg::Value> maybeException) mutable {
-                  KJ_IF_MAYBE(reader, tryGetAs<PumpToReader>(pumpToReader)) {
-                    auto& ioContext = reader->ioContext;
+                  KJ_IF_SOME(reader, tryGetAs<PumpToReader>(pumpToReader)) {
+                    auto& ioContext = reader.ioContext;
                     ioContext.requireCurrentOrThrowJs();
                     // Oh good, if we got here it means we're in the right IoContext and
                     // the PumpToReader is still alive.
-                    KJ_IF_MAYBE(exception, maybeException) {
-                      reader->doError(js, exception->getHandle(js));
+                    KJ_IF_SOME(exception, maybeException) {
+                      reader.doError(js, exception.getHandle(js));
+                    } else {
+                      // Else block to avert dangling else compiler warning.
                     }
-                    return reader->pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
+                    return reader.pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
                   } else {
                     // If we got here, we're in the right IoContext but the PumpToReader
                     // has been destroyed. Let's cancel the readable as the last step.
@@ -3090,16 +3100,16 @@ private:
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
                 // If we got here, the read signaled that we're done. Close the reader and
                 // pump one more time to shut things down.
-                reader->doClose(js);
+                reader.doClose(js);
               }
               KJ_CASE_ONEOF(exception, jsg::Value) {
                 // If we got here, the read signaled an exception. Either the read failed or
                 // provided something other than bytes. Error the reader and pump one more
                 // time to shut things down.
-                reader->doError(js, exception.getHandle(js));
+                reader.doError(js, exception.getHandle(js));
               }
             }
-            return reader->pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
+            return reader.pumpLoop(js, ioContext, kj::mv(readable), kj::mv(pumpToReader));
           } else {
             // If we got here, we're in the right IoContext but the PumpToReader has been
             // freed. There's nothing we can do except cleanup.
@@ -3258,7 +3268,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(jsg::Lock& 
 }
 
 kj::Maybe<uint64_t> ReadableStreamJsController::tryGetLength(StreamEncoding encoding) {
-  return nullptr;
+  return kj::none;
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
@@ -3328,10 +3338,10 @@ jsg::Ref<AbortSignal> WritableStreamDefaultController::getSignal() {
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamDefaultController::isErroring(jsg::Lock& js) {
-  KJ_IF_MAYBE(erroring, impl.state.tryGet<StreamStates::Erroring>()) {
-    return erroring->reason.getHandle(js);
+  KJ_IF_SOME(erroring, impl.state.tryGet<StreamStates::Erroring>()) {
+    return erroring.reason.getHandle(js);
   }
-  return nullptr;
+  return kj::none;
 }
 
 void WritableStreamDefaultController::setup(
@@ -3366,8 +3376,8 @@ jsg::Promise<void> WritableStreamJsController::abort(
   // The spec requires that if abort is called multiple times, it is supposed to return the same
   // promise each time. That's a bit cumbersome here with jsg::Promise so we intentionally just
   // return a continuation branch off the same promise.
-  KJ_IF_MAYBE(abortPromise, maybeAbortPromise) {
-    return abortPromise->whenResolved(js);
+  KJ_IF_SOME(abortPromise, maybeAbortPromise) {
+    return abortPromise.whenResolved(js);
   }
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
@@ -3415,20 +3425,20 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
 
 void WritableStreamJsController::doClose(jsg::Lock& js) {
   state.init<StreamStates::Closed>();
-  KJ_IF_MAYBE(locked, lock.state.tryGet<WriterLocked>()) {
-    maybeResolvePromise(js, locked->getClosedFulfiller());
-    maybeResolvePromise(js, locked->getReadyFulfiller());
-  } else KJ_IF_MAYBE(locked, lock.state.tryGet<WritableLockImpl::PipeLocked>()) {
+  KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
+    maybeResolvePromise(js, locked.getClosedFulfiller());
+    maybeResolvePromise(js, locked.getReadyFulfiller());
+  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
     lock.state.init<Unlocked>();
   }
 }
 
 void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   state.init<StreamStates::Errored>(js.v8Ref(reason));
-  KJ_IF_MAYBE(locked, lock.state.tryGet<WriterLocked>()) {
-    maybeRejectPromise<void>(js, locked->getClosedFulfiller(), reason);
-    maybeResolvePromise(js, locked->getReadyFulfiller());
-  } else KJ_IF_MAYBE(locked, lock.state.tryGet<WritableLockImpl::PipeLocked>()) {
+  KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
+    maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
+    maybeResolvePromise(js, locked.getReadyFulfiller());
+  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
     lock.state.init<Unlocked>();
   }
 }
@@ -3439,7 +3449,7 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
       return 0;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return nullptr;
+      return kj::none;
     }
     KJ_CASE_ONEOF(controller, Controller) {
       return controller->getDesiredSize();
@@ -3449,16 +3459,16 @@ kj::Maybe<int> WritableStreamJsController::getDesiredSize() {
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroring(jsg::Lock& js) {
-  KJ_IF_MAYBE(controller, state.tryGet<Controller>()) {
-    return (*controller)->isErroring(js);
+  KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    return controller->isErroring(js);
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<v8::Local<v8::Value>> WritableStreamJsController::isErroredOrErroring(
     jsg::Lock& js) {
-  KJ_IF_MAYBE(err, state.tryGet<StreamStates::Errored>()) {
-    return err->getHandle(js);
+  KJ_IF_SOME(err, state.tryGet<StreamStates::Errored>()) {
+    return err.getHandle(js);
   }
   return isErroring(js);
 }
@@ -3491,21 +3501,21 @@ bool WritableStreamJsController::lockWriter(jsg::Lock& js, Writer& writer) {
 void WritableStreamJsController::maybeRejectReadyPromise(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-  KJ_IF_MAYBE(writerLock, lock.state.tryGet<WriterLocked>()) {
-    if (writerLock->getReadyFulfiller() != nullptr) {
-      maybeRejectPromise<void>(js, writerLock->getReadyFulfiller(), reason);
+  KJ_IF_SOME(writerLock, lock.state.tryGet<WriterLocked>()) {
+    if (writerLock.getReadyFulfiller() != kj::none) {
+      maybeRejectPromise<void>(js, writerLock.getReadyFulfiller(), reason);
     } else {
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
       prp.resolver.reject(js, reason);
-      writerLock->setReadyFulfiller(prp);
+      writerLock.setReadyFulfiller(prp);
     }
   }
 }
 
 void WritableStreamJsController::maybeResolveReadyPromise(jsg::Lock& js) {
-  KJ_IF_MAYBE(writerLock, lock.state.tryGet<WriterLocked>()) {
-    maybeResolvePromise(js, writerLock->getReadyFulfiller());
+  KJ_IF_SOME(writerLock, lock.state.tryGet<WriterLocked>()) {
+    maybeResolvePromise(js, writerLock.getReadyFulfiller());
   }
 }
 
@@ -3556,7 +3566,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   auto maybePipeLock = lock.tryGetPipe();
-  if (maybePipeLock == nullptr) return js.resolvedPromise();
+  if (maybePipeLock == kj::none) return js.resolvedPromise();
   auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
 
   auto preventAbort = pipeLock.preventAbort;
@@ -3566,35 +3576,35 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   auto& source = pipeLock.source;
   // At the start of each pipe step, we check to see if either the source or
   // the destination has closed or errored and propagate that on to the other.
-  KJ_IF_MAYBE(promise, pipeLock.checkSignal(js, *this)) {
+  KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
     lock.releasePipeLock();
-    return kj::mv(*promise);
+    return kj::mv(promise);
   }
 
-  KJ_IF_MAYBE(errored, pipeLock.source.tryGetErrored(js)) {
+  KJ_IF_SOME(errored, pipeLock.source.tryGetErrored(js)) {
     source.release(js);
     lock.releasePipeLock();
     if (!preventAbort) {
-      auto onSuccess = JSG_VISITABLE_LAMBDA((pipeThrough, reason = js.v8Ref(*errored)),
+      auto onSuccess = JSG_VISITABLE_LAMBDA((pipeThrough, reason = js.v8Ref(errored)),
                                             (reason), (jsg::Lock& js) {
         return rejectedMaybeHandledPromise<void>(
           js,
           reason.getHandle(js),
           pipeThrough);
       });
-      auto promise = abort(js, *errored);
+      auto promise = abort(js, errored);
       if (IoContext::hasCurrent()) {
         return promise.then(js, IoContext::current().addFunctor(kj::mv(onSuccess)));
       } else {
         return promise.then(js, kj::mv(onSuccess));
       }
     }
-    return rejectedMaybeHandledPromise<void>(js, *errored, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(js, errored, pipeThrough);
   }
 
-  KJ_IF_MAYBE(errored, state.tryGet<StreamStates::Errored>()) {
+  KJ_IF_SOME(errored, state.tryGet<StreamStates::Errored>()) {
     lock.releasePipeLock();
-    auto reason = errored->getHandle(js);
+    auto reason = errored.getHandle(js);
     if (!preventCancel) {
       source.release(js, reason);
     } else {
@@ -3603,14 +3613,14 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
     return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
   }
 
-  KJ_IF_MAYBE(erroring, isErroring(js)) {
+  KJ_IF_SOME(erroring, isErroring(js)) {
     lock.releasePipeLock();
     if (!preventCancel) {
-      source.release(js, *erroring);
+      source.release(js, erroring);
     } else {
       source.release(js);
     }
-    return rejectedMaybeHandledPromise<void>(js, *erroring, pipeThrough);
+    return rejectedMaybeHandledPromise<void>(js, erroring, pipeThrough);
   }
 
   if (source.isClosed()) {
@@ -3651,12 +3661,12 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   auto onSuccess = [this,ref=addRef(),preventCancel,pipeThrough,&source]
           (jsg::Lock& js, ReadResult result) -> jsg::Promise<void> {
     auto maybePipeLock = lock.tryGetPipe();
-    if (maybePipeLock == nullptr) return js.resolvedPromise();
+    if (maybePipeLock == kj::none) return js.resolvedPromise();
     auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
 
-    KJ_IF_MAYBE(promise, pipeLock.checkSignal(js, *this)) {
+    KJ_IF_SOME(promise, pipeLock.checkSignal(js, *this)) {
       lock.releasePipeLock();
-      return kj::mv(*promise);
+      return kj::mv(promise);
     }
 
     if (result.done) {
@@ -3694,18 +3704,18 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
 }
 
 void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpressure) {
-  KJ_IF_MAYBE(writerLock, lock.state.tryGet<WriterLocked>()) {
+  KJ_IF_SOME(writerLock, lock.state.tryGet<WriterLocked>()) {
     if (backpressure) {
       // Per the spec, when backpressure is updated and is true, we replace the existing
       // ready promise on the writer with a new pending promise, regardless of whether
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
-      return writerLock->setReadyFulfiller(prp);
+      return writerLock.setReadyFulfiller(prp);
     }
 
     // When backpressure is updated and is false, we resolve the ready promise on the writer
-    maybeResolvePromise(js, writerLock->getReadyFulfiller());
+    maybeResolvePromise(js, writerLock.getReadyFulfiller());
   }
 }
 
@@ -3747,10 +3757,10 @@ TransformStreamDefaultController::TransformStreamDefaultController(jsg::Lock& js
         startPromise(js.newPromiseAndResolver<void>()) {}
 
 kj::Maybe<int> TransformStreamDefaultController::getDesiredSize() {
-  KJ_IF_MAYBE(readableController, tryGetReadableController()) {
-    return readableController->getDesiredSize();
+  KJ_IF_SOME(readableController, tryGetReadableController()) {
+    return readableController.getDesiredSize();
   }
-  return nullptr;
+  return kj::none;
 }
 
 void TransformStreamDefaultController::enqueue(
@@ -3775,17 +3785,17 @@ void TransformStreamDefaultController::enqueue(
 }
 
 void TransformStreamDefaultController::error(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_IF_MAYBE(readableController, tryGetReadableController()) {
-    readableController->error(js, reason);
-    maybeReadableController = nullptr;
+  KJ_IF_SOME(readableController, tryGetReadableController()) {
+    readableController.error(js, reason);
+    maybeReadableController = kj::none;
   }
   errorWritableAndUnblockWrite(js, reason);
 }
 
 void TransformStreamDefaultController::terminate(jsg::Lock& js) {
-  KJ_IF_MAYBE(readableController, tryGetReadableController()) {
-    readableController->close(js);
-    maybeReadableController = nullptr;
+  KJ_IF_SOME(readableController, tryGetReadableController()) {
+    readableController.close(js);
+    maybeReadableController = kj::none;
   }
   errorWritableAndUnblockWrite(js, js.v8TypeError("The transform stream has been terminated"_kj));
 }
@@ -3793,22 +3803,26 @@ void TransformStreamDefaultController::terminate(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::write(
     jsg::Lock& js,
     v8::Local<v8::Value> chunk) {
-  KJ_IF_MAYBE(writableController, tryGetWritableController()) {
-    KJ_IF_MAYBE(error, writableController->isErroredOrErroring(js)) {
-      return js.rejectedPromise<void>(*error);
+  KJ_IF_SOME(writableController, tryGetWritableController()) {
+    KJ_IF_SOME(error, writableController.isErroredOrErroring(js)) {
+      return js.rejectedPromise<void>(error);
     }
 
-    KJ_ASSERT(writableController->isWritable());
+    KJ_ASSERT(writableController.isWritable());
 
     if (backpressure) {
       auto chunkRef = js.v8Ref(chunk);
       return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
           JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref=JSG_THIS),
                               (chunkRef, ref), (jsg::Lock& js) mutable -> jsg::Promise<void> {
-        KJ_IF_MAYBE(writableController, ref->tryGetWritableController()) {
-          KJ_IF_MAYBE(error, writableController->isErroring(js)) {
-            return js.rejectedPromise<void>(*error);
+        KJ_IF_SOME(writableController, ref->tryGetWritableController()) {
+          KJ_IF_SOME(error, writableController.isErroring(js)) {
+            return js.rejectedPromise<void>(error);
+          } else {
+            // Else block to avert dangling else compiler warning.
           }
+        } else {
+          // Else block to avert dangling else compiler warning.
         }
         return ref->performTransform(js, chunkRef.getHandle(js));
       }));
@@ -3830,11 +3844,13 @@ jsg::Promise<void> TransformStreamDefaultController::abort(
 jsg::Promise<void> TransformStreamDefaultController::close(jsg::Lock& js) {
   auto onSuccess = JSG_VISITABLE_LAMBDA(
       (ref=JSG_THIS), (ref), (jsg::Lock& js) -> jsg::Promise<void> {
-    KJ_IF_MAYBE(readableController, ref->tryGetReadableController()) {
+    KJ_IF_SOME(readableController, ref->tryGetReadableController()) {
       // Allows for a graceful close of the readable side. Close will
       // complete once all of the queued data is read or the stream
       // errors.
-      readableController->close(js);
+      readableController.close(js);
+    } else {
+      // Else block to avert dangling else compiler warning.
     }
     return js.resolvedPromise();
   });
@@ -3858,7 +3874,7 @@ jsg::Promise<void> TransformStreamDefaultController::pull(jsg::Lock& js) {
 jsg::Promise<void> TransformStreamDefaultController::cancel(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
-  maybeReadableController = nullptr;
+  maybeReadableController = kj::none;
   errorWritableAndUnblockWrite(js, reason);
   return js.resolvedPromise();
 }
@@ -3866,10 +3882,10 @@ jsg::Promise<void> TransformStreamDefaultController::cancel(
 jsg::Promise<void> TransformStreamDefaultController::performTransform(
     jsg::Lock& js,
     v8::Local<v8::Value> chunk) {
-  KJ_IF_MAYBE(transform, algorithms.transform) {
+  if (algorithms.transform != kj::none) {
     return maybeRunAlgorithm(
         js,
-        transform,
+        algorithms.transform,
         [](jsg::Lock& js) -> jsg::Promise<void> {
           return js.resolvedPromise();
         },
@@ -3893,8 +3909,8 @@ jsg::Promise<void> TransformStreamDefaultController::performTransform(
 
 void TransformStreamDefaultController::setBackpressure(jsg::Lock& js, bool newBackpressure) {
   KJ_ASSERT(newBackpressure != backpressure);
-  KJ_IF_MAYBE(prp, maybeBackpressureChange) {
-    prp->resolver.resolve(js);
+  KJ_IF_SOME(prp, maybeBackpressureChange) {
+    prp.resolver.resolve(js);
   }
   maybeBackpressureChange = js.newPromiseAndResolver<void>();
   KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.markAsHandled(js);
@@ -3905,11 +3921,11 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
     jsg::Lock& js,
     v8::Local<v8::Value> reason) {
   algorithms.clear();
-  KJ_IF_MAYBE(writableController, tryGetWritableController()) {
-    if (writableController->isWritable()) {
-      writableController->doError(js, reason);
+  KJ_IF_SOME(writableController, tryGetWritableController()) {
+    if (writableController.isWritable()) {
+      writableController.doError(js, reason);
     }
-    maybeWritableController = nullptr;
+    maybeWritableController = kj::none;
   }
   if (backpressure) {
     setBackpressure(js, false);
@@ -3917,8 +3933,8 @@ void TransformStreamDefaultController::errorWritableAndUnblockWrite(
 }
 
 void TransformStreamDefaultController::visitForGc(jsg::GcVisitor& visitor) {
-  KJ_IF_MAYBE(backpressureChange, maybeBackpressureChange) {
-    visitor.visit(backpressureChange->promise, backpressureChange->resolver);
+  KJ_IF_SOME(backpressureChange, maybeBackpressureChange) {
+    visitor.visit(backpressureChange.promise, backpressureChange.resolver);
   }
   visitor.visit(startPromise.resolver, startPromise.promise, algorithms);
 }
@@ -3952,12 +3968,12 @@ void TransformStreamDefaultController::init(
   JSG_REQUIRE(transformer.writableType == nullptr, TypeError,
                "transformer.writableType must be undefined.");
 
-  KJ_IF_MAYBE(transform, transformer.transform) {
-    algorithms.transform = kj::mv(*transform);
+  KJ_IF_SOME(transform, transformer.transform) {
+    algorithms.transform = kj::mv(transform);
   }
 
-  KJ_IF_MAYBE(flush, transformer.flush) {
-    algorithms.flush = kj::mv(*flush);
+  KJ_IF_SOME(flush, transformer.flush) {
+    algorithms.flush = kj::mv(flush);
   }
 
   setBackpressure(js, true);
@@ -3976,18 +3992,18 @@ void TransformStreamDefaultController::init(
 
 kj::Maybe<ReadableStreamDefaultController&>
 TransformStreamDefaultController::tryGetReadableController() {
-  KJ_IF_MAYBE(controller, maybeReadableController) {
-    return (*controller)->tryGet();
+  KJ_IF_SOME(controller, maybeReadableController) {
+    return controller->tryGet();
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<WritableStreamJsController&>
 TransformStreamDefaultController::tryGetWritableController() {
-  KJ_IF_MAYBE(controller, maybeWritableController) {
-    return (*controller)->tryGet();
+  KJ_IF_SOME(controller, maybeWritableController) {
+    return controller->tryGet();
   }
-  return nullptr;
+  return kj::none;
 }
 
 }  // namespace workerd::api
