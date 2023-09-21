@@ -278,9 +278,9 @@ public:
   // Extract the kj::WebSocket from this api::WebSocket (if applicable). The kj::WebSocket will be
   // owned elsewhere, but the api::WebSocket will retain a reference.
   kj::Own<kj::WebSocket> acceptAsHibernatable() {
-    KJ_IF_MAYBE(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
+    KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
       // We can only request hibernation if we have not called accept.
-      auto ws = kj::mv(hibernatable->ws);
+      auto ws = kj::mv(hibernatable.ws);
       // We pass a reference to the kj::WebSocket for the api::WebSocket to refer to when calling
       // `send()` or `close()`.
       farNative->state.init<Accepted>(
@@ -309,10 +309,10 @@ public:
     // TODO(soon): We probably want this to be an assert, since this is meant to be called once
     // at the end of a websocket connection and if it doesn't run then it's likely that no close
     // or error event will get dispatched.
-    KJ_IF_MAYBE(state, farNative->state.tryGet<Accepted>()) {
-      KJ_REQUIRE(state->isHibernatable(),
+    KJ_IF_SOME(state, farNative->state.tryGet<Accepted>()) {
+      KJ_REQUIRE(state.isHibernatable(),
           "tried to initiate hibernatable release but websocket wasn't hibernatable");
-      state->ws.initiateHibernatableRelease(js, kj::mv(ws), releaseState);
+      state.ws.initiateHibernatableRelease(js, kj::mv(ws), releaseState);
       farNative->closedIncoming = true;
     } else {
       KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
@@ -320,15 +320,15 @@ public:
   }
 
   inline bool awaitingHibernatableError() {
-    KJ_IF_MAYBE(accepted, farNative->state.tryGet<Accepted>()) {
-      return (accepted->ws.isAwaitingError());
+    KJ_IF_SOME(accepted, farNative->state.tryGet<Accepted>()) {
+      return (accepted.ws.isAwaitingError());
     }
     return false;
   }
 
   inline bool awaitingHibernatableRelease() {
-    KJ_IF_MAYBE(accepted, farNative->state.tryGet<Accepted>()) {
-      return (accepted->ws.isAwaitingRelease());
+    KJ_IF_SOME(accepted, farNative->state.tryGet<Accepted>()) {
+      return (accepted.ws.isAwaitingRelease());
     }
     return false;
   }
@@ -345,8 +345,8 @@ public:
   // Relevant for WebSocket Hibernation: the end we return in the Response must be in the
   // AwaitingAcceptanceOrCoupling state.
   bool pairIsAwaitingCoupling() {
-    KJ_IF_MAYBE(pair, maybePair) {
-      return (*pair)->farNative->state.is<AwaitingAcceptanceOrCoupling>();
+    KJ_IF_SOME(pair, maybePair) {
+      return pair->farNative->state.is<AwaitingAcceptanceOrCoupling>();
     }
     return false;
   }
@@ -561,15 +561,15 @@ private:
       }
 
       bool isAwaitingRelease() {
-        KJ_IF_MAYBE(ws, getIfHibernatable()) {
-          return (ws->releaseState != HibernatableReleaseState::NONE);
+        KJ_IF_SOME(ws, getIfHibernatable()) {
+          return (ws.releaseState != HibernatableReleaseState::NONE);
         }
         return false;
       }
 
       bool isAwaitingError() {
-        KJ_IF_MAYBE(ws, getIfHibernatable()) {
-          return (ws->releaseState == HibernatableReleaseState::ERROR);
+        KJ_IF_SOME(ws, getIfHibernatable()) {
+          return (ws.releaseState == HibernatableReleaseState::ERROR);
         }
         return false;
       }
@@ -581,7 +581,7 @@ private:
     WrappedWebSocket ws;
 
     bool isHibernatable() {
-      return ws.getIfNotHibernatable() == nullptr;
+      return ws.getIfNotHibernatable() == kj::none;
     }
 
     kj::Promise<void> createAbortTask(Native& native, IoContext& context);

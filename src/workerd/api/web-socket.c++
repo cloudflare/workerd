@@ -60,7 +60,7 @@ jsg::Ref<WebSocket> WebSocket::hibernatableFromNative(
 }
 
 WebSocket::WebSocket(kj::Own<kj::WebSocket> native, Locality locality)
-    : url(nullptr),
+    : url(kj::none),
       farNative(nullptr),
       outgoingMessages(IoContext::current().addObject(kj::heap<OutgoingMessagesMap>())),
       locality(locality) {
@@ -86,9 +86,9 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
   IoContext::current().awaitIo(js, canceler.wrap(kj::mv(prom)),
       [this, self = JSG_THIS](jsg::Lock& js, PackedWebSocket packedSocket) mutable {
     auto& native = *farNative;
-    KJ_IF_MAYBE(pending, native.state.tryGet<AwaitingConnection>()) {
+    KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
       // We've succeessfully established our web socket, we do not need to cancel anything.
-      pending->canceler.release();
+      pending.canceler.release();
     }
 
     native.state.init<AwaitingAcceptanceOrCoupling>(AwaitingAcceptanceOrCoupling{
@@ -97,16 +97,16 @@ void WebSocket::initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> prom)
     // both `protocol` and `extensions` start off as empty strings.
     // They become null if the connection is established and no protocol/extension was chosen.
     // https://html.spec.whatwg.org/multipage/web-sockets.html#dom-websocket-protocol
-    KJ_IF_MAYBE(proto, packedSocket.proto) {
-      protocol = kj::mv(*proto);
+    KJ_IF_SOME(proto, packedSocket.proto) {
+      protocol = kj::mv(proto);
     } else {
-      protocol = nullptr;
+      protocol = kj::none;
     }
 
-    KJ_IF_MAYBE(ext, packedSocket.extensions) {
-      extensions = kj::mv(*ext);
+    KJ_IF_SOME(ext, packedSocket.extensions) {
+      extensions = kj::mv(ext);
     } else {
-      extensions = nullptr;
+      extensions = kj::none;
     }
 
     // Fire open event.
@@ -201,14 +201,14 @@ jsg::Ref<WebSocket> WebSocket::constructor(
       "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());
-  auto client = context.getHttpClient(0, false, nullptr, "WebSocket::constructor"_kjc);
+  auto client = context.getHttpClient(0, false, kj::none, "WebSocket::constructor"_kjc);
 
   // Set protocols header if necessary.
-  KJ_IF_MAYBE(variant, protocols) {
+  KJ_IF_SOME(variant, protocols) {
     // String consisting of the protocol(s) we send to the server.
     kj::String protoString;
 
-    KJ_SWITCH_ONEOF(*variant) {
+    KJ_SWITCH_ONEOF(variant) {
       KJ_CASE_ONEOF(proto, kj::String) {
         JSG_REQUIRE(validProtoToken(proto), DOMSyntaxError, wsErr,
             "The protocol header token is invalid.");
@@ -264,12 +264,12 @@ jsg::Ref<WebSocket> WebSocket::constructor(
         kj::Maybe<kj::String> maybeProto;
         kj::Maybe<kj::String> maybeExtensions;
 
-        KJ_IF_MAYBE(proto, maybeProtoPtr) {
-          maybeProto = kj::str(*proto);
+        KJ_IF_SOME(proto, maybeProtoPtr) {
+          maybeProto = kj::str(proto);
         }
 
-        KJ_IF_MAYBE(extensions, maybeExtensionsPtr) {
-          maybeExtensions = kj::str(*extensions);
+        KJ_IF_SOME(extensions, maybeExtensionsPtr) {
+          maybeExtensions = kj::str(extensions);
         }
 
         co_return PackedWebSocket{
@@ -297,8 +297,8 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
       "Can't return WebSocket in a Response if it was created with `new WebSocket()`");
   JSG_REQUIRE(!native.state.is<Released>(), TypeError,
       "Can't return WebSocket that was already used in a response.");
-  KJ_IF_MAYBE(state, native.state.tryGet<Accepted>()) {
-    if (state->isHibernatable()) {
+  KJ_IF_SOME(state, native.state.tryGet<Accepted>()) {
+    if (state.isHibernatable()) {
       JSG_FAIL_REQUIRE(TypeError,
           "Can't return WebSocket in a Response after calling acceptWebSocket().");
     } else {
@@ -355,8 +355,8 @@ void WebSocket::accept(jsg::Lock& js) {
   JSG_REQUIRE(!native.state.is<Released>(), TypeError,
       "Can't accept() WebSocket that was already used in a response.");
 
-  KJ_IF_MAYBE(accepted, native.state.tryGet<Accepted>()) {
-    JSG_REQUIRE(!accepted->isHibernatable(), TypeError,
+  KJ_IF_SOME(accepted, native.state.tryGet<Accepted>()) {
+    JSG_REQUIRE(!accepted.isHibernatable(), TypeError,
         "Can't accept() WebSocket after enabling hibernation.");
     // Technically, this means it's okay to invoke `accept()` once a `new WebSocket()` resolves to
     // an established connection. This is probably okay? It might spare the worker devs a class of
@@ -377,8 +377,8 @@ void WebSocket::internalAccept(jsg::Lock& js) {
 WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, IoContext& context)
     : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
-  KJ_IF_MAYBE(a, context.getActor()) {
-    auto& metrics = a->getMetrics();
+  KJ_IF_SOME(a, context.getActor()) {
+    auto& metrics = a.getMetrics();
     metrics.webSocketAccepted();
 
     // Save the metrics object for the destructor since the IoContext may not be accessible
@@ -390,8 +390,8 @@ WebSocket::Accepted::Accepted(kj::Own<kj::WebSocket> wsParam, Native& native, Io
 WebSocket::Accepted::Accepted(Hibernatable wsParam, Native& native, IoContext& context)
     : ws(kj::mv(wsParam)),
       whenAbortedTask(createAbortTask(native, context)) {
-  KJ_IF_MAYBE(a, context.getActor()) {
-    auto& metrics = a->getMetrics();
+  KJ_IF_SOME(a, context.getActor()) {
+    auto& metrics = a.getMetrics();
     metrics.webSocketAccepted();
 
     // Save the metrics object for the destructor since the IoContext may not be accessible
@@ -432,8 +432,8 @@ kj::Promise<void> WebSocket::Accepted::createAbortTask(Native& native, IoContext
 }
 
 WebSocket::Accepted::~Accepted() noexcept(false) {
-  KJ_IF_MAYBE(a, actorMetrics) {
-    a->get()->webSocketClosed();
+  KJ_IF_SOME(a, actorMetrics) {
+    a.get()->webSocketClosed();
   }
 }
 
@@ -474,8 +474,8 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
       .then(js, [this, thisHandle = JSG_THIS]
                 (jsg::Lock& js, kj::Maybe<kj::Exception>&& maybeError) mutable {
     auto& native = *farNative;
-    KJ_IF_MAYBE(e, maybeError) {
-      if (!native.closedIncoming && e->getType() == kj::Exception::Type::DISCONNECTED) {
+    KJ_IF_SOME(e, maybeError) {
+      if (!native.closedIncoming && e.getType() == kj::Exception::Type::DISCONNECTED) {
         // Report premature disconnect or cancel as a close event.
         dispatchEventImpl(js, jsg::alloc<CloseEvent>(
             1006, kj::str("WebSocket disconnected without sending Close frame."), false));
@@ -484,8 +484,8 @@ void WebSocket::startReadLoop(jsg::Lock& js) {
         tryReleaseNative(js);
       } else {
         native.closedIncoming = true;
-        reportError(js, kj::cp(*e));
-        kj::throwFatalException(kj::mv(*e));
+        reportError(js, kj::cp(e));
+        kj::throwFatalException(kj::mv(e));
       }
     }
   })));
@@ -541,8 +541,8 @@ void WebSocket::close(
   auto& native = *farNative;
 
   // Handle close before connection is established for websockets obtained through `new WebSocket()`.
-  KJ_IF_MAYBE(pending, native.state.tryGet<AwaitingConnection>()) {
-    pending->canceler.cancel(kj::str("Called close before connection was established."));
+  KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
+    pending.canceler.cancel(kj::str("Called close before connection was established."));
 
     // Strictly speaking, we might not be all the way released by now, but we definitely shouldn't
     // worry about canceling again.
@@ -567,11 +567,11 @@ void WebSocket::close(
 
   assertNoError(js);
 
-  KJ_IF_MAYBE(c, code) {
-    JSG_REQUIRE(*c >= 1000 && *c < 5000 && *c != 1004 && *c != 1005 && *c != 1006 && *c != 1015,
-                 TypeError, "Invalid WebSocket close code: ", *c, ".");
+  KJ_IF_SOME(c, code) {
+    JSG_REQUIRE(c >= 1000 && c < 5000 && c != 1004 && c != 1005 && c != 1006 && c != 1015,
+                 TypeError, "Invalid WebSocket close code: ", c, ".");
   }
-  if (reason != nullptr) {
+  if (reason != kj::none) {
     // The default code of 1005 cannot have a reason, per the standard, so if a reason is specified
     // then there must be a code, too.
     JSG_REQUIRE(code != nullptr, TypeError,
@@ -594,7 +594,7 @@ void WebSocket::close(
 
 int WebSocket::getReadyState() {
   auto& native = *farNative;
-  if ((native.closedIncoming && native.closedOutgoing) || error != nullptr) {
+  if ((native.closedIncoming && native.closedOutgoing) || error != kj::none) {
     return READY_STATE_CLOSED;
   } else if (native.closedIncoming || native.closedOutgoing) {
     // Bizarrely, the spec uses the same state for a close message having been sent *or* received,
@@ -617,7 +617,7 @@ bool WebSocket::isReleased() {
 kj::Maybe<kj::String> WebSocket::getPreferredExtensions(kj::WebSocket::ExtensionsContext ctx) {
   KJ_SWITCH_ONEOF(farNative->state) {
     KJ_CASE_ONEOF(ws, AwaitingConnection) {
-      return nullptr;
+      return kj::none;
     }
     KJ_CASE_ONEOF(container, AwaitingAcceptanceOrCoupling) {
       return container.ws->getPreferredExtensions(ctx);
@@ -626,10 +626,10 @@ kj::Maybe<kj::String> WebSocket::getPreferredExtensions(kj::WebSocket::Extension
       return container.ws->getPreferredExtensions(ctx);
     }
     KJ_CASE_ONEOF(container, Released) {
-      return nullptr;
+      return kj::none;
     }
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<kj::StringPtr> WebSocket::getUrl() {
@@ -647,7 +647,7 @@ kj::Maybe<kj::StringPtr> WebSocket::getExtensions() {
 kj::Maybe<jsg::JsValue> WebSocket::deserializeAttachment(jsg::Lock& js) {
   return serializedAttachment.map([&](kj::ArrayPtr<byte> attachment)
       -> jsg::JsValue {
-    jsg::Deserializer deserializer(js, attachment, nullptr, nullptr,
+    jsg::Deserializer deserializer(js, attachment, kj::none, kj::none,
         jsg::Deserializer::Options {
       .version = 15,
       .readHeader = true,
@@ -773,8 +773,8 @@ kj::Promise<void> WebSocket::pump(
 
   while (outgoingMessages.size() > 0) {
     GatedMessage gatedMessage = outgoingMessages.release(*outgoingMessages.ordered().begin());
-    KJ_IF_MAYBE(promise, gatedMessage.outputLock) {
-      co_await *promise;
+    KJ_IF_SOME(promise, gatedMessage.outputLock) {
+      co_await promise;
     }
 
     auto size = countBytesFromMessage(gatedMessage.message);
@@ -794,8 +794,8 @@ kj::Promise<void> WebSocket::pump(
       }
     }
 
-    KJ_IF_MAYBE(a, context.getActor()) {
-      a->getMetrics().sentWebSocketMessage(size);
+    KJ_IF_SOME(a, context.getActor()) {
+      a.getMetrics().sentWebSocketMessage(size);
     }
   }
 }
@@ -821,9 +821,9 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
       auto message = co_await ws.receive();
 
       context.getLimitEnforcer().topUpActor();
-      KJ_IF_MAYBE(a, context.getActor()) {
+      KJ_IF_SOME(a, context.getActor()) {
         auto size = countBytesFromMessage(message);
-        a->getMetrics().receivedWebSocketMessage(size);
+        a.getMetrics().receivedWebSocketMessage(size);
       }
 
       // Re-enter the context with context.run(). This is arguably a bit unusual compared to other
@@ -859,7 +859,7 @@ kj::Promise<kj::Maybe<kj::Exception>> WebSocket::readLoop() {
         return true;
       });
 
-      if (!result) co_return nullptr;
+      if (!result) co_return kj::none;
     }
     KJ_UNREACHABLE;
   } catch (...) {
@@ -890,7 +890,7 @@ void WebSocket::reportError(jsg::Lock& js, kj::Exception&& e) {
 
 void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
   // If this is the first error, raise the error event.
-  if (error == nullptr) {
+  if (error == kj::none) {
     auto msg = kj::str(v8::Exception::CreateMessage(js.v8Isolate, err.getHandle(js))->Get());
     error = err.addRef(js);
 
@@ -904,10 +904,10 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     auto& native = *farNative;
     native.outgoingAborted = true;
     if (native.closedIncoming && !native.isPumping) {
-      KJ_IF_MAYBE(pending, native.state.tryGet<AwaitingConnection>()) {
+      KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
         // Nothing worth canceling if we're reporting an error from the connection establishment
         // continuations.
-        pending->canceler.release();
+        pending.canceler.release();
       }
 
       // We're no longer pumping so let's make sure we release the native connection here.
@@ -917,8 +917,8 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
 }
 
 void WebSocket::assertNoError(jsg::Lock& js) {
-  KJ_IF_MAYBE(e, error) {
-    js.throwException(e->addRef(js));
+  KJ_IF_SOME(e, error) {
+    js.throwException(e.addRef(js));
   }
 }
 
