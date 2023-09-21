@@ -286,11 +286,11 @@ private:
     // write without reading, which will continue to fill the internal buffer.
     KJ_ASSERT(flush == Z_FINISH || state.template is<Open>());
     Context::Result result;
-    KJ_IF_MAYBE(exception, kj::runCatchingExceptions([this, flush, &result]() {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([this, flush, &result]() {
       result = context.pumpOnce(flush);
     })) {
-      cancelInternal(kj::cp(*exception));
-      return kj::mv(*exception);
+      cancelInternal(kj::cp(exception));
+      return kj::mv(exception);
     }
 
     if (result.buffer.size() == 0) {

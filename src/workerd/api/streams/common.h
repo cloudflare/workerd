@@ -127,7 +127,7 @@ struct UnderlyingSink {
 
   JSG_STRUCT(type, start, write, abort, close);
 
-  // TODO(cleanp): Get rid of this override and parse the type directly in param-extractor.rs
+  // TODO(cleanup): Get rid of this override and parse the type directly in param-extractor.rs
   JSG_STRUCT_TS_OVERRIDE(<W = any> {
     write?: (chunk: W, controller: WritableStreamDefaultController) => void | Promise<void>;
     start?: (controller: WritableStreamDefaultController) => void | Promise<void>;
@@ -292,7 +292,7 @@ namespace StreamStates {
 // The methods here return jsg::Promise rather than kj::Promise because the controller
 // operations here do not always require passing through the kj mechanisms or kj event loop.
 // Likewise, we do not make use of kj::Exception in these interfaces because the stream
-// standard dicates that streams can be canceled/aborted/errored using any arbitrary JavaScript
+// standard dictates that streams can be canceled/aborted/errored using any arbitrary JavaScript
 // value, not just Errors.
 class ReadableStreamController {
 public:
@@ -417,7 +417,7 @@ public:
     virtual void close(jsg::Lock& js) = 0;
     virtual void error(jsg::Lock& js, v8::Local<v8::Value> reason) = 0;
     virtual void release(jsg::Lock& js,
-                         kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) = 0;
+                         kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) = 0;
     virtual kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) = 0;
     virtual jsg::Promise<ReadResult> read(jsg::Lock& js) = 0;
   };
@@ -545,7 +545,7 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
 // The methods here return jsg::Promise rather than kj::Promise because the controller
 // operations here do not always require passing through the kj mechanisms or kj event loop.
 // Likewise, we do not make use of kj::Exception in these interfaces because the stream
-// standard dicates that streams can be canceled/aborted/errored using any arbitrary JavaScript
+// standard dictates that streams can be canceled/aborted/errored using any arbitrary JavaScript
 // value, not just Errors.
 class WritableStreamController {
 public:
@@ -679,7 +679,7 @@ kj::Own<WritableStreamController> newWritableStreamJsController();
 kj::Own<WritableStreamController> newWritableStreamInternalController(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> source,
-    kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
+    kj::Maybe<uint64_t> maybeHighWaterMark = kj::none);
 
 struct Unlocked {};
 struct Locked {};
@@ -691,14 +691,14 @@ public:
   ReaderLocked(
       ReadableStreamController::Reader& reader,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<IoOwn<kj::Canceler>> canceler = nullptr)
+      kj::Maybe<IoOwn<kj::Canceler>> canceler = kj::none)
       : reader(reader),
         closedFulfiller(kj::mv(closedFulfiller)),
         canceler(kj::mv(canceler)) {}
 
   ReaderLocked(ReaderLocked&&) = default;
   ~ReaderLocked() noexcept(false) {
-    KJ_IF_MAYBE(r, reader) { r->detach(); }
+    KJ_IF_SOME(r, reader) { r.detach(); }
   }
   KJ_DISALLOW_COPY(ReaderLocked);
 
@@ -731,14 +731,14 @@ public:
   WriterLocked(
       WritableStreamController::Writer& writer,
       jsg::Promise<void>::Resolver closedFulfiller,
-      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = nullptr)
+      kj::Maybe<jsg::Promise<void>::Resolver> readyFulfiller = kj::none)
       : writer(writer),
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
   WriterLocked(WriterLocked&&) = default;
   ~WriterLocked() noexcept(false) {
-    KJ_IF_MAYBE(w, writer) { w->detach(); }
+    KJ_IF_SOME(w, writer) { w.detach(); }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -758,9 +758,9 @@ public:
   }
 
   void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
-    KJ_IF_MAYBE(w, writer) {
+    KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w->replaceReadyPromise(kj::mv(pair.promise));
+      w.replaceReadyPromise(kj::mv(pair.promise));
     }
   }
 
@@ -775,8 +775,8 @@ void maybeResolvePromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     T&& t) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve(js, kj::fwd<T>(t));
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js, kj::fwd<T>(t));
     maybeResolver = nullptr;
   }
 }
@@ -784,9 +784,9 @@ void maybeResolvePromise(
 inline void maybeResolvePromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<void>::Resolver>& maybeResolver) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->resolve(js);
-    maybeResolver = nullptr;
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.resolve(js);
+    maybeResolver = kj::none;
   }
 }
 
@@ -795,8 +795,8 @@ void maybeRejectPromise(
     jsg::Lock& js,
     kj::Maybe<typename jsg::Promise<T>::Resolver>& maybeResolver,
     v8::Local<v8::Value> reason) {
-  KJ_IF_MAYBE(resolver, maybeResolver) {
-    resolver->reject(js, reason);
+  KJ_IF_SOME(resolver, maybeResolver) {
+    resolver.reject(js, reason);
     maybeResolver = nullptr;
   }
 }
@@ -818,7 +818,7 @@ inline kj::Maybe<IoContext&> tryGetIoContext() {
   if (IoContext::hasCurrent()) {
     return IoContext::current();
   }
-  return nullptr;
+  return kj::none;
 }
 
 }  // namespace workerd::api

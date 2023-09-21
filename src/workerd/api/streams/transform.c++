@@ -110,9 +110,9 @@ jsg::Ref<TransformStream> TransformStream::constructor(
   // The old implementation just defers to IdentityTransformStream. If any of the arguments
   // are specified we throw because it's most likely that they want the standard implementation
   // but the compatibility flag is not set.
-  if (maybeTransformer != nullptr ||
-      maybeWritableStrategy != nullptr ||
-      maybeReadableStrategy != nullptr) {
+  if (maybeTransformer != kj::none ||
+      maybeWritableStrategy != kj::none ||
+      maybeReadableStrategy != kj::none) {
     IoContext::current().logWarningOnce(
         "To use the new TransformStream() constructor with a "
         "custom transformer, enable the transformstream_enable_standard_constructor compatibility flag. "
@@ -130,9 +130,9 @@ jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
 
   auto& ioContext = IoContext::current();
 
-  kj::Maybe<uint64_t> maybeHighWaterMark = nullptr;
-  KJ_IF_MAYBE(queuingStrategy, maybeQueuingStrategy) {
-    maybeHighWaterMark = queuingStrategy->highWaterMark;
+  kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
+  KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
+    maybeHighWaterMark = queuingStrategy.highWaterMark;
   }
 
   return jsg::alloc<IdentityTransformStream>(
@@ -154,10 +154,10 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(
 
   auto& ioContext = IoContext::current();
 
-  kj::Maybe<uint64_t> maybeHighWaterMark = nullptr;
+  kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
   // For a FixedLengthStream we do not want a highWaterMark higher than the expectedLength.
-  KJ_IF_MAYBE(queuingStrategy, maybeQueuingStrategy) {
-    maybeHighWaterMark = queuingStrategy->highWaterMark.map([&](uint64_t highWaterMark) {
+  KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
+    maybeHighWaterMark = queuingStrategy.highWaterMark.map([&](uint64_t highWaterMark) {
       return kj::min(expectedLength, highWaterMark);
     });
   }
