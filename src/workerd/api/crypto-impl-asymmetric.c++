@@ -1740,15 +1740,6 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
         "Missing field \"crv\" for ", curveName, " key.");
     JSG_REQUIRE(crv == curveName, DOMNotSupportedError,
         "Only ", curveName, " is supported but \"", crv, "\" was requested.");
-    KJ_IF_MAYBE(alg, keyDataJwk.alg) {
-      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-      // importKey().
-      if (curveId == NID_ED25519) {
-        JSG_REQUIRE(*alg == "EdDSA", DOMDataError,
-            "JSON Web Key Algorithm parameter \"alg\" (\"", *alg, "\") does not match requested "
-            "Ed25519 curve.");
-      }
-    }
 
     auto x = UNWRAP_JWK_BIGNUM(kj::mv(keyDataJwk.x), DOMDataError,
         "Invalid ", crv, " key in JSON WebKey; missing or invalid public key component (\"x\").");
@@ -2126,9 +2117,6 @@ private:
     jwk.kty = kj::str("OKP");
     jwk.crv = kj::str(getAlgorithmName() == "X25519"_kj ? "X25519"_kj : "Ed25519"_kj);
     jwk.x = kj::encodeBase64Url(kj::arrayPtr(rawPublicKey, publicKeyLen));
-    if (getAlgorithmName() == "Ed25519"_kj) {
-      jwk.alg = kj::str("EdDSA");
-    }
 
     if (getType() == "private"_kj) {
       // Deliberately use ED25519_PUBLIC_KEY_LEN here.
