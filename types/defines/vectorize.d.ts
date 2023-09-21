@@ -20,15 +20,6 @@ interface VectorizeError {
 }
 
 /**
- * A pre-configured list of known models.
- * These can be supplied in place of configuring explicit dimensions.
- */
-type VectorizePreset =
-  | "openapi-text-embedding-ada-002"
-  | "workers-ai/bge-small-en"
-  | "cohere/embed-multilingual-v2.0";
-
-/**
  * Supported distance metrics for an index.
  * Distance metrics determine how other "similar" vectors are determined.
  */
@@ -49,7 +40,7 @@ type VectorizeIndexConfig =
       metric: VectorizeDistanceMetric;
     }
   | {
-      preset: VectorizePreset;
+      preset: string; // keep this generic, as we'll be adding more presets in the future and this is only in a read capacity
     };
 
 /**
