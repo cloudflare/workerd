@@ -470,6 +470,10 @@ public:
   // Get the currently set hibernatable websocket event timeout if set, or kj::none if not.
   kj::Maybe<uint32_t> getHibernatableWebSocketEventTimeout();
 
+  // Gets an array of tags that this websocket was accepted with. If the given websocket is not
+  // hibernatable, we'll throw an error because regular websockets do not have tags.
+  kj::Array<kj::StringPtr> getTags(jsg::Lock& js, jsg::Ref<api::WebSocket> ws);
+
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
@@ -482,6 +486,7 @@ public:
     JSG_METHOD(getWebSocketAutoResponseTimestamp);
     JSG_METHOD(setHibernatableWebSocketEventTimeout);
     JSG_METHOD(getHibernatableWebSocketEventTimeout);
+    JSG_METHOD(getTags);
 
     if (flags.getWorkerdExperimental()) {
       // TODO(someday): This currently exists for testing purposes only but maybe it could be
