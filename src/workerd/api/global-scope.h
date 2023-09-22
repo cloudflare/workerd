@@ -224,7 +224,7 @@ struct ExportedHandler {
   // so that they don't interfere with `JSG_STRUCT`'s machinations.
 
   jsg::Value env = nullptr;
-  jsg::Optional<jsg::Ref<ExecutionContext>> ctx = nullptr;
+  jsg::Optional<jsg::Ref<ExecutionContext>> ctx = kj::none;
   // TODO(cleanup): These are shoved here as a bit of a hack. At present, this is convenient and
   //   works for all use cases. If we have bindings or things on ctx that vary on a per-request basis,
   //   this won't work as well, I guess, but we can cross that bridge when we come to it.
