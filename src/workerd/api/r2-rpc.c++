@@ -28,15 +28,15 @@ jsg::JsValue R2Error::getStack(jsg::Lock& js) {
 }
 
 kj::Maybe<uint> R2Result::v4ErrorCode() {
-  KJ_IF_MAYBE(e, toThrow) {
-    return (*e)->v4Code;
+  KJ_IF_SOME(e, toThrow) {
+    return e->v4Code;
   }
-  return nullptr;
+  return kj::none;
 }
 
 void R2Result::throwIfError(kj::StringPtr action,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  KJ_IF_MAYBE(e, toThrow) {
+  KJ_IF_SOME(e, toThrow) {
     // TODO(soon): Once jsg::JsPromise exists, switch to using that to tunnel out the exception. As
     // it stands today, unfortunately, all we can send back to the user is a message. R2Error isn't
     // a registered type in the runtime. When reenabling, make sure to update overrides/r2.d.ts to
@@ -50,7 +50,7 @@ void R2Result::throwIfError(kj::StringPtr action,
     throw jsg::JsExceptionThrown();
 #else
     JSG_FAIL_REQUIRE(Error, kj::str(
-        action, ": ", (e)->get()->getMessage(), " (", (*e)->v4Code, ')'));
+        action, ": ", e.get()->getMessage(), " (", e->v4Code, ')'));
 #endif
   }
 }
@@ -79,8 +79,8 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
 
   auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
   requestHeaders.set(headerIds.cfBlobRequest, kj::mv(metadataPayload));
-  KJ_IF_MAYBE(j, jwt) {
-    requestHeaders.set(headerIds.authorization, kj::str("Bearer ", *j));
+  KJ_IF_SOME(j, jwt) {
+    requestHeaders.set(headerIds.authorization, kj::str("Bearer ", j));
   }
 
   static auto constexpr processStream = [](kj::StringPtr metadata,
@@ -120,7 +120,7 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
   if (response.statusCode >= 400) {
     // Error responses should have a cfR2ErrorHeader but don't always. If there
     // isn't one, we'll use a generic error.
-    if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+    if (response.headers->get(headerIds.cfR2ErrorHeader) == kj::none) {
       LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
                         response.statusCode);
     }
@@ -132,8 +132,8 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
       .toThrow = toError(response.statusCode, error),
     };
 
-    KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
-      auto processed = co_await processStream(*m, response, kj::mv(client), flags, context);
+    KJ_IF_SOME(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
+      auto processed = co_await processStream(m, response, kj::mv(client), flags, context);
       result.metadataPayload = kj::mv(processed.metadataPayload);
       result.stream = kj::mv(processed.stream);
     }
@@ -141,8 +141,8 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
     co_return kj::mv(result);
   }
 
-  KJ_IF_MAYBE(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
-    co_return co_await processStream(*m, response, kj::mv(client), flags, context);
+  KJ_IF_SOME(m, response.headers->get(headerIds.cfBlobMetadataSize)) {
+    co_return co_await processStream(m, response, kj::mv(client), flags, context);
   } else {
     co_return R2Result { .httpStatus = response.statusCode };
   }
@@ -163,14 +163,14 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
 
   kj::Maybe<uint64_t> expectedBodySize;
 
-  KJ_IF_MAYBE(b, supportedBody) {
-    KJ_SWITCH_ONEOF(*b) {
+  KJ_IF_SOME(b, supportedBody) {
+    KJ_SWITCH_ONEOF(b) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
-        if (expectedBodySize == nullptr) {
+        if (expectedBodySize == kj::none) {
           expectedBodySize = streamSize;
         }
-        JSG_REQUIRE(expectedBodySize != nullptr, TypeError,
+        JSG_REQUIRE(expectedBodySize != kj::none, TypeError,
             "Provided readable stream must have a known length (request/response body or readable "
             "half of FixedLengthStream)");
         JSG_REQUIRE(streamSize.orDefault(KJ_ASSERT_NONNULL(expectedBodySize)) == expectedBodySize,
@@ -179,25 +179,25 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
       }
       KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
         expectedBodySize = text.value.size();
-        KJ_REQUIRE(streamSize == nullptr);
+        KJ_REQUIRE(streamSize == kj::none);
       }
       KJ_CASE_ONEOF(data, kj::Array<kj::byte>) {
         expectedBodySize = data.size();
-        KJ_REQUIRE(streamSize == nullptr);
+        KJ_REQUIRE(streamSize == kj::none);
       }
       KJ_CASE_ONEOF(data, jsg::Ref<Blob>) {
         expectedBodySize = data->getSize();
-        KJ_REQUIRE(streamSize == nullptr);
+        KJ_REQUIRE(streamSize == kj::none);
       }
     }
   } else {
     expectedBodySize = uint64_t(0);
-    KJ_REQUIRE(streamSize == nullptr);
+    KJ_REQUIRE(streamSize == kj::none);
   }
 
   headers.set(context.getHeaderIds().cfBlobMetadataSize, kj::str(metadataPayload.size()));
-  KJ_IF_MAYBE(j, jwt) {
-    headers.set(context.getHeaderIds().authorization, kj::str("Bearer ", *j));
+  KJ_IF_SOME(j, jwt) {
+    headers.set(context.getHeaderIds().authorization, kj::str("Bearer ", j));
   }
 
   uint64_t combinedSize = metadataPayload.size() + KJ_ASSERT_NONNULL(expectedBodySize);
@@ -208,8 +208,8 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
 
   co_await request.body->write(metadataPayload.begin(), metadataPayload.size());
 
-  KJ_IF_MAYBE(b, supportedBody) {
-    KJ_SWITCH_ONEOF(*b) {
+  KJ_IF_SOME(b, supportedBody) {
+    KJ_SWITCH_ONEOF(b) {
       KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
         co_await request.body->write(text.value.begin(), text.value.size());
       }
@@ -239,7 +239,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
     // Error responses should have a cfR2ErrorHeader but don't always. If there
     // isn't one, we'll use a generic error.
     auto& headerIds = context.getHeaderIds();
-    if (response.headers->get(headerIds.cfR2ErrorHeader) == nullptr) {
+    if (response.headers->get(headerIds.cfR2ErrorHeader) == kj::none) {
       LOG_WARNING_ONCE("R2 error response does not contain the CF-R2-Error header.",
                        response.statusCode);
     }

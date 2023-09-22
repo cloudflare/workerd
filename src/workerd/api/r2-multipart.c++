@@ -24,7 +24,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
       "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_uploadPart"_kjc);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, "r2_uploadPart"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -45,8 +45,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), nullptr,
-                                      kj::mv(requestJson), path, nullptr);
+    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::mv(value), kj::none,
+                                      kj::mv(requestJson), path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType, partNumber]
@@ -72,7 +72,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
   const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_completeMultipartUpload"_kjc);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, "r2_completeMultipartUpload"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -100,15 +100,15 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-                                      path, nullptr);
+    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
+                                      path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
         [&errorType]
         (jsg::Lock& js, R2Result r2Result) mutable {
       auto parsedObject = parseHeadResultWrapper("completeMultipartUpload", r2Result, errorType);
-      KJ_IF_MAYBE(obj, parsedObject) {
-        return obj->addRef();
+      KJ_IF_SOME(obj, parsedObject) {
+        return obj.addRef();
       } else {
         KJ_FAIL_ASSERT("Shouldn't happen, multipart completion should either error or return an object");
       }
@@ -119,7 +119,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(
 jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = context.getHttpClient(this->bucket->clientIndex, true, nullptr, "r2_abortMultipartUpload"_kjc);
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, "r2_abortMultipartUpload"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -136,8 +136,8 @@ jsg::Promise<void> R2MultipartUpload::abort(jsg::Lock& js, const jsg::TypeHandle
 
     kj::StringPtr components[1];
     auto path = fillR2Path(components, this->bucket->adminBucket);
-    auto promise = doR2HTTPPutRequest(js, kj::mv(client), nullptr, nullptr, kj::mv(requestJson),
-                                      path, nullptr);
+    auto promise = doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson),
+                                      path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {
