@@ -70,12 +70,12 @@ void parseQueryString(kj::Vector<kj::Url::QueryParam>& query, kj::ArrayPtr<const
 
 kj::Maybe<kj::String> readContentTypeParameter(kj::StringPtr contentType,
                                                kj::StringPtr param) {
-  KJ_IF_MAYBE(parsed, MimeType::tryParse(contentType)) {
-    return parsed->params().find(toLower(param)).map([](auto& value) {
+  KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
+    return parsed.params().find(toLower(param)).map([](auto& value) {
       return kj::str(value);
     });
   }
-  return nullptr;
+  return kj::none;
 }
 
 kj::Maybe<kj::Exception> translateKjException(const kj::Exception& exception,
@@ -87,7 +87,7 @@ kj::Maybe<kj::Exception> translateKjException(const kj::Exception& exception,
     }
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 namespace {
@@ -98,7 +98,7 @@ auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
     co_return co_await f();
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
-    KJ_IF_MAYBE(e, translateKjException(exception, {
+    KJ_IF_SOME(e, translateKjException(exception, {
       { "tee buffer size limit exceeded"_kj,
         "ReadableStream.tee() buffer limit exceeded. This error usually occurs when a Request or "
         "Response with a large body is cloned, then only one of the clones is read, forcing "
@@ -106,7 +106,7 @@ auto translateTeeErrors(Func&& f) -> decltype(kj::fwd<Func>(f)()) {
         "unnecessary calls to Request/Response.clone() and ReadableStream.tee(), and always read "
         "clones/tees in parallel."_kj },
     })) {
-      kj::throwFatalException(kj::mv(*e));
+      kj::throwFatalException(kj::mv(e));
     }
     kj::throwFatalException(kj::mv(exception));
   }
@@ -219,10 +219,10 @@ double dateNow() {
 kj::Maybe<jsg::V8Ref<v8::Object>> cloneRequestCf(
     jsg::Lock& js,
     kj::Maybe<jsg::V8Ref<v8::Object>> maybeCf) {
-  KJ_IF_MAYBE(cf, maybeCf) {
-    return cf->deepClone(js);
+  KJ_IF_SOME(cf, maybeCf) {
+    return cf.deepClone(js);
   }
-  return nullptr;
+  return kj::none;
 }
 
 void maybeWarnIfNotText(kj::StringPtr str) {
