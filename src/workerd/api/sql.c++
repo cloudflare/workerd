@@ -69,10 +69,10 @@ SqlStorage::Cursor::State::State(
 
 SqlStorage::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
-  KJ_IF_MAYBE(s, selfRef) {
-    KJ_IF_MAYBE(p, *s) {
-      if (p == this) {
-        *s = nullptr;
+  KJ_IF_SOME(s, selfRef) {
+    KJ_IF_SOME(p, s) {
+      if (&p == this) {
+        s = nullptr;
       }
     }
   }
@@ -80,7 +80,7 @@ SqlStorage::Cursor::~Cursor() noexcept(false) {
 
 void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
     jsg::Lock& js, SqliteDatabase::Query& source) {
-  if (names == nullptr) {
+  if (names == kj::none) {
     js.withinHandleScope([&] {
       auto builder = kj::heapArrayBuilder<jsg::JsRef<jsg::JsString>>(source.columnCount());
       for (auto i: kj::zeroTo(builder.capacity())) {
@@ -92,24 +92,24 @@ void SqlStorage::Cursor::CachedColumnNames::ensureInitialized(
 }
 
 double SqlStorage::Cursor::getRowsRead() {
-  KJ_IF_MAYBE(st, state) {
-    return static_cast<double>((**st).query.getRowsRead());
+  KJ_IF_SOME(st, state) {
+    return static_cast<double>(st->query.getRowsRead());
   } else {
     return static_cast<double>(rowsRead);
   }
 }
 
 double SqlStorage::Cursor::getRowsWritten() {
-  KJ_IF_MAYBE(st, state) {
-    return static_cast<double>((**st).query.getRowsWritten());
+  KJ_IF_SOME(st, state) {
+    return static_cast<double>(st->query.getRowsWritten());
   } else {
     return static_cast<double>(rowsWritten);
   }
 }
 
 jsg::Ref<SqlStorage::Cursor::RowIterator> SqlStorage::Cursor::rows(jsg::Lock& js) {
-  KJ_IF_MAYBE(s, state) {
-    cachedColumnNames.ensureInitialized(js, (*s)->query);
+  KJ_IF_SOME(s, state) {
+    cachedColumnNames.ensureInitialized(js, s->query);
   }
   return jsg::alloc<RowIterator>(JSG_THIS);
 }
@@ -139,8 +139,8 @@ jsg::Ref<SqlStorage::Cursor::RawIterator> SqlStorage::Cursor::raw(jsg::Lock&) {
 // iterator has already been fully consumed. The resulting columns may contain duplicate entries,
 // for instance a `SELECT *` across a join of two tables that share a column name.
 kj::Array<jsg::JsRef<jsg::JsString>> SqlStorage::Cursor::getColumnNames(jsg::Lock& js) {
-  KJ_IF_MAYBE(s, state) {
-    cachedColumnNames.ensureInitialized(js, (*s)->query);
+  KJ_IF_SOME(s, state) {
+    cachedColumnNames.ensureInitialized(js, s->query);
     return KJ_MAP(name, this->cachedColumnNames.get()) {
       return name.addRef(js);
     };
@@ -171,7 +171,7 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
           "prepared statement objects.");
     } else {
       // Query already done.
-      return nullptr;
+      return kj::none;
     }
   });
 
@@ -190,8 +190,8 @@ auto SqlStorage::Cursor::iteratorImpl(jsg::Lock& js, jsg::Ref<Cursor>& obj, Func
     obj->rowsRead = query.getRowsRead();
     obj->rowsWritten = query.getRowsWritten();
     // Clean up the query proactively.
-    obj->state = nullptr;
-    return nullptr;
+    obj->state = kj::none;
+    return kj::none;
   }
 
   auto results = kj::heapArrayBuilder<Element>(query.columnCount());
@@ -229,8 +229,8 @@ SqlStorage::Statement::Statement(SqliteDatabase::Statement&& statement)
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(
     kj::ArrayPtr<BindingValue> values) {
   return KJ_MAP(value, values) -> SqliteDatabase::Query::ValuePtr {
-    KJ_IF_MAYBE(v, value) {
-      KJ_SWITCH_ONEOF(*v) {
+    KJ_IF_SOME(v, value) {
+      KJ_SWITCH_ONEOF(v) {
         KJ_CASE_ONEOF(data, kj::Array<const byte>) {
           return data.asPtr();
         }
@@ -251,20 +251,20 @@ kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings
 jsg::Ref<SqlStorage::Cursor> SqlStorage::Statement::run(jsg::Arguments<BindingValue> bindings) {
   auto& statementRef = *statement;  // validate we're in the right IoContext
 
-  KJ_IF_MAYBE(c, currentCursor) {
+  KJ_IF_SOME(c, currentCursor) {
     // Invalidate previous cursor if it's still running. We have to do this because SQLite only
     // allows one execution of a statement at a time.
     //
     // If this is a problem, we could consider a scheme where we dynamically instantiate copies of
     // the statement as needed. However, that risks wasting memory if the app commonly leaves
     // cursors open and the GC doesn't run proactively enough.
-    KJ_IF_MAYBE(s, c->state) {
-      c->canceled = !(*s)->query.isDone();
-      c->state = nullptr;
+    KJ_IF_SOME(s, c.state) {
+      c.canceled = !s->query.isDone();
+      c.state = kj::none;
     }
-    c->selfRef = nullptr;
-    c->statement = nullptr;
-    currentCursor = nullptr;
+    c.selfRef = kj::none;
+    c.statement = kj::none;
+    currentCursor = kj::none;
   }
 
   auto result = jsg::alloc<Cursor>(cachedColumnNames, statementRef, kj::mv(bindings));

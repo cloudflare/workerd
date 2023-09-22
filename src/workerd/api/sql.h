@@ -64,8 +64,8 @@ private:
     // for future calls.
 
     SqliteDatabase::Statement* stmt;
-    KJ_IF_MAYBE(s, slot) {
-      stmt = &**s;
+    KJ_IF_SOME(s, slot) {
+      stmt = &*s;
     } else {
       stmt = &*slot.emplace(IoContext::current().addObject(
           kj::heap(sqlite->prepare(sqlCode))));
@@ -74,8 +74,8 @@ private:
   }
 
   uint64_t getPageSize() {
-    KJ_IF_MAYBE(p, pageSize) {
-      return *p;
+    KJ_IF_SOME(p, pageSize) {
+      return p;
     } else {
       return pageSize.emplace(sqlite->run("PRAGMA page_size;").getInt64(0));
     }
@@ -88,7 +88,7 @@ public:
   template <typename... Params>
   Cursor(Params&&... params)
       : state(IoContext::current().addObject(kj::heap<State>(kj::fwd<Params>(params)...))),
-        ownCachedColumnNames(nullptr),  // silence bogus Clang warning on next line
+        ownCachedColumnNames(kj::none),  // silence bogus Clang warning on next line
         cachedColumnNames(ownCachedColumnNames.emplace()) {}
 
   template <typename... Params>
