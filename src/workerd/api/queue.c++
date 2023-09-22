@@ -180,9 +180,9 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
   JSG_REQUIRE(!body.isUndefined(), TypeError, "Message body cannot be undefined");
 
   kj::Maybe<kj::StringPtr> contentType;
-  KJ_IF_MAYBE(opts, options) {
-    KJ_IF_MAYBE(type, opts->contentType) {
-      contentType = validateContentType(*type);
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(type, opts.contentType) {
+      contentType = validateContentType(type);
     }
   }
 
@@ -190,9 +190,9 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::OCTET_STREAM.toString());
 
   Serialized serialized;
-  KJ_IF_MAYBE(type, contentType) {
-    headers.add("X-Msg-Fmt", *type);
-    serialized = serialize(js, body, *type, SerializeArrayBufferBehavior::DEEP_COPY);
+  KJ_IF_SOME(type, contentType) {
+    headers.add("X-Msg-Fmt", type);
+    serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
     // TODO(cleanup) send message format header (v8) by default
     serialized = serializeV8(js, body);
@@ -202,7 +202,7 @@ kj::Promise<void> WorkerQueue::send(jsg::Lock& js,
   // queue broker's domain, and the start of the URL path including the account ID and queue ID. All
   // we have to do is provide the end of the path (which is "/message") to send a single message.
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
   auto req = client->request(kj::HttpMethod::POST,
                              "https://fake-host/message"_kjc,
                              headers, serialized.data.size());
@@ -233,9 +233,9 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
                 "Message body cannot be undefined");
 
     SerializedWithContentType item;
-    KJ_IF_MAYBE(contentType, message.contentType) {
-      item.contentType = validateContentType(*contentType);
-      item.body = serialize(js, body, *contentType,
+    KJ_IF_SOME(contentType, message.contentType) {
+      item.contentType = validateContentType(contentType);
+      item.body = serialize(js, body, contentType,
           SerializeArrayBufferBehavior::SHALLOW_REFERENCE);
     } else {
       item.body = serializeV8(js, body);
@@ -261,9 +261,9 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
     bodyBuilder.addAll(kj::encodeBase64(serializedBodies[i].body.data));
     bodyBuilder.add('"');
 
-    KJ_IF_MAYBE(contentType, serializedBodies[i].contentType) {
+    KJ_IF_SOME(contentType, serializedBodies[i].contentType) {
       bodyBuilder.addAll(",\"contentType\":\""_kj);
-      bodyBuilder.addAll(*contentType);
+      bodyBuilder.addAll(contentType);
       bodyBuilder.add('"');
     }
 
@@ -278,7 +278,7 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js, jsg::Sequence<MessageSen
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, "queue_send"_kjc);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
 
   // We add info about the size of the batch to the headers so that the queue implementation can
   // decide whether it's too large.
@@ -436,14 +436,14 @@ jsg::Ref<QueueEvent> startQueueEvent(
     }
   }
 
-  KJ_IF_MAYBE(h, exportedHandler) {
+  KJ_IF_SOME(h, exportedHandler) {
     auto queueHandler = KJ_ASSERT_NONNULL(handlerHandler.tryUnwrap(
-        lock, h->self.getHandle(lock)));
-    KJ_IF_MAYBE(f, queueHandler.queue) {
-      auto promise = (*f)(lock,
+        lock, h.self.getHandle(lock)));
+    KJ_IF_SOME(f, queueHandler.queue) {
+      auto promise = f(lock,
                           jsg::alloc<QueueController>(event.addRef()),
-                          jsg::JsValue(h->env.getHandle(js)).addRef(js),
-                          h->getCtx());
+                          jsg::JsValue(h.env.getHandle(js)).addRef(js),
+                          h.getCtx());
       event->waitUntil(kj::mv(promise));
     } else {
       lock.logWarningOnce(
@@ -484,8 +484,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     }
   }
 
-  KJ_IF_MAYBE(t, incomingRequest->getWorkerTracer()) {
-    t->setEventInfo(context.now(), Trace::QueueEventInfo(kj::mv(queueName), batchSize));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(context.now(), Trace::QueueEventInfo(kj::mv(queueName), batchSize));
   }
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
@@ -537,8 +537,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
         messages[i].setId(p.messages[i].id);
         messages[i].setTimestampNs((p.messages[i].timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
         messages[i].setData(p.messages[i].body);
-        KJ_IF_MAYBE(contentType, p.messages[i].contentType) {
-          messages[i].setContentType(*contentType);
+        KJ_IF_SOME(contentType, p.messages[i].contentType) {
+          messages[i].setContentType(contentType);
         }
       }
     }
