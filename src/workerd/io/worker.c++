@@ -2052,8 +2052,8 @@ private:
 
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
 public:
-  InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam, kj::WebSocket& webSocket, kj::Timer& timer)
-      : ioHandler(webSocket, timer), state(kj::heap<State>(this, kj::mv(isolateParam))) {
+  InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam, kj::WebSocket& webSocket)
+      : ioHandler(webSocket), state(kj::heap<State>(this, kj::mv(isolateParam))) {
     ioHandler.connect(*this);
   }
 
@@ -2286,8 +2286,8 @@ private:
   // the InspectorChannelImpl and the InspectorClient.
   class WebSocketIoHandler final {
   public:
-    WebSocketIoHandler(kj::WebSocket& webSocket, kj::Timer& timer)
-        : webSocket(webSocket), timer(timer) {
+    WebSocketIoHandler(kj::WebSocket& webSocket)
+        : webSocket(webSocket) {
       // Assume we are being instantiated on the InspectorService thread, the thread that will do
       // I/O for CDP messages. Messages are delivered to the InspectorChannelImpl on the Isolate thread.
       outgoingQueueNotifier = XThreadNotifier::create();
@@ -2424,18 +2424,6 @@ private:
     }
 
     kj::Promise<void> outgoingLoop() {
-      // Pause before sending outgoing messages when a connection is first received. V8 starts
-      // sending messages as soon as it sees there is an inspector client. The process at the
-      // other end of the pipe may not be ready for messages right away (it looks like Chrome does
-      // not render CDP messages, and responses, exchanged before the inspector window is rendered).
-      //
-      // The pause time, 300ms, is experimentally determined on a couple of different dev boxes.
-      // Stepping up from 50ms in 50ms increments, 250ms is the lowest value that seems to
-      // consistently result in the expected behaviour. 300ms allows for a little more noise.
-      //
-      // (Bug: https://github.com/cloudflare/workerd/issues/1201, needs some more investigation).
-      co_await timer.afterDelay(300 * kj::MILLISECONDS);
-
       for (;;) {
         co_await outgoingQueueNotifier->awaitNotification();
         try {
@@ -2466,7 +2454,6 @@ private:
     kj::Own<XThreadNotifier> outgoingQueueNotifier;
 
     kj::WebSocket& webSocket;                 // only accessed on the InspectorService thread.
-    kj::Timer& timer;
     std::atomic_bool receivedClose;           // accessed on any thread (only transitions false -> true).
     kj::Maybe<InspectorChannelImpl&> channel; // only accessed on the isolate thread.
   };
@@ -2658,7 +2645,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
 
   lockedSelf.impl->inspectorClient.setInspectorTimerInfo(timer, timerOffset);
 
-  auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(kj::atomicAddRef(*this), webSocket, timer);
+  auto channel = kj::heap<Worker::Isolate::InspectorChannelImpl>(kj::atomicAddRef(*this), webSocket);
   lockedSelf.currentInspectorSession = *channel;
   lockedSelf.impl->inspectorClient.setChannel(*channel);
 
