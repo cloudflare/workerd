@@ -30,7 +30,7 @@ public:
       }
 
       // Lazily initialize actorChannel
-      if (actorChannel == nullptr) {
+      if (actorChannel == kj::none) {
         actorChannel = context.getColoLocalActorChannel(channelId, actorId, span);
       }
 
@@ -73,7 +73,7 @@ public:
       }
 
       // Lazily initialize actorChannel
-      if (actorChannel == nullptr) {
+      if (actorChannel == kj::none) {
         actorChannel = context.getGlobalActorChannel(channelId, id->getInner(), kj::mv(locationHint),
             mode, span);
       }
@@ -154,9 +154,9 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(
       "get called on jurisdictional subnamespace with an ID from a different jurisdiction");
 
   auto& context = IoContext::current();
-  kj::Maybe<kj::String> locationHint = nullptr;
-  KJ_IF_MAYBE(o, options) {
-    locationHint = kj::mv(o->locationHint);
+  kj::Maybe<kj::String> locationHint = kj::none;
+  KJ_IF_SOME(o, options) {
+    locationHint = kj::mv(o.locationHint);
   }
 
   auto outgoingFactory = context.addObject<Fetcher::OutgoingFactory>(
