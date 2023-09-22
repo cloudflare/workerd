@@ -64,7 +64,7 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
     return inner->tryRead(buffer, minBytes, maxBytes)
       .attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
-    KJ_IF_MAYBE(e, translateKjException(exception, {
+    KJ_IF_SOME(e, translateKjException(exception, {
       { "gzip compressed stream ended prematurely"_kj,
         "Gzip compressed stream ended prematurely."_kj },
       { "gzip decompression failed"_kj,
@@ -84,7 +84,7 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
       { "brotli compressed stream ended prematurely"_kj,
         "Brotli compressed stream ended prematurely." },
     })) {
-      return kj::mv(*e);
+      return kj::mv(e);
     }
 
     // Let the original exception pass through, since it is likely already a jsg.TypeError.
@@ -97,7 +97,7 @@ kj::Maybe<uint64_t> EncodedAsyncInputStream::tryGetLength(StreamEncoding outEnco
     return inner->tryGetLength();
   } else {
     // We have no idea what the length will be once encoded/decoded.
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -215,7 +215,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
     return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> { kj::READY_NOW });
   }
 
-  KJ_IF_MAYBE(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
+  KJ_IF_SOME(nativeInput, kj::dynamicDowncastIfAvailable<EncodedAsyncInputStream>(input)) {
     // We can avoid putting our inner streams into identity encoding if the input and output both
     // have the same encoding. Since ReadableStreamSource/WritableStreamSink always pump everything
     // (there is no `amount` parameter like in the KJ equivalents), we can assume that we will
@@ -225,18 +225,18 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
     // We can still optimize the pump a little by registering only a single pending event rather
     // than falling back to the heavier weight algorithm in ReadableStreamSource, which depends on
     // tryRead() and write() registering their own individual events on every call.
-    if (nativeInput->encoding != encoding) {
+    if (nativeInput.encoding != encoding) {
       ensureIdentityEncoding();
-      nativeInput->ensureIdentityEncoding();
+      nativeInput.ensureIdentityEncoding();
     }
 
-    auto promise = nativeInput->inner->pumpTo(getInner()).ignoreResult();
+    auto promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
     if (end) {
-      KJ_IF_MAYBE(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
-        promise = promise.then([&gz = *gz]() { return gz->end(); });
+      KJ_IF_SOME(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
+        promise = promise.then([&gz = gz]() { return gz->end(); });
       }
-      KJ_IF_MAYBE(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
-        promise = promise.then([&br = *br]() { return br->end(); });
+      KJ_IF_SOME(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
+        promise = promise.then([&br = br]() { return br->end(); });
       }
     }
 
@@ -245,7 +245,7 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
     return kj::Promise<DeferredProxy<void>>(DeferredProxy<void> { kj::mv(promise) });
   }
 
-  return nullptr;
+  return kj::none;
 }
 
 kj::Promise<void> EncodedAsyncOutputStream::end() {
@@ -253,18 +253,18 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
 
   kj::Promise<void> promise = kj::READY_NOW;
 
-  KJ_IF_MAYBE(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
-    promise = (*gz)->end().attach(kj::mv(*gz));
+  KJ_IF_SOME(gz, inner.tryGet<kj::Own<kj::GzipAsyncOutputStream>>()) {
+    promise = gz->end().attach(kj::mv(gz));
   }
-  KJ_IF_MAYBE(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
-    promise = (*br)->end().attach(kj::mv(*br));
+  KJ_IF_SOME(br, inner.tryGet<kj::Own<kj::BrotliAsyncOutputStream>>()) {
+    promise = br->end().attach(kj::mv(br));
   }
 
-  KJ_IF_MAYBE(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
-    if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream->get())) {
+  KJ_IF_SOME(stream, inner.tryGet<kj::Own<kj::AsyncOutputStream>>()) {
+    if (auto casted = dynamic_cast<kj::AsyncIoStream*>(stream.get())) {
       casted->shutdownWrite();
     }
-    promise = promise.attach(kj::mv(*stream));
+    promise = promise.attach(kj::mv(stream));
   }
 
   inner.init<Ended>();
@@ -347,10 +347,10 @@ StreamEncoding getContentEncoding(IoContext& context, const kj::HttpHeaders& hea
   if (bodyEncoding == Response::BodyEncoding::MANUAL) {
     return StreamEncoding::IDENTITY;
   }
-  KJ_IF_MAYBE(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
-    if (*encodingStr == "gzip") {
+  KJ_IF_SOME(encodingStr, headers.get(context.getHeaderIds().contentEncoding)) {
+    if (encodingStr == "gzip") {
       return StreamEncoding::GZIP;
-    } else if (options.brotliEnabled && *encodingStr == "br") {
+    } else if (options.brotliEnabled && encodingStr == "br") {
       return StreamEncoding::BROTLI;
     }
   }
