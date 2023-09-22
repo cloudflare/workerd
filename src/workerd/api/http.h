@@ -194,7 +194,7 @@ private:
 
   static kj::Maybe<kj::Array<jsg::ByteString>> entryIteratorNext(jsg::Lock& js, auto& state) {
     if (state.cursor == state.copy.end()) {
-      return nullptr;
+      return kj::none;
     }
     auto& ret = *state.cursor++;
     return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
@@ -202,7 +202,7 @@ private:
 
   static kj::Maybe<jsg::ByteString> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
     if (state.cursor == state.copy.end()) {
-      return nullptr;
+      return kj::none;
     }
     auto& ret = *state.cursor++;
     return kj::mv(ret);
@@ -283,8 +283,8 @@ public:
 
   struct ExtractedBody {
     ExtractedBody(jsg::Ref<ReadableStream> stream,
-                  kj::Maybe<Buffer> source = nullptr,
-                  kj::Maybe<kj::String> contentType = nullptr);
+                  kj::Maybe<Buffer> source = kj::none,
+                  kj::Maybe<kj::String> contentType = kj::none);
 
     Impl impl;
     kj::Maybe<kj::String> contentType;
@@ -355,8 +355,8 @@ private:
   Headers& headersRef;
 
   void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_MAYBE(i, impl) {
-      visitor.visit(i->stream);
+    KJ_IF_SOME(i, impl) {
+      visitor.visit(i.stream);
     }
   }
 };
@@ -667,14 +667,14 @@ public:
     : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
       cf(kj::mv(cf)) {
-    KJ_IF_MAYBE(s, signal) {
+    KJ_IF_SOME(s, signal) {
       // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
       // do the right thing.
-      if ((*s)->getNeverAborts()) {
-        this->thisSignal = kj::mv(*s);
+      if (s->getNeverAborts()) {
+        this->thisSignal = kj::mv(s);
       } else {
-        this->signal = kj::mv(*s);
+        this->signal = kj::mv(s);
       }
     }
   }
@@ -848,7 +848,7 @@ private:
   // The fetch spec definition of Request has a distinction between the "signal" (which is
   // an optional AbortSignal passed in with the options), and "this' signal", which is an
   // AbortSignal that is always available via the request.signal accessor. When signal is
-  // used explicity, thisSignal will not be.
+  // used explicitly, thisSignal will not be.
   kj::Maybe<jsg::Ref<AbortSignal>> thisSignal;
 
   CfProperty cf;
@@ -868,7 +868,7 @@ public:
   Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
            CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
            kj::Array<kj::String> urlList = {},
-           kj::Maybe<jsg::Ref<WebSocket>> webSocket = nullptr,
+           kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
            Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
@@ -929,8 +929,8 @@ public:
   // TODO(conform): implementation is missing; two approaches where tested:
   //  - returning a HTTP 5xx response but that doesn't match the spec and we didn't
   //    find it useful.
-  //  - throwing/propaging a DISCONNECTED kj::Exception to actually disconnect the
-  //    client. However, we were conserned about possible side-effects and incorrect
+  //  - throwing/propagating a DISCONNECTED kj::Exception to actually disconnect the
+  //    client. However, we were concerned about possible side-effects and incorrect
   //    error reporting.
 
   jsg::Ref<Response> clone(jsg::Lock& js);
@@ -1104,7 +1104,7 @@ jsg::Ref<Response> makeHttpResponse(
     uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
     kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
-    kj::Maybe<jsg::Ref<AbortSignal>> signal = nullptr);
+    kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
 
 kj::Maybe<kj::StringPtr> defaultStatusText(uint statusCode);
 // Return the RFC-recommended default status text for `statusCode`.
