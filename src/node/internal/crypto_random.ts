@@ -173,7 +173,7 @@ function getRandomInt(min: number, max: number) {
 
   // If we don't have a callback, or if there is still data in the cache, we can
   // do this synchronously, which is super fast.
-  while (randomCacheOffset < randomCache.length) {
+  while (randomCacheOffset <= randomCache.length) {
     if (randomCacheOffset === randomCache.length) {
       // This might block the thread for a bit, but we are in sync mode.
       randomFillSync(randomCache);
