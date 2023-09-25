@@ -700,9 +700,8 @@ kj::Promise<void> DigestStreamSink::write(const void* buffer, size_t size) {
 
 kj::Promise<void> DigestStreamSink::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   for (auto& piece : pieces) {
-    write(piece.begin(), piece.size());
+    co_await write(piece.begin(), piece.size());
   }
-  return kj::READY_NOW;
 }
 
 kj::Promise<void> DigestStreamSink::end() {

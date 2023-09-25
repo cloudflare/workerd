@@ -207,7 +207,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
               // autoResponseTimestamp on the active websocket.
               (active)->setAutoResponseTimestamp(hib.autoResponseTimestamp);
             }
-            ws.send((reqResp)->getResponse().asArray());
+            co_await ws.send((reqResp)->getResponse().asArray());
             skip = true;
             // If we've sent an auto response message, we should not unhibernate or deliver the
             // received message to the actor

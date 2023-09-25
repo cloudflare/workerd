@@ -2546,9 +2546,11 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
   co_await drainWhen;
   // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
   // have a request in-flight.
+  auto drainPromises = kj::heapArrayBuilder<kj::Promise<void>>(httpServers.size());
   for (auto& httpServer: httpServers) {
-    httpServer.httpServer.drain();
+    drainPromises.add(httpServer.httpServer.drain());
   }
+  co_await kj::joinPromisesFailFast(drainPromises.finish());
 }
 
 kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config,
