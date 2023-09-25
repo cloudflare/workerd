@@ -507,36 +507,36 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 
+namespace {
+void requestGc(const Worker& worker) {
+  jsg::V8StackScope stackScope;
+  auto lock = worker.getIsolate().getApiIsolate().lock(stackScope);
+  lock->requestGcForTesting();
+}
+
+template <typename T>
+kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
+  auto worker = kj::atomicAddRef(context.getWorker());
+  if constexpr (kj::isSameType<T, void>()) {
+    co_await promise;
+    requestGc(*worker);
+  } else {
+    auto ret = co_await promise;
+    requestGc(*worker);
+    co_return kj::mv(ret);
+  }
+}
+}  // namespace
+
 template <typename T>
 kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(
     IoContext& context, kj::Promise<T> promise) {
 #ifdef KJ_DEBUG
-  kj::Maybe<kj::Own<const Worker>> worker;
   if (isPredictableModeForTest()) {
-    worker = kj::atomicAddRef(context.getWorker());
+    return addGcPassForTest(context, kj::mv(promise));
   }
-
-  static auto constexpr maybeRequestGc = [](auto& worker) {
-    if (isPredictableModeForTest()) {
-      jsg::V8StackScope stackScope;
-      auto lock = KJ_ASSERT_NONNULL(worker)->getIsolate().getApiIsolate().lock(stackScope);
-      lock->requestGcForTesting();
-    }
-  };
-#endif  // KJ_DEBUG
-
-  if constexpr (kj::isSameType<T, void>()) {
-    co_await promise;
-#ifdef KJ_DEBUG
-    maybeRequestGc(worker);
-#endif  // KJ_DEBUG
-  } else {
-    auto ret = co_await promise;
-#ifdef KJ_DEBUG
-    maybeRequestGc(worker);
-#endif  // KJ_DEBUG
-    co_return kj::mv(ret);
-  }
+#endif
+  return kj::mv(promise);
 }
 
 } // namespace workerd
