@@ -44,13 +44,13 @@ static void parseListMetadata(jsg::Lock& js,
 
   js.withinHandleScope([&] {
     auto obj = KJ_ASSERT_NONNULL(listResponse.tryCast<jsg::JsObject>());
-    KJ_IF_MAYBE(keysArr, obj.get(js, KEYS).tryCast<jsg::JsArray>()) {
-      auto length = keysArr->size();
+    KJ_IF_SOME(keysArr, obj.get(js, KEYS).tryCast<jsg::JsArray>()) {
+      auto length = keysArr.size();
       for (int i = 0; i < length; i++) {
         js.withinHandleScope([&] {
-          KJ_IF_MAYBE(key, keysArr->get(js, i).tryCast<jsg::JsObject>()) {
-            KJ_IF_MAYBE(str, key->get(js, METADATA).tryCast<jsg::JsString>()) {
-              key->set(js, METADATA, jsg::JsValue::fromJson(js, *str));
+          KJ_IF_SOME(key, keysArr.get(js, i).tryCast<jsg::JsObject>()) {
+            KJ_IF_SOME(str, key.get(js, METADATA).tryCast<jsg::JsString>()) {
+              key.set(js, METADATA, jsg::JsValue::fromJson(js, str));
             }
           }
         });
@@ -93,7 +93,7 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(
     KJ_UNREACHABLE;
   }();
 
-  auto client = context.getHttpClient(subrequestChannel, true, nullptr, operationName);
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, operationName);
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
     headers.add(header.name.asPtr(), header.value.asPtr());
@@ -127,17 +127,17 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
   url.query.add(kj::Url::QueryParam { kj::str("urlencoded"), kj::str("true") });
 
   kj::Maybe<kj::String> type;
-  KJ_IF_MAYBE(oneOfOptions, options) {
-    KJ_SWITCH_ONEOF(*oneOfOptions) {
+  KJ_IF_SOME(oneOfOptions, options) {
+    KJ_SWITCH_ONEOF(oneOfOptions) {
       KJ_CASE_ONEOF(t, kj::String) {
         type = kj::mv(t);
       }
       KJ_CASE_ONEOF(options, GetOptions) {
-        KJ_IF_MAYBE(t, options.type) {
-          type = kj::mv(*t);
+        KJ_IF_SOME(t, options.type) {
+          type = kj::mv(t);
         }
-        KJ_IF_MAYBE(cacheTtl, options.cacheTtl) {
-          url.query.add(kj::Url::QueryParam { kj::str("cache_ttl"), kj::str(*cacheTtl) });
+        KJ_IF_SOME(cacheTtl, options.cacheTtl) {
+          url.query.add(kj::Url::QueryParam { kj::str("cache_ttl"), kj::str(cacheTtl) });
         }
       }
     }
@@ -162,8 +162,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
 
     if (response.statusCode == 404 || response.statusCode == 410) {
       return js.resolvedPromise(KvNamespace::GetWithMetadataResult {
-        .value = nullptr,
-        .metadata = nullptr,
+        .value = kj::none,
+        .metadata = kj::none,
         .cacheStatus = kj::mv(cacheStatus),
       });
     }
@@ -171,9 +171,9 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     checkForErrorStatus("GET", response);
 
     auto metaheader = response.headers->get(context.getHeaderIds().cfKvMetadata);
-    kj::Maybe<kj::String> maybeMeta = nullptr;
-    KJ_IF_MAYBE(m, metaheader) {
-      maybeMeta = kj::str(*m);
+    kj::Maybe<kj::String> maybeMeta;
+    KJ_IF_SOME(m, metaheader) {
+      maybeMeta = kj::str(m);
     }
 
     auto typeName =
@@ -223,8 +223,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadata(
     return result.then(js, [maybeMeta = kj::mv(maybeMeta), cacheStatus = kj::mv(cacheStatus)]
         (jsg::Lock& js, KvNamespace::GetResult result) mutable -> KvNamespace::GetWithMetadataResult {
       kj::Maybe<jsg::JsRef<jsg::JsValue>> meta;
-      KJ_IF_MAYBE (metaStr, maybeMeta) {
-        meta = jsg::JsRef(js, jsg::JsValue::fromJson(js, *metaStr));
+      KJ_IF_SOME (metaStr, maybeMeta) {
+        meta = jsg::JsRef(js, jsg::JsValue::fromJson(js, metaStr));
       }
       return KvNamespace::GetWithMetadataResult{
         kj::mv(result),
@@ -243,20 +243,20 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
     kj::Url url;
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
-    KJ_IF_MAYBE(o, options) {
-      KJ_IF_MAYBE(limit, o->limit) {
-        if (*limit > 0) {
-          url.query.add(kj::Url::QueryParam { kj::str("key_count_limit"), kj::str(*limit) });
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(limit, o.limit) {
+        if (limit > 0) {
+          url.query.add(kj::Url::QueryParam { kj::str("key_count_limit"), kj::str(limit) });
         }
       }
-      KJ_IF_MAYBE(maybePrefix, o->prefix) {
-        KJ_IF_MAYBE(prefix, *maybePrefix) {
-          url.query.add(kj::Url::QueryParam { kj::str("prefix"), kj::str(*prefix) });
+      KJ_IF_SOME(maybePrefix, o.prefix) {
+        KJ_IF_SOME(prefix, maybePrefix) {
+          url.query.add(kj::Url::QueryParam { kj::str("prefix"), kj::str(prefix) });
         }
       }
-      KJ_IF_MAYBE(maybeCursor, o->cursor) {
-        KJ_IF_MAYBE(cursor, *maybeCursor) {
-          url.query.add(kj::Url::QueryParam { kj::str("cursor"), kj::str(*cursor) });
+      KJ_IF_SOME(maybeCursor, o.cursor) {
+        KJ_IF_SOME(cursor, maybeCursor) {
+          url.query.add(kj::Url::QueryParam { kj::str("cursor"), kj::str(cursor) });
         }
       }
     }
@@ -277,10 +277,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(jsg::Lock& js,
 
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus = [&]()
           -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
-        KJ_IF_MAYBE(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          return jsg::JsRef<jsg::JsValue>(js, js.strIntern(*cs));
+        KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
+          return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         }
-        return nullptr;
+        return kj::none;
       }();
 
       auto stream = newSystemStream(
@@ -323,16 +323,16 @@ jsg::Promise<void> KvNamespace::put(
 
     // If any optional parameters were specified by the client, append them to
     // the URL's query parameters.
-    KJ_IF_MAYBE(o, options) {
-      KJ_IF_MAYBE(expiration, o->expiration) {
-        url.query.add(kj::Url::QueryParam { kj::str("expiration"), kj::str(*expiration) });
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(expiration, o.expiration) {
+        url.query.add(kj::Url::QueryParam { kj::str("expiration"), kj::str(expiration) });
       }
-      KJ_IF_MAYBE(expirationTtl, o->expirationTtl) {
-        url.query.add(kj::Url::QueryParam { kj::str("expiration_ttl"), kj::str(*expirationTtl) });
+      KJ_IF_SOME(expirationTtl, o.expirationTtl) {
+        url.query.add(kj::Url::QueryParam { kj::str("expiration_ttl"), kj::str(expirationTtl) });
       }
-      KJ_IF_MAYBE(maybeMetadata, o->metadata) {
-        KJ_IF_MAYBE(metadata, *maybeMetadata) {
-          kj::String json = metadata->getHandle(js).toJson(js);
+      KJ_IF_SOME(maybeMetadata, o.metadata) {
+        KJ_IF_SOME(metadata, maybeMetadata) {
+          kj::String json = metadata.getHandle(js).toJson(js);
           headers.set(context.getHeaderIds().cfKvMetadata, kj::mv(json));
         }
       }
