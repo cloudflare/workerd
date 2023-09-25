@@ -507,6 +507,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   return maybeAddGcPassForTest(context, kj::mv(promise));
 }
 
+#ifdef KJ_DEBUG
 namespace {
 void requestGc(const Worker& worker) {
   jsg::V8StackScope stackScope;
@@ -527,6 +528,7 @@ kj::Promise<T> addGcPassForTest(IoContext& context, kj::Promise<T> promise) {
   }
 }
 }  // namespace
+#endif
 
 template <typename T>
 kj::Promise<T> WorkerEntrypoint::maybeAddGcPassForTest(
