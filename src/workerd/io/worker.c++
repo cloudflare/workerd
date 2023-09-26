@@ -425,7 +425,7 @@ public:
     auto lockedState = state.lockExclusive();
     // There is only one active inspector channel at a time in workerd. The teardown of any
     // previous channel should have invalidated `lockedState->channel`.
-    KJ_REQUIRE(lockedState->channel == nullptr);
+    KJ_REQUIRE(lockedState->channel == kj::none);
     lockedState->channel = channel;
   }
 
@@ -590,7 +590,7 @@ struct Worker::Isolate::Impl {
 
       // We record the current lock so our GC prologue/epilogue callbacks can report GC time via
       // Jaeger tracing.
-      KJ_DASSERT(impl.currentLock == nullptr, "Isolate lock taken recursively");
+      KJ_DASSERT(impl.currentLock == kj::none, "Isolate lock taken recursively");
       impl.currentLock = *this;
 
       // Now's a good time to destroy any workers queued up for destruction.
@@ -1441,7 +1441,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           KJ_CASE_ONEOF(mainModule, kj::Path) {
             auto& registry = (*jsContext)->getModuleRegistry();
             KJ_IF_SOME(entry, registry.resolve(lock, mainModule)) {
-              JSG_REQUIRE(entry.maybeSynthetic == nullptr, TypeError,
+              JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
                           "Main module must be an ES module.");
               auto module = entry.module.getHandle(lock);
 
@@ -1864,7 +1864,7 @@ Worker::Isolate::AsyncWaiterList::~AsyncWaiterList() noexcept {
   // It should be impossible for this list to be non-empty since each member of the list holds a
   // strong reference back to us. But if the list is non-empty, we'd better crash here, to avoid
   // dangling pointers.
-  KJ_ASSERT(head == nullptr, "destroying non-empty waiter list?");
+  KJ_ASSERT(head == kj::none, "destroying non-empty waiter list?");
   KJ_ASSERT(tail == &head, "tail pointer corrupted?");
 }
 
@@ -2627,7 +2627,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::HttpService::Response& response,
     const kj::HttpHeaderTable& headerTable,
     kj::HttpHeaderId controlHeaderId) const {
-  KJ_REQUIRE(impl->inspector != nullptr);
+  KJ_REQUIRE(impl->inspector != kj::none);
 
   kj::HttpHeaders headers(headerTable);
   headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
@@ -2641,7 +2641,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(
     kj::Timer& timer,
     kj::Duration timerOffset,
     kj::WebSocket& webSocket) const {
-  KJ_REQUIRE(impl->inspector != nullptr);
+  KJ_REQUIRE(impl->inspector != kj::none);
 
   jsg::V8StackScope stackScope;
   Isolate::Impl::Lock recordedLock(*this, InspectorChannelImpl::InspectorLock(kj::none), stackScope);
@@ -3298,7 +3298,7 @@ kj::Maybe<IoContext&> Worker::Actor::getIoContext() {
 }
 
 void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
-  KJ_REQUIRE(impl->ioContext == nullptr);
+  KJ_REQUIRE(impl->ioContext == kj::none);
   KJ_IF_SOME(f, impl->abortFulfiller) {
     f.get()->fulfill(context->onAbort());
     impl->abortFulfiller = kj::none;
@@ -3318,7 +3318,7 @@ kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManag
 }
 
 void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {
-  KJ_REQUIRE(impl->hibernationManager == nullptr);
+  KJ_REQUIRE(impl->hibernationManager == kj::none);
   hib->setTimerChannel(impl->timerChannel);
   // Not the cleanest way to provide hibernation manager with a timer channel reference, but
   // where HibernationManager is constructed (actor-state), we don't have a timer channel ref.

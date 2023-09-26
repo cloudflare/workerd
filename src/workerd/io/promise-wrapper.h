@@ -39,7 +39,7 @@ public:
         kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<Self&>(*this);
     auto jsPromise = KJ_UNWRAP_OR_RETURN(wrapper.tryUnwrap(
-        context, handle, (jsg::Promise<T>*)nullptr, parentObject), nullptr);
+        context, handle, (jsg::Promise<T>*)nullptr, parentObject), kj::none);
     auto& js = jsg::Lock::from(context->GetIsolate());
     return IoContext::current().awaitJs(js, kj::mv(jsPromise));
   }

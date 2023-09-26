@@ -268,7 +268,7 @@ KJ_TEST("ActorCache single-key basics") {
         .thenReturn(CAPNP());
 
     auto result = promise.wait(ws);
-    KJ_EXPECT(result == nullptr);
+    KJ_EXPECT(result == kj::none);
   }
 
   // Get cached.
@@ -278,7 +278,7 @@ KJ_TEST("ActorCache single-key basics") {
   }
   {
     auto result = expectCached(test.get("bar"));
-    KJ_EXPECT(result == nullptr);
+    KJ_EXPECT(result == kj::none);
   }
 
   // Overwrite with a put().
@@ -305,7 +305,7 @@ KJ_TEST("ActorCache single-key basics") {
 
   {
     auto result = expectCached(test.get("foo"));
-    KJ_EXPECT(result == nullptr);
+    KJ_EXPECT(result == kj::none);
   }
 }
 
@@ -421,14 +421,14 @@ KJ_TEST("ActorCache more deletes") {
     auto promise = expectUncached(test.delete_("foo"));
 
     // Value is immediately in cache.
-    KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
+    KJ_ASSERT(expectCached(test.get("foo")) == kj::none);
 
     auto mockDelete = mockStorage->expectCall("delete", ws)
         .withParams(CAPNP(keys = ["foo"]));
 
     // Still in cache during flush.
     KJ_ASSERT(!promise.poll(ws));
-    KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
+    KJ_ASSERT(expectCached(test.get("foo")) == kj::none);
 
     kj::mv(mockDelete).thenReturn(CAPNP(numDeleted = 1));
 
@@ -437,7 +437,7 @@ KJ_TEST("ActorCache more deletes") {
   }
 
   // Still in cache after transaction completion.
-  KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
+  KJ_ASSERT(expectCached(test.get("foo")) == kj::none);
 
   // Try a case where the key isn't on disk.
   {
@@ -479,7 +479,7 @@ KJ_TEST("ActorCache more deletes") {
         .thenReturn(CAPNP(numDeleted = 1));
   }
 
-  KJ_ASSERT(expectCached(test.get("foo")) == nullptr);
+  KJ_ASSERT(expectCached(test.get("foo")) == kj::none);
 }
 
 KJ_TEST("ActorCache more multi-puts") {
@@ -3654,7 +3654,7 @@ KJ_TEST("ActorCache evict on timeout") {
   auto& mockStorage = test.mockStorage;
 
   auto timePoint = kj::UNIX_EPOCH;
-  KJ_ASSERT(test.cache.evictStale(timePoint) == nullptr);
+  KJ_ASSERT(test.cache.evictStale(timePoint) == kj::none);
 
   auto ackFlush = [&]() {
     mockStorage->expectCall("put", ws).thenReturn(CAPNP());
@@ -3666,9 +3666,9 @@ KJ_TEST("ActorCache evict on timeout") {
   test.put("bar", "456");
   ackFlush();
 
-  KJ_ASSERT(test.cache.evictStale(timePoint + 100 * kj::MILLISECONDS) == nullptr);
-  KJ_ASSERT(test.cache.evictStale(timePoint + 200 * kj::MILLISECONDS) == nullptr);
-  KJ_ASSERT(test.cache.evictStale(timePoint + 500 * kj::MILLISECONDS) == nullptr);
+  KJ_ASSERT(test.cache.evictStale(timePoint + 100 * kj::MILLISECONDS) == kj::none);
+  KJ_ASSERT(test.cache.evictStale(timePoint + 200 * kj::MILLISECONDS) == kj::none);
+  KJ_ASSERT(test.cache.evictStale(timePoint + 500 * kj::MILLISECONDS) == kj::none);
 
   expectCached(test.get("foo"));
   expectCached(test.get("bar"));
@@ -4846,13 +4846,13 @@ KJ_TEST("ActorCache alarm get/put") {
     mockStorage->expectCall("getAlarm", ws)
       .thenReturn(CAPNP(scheduledTimeMs = 0));
 
-    KJ_ASSERT(time.wait(ws) == nullptr);
+    KJ_ASSERT(time.wait(ws) == kj::none);
   }
 
   {
     auto time = expectCached(test.getAlarm());
 
-    KJ_ASSERT(time == nullptr);
+    KJ_ASSERT(time == kj::none);
   }
 
   auto oneMs = 1 * kj::MILLISECONDS + kj::UNIX_EPOCH;
@@ -4895,11 +4895,11 @@ KJ_TEST("ActorCache alarm get/put") {
   {
     auto time = expectCached(test.getAlarm());
 
-    KJ_ASSERT(time == nullptr);
+    KJ_ASSERT(time == kj::none);
   }
 
   // we have a cached time == nullptr, so we should not attempt to run an alarm
-  KJ_ASSERT(test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false) == nullptr);
+  KJ_ASSERT(test.cache.armAlarmHandler(10 * kj::SECONDS + kj::UNIX_EPOCH, false) == kj::none);
 
   {
     test.setAlarm(oneMs);
@@ -4962,7 +4962,7 @@ KJ_TEST("ActorCache alarm get/put") {
     mockStorage->expectCall("getAlarm", ws)
       .thenReturn(CAPNP(scheduledTimeMs = 0));
 
-    KJ_ASSERT(time.wait(ws) == nullptr);
+    KJ_ASSERT(time.wait(ws) == kj::none);
   }
 }
 
@@ -5007,7 +5007,7 @@ KJ_TEST("ActorCache alarm delete when flush fails") {
     auto handle = test.cache.armAlarmHandler(oneMs, false);
 
     auto time = expectCached(test.getAlarm());
-    KJ_ASSERT(time == nullptr);
+    KJ_ASSERT(time == kj::none);
   }
 
   for(auto i = 0; i < 2; i++) {
