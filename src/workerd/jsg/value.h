@@ -672,7 +672,7 @@ public:
         return true;
       }
     } else if constexpr(Predicate<kj::Decay<U>>::value) {
-      KJ_IF_SOME(val, static_cast<TypeWrapper*>(this)->tryUnwrap(context, in, (U*)nullptr, nullptr)) {
+      KJ_IF_SOME(val, static_cast<TypeWrapper*>(this)->tryUnwrap(context, in, (U*)nullptr, kj::none)) {
         out.template init<U>(kj::mv(val));
         return true;
       }
@@ -750,7 +750,7 @@ public:
         || (unwrapHelper<IsBooleanType>(context, handle, result))) {
       return kj::mv(result);
     }
-    return nullptr;
+    return kj::none;
   }
 };
 
@@ -810,7 +810,7 @@ public:
       v8::Local<v8::Context> context, v8::Local<v8::Value> handle, kj::Array<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsArray()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto array = handle.As<v8::Array>();
@@ -982,7 +982,7 @@ public:
     };
 
     if (!handle->IsObject() || handle->IsArray()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto object = handle.As<v8::Object>();
@@ -1103,22 +1103,22 @@ public:
                          kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
     if constexpr (kj::isSameType<kj::String, T>()) {
-      if (!handle->IsString()) return nullptr;
+      if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value, wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T> {
           .value = kj::mv(value),
         };
       }
-      return nullptr;
+      return kj::none;
     } else if constexpr (kj::isSameType<bool, T>()) {
-      if (!handle->IsBoolean()) return nullptr;
+      if (!handle->IsBoolean()) return kj::none;
       return wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject).map([](auto& value) {
         return NonCoercible<T> {
           .value = value,
         };
       });
     } else if constexpr (kj::isSameType<double, T>()) {
-      if (!handle->IsNumber()) return nullptr;
+      if (!handle->IsNumber()) return kj::none;
       return wrapper.tryUnwrap(context, handle, (T*)nullptr, parentObject).map([](auto& value) {
         return NonCoercible<T> {
           .value = value,
@@ -1204,7 +1204,7 @@ public:
                                      Identified<T>*,
                                      kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsObject()) {
-      return nullptr;
+      return kj::none;
     }
 
     auto& wrapper = static_cast<TypeWrapper&>(*this);

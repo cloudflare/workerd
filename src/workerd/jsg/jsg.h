@@ -1633,7 +1633,7 @@ public:
         return unwrapper(isolate, h, name);
       }
     }
-    return nullptr;
+    return kj::none;
   }
 
   // TODO(someday): Support for reading Symbols and Privates?

@@ -100,25 +100,25 @@ struct TypeErrorContext {
     return { STRUCT_FIELD, 0, type, fieldName };
   }
   static inline TypeErrorContext arrayElement(uint index) {
-    return { ARRAY_ELEMENT, index, nullptr, nullptr };
+    return { ARRAY_ELEMENT, index, kj::none, nullptr };
   }
   static inline TypeErrorContext callbackArgument(uint argumentIndex) {
-    return { CALLBACK_ARGUMENT, argumentIndex, nullptr, nullptr };
+    return { CALLBACK_ARGUMENT, argumentIndex, kj::none, nullptr };
   }
   static inline TypeErrorContext callbackReturn() {
-    return { CALLBACK_RETURN, 0, nullptr, nullptr };
+    return { CALLBACK_RETURN, 0, kj::none, nullptr };
   }
   static inline TypeErrorContext dictKey(const char* keyName) {
-    return { DICT_KEY, 0, nullptr, keyName };
+    return { DICT_KEY, 0, kj::none, keyName };
   }
   static inline TypeErrorContext dictField(const char* fieldName) {
-    return { DICT_FIELD, 0, nullptr, fieldName };
+    return { DICT_FIELD, 0, kj::none, fieldName };
   }
   static inline TypeErrorContext promiseResolution() {
-    return { PROMISE_RESOLUTION, 0, nullptr, nullptr };
+    return { PROMISE_RESOLUTION, 0, kj::none, nullptr };
   }
   static inline TypeErrorContext other() {
-    return { OTHER, 0, nullptr, nullptr };
+    return { OTHER, 0, kj::none, nullptr };
   }
 };
 

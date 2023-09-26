@@ -105,7 +105,7 @@ kj::Maybe<size_t> findLastIndexOf(kj::ArrayPtr<uint32_t> buffer, uint32_t codepo
   while (index != 0) {
     if (buffer[--index] == codepoint) return index;
   }
-  return nullptr;
+  return kj::none;
 }
 
 auto lexCmpThreeway(const kj::ArrayPtr<const uint32_t> one,

@@ -541,7 +541,7 @@ public:
       auto context = isolate->GetCurrentContext();
       auto value = jsg::check(object->Get(context, v8StrIntern(isolate, name)));
       if (value->IsUndefined()) {
-        return nullptr;
+        return kj::none;
       } else {
         // TypeErrorContext::structField() produces a pretty good error message for this case.
         return from(isolate).template unwrap<U>(context, value,
@@ -563,13 +563,13 @@ public:
   v8::Local<v8::Value> wrap(Lock& js, T value) const override {
     auto isolate = js.v8Isolate;
     auto context = js.v8Context();
-    return TypeWrapper::from(isolate).wrap(context, nullptr, kj::mv(value));
+    return TypeWrapper::from(isolate).wrap(context, kj::none, kj::mv(value));
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js, v8::Local<v8::Value> handle) const override {
     auto isolate = js.v8Isolate;
     auto context = js.v8Context();
-    return TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, nullptr);
+    return TypeWrapper::from(isolate).tryUnwrap(context, handle, (T*)nullptr, kj::none);
   }
 };
 
