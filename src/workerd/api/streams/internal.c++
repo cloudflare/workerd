@@ -280,7 +280,7 @@ public:
     // HACK: If `output` is another TransformStream, we don't allow pumping to it, in order to
     //   guarantee that we can't create cycles. Note that currently TeeBranch only ever wraps
     //   TransformStreams, never system streams.
-    JSG_REQUIRE(kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(output) == nullptr,
+    JSG_REQUIRE(kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(output) == kj::none,
         TypeError, "Inter-TransformStream ReadableStream.pipeTo() is not implemented.");
 
     // It is important we actually call `inner->pumpTo()` so that `kj::newTee()` is aware of this
@@ -2015,7 +2015,7 @@ kj::Promise<DeferredProxy<void>> IdentityTransformStreamImpl::pumpTo(
 
   // HACK: If `output` is another TransformStream, we don't allow pumping to it, in order to
   //   guarantee that we can't create cycles.
-  JSG_REQUIRE(kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(output) == nullptr,
+  JSG_REQUIRE(kj::dynamicDowncastIfAvailable<IdentityTransformStreamImpl>(output) == kj::none,
       TypeError, "Inter-TransformStream ReadableStream.pipeTo() is not implemented.");
 
   return ReadableStreamSource::pumpTo(output, end);

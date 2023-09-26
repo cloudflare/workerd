@@ -85,7 +85,7 @@ KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
   KJ_ASSERT(readContentTypeParameter(
     "multipart/form-data; charset=\"boundary=;\"; boundary=\"__boundary__\""_kj,
     "boundary1"_kj
-  ) == nullptr);
+  ) == kj::none);
 
   // no quotes
   expectContentTypeParameter(
@@ -156,19 +156,19 @@ KJ_TEST("readContentTypeParameter can fetch boundary parameter") {
   KJ_ASSERT(readContentTypeParameter(
     "multipart/form-data; boundary= ;foo=bar"_kj,
     "boundary"_kj
-  ) == nullptr);
+  ) == kj::none);
 
   // all whitespace with quotes
   KJ_ASSERT(readContentTypeParameter(
     "multipart/form-data; boundary="" ;foo=bar"_kj,
     "boundary"_kj
-  ) == nullptr);
+  ) == kj::none);
 
   // terminal escape character after quote
   KJ_ASSERT(readContentTypeParameter(
     R"(multipart/form-data; foo="\)",
     "boundary"_kj
-  ) == nullptr);
+  ) == kj::none);
 
   // space before value
   expectContentTypeParameter(

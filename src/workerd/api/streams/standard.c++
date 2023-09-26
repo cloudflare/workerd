@@ -295,7 +295,7 @@ kj::Maybe<kj::Promise<void>> ReadableLockImpl<Controller>::PipeLocked::tryPumpTo
 
 template <typename Controller>
 jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Lock& js) {
-  return KJ_ASSERT_NONNULL(inner.read(js, nullptr));
+  return KJ_ASSERT_NONNULL(inner.read(js, kj::none));
 }
 
 template <typename Controller>
@@ -1137,7 +1137,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
 
   if (writeRequests.empty()) {
     if (closeRequest != kj::none) {
-      KJ_ASSERT(inFlightClose == nullptr);
+      KJ_ASSERT(inFlightClose == kj::none);
       KJ_ASSERT_NONNULL(closeRequest);
       inFlightClose = kj::mv(closeRequest);
 
@@ -1155,7 +1155,7 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
     return;
   }
 
-  KJ_ASSERT(inFlightWrite == nullptr);
+  KJ_ASSERT(inFlightWrite == kj::none);
   auto req = dequeueWriteRequest();
   auto value = req.value.addRef(js);
   auto size = req.size;
@@ -1228,8 +1228,8 @@ template <typename Self>
 void WritableImpl<Self>::doClose(jsg::Lock& js) {
   KJ_ASSERT(closeRequest == nullptr);
   KJ_ASSERT(inFlightClose == nullptr);
-  KJ_ASSERT(inFlightWrite == nullptr);
-  KJ_ASSERT(maybePendingAbort == nullptr);
+  KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
   state.template init<StreamStates::Closed>();
   algorithms.clear();
@@ -1241,10 +1241,10 @@ void WritableImpl<Self>::doClose(jsg::Lock& js) {
 
 template <typename Self>
 void WritableImpl<Self>::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
-  KJ_ASSERT(closeRequest == nullptr);
-  KJ_ASSERT(inFlightClose == nullptr);
-  KJ_ASSERT(inFlightWrite == nullptr);
-  KJ_ASSERT(maybePendingAbort == nullptr);
+  KJ_ASSERT(closeRequest == kj::none);
+  KJ_ASSERT(inFlightClose == kj::none);
+  KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(maybePendingAbort == kj::none);
   KJ_ASSERT(writeRequests.empty());
   state = js.v8Ref(reason);
   algorithms.clear();
@@ -1269,8 +1269,8 @@ template <typename Self>
 void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   auto erroring = kj::mv(KJ_ASSERT_NONNULL(state.template tryGet<StreamStates::Erroring>()));
   auto reason = erroring.reason.getHandle(js);
-  KJ_ASSERT(inFlightWrite == nullptr);
-  KJ_ASSERT(inFlightClose == nullptr);
+  KJ_ASSERT(inFlightWrite == kj::none);
+  KJ_ASSERT(inFlightClose == kj::none);
   state.template init<StreamStates::Errored>(kj::mv(erroring.reason));
 
   while (!writeRequests.empty()) {
@@ -1331,7 +1331,7 @@ void WritableImpl<Self>::finishInFlightClose(
       pendingAbort.complete(js);
     }
   }
-  KJ_ASSERT(maybePendingAbort == nullptr);
+  KJ_ASSERT(maybePendingAbort == kj::none);
 
   state.template init<StreamStates::Closed>();
   doClose(js);
@@ -2415,7 +2415,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     KJ_SWITCH_ONEOF(pendingState) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
         // The closed state for BYOB reads is handled in the maybeByobOptions check above.
-        KJ_ASSERT(maybeByobOptions == nullptr);
+        KJ_ASSERT(maybeByobOptions == kj::none);
         return js.resolvedPromise(ReadResult { .done = true });
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
@@ -2427,7 +2427,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
       // The closed state for BYOB reads is handled in the maybeByobOptions check above.
-      KJ_ASSERT(maybeByobOptions == nullptr);
+      KJ_ASSERT(maybeByobOptions == kj::none);
       return js.resolvedPromise(ReadResult { .done = true });
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
@@ -2436,7 +2436,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamJsController::read(
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
       // The ReadableStreamDefaultController does not support ByobOptions.
       // It should never happen, but let's make sure.
-      KJ_ASSERT(maybeByobOptions == nullptr);
+      KJ_ASSERT(maybeByobOptions == kj::none);
       ReadPendingScope readPendingScope(js, *this);
       return consumer->read(js);
     }
@@ -2518,7 +2518,7 @@ ReadableStreamController::Tee ReadableStreamJsController::tee(jsg::Lock& js) {
 }
 
 void ReadableStreamJsController::setOwnerRef(ReadableStream& stream) {
-  KJ_ASSERT(owner == nullptr);
+  KJ_ASSERT(owner == kj::none);
   owner = &stream;
 }
 
@@ -3944,8 +3944,8 @@ void TransformStreamDefaultController::init(
     jsg::Ref<ReadableStream>& readable,
     jsg::Ref<WritableStream>& writable,
     jsg::Optional<Transformer> maybeTransformer) {
-  KJ_ASSERT(maybeReadableController == nullptr);
-  KJ_ASSERT(maybeWritableController == nullptr);
+  KJ_ASSERT(maybeReadableController == kj::none);
+  KJ_ASSERT(maybeWritableController == kj::none);
   maybeWritableController =
       static_cast<WritableStreamJsController&>(writable->getController()).getWeakRef();
 

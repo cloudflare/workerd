@@ -120,7 +120,7 @@ private:
 
     void error(jsg::Lock& js, v8::Local<v8::Value> reason) override;
 
-    void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = nullptr) override;
+    void release(jsg::Lock& js, kj::Maybe<v8::Local<v8::Value>> maybeError = kj::none) override;
 
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
 
@@ -153,7 +153,7 @@ public:
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
   explicit WritableStreamInternalController(Writable writable,
-                                            kj::Maybe<uint64_t> maybeHighWaterMark = nullptr)
+                                            kj::Maybe<uint64_t> maybeHighWaterMark = kj::none)
       : state(kj::mv(writable)),
         maybeHighWaterMark(maybeHighWaterMark) {
 }
@@ -196,7 +196,7 @@ public:
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override {
     // TODO(later): The internal controller has no concept of an "erroring"
     // state, so for now we just return nullptr here.
-    return nullptr;
+    return kj::none;
   }
 
   void visitForGc(jsg::GcVisitor& visitor) override;
@@ -293,7 +293,7 @@ class IdentityTransformStreamImpl: public kj::Refcounted,
   // TODO(soon): Reimplement this in terms of kj::OneWayPipe, so we can optimize pumpTo().
 
 public:
-  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = nullptr)
+  explicit IdentityTransformStreamImpl(kj::Maybe<uint64_t> limit = kj::none)
       : limit(limit) {}
 
   ~IdentityTransformStreamImpl() noexcept(false) {

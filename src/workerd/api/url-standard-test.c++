@@ -23,12 +23,12 @@ KJ_TEST("Minimal URL Parse") {
   KJ_ASSERT(record.password == jsg::usv());
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("example.org"));
-  KJ_ASSERT(record.port == nullptr);
+  KJ_ASSERT(record.port == kj::none);
   auto& path = KJ_ASSERT_NONNULL(record.path.tryGet<kj::Array<jsg::UsvString>>());
   KJ_ASSERT(path.size() == 1);
   KJ_ASSERT(path[0] == jsg::usv());
-  KJ_ASSERT(record.query == nullptr);
-  KJ_ASSERT(record.fragment == nullptr);
+  KJ_ASSERT(record.query == kj::none);
+  KJ_ASSERT(record.fragment == kj::none);
 }
 
 KJ_TEST("Minimal URL Parse 2") {
@@ -39,12 +39,12 @@ KJ_TEST("Minimal URL Parse 2") {
   KJ_ASSERT(record.password == jsg::usv());
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("example.org"));
-  KJ_ASSERT(record.port == nullptr);
+  KJ_ASSERT(record.port == kj::none);
   auto& path = KJ_ASSERT_NONNULL(record.path.tryGet<kj::Array<jsg::UsvString>>());
   KJ_ASSERT(path.size() == 1);
   KJ_ASSERT(path[0] == jsg::usv());
-  KJ_ASSERT(record.query == nullptr);
-  KJ_ASSERT(record.fragment == nullptr);
+  KJ_ASSERT(record.query == kj::none);
+  KJ_ASSERT(record.fragment == kj::none);
 }
 
 KJ_TEST("Minimal URL Parse - Username") {
@@ -55,7 +55,7 @@ KJ_TEST("Minimal URL Parse - Username") {
   KJ_ASSERT(record.password == jsg::usv());
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("example.org"));
-  KJ_ASSERT(record.port == nullptr);
+  KJ_ASSERT(record.port == kj::none);
   auto& path = KJ_ASSERT_NONNULL(record.path.tryGet<kj::Array<jsg::UsvString>>());
   KJ_ASSERT(path.size() == 1);
   KJ_ASSERT(path[0] == jsg::usv());
@@ -71,7 +71,7 @@ KJ_TEST("Minimal URL Parse - Username and Password") {
   KJ_ASSERT(record.password == jsg::usv("xyz"));
   auto& host = KJ_ASSERT_NONNULL(record.host);
   KJ_ASSERT(host == jsg::usv("example.org"));
-  KJ_ASSERT(record.port == nullptr);
+  KJ_ASSERT(record.port == kj::none);
   auto& path = KJ_ASSERT_NONNULL(record.path.tryGet<kj::Array<jsg::UsvString>>());
   KJ_ASSERT(path.size() == 1);
   KJ_ASSERT(path[0] == jsg::usv());
@@ -630,13 +630,13 @@ KJ_TEST("IPv4 in hostname") {
   }
 
   {
-    KJ_ASSERT(URL::parse(jsg::usv("https://999.999.999.999")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://123.999.999.999")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.999.999")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.123.999")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.65536")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://123.16777216")) == nullptr);
-    KJ_ASSERT(URL::parse(jsg::usv("https://4294967296")) == nullptr);
+    KJ_ASSERT(URL::parse(jsg::usv("https://999.999.999.999")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://123.999.999.999")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.999.999")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.123.999")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://123.123.65536")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://123.16777216")) == kj::none);
+    KJ_ASSERT(URL::parse(jsg::usv("https://4294967296")) == kj::none);
   }
 }
 
@@ -675,7 +675,7 @@ KJ_TEST("IPv6 in hostname") {
     KJ_ASSERT(host == jsg::usv("[2001:db8:122:344::c000:221]"));
   }
 
-  KJ_ASSERT(URL::parse(jsg::usv("https://[zz::top]")) == nullptr);
+  KJ_ASSERT(URL::parse(jsg::usv("https://[zz::top]")) == kj::none);
 }
 
 KJ_TEST("javascript: URLS") {
@@ -765,7 +765,7 @@ KJ_TEST("Relative URLs") {
   {
     auto base = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("data:cannot-be-base")));
     auto record = URL::parse(jsg::usv("/anything"), base);
-    KJ_ASSERT(record == nullptr);
+    KJ_ASSERT(record == kj::none);
   }
 }
 

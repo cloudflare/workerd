@@ -155,7 +155,7 @@ private:
   template <typename Type>
   static kj::Maybe<Type> iteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->data.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& [key, value] = state.parent->data[state.index++];
     if constexpr (kj::isSameType<Type, EntryIteratorType>()) {

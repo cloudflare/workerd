@@ -241,7 +241,7 @@ void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
   KJ_IF_SOME(byobRequest, req) {
     byobRequest.invalidate();
     // The call to byobRequest->invalidate() should have cleared the reference.
-    KJ_ASSERT(req == nullptr);
+    KJ_ASSERT(req == kj::none);
   }
 }
 }  // namespace
@@ -1010,7 +1010,7 @@ kj::Maybe<kj::Own<ByteQueue::ByobRequest>> ByteQueue::nextPendingByobReadRequest
       }
     }
   }
-  return nullptr;
+  return kj::none;
 }
 
 bool ByteQueue::hasPartiallyFulfilledRead() {

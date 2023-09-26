@@ -213,7 +213,7 @@ public:
   // Asserts if the queue is closed or errored.
   void push(jsg::Lock& js,
             kj::Own<Entry> entry,
-            kj::Maybe<ConsumerImpl&> skipConsumer = nullptr) {
+            kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(),
         "The queue is closed or errored.");
 
