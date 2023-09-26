@@ -342,7 +342,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
-  KJ_ASSERT(context.getActor() == nullptr);
+  KJ_ASSERT(context.getActor() == kj::none);
   // This code currently doesn't work with actors because cancellations occur immediately, without
   // calling context->drain(). We don't ever send scheduled events to actors. If we do, we'll have
   // to think more about this.

@@ -510,7 +510,7 @@ kj::Promise<bool> IoContext::IncomingRequest::finishScheduled() {
   //   cannot assume that just because an async task fails while the scheduled event is running,
   //   that the scheduled event itself failed -- the failure could have been a task initiated by
   //   an unrelated concurrent event.
-  KJ_ASSERT(context->actor == nullptr,
+  KJ_ASSERT(context->actor == kj::none,
       "this code isn't designed to allow scheduled events to be delivered to actors");
 
   // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
@@ -679,7 +679,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
       if (state.isCanceled) {
         // We've been canceled before running. Nothing more to do.
-        KJ_ASSERT(state.maybePromise == nullptr);
+        KJ_ASSERT(state.maybePromise == kj::none);
         return;
       }
 
@@ -710,7 +710,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
           unwindDetector.catchExceptionsIfUnwinding([&] {
             if (state.isCanceled) {
               // The user's callback has called clearInterval(), nothing more to do.
-              KJ_ASSERT(state.maybePromise == nullptr);
+              KJ_ASSERT(state.maybePromise == kj::none);
               return;
             }
 
@@ -1108,8 +1108,8 @@ public:
         handleScope(workerLock.getIsolate()),
         jsContextScope(workerLock.getContext()),
         promiseContextScope(workerLock.getIsolate(), context.getPromiseContextTag(workerLock)) {
-    KJ_REQUIRE(context.currentInputLock == nullptr);
-    KJ_REQUIRE(context.currentLock == nullptr);
+    KJ_REQUIRE(context.currentInputLock == kj::none);
+    KJ_REQUIRE(context.currentLock == kj::none);
     context.currentInputLock = kj::mv(inputLock);
     context.currentLock = workerLock;
 
@@ -1267,7 +1267,7 @@ auto IoContext::tryGetWeakRefForCurrent() -> kj::Maybe<kj::Own<WeakRef>> {
 }
 
 void IoContext::runFinalizers(Worker::AsyncLock& asyncLock) {
-  KJ_ASSERT(actor == nullptr);  // we don't finalize actor requests
+  KJ_ASSERT(actor == kj::none);  // we don't finalize actor requests
 
   tasks = kj::none;
   // Tasks typically have callbacks that dereference IoOwns. Since those callbacks
