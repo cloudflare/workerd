@@ -313,7 +313,7 @@ public:
 
   v8::Local<v8::Value> wrapException(v8::Local<v8::Context> context,
                                      kj::Exception&& exception) override {
-    return wrapper->wrap(context, nullptr, kj::fwd<kj::Exception>(exception));
+    return wrapper->wrap(context, kj::none, kj::fwd<kj::Exception>(exception));
   }
 
   // Before you can execute code in your Isolate you must lock it to the current thread by
@@ -359,17 +359,17 @@ public:
     }
 
     v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) override {
-      return jsgIsolate.wrapper->wrap(v8Isolate, nullptr, kj::mv(data));
+      return jsgIsolate.wrapper->wrap(v8Isolate, kj::none, kj::mv(data));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
         jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)>
             simpleFunction) override {
-      return jsgIsolate.wrapper->wrap(context, nullptr, kj::mv(simpleFunction));
+      return jsgIsolate.wrapper->wrap(context, kj::none, kj::mv(simpleFunction));
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
             returningFunction) override {
-      return jsgIsolate.wrapper->wrap(context, nullptr, kj::mv(returningFunction));
+      return jsgIsolate.wrapper->wrap(context, kj::none, kj::mv(returningFunction));
     }
     kj::String toString(v8::Local<v8::Value> value) override {
       return jsgIsolate.wrapper->template unwrap<kj::String>(
@@ -384,7 +384,7 @@ public:
           v8Isolate->GetCurrentContext(), value, jsg::TypeErrorContext::other());
     }
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
-      return jsgIsolate.wrapper->wrap(v8Context(), nullptr, kj::mv(promise));
+      return jsgIsolate.wrapper->wrap(v8Context(), kj::none, kj::mv(promise));
     }
     jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Promise> promise) override {
       return jsgIsolate.wrapper->template unwrap<jsg::Promise<jsg::Value>>(

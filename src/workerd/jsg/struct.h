@@ -31,7 +31,7 @@ public:
     } else {
       if constexpr (webidl::isOptional<Type>) {
         // Don't even set optional fields that aren't present.
-        if (in.*field == nullptr) return;
+        if (in.*field == kj::none) return;
       }
       auto value = wrapper.wrap(context, creator, kj::mv(in.*field));
       check(out->Set(context, nameHandle.Get(isolate), value));

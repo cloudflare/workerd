@@ -502,7 +502,7 @@ public:
       UsvString*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle.IsEmpty()) {
-      return nullptr;
+      return kj::none;
     }
     return usv(context->GetIsolate(), handle);
   }
