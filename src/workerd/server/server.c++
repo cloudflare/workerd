@@ -354,7 +354,7 @@ public:
     if (style == config::HttpOptions::Style::HOST) {
       auto parsed = kj::Url::parse(url, kj::Url::HTTP_REQUEST,
           kj::Url::Options {.percentDecode = false, .allowEmpty = true});
-      parsed.host = kj::str(KJ_UNWRAP_OR_RETURN(headers.get(kj::HttpHeaderId::HOST), nullptr));
+      parsed.host = kj::str(KJ_UNWRAP_OR_RETURN(headers.get(kj::HttpHeaderId::HOST), kj::none));
 
       KJ_IF_SOME(h, forwardedProtoHeader) {
         KJ_IF_SOME(s, headers.get(h)) {
@@ -2206,11 +2206,11 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       },
       IsolateObserver::StartType::COLD,
       nullptr,          // systemTracer -- TODO(beta): factor out
-      Worker::Lock::TakeSynchronously(nullptr),
+      Worker::Lock::TakeSynchronously(kj::none),
       errorReporter);
 
   {
-    Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(nullptr));
+    Worker::Lock lock(*worker, Worker::Lock::TakeSynchronously(kj::none));
     lock.validateHandlers(errorReporter);
   }
 
