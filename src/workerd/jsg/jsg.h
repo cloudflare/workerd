@@ -461,6 +461,13 @@ using HasGetTemplateOverload = decltype(
     wrapper.initReflection(this, __VA_ARGS__); \
   }
 
+// Configures the resource type to implement named property interception.
+// @see the definition of jsg::NamedIntercept in resource.h for more information.
+#define JSG_NAMED_INTERCEPT() \
+  do { \
+   registry.template registerNamedIntercept<Self>(); \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type should be considered a "root" for
 // the purposes of automatically generating TypeScript definitions. All "root" types and their
 // recursively referenced types (e.g. method parameter/return types, property types, inherits, etc)

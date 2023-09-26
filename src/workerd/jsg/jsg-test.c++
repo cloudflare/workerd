@@ -360,10 +360,54 @@ KJ_TEST("Test JSG_CALLABLE") {
   e.expectEval("let obj = getCallable(); new obj();", "boolean", "true");
 }
 
-}  // namespace
+// ========================================================================================
+struct InterceptContext: public ContextGlobalObject {
+  struct ProxyImpl: public jsg::Object,
+                    public jsg::NamedIntercept {
+    static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
+
+    int getBar() { return 123; }
+
+    // NamedIntercept implementation
+    kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override {
+      if (name == "foo") {
+        return kj::Maybe(js.str("bar"_kj));
+      } else if (name == "abc") {
+        JSG_FAIL_REQUIRE(TypeError, "boom");
+      }
+      return kj::none;
+    }
+
+    kj::Array<kj::String> listNamed(Lock& js) override {
+      return kj::arr(kj::str("foo"));
+    }
+
+    JSG_RESOURCE_TYPE(ProxyImpl) {
+      JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
+      JSG_NAMED_INTERCEPT();
+    }
+  };
+
+  JSG_RESOURCE_TYPE(InterceptContext) {
+    JSG_NESTED_TYPE(ProxyImpl);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(InterceptIsolate, InterceptContext, InterceptContext::ProxyImpl);
+
+KJ_TEST("Named interceptor") {
+  Evaluator<InterceptContext, InterceptIsolate> e(v8System);
+  // Calling Object.keys(p) here just to verify that it does not throw.
+  // Also, the test tries modifying the known intercepted property foo but verifies
+  // that the value is readonly/unchanged.
+  e.expectEval("p = new ProxyImpl; Object.keys(p); p.foo = 123; p.foo", "string", "bar");
+  e.expectEval("p = new ProxyImpl; p.bar", "number", "123");
+  e.expectEval("p = new ProxyImpl; Reflect.has(p, 'foo')", "boolean", "true");
+  e.expectEval("p = new ProxyImpl; Reflect.has(p, 'bar')", "boolean", "true");
+  e.expectEval("p = new ProxyImpl; Reflect.has(p, 'baz')", "boolean", "false");
+  e.expectEval("p = new ProxyImpl; p.abc", "throws", "TypeError: boom");
+}
 
 // ========================================================================================
-
 struct IsolateUuidContext: public ContextGlobalObject {
   JSG_RESOURCE_TYPE(IsolateUuidContext) {}
 };
@@ -378,5 +422,7 @@ KJ_TEST("jsg::Lock getUuid") {
   KJ_ASSERT(isolate.getUuid() == lock.getUuid());
   KJ_ASSERT(lock.getUuid().size() == 36);
 }
+
+}  // namespace
 
 }  // namespace workerd::jsg::test
