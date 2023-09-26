@@ -129,7 +129,7 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Promise<void> limitDrain() override { return kj::NEVER_DONE; }
   kj::Promise<void> limitScheduled() override { return kj::NEVER_DONE; }
   size_t getBufferingLimit() override { return kj::maxValue; }
-  kj::Maybe<EventOutcome> getLimitsExceeded() override { return nullptr; }
+  kj::Maybe<EventOutcome> getLimitsExceeded() override { return kj::none; }
   kj::Promise<void> onLimitsExceeded() override { return kj::NEVER_DONE; }
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
@@ -220,7 +220,7 @@ struct MockResponse final: public kj::HttpService::Response {
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode, kj::StringPtr statusText,
                                       const kj::HttpHeaders &headers,
-                                      kj::Maybe<uint64_t> expectedBodySize = nullptr) override {
+                                      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
     this->statusCode = statusCode;
     this->statusText = statusText;
     return kj::addRef(*body);
@@ -236,7 +236,7 @@ struct MockResponse final: public kj::HttpService::Response {
 TestFixture::TestFixture(SetupParams params)
   : params(params),
     config(buildConfig(params, configArena)),
-    io(params.waitScope == nullptr ? kj::Maybe(kj::setupAsyncIo()) : kj::Maybe<kj::AsyncIoContext>(nullptr)),
+    io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo()) : kj::Maybe<kj::AsyncIoContext>(kj::none)),
     timer(kj::heap<MockTimer>()),
     timerChannel(kj::heap<MockTimerChannel>()),
     entropySource(kj::heap<MockEntropySource>()),
@@ -271,7 +271,7 @@ TestFixture::TestFixture(SetupParams params)
       },
       IsolateObserver::StartType::COLD,
       nullptr /* parentSpan */,
-      Worker::LockType(Worker::Lock::TakeSynchronously(nullptr))
+      Worker::LockType(Worker::Lock::TakeSynchronously(kj::none))
     )),
     errorHandler(kj::heap<DummyErrorHandler>()),
     waitUntilTasks(*errorHandler),
@@ -334,7 +334,7 @@ TestFixture::Response TestFixture::runRequest(
         response,
         "{}"_kj,
         env.lock,
-        env.lock.getExportedHandler(nullptr, nullptr));
+        env.lock.getExportedHandler(kj::none, kj::none));
   });
 
   return { .statusCode = response.statusCode, .body = response.body->str() };
