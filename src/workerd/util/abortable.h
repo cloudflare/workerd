@@ -14,7 +14,7 @@ public:
   AbortableImpl(kj::Own<T> inner, RefcountedCanceler& canceler)
       : canceler(kj::addRef(canceler)),
         inner(kj::mv(inner)),
-        onCancel(*(this->canceler), [this]() { this->inner = nullptr; }) {}
+        onCancel(*(this->canceler), [this]() { this->inner = kj::none; }) {}
 
   template <typename V, typename... Args, typename...ArgsT>
   kj::Promise<V> wrap(kj::Promise<V>(T::*fn)(ArgsT...), Args&&...args) {

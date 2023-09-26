@@ -261,19 +261,19 @@ public:
   bool isNull(uint column);
 
   kj::Maybe<kj::ArrayPtr<const byte>> getMaybeBlob(uint column) {
-    if (isNull(column)) { return nullptr; } else { return getBlob(column); }
+    if (isNull(column)) { return kj::none; } else { return getBlob(column); }
   }
   kj::Maybe<kj::StringPtr> getMaybeText(uint column) {
-    if (isNull(column)) { return nullptr; } else { return getText(column); }
+    if (isNull(column)) { return kj::none; } else { return getText(column); }
   }
   kj::Maybe<int> getMaybeInt(uint column) {
-    if (isNull(column)) { return nullptr; } else { return getInt(column); }
+    if (isNull(column)) { return kj::none; } else { return getInt(column); }
   }
   kj::Maybe<int64_t> getMaybeInt64(uint column) {
-    if (isNull(column)) { return nullptr; } else { return getInt64(column); }
+    if (isNull(column)) { return kj::none; } else { return getInt64(column); }
   }
   kj::Maybe<double> getMaybeDouble(uint column) {
-    if (isNull(column)) { return nullptr; } else { return getDouble(column); }
+    if (isNull(column)) { return kj::none; } else { return getDouble(column); }
   }
 
 private:

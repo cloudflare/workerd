@@ -58,7 +58,7 @@ namespace workerd {
 const capnp::TextCodec TEXT_CODEC;
 
 kj::String canonicalizeCapnpText(capnp::StructSchema schema, kj::StringPtr text,
-                                 kj::Maybe<kj::StringPtr> capName = nullptr);
+                                 kj::Maybe<kj::StringPtr> capName = kj::none);
 
 class MockClient: public capnp::DynamicCapability::Client {
 public:
@@ -139,7 +139,7 @@ public:
     }
 
     ExpectedCall withParams(kj::StringPtr paramsText,
-                            kj::Maybe<kj::StringPtr> capName = nullptr,
+                            kj::Maybe<kj::StringPtr> capName = kj::none,
                             kj::SourceLocation location = {}) &&
                             KJ_WARN_UNUSED_RESULT {
       // Expect that the call had the given parameters.
@@ -312,7 +312,7 @@ private:
       auto paf = kj::newPromiseAndFulfiller<void>();
       waiter = kj::mv(paf.fulfiller);
       if (!paf.promise.poll(waitScope)) {
-        waiter = nullptr;
+        waiter = kj::none;
         return false;
       }
       paf.promise.wait(waitScope);

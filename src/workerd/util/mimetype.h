@@ -35,7 +35,7 @@ public:
 
   explicit MimeType(kj::StringPtr type,
                     kj::StringPtr subtype,
-                    kj::Maybe<MimeParams> params = nullptr);
+                    kj::Maybe<MimeParams> params = kj::none);
 
   MimeType(MimeType&&) = default;
   MimeType& operator=(MimeType&&) = default;
