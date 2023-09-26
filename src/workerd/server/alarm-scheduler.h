@@ -89,7 +89,7 @@ private:
     kj::Own<ActorKey> actor;
     kj::Date scheduledTime;
     kj::Promise<void> task;
-    kj::Maybe<kj::Date> queuedAlarm = nullptr;
+    kj::Maybe<kj::Date> queuedAlarm = kj::none;
     // Once started, an alarm can have a single alarm queued behind it.
     AlarmStatus status = AlarmStatus::WAITING;
 
