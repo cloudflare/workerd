@@ -100,7 +100,7 @@ class WritableStream: public jsg::Object {
 public:
   explicit WritableStream(IoContext& ioContext,
                           kj::Own<WritableStreamSink> sink,
-                          kj::Maybe<uint64_t> maybeHighWaterMark = nullptr);
+                          kj::Maybe<uint64_t> maybeHighWaterMark = kj::none);
 
   explicit WritableStream(kj::Own<WritableStreamController> controller);
 

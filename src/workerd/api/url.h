@@ -218,7 +218,7 @@ private:
 
   static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
     return kj::arr(kj::str(key), kj::str(value));
@@ -226,7 +226,7 @@ private:
 
   static kj::Maybe<kj::String> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
     return kj::str(key);
@@ -234,7 +234,7 @@ private:
 
   static kj::Maybe<kj::String> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->url->query.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& [key, value] = state.parent->url->query[state.index++];
     return kj::str(value);

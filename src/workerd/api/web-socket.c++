@@ -186,7 +186,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
 
   constexpr auto wsErr = "WebSocket Constructor: "_kj;
 
-  JSG_REQUIRE(maybeException == nullptr, DOMSyntaxError, wsErr, "The url is invalid.");
+  JSG_REQUIRE(maybeException == kj::none, DOMSyntaxError, wsErr, "The url is invalid.");
   JSG_REQUIRE(urlRecord.scheme == "ws" || urlRecord.scheme == "wss", DOMSyntaxError, wsErr,
       "The url scheme must be ws or wss.");
   // We want the caller to pass `ws/wss` as per the spec, but FL would treat these as http in
@@ -197,7 +197,7 @@ jsg::Ref<WebSocket> WebSocket::constructor(
     urlRecord.scheme = kj::str("https");
   }
 
-  JSG_REQUIRE(urlRecord.fragment == nullptr, DOMSyntaxError, wsErr,
+  JSG_REQUIRE(urlRecord.fragment == kj::none, DOMSyntaxError, wsErr,
       "The url fragment must be empty.");
 
   kj::HttpHeaders headers(context.getHeaderTable());

@@ -251,7 +251,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
 
     auto responseHeadersRef = jsResponse->getHeaders(js);
     KJ_IF_SOME(vary, responseHeadersRef->get(jsg::ByteString(kj::str("vary")))) {
-      JSG_REQUIRE(vary.findFirst('*') == nullptr,
+      JSG_REQUIRE(vary.findFirst('*') == kj::none,
           TypeError, "Cannot cache response with 'Vary: *' header.");
     }
 

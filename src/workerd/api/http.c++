@@ -1249,7 +1249,7 @@ jsg::Ref<Response> Response::json_(
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
-  JSG_REQUIRE(webSocket == nullptr,
+  JSG_REQUIRE(webSocket == kj::none,
       TypeError, "Cannot clone a response to a WebSocket handshake.");
 
   auto headersClone = headers->clone();

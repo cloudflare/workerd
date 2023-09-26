@@ -26,7 +26,7 @@ struct OpaqueOrigin {};
 struct TupleOrigin {
   jsg::UsvStringPtr scheme;
   jsg::UsvStringPtr host;
-  kj::Maybe<uint16_t> port = nullptr;
+  kj::Maybe<uint16_t> port = kj::none;
 };
 
 using Origin = kj::OneOf<OpaqueOrigin, TupleOrigin>;
@@ -182,7 +182,7 @@ private:
   kj::Maybe<URL&> maybeUrl;
 
   void update();
-  void reset(kj::Maybe<jsg::UsvStringPtr> value = nullptr);
+  void reset(kj::Maybe<jsg::UsvStringPtr> value = kj::none);
 
   void init(Initializer init);
   void parse(jsg::UsvStringPtr input);
@@ -190,7 +190,7 @@ private:
   static kj::Maybe<kj::Array<jsg::UsvStringPtr>> entryIteratorNext(
       jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->list.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& entry = state.parent->list[state.index++];
     return kj::arr<jsg::UsvStringPtr>(entry.name, entry.value);
@@ -198,7 +198,7 @@ private:
 
   static kj::Maybe<jsg::UsvStringPtr> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->list.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& entry = state.parent->list[state.index++];
     return entry.name.asPtr();
@@ -206,7 +206,7 @@ private:
 
   static kj::Maybe<jsg::UsvStringPtr> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
     if (state.index >= state.parent->list.size()) {
-      return nullptr;
+      return kj::none;
     }
     auto& entry = state.parent->list[state.index++];
     return entry.value.asPtr();
@@ -250,8 +250,8 @@ public:
   static kj::Maybe<UrlRecord> parse(
       jsg::UsvStringPtr input,
       jsg::Optional<UrlRecord&> maybeBase = nullptr,
-      kj::Maybe<UrlRecord&> maybeRecord = nullptr,
-      kj::Maybe<ParseState> maybeStateOverride = nullptr);
+      kj::Maybe<UrlRecord&> maybeRecord = kj::none,
+      kj::Maybe<ParseState> maybeStateOverride = kj::none);
 
   URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = nullptr);
 
