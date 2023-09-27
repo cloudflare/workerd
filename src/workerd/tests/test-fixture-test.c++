@@ -137,27 +137,6 @@ KJ_TEST("runInIoContext consuming ignored js exception") {
   KJ_EXPECT(runCount == 1);
 }
 
-KJ_TEST("compileAndInstantiateModule") {
-  TestFixture fixture;
-  uint runCount = 0;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    runCount++;
-    auto context = env.isolate->GetCurrentContext();
-
-    auto ns = env.compileAndInstantiateModule("testFixtureTest",
-        "export function init() { return 42; }"_kj);
-    auto fn = env.js.v8Get(ns, "init"_kj);
-    KJ_EXPECT(fn->IsFunction());
-    auto callResult = v8::Function::Cast(*fn)->
-        Call(context, context->Global(), 0, nullptr).ToLocalChecked();
-    v8::String::Utf8Value value(env.isolate, callResult);
-    KJ_EXPECT(*value == "42"_kj);
-  });
-
-  KJ_EXPECT(runCount == 1);
-}
-
 KJ_TEST("runRequest") {
   TestFixture fixture({
     .mainModuleSource = R"SCRIPT(

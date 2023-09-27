@@ -29,10 +29,6 @@ struct TestFixture {
 
   struct V8Environment {
     v8::Isolate* isolate;
-
-    // Compile and instantiate esm module. Returns module namespace object.
-    v8::Local<v8::Object> compileAndInstantiateModule(
-      kj::StringPtr name, kj::ArrayPtr<const char> src) const;
   };
 
   struct Environment : public V8Environment {

@@ -340,21 +340,4 @@ TestFixture::Response TestFixture::runRequest(
   return { .statusCode = response.statusCode, .body = response.body->str() };
 }
 
-v8::Local<v8::Object> TestFixture::V8Environment::compileAndInstantiateModule(
-    kj::StringPtr name, kj::ArrayPtr<const char> src) const {
-  v8::Local<v8::Module> module;
-
-  v8::ScriptCompiler::Source source(jsg::v8Str(isolate, src),
-  v8::ScriptOrigin(isolate, jsg::v8StrIntern(isolate, name),
-      false, false, false, -1, {}, false, false, true /* is_module */));
-
-  if (!v8::ScriptCompiler::CompileModule(isolate, &source).ToLocal(&module)) {
-    KJ_FAIL_REQUIRE("error parsing code");
-  }
-
-  auto& js = jsg::Lock::from(isolate);
-  jsg::instantiateModule(js, module);
-  return module->GetModuleNamespace()->ToObject(isolate->GetCurrentContext()).ToLocalChecked();
-}
-
 }  // namespace workerd
