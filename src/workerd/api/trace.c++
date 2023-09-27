@@ -153,6 +153,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(email, Trace::EmailEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::EmailEventInfo>(trace, email));
       }
+      KJ_CASE_ONEOF(tracedTrace, Trace::TraceEventInfo) {
+        return kj::Maybe(jsg::alloc<TraceItem::TailEventInfo>(trace, tracedTrace));
+      }
       KJ_CASE_ONEOF(custom, Trace::CustomEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
@@ -183,6 +186,7 @@ kj::Maybe<TraceItem::EventInfo> TraceItem::getEvent(jsg::Lock& js) {
       KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) { return info.addRef(); }
+      KJ_CASE_ONEOF(info, jsg::Ref<TailEventInfo>) { return info.addRef(); }
       KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) { return info.addRef(); }
     }
     KJ_UNREACHABLE;
@@ -364,6 +368,30 @@ uint32_t TraceItem::EmailEventInfo::getRawSize() {
   return rawSize;
 }
 
+kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> getConsumedEventsFromEventInfo(
+    const Trace::TraceEventInfo& eventInfo) {
+  return KJ_MAP(t, eventInfo.traces) -> jsg::Ref<TraceItem::TailEventInfo::TailItem> {
+    return jsg::alloc<TraceItem::TailEventInfo::TailItem>(t);
+  };
+}
+
+TraceItem::TailEventInfo::TailEventInfo(const Trace& trace,
+                                        const Trace::TraceEventInfo& eventInfo)
+    : consumedEvents(getConsumedEventsFromEventInfo(eventInfo)) {}
+
+kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo::getConsumedEvents() {
+  return KJ_MAP(consumedEvent, consumedEvents) -> jsg::Ref<TailEventInfo::TailItem> {
+    return consumedEvent.addRef();
+  };
+}
+
+TraceItem::TailEventInfo::TailItem::TailItem(const Trace::TraceEventInfo::TraceItem& traceItem)
+    : scriptName(traceItem.scriptName.map([](auto& s) { return kj::str(s); })) {}
+
+kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
+  return scriptName;
+}
+
 TraceDiagnosticChannelEvent::TraceDiagnosticChannelEvent(
     const Trace& trace,
     const Trace::DiagnosticChannelEvent& eventInfo)
@@ -436,6 +464,10 @@ kj::Promise<void> sendTracesToExportedHandler(
 
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
+
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(context.now(), Trace::TraceEventInfo(traces));
+  }
 
   // Add the actual JS as a wait until because the handler may be an event listener which can't
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`

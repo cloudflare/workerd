@@ -50,6 +50,7 @@ struct Trace @0x8e8d911203762d34 {
     queue @15 :QueueEventInfo;
     custom @13 :CustomEventInfo;
     email @16 :EmailEventInfo;
+    trace @18 :TraceEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -81,6 +82,14 @@ struct Trace @0x8e8d911203762d34 {
     mailFrom @0 :Text;
     rcptTo @1 :Text;
     rawSize @2 :UInt32;
+  }
+
+  struct TraceEventInfo {
+    struct TraceItem {
+      scriptName @0 :Text;
+    }
+
+    traces @0 :List(TraceItem);
   }
 
   struct CustomEventInfo {}

@@ -106,6 +106,46 @@ void Trace::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder) 
   builder.setRawSize(rawSize);
 }
 
+kj::Vector<Trace::TraceEventInfo::TraceItem> getTraceItemsFromTraces(kj::ArrayPtr<kj::Own<Trace>> traces) {
+  return KJ_MAP(t, traces) -> Trace::TraceEventInfo::TraceItem {
+    return Trace::TraceEventInfo::TraceItem(t->scriptName.map([](auto& scriptName) {
+      return kj::str(scriptName);
+    }));
+  };
+}
+
+Trace::TraceEventInfo::TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces)
+    : traces(getTraceItemsFromTraces(traces)) {}
+
+kj::Vector<Trace::TraceEventInfo::TraceItem> getTraceItemsFromReader(
+    rpc::Trace::TraceEventInfo::Reader reader) {
+  return KJ_MAP(r, reader.getTraces()) -> Trace::TraceEventInfo::TraceItem {
+    return Trace::TraceEventInfo::TraceItem(r);
+  };
+}
+
+Trace::TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)
+    : traces(getTraceItemsFromReader(reader)) {}
+
+void Trace::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder) {
+  auto list = builder.initTraces(traces.size());
+  for (auto i: kj::indices(traces)) {
+    traces[i].copyTo(list[i]);
+  }
+}
+
+Trace::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
+    : scriptName(kj::mv(scriptName)) {}
+
+Trace::TraceEventInfo::TraceItem::TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader)
+    : scriptName(kj::str(reader.getScriptName())) {}
+
+void Trace::TraceEventInfo::TraceItem::copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder) {
+  KJ_IF_SOME(name, scriptName) {
+    builder.setScriptName(name);
+  }
+}
+
 Trace::DiagnosticChannelEvent::DiagnosticChannelEvent(kj::Date timestamp,
                                                       kj::String channel,
                                                       kj::Array<kj::byte> message)
@@ -212,6 +252,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto emailBuilder = eventInfoBuilder.initEmail();
         email.copyTo(emailBuilder);
       }
+      KJ_CASE_ONEOF(trace, TraceEventInfo) {
+        auto traceBuilder = eventInfoBuilder.initTrace();
+        trace.copyTo(traceBuilder);
+      }
       KJ_CASE_ONEOF(custom, CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -288,6 +332,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::EMAIL:
         eventInfo = EmailEventInfo(e.getEmail());
+        break;
+      case rpc::Trace::EventInfo::Which::TRACE:
+        eventInfo = TraceEventInfo(e.getTrace());
         break;
       case rpc::Trace::EventInfo::Which::CUSTOM:
         eventInfo = CustomEventInfo(e.getCustom());
@@ -502,6 +549,7 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::EmailEventInfo) {}
+    KJ_CASE_ONEOF(_, Trace::TraceEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::CustomEventInfo) {}
   }
   trace->bytesUsed = newSize;

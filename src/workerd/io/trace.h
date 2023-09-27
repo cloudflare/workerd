@@ -126,6 +126,28 @@ public:
     void copyTo(rpc::Trace::EmailEventInfo::Builder builder);
   };
 
+  class TraceEventInfo {
+  public:
+    class TraceItem;
+
+    explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
+    TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
+
+    class TraceItem {
+    public:
+      explicit TraceItem(kj::Maybe<kj::String> scriptName);
+      TraceItem(rpc::Trace::TraceEventInfo::TraceItem::Reader reader);
+
+      kj::Maybe<kj::String> scriptName;
+
+      void copyTo(rpc::Trace::TraceEventInfo::TraceItem::Builder builder);
+    };
+
+    kj::Vector<TraceItem> traces;
+
+    void copyTo(rpc::Trace::TraceEventInfo::Builder builder);
+  };
+
   class CustomEventInfo {
   public:
     explicit CustomEventInfo() {};
@@ -202,7 +224,7 @@ public:
   kj::Date eventTimestamp = kj::UNIX_EPOCH;
 
   typedef kj::OneOf<FetchEventInfo, ScheduledEventInfo, AlarmEventInfo, QueueEventInfo,
-          EmailEventInfo, CustomEventInfo> EventInfo;
+          EmailEventInfo, TraceEventInfo, CustomEventInfo> EventInfo;
   kj::Maybe<EventInfo> eventInfo;
   // TODO(someday): Support more event types.
   // TODO(someday): Work out what sort of information we may want to convey about the parent
