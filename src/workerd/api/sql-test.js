@@ -90,6 +90,13 @@ async function test(storage) {
     assert.equal(result[0]['sum(value)'], 6)
   }
 
+  // Test math functions enabled
+  {
+    const result = [...sql.exec("SELECT cos(0)")]
+    assert.equal(result.length, 1)
+    assert.equal(result[0]['cos(0)'], 1)
+  }
+
   // Empty statements
   assert.throws(() => sql.exec(''), 'SQL code did not contain a statement')
   assert.throws(() => sql.exec(';'), 'SQL code did not contain a statement')
