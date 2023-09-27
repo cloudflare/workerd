@@ -340,26 +340,6 @@ TestFixture::Response TestFixture::runRequest(
   return { .statusCode = response.statusCode, .body = response.body->str() };
 }
 
-v8::Local<v8::Value> TestFixture::V8Environment::compileAndRunScript(
-    kj::StringPtr code) const {
-  v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::Local<v8::String> source = jsg::v8Str(isolate, code);
-  v8::Local<v8::Script> script;
-  if (!v8::Script::Compile(context, source).ToLocal(&script)) {
-    KJ_FAIL_REQUIRE("error parsing code", code);
-  }
-
-  v8::TryCatch catcher(isolate);
-  v8::Local<v8::Value> result;
-  if (script->Run(context).ToLocal(&result)) {
-    return result;
-  } else {
-    KJ_REQUIRE(catcher.HasCaught());
-    catcher.ReThrow();
-    throw jsg::JsExceptionThrown();
-  }
-}
-
 v8::Local<v8::Object> TestFixture::V8Environment::compileAndInstantiateModule(
     kj::StringPtr name, kj::ArrayPtr<const char> src) const {
   v8::Local<v8::Module> module;
