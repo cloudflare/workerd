@@ -1790,6 +1790,83 @@ KJ_TEST("Server: Durable Objects (ephemeral) eviction") {
   connTwo.httpGet200("/checkEvicted", "OK");
 }
 
+KJ_TEST("Server: Durable Objects (ephemeral) prevent eviction") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2023-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let id = env.ns.idFromName("59002eb8cf872e541722977a258a12d6a93bbe8192b502e1c0cb250aa91af234");
+                `    let obj = env.ns.get(id);
+                `    if (request.url.endsWith("/setup")) {
+                `      return await obj.fetch("http://example.com/setup");
+                `    } else if (request.url.endsWith("/assertNotEvicted")) {
+                `      try {
+                `        return await obj.fetch("http://example.com/assertNotEvicted");
+                `      } catch(e) {
+                `        throw e;
+                `      }
+                `    }
+                `    return new Response("Invalid Route!")
+                `  }
+                `}
+                `export class MyActorClass {
+                `  constructor(state, env) {
+                `    this.defaultMessage = false; // Set to true on first "setup" request
+                `  }
+                `  async fetch(request) {
+                `    if (request.url.endsWith("/setup")) {
+                `      // Request 1, set defaultMessage, will remain true as long as actor is live.
+                `      this.defaultMessage = true;
+                `      return new Response("OK");
+                `    } else if (request.url.endsWith("/assertNotEvicted")) {
+                `      // Request 2, assert that actor is still in alive (defaultMessage is still true).
+                `      if (this.defaultMessage) {
+                `        // Actor is still alive and we did not re-run the constructor
+                `        return new Response("OK");
+                `      }
+                `      throw new Error("Error: Actor was evicted!");
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [(name = "ns", durableObjectNamespace = "MyActorClass")],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+              preventEviction = true,
+            )
+          ],
+          durableObjectStorage = (inMemory = void)
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/setup", "OK");
+  conn.httpGet200("/assertNotEvicted", "OK");
+
+  // Attempt to force hibernation by waiting 10 seconds.
+  test.wait(10);
+  // Need a second connection because of 5 second HTTP timeout.
+  auto connTwo = test.connect("test-addr");
+  connTwo.httpGet200("/assertNotEvicted", "OK");
+}
+
 KJ_TEST("Server: Durable Object evictions when callback scheduled") {
   kj::StringPtr config = R"((
     services = [

@@ -69,8 +69,13 @@ public:
                          kj::StringPtr servicePattern = "*"_kj,
                          kj::StringPtr entrypointPattern = "*"_kj);
 
-  struct Durable { kj::String uniqueKey; };
-  struct Ephemeral {};
+  struct Durable {
+    kj::String uniqueKey;
+    bool isEvictable;
+  };
+  struct Ephemeral {
+    bool isEvictable;
+  };
   using ActorConfig = kj::OneOf<Durable, Ephemeral>;
 
   class InspectorService;

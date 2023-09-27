@@ -1429,14 +1429,26 @@ public:
       }
 
       void inactive() override {
-        KJ_IF_SOME(a, actor) {
-          KJ_IF_SOME(m, a->getHibernationManager()) {
-            // The hibernation manager needs to survive actor eviction and be passed to the actor
-            // constructor next time we create it.
-            manager = kj::addRef(*static_cast<HibernationManagerImpl*>(&m));
+        // Durable objects are evictable by default.
+        bool isEvictable = true;
+        KJ_SWITCH_ONEOF(parent.config) {
+          KJ_CASE_ONEOF(c, Durable) {
+            isEvictable = c.isEvictable;
+          }
+          KJ_CASE_ONEOF(c, Ephemeral) {
+            isEvictable = c.isEvictable;
           }
         }
-        shutdownTask = handleShutdown().eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+        if (isEvictable) {
+          KJ_IF_SOME(a, actor) {
+            KJ_IF_SOME(m, a->getHibernationManager()) {
+              // The hibernation manager needs to survive actor eviction and be passed to the actor
+              // constructor next time we create it.
+              manager = kj::addRef(*static_cast<HibernationManagerImpl*>(&m));
+            }
+          }
+          shutdownTask = handleShutdown().eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+        }
       }
 
       // Processes the eviction of the Durable Object and hibernates active websockets.
@@ -1586,8 +1598,19 @@ public:
       while (true) {
         auto now = timer.now();
         actors.eraseAll([&](auto&, kj::Own<ActorContainer>& entry) {
-          if (entry->hasClients()) {
-            // We are still using the actor so we cannot remove it!
+
+          // Durable Objects are evictable by default.
+          bool isEvictable = true;
+          KJ_SWITCH_ONEOF(config) {
+            KJ_CASE_ONEOF(c, Durable) {
+              isEvictable = c.isEvictable;
+            }
+            KJ_CASE_ONEOF(c, Ephemeral) {
+              isEvictable = c.isEvictable;
+            }
+          }
+          if (entry->hasClients() || !isEvictable) {
+            // We are still using the actor so we cannot remove it, or this actor cannot be evicted.
             return false;
           }
 
@@ -2896,7 +2919,9 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
           case config::Worker::DurableObjectNamespace::UNIQUE_KEY:
             hadDurable = true;
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
-                Durable { kj::str(ns.getUniqueKey()) });
+                Durable {
+                    .uniqueKey = kj::str(ns.getUniqueKey()),
+                    .isEvictable = !ns.getPreventEviction() });
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {
@@ -2905,7 +2930,8 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
                   "experimental feature which may change or go away in the future. You must run "
                   "workerd with `--experimental` to use this feature."));
             }
-            serviceActorConfigs.insert(kj::str(ns.getClassName()), Ephemeral {});
+            serviceActorConfigs.insert(kj::str(ns.getClassName()),
+                Ephemeral { .isEvictable = !ns.getPreventEviction() });
             continue;
         }
         reportConfigError(kj::str(
