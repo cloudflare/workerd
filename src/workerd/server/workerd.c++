@@ -1063,6 +1063,9 @@ public:
           context.error("Tests failed!");
         }
 
+        char *p = nullptr;
+        *p = 'c';
+
         if (watcher == kj::none) {
           return kj::READY_NOW;
         } else {

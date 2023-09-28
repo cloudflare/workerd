@@ -52,6 +52,15 @@ jobs:
             sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev
             echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
             echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+            sed -i -e "s_llvm-symbolizer_/usr/lib/llvm-14/bin/llvm-symbolizer_" .bazelrc
+      - name: Setup macOS
+        if: runner.os == 'macOS'
+        # Image should have llvm@15 installed and we want to symbolize stacks for crashes
+        # on CI. Xcode is currently based on LLVM 15.
+        run: |
+            export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
+            ls -l ${LLVM_SYMBOLIZER}
+            sed -i -e "s%=llvm-symbolizer%=${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
         if: runner.os == 'Windows'
         # Set a custom output dir and disable generating debug information on Windows. By default,
