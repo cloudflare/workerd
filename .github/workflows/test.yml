@@ -46,9 +46,11 @@ jobs:
         # to use APT much otherwise.
         run: |
             export DEBIAN_FRONTEND=noninteractive
+            which llvm-symbolizer
             wget https://apt.llvm.org/llvm.sh
             chmod +x llvm.sh
             sudo ./llvm.sh 14
+            which llvm-symbolizer
             sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev
             echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
             echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
@@ -82,4 +84,3 @@ jobs:
             du -hs -t 1 $BAZEL_OUTPUT_BASE
             echo "Workspace usage statistics"
             du -hs -t 1 $GITHUB_WORKSPACE
-
