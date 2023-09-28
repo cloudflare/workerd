@@ -340,41 +340,4 @@ TestFixture::Response TestFixture::runRequest(
   return { .statusCode = response.statusCode, .body = response.body->str() };
 }
 
-v8::Local<v8::Value> TestFixture::V8Environment::compileAndRunScript(
-    kj::StringPtr code) const {
-  v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::Local<v8::String> source = jsg::v8Str(isolate, code);
-  v8::Local<v8::Script> script;
-  if (!v8::Script::Compile(context, source).ToLocal(&script)) {
-    KJ_FAIL_REQUIRE("error parsing code", code);
-  }
-
-  v8::TryCatch catcher(isolate);
-  v8::Local<v8::Value> result;
-  if (script->Run(context).ToLocal(&result)) {
-    return result;
-  } else {
-    KJ_REQUIRE(catcher.HasCaught());
-    catcher.ReThrow();
-    throw jsg::JsExceptionThrown();
-  }
-}
-
-v8::Local<v8::Object> TestFixture::V8Environment::compileAndInstantiateModule(
-    kj::StringPtr name, kj::ArrayPtr<const char> src) const {
-  v8::Local<v8::Module> module;
-
-  v8::ScriptCompiler::Source source(jsg::v8Str(isolate, src),
-  v8::ScriptOrigin(isolate, jsg::v8StrIntern(isolate, name),
-      false, false, false, -1, {}, false, false, true /* is_module */));
-
-  if (!v8::ScriptCompiler::CompileModule(isolate, &source).ToLocal(&module)) {
-    KJ_FAIL_REQUIRE("error parsing code");
-  }
-
-  auto& js = jsg::Lock::from(isolate);
-  jsg::instantiateModule(js, module);
-  return module->GetModuleNamespace()->ToObject(isolate->GetCurrentContext()).ToLocalChecked();
-}
-
 }  // namespace workerd

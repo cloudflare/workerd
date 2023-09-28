@@ -114,8 +114,7 @@ KJ_TEST("runInIoContext re-throwing js exception") {
   try {
     fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
       runCount++;
-      env.compileAndRunScript("throw new Error('let_me_through');");
-      return kj::READY_NOW;
+      env.js.throwException(env.js.error("let_me_through"));
     }, kj::arr("test_error"_kj));
   } catch (kj::Exception& e) {
     KJ_EXPECT(e.getDescription() == "jsg.Error: let_me_through"_kj);
@@ -132,76 +131,8 @@ KJ_TEST("runInIoContext consuming ignored js exception") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     runCount++;
-    env.compileAndRunScript("throw new Error('test_error');");
-    return kj::READY_NOW;
+    env.js.throwException(env.js.error("test_error"));
   }, kj::arr("test_error"_kj));
-
-  KJ_EXPECT(runCount == 1);
-}
-
-KJ_TEST("compileAndRunScript") {
-  TestFixture fixture;
-  uint runCount = 0;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    runCount++;
-    auto result = env.compileAndRunScript("42;");
-    v8::String::Utf8Value value(env.isolate, result);
-    KJ_EXPECT(*value == "42"_kj);
-  });
-  KJ_EXPECT(runCount == 1);
-}
-
-KJ_TEST("compileAndRunScript context access") {
-  TestFixture fixture;
-  uint runCount = 0;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    runCount++;
-    auto result = env.compileAndRunScript("btoa([1,2,3,4,5]);");
-    v8::String::Utf8Value value(env.isolate, result);
-    KJ_EXPECT(*value == "MSwyLDMsNCw1"_kj);
-  });
-  KJ_EXPECT(runCount == 1);
-}
-
-KJ_TEST("compileAndRunScript exception handling") {
-  TestFixture fixture;
-  uint runCount = 0;
-  uint exceptionCount = 0;
-
-  try {
-    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-      runCount++;
-      env.compileAndRunScript("throw new Error('test_error');");
-      KJ_FAIL_REQUIRE("shouldn't happen");
-    });
-  } catch (kj::Exception& e) {
-    exceptionCount++;
-    KJ_EXPECT(e.getDescription() == "jsg.Error: test_error"_kj);
-  }
-
-  KJ_EXPECT(runCount == 1);
-  KJ_EXPECT(exceptionCount == 1);
-}
-
-KJ_TEST("compileAndInstantiateModule") {
-  TestFixture fixture;
-  uint runCount = 0;
-
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    runCount++;
-    auto context = env.isolate->GetCurrentContext();
-
-    auto ns = env.compileAndInstantiateModule("testFixtureTest",
-        "export function init() { return 42; }"_kj);
-    auto fn = env.js.v8Get(ns, "init"_kj);
-    KJ_EXPECT(fn->IsFunction());
-    auto callResult = v8::Function::Cast(*fn)->
-        Call(context, context->Global(), 0, nullptr).ToLocalChecked();
-    v8::String::Utf8Value value(env.isolate, callResult);
-    KJ_EXPECT(*value == "42"_kj);
-  });
 
   KJ_EXPECT(runCount == 1);
 }
