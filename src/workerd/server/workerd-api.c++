@@ -16,6 +16,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
+#include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/queue.h>
@@ -615,6 +616,10 @@ static v8::Local<v8::Value> createBindingValue(
         KJ_LOG(ERROR, "wrapped binding module can't be resolved (internal modules only)", moduleName);
       }
     }
+    KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
+      value = lock.wrap(context,
+          jsg::alloc<api::public_beta::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.host), hyperdrive.port, kj::str(hyperdrive.database), kj::str(hyperdrive.username), kj::str(hyperdrive.password)));
+    }
   }
 
   return value;
@@ -684,6 +689,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
       result.value = wrapped.clone();
+    }
+    KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
+      result.value = hyperdrive.clone();
     }
   }
 

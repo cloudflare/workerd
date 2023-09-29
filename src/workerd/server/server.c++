@@ -2328,6 +2328,21 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
         .version = 0,
       });
     }
+    case config::Worker::Binding::HYPERDRIVE: {
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      subrequestChannels.add(FutureSubrequestChannel {
+        binding.getHyperdrive().getDesignator(),
+        kj::mv(errorContext)
+      });
+      return makeGlobal(Global::Hyperdrive{
+          .subrequestChannel = channel,
+          .host = kj::str(binding.getHyperdrive().getHost()),
+          .port = binding.getHyperdrive().getPort(),
+          .database = kj::str(binding.getHyperdrive().getDatabase()),
+          .username = kj::str(binding.getHyperdrive().getUsername()),
+          .password = kj::str(binding.getHyperdrive().getPassword()),
+      });
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "
