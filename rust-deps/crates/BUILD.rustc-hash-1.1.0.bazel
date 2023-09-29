@@ -6,16 +6,16 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # Apache-2.0/MIT
 # ])
 
-rust_proc_macro(
-    name = "thiserror_impl",
+rust_library(
+    name = "rustc_hash",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,20 +28,19 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2015",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror-impl",
+        "crate-name=rustc-hash",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.47",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.66//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
-        "@crates_vendor__syn-2.0.29//:syn",
-    ],
+    version = "1.1.0",
 )

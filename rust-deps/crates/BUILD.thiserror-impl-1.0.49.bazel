@@ -6,16 +6,16 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT/Apache-2.0
+#     "TODO",  # MIT OR Apache-2.0
 # ])
 
-rust_library(
-    name = "siphasher",
+rust_proc_macro(
+    name = "thiserror_impl",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,19 +28,20 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=siphasher",
+        "crate-name=thiserror-impl",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.10",
+    version = "1.0.49",
+    deps = [
+        "@crates_vendor__proc-macro2-1.0.67//:proc_macro2",
+        "@crates_vendor__quote-1.0.33//:quote",
+        "@crates_vendor__syn-2.0.37//:syn",
+    ],
 )

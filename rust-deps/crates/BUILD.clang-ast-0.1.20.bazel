@@ -15,7 +15,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "syn",
+    name = "clang_ast",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,31 +28,19 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "clone-impls",
-        "default",
-        "derive",
-        "extra-traits",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
-        "quote",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=clang-ast",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.29",
+    version = "0.1.20",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.66//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
-        "@crates_vendor__unicode-ident-1.0.11//:unicode_ident",
+        "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
+        "@crates_vendor__serde-1.0.188//:serde",
     ],
 )
