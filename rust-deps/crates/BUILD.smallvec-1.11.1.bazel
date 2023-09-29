@@ -15,7 +15,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "clang_ast",
+    name = "smallvec",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,17 +29,14 @@ rust_library(
         ],
     ),
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=smallvec",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.19",
-    deps = [
-        "@crates_vendor__serde-1.0.185//:serde",
-    ],
+    version = "1.11.1",
 )

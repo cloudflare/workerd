@@ -16,7 +16,7 @@ package(default_visibility = ["//visibility:public"])
 # ])
 
 rust_library(
-    name = "proc_macro2",
+    name = "serde_json",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -31,31 +31,33 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.66",
+    version = "1.0.107",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.66//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.11//:unicode_ident",
+        "@crates_vendor__itoa-1.0.9//:itoa",
+        "@crates_vendor__ryu-1.0.15//:ryu",
+        "@crates_vendor__serde-1.0.188//:serde",
+        "@crates_vendor__serde_json-1.0.107//:build_script_build",
     ],
 )
 
 cargo_build_script(
-    name = "proc-macro2_build_script",
+    name = "serde_json_build_script",
     srcs = glob(["**/*.rs"]),
     crate_features = [
         "default",
-        "proc-macro",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -76,17 +78,17 @@ cargo_build_script(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.66",
+    version = "1.0.107",
     visibility = ["//visibility:private"],
 )
 
 alias(
     name = "build_script_build",
-    actual = "proc-macro2_build_script",
+    actual = "serde_json_build_script",
     tags = ["manual"],
 )

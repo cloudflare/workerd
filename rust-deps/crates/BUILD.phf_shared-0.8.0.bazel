@@ -44,6 +44,6 @@ rust_library(
     ],
     version = "0.8.0",
     deps = [
-        "@crates_vendor__siphasher-0.3.10//:siphasher",
+        "@crates_vendor__siphasher-0.3.11//:siphasher",
     ],
 )
