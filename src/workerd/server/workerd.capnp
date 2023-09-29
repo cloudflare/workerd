@@ -358,11 +358,9 @@ struct Worker {
 
       hyperdrive :group {
         designator @18 :ServiceDesignator;
-        host @19 :Text;
-        port @20 :UInt16;
-        database @21 :Text;
-        username @22 :Text;
-        password @23 :Text;
+        database @19 :Text;
+        user @20 :Text;
+        password @21 :Text;
       }
       # A binding for Hyperdrive. Allows workers to use Hyperdrive caching & pooling for Postgres
       # databases.
@@ -626,6 +624,13 @@ struct ExternalServer {
       certificateHost @4 :Text;
       # If present, expect the host to present a certificate authenticating it as this hostname.
       # If `certificateHost` is not provided, then the certificate is checked against `address`.
+    }
+
+    tcp :group {
+      # Connect to the server over raw TCP. Bindings to this service will only support the
+      # `connect()` method; `fetch()` will throw an exception.
+      tlsOptions @5 :TlsOptions;
+      certificateHost @6 :Text;
     }
 
     # TODO(someday): Cap'n Proto RPC

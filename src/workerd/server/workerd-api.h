@@ -155,19 +155,15 @@ public:
     };
     struct Hyperdrive {
       uint subrequestChannel;
-      kj::String host;
-      uint16_t port;
       kj::String database;
-      kj::String username;
+      kj::String user;
       kj::String password;
 
       Hyperdrive clone() const {
         return Hyperdrive {
           .subrequestChannel = subrequestChannel,
-          .host = kj::str(host),
-          .port = port,
           .database = kj::str(database),
-          .username = kj::str(username),
+          .user = kj::str(user),
           .password = kj::str(password),
         };
       }

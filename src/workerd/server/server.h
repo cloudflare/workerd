@@ -182,6 +182,7 @@ private:
 
   class InvalidConfigService;
   class ExternalHttpService;
+  class ExternalTcpService;
   class NetworkService;
   class DiskDirectoryService;
   class WorkerService;

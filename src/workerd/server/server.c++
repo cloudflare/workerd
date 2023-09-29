@@ -499,6 +499,51 @@ private:
   kj::Maybe<kj::Own<kj::NetworkAddress>> addr;
 };
 
+class Server::ExternalTcpService final: public Service, private WorkerInterface {
+public:
+  ExternalTcpService(kj::Own<kj::NetworkAddress> addrParam)
+    : addr(kj::mv(addrParam)) {}
+
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    return { this, kj::NullDisposer::instance };
+  }
+
+  bool hasHandler(kj::StringPtr handlerName) override {
+    return handlerName == "fetch"_kj || handlerName == "connect"_kj;
+  }
+
+private:
+  kj::Own<kj::NetworkAddress> addr;
+  
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+    throwUnsupported();
+  }
+
+  kj::Promise<void> connect(
+      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+      ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+    connection = *(co_await addr->connect());
+  }
+
+  void prewarm(kj::StringPtr url) override {}
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    throwUnsupported();
+  }
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override {
+    throwUnsupported();
+  }
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    throwUnsupported();
+  }
+
+  [[noreturn]] void throwUnsupported() {
+    JSG_FAIL_REQUIRE(Error, "External TCP servers don't support this event type.");
+  }
+      
+};
+
 // Service used when the service is configured as external HTTP service.
 class Server::ExternalHttpService final: public Service {
 public:
@@ -638,6 +683,19 @@ kj::Own<Server::Service> Server::makeExternalService(
           makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443));
       return kj::heap<ExternalHttpService>(
           kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
+    }
+    case config::ExternalServer::TCP: {
+      auto tcpConf = conf.getTcp();
+      auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
+      if (tcpConf.hasTlsOptions()) {
+        kj::Maybe<kj::StringPtr> certificateHost;
+        if (tcpConf.hasCertificateHost()) {
+          certificateHost = tcpConf.getCertificateHost();
+        }
+        addr = kj::heap<PromisedNetworkAddress>(
+            makeTlsNetworkAddress(tcpConf.getTlsOptions(), addrStr, certificateHost, 0));
+      } 
+      return kj::heap<ExternalTcpService>(kj::mv(addr));
     }
   }
   reportConfigError(kj::str(
@@ -2336,10 +2394,8 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       });
       return makeGlobal(Global::Hyperdrive{
           .subrequestChannel = channel,
-          .host = kj::str(binding.getHyperdrive().getHost()),
-          .port = binding.getHyperdrive().getPort(),
           .database = kj::str(binding.getHyperdrive().getDatabase()),
-          .username = kj::str(binding.getHyperdrive().getUsername()),
+          .user = kj::str(binding.getHyperdrive().getUser()),
           .password = kj::str(binding.getHyperdrive().getPassword()),
       });
     }
