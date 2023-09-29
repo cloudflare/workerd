@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
@@ -152,10 +153,29 @@ public:
         };
       }
     };
+    struct Hyperdrive {
+      uint subrequestChannel;
+      kj::String host;
+      uint16_t port;
+      kj::String database;
+      kj::String username;
+      kj::String password;
+
+      Hyperdrive clone() const {
+        return Hyperdrive {
+          .subrequestChannel = subrequestChannel,
+          .host = kj::str(host),
+          .port = port,
+          .database = kj::str(database),
+          .username = kj::str(username),
+          .password = kj::str(password),
+        };
+      }
+    };
     kj::String name;
     kj::OneOf<Json, Fetcher, KvNamespace, R2Bucket, R2Admin, CryptoKey, EphemeralActorNamespace,
               DurableActorNamespace, QueueBinding, kj::String, kj::Array<byte>, Wrapped,
-              AnalyticsEngine> value;
+              AnalyticsEngine, Hyperdrive> value;
 
     Global clone() const;
   };

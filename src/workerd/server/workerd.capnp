@@ -356,6 +356,17 @@ struct Worker {
       # workerd will forward AnalyticsEngineEvents to designated service in the body of HTTP requests
       # This binding is subject to change and requires the `--experimental` flag
 
+      hyperdrive :group {
+        designator @18 :ServiceDesignator;
+        host @19 :Text;
+        port @20 :UInt16;
+        database @21 :Text;
+        username @22 :Text;
+        password @23 :Text;
+      }
+      # A binding for Hyperdrive. Allows workers to use Hyperdrive caching & pooling for Postgres
+      # databases.
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -378,6 +389,7 @@ struct Worker {
         r2Admin @10 :Void;
         queue @11 :Void;
         analyticsEngine @12 : Void;
+        hyperdrive @13: Void;
       }
     }
 
