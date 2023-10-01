@@ -68,3 +68,12 @@ wd_cc_benchmark(
     srcs = ["bench-global-scope.c++"],
     deps = [":test-fixture"],
 )
+
+wd_cc_benchmark(
+    name = "bench-regex",
+    srcs = ["bench-regex.c++"],
+    deps = [
+        "//src/workerd/util",
+        ":test-fixture",
+    ],
+)
