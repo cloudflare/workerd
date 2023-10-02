@@ -18,6 +18,8 @@ jobs:
             os: ubuntu-20.04
           - os-name: macOS
             os: macos-latest
+          - os-name: macOS ARM
+            os: macos-latest-xlarge
           - os-name: windows
             os: windows-2022
       fail-fast: false
