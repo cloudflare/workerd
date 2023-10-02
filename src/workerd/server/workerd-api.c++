@@ -84,6 +84,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_SQL_ISOLATE_TYPES,
   EW_NODE_ISOLATE_TYPES,
   EW_RTTI_ISOLATE_TYPES,
+  EW_HYPERDRIVE_ISOLATE_TYPES,
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
   EW_WEBGPU_ISOLATE_TYPES,
 #endif
@@ -617,7 +618,7 @@ static v8::Local<v8::Value> createBindingValue(
       }
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
-      value = lock.wrap(context, jsg::alloc<api::public_beta::Hyperdrive>(
+      value = lock.wrap(context, jsg::alloc<api::Hyperdrive>(
                                      hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
                                      kj::str(hyperdrive.user), kj::str(hyperdrive.password)));
     }
