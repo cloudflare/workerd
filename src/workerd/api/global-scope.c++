@@ -700,4 +700,25 @@ jsg::Ref<api::gpu::GPU> Navigator::getGPU(CompatibilityFlags::Reader flags) {
 }
 #endif
 
+bool Navigator::sendBeacon(jsg::Lock& js, jsg::UsvString url,
+                           jsg::Optional<Body::Initializer> body) {
+  if (IoContext::hasCurrent()) {
+    auto v8Context = js.v8Context();
+    auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+        v8Context, v8Context->Global());
+    auto promise = global.fetch(js, url.toStr(), Request::InitializerDict {
+      .method = kj::str("POST"),
+      .body = kj::mv(body),
+    });
+
+    auto& context = IoContext::current();
+
+    context.addWaitUntil(context.awaitJs(js, kj::mv(promise)).ignoreResult());
+    return true;
+  }
+
+  // We cannot schedule a beacon to be sent outside of a request context.
+  return false;
+}
+
 } // namespace workerd::api

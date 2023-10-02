@@ -47,7 +47,10 @@ public:
   jsg::Ref<api::gpu::GPU> getGPU(CompatibilityFlags::Reader flags);
 #endif
 
+  bool sendBeacon(jsg::Lock& js, jsg::UsvString url, jsg::Optional<Body::Initializer> body);
+
   JSG_RESOURCE_TYPE(Navigator) {
+    JSG_METHOD(sendBeacon);
     JSG_READONLY_INSTANCE_PROPERTY(userAgent, getUserAgent);
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
     JSG_READONLY_INSTANCE_PROPERTY(gpu, getGPU);
