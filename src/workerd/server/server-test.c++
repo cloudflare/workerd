@@ -1125,6 +1125,7 @@ KJ_TEST("Server: capability bindings") {
                 `    items.push(await (await env.r2.get("baz")).text());
                 `    await env.queue.send("hello");
                 `    items.push("Hello from Queue\n");
+                `    items.push(`Hello from Hyperdrive(${env.hyperdrive.user})\n`);
                 `    return new Response(items.join(""));
                 `  }
                 `}
@@ -1142,6 +1143,14 @@ KJ_TEST("Server: capability bindings") {
             ),
             ( name = "queue",
               queue = "queue-outbound"
+            ),
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password"
+              )
             )
           ]
         )
@@ -1150,6 +1159,10 @@ KJ_TEST("Server: capability bindings") {
       ( name = "kv-outbound", external = "kv-host" ),
       ( name = "r2-outbound", external = "r2-host" ),
       ( name = "queue-outbound", external = "queue-host" ),
+      ( name = "hyperdrive-outbound", external = (
+        address = "hyperdrive-host",
+        tcp = ()
+      ))
     ],
     sockets = [
       ( name = "main",
@@ -1236,6 +1249,7 @@ KJ_TEST("Server: capability bindings") {
     Hello from KV
     Hello from R2
     Hello from Queue
+    Hello from Hyperdrive(test-user)
   )"_blockquote);
 }
 
