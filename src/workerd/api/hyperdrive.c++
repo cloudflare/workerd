@@ -1,17 +1,21 @@
 #include "hyperdrive.h"
+#include <openssl/rand.h>
 #include <cstdint>
 #include <kj/compat/http.h>
+#include <kj/encoding.h>
 #include "sockets.h"
 #include "global-scope.h"
 #include <kj/string.h>
 #include <workerd/util/uuid.h>
 
-namespace workerd::api::public_beta {
+namespace workerd::api {
 Hyperdrive::Hyperdrive(uint clientIndex, kj::String database,
                        kj::String user, kj::String password)
     : clientIndex(clientIndex), database(kj::mv(database)),
       user(kj::mv(user)), password(kj::mv(password)) {
-        randomHost = randomUUID(kj::none);
+        kj::byte randomBytes[16];
+        KJ_ASSERT(RAND_bytes(randomBytes, sizeof(randomBytes)) == 1);
+        randomHost = kj::str(kj::encodeHex(randomBytes), ".hyperdrive.local");
       }
 
 jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
@@ -20,7 +24,7 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   auto paf = kj::newPromiseAndFulfiller<kj::Maybe<kj::Exception>>();
   auto conn = kj::newPromisedStream(connPromise.then(
       [&f = *paf.fulfiller](kj::Own<kj::AsyncIoStream> stream) {
-    f.fulfill(nullptr);
+    f.fulfill(kj::none);
     return kj::mv(stream);
   }, [&f = *paf.fulfiller](kj::Exception e) {
     KJ_LOG(WARNING, "failed to connect to local hyperdrive process", e);
@@ -57,6 +61,7 @@ kj::StringPtr Hyperdrive::getHost() {
   return this->randomHost;
 }
 
+// Always returns the default postgres port
 uint16_t Hyperdrive::getPort() {
   return 5432;
 }
@@ -78,7 +83,7 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
 
   auto http = kj::newHttpService(*client);
 
-  if (status.statusCode == 200) {
+  if (status.statusCode >= 200 && status.statusCode < 300) {
     co_return kj::mv(connectReq.connection).attach(kj::mv(http), kj::mv(client));
   }
 

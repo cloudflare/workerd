@@ -12,9 +12,12 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/http-util.h>
 
-namespace workerd::api::public_beta {
+namespace workerd::api {
 
-// A capability to an R2 Bucket.
+// A Hyperdrive resource for development integrations.
+//
+// Provides the same interface as Hyperdrive while sending connection
+// traffic directly to postgres
 class Hyperdrive : public jsg::Object {
 public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
@@ -31,6 +34,17 @@ public:
 
   kj::String getConnectionString();
 
+  JSG_RESOURCE_TYPE(Hyperdrive, CompatibilityFlags::Reader flags) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(database, getDatabase);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(user, getUser);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(password, getPassword);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(connectionString, getConnectionString);
+
+    JSG_METHOD(connect);
+  }
+
 private:
   uint clientIndex;
   kj::String randomHost;
@@ -40,4 +54,6 @@ private:
   bool registeredConnectOverride = false;
   kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb(); 
 };
-} // namespace workerd::api::public_beta
+#define EW_HYPERDRIVE_ISOLATE_TYPES \
+  api::Hyperdrive
+} // namespace workerd::api

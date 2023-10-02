@@ -34,6 +34,7 @@
 #include <workerd/api/trace.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/hyperdrive.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -57,6 +58,7 @@
   F("form-data", EW_FORMDATA_ISOLATE_TYPES)                                    \
   F("html-rewriter", EW_HTML_REWRITER_ISOLATE_TYPES)                           \
   F("http", EW_HTTP_ISOLATE_TYPES)                                             \
+  F("hyperdrive", EW_HYPERDRIVE_ISOLATE_TYPES)                                 \
   F("kv", EW_KV_ISOLATE_TYPES)                                                 \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                           \
   F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                         \
