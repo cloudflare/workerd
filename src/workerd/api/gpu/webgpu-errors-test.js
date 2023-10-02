@@ -17,6 +17,7 @@ export class DurableObjectExample {
 
     const device = await adapter.requestDevice();
     ok(device);
+    ok(device.features.keys());
 
     let callbackCalled = false;
     device.addEventListener("uncapturederror", (event) => {

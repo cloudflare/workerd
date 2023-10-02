@@ -487,7 +487,9 @@ jsg::Ref<GPUSupportedFeatures> GPUDevice::getFeatures() {
   wgpu::Device device(device_.Get());
   size_t count = device.EnumerateFeatures(nullptr);
   kj::Array<wgpu::FeatureName> features = kj::heapArray<wgpu::FeatureName>(count);
-  device.EnumerateFeatures(&features[0]);
+  if (count > 0) {
+    device.EnumerateFeatures(&features[0]);
+  }
   return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
 }
 

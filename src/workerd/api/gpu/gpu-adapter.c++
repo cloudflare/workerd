@@ -69,12 +69,12 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
   wgpu::DeviceDescriptor desc{};
   kj::Vector<wgpu::FeatureName> requiredFeatures;
   wgpu::RequiredLimits limits;
-  KJ_IF_SOME (d, descriptor) {
-    KJ_IF_SOME (label, d.label) {
+  KJ_IF_SOME(d, descriptor) {
+    KJ_IF_SOME(label, d.label) {
       desc.label = label.cStr();
     }
 
-    KJ_IF_SOME (features, d.requiredFeatures) {
+    KJ_IF_SOME(features, d.requiredFeatures) {
       for (auto& required : features) {
         requiredFeatures.add(parseFeatureName(required));
       }
@@ -83,7 +83,7 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
       desc.requiredFeatures = requiredFeatures.begin();
     }
 
-    KJ_IF_SOME (requiredLimits, d.requiredLimits) {
+    KJ_IF_SOME(requiredLimits, d.requiredLimits) {
       for (auto& f : requiredLimits.fields) {
         setLimit(limits, f.name, f.value);
       }
@@ -118,7 +118,9 @@ jsg::Ref<GPUSupportedFeatures> GPUAdapter::getFeatures() {
   wgpu::Adapter adapter(adapter_.Get());
   size_t count = adapter.EnumerateFeatures(nullptr);
   kj::Array<wgpu::FeatureName> features = kj::heapArray<wgpu::FeatureName>(count);
-  adapter.EnumerateFeatures(&features[0]);
+  if (count > 0) {
+    adapter.EnumerateFeatures(&features[0]);
+  }
   return jsg::alloc<GPUSupportedFeatures>(kj::mv(features));
 }
 
