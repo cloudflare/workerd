@@ -1,7 +1,8 @@
 import {
   deepStrictEqual,
   strictEqual,
-  throws
+  throws,
+  ok,
 } from 'node:assert';
 
 // Test for the Event and EventTarget standard Web API implementations.
@@ -367,5 +368,14 @@ export const nullUndefinedHandler = {
     const target = new EventTarget();
     // target.addEventListener('foo', null);
     // target.addEventListener('foo', undefined);
+  }
+};
+
+export const customEvent = {
+  test() {
+    const event = new CustomEvent('foo', { detail: { a: 123 } });
+    ok(event instanceof Event);
+    strictEqual(event.type, 'foo');
+    deepStrictEqual(event.detail, { a: 123 });
   }
 };

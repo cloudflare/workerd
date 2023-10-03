@@ -190,6 +190,35 @@ public:
   }
 };
 
+// An implementation of the Web Platform Standard CustomEvent API
+class CustomEvent: public Event {
+public:
+  struct CustomEventInit final {
+    jsg::Optional<bool> bubbles;
+    jsg::Optional<bool> cancelable;
+    jsg::Optional<bool> composed;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+    JSG_STRUCT(bubbles, cancelable, composed, detail);
+
+    operator Event::Init();
+  };
+
+  explicit CustomEvent(kj::String ownType, CustomEventInit init = CustomEventInit());
+
+  static jsg::Ref<CustomEvent> constructor(jsg::Lock& js, kj::String type,
+                                           jsg::Optional<CustomEventInit> init);
+
+  jsg::Optional<jsg::JsValue> getDetail(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(CustomEvent) {
+    JSG_INHERIT(Event);
+    JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+  }
+
+private:
+  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+};
+
 // An implementation of the Web Platform Standard EventTarget API
 class EventTarget: public jsg::Object {
 public:
@@ -632,7 +661,9 @@ private:
     api::AbortSignal,                          \
     api::Scheduler,                            \
     api::Scheduler::WaitOptions,               \
-    api::ExtendableEvent
+    api::ExtendableEvent,                      \
+    api::CustomEvent,                          \
+    api::CustomEvent::CustomEventInit
 // The list of basics.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

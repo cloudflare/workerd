@@ -413,6 +413,7 @@ public:
 
     JSG_NESTED_TYPE(Event);
     JSG_NESTED_TYPE(ExtendableEvent);
+    JSG_NESTED_TYPE(CustomEvent);
     JSG_NESTED_TYPE(PromiseRejectionEvent);
     JSG_NESTED_TYPE(FetchEvent);
     JSG_NESTED_TYPE(TailEvent);

@@ -585,4 +585,27 @@ jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState() {
   });
 }
 
+CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
+    : Event(kj::mv(ownType), (Event::Init)init),
+      detail(kj::mv(init.detail)) {}
+
+jsg::Ref<CustomEvent> CustomEvent::constructor(jsg::Lock& js, kj::String type,
+                                               jsg::Optional<CustomEventInit> init) {
+  return jsg::alloc<CustomEvent>(kj::mv(type), kj::mv(init).orDefault({}));
+}
+
+jsg::Optional<jsg::JsValue> CustomEvent::getDetail(jsg::Lock& js) {
+  return detail.map([&](jsg::JsRef<jsg::JsValue>& val) {
+    return val.getHandle(js);
+  });
+}
+
+CustomEvent::CustomEventInit::operator Event::Init() {
+  return {
+    .bubbles = this->bubbles.map([](auto& val) { return val; }),
+    .cancelable = this->cancelable.map([](auto& val) { return val; }),
+    .composed = this->composed.map([](auto& val) { return val; }),
+  };
+}
+
 }  // namespace workerd::api
