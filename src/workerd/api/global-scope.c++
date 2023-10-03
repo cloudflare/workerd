@@ -184,6 +184,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
 
   uint tasksBefore = ioContext.taskCount();
 
+  // We'll drop our span once the promise (fetch handler result) resolves.
+  kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("fetch_handler"_kjc);
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
@@ -247,10 +249,12 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     return ioContext.awaitJs(lock ,promise.then(kj::implicitCast<jsg::Lock&>(lock),
         ioContext.addFunctor(
             [&response, allowWebSocket = headers.isWebSocket(),
-             canceled = kj::addRef(*canceled), &headers]
-            (jsg::Lock& js, jsg::Ref<Response> innerResponse)
+             canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)]
+            (jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
             -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       auto& context = IoContext::current();
+      // Drop our fetch_handler span now that the promise has resolved.
+      span = kj::none;
       if (canceled->value) {
         // Oops, the client disconnected before the response was ready to send. `response` is
         // a dangling reference, let's not use it.
