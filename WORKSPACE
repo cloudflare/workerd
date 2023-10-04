@@ -24,10 +24,10 @@ bazel_skylib_workspace()
 
 http_archive(
     name = "capnp-cpp",
-    sha256 = "19c489573aed8fe130f66e868e312d2cadfcdcb7b7640349b3b0f1cebfefe212",
-    strip_prefix = "capnproto-capnproto-99115bd/c++",
+    sha256 = "a588878af2b2463f6275441d967a4ecc2983addb043c0bbd1ed64149e13c03a6",
+    strip_prefix = "capnproto-capnproto-d6f32b3/c++",
     type = "tgz",
-    urls = ["https://github.com/capnproto/capnproto/tarball/99115bdd4b3b3227dfd363921c6399d8785017aa"],
+    urls = ["https://github.com/capnproto/capnproto/tarball/d6f32b38362749be7fdb7edf28b801ba92d56e7a"],
 )
 
 http_archive(
