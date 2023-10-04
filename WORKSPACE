@@ -76,6 +76,16 @@ http_archive(
     urls = ["https://github.com/google/brotli/tarball/ec107cf015139c791f79afac0f96c3a2c45e157f"],
 )
 
+http_archive(
+    name = "ada-url",
+    build_file = "//:build/BUILD.ada-url",
+    sha256 = "d6be6a559745a79be191bc63c1190015c702a30bacad10028d32b479644a0785",
+    type = "zip",
+    url = "https://github.com/ada-url/ada/releases/download/v2.7.0/singleheader.zip",
+    patches = [],
+    patch_args = ["-p1"],
+)
+
 # ========================================================================================
 # Dawn
 #
