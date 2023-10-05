@@ -16,13 +16,19 @@ jobs:
         include:
           - os-name: linux
             os: ubuntu-20.04
+            config: fastdbg
+          - os-name: linux
+            os: ubuntu-20.04
+            config: asan
           - os-name: macOS
             os: macos-latest
+            config: fastdbg
           - os-name: windows
             os: windows-2022
+            config: fastdbg
       fail-fast: false
     runs-on: ${{ matrix.os }}
-    name: test (${{ matrix.os-name }})
+    name: test (${{ matrix.os-name }}-${{ matrix.config }})
     steps:
       - uses: actions/checkout@v3
       - name: Cache
@@ -75,10 +81,10 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-            bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
+            bazelisk build --config=${{ matrix.config }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
       - name: Bazel tests
         run: |
-            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
+            bazelisk test --config=${{ matrix.config }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
       - name: Report disk usage
         if: always()
         shell: bash
