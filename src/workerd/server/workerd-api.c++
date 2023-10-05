@@ -602,13 +602,22 @@ static v8::Local<v8::Value> createBindingValue(
                      createBindingValue(lock, innerBinding, featureFlags, ownerId));
         }
 
+        // build an execution context object for information about the wider Worker
+        auto executionContext = v8::Object::New(lock.v8Isolate);
+        // corral feature flags into object that can be passed
+        capnp::JsonCodec jsonCodec;
+        jsonCodec.handleByAnnotation<CompatibilityFlags>();
+        jsonCodec.setPrettyPrint(false);
+        kj::String compatibilityFlagsJson = jsonCodec.encode(featureFlags);
+        lock.v8Set(executionContext, "compatibilityFlags", lock.parseJson(compatibilityFlagsJson).getHandle(lock));
+
         // obtain exported function to call
         auto moduleNs = jsg::check(module->GetModuleNamespace()->ToObject(context));
         auto fn = lock.v8Get(moduleNs, wrapped.entrypoint);
         KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
 
         // invoke the function, its result will be binding value
-        auto args = kj::arr(env.As<v8::Value>());
+        auto args = kj::arr(env.As<v8::Value>(), executionContext.As<v8::Value>());
         value = jsg::check(v8::Function::Cast(*fn)-> Call(context, context->Global(),
             args.size(), args.begin()));
       } else {
