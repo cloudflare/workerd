@@ -187,11 +187,14 @@
     },
     {
       "name": "workerd wd-test case (dbg)",
-      "preLaunchTask": "Bazel build all (dbg)",
+      "preLaunchTask": "Prepare workerd wd-test (dbg)",
       "program": "${workspaceFolder}/bazel-bin/src/workerd/server/workerd",
       "args": [
         "test",
-        "${input:wdtestToDebug}"
+        "${input:wdtestToDebug}",
+        "--experimental",
+        "--directory-path",
+        "TEST_TMPDIR=${workspaceFolder}/bazel-out/test_tmpdir"
       ],
       "cwd": "${workspaceFolder}",
       "type": "cppdbg",
@@ -280,27 +283,41 @@
       "type": "pickString",
       "default": "src/workerd/api/node/path-test.wd-test",
       "options": [
-        "src/workerd/api/blob-test.wd-test",
+        "src/cloudflare/internal/test/d1/d1-api-test.wd-test",
+        "src/cloudflare/internal/test/vectorize/vectorize-api-test.wd-test",
+        "src/workerd/api/actor-alarms-delete-test.wd-test",
+        "src/workerd/api/actor-alarms-test.wd-test",
+        "src/workerd/api/analytics-engine-test.wd-test",
+        "src/workerd/api/crypto-impl-asymmetric-test.wd-test",
+        "src/workerd/api/http-test.wd-test",
         "src/workerd/api/node/assert-test.wd-test",
         "src/workerd/api/node/buffer-nodejs-test.wd-test",
+        "src/workerd/api/node/crypto_dh-test.wd-test",
+        "src/workerd/api/node/crypto_hash-test.wd-test",
+        "src/workerd/api/node/crypto_hkdf-test.wd-test",
+        "src/workerd/api/node/crypto_hmac-test.wd-test",
         "src/workerd/api/node/crypto_keys-test.wd-test",
         "src/workerd/api/node/crypto_pbkdf2-test.wd-test",
         "src/workerd/api/node/crypto_random-test.wd-test",
+        "src/workerd/api/node/diagnostics-channel-test.wd-test",
+        "src/workerd/api/node/mimetype-test.wd-test",
         "src/workerd/api/node/path-test.wd-test",
         "src/workerd/api/node/streams-test.wd-test",
         "src/workerd/api/node/string-decoder-test.wd-test",
+        "src/workerd/api/queue-test.wd-test",
+        "src/workerd/api/rtti-test.wd-test",
+        "src/workerd/api/sql-test.wd-test",
         "src/workerd/api/streams/identitytransformstream-backpressure-test.wd-test",
+        "src/workerd/api/streams/streams-test.wd-test",
+        "src/workerd/api/tests/abortable-fetch-test.wd-test",
+        "src/workerd/api/tests/abortsignal-test.wd-test",
+        "src/workerd/api/tests/blob-test.wd-test",
+        "src/workerd/api/tests/encoding-test.wd-test",
+        "src/workerd/api/tests/events-test.wd-test",
+        "src/workerd/api/tests/scheduler-test.wd-test",
+        "src/workerd/api/urlpattern-test.wd-test",
         "src/workerd/server/tests/extensions/extensions-test.wd-test",
         "src/workerd/tests/performance-test.wd-test",
-        "src/cloudflare/internal/test/d1/d1-api-test.wd-test",
-        "src/cloudflare/internal/test/vectorize/vectorize-api-test.wd-test",
-        // The following tests are not supported yet in vscode. They require
-        // TEST_TMPDIR to be defined, usually this comes from bazel. There needs to
-        // be some logic to create the test directory and set the environment variable
-        // for the test.
-        // "src/workerd/api/actor-alarms-test.wd-test",
-        // "src/workerd/api/actor-alarms-delete-test.wd-test",
-        // "src/workerd/api/sql-test.wd-test",
       ],
     }
   ]

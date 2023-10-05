@@ -220,6 +220,37 @@
         "reevaluateOnRerun": false,
         "runOn": "folderOpen"
       }
+    },
+    {
+      "label": "Prepare wd-test TEST_TMPDIR",
+      "detail": "Ensures a tmp directory for a wd-test exists and is empty.",
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "'rm -rf ${workspaceFolder}/bazel-out/test_tmpdir; mkdir ${workspaceFolder}/bazel-out/test_tmpdir'",
+      ],
+      "windows": {
+        "args": [
+          "/c",
+          "'del /q/s ${workspaceFolder}/bazel-out/test_tmpdir & mkdir ${workspaceFolder}/bazel-out/test_tmpdir'"
+        ],
+      },
+      "hide": true,
+      "type": "shell",
+      "runOptions": {
+        "reevaluateOnRerun": true,
+      },
+    },
+    {
+      "label": "Prepare workerd wd-test (dbg)",
+      "dependsOn": ["Bazel build workerd (dbg)", "Prepare wd-test TEST_TMPDIR" ],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "detail": "Builds a debug workerd and prepares a test directory for wd-test",
+      "hide": false,
+      "runOptions": {
+        "reevaluateOnRerun": true,
+      }
     }
   ]
 }
