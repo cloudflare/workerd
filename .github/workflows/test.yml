@@ -69,8 +69,6 @@ jobs:
         run: |
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
-            # Work around bazel clang 16 include path bug (https://github.com/bazelbuild/bazel/issues/17863)
-            Move-Item -Path "C:\Program Files\LLVM\lib\clang\16" -Destination "C:\Program Files\LLVM\lib\clang\16.0.6"
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
