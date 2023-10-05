@@ -178,20 +178,6 @@ build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unuse
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-# The following are required on github runners temporarily due to
-# https://github.com/actions/runner-images/issues/8125
-# For reasons TBD, clang in LLVM 16 is including the MSFT version emmintrin.h in
-# preference to the very packaged in LLVM 16 when compiling these files. The compiler
-# command-line and environment set by Bazel is the same, modulo the LLVM version
-# strings.
-build:windows --per_file_copt='external/ssl/src/crypto/fipsmodule/bcm.\c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/ssl/src/crypto/fipsmodule/bcm\.c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/ssl/src/crypto/hrss/hrss\.c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/ssl/src/crypto/hrss/hrss\.c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/ssl/src/crypto/poly1305/poly1305_vec\.c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/ssl/src/crypto/poly1305/poly1305_vec.c@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/v8/src/objects/literal-objects\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/objects/literal-objects.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/v8/src/runtime/runtime-object\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/runtime/runtime-object.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/v8/src/objects/swiss-name-dictionary\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/objects/swiss-name-dictionary.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-build:windows --per_file_copt='external/ada-url/ada\.cpp@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/ada-url/ada\.cpp@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
-
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
 build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
