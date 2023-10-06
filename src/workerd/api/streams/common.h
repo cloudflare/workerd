@@ -679,7 +679,8 @@ kj::Own<WritableStreamController> newWritableStreamJsController();
 kj::Own<WritableStreamController> newWritableStreamInternalController(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> source,
-    kj::Maybe<uint64_t> maybeHighWaterMark = kj::none);
+    kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
+    kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none);
 
 struct Unlocked {};
 struct Locked {};

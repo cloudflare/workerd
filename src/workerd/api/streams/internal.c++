@@ -921,9 +921,7 @@ void WritableStreamInternalController::setHighWaterMark(uint64_t highWaterMark) 
   maybeHighWaterMark = highWaterMark;
 }
 
-jsg::Promise<void> WritableStreamInternalController::close(
-    jsg::Lock& js,
-    bool markAsHandled) {
+jsg::Promise<void> WritableStreamInternalController::closeImpl(jsg::Lock& js, bool markAsHandled) {
   if (isClosedOrClosing()) {
     auto reason = js.v8TypeError("This WritableStream has been closed."_kj);
     return rejectedMaybeHandledPromise<void>(js, reason, markAsHandled);
@@ -953,6 +951,23 @@ jsg::Promise<void> WritableStreamInternalController::close(
   }
 
   KJ_UNREACHABLE;
+}
+
+jsg::Promise<void> WritableStreamInternalController::close(
+    jsg::Lock& js,
+    bool markAsHandled) {
+  KJ_IF_SOME(closureWaitable, maybeClosureWaitable) {
+    return closureWaitable
+        .then(js, [markAsHandled, this](jsg::Lock& js) {
+          return closeImpl(js, markAsHandled);
+        }, [](jsg::Lock& js, jsg::V8Ref<v8::Value> val) {
+          // Ignore rejection as it will be reported in the Socket's `closed`/`opened` promises
+          // instead.
+          return js.resolvedPromise();
+        });
+  } else {
+    return closeImpl(js, markAsHandled);
+  }
 }
 
 jsg::Promise<void> WritableStreamInternalController::flush(
@@ -2219,10 +2234,12 @@ kj::Own<ReadableStreamController> newReadableStreamInternalController(
 kj::Own<WritableStreamController> newWritableStreamInternalController(
     IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
-    kj::Maybe<uint64_t> maybeHighWaterMark) {
+    kj::Maybe<uint64_t> maybeHighWaterMark,
+    kj::Maybe<jsg::Promise<void>> maybeClosureWaitable) {
   return kj::heap<WritableStreamInternalController>(
       ioContext.addObject(kj::mv(sink)),
-      maybeHighWaterMark);
+      maybeHighWaterMark,
+      kj::mv(maybeClosureWaitable));
 }
 
 }  // namespace workerd::api
