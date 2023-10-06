@@ -7,9 +7,12 @@ FOR /f %%i IN ('bazel info output_path') do SET "output_path=%%i"
 FOR /f %%i IN ('bazel info workspace') do SET "workspace=%%i"
 SET "external=%output_path%\..\..\..\external"
 
-IF NOT EXIST "%workspace%\external" (
-  MKLINK /J "%workspace%\external" "%external%"
-)
+@REM Delete the convenience junction external if it exists (it maybe stale if it does).
+rmdir  "%workspace%\external" 2>NUL
+
+@REM Create the convenience junction external anew for easy access to sources and for
+@REM VSCode to be able to open files at points of error when compilation fails.
+MKLINK /J "%workspace%\external" "%external%"
 
 SET "compile_commands=%workspace%\compile_commands.json"
 IF EXIST "%compile_commands%" (
