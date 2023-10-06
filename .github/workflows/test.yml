@@ -12,17 +12,37 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-2022]
+        os:
+          [
+            { name : linux, image : ubuntu-20.04 },
+            { name : macOS, image : macos-latest },
+            { name : windows, image : windows-2022 }
+          ]
+        config:
+          [
+            # Default build: no suffix or additional bazel arguments
+            { suffix: '', bazel-args: '' },
+            # Debug build
+            { suffix: -debug, bazel-args: --config=debug }
+          ]
         include:
-          - os-name: linux
-            os: ubuntu-20.04
-          - os-name: macOS
-            os: macos-latest
-          - os-name: windows
-            os: windows-2022
+          # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
+          - os:     { name: linux, image: ubuntu-20.04 }
+            config: { suffix: -asan, bazel-args: --config=asan }
+          # Windows has a custom non-debug bazel config.
+          - os:     { name : windows, image : windows-2022 }
+            config: { suffix: '', bazel-args: --config=windows_no_dbg }
+        exclude:
+          # Skip the matrix generated Windows non-debug config to use the one added above.
+          - os:     { name : windows, image : windows-2022 }
+            config: { suffix: '', bazel-args: '' }
+          # Skip the matrix generated Windows debug config due to //src/workerd/jsg:string-test
+          # for Windows debug, probably caused by macro mis-configuration (TODO: fix).
+          - os:     { name : windows, image : windows-2022 }
+            config: { suffix: -debug, bazel-args: --config=debug }
       fail-fast: false
-    runs-on: ${{ matrix.os }}
-    name: test (${{ matrix.os-name }})
+    runs-on: ${{ matrix.os.image }}
+    name: test (${{ matrix.os.name }}${{ matrix.config.suffix }})
     steps:
       - uses: actions/checkout@v3
       - name: Cache
@@ -30,12 +50,12 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/bazel-disk-cache
-          key: bazel-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          key: bazel-disk-cache-${{ matrix.os.name }}-${{ runner.arch }}${{ matrix.config.suffix }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
           # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.
       - name: Setup Linux
-        if: runner.os == 'Linux'
+        if: matrix.os.name == 'linux'
         # Install dependencies, including clang via through LLVM APT repository. Note that this
         # will also install lldb and clangd alongside dependencies, which can be removed with
         # `sudo apt-get remove -y lldb-14 clangd-14; sudo apt-get autoremove -y` if space is
@@ -45,58 +65,90 @@ jobs:
         # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
         # to use APT much otherwise.
         run: |
-            export DEBIAN_FRONTEND=noninteractive
-            wget https://apt.llvm.org/llvm.sh
-            chmod +x llvm.sh
-            sudo ./llvm.sh 14
-            sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev
-            echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
-            echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
-            sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-14/bin/llvm-symbolizer%" .bazelrc
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 14
+          sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev libclang-rt-14-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-14/bin/llvm-symbolizer%" .bazelrc
       - name: Setup macOS
-        if: runner.os == 'macOS'
-        # We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 15
+        if: matrix.os.name == 'macOS'
+        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 15
         # and the macos-12 image has llvm@15 installed:
         # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
+        #
+        # Not enabled because symbolication does not work on workerd macOS builds yet and running
+        # llvm-symbolizer in the currently broken state causes some tests to time out on the
+        # runner.
         run: |
-            export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
-            sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
+          # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
+          # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
-        if: runner.os == 'Windows'
-        # Set a custom output dir and disable generating debug information on Windows. By default,
-        # bazel generates huge amounts of debug information on Windows which slows down the build
-        # and takes up an excessive amount of cache space.
+        if: matrix.os.name == 'windows'
+        # Set a custom output root directory to avoid long file name issues.
         run: |
-            [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
-            [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
-      - name: Configure download mirrors
+          [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
+      - name: Generate list of excluded Bazel targets
+        # Exclude large benchmarking binaries created in debug and asan configurations to avoid
+        # running out of disk space on the runner (nominally 14GB). We typically have two copies
+        # of generated artifacts: one under bazel output-base and one in the bazel disk cache.
+        if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
         shell: bash
         run: |
-            if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
-              # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
-              sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
-            fi
+          cat <<EOF >> .bazelrc
+          build:limit-storage -- -//src/workerd/tests:bench-api-headers
+          build:limit-storage -//src/workerd/tests:bench-global-scope
+          build:limit-storage -//src/workerd/tests:bench-json
+          build:limit-storage -//src/workerd/tests:bench-kj-headers
+          build:limit-storage -//src/workerd/tests:bench-mimetype
+          build:limit-storage -//src/workerd/tests:bench-regex
+          build:limit-storage -//src/workerd/tests:bench-tools
+          build:asan --config=limit-storage
+          build:debug --config=limit-storage
+          EOF
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-            bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
-      - name: Bazel tests
-        # Run tests and check that there are no .bazelrc issues that prevent shutdown.
+          bazelisk build ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
+      - name: Bazel test
         run: |
-            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
-            bazelisk shutdown
+          bazelisk test ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --keep_going --verbose_failures --test_output=errors //...
       - name: Report disk usage
         if: always()
         shell: bash
         run: |
-            BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
-            BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
-            echo "Bazel cache usage statistics"
-            du -hs -t 1 ~/bazel-disk-cache/* || true
-            du -hs $BAZEL_REPOSITORY_CACHE
-            echo "Bazel output usage statistics"
-            du -hs -t 1 $BAZEL_OUTPUT_BASE
-            echo "Workspace usage statistics"
-            du -hs -t 1 $GITHUB_WORKSPACE
-
+          BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
+          BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
+          echo "Bazel cache usage statistics"
+          du -hs -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+          echo "Bazel output usage statistics"
+          du -hs -t 1 $BAZEL_OUTPUT_BASE
+          echo "Workspace usage statistics"
+          du -hs -t 1 $GITHUB_WORKSPACE
+      - name: Drop large Bazel cache files
+        if: always()
+        # Github has a nominal 10GB of storage for all cached builds associated with a project.
+        # Drop large files (>100MB) in our cache to improve shared build cache efficiency. This is
+        # particularly helpful for asan and debug builds that produce larger executables. Also
+        # the process of saving the Bazel disk cache generates a tarball on the runners disk, and
+        # it is possible to run out of storage in that process (does not fail the workflow).
+        shell: bash
+        run: |
+          if [ -d ~/bazel-disk-cache ]; then
+            find ~/bazel-disk-cache -size +100M -type f -exec rm {} \;
+            echo "Trimmed Bazel cache usage statistics"
+            du -hs -t 1 ~/bazel-disk-cache/*
+          else
+            echo "Disk cache does not exist: ~/bazel-disk-cache"
+          fi
+      - name: Bazel clean (expunge)
+        # Only files in the disk cache are needed at this point, but generating the tarball created
+        # of the bazel disk cache requires disk space. This step blows away build outputs and leaves
+        # the Bazel disk cache untouched.
+        run: bazelisk clean --expunge
+      - name: Bazel shutdown
+        # Check that there are no .bazelrc issues that prevent shutdown.
+        run: bazelisk shutdown
