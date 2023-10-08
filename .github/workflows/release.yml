@@ -56,12 +56,12 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-2022]
+        os: [ubuntu-20.04, macos-13, windows-2022]
         include:
           - os-name: linux
             os: ubuntu-20.04
           - os-name: macOS
-            os: macos-latest
+            os: macos-13
           - os-name: windows
             os: windows-2022
     runs-on: ${{ matrix.os }}
@@ -82,10 +82,14 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 14
-          sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
+          sudo ./llvm.sh 15
+          sudo apt-get install -y libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+      - name: Setup macOS
+        if: runner.os == 'macOS'
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_14.3.1.app"
       - name: Setup Windows
         if: runner.os == 'Windows'
         run: |

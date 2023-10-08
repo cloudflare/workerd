@@ -15,7 +15,7 @@ jobs:
         os:
           [
             { name : linux, image : ubuntu-20.04 },
-            { name : macOS, image : macos-latest },
+            { name : macOS, image : macos-13 },
             { name : windows, image : windows-2022 }
           ]
         config:
@@ -54,7 +54,7 @@ jobs:
         if: matrix.os.name == 'linux'
         # Install dependencies, including clang via through LLVM APT repository. Note that this
         # will also install lldb and clangd alongside dependencies, which can be removed with
-        # `sudo apt-get remove -y lldb-14 clangd-14; sudo apt-get autoremove -y` if space is
+        # `sudo apt-get remove -y lldb-15 clangd-15; sudo apt-get autoremove -y` if space is
         # limited.
         # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
         # libc++, but this appears to cause errors so they are also being explicitly installed.
@@ -64,21 +64,23 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 14
-          sudo apt-get install -y libunwind-14 libc++abi1-14 libc++1-14 libc++-14-dev libclang-rt-14-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-14/bin/clang --action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-14/bin/clang --host_action_env=CXX=/usr/lib/llvm-14/bin/clang++" >> .bazelrc
-          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-14/bin/llvm-symbolizer%" .bazelrc
+          sudo ./llvm.sh 15
+          sudo apt-get install -y libunwind-15 libc++abi1-15 libc++1-15 libc++-15-dev libclang-rt-15-dev
+          echo "build:linux --action_env=CC=/usr/lib/llvm-15/bin/clang --action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+          echo "build:linux --host_action_env=CC=/usr/lib/llvm-15/bin/clang --host_action_env=CXX=/usr/lib/llvm-15/bin/clang++" >> .bazelrc
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-15/bin/llvm-symbolizer%" .bazelrc
       - name: Setup macOS
         if: matrix.os.name == 'macOS'
         # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 15
-        # and the macos-12 image has llvm@15 installed:
-        # https://github.com/actions/runner-images/blob/main/images/macos/macos-12-Readme.md
+        # and the macos-13 image has llvm@15 installed:
+        # https://github.com/actions/runner-images/blob/main/images/macos/macos-13-Readme.md
         #
         # Not enabled because symbolication does not work on workerd macOS builds yet and running
         # llvm-symbolizer in the currently broken state causes some tests to time out on the
         # runner.
+        # Use Xcode 14.3.1 for now, upgrade once 15.1 is available on the runner image.
         run: |
+          sudo xcode-select -s "/Applications/Xcode_14.3.1.app"
           # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
           # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows

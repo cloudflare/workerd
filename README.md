@@ -72,13 +72,13 @@ To build `workerd`, you need:
 * [Bazel](https://bazel.build/)
   * If you use [Bazelisk](https://github.com/bazelbuild/bazelisk) (recommended), it will automatically download and use the right version of Bazel for building workerd.
 * On Linux:
-  * Clang 11+ (e.g. package `clang` on Debian Bullseye)
-  * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
-  * LLD 11+ (e.g. package `lld` on Debian Bullseye)
+  * We use the clang/LLVM toolchain to build workerd and support version 15 and higher. Earlier versions of clang may still work, but are not officially supported.
+  * Clang 15+ (e.g. package `clang-15` on Debian Bookworm).
+  * libc++ 15+ (e.g. packages `libc++-15-dev` and `libc++abi-15-dev`)
+  * LLD 15+ (e.g. package `lld-15`).
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
-  * Xcode 13+ installation
-  * macOS 11 or higher
+  * Xcode 14.3+ installation (available on macOS 13 and higher)
   * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
