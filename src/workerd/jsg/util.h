@@ -30,6 +30,7 @@ typedef unsigned int uint;
 class JsExceptionThrown: public std::exception {
 public:
   JsExceptionThrown();
+  ~JsExceptionThrown() noexcept = default;  // We must match `std::exception`'s noexcept.
   const char* what() const noexcept override;
 
 private:
