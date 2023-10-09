@@ -80,6 +80,19 @@ export const syncSubrequest = {
   }
 };
 
+export const requestAbortSignal = {
+  test() {
+    // The request objet has an AbortSignal, even if never used.
+    const req1 = new Request('');
+    ok(Reflect.has(req1, 'signal'));
+
+    // request.signal should be the one passed in.
+    const ac = new AbortController();
+    const req2 = new Request('', { signal: ac.signal });
+    strictEqual(req2.signal, ac.signal);
+  }
+};
+
 export default {
   async fetch(request, env) {
     if (request.url.endsWith('/sub')) {
