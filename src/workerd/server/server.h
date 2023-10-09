@@ -8,6 +8,7 @@
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/async-io.h>
+#include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/sqlite.h>
 #include <workerd/server/alarm-scheduler.h>
@@ -30,7 +31,8 @@ namespace workerd::server {
 class Server: private kj::TaskSet::ErrorHandler {
 public:
   Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
-         kj::EntropySource& entropySource, kj::Function<void(kj::String)> reportConfigError);
+         kj::EntropySource& entropySource, Worker::ConsoleMode consoleMode,
+         kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept(false);
 
   // Permit experimental features to be used. These features may break backwards compatibility
@@ -89,6 +91,8 @@ private:
   kj::Function<void(kj::String)> reportConfigError;
 
   bool experimental = false;
+
+  Worker::ConsoleMode consoleMode;
 
   kj::HashMap<kj::String, kj::OneOf<kj::String, kj::Own<kj::ConnectionReceiver>>> socketOverrides;
   kj::HashMap<kj::String, kj::String> directoryOverrides;

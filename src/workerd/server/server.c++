@@ -167,9 +167,10 @@ private:
 // =======================================================================================
 
 Server::Server(kj::Filesystem& fs, kj::Timer& timer, kj::Network& network,
-               kj::EntropySource& entropySource, kj::Function<void(kj::String)> reportConfigError)
+               kj::EntropySource& entropySource, Worker::ConsoleMode consoleMode,
+               kj::Function<void(kj::String)> reportConfigError)
     : fs(fs), timer(timer), network(network), entropySource(entropySource),
-      reportConfigError(kj::mv(reportConfigError)), tasks(*this) {}
+      reportConfigError(kj::mv(reportConfigError)), consoleMode(consoleMode), tasks(*this) {}
 
 Server::~Server() noexcept(false) {}
 
@@ -2521,7 +2522,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::mv(observer),
       name,
       kj::mv(limitEnforcer),
-      inspectorPolicy);
+      inspectorPolicy,
+      consoleMode);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
