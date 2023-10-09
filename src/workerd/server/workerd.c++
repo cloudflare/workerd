@@ -487,7 +487,7 @@ public:
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context), argv(argv),
         server(*fs, io.provider->getTimer(), io.provider->getNetwork(), entropySource,
-            [&](kj::String error) {
+            Worker::ConsoleMode::STDOUT, [&](kj::String error) {
           if (watcher == kj::none) {
             // TODO(someday): Don't just fail on the first error, keep going in order to report
             //   additional errors. The tricky part is we don't currently have any signal of when

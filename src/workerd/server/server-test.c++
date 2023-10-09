@@ -208,7 +208,8 @@ public:
         pwd(kj::Path({"current", "dir"})),
         cwd(root->openSubdir(pwd, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT)),
         timer(kj::origin<kj::TimePoint>()),
-        server(*this, timer, mockNetwork, *this, [this](kj::String error) {
+        server(*this, timer, mockNetwork, *this, Worker::ConsoleMode::INSPECTOR_ONLY,
+                [this](kj::String error) {
           if (expectedErrors.startsWith(error) && expectedErrors[error.size()] == '\n') {
             expectedErrors = expectedErrors.slice(error.size() + 1);
           } else {

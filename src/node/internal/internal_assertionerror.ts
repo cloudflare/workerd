@@ -26,7 +26,7 @@
 /* eslint-disable */
 
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
-import util from 'node-internal:inspect_polyfill';
+import util from 'cloudflare-internal:inspect_polyfill';
 
 let blue = "";
 let green = "";
