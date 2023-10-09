@@ -202,29 +202,15 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
             // We'll store the current timestamp in the HibernatableWebSocket to assure it gets
             // stored even if the WebSocket is currently hibernating. In that scenario, the timestamp
             // value will be loaded into the WebSocket during unhibernation.
-            KJ_SWITCH_ONEOF(hib.activeOrPackage){
-              KJ_CASE_ONEOF(apiWs, jsg::Ref<api::WebSocket>) {
-                // If the actor is not hibernated/If the WebSocket is active, we need to update
-                // autoResponseTimestamp on the active websocket.
-                apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
-                co_await apiWs->sendAutoResponse(kj::str(reqResp->getResponse().asArray()), ws);
-              }
-              KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
-                if (!package.closedOutgoingConnection) {
-                  // We need to store the autoResponsePromise because we may instantiate an api::websocket
-                  // If we do that, we have to provide it with the promise to avoid races. This can
-                  // happen if we have a websocket hibernating, that unhibernates and sends a
-                  // message while ws.send() for auto-response is also sending.
-                  auto p = ws.send(reqResp->getResponse().asArray()).fork();
-                  hib.autoResponsePromise = p.addBranch();
-                  co_await p;
-                  hib.autoResponsePromise = kj::READY_NOW;
-                }
-              }
+            KJ_IF_SOME(active, hib.activeOrPackage.tryGet<jsg::Ref<api::WebSocket>>()) {
+              // If the actor is not hibernated/If the WebSocket is active, we need to update
+              // autoResponseTimestamp on the active websocket.
+              (active)->setAutoResponseTimestamp(hib.autoResponseTimestamp);
             }
+            co_await ws.send((reqResp)->getResponse().asArray());
+            skip = true;
             // If we've sent an auto response message, we should not unhibernate or deliver the
             // received message to the actor
-            skip = true;
           }
         }
         KJ_CASE_ONEOF_DEFAULT {}

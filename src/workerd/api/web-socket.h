@@ -9,7 +9,6 @@
 #include "basics.h"
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/ser.h>
-#include <stdlib.h>
 
 namespace workerd {
   class ActorObserver;
@@ -396,14 +395,11 @@ public:
 
   // Used to get/store the last auto request/response timestamp for this WebSocket.
   // These methods are c++ only and are not exposed to our js interface.
-  // Also used to track hibernatable websockets auto-response sends.
-  void setAutoResponseStatus(kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise);
+  void setAutoResponseTimestamp(kj::Maybe<kj::Date> time);
 
   // Used to get/store the last auto request/response timestamp for this WebSocket.
   // These methods are c++ only and are not exposed to our js interface.
   kj::Maybe<kj::Date> getAutoResponseTimestamp();
-
-  kj::Promise<void> sendAutoResponse(kj::String message, kj::WebSocket& ws);
 
   int getReadyState();
 
@@ -646,24 +642,11 @@ private:
   struct GatedMessage {
     kj::Maybe<kj::Promise<void>> outputLock;  // must wait for this before actually sending
     kj::WebSocket::Message message;
-    size_t pendingAutoResponses = 0;
   };
   using OutgoingMessagesMap = kj::Table<GatedMessage, kj::InsertionOrderIndex>;
   // Queue of messages to be sent. This is wraped in a IoOwn so that the pump loop can safely
   // access the map without locking the isolate.
   IoOwn<OutgoingMessagesMap> outgoingMessages;
-
-  // Keep track of current hibernatable websockets auto-response status to avoid racing
-  // between regular websocket messages, and auto-responses.
-  struct AutoResponse {
-    kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
-    std::deque<kj::String> pendingAutoResponseDeque;
-    size_t queuedAutoResponses = 0;
-    bool isPumping = false;
-    bool isClosed = false;
-  };
-
-  AutoResponse autoResponseStatus;
 
   Locality locality;
 
@@ -694,8 +677,7 @@ private:
   // objects so are safe to access from the thread without the isolate lock. The whole task is
   // owned by the `IoContext` so it'll be canceled if the `IoContext` is destroyed.
   static kj::Promise<void> pump(
-      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native,
-      AutoResponse& autoResponse);
+      IoContext& context, OutgoingMessagesMap& outgoingMessages, kj::WebSocket& ws, Native& native);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop();
 
