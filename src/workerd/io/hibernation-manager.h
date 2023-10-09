@@ -108,13 +108,11 @@ private:
     // to the api::WebSocket.
     jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js) {
       KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
-        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
-        // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
-        // from the hibernation manager to api::websocket to prevent possible ws.send races.
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
             api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package))
-        )->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
-        autoResponsePromise = kj::READY_NOW;
+        )->setAutoResponseTimestamp(autoResponseTimestamp);
+        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
+        // that was stored in the corresponding HibernatableWebSocket.
       }
       return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
     }
@@ -152,10 +150,6 @@ private:
 
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
-
-    // Keeps track of the currently ongoing websocket auto-response send promise. This promise may
-    // be moved to api::websocket if an hibernating websocket unhibernates.
-    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
 
     friend HibernationManagerImpl;
   };
