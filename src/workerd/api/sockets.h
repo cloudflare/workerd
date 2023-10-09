@@ -47,7 +47,8 @@ public:
       jsg::Ref<ReadableStream> readableParam, jsg::Ref<WritableStream> writable,
       jsg::PromiseResolverPair<void> closedPrPair, kj::Promise<void> watchForDisconnectTask,
       jsg::Optional<SocketOptions> options, kj::Own<kj::TlsStarterCallback> tlsStarter,
-      bool isSecureSocket, kj::String domain, bool isDefaultFetchPort)
+      bool isSecureSocket, kj::String domain, bool isDefaultFetchPort,
+      jsg::PromiseResolverPair<void> openedPrPair)
       : connectionStream(context.addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
@@ -57,12 +58,17 @@ public:
         tlsStarter(context.addObject(kj::mv(tlsStarter))),
         isSecureSocket(isSecureSocket),
         domain(kj::mv(domain)),
-        isDefaultFetchPort(isDefaultFetchPort) { };
+        isDefaultFetchPort(isDefaultFetchPort),
+        openedResolver(kj::mv(openedPrPair.resolver)),
+        openedPromise(kj::mv(openedPrPair.promise)) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
     return closedPromise;
+  }
+  jsg::MemoizedIdentity<jsg::Promise<void>>& getOpened() {
+    return openedPromise;
   }
 
   // Closes the socket connection.
@@ -118,6 +124,9 @@ private:
   kj::String domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
+  // This fulfiller is used to resolve the `openedPromise` below.
+  jsg::Promise<void>::Resolver openedResolver;
+  jsg::MemoizedIdentity<jsg::Promise<void>> openedPromise;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);

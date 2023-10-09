@@ -143,7 +143,10 @@ jsg::Ref<Socket> setupSocket(
   if (!allowHalfOpen) {
     eofPromise = readable->onEof(js);
   }
-  auto writable = jsg::alloc<WritableStream>(ioContext, kj::mv(sysStreams.writable));
+  auto openedPrPair = js.newPromiseAndResolver<void>();
+  openedPrPair.promise.markAsHandled(js);
+  auto writable = jsg::alloc<WritableStream>(
+      ioContext, kj::mv(sysStreams.writable), kj::none, openedPrPair.promise.whenResolved(js));
 
   auto result = jsg::alloc<Socket>(
       js, ioContext,
@@ -156,7 +159,9 @@ jsg::Ref<Socket> setupSocket(
       kj::mv(tlsStarter),
       isSecureSocket,
       kj::mv(domain),
-      isDefaultFetchPort);
+      isDefaultFetchPort,
+      kj::mv(openedPrPair));
+
   KJ_IF_SOME(p, eofPromise) {
     result->handleReadableEof(js, kj::mv(p));
   }
@@ -337,6 +342,8 @@ void Socket::handleProxyStatus(
             " — consider using fetch instead");
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
+    } else {
+      openedResolver.resolve(js);
     }
   });
   result.markAsHandled(js);
@@ -357,6 +364,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
     if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
+    } else {
+      openedResolver.resolve(js);
     }
   });
   result.markAsHandled(js);
@@ -364,6 +373,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
 
 void Socket::handleProxyError(jsg::Lock& js, kj::Exception e) {
   resolveFulfiller(js, kj::mv(e));
+  openedResolver.reject(js, kj::cp(e));
   readable->getController().cancel(js, kj::none).markAsHandled(js);
   writable->getController().abort(js, js.error(e.getDescription())).markAsHandled(js);
 }

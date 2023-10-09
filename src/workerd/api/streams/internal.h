@@ -153,9 +153,10 @@ public:
   explicit WritableStreamInternalController(StreamStates::Errored errored)
       : state(kj::mv(errored)) {}
   explicit WritableStreamInternalController(Writable writable,
-                                            kj::Maybe<uint64_t> maybeHighWaterMark = kj::none)
-      : state(kj::mv(writable)),
-        maybeHighWaterMark(maybeHighWaterMark) {
+      kj::Maybe<uint64_t> maybeHighWaterMark = kj::none,
+      kj::Maybe<jsg::Promise<void>> maybeClosureWaitable = kj::none) : state(kj::mv(writable)),
+          maybeHighWaterMark(maybeHighWaterMark),
+          maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {
 }
 
   WritableStreamInternalController(WritableStreamInternalController&& other) = default;
@@ -226,6 +227,7 @@ private:
   void drain(jsg::Lock& js, v8::Local<v8::Value> reason);
   void finishClose(jsg::Lock& js);
   void finishError(jsg::Lock& js, v8::Local<v8::Value> reason);
+  jsg::Promise<void> closeImpl(jsg::Lock& js, bool markAsHandled);
 
   struct PipeLocked {
     ReadableStream& ref;
@@ -244,6 +246,10 @@ private:
   // It is used to implement backpressure signaling using desiredSize and the ready
   // promise on the writer.
   kj::Maybe<uint64_t> maybeHighWaterMark;
+
+  // Used by Sockets code to ensure the connection is established before the associated
+  // WritableStream is closed.
+  kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
 
   void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
   void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
