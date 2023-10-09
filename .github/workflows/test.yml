@@ -77,8 +77,10 @@ jobs:
         run: |
             bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
       - name: Bazel tests
+        # Run tests and check that there are no .bazelrc issues that prevent shutdown.
         run: |
             bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
+            bazelisk shutdown
       - name: Report disk usage
         if: always()
         shell: bash
