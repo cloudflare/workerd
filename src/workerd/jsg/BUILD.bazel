@@ -21,8 +21,6 @@ wd_cc_library(
             "observer.h",
             "memory.h",
             "rtti.h",
-            "url-test-corpus-failures.h",
-            "url-test-corpus-success.h",
         ],
     ) + ["//src/workerd/util:autogate.h"],
     visibility = ["//visibility:public"],
@@ -60,8 +58,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        "@v8//:v8_icu",
-        "@workerd//:icudata-embed",
+        "@workerd-v8//:v8",
         "@capnp-cpp//src/kj",
         "@ada-url",
         ":memory-tracker",
@@ -170,20 +167,10 @@ kj_test(
     ],
 )
 
-wd_cc_library(
-    name = "url-test-corpus",
-    hdrs = [
-        "url-test-corpus-failures.h",
-        "url-test-corpus-success.h",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 kj_test(
     src = "url-test.c++",
     deps = [
         ":jsg",
-        ":url-test-corpus",
     ],
 )
 

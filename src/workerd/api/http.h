@@ -998,7 +998,7 @@ public:
   //      you'll need to use the regular constructor, which is more flexible.
   //
   // These behaviors surprised me, but they match both the spec and Chrome/Firefox behavior.
-  static jsg::Ref<Response> redirect(jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status);
+  static jsg::Ref<Response> redirect(jsg::Lock& js, kj::String url, jsg::Optional<int> status);
 
   // Constructs a `network error` response.
   //
