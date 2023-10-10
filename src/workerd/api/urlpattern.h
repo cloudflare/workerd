@@ -5,35 +5,26 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/string.h>  // jsg::UsvString
+#include <workerd/jsg/url.h>
 
 namespace workerd::api {
 
-// An individual compiled component of a URLPattern
-struct URLPatternComponent {
-  jsg::UsvString pattern;
-  jsg::JsRef<jsg::JsRegExp> regex;
-  kj::Array<jsg::UsvString> nameList;
-};
-
-// The collection of compiled patterns for each component of a URLPattern.
-struct URLPatternComponents {
-  URLPatternComponent protocol;
-  URLPatternComponent username;
-  URLPatternComponent password;
-  URLPatternComponent hostname;
-  URLPatternComponent port;
-  URLPatternComponent pathname;
-  URLPatternComponent search;
-  URLPatternComponent hash;
-};
+#define URL_PATTERN_COMPONENTS(V) \
+  V(Protocol, protocol)           \
+  V(Username, username)           \
+  V(Password, password)           \
+  V(Hostname, hostname)           \
+  V(Port, port)                   \
+  V(Pathname, pathname)           \
+  V(Search, search)               \
+  V(Hash, hash)
 
 // URLPattern is a Web Platform standard API for matching URLs against a
 // pattern syntax (think of it as a regular expression for URLs). It is
 // defined in https://wicg.github.io/urlpattern.
 // More information about the URL Pattern syntax can be found at
 // https://developer.mozilla.org/en-US/docs/Web/API/URL_Pattern_API
-class URLPattern: public jsg::Object {
+class URLPattern final: public jsg::Object {
 public:
   // A structure providing matching patterns for individual components
   // of a URL. When a URLPattern is created, or when a URLPattern is
@@ -41,30 +32,27 @@ public:
   // either a string or a URLPatternInit struct. If a string is given,
   // it will be parsed to create a URLPatternInit. The URLPatternInit
   // API is defined as part of the URLPattern specification.
-  struct URLPatternInit {
-    jsg::Optional<jsg::UsvString> protocol;
-    jsg::Optional<jsg::UsvString> username;
-    jsg::Optional<jsg::UsvString> password;
-    jsg::Optional<jsg::UsvString> hostname;
-    jsg::Optional<jsg::UsvString> port;
-    jsg::Optional<jsg::UsvString> pathname;
-    jsg::Optional<jsg::UsvString> search;
-    jsg::Optional<jsg::UsvString> hash;
-    jsg::Optional<jsg::UsvString> baseURL;
+  struct URLPatternInit final {
+#define V(_, name) jsg::Optional<kj::String> name;
+    URL_PATTERN_COMPONENTS(V)
+#undef V
+    jsg::Optional<kj::String> baseURL;
 
     JSG_STRUCT(protocol, username, password, hostname, port, pathname, search, hash, baseURL);
+
+    operator jsg::UrlPattern::Init();
   };
 
-  using URLPatternInput = kj::OneOf<jsg::UsvString, URLPatternInit>;
+  using URLPatternInput = kj::OneOf<kj::String, URLPatternInit>;
 
   // A struct providing the URLPattern matching results for a single
   // URL component. The URLPatternComponentResult is only ever used
   // as a member attribute of a URLPatternResult struct. The
   // URLPatternComponentResult API is defined as part of the URLPattern
   // specification.
-  struct URLPatternComponentResult {
-    jsg::UsvString input;
-    jsg::Dict<jsg::UsvString, jsg::UsvString> groups;
+  struct URLPatternComponentResult final {
+    kj::String input;
+    jsg::Dict<kj::String, kj::String> groups;
 
     JSG_STRUCT(input, groups);
   };
@@ -72,64 +60,65 @@ public:
   // A struct providing the URLPattern matching results for all
   // components of a URL. The URLPatternResult API is defined as
   // part of the URLPattern specification.
-  struct URLPatternResult {
+  struct URLPatternResult final {
     kj::Array<URLPatternInput> inputs;
-    URLPatternComponentResult protocol;
-    URLPatternComponentResult username;
-    URLPatternComponentResult password;
-    URLPatternComponentResult hostname;
-    URLPatternComponentResult port;
-    URLPatternComponentResult pathname;
-    URLPatternComponentResult search;
-    URLPatternComponentResult hash;
+#define V(_, name) URLPatternComponentResult name;
+    URL_PATTERN_COMPONENTS(V)
+#undef V
 
     JSG_STRUCT(inputs, protocol, username, password, hostname, port, pathname, search, hash);
   };
 
+  struct URLPatternOptions final {
+    jsg::Optional<bool> ignoreCase;
+
+    JSG_STRUCT(ignoreCase);
+  };
+
   explicit URLPattern(
-      jsg::Lock& js,
-      jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL);
+      jsg::UrlPattern inner
+#define V(_, name) ,jsg::JsRef<jsg::JsRegExp> name##Regex
+      URL_PATTERN_COMPONENTS(V)
+#undef V
+      );
 
   static jsg::Ref<URLPattern> constructor(
       jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL);
+      jsg::Optional<kj::String> baseURL,
+      jsg::Optional<URLPatternOptions> patternOptions);
 
   kj::Maybe<URLPatternResult> exec(
       jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL = kj::none);
+      jsg::Optional<kj::String> baseURL);
 
   bool test(
       jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL = kj::none);
+      jsg::Optional<kj::String> baseURL);
 
-  jsg::UsvStringPtr getProtocol();
-  jsg::UsvStringPtr getUsername();
-  jsg::UsvStringPtr getPassword();
-  jsg::UsvStringPtr getHostname();
-  jsg::UsvStringPtr getPort();
-  jsg::UsvStringPtr getPathname();
-  jsg::UsvStringPtr getSearch();
-  jsg::UsvStringPtr getHash();
+#define V(name, _) kj::StringPtr get##name();
+  URL_PATTERN_COMPONENTS(V)
+#undef V
 
   JSG_RESOURCE_TYPE(URLPattern) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(protocol, getProtocol);
-    JSG_READONLY_PROTOTYPE_PROPERTY(username, getUsername);
-    JSG_READONLY_PROTOTYPE_PROPERTY(password, getPassword);
-    JSG_READONLY_PROTOTYPE_PROPERTY(hostname, getHostname);
-    JSG_READONLY_PROTOTYPE_PROPERTY(port, getPort);
-    JSG_READONLY_PROTOTYPE_PROPERTY(pathname, getPathname);
-    JSG_READONLY_PROTOTYPE_PROPERTY(search, getSearch);
-    JSG_READONLY_PROTOTYPE_PROPERTY(hash, getHash);
+#define V(Name, name) JSG_READONLY_PROTOTYPE_PROPERTY(name, get##Name);
+    URL_PATTERN_COMPONENTS(V)
+#undef V
     JSG_METHOD(test);
     JSG_METHOD(exec);
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("inner", inner);
+  }
+
 private:
-  URLPatternComponents components;
+  jsg::UrlPattern inner;
+#define V(_, name) jsg::JsRef<jsg::JsRegExp> name##Regex;
+  URL_PATTERN_COMPONENTS(V)
+#undef V
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
@@ -138,6 +127,7 @@ private:
   api::URLPattern,                            \
   api::URLPattern::URLPatternInit,            \
   api::URLPattern::URLPatternComponentResult, \
-  api::URLPattern::URLPatternResult
+  api::URLPattern::URLPatternResult,          \
+  api::URLPattern::URLPatternOptions
 
 }  // namespace workerd::api

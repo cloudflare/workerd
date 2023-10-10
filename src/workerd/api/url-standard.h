@@ -8,6 +8,7 @@
 #include "form-data.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/string.h>
+#include <workerd/jsg/url.h>
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
@@ -18,110 +19,65 @@ namespace workerd::api {
 // from conflicting with the old implementation.
 namespace url {
 
-// An internal structure representing a URL origin that cannot be serialized.
-struct OpaqueOrigin {};
-
-// "Special scheme" URLs have an origin that is composed of the scheme, host, and port.
-// https://html.spec.whatwg.org/multipage/origin.html#concept-origin-tuple
-struct TupleOrigin {
-  jsg::UsvStringPtr scheme;
-  jsg::UsvStringPtr host;
-  kj::Maybe<uint16_t> port = kj::none;
-};
-
-using Origin = kj::OneOf<OpaqueOrigin, TupleOrigin>;
-
-  // The internal representation of a parsed URL.
-struct UrlRecord {
-  using Path = kj::OneOf<jsg::UsvString, kj::Array<jsg::UsvString>>;
-
-  jsg::UsvString scheme;
-  jsg::UsvString username;
-  jsg::UsvString password;
-  kj::Maybe<jsg::UsvString> host;
-  kj::Maybe<uint16_t> port;
-  Path path = kj::Array<jsg::UsvString>();
-  kj::Maybe<jsg::UsvString> query;
-  kj::Maybe<jsg::UsvString> fragment;
-  bool special;
-
-  enum class GetHrefOption {
-    NONE,
-    EXCLUDE_FRAGMENT,
-  };
-
-  Origin getOrigin();
-  jsg::UsvString getHref(GetHrefOption option = GetHrefOption::NONE);
-  jsg::UsvString getPathname();
-
-  void setUsername(jsg::UsvStringPtr username);
-  void setPassword(jsg::UsvStringPtr password);
-
-  bool operator==(UrlRecord& other);
-
-  bool equivalentTo(UrlRecord& other, GetHrefOption option = GetHrefOption::NONE);
-};
-
 class URL;
 
 // The URLSearchParams object is a wrapper for application/x-www-form-urlencoded
 // data. It can be used by itself or with URL (every URL object has a searchParams
 // attribute that is kept in sync).
 class URLSearchParams: public jsg::Object {
-private:
+  template <typename T>
   struct IteratorState {
-    jsg::Ref<URLSearchParams> parent;
-    uint index = 0;
+    jsg::Ref<URLSearchParams> self;
+    T inner;
+    IteratorState(jsg::Ref<URLSearchParams> self, T t) : self(kj::mv(self)), inner(kj::mv(t)) {}
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
+      visitor.visit(self);
     }
   };
 public:
-  using UsvStringPair = jsg::Sequence<jsg::UsvString>;
-  using UsvStringPairs = jsg::Sequence<UsvStringPair>;
+  using StringPair = jsg::Sequence<kj::String>;
+  using StringPairs = jsg::Sequence<StringPair>;
 
-  using Initializer = kj::OneOf<UsvStringPairs,
-                                jsg::Dict<jsg::UsvString, jsg::UsvString>,
-                                jsg::UsvString>;
+  using Initializer = kj::OneOf<StringPairs,
+                                jsg::Dict<kj::String, kj::String>,
+                                kj::String>;
 
   // Constructor called by the static constructor method.
   URLSearchParams(Initializer init);
 
   // Constructor called by the URL class when created.
-  URLSearchParams(kj::Maybe<jsg::UsvString>& maybeQuery, URL& url);
+  URLSearchParams(kj::Maybe<kj::ArrayPtr<const char>> maybeQuery, URL& url);
 
-  static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init) {
-    return jsg::alloc<URLSearchParams>(kj::mv(init).orDefault(jsg::usv()));
-  }
+  static jsg::Ref<URLSearchParams> constructor(jsg::Optional<Initializer> init);
 
-  void append(jsg::UsvString name, jsg::UsvString value);
-  void delete_(jsg::Lock& js, jsg::UsvString name, jsg::Optional<jsg::UsvString> value);
-  kj::Maybe<jsg::UsvStringPtr> get(jsg::UsvString name);
-  kj::Array<jsg::UsvStringPtr> getAll(jsg::UsvString name);
-  bool has(jsg::Lock& js, jsg::UsvString name, jsg::Optional<jsg::UsvString> value);
-  void set(jsg::UsvString name, jsg::UsvString value);
+  void append(kj::String name, kj::String value);
+  void delete_(jsg::Lock& js, kj::String name, jsg::Optional<kj::String> value);
+  kj::Maybe<kj::ArrayPtr<const char>> get(kj::String name);
+  kj::Array<kj::ArrayPtr<const char>> getAll(kj::String name);
+  bool has(jsg::Lock& js, kj::String name, jsg::Optional<kj::String> value);
+  void set(kj::String name, kj::String value);
   void sort();
 
   JSG_ITERATOR(EntryIterator, entries,
-               kj::Array<jsg::UsvStringPtr>,
-               IteratorState,
+               kj::Array<kj::ArrayPtr<const char>>,
+               IteratorState<jsg::UrlSearchParams::EntryIterator>,
                entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-               jsg::UsvStringPtr,
-               IteratorState,
+               kj::ArrayPtr<const char>,
+               IteratorState<jsg::UrlSearchParams::KeyIterator>,
                keyIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-               jsg::UsvStringPtr,
-               IteratorState,
+               kj::ArrayPtr<const char>,
+               IteratorState<jsg::UrlSearchParams::ValueIterator>,
                valueIteratorNext)
 
   void forEach(jsg::Lock&,
-               jsg::Function<void(jsg::UsvStringPtr, jsg::UsvStringPtr, jsg::Ref<URLSearchParams>)>,
-               jsg::Optional<jsg::Value>);
+               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<URLSearchParams>)>,
+               jsg::Optional<jsg::JsValue>);
 
-  jsg::UsvString toString();
+  kj::String toString();
 
-  inline uint getSize() { return list.size(); }
+  uint getSize();
 
   JSG_RESOURCE_TYPE(URLSearchParams, CompatibilityFlags::Reader flags) {
     JSG_READONLY_PROTOTYPE_PROPERTY(size, getSize);
@@ -160,146 +116,77 @@ public:
     // Rename from urlURLSearchParams
   }
 
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("inner", inner);
+    tracker.trackField("url", maybeUrl);
+  }
+
 private:
-  struct Entry {
-    jsg::UsvString name;
-    jsg::UsvString value;
-    uint hash;
-
-    Entry(jsg::UsvString name, jsg::UsvString value)
-        : name(kj::mv(name)),
-          value(kj::mv(value)),
-          hash(kj::hashCode(this->name.storage())) {}
-
-    Entry(Entry&&) = default;
-    Entry& operator=(Entry&&) = default;
-
-    inline uint hashCode() const { return hash; }
-    inline bool operator==(const Entry& other) const { return name == other.name; }
-  };
-
-  kj::Vector<Entry> list;
+  jsg::UrlSearchParams inner;
   kj::Maybe<URL&> maybeUrl;
 
+  // Updates the associated URL (if any) with the serialized contents of this URLSearchParam
   void update();
-  void reset(kj::Maybe<jsg::UsvStringPtr> value = kj::none);
 
-  void init(Initializer init);
-  void parse(jsg::UsvStringPtr input);
+  // Updates the contents of this URLSearchParam with the current contents of the associated
+  // URLs search component.
+  void reset();
 
-  static kj::Maybe<kj::Array<jsg::UsvStringPtr>> entryIteratorNext(
-      jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->list.size()) {
-      return kj::none;
-    }
-    auto& entry = state.parent->list[state.index++];
-    return kj::arr<jsg::UsvStringPtr>(entry.name, entry.value);
-  }
-
-  static kj::Maybe<jsg::UsvStringPtr> keyIteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->list.size()) {
-      return kj::none;
-    }
-    auto& entry = state.parent->list[state.index++];
-    return entry.name.asPtr();
-  }
-
-  static kj::Maybe<jsg::UsvStringPtr> valueIteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.parent->list.size()) {
-      return kj::none;
-    }
-    auto& entry = state.parent->list[state.index++];
-    return entry.value.asPtr();
-  }
+  static kj::Maybe<kj::Array<kj::ArrayPtr<const char>>> entryIteratorNext(
+      jsg::Lock& js,
+      IteratorState<jsg::UrlSearchParams::EntryIterator>& state);
+  static kj::Maybe<kj::ArrayPtr<const char>> keyIteratorNext(
+      jsg::Lock& js,
+      IteratorState<jsg::UrlSearchParams::KeyIterator>& state);
+  static kj::Maybe<kj::ArrayPtr<const char>> valueIteratorNext(
+      jsg::Lock& js,
+      IteratorState<jsg::UrlSearchParams::ValueIterator>& state);
 
   friend class URL;
 };
 
-#define EW_URL_PARSE_STATES(V) \
-  V(SCHEME_START) \
-  V(SCHEME) \
-  V(NO_SCHEME) \
-  V(SPECIAL_RELATIVE_OR_AUTHORITY) \
-  V(PATH_OR_AUTHORITY) \
-  V(RELATIVE) \
-  V(RELATIVE_SLASH) \
-  V(SPECIAL_AUTHORITY_SLASHES) \
-  V(SPECIAL_AUTHORITY_IGNORE_SLASHES) \
-  V(AUTHORITY) \
-  V(HOST) \
-  V(HOSTNAME) \
-  V(PORT) \
-  V(FILE) \
-  V(FILE_SLASH) \
-  V(FILE_HOST) \
-  V(PATH_START) \
-  V(PATH) \
-  V(OPAQUE_PATH) \
-  V(QUERY) \
-  V(FRAGMENT)
-
 // The humble URL object, in all its spec-compliant glory.
+// The majority of the implementation is covered by jsg::Url.
 class URL: public jsg::Object {
 public:
-  enum class ParseState {
-  #define V(name) name,
-    EW_URL_PARSE_STATES(V)
-  #undef V
-  };
-
-  static kj::Maybe<UrlRecord> parse(
-      jsg::UsvStringPtr input,
-      jsg::Optional<UrlRecord&> maybeBase = kj::none,
-      kj::Maybe<UrlRecord&> maybeRecord = kj::none,
-      kj::Maybe<ParseState> maybeStateOverride = kj::none);
-
-  URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = kj::none);
-
+  URL(kj::StringPtr url, kj::Maybe<kj::StringPtr> base = kj::none);
   ~URL() noexcept(false) override;
 
-  static inline jsg::Ref<URL> constructor(
-      jsg::UsvString url,
-      jsg::Optional<jsg::UsvString> base) {
-    return jsg::alloc<URL>(
-        kj::mv(url),
-        base.map([](jsg::UsvString& base) { return base.asPtr(); }));
-  }
+  static jsg::Ref<URL> constructor(kj::String url, jsg::Optional<kj::String> base);
 
-  jsg::UsvString getHref();
-  void setHref(jsg::UsvString value);
+  kj::ArrayPtr<const char> getHref();
+  void setHref(kj::String value);
 
-  jsg::UsvString getOrigin();
+  kj::Array<const char> getOrigin();
 
-  jsg::UsvString getProtocol();
-  void setProtocol(jsg::UsvString value);
+  kj::ArrayPtr<const char> getProtocol();
+  void setProtocol(kj::String value);
 
-  jsg::UsvStringPtr getUsername();
-  void setUsername(jsg::UsvString value);
+  kj::ArrayPtr<const char> getUsername();
+  void setUsername(kj::String value);
 
-  jsg::UsvStringPtr getPassword();
-  void setPassword(jsg::UsvString value);
+  kj::ArrayPtr<const char> getPassword();
+  void setPassword(kj::String value);
 
-  jsg::UsvString getHost();
-  void setHost(jsg::UsvString value);
+  kj::ArrayPtr<const char> getHost();
+  void setHost(kj::String value);
 
-  jsg::UsvStringPtr getHostname();
-  void setHostname(jsg::UsvString value);
+  kj::ArrayPtr<const char> getHostname();
+  void setHostname(kj::String value);
 
-  jsg::UsvString getPort();
-  void setPort(jsg::UsvString value);
+  kj::ArrayPtr<const char> getPort();
+  void setPort(kj::String value);
 
-  jsg::UsvString getPathname();
-  void setPathname(jsg::UsvString value);
+  kj::ArrayPtr<const char> getPathname();
+  void setPathname(kj::String value);
 
-  jsg::UsvString getSearch();
-  void setSearch(jsg::UsvString value);
+  kj::ArrayPtr<const char> getSearch();
+  void setSearch(kj::String value);
 
-  jsg::UsvString getHash();
-  void setHash(jsg::UsvString value);
+  kj::ArrayPtr<const char> getHash();
+  void setHash(kj::String value);
 
   jsg::Ref<URLSearchParams> getSearchParams();
-
-  UrlRecord& getRecord() KJ_LIFETIMEBOUND { return inner; }
 
   // Standard utility that returns true if the given input can be
   // successfully parsed as a URL. This is useful for validating
@@ -311,8 +198,7 @@ public:
   //   'not a url'
   // ].filter((test) => URL.canParse(test));
   //
-  static bool canParse(jsg::UsvString url,
-                       jsg::Optional<jsg::UsvString> base = kj::none);
+  static bool canParse(kj::String url, jsg::Optional<kj::String> base = kj::none);
 
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);
@@ -334,19 +220,20 @@ public:
     JSG_TS_OVERRIDE(URL {
       constructor(url: string | URL, base?: string | URL);
     });
-    // Rename from urlURL, and allow URLs which get coerced to strings in either constructor parameter
+    // Rename from urlURL, and allow URLs which get coerced to strings in either
+    // constructor parameter
   }
 
-  static bool isSpecialScheme(jsg::UsvStringPtr scheme);
-  static kj::Maybe<uint16_t> defaultPortForScheme(jsg::UsvStringPtr scheme);
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+    tracker.trackField("inner", inner);
+    tracker.trackField("searchParams", maybeSearchParams);
+  }
 
 private:
-  UrlRecord inner;
+  jsg::Url inner;
   kj::Maybe<jsg::Ref<URLSearchParams>> maybeSearchParams;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(maybeSearchParams);
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 
   friend class URLSearchParams;
 };

@@ -705,7 +705,7 @@ struct Token {
 
   Type type = Type::INVALID_CHAR;
   size_t index = 0;
-  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char)0;
+  kj::OneOf<char, kj::ArrayPtr<const char>> value = (char) 0;
   Part::Modifier modifier = Part::Modifier::NONE;
 
   operator kj::String() const {
@@ -2078,11 +2078,17 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
     KJ_IF_SOME(protocol, chooseStr(kj::mv(init.protocol), options.protocol)) {
       // The protocol value we are given might not be valid. We'll check by
       // attempting to use it to parse a URL.
-      auto str = kj::str(protocol, protocol.asArray().back() == ':' ? "" : ":", "//a:b@fake-url");
+      bool emptyProtocol = protocol == "";
+      auto str = kj::str((emptyProtocol ? "fake:"_kj : protocol.asPtr()),
+                         (emptyProtocol || protocol.asArray().back() == ':') ? "" : ":",
+                         "//a:b@fake-url");
       KJ_IF_SOME(parsed, Url::tryParse(str.asPtr())) {
         // Nice. We have a good protocol component. Let's set the normalized version
         // on the result and return the parsed URL to use as our temporary.
-        result.protocol = stripSuffixFromProtocol(parsed.getProtocol());
+        if (!emptyProtocol) {
+          result.protocol = stripSuffixFromProtocol(parsed.getProtocol());
+        }
+
         // We set isAbsolute true here so that when we later want to normalize the
         // pathname, we know not to try to resolve the path relative to the base.
         isAbsolute = true;
@@ -2133,9 +2139,12 @@ UrlPattern::Result<UrlPattern::Init> UrlPattern::processInit(
         result.hostname = kj::str(url.getHostname());
       }
       KJ_IF_SOME(port, chooseStr(kj::mv(init.port), options.port)) {
-        if (port.size() >= 5 ||
-            !std::all_of(port.begin(), port.end(), isAsciiDigit) ||
-            !url.setPort(kj::Maybe(port.asPtr()))) {
+        if (port.size() >= 5 || !std::all_of(port.begin(), port.end(), isAsciiDigit)) {
+          return kj::str("Invalid URL port component");
+        }
+        if (port.size() == 0) {
+          url.setPort(kj::none);
+        } else if(!url.setPort(kj::Maybe(port.asPtr()))) {
           return kj::str("Invalid URL port component");
         }
         result.port = kj::str(url.getPort());

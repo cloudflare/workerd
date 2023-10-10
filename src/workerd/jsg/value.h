@@ -423,13 +423,22 @@ public:
   // TODO(someday): This conflates USVStrings, which must have valid code points, with DOMStrings,
   //   which needn't have valid code points.
 
+  static constexpr const char* getName(kj::ArrayPtr<const char>*) { return "string"; }
+  static constexpr const char* getName(kj::Array<const char>*) { return "string"; }
+
   static constexpr const char* getName(ByteString*) { return "ByteString"; }
   // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
 
-  v8::Local<v8::String> wrap(
-      v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::StringPtr value) {
-    return wrap(context->GetIsolate(), creator, value);
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+                             kj::Maybe<v8::Local<v8::Object>> creator,
+                             kj::ArrayPtr<const char> value) {
+    return v8Str(context->GetIsolate(), value);
+  }
+
+  v8::Local<v8::String> wrap(v8::Local<v8::Context> context,
+                             kj::Maybe<v8::Local<v8::Object>> creator,
+                             kj::Array<const char> value) {
+    return wrap(context, creator, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(
@@ -442,7 +451,7 @@ public:
       v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(context, creator, static_cast<const kj::String&>(value));
+    return wrap(context, creator, value.asPtr());
   }
 
   kj::Maybe<kj::String> tryUnwrap(

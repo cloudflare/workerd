@@ -100,6 +100,9 @@ public:
   // Convert a Unicode hostname to ASCII.
   static kj::Array<const char> idnToAscii(kj::ArrayPtr<const char> value) KJ_WARN_UNUSED_RESULT;
 
+  static bool isSpecialScheme(kj::StringPtr protocol);
+  static bool isSpecialSchemeDefaultPort(kj::StringPtr protocol, kj::StringPtr port);
+
   JSG_MEMORY_INFO(Url) {
     tracker.trackFieldWithSize("inner", getProtocol().size() +
                                         getUsername().size() +
@@ -200,7 +203,7 @@ inline kj::String KJ_STRINGIFY(const UrlSearchParams& searchParams) {
 // @see https://wicg.github.io/urlpattern
 class UrlPattern final {
 public:
-  // If the value it T, the operation is successful.
+  // If the value is T, the operation is successful.
   // If the value is kj::String, that's an Error message.
   template <typename T>
   using Result = kj::OneOf<T, kj::String>;
@@ -218,6 +221,14 @@ public:
     inline kj::StringPtr getRegex() const KJ_LIFETIMEBOUND { return regex; }
     inline kj::ArrayPtr<const kj::String> getNames() const KJ_LIFETIMEBOUND {
       return names.asPtr();
+    }
+
+    JSG_MEMORY_INFO(Component) {
+      tracker.trackField("pattern", pattern);
+      tracker.trackField("regex", regex);
+      for (const auto& name : names) {
+        tracker.trackField("name", name);
+      }
     }
 
   private:
@@ -262,8 +273,7 @@ public:
 
   // Processes the given init according to the specified mode and options.
   // If a kj::String is returned, then processing failed and the string
-  // is the description to include in the error message (if any). This is
-  // exposed here for testing only.
+  // is the description to include in the error message (if any).
   static Result<Init> processInit(Init init,
                                   kj::Maybe<ProcessInitOptions> options = kj::none)
                                   KJ_WARN_UNUSED_RESULT;
@@ -295,6 +305,17 @@ public:
   // If ignoreCase is true, the JavaScript regular expression created for each pattern
   // must use the `vi` flag. Otherwise, they must use the `v` flag.
   inline bool getIgnoreCase() const { return ignoreCase; }
+
+  JSG_MEMORY_INFO(UrlPattern) {
+    tracker.trackField("protocol", protocol);
+    tracker.trackField("username", username);
+    tracker.trackField("password", password);
+    tracker.trackField("hostname", hostname);
+    tracker.trackField("port", port);
+    tracker.trackField("pathname", pathname);
+    tracker.trackField("search", search);
+    tracker.trackField("hash", hash);
+  }
 
 private:
   UrlPattern(kj::Array<Component> components, bool ignoreCase);

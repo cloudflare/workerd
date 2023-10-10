@@ -5,9 +5,9 @@
 #include "sockets.h"
 #include "system-streams.h"
 #include <workerd/io/worker-interface.h>
-#include "url-standard.h"
 #include <workerd/util/autogate.h>
 
+#include <workerd/jsg/url.h>
 
 namespace workerd::api {
 
@@ -173,22 +173,26 @@ jsg::Ref<Socket> connectImplNoOutputLock(
     jsg::Lock& js, kj::Maybe<jsg::Ref<Fetcher>> fetcher, AnySocketAddress address,
     jsg::Optional<SocketOptions> options) {
 
+  auto& ioContext = IoContext::current();
+  JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
+
   // Extract the domain/ip we are connecting to from the address.
   kj::String domain;
   bool isDefaultFetchPort = false;
+
   KJ_SWITCH_ONEOF(address) {
     KJ_CASE_ONEOF(str, kj::String) {
       // We need just the hostname part of the address, i.e. we want to strip out the port.
       // We do this using the standard URL parser since it will handle IPv6 for us as well.
-      auto record = JSG_REQUIRE_NONNULL(url::URL::parse(jsg::usv(kj::str("https://", str))),
+      auto input = kj::str("fake://", str);
+      auto url = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(input.asPtr()),
           TypeError, "Specified address could not be parsed.");
-      auto& host = JSG_REQUIRE_NONNULL(record.host, TypeError,
-          "Specified address is missing hostname.");
-      // Note that there is an edge case here where the address containing `:443` will nonetheless
-      // parse to a record whose `port` is set to nullptr.
-      auto port = record.port.orDefault(443);
-      isDefaultFetchPort = port == 443 || port == 80;
-      domain = host.toStr();
+      auto host = url.getHostname();
+      auto port = url.getPort();
+      JSG_REQUIRE(host != ""_kj, TypeError, "Specified address is missing hostname.");
+      JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
+      isDefaultFetchPort = port == "443"_kj || port == "80"_kj;
+      domain = kj::str(host);
     }
     KJ_CASE_ONEOF(record, SocketAddress) {
       domain = kj::heapString(record.hostname);
@@ -209,10 +213,6 @@ jsg::Ref<Socket> connectImplNoOutputLock(
 
   JSG_REQUIRE(isValidHost(addressStr), TypeError,
       "Specified address is empty string, contains unsupported characters or is too long.");
-
-  auto& ioContext = IoContext::current();
-
-  JSG_REQUIRE(!ioContext.isFiddle(), TypeError, "Socket API not supported in web preview mode.");
 
   jsg::Ref<Fetcher> actualFetcher = nullptr;
   KJ_IF_SOME(f, fetcher) {

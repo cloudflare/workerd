@@ -18,6 +18,7 @@
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/jsg/url.h>
 #include <workerd/io/io-context.h>
 #include <set>
 
@@ -1152,8 +1153,7 @@ jsg::Ref<Response> Response::constructor(
                               kj::mv(webSocket), bodyEncoding);
 }
 
-jsg::Ref<Response> Response::redirect(
-    jsg::Lock& js, jsg::UsvString url, jsg::Optional<int> status) {
+jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Optional<int> status) {
   auto statusCode = status.orDefault(302);
   if (!isRedirectStatusCode(statusCode)) {
     JSG_FAIL_REQUIRE(RangeError,
@@ -1165,11 +1165,9 @@ jsg::Ref<Response> Response::redirect(
   //   base URL".
   kj::String parsedUrl = nullptr;
   if (FeatureFlags::get(js).getSpecCompliantResponseRedirect()) {
-    auto maybeParsedUrl = url::URL::parse(url);
-    if (maybeParsedUrl == kj::none) {
-      JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
-    }
-    parsedUrl = kj::str(KJ_ASSERT_NONNULL(kj::mv(maybeParsedUrl)).getHref());
+    auto parsed = JSG_REQUIRE_NONNULL(jsg::Url::tryParse(url.asPtr()), TypeError,
+                                      "Unable to parse URL: ", url);
+    parsedUrl = kj::str(parsed.getHref());
   } else {
     auto urlOptions = kj::Url::Options { .percentDecode = false, .allowEmpty = true };
     auto maybeParsedUrl = kj::Url::tryParse(kj::str(url), kj::Url::REMOTE_HREF, urlOptions);

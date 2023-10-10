@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "url-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "url-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "urlsearchparams_delete_has_value_arg",
+        ]
+      )
+    ),
+  ],
+);
