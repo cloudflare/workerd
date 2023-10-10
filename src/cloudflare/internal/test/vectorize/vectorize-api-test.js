@@ -19,10 +19,11 @@ export const test_vector_search_vector_query = {
   async test(ctr, env) {
     const IDX = env["vector-search"];
     {
-      // with returnVectors = true
+      // with returnValues = true, returnMetadata = true
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
-        returnVectors: true,
+        returnValues: true,
+        returnMetadata: true,
       });
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
@@ -55,8 +56,9 @@ export const test_vector_search_vector_query = {
       };
       assert.deepStrictEqual(results, expected);
     }
+
     {
-      // with returnVectors unset (false)
+      // with returnValues = unset (false), returnMetadata = unset (false)
       const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
         topK: 3,
       });
@@ -224,8 +226,8 @@ export const test_vector_search_vector_get_ids = {
 export const test_vector_search_can_use_enum_exports = {
   async test() {
     assert.equal(
-      KnownModel["openapi-text-embedding-ada-002"],
-      "openapi-text-embedding-ada-002"
+      KnownModel["openai/text-embedding-ada-002"],
+      "openai/text-embedding-ada-002"
     );
     assert.equal(DistanceMetric.COSINE, "cosine");
   },
