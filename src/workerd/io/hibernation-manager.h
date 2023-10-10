@@ -40,8 +40,7 @@ public:
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
   void hibernateWebSockets(Worker::Lock& lock) override;
 
-  void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) override;
-  void unsetWebSocketAutoResponse() override;
+  void setWebSocketAutoResponse(kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
   void setTimerChannel(TimerChannel& timerChannel) override;
 
@@ -187,6 +186,11 @@ private:
     TagCollection(TagCollection&& other) = default;
   };
 
+  struct AutoRequestResponsePair {
+    kj::StringPtr request;
+    kj::StringPtr response;
+  };
+
   // A hashmap of tags to HibernatableWebSockets associated with the tag.
   // We use a kj::List so we can quickly remove websockets that have disconnected.
   // Also note that we box the keys and values such that in the event of a hashmap resizing we don't
@@ -222,7 +226,7 @@ private:
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> autoResponsePair;
+  kj::Maybe<AutoRequestResponsePair&> autoResponsePair;
   kj::Maybe<TimerChannel&> timer;
 };
 }; // namespace workerd

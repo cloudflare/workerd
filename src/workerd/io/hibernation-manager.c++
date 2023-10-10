@@ -99,17 +99,22 @@ kj::Vector<jsg::Ref<api::WebSocket>> HibernationManagerImpl::getWebSockets(
 }
 
 void HibernationManagerImpl::setWebSocketAutoResponse(
-    jsg::Ref<api::WebSocketRequestResponsePair> reqResp) {
-  autoResponsePair = kj::mv(reqResp);
-}
-
-void HibernationManagerImpl::unsetWebSocketAutoResponse() {
+    kj::Maybe<kj::StringPtr> request, kj::Maybe<kj::StringPtr> response) {
+  KJ_IF_SOME(req, request) {
+    KJ_IF_SOME(resp, response){
+      auto autoRR = kj::heap<AutoRequestResponsePair>();
+      autoRR->response = kj::mv(req);
+      autoRR->request = kj::mv(resp);
+      autoResponsePair = kj::mv(autoRR);
+      return;
+    }
+  }
   autoResponsePair = kj::none;
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> HibernationManagerImpl::getWebSocketAutoResponse() {
   KJ_IF_SOME(ar, autoResponsePair) {
-    return ar.addRef();
+    return api::WebSocketRequestResponsePair::constructor(kj::str(ar.request), kj::str(ar.response));
   } else {
     return kj::none;
   }
@@ -191,7 +196,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
     KJ_IF_SOME (reqResp, autoResponsePair) {
       KJ_SWITCH_ONEOF(message) {
         KJ_CASE_ONEOF(text, kj::String) {
-          if (text == (reqResp)->getRequest()) {
+          if (text == reqResp.request) {
             // If the received message matches the one set for auto-response, we must
             // short-circuit readLoop, store the current timestamp and and automatically respond
             // with the expected response.
@@ -207,7 +212,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
                 // If the actor is not hibernated/If the WebSocket is active, we need to update
                 // autoResponseTimestamp on the active websocket.
                 apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, kj::READY_NOW);
-                co_await apiWs->sendAutoResponse(kj::str(reqResp->getResponse().asArray()), ws);
+                co_await apiWs->sendAutoResponse(kj::str(reqResp.response.asArray()), ws);
               }
               KJ_CASE_ONEOF(package, api::WebSocket::HibernationPackage) {
                 if (!package.closedOutgoingConnection) {
@@ -215,7 +220,7 @@ kj::Promise<void> HibernationManagerImpl::readLoop(HibernatableWebSocket& hib) {
                   // If we do that, we have to provide it with the promise to avoid races. This can
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
-                  auto p = ws.send(reqResp->getResponse().asArray()).fork();
+                  auto p = ws.send(reqResp.response.asArray()).fork();
                   hib.autoResponsePromise = p.addBranch();
                   co_await p;
                   hib.autoResponsePromise = kj::READY_NOW;

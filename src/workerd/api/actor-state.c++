@@ -880,7 +880,7 @@ void DurableObjectState::setWebSocketAutoResponse(
     // If there's no request/response pair, we unset any current set auto response configuration.
     KJ_IF_SOME(manager, a.getHibernationManager()) {
       // If there's no hibernation manager created yet, there's nothing to do here.
-      manager.unsetWebSocketAutoResponse();
+      manager.setWebSocketAutoResponse(kj::none, kj::none);
     }
     return;
   }
@@ -902,7 +902,8 @@ void DurableObjectState::setWebSocketAutoResponse(
     // If there's no hibernation manager created yet, we should create one and
     // set its auto response.
   }
-  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setWebSocketAutoResponse(kj::mv(reqResp));
+  KJ_REQUIRE_NONNULL(a.getHibernationManager()).setWebSocketAutoResponse(
+      reqResp->getRequest(), reqResp->getResponse());
 }
 
 kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWebSocketAutoResponse() {
@@ -910,7 +911,7 @@ kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> DurableObjectState::getWe
   KJ_IF_SOME(manager, a.getHibernationManager()) {
     // If there's no hibernation manager created yet, there's nothing to do here.
     auto r = manager.getWebSocketAutoResponse();
-    return r;
+    return kj::mv(r);
   }
   return kj::none;
 }
