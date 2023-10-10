@@ -1,0 +1,29 @@
+{
+	"name": "C++: Workerd",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"postStartCommand": "npm i",
+	"customizations": {
+		// Configure properties specific to VS Code.
+		"vscode": {
+			// Add the IDs of extensions you want installed when the container is created.
+			"extensions": [
+				"BazelBuild.vscode-bazel",
+				"eamodio.gitlens",
+				"streetsidesoftware.code-spell-checker",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"ms-vscode.cpptools",
+				"abronan.capnproto-syntax",
+				"DavidAnson.vscode-markdownlint"
+			],
+			"settings": {
+				// The Microsoft C/C++ extension has IntelliSense support that is not compatible with the clangd extension.
+				"C_Cpp.intelliSenseEngine": "disabled",
+				"C_Cpp.default.cppStandard": "c++20"
+			}
+		}
+	}
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}

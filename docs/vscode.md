@@ -2,6 +2,16 @@
 
 Visual Studio Code is a commonly used editor by workerd developers (other editors are great too!). These notes present some getting started tips. If you have tricks and tips that would improve the developer experience, please let us know!
 
+## Using the [dev container](https://containers.dev/)
+
+workerd includes a [devcontainer](https://containers.dev/) setup that automates a majority of the developer environment setup by shifting the development to a container based setup. To make use of this, install the [devcontainer extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers). You can then either (a) use the **Dev Containers: Open Folder In Container** command and navigate to the checked out location or (b) open the project normally, in which case vscode should detect the presence of the devcontainer. Clicking **Reopen in Container** on the modal below will relaunch your workspaces in a container.
+
+![dev container modal](./assets/vscode-dev-container-modal.png)
+
+_Note_: It may take some time to initially bootstrap the dev container. To monitor its progress, click **show log** modal on the new window. Subsequent launches will be cached.
+
+![dev container bootstrap log](./assets/vscode-dev-container-progress.png)
+
 ## Recommended extensions for developing workerd
 
 The recommended extensions to install are:
