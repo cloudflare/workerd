@@ -26,11 +26,23 @@ wd_cc_library(
         ":exception",
         ":modules_capnp",
         ":observer",
+        ":url",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "url",
+    srcs = ["url.c++"],
+    hdrs = ["url.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@ada-url",
     ],
 )
 

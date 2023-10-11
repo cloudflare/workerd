@@ -190,6 +190,7 @@ build:windows --per_file_copt='external/ssl/src/crypto/poly1305/poly1305_vec\.c@
 build:windows --per_file_copt='external/v8/src/objects/literal-objects\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/objects/literal-objects.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
 build:windows --per_file_copt='external/v8/src/runtime/runtime-object\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/runtime/runtime-object.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
 build:windows --per_file_copt='external/v8/src/objects/swiss-name-dictionary\.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/v8/src/objects/swiss-name-dictionary.cc@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
+build:windows --per_file_copt='external/ada-url/ada\.cpp@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include' --host_per_file_copt='external/ada-url/ada\.cpp@-imsvcC:\\Program Files\\LLVM\\lib\\clang\\16.0.6\\include'
 
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
