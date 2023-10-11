@@ -705,7 +705,7 @@ void SqliteDatabase::setupSecurity() {
   sqlite3_limit(db, SQLITE_LIMIT_LENGTH, 1000000);
   sqlite3_limit(db, SQLITE_LIMIT_SQL_LENGTH, 100000);
   sqlite3_limit(db, SQLITE_LIMIT_COLUMN, 100);
-  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 20);
+  sqlite3_limit(db, SQLITE_LIMIT_EXPR_DEPTH, 100);
   // Enforces limits on UNION/UNION ALL/INTERSECT/etc
   // https://www.sqlite.org/limits.html#max_compound_select
   sqlite3_limit(db, SQLITE_LIMIT_COMPOUND_SELECT, 5);
