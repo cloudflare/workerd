@@ -4,7 +4,6 @@
 # runs during each build.
 
 script_dir=$(dirname "$0")
-workspace=$(realpath "${script_dir}/../..")
 inside_work_tree=$(git rev-parse --is-inside-work-tree 2>/dev/null)
 
 # Check for issues that may affect developer workspace
