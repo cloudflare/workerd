@@ -1125,6 +1125,9 @@ KJ_TEST("Server: capability bindings") {
                 `    items.push(await (await env.r2.get("baz")).text());
                 `    await env.queue.send("hello");
                 `    items.push("Hello from Queue\n");
+                `    const connection = await env.hyperdrive.connect();
+                `    const encoded = new TextEncoder().encode("hyperdrive-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
                 `    items.push(`Hello from Hyperdrive(${env.hyperdrive.user})\n`);
                 `    return new Response(items.join(""));
                 `  }
@@ -1245,6 +1248,10 @@ KJ_TEST("Server: capability bindings") {
     )"_blockquote);
   }
 
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    subreq.recv("hyperdrive-test");
+  }
   conn.recvHttp200(R"(
     Hello from HTTP
     Hello from KV
