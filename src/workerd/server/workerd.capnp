@@ -520,6 +520,13 @@ struct Worker {
       #   anything. An object that hasn't stored anything will not consume any storage space on
       #   disk.
     }
+
+    preventEviction @3 :Bool;
+    # By default, Durable Objects are evicted after 10 seconds of inactivity, and expire 70 seconds
+    # after all clients have disconnected. Some applications may want to keep their Durable Objects
+    # pinned to memory forever, so we provide this flag to change the default behavior.
+    #
+    # Note that this is only supported in Workerd; production Durable Objects cannot toggle eviction.
   }
 
   durableObjectUniqueKeyModifier @8 :Text;
