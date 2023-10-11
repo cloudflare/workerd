@@ -361,6 +361,7 @@ struct Worker {
         database @19 :Text;
         user @20 :Text;
         password @21 :Text;
+        scheme @22 :Text;
       }
       # A binding for Hyperdrive. Allows workers to use Hyperdrive caching & pooling for Postgres
       # databases.

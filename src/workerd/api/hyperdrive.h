@@ -23,11 +23,12 @@ public:
   // `clientIndex` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace.
   explicit Hyperdrive(uint clientIndex, kj::String database,
-                      kj::String user, kj::String password);
+                      kj::String user, kj::String password, kj::String scheme);
   jsg::Ref<Socket> connect(jsg::Lock& js);
   kj::StringPtr getDatabase();
   kj::StringPtr getUser();
   kj::StringPtr getPassword();
+  kj::StringPtr getScheme();
 
   kj::StringPtr getHost();
   uint16_t getPort();
@@ -38,6 +39,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(database, getDatabase);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(user, getUser);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(password, getPassword);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheme, getScheme);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(host, getHost);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(port, getPort);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(connectionString, getConnectionString);
@@ -51,8 +53,9 @@ private:
   kj::String database;
   kj::String user;
   kj::String password;
+  kj::String scheme;
   bool registeredConnectOverride = false;
-  kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb(); 
+  kj::Promise<kj::Own<kj::AsyncIoStream>> connectToDb();
 };
 #define EW_HYPERDRIVE_ISOLATE_TYPES \
   api::Hyperdrive

@@ -1149,7 +1149,8 @@ KJ_TEST("Server: capability bindings") {
                 designator = "hyperdrive-outbound",
                 database = "test-db",
                 user = "test-user",
-                password = "test-password"
+                password = "test-password",
+                scheme = "postgresql"
               )
             )
           ]

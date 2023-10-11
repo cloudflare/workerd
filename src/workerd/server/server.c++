@@ -514,7 +514,7 @@ public:
 
 private:
   kj::Own<kj::NetworkAddress> addr;
-  
+
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
@@ -524,7 +524,21 @@ private:
   kj::Promise<void> connect(
       kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
       ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
-    connection = *(co_await addr->connect());
+      auto io_stream = co_await addr->connect();
+
+      auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
+
+      promises.add(connection.pumpTo(*io_stream).then([&io_stream=*io_stream](uint64_t size) {
+        io_stream.shutdownWrite();
+      }));
+
+      promises.add(io_stream->pumpTo(connection).then([&connection](uint64_t size) {
+        connection.shutdownWrite();
+      }));
+
+      co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(io_stream));
+
+      tunnel.accept(200, "", kj::HttpHeaders(kj::HttpHeaderTable{}));
   }
 
   void prewarm(kj::StringPtr url) override {}
@@ -541,7 +555,7 @@ private:
   [[noreturn]] void throwUnsupported() {
     JSG_FAIL_REQUIRE(Error, "External TCP servers don't support this event type.");
   }
-      
+
 };
 
 // Service used when the service is configured as external HTTP service.
@@ -694,7 +708,7 @@ kj::Own<Server::Service> Server::makeExternalService(
         }
         addr = kj::heap<PromisedNetworkAddress>(
             makeTlsNetworkAddress(tcpConf.getTlsOptions(), addrStr, certificateHost, 0));
-      } 
+      }
       return kj::heap<ExternalTcpService>(kj::mv(addr));
     }
   }
@@ -2397,6 +2411,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
           .database = kj::str(binding.getHyperdrive().getDatabase()),
           .user = kj::str(binding.getHyperdrive().getUser()),
           .password = kj::str(binding.getHyperdrive().getPassword()),
+          .scheme = kj::str(binding.getHyperdrive().getScheme()),
       });
     }
   }
