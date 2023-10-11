@@ -2546,7 +2546,11 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
       }
       return kj::mv(e);
     } else {
-      LOG_EXCEPTION("actorCacheFlush", e);
+      if (isInterestingException(e)) {
+        LOG_EXCEPTION("actorCacheFlush", e);
+      } else {
+        LOG_NOSENTRY(ERROR, "actor cache flush failed", e);
+      }
       return KJ_EXCEPTION(FAILED, "broken.outputGateBroken; jsg.Error: Internal error in Durable "
           "Object storage write caused object to be reset.");
     }
