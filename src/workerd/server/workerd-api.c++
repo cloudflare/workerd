@@ -620,7 +620,8 @@ static v8::Local<v8::Value> createBindingValue(
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
       value = lock.wrap(context, jsg::alloc<api::Hyperdrive>(
                                      hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
-                                     kj::str(hyperdrive.user), kj::str(hyperdrive.password)));
+                                     kj::str(hyperdrive.user), kj::str(hyperdrive.password),
+                                     kj::str(hyperdrive.scheme)));
     }
   }
 

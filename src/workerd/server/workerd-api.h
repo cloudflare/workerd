@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
@@ -158,6 +157,7 @@ public:
       kj::String database;
       kj::String user;
       kj::String password;
+      kj::String scheme;
 
       Hyperdrive clone() const {
         return Hyperdrive {
@@ -165,6 +165,7 @@ public:
           .database = kj::str(database),
           .user = kj::str(user),
           .password = kj::str(password),
+          .scheme = kj::str(scheme),
         };
       }
     };
