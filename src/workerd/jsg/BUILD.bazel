@@ -60,9 +60,12 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        "@v8//:v8_icu",
+        "@workerd//:icudata-embed",
         "@capnp-cpp//src/kj",
         "@ada-url",
         ":memory-tracker",
+        ":exception",
     ],
 )
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <kj/string.h>
 #include <kj/common.h>
+#include <kj/one-of.h>
 #include <workerd/jsg/memory.h>
 
 namespace workerd::jsg {
@@ -192,5 +193,123 @@ inline kj::String KJ_STRINGIFY(const Url& url) {
 inline kj::String KJ_STRINGIFY(const UrlSearchParams& searchParams) {
   return kj::str(searchParams.toStr());
 }
+
+// ======================================================================================
+
+// Encapsulates a parsed URLPattern.
+// @see https://wicg.github.io/urlpattern
+class UrlPattern final {
+public:
+  // If the value it T, the operation is successful.
+  // If the value is kj::String, that's an Error message.
+  template <typename T>
+  using Result = kj::OneOf<T, kj::String>;
+
+  // An individual, compiled component of a URLPattern.
+  class Component final {
+  public:
+    Component(kj::String pattern, kj::String regex, kj::Array<kj::String> names);
+
+    Component(Component&&) = default;
+    Component& operator=(Component&&) = default;
+    KJ_DISALLOW_COPY(Component);
+
+    inline kj::StringPtr getPattern() const KJ_LIFETIMEBOUND { return pattern; }
+    inline kj::StringPtr getRegex() const KJ_LIFETIMEBOUND { return regex; }
+    inline kj::ArrayPtr<const kj::String> getNames() const KJ_LIFETIMEBOUND {
+      return names.asPtr();
+    }
+
+  private:
+    // The normalized pattern for this component.
+    kj::String pattern = nullptr;
+
+    // The generated JavaScript regular expression for this component.
+    kj::String regex = nullptr;
+
+    // The list of sub-component names extracted for this component.
+    kj::Array<kj::String> names = nullptr;
+  };
+
+  // A structure providing matching patterns for individual components of a URL.
+  struct Init {
+    kj::Maybe<kj::String> protocol;
+    kj::Maybe<kj::String> username;
+    kj::Maybe<kj::String> password;
+    kj::Maybe<kj::String> hostname;
+    kj::Maybe<kj::String> port;
+    kj::Maybe<kj::String> pathname;
+    kj::Maybe<kj::String> search;
+    kj::Maybe<kj::String> hash;
+    kj::Maybe<kj::String> baseUrl;
+  };
+
+  struct ProcessInitOptions {
+    enum class Mode {
+      PATTERN,
+      URL,
+    };
+    Mode mode = Mode::PATTERN;
+    kj::Maybe<kj::StringPtr> protocol = kj::none;
+    kj::Maybe<kj::StringPtr> username = kj::none;
+    kj::Maybe<kj::StringPtr> password = kj::none;
+    kj::Maybe<kj::StringPtr> hostname = kj::none;
+    kj::Maybe<kj::StringPtr> port = kj::none;
+    kj::Maybe<kj::StringPtr> pathname = kj::none;
+    kj::Maybe<kj::StringPtr> search = kj::none;
+    kj::Maybe<kj::StringPtr> hash = kj::none;
+  };
+
+  // Processes the given init according to the specified mode and options.
+  // If a kj::String is returned, then processing failed and the string
+  // is the description to include in the error message (if any). This is
+  // exposed here for testing only.
+  static Result<Init> processInit(Init init,
+                                  kj::Maybe<ProcessInitOptions> options = kj::none)
+                                  KJ_WARN_UNUSED_RESULT;
+
+  struct CompileOptions {
+    // The base URL to use. Only used in the compile(kj::StringPtr, ...) variant.
+    kj::Maybe<kj::StringPtr> baseUrl;
+    bool ignoreCase = false;
+  };
+
+  static Result<UrlPattern> tryCompile(kj::StringPtr, kj::Maybe<CompileOptions> = kj::none)
+      KJ_WARN_UNUSED_RESULT;
+  static Result<UrlPattern> tryCompile(Init init, kj::Maybe<CompileOptions> = kj::none)
+      KJ_WARN_UNUSED_RESULT;
+
+  UrlPattern(UrlPattern&&) = default;
+  UrlPattern& operator=(UrlPattern&&) = default;
+  KJ_DISALLOW_COPY(UrlPattern);
+
+  inline const Component& getProtocol() const KJ_LIFETIMEBOUND { return protocol; }
+  inline const Component& getUsername() const KJ_LIFETIMEBOUND { return username; }
+  inline const Component& getPassword() const KJ_LIFETIMEBOUND { return password; }
+  inline const Component& getHostname() const KJ_LIFETIMEBOUND { return hostname; }
+  inline const Component& getPort() const KJ_LIFETIMEBOUND { return port; }
+  inline const Component& getPathname() const KJ_LIFETIMEBOUND { return pathname; }
+  inline const Component& getSearch() const KJ_LIFETIMEBOUND { return search; }
+  inline const Component& getHash() const KJ_LIFETIMEBOUND { return hash; }
+
+  // If ignoreCase is true, the JavaScript regular expression created for each pattern
+  // must use the `vi` flag. Otherwise, they must use the `v` flag.
+  inline bool getIgnoreCase() const { return ignoreCase; }
+
+private:
+  UrlPattern(kj::Array<Component> components, bool ignoreCase);
+
+  Component protocol;
+  Component username;
+  Component password;
+  Component hostname;
+  Component port;
+  Component pathname;
+  Component search;
+  Component hash;
+  bool ignoreCase;
+
+  static Result<UrlPattern> tryCompileInit(UrlPattern::Init init, const CompileOptions& options);
+};
 
 }  // namespace workerd::jsg

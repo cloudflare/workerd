@@ -263,6 +263,7 @@
         "bazel-bin/src/workerd/jsg/buffersource-test",
         "bazel-bin/src/workerd/jsg/struct-test",
         "bazel-bin/src/workerd/jsg/jsg-test",
+        "bazel-bin/src/workerd/jsg/url-test",
         "bazel-bin/src/workerd/jsg/iterator-test",
         "bazel-bin/src/workerd/server/server-test",
         "bazel-bin/src/workerd/api/actor-state-test",
