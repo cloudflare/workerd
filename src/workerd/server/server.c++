@@ -536,9 +536,9 @@ private:
         connection.shutdownWrite();
       }));
 
-      co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(io_stream));
+      tunnel.accept(200, "OK", kj::HttpHeaders(kj::HttpHeaderTable{}));
 
-      tunnel.accept(200, "", kj::HttpHeaders(kj::HttpHeaderTable{}));
+      co_await kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(io_stream));
   }
 
   void prewarm(kj::StringPtr url) override {}
