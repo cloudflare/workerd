@@ -389,10 +389,14 @@ public:
     entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addBuiltinBundle(Bundle::Reader bundle) {
+  void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
-      // TODO: asChars() might be wrong for wide characters
-      addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType());
+      auto type = module.getType();
+      auto filter = maybeFilter.orDefault(type);
+      if (type == filter) {
+        // TODO: asChars() might be wrong for wide characters
+        addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
+      }
     }
   }
 

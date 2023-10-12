@@ -367,7 +367,10 @@ void WorkerdApiIsolate::compileModules(
       }
     }
 
-    api::registerModules(*modules, getFeatureFlags());
+    // Always register internal Node modules, even if the `nodejs_compat` flag isn't enabled.
+    // We rely on `node-internal:internal_inspect` for logging when running `workerd` locally.
+    auto nodeAccess = workerd::api::node::NodeJsCompatAccess::REQUIRE_FLAG_FOR_EXTERNAL_ONLY;
+    api::registerModules(*modules, getFeatureFlags(), nodeAccess);
 
     // todo(perf): we'd like to find a way to precompile these on server startup and use isolate
     // cloning for faster worker creation.

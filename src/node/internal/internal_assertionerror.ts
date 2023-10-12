@@ -26,7 +26,7 @@
 /* eslint-disable */
 
 import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
-import util from 'cloudflare-internal:inspect_polyfill';
+import { inspect } from 'node-internal:internal_inspect';
 
 let blue = "";
 let green = "";
@@ -66,7 +66,7 @@ export function copyError(source: any): Error {
 }
 
 export function inspectValue(val: unknown): string {
-  return util.inspect(
+  return inspect(
     val,
     {
       compact: true,

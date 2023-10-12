@@ -105,11 +105,15 @@ struct EncoderModuleRegistryImpl {
     kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
   };
 
-  void addBuiltinBundle(jsg::Bundle::Reader bundle) {
+  void addBuiltinBundle(jsg::Bundle::Reader bundle, kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
-      TypeScriptModuleContents contents (module.getTsDeclaration());
-      ModuleInfo info (module.getName(), module.getType(), kj::mv(contents));
-      modules.add(kj::mv(info));
+      auto type = module.getType();
+      auto filter = maybeFilter.orDefault(type);
+      if (type == filter) {
+        TypeScriptModuleContents contents (module.getTsDeclaration());
+        ModuleInfo info (module.getName(), type, kj::mv(contents));
+        modules.add(kj::mv(info));
+      }
     }
   }
 
@@ -180,7 +184,8 @@ public:
 
     // Encode modules
     EncoderModuleRegistryImpl registry;
-    registerModules(registry, flags);
+    // Require explicit `nodejs_compat` flag to include RTTI for internal Node compat modules
+    registerModules(registry, flags, node::NodeJsCompatAccess::REQUIRE_FLAG_FOR_ALL);
 
     unsigned int i = 0;
     auto modulesBuilder = root.initModules(registry.modules.size());

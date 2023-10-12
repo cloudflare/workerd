@@ -1678,13 +1678,13 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
 
     // TODO(now): does this need to run within a handle scope?
     auto registry = jsg::ModuleRegistry::from(js);
-    auto formatModule = registry->resolveInternalImport(js, "cloudflare-internal:format"_kj);
-    auto formatModuleHandle = formatModule.getHandle(js).As<v8::Object>();
-    auto formatArgs = js.v8Get(formatModuleHandle, "formatArgs"_kj).As<v8::Function>();
+    auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
+    auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
+    auto formatLog = js.v8Get(inspectModuleHandle, "formatLog"_kj).As<v8::Function>();
 
     auto recv = js.v8Undefined();
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    auto formatted = js.toString(jsg::check(formatArgs->Call(context, recv, length + 1, args)));
+    auto formatted = js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args)));
     fprintf(fd, "%s\n", formatted.cStr());
   }
 }

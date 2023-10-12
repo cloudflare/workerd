@@ -95,6 +95,23 @@ kj::String JsObject::getConstructorName() {
   return kj::str(inner->GetConstructorName());
 }
 
+JsArray JsObject::getPropertyNames(Lock& js, KeyCollectionFilter keyFilter,
+                                     PropertyFilter propertyFilter,
+                                     IndexFilter indexFilter) {
+  auto v8keyFilter = keyFilter == KeyCollectionFilter::INCLUDE_PROTOTYPES
+    ? v8::KeyCollectionMode::kIncludePrototypes : v8::KeyCollectionMode::kOwnOnly;
+  auto v8PropertyFilter = static_cast<v8::PropertyFilter>(propertyFilter);
+  auto v8IndexFilter = indexFilter == IndexFilter::INCLUDE_INDICES
+    ? v8::IndexFilter::kIncludeIndices : v8::IndexFilter::kSkipIndices;
+  return JsArray(
+    check(inner->GetPropertyNames(js.v8Context(), v8keyFilter, v8PropertyFilter, v8IndexFilter))
+  );
+}
+
+JsArray JsObject::previewEntries(bool* isKeyValue) {
+  return JsArray(check(inner->PreviewEntries(isKeyValue)));
+}
+
 void JsObject::recursivelyFreeze(Lock& js) {
   jsg::recursivelyFreeze(js.v8Context(), inner);
 }
@@ -444,6 +461,30 @@ JsDate Lock::date(kj::StringPtr date) {
       constructor.template As<v8::Function>()->NewInstance(v8Context(), 1, &argv));
   JSG_REQUIRE(converted->IsDate(), TypeError, "Date.constructor did not return a Date");
   return JsDate(converted.As<v8::Date>());
+}
+
+PromiseState JsPromise::state() {
+  switch (inner->State()) {
+    case v8::Promise::PromiseState::kPending:
+      return PromiseState::PENDING;
+    case v8::Promise::PromiseState::kFulfilled:
+      return PromiseState::FULFILLED;
+    case v8::Promise::PromiseState::kRejected:
+      return PromiseState::REJECTED;
+  }
+  KJ_UNREACHABLE
+}
+
+JsValue JsPromise::result() {
+  return JsValue(inner->Result());
+}
+
+JsValue JsProxy::target() {
+  return JsValue(inner->GetTarget());
+}
+
+JsValue JsProxy::handler() {
+  return JsValue(inner->GetHandler());
 }
 
 JsRef<JsValue> JsValue::addRef(Lock& js) {

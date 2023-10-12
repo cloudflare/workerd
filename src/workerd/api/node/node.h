@@ -4,6 +4,7 @@
 #include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
+#include "inspect.h"
 #include "util.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
@@ -31,15 +32,27 @@ public:
   }
 };
 
+enum class NodeJsCompatAccess {
+  // Require `nodejs_compat` flag to be enabled for access to any Node module
+  REQUIRE_FLAG_FOR_ALL,
+  // Require `nodejs_compat` flag to be enabled only for user facing modules,
+  // always register internal modules (e.g. `node-internal:internal_inspect` for logging)
+  REQUIRE_FLAG_FOR_EXTERNAL_ONLY,
+};
+
 template <class Registry>
 void registerNodeJsCompatModules(
-    Registry& registry, auto featureFlags) {
+    Registry& registry, auto featureFlags, NodeJsCompatAccess access) {
+  // If `REQUIRE_FLAG_FOR_ALL` is set, and the flag isn't, don't add any modules
+  auto flagEnabled = featureFlags.getNodeJsCompat();
+  if (!flagEnabled && access == NodeJsCompatAccess::REQUIRE_FLAG_FOR_ALL) return;
 
 #define NODEJS_MODULES(V)                                                       \
   V(CompatibilityFlags, "workerd:compatibility-flags")                          \
   V(AsyncHooksModule, "node-internal:async_hooks")                              \
   V(BufferUtil, "node-internal:buffer")                                         \
   V(CryptoImpl, "node-internal:crypto")                                         \
+  V(InspectModule, "node-internal:inspect")                                     \
   V(UtilModule, "node-internal:util")                                           \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
 
@@ -60,7 +73,13 @@ void registerNodeJsCompatModules(
 #undef V
 #undef NODEJS_MODULES
 
-  registry.addBuiltinBundle(NODE_BUNDLE);
+  // If `REQUIRE_FLAG_FOR_EXTERNAL` is set, but the flag isn't, only register internal modules
+  kj::Maybe<jsg::ModuleType> maybeFilter;
+  if (!flagEnabled && access == NodeJsCompatAccess::REQUIRE_FLAG_FOR_EXTERNAL_ONLY) {
+    maybeFilter = jsg::ModuleType::INTERNAL;
+  }
+
+  registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
 }
 
 #define EW_NODE_ISOLATE_TYPES              \
@@ -68,6 +87,7 @@ void registerNodeJsCompatModules(
   EW_NODE_BUFFER_ISOLATE_TYPES,            \
   EW_NODE_CRYPTO_ISOLATE_TYPES,            \
   EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, \
+  EW_NODE_INSPECT_ISOLATE_TYPES,           \
   EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,        \
   EW_NODE_UTIL_ISOLATE_TYPES
 
