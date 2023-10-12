@@ -1,3 +1,7 @@
+// Copyright (c) 2023 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
 #include "hyperdrive.h"
 #include <openssl/rand.h>
 #include <cstdint>
@@ -27,7 +31,7 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
     f.fulfill(kj::none);
     return kj::mv(stream);
   }, [&f = *paf.fulfiller](kj::Exception e) {
-    KJ_LOG(WARNING, "failed to connect to local hyperdrive process", e);
+    KJ_LOG(WARNING, "failed to connect to local database", e);
     f.fulfill(kj::cp(e));
     return kj::mv(e);
   }).attach(kj::mv(paf.fulfiller)));
@@ -36,7 +40,7 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   // some users may want it anyway.
   auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
   auto sock = setupSocket(js, kj::mv(conn), kj::none, kj::mv(nullTlsStarter),
-      false, kj::str(this->randomHost), false);
+                  false, kj::str(this->randomHost), false);
   sock->handleProxyStatus(js, kj::mv(paf.promise));
   return sock;
 }
@@ -77,34 +81,35 @@ kj::String Hyperdrive::getConnectionString() {
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   auto& context = IoContext::current();
-  auto client = context.getHttpClient(this->clientIndex, true, kj::none, "hyperdrive_dev"_kjc);
+  auto service = context.getSubrequestChannel(this->clientIndex,
+            true, kj::none, "hyperdrive_dev"_kjc);
 
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
-  auto connectReq = client->connect(kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+  auto connectReq = kj::newHttpClient(*service)->connect(
+    kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+
   auto status = co_await connectReq.status;
 
-  auto http = kj::newHttpService(*client);
-
   if (status.statusCode >= 200 && status.statusCode < 300) {
-    co_return kj::mv(connectReq.connection).attach(kj::mv(http), kj::mv(client));
+    co_return kj::mv(connectReq.connection);
   }
 
   KJ_IF_SOME(e, status.errorBody) {
     try {
       auto errorBody = co_await e->readAllText();
       kj::throwFatalException(KJ_EXCEPTION(
-          FAILED, kj::str("unexpected error connecting to database from process sandbox: ", errorBody)));
+          FAILED, kj::str("unexpected error connecting to database: ", errorBody)));
     } catch (const kj::Exception& e) {
       kj::throwFatalException(
-          KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database from process sandbox "
+          KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database "
                                        "and couldn't read error details: ", e)));
     }
   }
   else {
     kj::throwFatalException(
-        KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database from process sandbox: ",
+        KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database: ",
                                      status.statusText)));
   }
 }
