@@ -40,7 +40,6 @@ inline void requireOnStack(void* self) {
   V(NumberObject) \
   V(StringObject) \
   V(SymbolObject) \
-  V(Promise) \
   V(ArrayBuffer) \
   V(ArrayBufferView) \
   V(TypedArray) \
@@ -56,7 +55,6 @@ inline void requireOnStack(void* self) {
   V(BigInt64Array) \
   V(BigUint64Array) \
   V(DataView) \
-  V(Proxy) \
   V(SharedArrayBuffer) \
   V(WasmMemoryObject) \
   V(WasmModuleObject) \
@@ -64,6 +62,20 @@ inline void requireOnStack(void* self) {
 
 template <typename TypeWrapper>
 struct JsValueWrapper;
+
+// Filters for `JsObject::getPropertyNames()`
+enum PropertyFilter {
+  ALL_PROPERTIES = 0,
+  ONLY_WRITABLE = 1,
+  ONLY_ENUMERABLE = 2,
+  ONLY_CONFIGURABLE = 4,
+  SKIP_STRINGS = 8,
+  SKIP_SYMBOLS = 16
+};
+enum KeyCollectionFilter { OWN_ONLY, INCLUDE_PROTOTYPES };
+enum IndexFilter { INCLUDE_INDICES, SKIP_INDICES };
+
+enum PromiseState { PENDING, FULFILLED, REJECTED };
 
 // A JsValue is an abstraction for a JavaScript value that has not been mapped
 // to a C++ type. It wraps an underlying v8::Local<T> in order to avoid direct
@@ -255,6 +267,31 @@ public:
   using JsBase<v8::Date, JsDate>::JsBase;
 };
 
+// Note `jsg::JsPromise` and `jsg::Promise` are not the same things.
+//
+// `jsg::JsPromise` wraps an arbitrary `v8::Local<v8::Promise>` to avoid direct use of the V8 API.
+// They have the same restrictions as other `JsValue`s (e.g. can only be stack allocated).
+// `jsg::JsPromise` cannot be awaited in C++. They are opaque references to JavaScript promises.
+//
+// `jsg::Promise<T>` wraps an JavaScript promise to an instantiable C++ type `T` with syntax that
+// makes it natural and ergonomic to consume within C++ (e.g. they provide a `then()` C++ method).
+//
+// You'll usually want to use `jsg::Promise<T>`. `jsg::JsPromise` should only be used when you need
+// direct access to the promise state (e.g. the promise state or its fulfilled value).
+class JsPromise final : public JsBase<v8::Promise, JsPromise> {
+public:
+  PromiseState state();
+  JsValue result();
+  using JsBase<v8::Promise, JsPromise>::JsBase;
+};
+
+class JsProxy final : public JsBase<v8::Proxy, JsProxy> {
+public:
+  JsValue target();
+  JsValue handler();
+  using JsBase<v8::Proxy, JsProxy>::JsBase;
+};
+
 #define V(Name) \
   class Js##Name final : public JsBase<v8::Name, Js##Name> { \
   public: \
@@ -297,6 +334,9 @@ public:
   int hashCode() const;
 
   kj::String getConstructorName() KJ_WARN_UNUSED_RESULT;
+  JsArray getPropertyNames(Lock& js, KeyCollectionFilter keyFilter, PropertyFilter propertyFilter,
+                             IndexFilter indexFilter) KJ_WARN_UNUSED_RESULT;
+  JsArray previewEntries(bool* isKeyValue) KJ_WARN_UNUSED_RESULT;
 
   using JsBase<v8::Object, JsObject>::JsBase;
 

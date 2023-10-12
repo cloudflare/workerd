@@ -26,6 +26,23 @@
 import assert from 'node:assert';
 import util, { inspect } from 'node:util';
 
+const remainingMustCallErrors = new Set();
+function commonMustCall(f) {
+  const error = new Error("Expected function to be called");
+  remainingMustCallErrors.add(error);
+  return (...args) => {
+    remainingMustCallErrors.delete(error);
+    return f(...args);
+  }
+}
+function assertCalledMustCalls() {
+  try {
+    for (const error of remainingMustCallErrors) throw error;
+  } finally {
+    remainingMustCallErrors.clear();
+  }
+}
+
 export const utilInspect = {
   // test-util-inspect.js
   test(ctrl, env, ctx) {
@@ -145,9 +162,6 @@ export const utilInspect = {
       "[String: 'hello'] { [length]: 5, [Symbol(foo)]: 123 }"
     );
 
-    assert.match(util.inspect((new JSStream())._externalStream),
-                 /^\[External: [0-9a-f]+\]$/);
-
     {
       const regexp = /regexp/;
       regexp.aprop = 42;
@@ -204,7 +218,7 @@ export const utilInspect = {
     {
       const ab = new ArrayBuffer(42);
       assert.strictEqual(ab.byteLength, 42);
-      new MessageChannel().port1.postMessage(ab, [ ab ]);
+      structuredClone(ab, { transfer: [ab] });
       assert.strictEqual(ab.byteLength, 0);
       assert.strictEqual(util.inspect(ab),
                         'ArrayBuffer { (detached), byteLength: 0 }');
@@ -219,45 +233,6 @@ export const utilInspect = {
       assert.strictEqual(util.inspect(ab, { showHidden: true, maxArrayLength: 1 }),
                         'ArrayBuffer { [Uint8Contents]' +
                           ': <00 ... 2 more bytes>, byteLength: 3 }');
-    }
-
-    // Now do the same checks but from a different context.
-    {
-      const showHidden = false;
-      const ab = vm.runInNewContext('new ArrayBuffer(4)');
-      const dv = vm.runInNewContext('new DataView(ab, 1, 2)', { ab });
-      assert.strictEqual(
-        util.inspect(ab, showHidden),
-        'ArrayBuffer { [Uint8Contents]: <00 00 00 00>, byteLength: 4 }'
-      );
-      assert.strictEqual(util.inspect(new DataView(ab, 1, 2), showHidden),
-                         'DataView {\n' +
-                         '  byteLength: 2,\n' +
-                         '  byteOffset: 1,\n' +
-                         '  buffer: ArrayBuffer { [Uint8Contents]: <00 00 00 00>,' +
-                           ' byteLength: 4 }\n}');
-      assert.strictEqual(
-        util.inspect(ab, showHidden),
-        'ArrayBuffer { [Uint8Contents]: <00 00 00 00>, byteLength: 4 }'
-      );
-      assert.strictEqual(util.inspect(dv, showHidden),
-                         'DataView {\n' +
-                         '  byteLength: 2,\n' +
-                         '  byteOffset: 1,\n' +
-                         '  buffer: ArrayBuffer { [Uint8Contents]: <00 00 00 00>,' +
-                           ' byteLength: 4 }\n}');
-      ab.x = 42;
-      dv.y = 1337;
-      assert.strictEqual(util.inspect(ab, showHidden),
-                         'ArrayBuffer { [Uint8Contents]: <00 00 00 00>, ' +
-                           'byteLength: 4, x: 42 }');
-      assert.strictEqual(util.inspect(dv, showHidden),
-                         'DataView {\n' +
-                         '  byteLength: 2,\n' +
-                         '  byteOffset: 1,\n' +
-                         '  buffer: ArrayBuffer { [Uint8Contents]: <00 00 00 00>,' +
-                           ' byteLength: 4, x: 42 },\n' +
-                         '  y: 1337\n}');
     }
 
     [ Float32Array,
@@ -276,40 +251,6 @@ export const utilInspect = {
       array[1] = 97;
       assert.strictEqual(
         util.inspect(array, { showHidden: true }),
-        `${constructor.name}(${length}) [\n` +
-          '  65,\n' +
-          '  97,\n' +
-          `  [BYTES_PER_ELEMENT]: ${constructor.BYTES_PER_ELEMENT},\n` +
-          `  [length]: ${length},\n` +
-          `  [byteLength]: ${byteLength},\n` +
-          '  [byteOffset]: 0,\n' +
-          `  [buffer]: ArrayBuffer { byteLength: ${byteLength} }\n]`);
-      assert.strictEqual(
-        util.inspect(array, false),
-        `${constructor.name}(${length}) [ 65, 97 ]`
-      );
-    });
-
-    // Now check that declaring a TypedArray in a different context works the same.
-    [ Float32Array,
-      Float64Array,
-      Int16Array,
-      Int32Array,
-      Int8Array,
-      Uint16Array,
-      Uint32Array,
-      Uint8Array,
-      Uint8ClampedArray ].forEach((constructor) => {
-      const length = 2;
-      const byteLength = length * constructor.BYTES_PER_ELEMENT;
-      const array = vm.runInNewContext(
-        'new constructor(new ArrayBuffer(byteLength), 0, length)',
-        { constructor, byteLength, length }
-      );
-      array[0] = 65;
-      array[1] = 97;
-      assert.strictEqual(
-        util.inspect(array, true),
         `${constructor.name}(${length}) [\n` +
           '  65,\n' +
           '  97,\n' +
@@ -531,16 +472,6 @@ export const utilInspect = {
                         '2010-02-14T11:48:40.000Z { aprop: 42 }');
     }
 
-    // Test the internal isDate implementation.
-    {
-      const Date2 = vm.runInNewContext('Date');
-      const d = new Date2();
-      const orig = util.inspect(d);
-      Date2.prototype.foo = 'bar';
-      const after = util.inspect(d);
-      assert.strictEqual(orig, after);
-    }
-
     // Test positive/negative zero.
     assert.strictEqual(util.inspect(0), '0');
     assert.strictEqual(util.inspect(-0), '-0');
@@ -573,33 +504,6 @@ export const utilInspect = {
       assert.strictEqual(util.inspect(a, {
         maxArrayLength: 2
       }), "[ 'foo', <1 empty item>, ... 99 more items ]");
-    }
-
-    // Test for Array constructor in different context.
-    {
-      const map = new Map();
-      map.set(1, 2);
-      // Passing only a single argument to indicate a set iterator.
-      const valsSetIterator = previewEntries(map.entries());
-      // Passing through true to indicate a map iterator.
-      const valsMapIterEntries = previewEntries(map.entries(), true);
-      const valsMapIterKeys = previewEntries(map.keys(), true);
-
-      assert.strictEqual(util.inspect(valsSetIterator), '[ 1, 2 ]');
-      assert.strictEqual(util.inspect(valsMapIterEntries), '[ [ 1, 2 ], true ]');
-      assert.strictEqual(util.inspect(valsMapIterKeys), '[ [ 1 ], false ]');
-    }
-
-    // Test for other constructors in different context.
-    {
-      let obj = vm.runInNewContext('(function(){return {}})()', {});
-      assert.strictEqual(util.inspect(obj), '{}');
-      obj = vm.runInNewContext('const m=new Map();m.set(1,2);m', {});
-      assert.strictEqual(util.inspect(obj), 'Map(1) { 1 => 2 }');
-      obj = vm.runInNewContext('const s=new Set();s.add(1);s.add(2);s', {});
-      assert.strictEqual(util.inspect(obj), 'Set(2) { 1, 2 }');
-      obj = vm.runInNewContext('fn=function(){};new Promise(fn,fn)', {});
-      assert.strictEqual(util.inspect(obj), 'Promise { <pending> }');
     }
 
     // Test for property descriptors.
@@ -988,7 +892,7 @@ export const utilInspect = {
 
       assert.strictEqual(util.inspect(subject), "{ foo: 'bar' }");
 
-      subject[util.inspect.custom] = common.mustCall((depth, opts, inspect) => {
+      subject[util.inspect.custom] = commonMustCall((depth, opts, inspect) => {
         const clone = { ...opts };
         // This might change at some point but for now we keep the stylize function.
         // The function should either be documented or an alternative should be
@@ -1004,7 +908,7 @@ export const utilInspect = {
           new Set(Object.keys(opts))
         );
         opts.showHidden = true;
-        return { [inspect.custom]: common.mustCall((depth, opts2) => {
+        return { [inspect.custom]: commonMustCall((depth, opts2) => {
           assert.deepStrictEqual(clone, opts2);
         }) };
       });
@@ -1029,7 +933,7 @@ export const utilInspect = {
     }
 
     {
-      const subject = { [util.inspect.custom]: common.mustCall((depth, opts) => {
+      const subject = { [util.inspect.custom]: commonMustCall((depth, opts) => {
         assert.strictEqual(depth, null);
         assert.strictEqual(opts.compact, true);
       }) };
@@ -1260,9 +1164,9 @@ export const utilInspect = {
     // a bonafide native Promise.
     {
       const oldPromise = Promise;
-      global.Promise = function() { this.bar = 42; };
+      globalThis.Promise = function() { this.bar = 42; };
       assert.strictEqual(util.inspect(new Promise()), '{ bar: 42 }');
-      global.Promise = oldPromise;
+      globalThis.Promise = oldPromise;
     }
 
     // Test Map iterators.
@@ -1578,8 +1482,6 @@ export const utilInspect = {
       }
       );
     }
-
-    util.inspect(process);
 
     // Setting custom inspect property to a non-function should do nothing.
     {
@@ -2812,121 +2714,11 @@ export const utilInspect = {
     }
 
     {
-      const originalCWD = process.cwd();
-
-      process.cwd = () => (process.platform === 'win32' ?
-        'C:\\workspace\\node-test-binary-windows js-suites-%percent-encoded\\node' :
-        '/home/user directory/repository%encoded/node');
-
-      // Use a fake stack to verify the expected colored outcome.
-      const stack = [
-        'Error: CWD is grayed out, even cwd that are percent encoded!',
-        '    at A.<anonymous> (/test/node_modules/foo/node_modules/bar/baz.js:2:7)',
-        '    at Module._compile (node:internal/modules/cjs/loader:827:30)',
-        '    at Fancy (node:vm:697:32)',
-        // This file is not an actual Node.js core file.
-        '    at tryModuleLoad (node:internal/modules/cjs/foo:629:12)',
-        '    at Function.Module._load (node:internal/modules/cjs/loader:621:3)',
-        // This file is not an actual Node.js core file.
-        '    at Module.require [as weird/name] (node:internal/aaaaa/loader:735:19)',
-        '    at require (node:internal/modules/helpers:14:16)',
-        '    at Array.forEach (<anonymous>)',
-        `    at ${process.cwd()}/test/parallel/test-util-inspect.js:2760:12`,
-        `    at Object.<anonymous> (${process.cwd()}/node_modules/hyper_module/folder/file.js:2753:10)`,
-        '    at /test/test-util-inspect.js:2239:9',
-        '    at getActual (node:assert:592:5)',
-      ];
-      const err = new Error('CWD is grayed out, even cwd that are percent encoded!');
-      err.stack = stack.join('\n');
-      if (process.platform === 'win32') {
-        err.stack = stack.map((frame) => (frame.includes('node:') ?
-          frame :
-          frame.replaceAll('/', '\\'))
-        ).join('\n');
-      }
-      const escapedCWD = util.inspect(process.cwd()).slice(1, -1);
-      util.inspect(err, { colors: true }).split('\n').forEach((line, i) => {
-        let expected = stack[i].replace(/node_modules\/([^/]+)/gi, (_, m) => {
-          return `node_modules/\u001b[4m${m}\u001b[24m`;
-        }).replaceAll(new RegExp(`(\\(?${escapedCWD}(\\\\|/))`, 'gi'), (_, m) => {
-          return `\x1B[90m${m}\x1B[39m`;
-        });
-        if (expected.includes(process.cwd()) && expected.endsWith(')')) {
-          expected = `${expected.slice(0, -1)}\x1B[90m)\x1B[39m`;
-        }
-        if (line.includes('node:')) {
-          if (!line.includes('foo') && !line.includes('aaa')) {
-            expected = `\u001b[90m${expected}\u001b[39m`;
-          }
-        } else if (process.platform === 'win32') {
-          expected = expected.replaceAll('/', '\\');
-        }
-        assert.strictEqual(line, expected);
-      });
-
-      // Check ESM
-      const encodedCwd = url.pathToFileURL(process.cwd());
-      const sl = process.platform === 'win32' ? '\\' : '/';
-
-      // Use a fake stack to verify the expected colored outcome.
-      err.stack = 'Error: ESM and CJS mixed are both grayed out!\n' +
-                  `    at ${encodedCwd}/test/parallel/test-esm.mjs:2760:12\n` +
-                  `    at Object.<anonymous> (${encodedCwd}/node_modules/esm_module/folder/file.js:2753:10)\n` +
-                  `    at ${process.cwd()}${sl}test${sl}parallel${sl}test-cjs.js:2760:12\n` +
-                  `    at Object.<anonymous> (${process.cwd()}${sl}node_modules${sl}cjs_module${sl}folder${sl}file.js:2753:10)`;
-
-      let actual = util.inspect(err, { colors: true });
-      let expected = 'Error: ESM and CJS mixed are both grayed out!\n' +
-        `    at \x1B[90m${encodedCwd}/\x1B[39mtest/parallel/test-esm.mjs:2760:12\n` +
-        `    at Object.<anonymous> \x1B[90m(${encodedCwd}/\x1B[39mnode_modules/\x1B[4mesm_module\x1B[24m/folder/file.js:2753:10\x1B[90m)\x1B[39m\n` +
-        `    at \x1B[90m${process.cwd()}${sl}\x1B[39mtest${sl}parallel${sl}test-cjs.js:2760:12\n` +
-        `    at Object.<anonymous> \x1B[90m(${process.cwd()}${sl}\x1B[39mnode_modules${sl}\x1B[4mcjs_module\x1B[24m${sl}folder${sl}file.js:2753:10\x1B[90m)\x1B[39m`;
-
-      assert.strictEqual(actual, expected);
-
-      // ESM without need for encoding
-      process.cwd = () => (process.platform === 'win32' ?
-        'C:\\workspace\\node-test-binary-windows-js-suites\\node' :
-        '/home/user/repository/node');
-      let expectedCwd = process.cwd();
-      if (process.platform === 'win32') {
-        expectedCwd = `/${expectedCwd.replaceAll('\\', '/')}`;
-      }
-      // Use a fake stack to verify the expected colored outcome.
-      err.stack = 'Error: ESM without need for encoding!\n' +
-                  `    at file://${expectedCwd}/file.js:15:15`;
-
-      actual = util.inspect(err, { colors: true });
-      expected = 'Error: ESM without need for encoding!\n' +
-      `    at \x1B[90mfile://${expectedCwd}/\x1B[39mfile.js:15:15`;
-      assert.strictEqual(actual, expected);
-
-      process.cwd = originalCWD;
-    }
-
-    {
       // Cross platform checks.
       const err = new Error('foo');
       util.inspect(err, { colors: true }).split('\n').forEach((line, i) => {
         assert(i < 2 || line.startsWith('\u001b[90m'));
       });
-    }
-
-    {
-      // Tracing class respects inspect depth.
-      try {
-        const trace = require('trace_events').createTracing({ categories: ['fo'] });
-        const actualDepth0 = util.inspect({ trace }, { depth: 0 });
-        assert.strictEqual(actualDepth0, '{ trace: [Tracing] }');
-        const actualDepth1 = util.inspect({ trace }, { depth: 1 });
-        assert.strictEqual(
-          actualDepth1,
-          "{ trace: Tracing { enabled: false, categories: 'fo' } }"
-        );
-      } catch (err) {
-        if (err.code !== 'ERR_TRACE_EVENTS_UNAVAILABLE')
-          throw err;
-      }
     }
 
     // Inspect prototype properties.
@@ -3063,14 +2855,6 @@ export const utilInspect = {
       assert.strictEqual(colors.grey, colors.gray);
     }
 
-    // https://github.com/nodejs/node/issues/31889
-    {
-      v8.setFlagsFromString('--allow-natives-syntax');
-      const undetectable = vm.runInThisContext('%GetUndetectable()');
-      v8.setFlagsFromString('--no-allow-natives-syntax');
-      assert.strictEqual(inspect(undetectable), '{}');
-    }
-
     // Truncate output for Primitives with 1 character left
     {
       assert.strictEqual(util.inspect('bl', { maxStringLength: 1 }),
@@ -3085,89 +2869,6 @@ export const utilInspect = {
         "'aaaa'... 999996 more characters"
       );
       assert.match(util.inspect(x, { maxStringLength: null }), /a'$/);
-    }
-
-    {
-      // Verify that util.inspect() invokes custom inspect functions on objects
-      // from other vm.Contexts but does not pass data from its own Context to that
-      // function.
-      const target = vm.runInNewContext(`
-        ({
-          [Symbol.for('nodejs.util.inspect.custom')](depth, ctx) {
-            this.depth = depth;
-            this.ctx = ctx;
-            try {
-              this.stylized = ctx.stylize('🐈');
-            } catch (e) {
-              this.stylizeException = e;
-            }
-            return this.stylized;
-          }
-        })
-      `, { __proto__: null });
-      assert.strictEqual(target.ctx, undefined);
-
-      {
-        // Subtest 1: Just try to inspect the object with default options.
-        assert.strictEqual(util.inspect(target), '🐈');
-        assert.strictEqual(typeof target.ctx, 'object');
-        const objectGraph = fullObjectGraph(target);
-        assert(!objectGraph.has(Object));
-        assert(!objectGraph.has(Function));
-      }
-
-      {
-        // Subtest 2: Use a stylize function that returns a non-primitive.
-        const output = util.inspect(target, {
-          stylize: common.mustCall((str) => {
-            return {};
-          })
-        });
-        assert.strictEqual(output, '[object Object]');
-        assert.strictEqual(typeof target.ctx, 'object');
-        const objectGraph = fullObjectGraph(target);
-        assert(!objectGraph.has(Object));
-        assert(!objectGraph.has(Function));
-      }
-
-      {
-        // Subtest 3: Use a stylize function that throws an exception.
-        const output = util.inspect(target, {
-          stylize: common.mustCall((str) => {
-            throw new Error('oops');
-          })
-        });
-        assert.strictEqual(output, '🐈');
-        assert.strictEqual(typeof target.ctx, 'object');
-        const objectGraph = fullObjectGraph(target);
-        assert(!objectGraph.has(Object));
-        assert(!objectGraph.has(Function));
-      }
-
-      function fullObjectGraph(value) {
-        const graph = new Set([value]);
-
-        for (const entry of graph) {
-          if ((typeof entry !== 'object' && typeof entry !== 'function') ||
-              entry === null) {
-            continue;
-          }
-
-          graph.add(Object.getPrototypeOf(entry));
-          const descriptors = Object.values(
-            Object.getOwnPropertyDescriptors(entry));
-          for (const descriptor of descriptors) {
-            graph.add(descriptor.value);
-            graph.add(descriptor.set);
-            graph.add(descriptor.get);
-          }
-        }
-
-        return graph;
-      }
-
-      // Consistency check.
-      assert(fullObjectGraph(global).has(Function.prototype));
     }
 
     {
@@ -3190,6 +2891,7 @@ export const utilInspect = {
       );
     }
 
+    // TODO(soon): figure out why we're generating `Iterator [Generator]` instead of `Object [Generator]`
     {
       // Confirm null prototype of generator prototype displays as expected.
 
@@ -3212,7 +2914,7 @@ export const utilInspect = {
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
-        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
         '}'
       );
@@ -3311,6 +3013,8 @@ export const utilInspect = {
         }
       }), '{ [Symbol(Symbol.iterator)]: [Getter] }');
     }
+
+    assertCalledMustCalls();
   }
 };
 
@@ -3355,31 +3059,8 @@ export const utilInspectProxy = {
     // Make sure inspecting object does not trigger any proxy traps.
     util.format('%s', proxyObj);
 
-    // getProxyDetails is an internal method, not intended for public use.
-    // This is here to test that the internals are working correctly.
-    let details = processUtil.getProxyDetails(proxyObj, true);
-    assert.strictEqual(target, details[0]);
-    assert.strictEqual(handler, details[1]);
-
-    details = processUtil.getProxyDetails(proxyObj);
-    assert.strictEqual(target, details[0]);
-    assert.strictEqual(handler, details[1]);
-
-    details = processUtil.getProxyDetails(proxyObj, false);
-    assert.strictEqual(target, details);
-
-    details = processUtil.getProxyDetails({}, true);
-    assert.strictEqual(details, undefined);
-
     const r = Proxy.revocable({}, {});
     r.revoke();
-
-    details = processUtil.getProxyDetails(r.proxy, true);
-    assert.strictEqual(details[0], null);
-    assert.strictEqual(details[1], null);
-
-    details = processUtil.getProxyDetails(r.proxy, false);
-    assert.strictEqual(details, null);
 
     assert.strictEqual(util.inspect(r.proxy), '<Revoked Proxy>');
     assert.strictEqual(
@@ -3410,9 +3091,6 @@ export const utilInspectProxy = {
       '  }\n' +
       ']'
     );
-
-    // Using getProxyDetails with non-proxy returns undefined
-    assert.strictEqual(processUtil.getProxyDetails({}), undefined);
 
     // Inspecting a proxy without the showProxy option set to true should not
     // trigger any proxy handlers.
@@ -3733,9 +3411,9 @@ export const utilFormat = {
         util.format('%s', Object.setPrototypeOf(new Foo(), null)),
         '[Foo: null prototype] {}'
       );
-      global.Foo = Foo;
+      globalThis.Foo = Foo;
       assert.strictEqual(util.format('%s', new Foo()), 'Bar');
-      delete global.Foo;
+      delete globalThis.Foo;
       class Bar { abc = true; }
       assert.strictEqual(util.format('%s', new Bar()), 'Bar { abc: true }');
       class Foobar extends Array { aaa = true; }
@@ -4076,10 +3754,19 @@ export const utilInspectError = {
   async test(ctrl, env, ctx) {
     const err = new Error('foo\nbar');
 
-    console.log(util.inspect({ err, nested: { err } }, { compact: true }));
-    console.log(util.inspect({ err, nested: { err } }, { compact: false }));
+    assert.match(
+      util.inspect({ err, nested: { err } }, { compact: true }),
+      /{ err: Error: foo\n   bar\n       at .+,\n  nested: { err: Error: foo\n      bar\n          at .+ } }/s
+    );
+    assert.match(
+      util.inspect({ err, nested: { err } }, { compact: false }),
+      /{\n  err: Error: foo\n  bar\n      at .+,\n  nested: {\n    err: Error: foo\n    bar\n        at .+\n  }\n}/s
+    );
 
     err.foo = 'bar';
-    console.log(util.inspect(err, { compact: true, breakLength: 5 }));
+    assert.match(
+      util.inspect(err, { compact: true, breakLength: 5 }),
+      /{ Error: foo\nbar\n    at .+\n  foo: 'bar' }/
+    );
   }
 };

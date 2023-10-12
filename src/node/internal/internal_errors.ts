@@ -29,6 +29,8 @@
 
 // TODO(soon): Fill in more of the internal/errors implementation
 
+import { inspect } from "node-internal:internal_inspect";
+
 const classRegExp = /^([A-Z][a-z0-9]*)+$/;
 
 const kTypes = [
@@ -183,13 +185,9 @@ function invalidArgTypeHelper(input: any) {
     if (input.constructor && input.constructor.name) {
       return ` Received an instance of ${input.constructor.name}`;
     }
-    return ` Received ${typeof input}`;
-    // TODO(later): Implement inspect
-    // return ` Received ${inspect(input, { depth: -1 })}`;
+    return ` Received ${inspect(input, { depth: -1 })}`;
   }
-  let inspected = `${input}`;
-  // TODO(later): Implement inspect
-  // let inspected = inspect(input, { colors: false });
+  let inspected = inspect(input, { colors: false });
   if (inspected.length > 25) {
     inspected = `${inspected.slice(0, 25)}...`;
   }

@@ -1820,7 +1820,9 @@ class JsMessage;
   V(Date) \
   V(RegExp) \
   V(Map) \
-  V(Set)
+  V(Set) \
+  V(Promise) \
+  V(Proxy)
 
 #define V(Name) class Js##Name;
   JS_TYPE_CLASSES(V)

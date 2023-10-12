@@ -7,15 +7,14 @@
 #include <workerd/api/node/node.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
+#include <workerd/io/worker.h>
 #include <cloudflare/cloudflare.capnp.h>
 
 namespace workerd::api {
 
 template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
-  if (featureFlags.getNodeJsCompat()) {
-    node::registerNodeJsCompatModules(registry, featureFlags);
-  }
+  node::registerNodeJsCompatModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
   }
