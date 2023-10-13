@@ -420,6 +420,22 @@ kj::Array<jsg::Ref<ReadableStream>> ReadableStream::tee(jsg::Lock& js) {
   return kj::arr(kj::mv(tee.branch1), kj::mv(tee.branch2));
 }
 
+jsg::JsString ReadableStream::inspectState(jsg::Lock& js) {
+  if (controller->isClosedOrErrored()) {
+    return js.strIntern(controller->isClosed() ? "closed"_kj : "errored"_kj);
+  } else {
+    return js.strIntern("readable"_kj);
+  }
+}
+
+bool ReadableStream::inspectSupportsBYOB() {
+  return controller->isByteOriented();
+}
+
+jsg::Optional<uint64_t> ReadableStream::inspectLength() {
+  return tryGetLength(StreamEncoding::IDENTITY);
+}
+
 jsg::Promise<kj::Maybe<jsg::Value>> ReadableStream::nextFunction(
     jsg::Lock& js,
     AsyncIteratorState& state) {

@@ -1281,6 +1281,10 @@ bool WritableStreamInternalController::isClosedOrClosing() {
   return state.is<StreamStates::Closed>() || isClosing || isFlushing;
 }
 
+bool WritableStreamInternalController::isErrored() {
+  return state.is<StreamStates::Errored>();
+}
+
 void WritableStreamInternalController::doClose(jsg::Lock& js) {
   state.init<StreamStates::Closed>();
   KJ_IF_SOME(locked, writeState.tryGet<WriterLocked>()) {
