@@ -31,6 +31,7 @@ import {
   strictEqual,
   throws,
 } from 'node:assert';
+import util from 'node:util';
 
 import {
   Buffer,
@@ -5565,5 +5566,47 @@ export const toStringRange = {
     }, {
       name: 'TypeError',
     });
+  }
+};
+
+export const inspect = {
+  // test-buffer-inspect.js
+  async test(ctrl, env, ctx) {
+    let b = Buffer.allocUnsafe(60);
+    b.fill('0123456789'.repeat(6));
+
+    let s = buffer.SlowBuffer(60);
+    s.fill('0123456789'.repeat(6));
+
+    let expected = '<Buffer 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 30 31 32 33 34 35 36 37 38 39 ... 10 more bytes>';
+
+    strictEqual(util.inspect(b), expected);
+    strictEqual(util.inspect(s), expected);
+
+    b = Buffer.allocUnsafe(2);
+    b.fill('12');
+
+    s = buffer.SlowBuffer(2);
+    s.fill('12');
+
+    expected = '<Buffer 31 32>';
+
+    strictEqual(util.inspect(b), expected);
+    strictEqual(util.inspect(s), expected);
+
+    b.inspect = undefined;
+    b.prop = new Uint8Array(0);
+    strictEqual(
+      util.inspect(b),
+      '<Buffer 31 32, inspect: undefined, prop: Uint8Array(0) []>'
+    );
+
+    b = Buffer.alloc(0);
+    b.prop = 123;
+
+    strictEqual(
+      util.inspect(b),
+      '<Buffer prop: 123>'
+    );
   }
 };
