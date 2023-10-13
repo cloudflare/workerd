@@ -50,6 +50,8 @@ import {
   ERR_MISSING_ARGS,
 } from 'node-internal:internal_errors';
 
+import { inspect } from "node-internal:internal_inspect";
+
 interface ExtendedAssertionErrorConstructorOptions
   extends AssertionErrorConstructorOptions {
   generatedMessage?: boolean;
@@ -76,7 +78,8 @@ function assert(actual: unknown, message?: string | Error): asserts actual {
     throw new AssertionError({
       message,
       actual,
-      expected: true
+      expected: true,
+      operator: "=="
     } as AssertionErrorConstructorOptions );
   }
 }
@@ -247,11 +250,8 @@ export function strictEqual(
   if (message) {
     message = `${message}`;
   } else {
-    // TODO(soon): Implement inspect
-    // const actualString = inspect(actual);
-    // const expectedString = inspect(expected);
-    const actualString = `${actual}`;
-    const expectedString = `${expected}`;
+    const actualString = inspect(actual);
+    const expectedString = inspect(expected);
 
     if (actualString === expectedString) {
       const withOffset = actualString
@@ -431,9 +431,7 @@ export function doesNotMatch(
     throw new AssertionError({
       message: message ||
         `The "string" argument must be of type string. Received type ${typeof string} (${
-          // TODO(soon): Implement inspect
-          // inspect(string)
-          string
+          inspect(string)
         })`,
       actual: string,
       expected: regexp,
@@ -652,9 +650,7 @@ export function ifError(err: any) {
         message += err.message;
       }
     } else {
-      // TODO(soon): Implement inspect
-      // message += inspect(err);
-      message += `${err}`;
+      message += inspect(err);
     }
 
     const newErr = new AssertionError({
@@ -752,9 +748,7 @@ function validateThrownError(
           ? `"${options.validationFunctionName}" validation`
           : "validation"
       } function is expected to return "true". Received ${
-        // inspect(received)
-        // TODO(soon): Implement inspect
-        received
+        inspect(received)
       }\n\nCaught error:\n\n${e}`,
       actual: e,
       expected: error,

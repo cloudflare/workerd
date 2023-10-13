@@ -502,41 +502,38 @@ export class AssertionError extends Error {
     return `${this.name} [${(this as any).code}]: ${this.message}`;
   }
 
-  // TODO(soon): Implement inspect
-  // [inspect.custom](_recurseTimes: number, ctx: Record<string, unknown>) {
-  //   // Long strings should not be fully inspected.
-  //   const tmpActual = this.actual;
-  //   const tmpExpected = this.expected;
+  [inspect.custom](_recurseTimes: number, ctx: Record<string, unknown>) {
+    // Long strings should not be fully inspected.
+    const tmpActual = (this as any).actual;
+    const tmpExpected = (this as any).expected;
 
-  //   for (const name of ["actual", "expected"]) {
-  //     if (typeof this[name] === "string") {
-  //       const value = this[name] as string;
-  //       const lines = value.split("\n");
-  //       if (lines.length > 10) {
-  //         lines.length = 10;
-  //         this[name] = `${lines.join("\n")}\n...`;
-  //       } else if (value.length > 512) {
-  //         this[name] = `${value.slice(512)}...`;
-  //       }
-  //     }
-  //   }
+    for (const name of ["actual", "expected"]) {
+      if (typeof this[name] === "string") {
+        const value = this[name] as string;
+        const lines = value.split("\n");
+        if (lines.length > 10) {
+          lines.length = 10;
+          this[name] = `${lines.join("\n")}\n...`;
+        } else if (value.length > 512) {
+          this[name] = `${value.slice(512)}...`;
+        }
+      }
+    }
 
-  //   // This limits the `actual` and `expected` property default inspection to
-  //   // the minimum depth. Otherwise those values would be too verbose compared
-  //   // to the actual error message which contains a combined view of these two
-  //   // input values.
-  //   // TODO(soon): Implement inspect
-  //   // const result = inspect(this, {
-  //   //   ...ctx,
-  //   //   customInspect: false,
-  //   //   depth: 0,
-  //   // });
-  //   const result = `${this}`;
+    // This limits the `actual` and `expected` property default inspection to
+    // the minimum depth. Otherwise those values would be too verbose compared
+    // to the actual error message which contains a combined view of these two
+    // input values.
+    const result = inspect(this, {
+      ...ctx,
+      customInspect: false,
+      depth: 0,
+    });
 
-  //   // Reset the properties after inspection.
-  //   (this as any).actual = tmpActual;
-  //   (this as any).expected = tmpExpected;
+    // Reset the properties after inspection.
+    (this as any).actual = tmpActual;
+    (this as any).expected = tmpExpected;
 
-  //   return result;
-  // }
+    return result;
+  }
 }
