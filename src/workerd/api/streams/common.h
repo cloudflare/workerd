@@ -461,6 +461,8 @@ public:
 
   virtual bool isClosedOrErrored() const = 0;
 
+  virtual bool isClosed() const = 0;
+
   virtual bool isDisturbed() = 0;
 
   // True if a Reader has been locked to this controller.
@@ -673,6 +675,10 @@ public:
                      jsg::Optional<StreamQueuingStrategy> queuingStrategy) {}
 
   virtual bool isClosedOrClosing() = 0;
+  virtual bool isErrored() = 0;
+
+  // True is this controller requires ArrayBuffer(Views) to be written to it.
+  virtual bool isByteOriented() const = 0;
 };
 
 kj::Own<WritableStreamController> newWritableStreamJsController();

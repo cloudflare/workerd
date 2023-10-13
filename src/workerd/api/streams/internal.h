@@ -73,6 +73,10 @@ public:
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
   }
 
+  bool isClosed() const override {
+    return state.is<StreamStates::Closed>();
+  }
+
   bool isDisturbed() override { return disturbed; }
 
   bool isLockedToReader() const override { return !readState.is<Unlocked>(); }
@@ -205,6 +209,9 @@ public:
   void setHighWaterMark(uint64_t highWaterMark);
 
   bool isClosedOrClosing() override;
+  bool isErrored() override;
+
+  inline bool isByteOriented() const override { return true; }
 private:
 
   struct AbortOptions {
