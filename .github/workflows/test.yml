@@ -71,15 +71,38 @@ jobs:
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
             # Work around bazel clang 16 include path bug (https://github.com/bazelbuild/bazel/issues/17863)
             Move-Item -Path "C:\Program Files\LLVM\lib\clang\16" -Destination "C:\Program Files\LLVM\lib\clang\16.0.6"
+      # First run a single test and quit if there is a compile error, then run all tests even if
+      # some of them fail.
+      # Rationale: The workerd CI tests should achieve a number of goals at once:
+      #   - provide comprehensive testing of the code base
+      #   - generally list all failing tests instead of just the first one
+      #   - take advantage of the cache so that CI runs following small changes finish quickly
+      #   - fail early when there is a compile issue to provide quick developer feedback
+      # To maximize the speedup from caching, we enable the --remote_download_minimal flag, which
+      # avoids building or downloading intermediate build outputs that are not needed to provide
+      # the build artifacts or test outputs requested. We first run the server-test target, which
+      # includes substantially the same code as the workerd binary. By not enabling --keep_going,
+      # the build fails with the first compilation error. If the test result is cached, (for
+      # example if only documentation is updated) no build or download steps are required.
+      # Then we run every test (again skipping tests that are already cached), while using
+      # --keep_going so that every failing test is reported.
+      # A previous approach was to first build all tests (without --keep_going) before starting to
+      # run them. This would require building or downloading every test target, even if there are
+      # cached results available.
+      # The present approach aims to maximize the advantage from caching while still being able to
+      # find compile issues early on and otherwise listing all failing tests. This should be the
+      # case unless there is a build failure within a test case (not failing early) or if
+      # server-test itself fails (any other test failures will not be reported). This should only
+      # affect a small proportion of test runs.
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-            bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
+            bazelisk build --remote_download_minimal --nobuild_runfile_links --jobs=12 --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --remote_timeout=30 --verbose_failures //...
       - name: Bazel tests
         # Run tests and check that there are no .bazelrc issues that prevent shutdown.
         run: |
-            bazelisk test --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures --keep_going --test_output=errors //...
+            bazelisk test --remote_download_minimal --nobuild_runfile_links --jobs=12 --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --remote_timeout=30 --verbose_failures --keep_going --test_output=errors //...
             bazelisk shutdown
       - name: Report disk usage
         if: always()
@@ -93,4 +116,3 @@ jobs:
             du -hs -t 1 $BAZEL_OUTPUT_BASE
             echo "Workspace usage statistics"
             du -hs -t 1 $GITHUB_WORKSPACE
-
