@@ -49,6 +49,8 @@ namespace workerd::api {
 // Implements supporting utilities for Node's `util.inspect()` function
 class InspectModule final: public jsg::Object {
 public:
+  jsg::Name getResourceTypeInspect(jsg::Lock& js);
+
   // `getOwnNonIndexProperties()` `filter`s
   static constexpr int ALL_PROPERTIES = jsg::PropertyFilter::ALL_PROPERTIES;
   static constexpr int ONLY_ENUMERABLE = jsg::PropertyFilter::ONLY_ENUMERABLE;
@@ -93,6 +95,8 @@ public:
   bool isBoxedPrimitive(jsg::JsValue value);
 
   JSG_RESOURCE_TYPE(InspectModule) {
+    JSG_READONLY_INSTANCE_PROPERTY(kResourceTypeInspect, getResourceTypeInspect);
+
     JSG_STATIC_CONSTANT(ALL_PROPERTIES);
     JSG_STATIC_CONSTANT(ONLY_ENUMERABLE);
     JSG_METHOD(getOwnNonIndexProperties);
