@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { strictEqual } from 'node:assert';
+import { inspect } from 'node:util';
 
 export const test1 = {
   async test(ctrl, env, ctx) {
@@ -115,5 +116,15 @@ export default {
     } else {
       throw new Error('Unexpected test request');
     }
+  }
+};
+
+export const testInspect = {
+  async test(ctrl, env, ctx) {
+    const blob = new Blob(["abc"], { type: "text/plain" });
+    strictEqual(inspect(blob), "Blob { type: 'text/plain', size: 3 }");
+
+    const file = new File(["1"], "file.txt", { type: "text/plain", lastModified: 1000 });
+    strictEqual(inspect(file), "File { lastModified: 1000, name: 'file.txt', type: 'text/plain', size: 1 }");
   }
 };

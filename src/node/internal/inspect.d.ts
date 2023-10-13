@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/ban-types */
 
+export const kResourceTypeInspect: unique symbol;
+
 export const ALL_PROPERTIES: 0;
 export const ONLY_ENUMERABLE: 1;
 export function getOwnNonIndexProperties(value: unknown, filter: typeof ALL_PROPERTIES | typeof ONLY_ENUMERABLE): PropertyKey[];

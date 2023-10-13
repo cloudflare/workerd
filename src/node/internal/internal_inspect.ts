@@ -840,7 +840,17 @@ function formatValue(ctx: Context, value: unknown, recurseTimes: number, typedAr
   // Provide a hook for user-specified inspect functions.
   // Check that value is an object with an inspect function on it.
   if (ctx.customInspect) {
-    const maybeCustom = (value as Record<string | symbol, Function>)[customInspectSymbol];
+    let maybeCustom = (value as Record<PropertyKey, unknown>)[customInspectSymbol];
+
+    // WORKERD SPECIFIC PATCH: if `value` is a JSG resource type, use a well-known custom inspect
+    const maybeResourceTypeInspect = (value as Record<PropertyKey, unknown>)[internal.kResourceTypeInspect];
+    if (typeof maybeResourceTypeInspect === "object") {
+      maybeCustom = formatJsgResourceType.bind(
+        context as Record<PropertyKey, unknown>,
+        maybeResourceTypeInspect as Record<string, symbol>
+      );
+    }
+
     if (typeof maybeCustom === 'function' &&
         // Filter out the util module, its inspect function is special.
         maybeCustom !== inspect &&
@@ -925,9 +935,26 @@ function formatRaw(ctx: Context, value: unknown, recurseTimes: number, typedArra
   // Iterators and the rest are split to reduce checks.
   // We have to check all values in case the constructor is set to null.
   // Otherwise it would not possible to identify all types properly.
-  if (Symbol.iterator in (value as object) || constructor === null) {
+
+  const isEntriesObject = hasEntries(value);
+  if (Symbol.iterator in (value as object) || constructor === null || isEntriesObject) {
     noIterator = false;
-    if (Array.isArray(value)) {
+    if (isEntriesObject) {
+      // WORKERD SPECIFIC PATCH: if `value` is an object with entries, format them like a map
+      const size = value[kEntries].length;
+      const prefix = getPrefix(constructor, tag, 'Object', `(${size})`);
+      keys = getKeys(value, ctx.showHidden);
+
+      // Remove `kEntries` and `size` from keys
+      keys.splice(keys.indexOf(kEntries), 1);
+      const sizeIndex = keys.indexOf("size");
+      if (sizeIndex !== -1) keys.splice(sizeIndex, 1);
+
+      formatter = formatMap.bind(null, value[kEntries][Symbol.iterator]());
+      if (size === 0 && keys.length === 0 && protoProps === undefined)
+        return `${prefix}{}`;
+      braces = [`${prefix}{`, '}'];
+    } else if (Array.isArray(value)) {
       // Only set the constructor for non ordinary ("Array [...]") arrays.
       const prefix = (constructor !== 'Array' || tag !== '') ?
         getPrefix(constructor, tag, 'Array', `(${value.length})`) :
@@ -2364,8 +2391,94 @@ export function stripVTControlCharacters(str: string): string {
   return str.replace(ansi, '');
 }
 
+// ================================================================================================
+// WORKERD SPECIFIC CODE
+
 // Called from C++ on `console.log()`s to format values
 export function formatLog(...args: [...values: unknown[], colors: boolean]): string {
   const inspectOptions: InspectOptions = { colors: args.pop() as boolean };
-  return formatWithOptions(inspectOptions, ...args);
+  try {
+    return formatWithOptions(inspectOptions, ...args);
+  } catch (err) {
+    return `<Formatting threw (${isError(err) ? err.stack : String(err)})>`;
+  }
+}
+
+function isBuiltinPrototype(proto: unknown) {
+  if (proto === null) return true;
+  const descriptor = Object.getOwnPropertyDescriptor(proto, 'constructor');
+  return (
+    descriptor !== undefined &&
+    typeof descriptor.value === "function" &&
+    builtInObjects.has(descriptor.value.name)
+  );
+}
+
+function isEntry(value: unknown): value is [unknown, unknown] {
+  return Array.isArray(value) && value.length === 2;
+}
+function maybeGetEntries(value: Record<PropertyKey, unknown>): [unknown, unknown][] | undefined {
+  const entriesFunction = value["entries"];
+  if (typeof entriesFunction !== "function") return;
+  const entriesIterator: unknown = entriesFunction.call(value);
+  if (typeof entriesIterator !== "object" || entriesIterator === null) return;
+  if (!(Symbol.iterator in entriesIterator)) return;
+  const entries = Array.from(entriesIterator as Iterable<unknown>);
+  if (!entries.every(isEntry)) return;
+  return entries;
+}
+
+const kEntries = Symbol("kEntries");
+function hasEntries(value: unknown): value is { [kEntries]: [unknown, unknown][] } {
+  return typeof value === "object" && value !== null && kEntries in value;
+}
+
+// Default custom inspect implementation for JSG resource types
+function formatJsgResourceType(
+  this: Record<PropertyKey, unknown>,
+  additionalProperties: Record<string, symbol>,
+  depth: number,
+  options: InspectOptionsStylized
+): unknown {
+  const name = this.constructor.name;
+  if (depth < 0) return options.stylize(`[${name}]`, 'special');
+
+  // Build a plain object for inspection. If this value has an `entries()` function, add those
+  // entries for map-like `K => V` formatting. Note we can't use a `Map` here as a key may have
+  // multiple values (e.g. URLSearchParams).
+  const record: Record<PropertyKey, unknown> = {};
+  const maybeEntries = maybeGetEntries(this);
+  if (maybeEntries !== undefined) record[kEntries] = maybeEntries;
+
+  // Add all instance and prototype non-function-valued properties
+  let current: object = this;
+  do {
+    for (const key of Object.getOwnPropertyNames(current)) {
+      // `Object.getOwnPropertyDescriptor()` throws `Illegal Invocation` for our prototypes here
+      const value = this[key];
+      // Ignore function-valued and static properties
+      if (typeof value === "function" || this.constructor.propertyIsEnumerable(key)) continue;
+      record[key] = value;
+    }
+  } while (!isBuiltinPrototype(current = Object.getPrototypeOf(current)));
+
+  // Add additional inspect-only properties as non-enumerable so they appear in square brackets
+  for (const [key, symbol] of Object.entries(additionalProperties)) {
+    Object.defineProperty(record, key, { value: this[symbol], enumerable: false });
+  }
+
+  // Format the plain object
+  const inspected = inspect(record, {
+    ...options,
+    depth: options.depth == null ? null : depth,
+    showHidden: true, // Show non-enumerable inspect-only properties
+  });
+
+  if (maybeEntries === undefined) {
+    return `${name} ${inspected}`;
+  } else {
+    // Inspecting a entries object gives something like `Object(1) { 'a' => '1' }`, whereas we want
+    // something like `Headers(1) { 'a' => '1' }`.
+    return `${name}${inspected.replace("Object", "")}`;
+  }
 }

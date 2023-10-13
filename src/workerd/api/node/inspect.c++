@@ -57,4 +57,8 @@ bool InspectModule::isBoxedPrimitive(jsg::JsValue value) {
          value.isSymbolObject();
 }
 
+jsg::Name InspectModule::getResourceTypeInspect(jsg::Lock& js) {
+  return js.newApiSymbol("kResourceTypeInspect"_kj);
+}
+
 }
