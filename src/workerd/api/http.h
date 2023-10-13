@@ -113,6 +113,8 @@ public:
                jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)>,
                jsg::Optional<jsg::Value>);
 
+  bool inspectImmutable();
+
   JSG_ITERATOR(EntryIterator, entries,
                 kj::Array<jsg::ByteString>,
                 IteratorState<DisplayedHeader>,
@@ -142,6 +144,8 @@ public:
     JSG_METHOD(entries);
     JSG_METHOD(keys);
     JSG_METHOD(values);
+
+    JSG_INSPECT_PROPERTY(immutable, inspectImmutable);
 
     JSG_ITERABLE(entries);
 
