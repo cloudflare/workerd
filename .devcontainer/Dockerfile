@@ -10,7 +10,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 ENV PATH /usr/lib/llvm-${LLVM_VERSION}/bin:$PATH
 
 # Install NodeJS
-ARG NODEJS_VERSION=v18.18.0
+ARG NODEJS_VERSION=v18.18.2
 ARG NODE_PACKAGE=node-${NODEJS_VERSION}-linux-x64
 ARG NODE_HOME=/opt/$NODE_PACKAGE
 RUN curl https://nodejs.org/dist/${NODEJS_VERSION}/${NODE_PACKAGE}.tar.xz | tar xvfJ - -C /opt
