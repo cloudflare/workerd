@@ -40,8 +40,8 @@ public:
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
   void hibernateWebSockets(Worker::Lock& lock) override;
 
-  void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) override;
-  void unsetWebSocketAutoResponse() override;
+  void setWebSocketAutoResponse(kj::Maybe<kj::StringPtr> request,
+      kj::Maybe<kj::StringPtr> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
   void setTimerChannel(TimerChannel& timerChannel) override;
 
@@ -187,6 +187,15 @@ private:
     TagCollection(TagCollection&& other) = default;
   };
 
+  // This structure will hold the request and corresponding response for hibernatable websockets
+  // auto-response feature. Although we store 2 kj::Maybe strings, if we don't have a request set
+  // we can't have a response, and vice versa.
+  // TODO(cleanup): Remove kj::Maybe from request and response strings.
+  struct AutoRequestResponsePair {
+    kj::Maybe<kj::String> request = kj::none;
+    kj::Maybe<kj::String> response = kj::none;
+  };
+
   // A hashmap of tags to HibernatableWebSockets associated with the tag.
   // We use a kj::List so we can quickly remove websockets that have disconnected.
   // Also note that we box the keys and values such that in the event of a hashmap resizing we don't
@@ -222,7 +231,7 @@ private:
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> autoResponsePair;
+  kj::Own<AutoRequestResponsePair> autoResponsePair = kj::heap<AutoRequestResponsePair>();
   kj::Maybe<TimerChannel&> timer;
 };
 }; // namespace workerd
