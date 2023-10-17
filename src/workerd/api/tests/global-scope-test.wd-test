@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "global-scope-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "global-scope-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"]
+      )
+    ),
+  ],
+);
