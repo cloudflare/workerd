@@ -1,0 +1,16 @@
+name: Issue
+
+on:
+  issues:
+    types: [opened, labeled, transferred]
+
+jobs:
+  add-to-project:
+    name: Add issue to GH project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v0.3.0
+        with:
+          project-url: https://github.com/orgs/cloudflare/projects/1
+          github-token: ${{ secrets.DEVPROD_PAT }}
+          labeled: types
