@@ -39,6 +39,7 @@
 -isystemexternal/v8
 -isystemexternal/v8/include
 -isystemexternal/zlib
+-isystemexternal/sqlite3
 -D_FORTIFY_SOURCE=1
 -DBAZEL_CURRENT_REPOSITORY=\"\"
 -DCAPNP_VERSION=11000

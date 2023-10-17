@@ -13,6 +13,7 @@ node_modules
 /npm/*/bin
 /npm/workerd/install.js
 /npm/workerd/lib/
+package-lock.json
 
 # The external link for compile_flags.txt: Differs on Windows vs macOS/Linux, so we can't check it in. The pattern needs to not have a trailing / because it's a symlink on macOS/Linux.
 /external
