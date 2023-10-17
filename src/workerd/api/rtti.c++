@@ -55,6 +55,7 @@
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                           \
   F("r2-admin", EW_R2_PUBLIC_BETA_ADMIN_ISOLATE_TYPES)                         \
   F("r2", EW_R2_PUBLIC_BETA_ISOLATE_TYPES)                                     \
+  F("worker-rpc", EW_WORKER_RPC_ISOLATE_TYPES)                                 \
   F("scheduled", EW_SCHEDULED_ISOLATE_TYPES)                                   \
   F("streams", EW_STREAMS_ISOLATE_TYPES)                                       \
   F("trace", EW_TRACE_ISOLATE_TYPES)                                           \
