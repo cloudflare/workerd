@@ -8,7 +8,10 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "scheduler-test.js")
         ],
         compatibilityDate = "2023-01-15",
-        compatibilityFlags = ["nodejs_compat"]
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          (name = "subrequest", service = "scheduler-test")
+        ]
       )
     ),
   ],

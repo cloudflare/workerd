@@ -166,6 +166,11 @@ export const basicEventTarget = {
       handleEvent: handler
     };
 
+    throws(() => target.addEventListener('foo', {}));
+    throws(() => target.addEventListener('foo', 'hello'));
+    throws(() => target.addEventListener('foo', []));
+    throws(() => target.addEventListener('foo', false));
+
     // Event listener with no options
     target.addEventListener('foo', handler);
 
@@ -174,8 +179,17 @@ export const basicEventTarget = {
 
     target.addEventListener('foo', handlerObj);
 
+    let classCalled;
+    const foo = new (class Foo {
+      handleEvent(event) {
+        classCalled = true;
+      }
+    });
+    target.addEventListener('foo', foo);
+
     target.dispatchEvent(event);
 
+    strictEqual(classCalled, true);
     strictEqual(event.eventPhase, Event.NONE);
     strictEqual(event.currentTarget, target);
 
