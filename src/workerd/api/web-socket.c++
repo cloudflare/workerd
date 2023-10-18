@@ -333,7 +333,8 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(kj::Own<kj::WebSocket> other)
   if (locality == LOCAL) {
     // Since the WebSocket is terminated locally, we need the IoContext to stay live while
     // it is active.
-    co_return co_await promise;
+    co_await promise;
+    co_return;
   } else {
     // Since the WebSocket is just proxying through, we can do the pump in a deferred proxy task.
     // Note that we don't need to (and can't) register any pending events in this case since the
