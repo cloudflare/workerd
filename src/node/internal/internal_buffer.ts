@@ -35,7 +35,7 @@ import {
   validateString,
 } from 'node-internal:validators';
 
-import internalInspect from 'node-internal:inspect';
+import internalUtil from 'node-internal:util';
 import {
   InspectOptionsStylized,
   inspect as utilInspect,
@@ -600,9 +600,9 @@ Buffer.prototype.inspect = function inspect(_recurseTimes: number, ctx: InspectO
   // Inspect special properties as well, if possible.
     if (ctx) {
       let extras = false;
-      const filter = ctx.showHidden ? internalInspect.ALL_PROPERTIES : internalInspect.ONLY_ENUMERABLE;
+      const filter = ctx.showHidden ? internalUtil.ALL_PROPERTIES : internalUtil.ONLY_ENUMERABLE;
       const obj: Record<PropertyKey, unknown> = { __proto__: null };
-      internalInspect.getOwnNonIndexProperties(this, filter).forEach(
+      internalUtil.getOwnNonIndexProperties(this, filter).forEach(
         (key) => {
           extras = true;
           obj[key] = this[key];

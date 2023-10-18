@@ -29,7 +29,7 @@
 /* todo: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import internal from "node-internal:inspect";
+import internal from "node-internal:util";
 
 import { Buffer } from "node-internal:internal_buffer";
 import {

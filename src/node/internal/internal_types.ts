@@ -23,7 +23,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import internal from "node-internal:inspect";
+import internal from "node-internal:util";
 
 export function isCryptoKey(value: unknown): boolean {
   return value instanceof CryptoKey;

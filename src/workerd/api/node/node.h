@@ -4,7 +4,6 @@
 #include "buffer.h"
 #include "crypto.h"
 #include "diagnostics-channel.h"
-#include "inspect.h"
 #include "util.h"
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
@@ -41,7 +40,6 @@ void registerNodeJsCompatModules(
   V(AsyncHooksModule, "node-internal:async_hooks")                              \
   V(BufferUtil, "node-internal:buffer")                                         \
   V(CryptoImpl, "node-internal:crypto")                                         \
-  V(InspectModule, "node-internal:inspect")                                     \
   V(UtilModule, "node-internal:util")                                           \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
 
@@ -75,7 +73,6 @@ void registerNodeJsCompatModules(
   EW_NODE_BUFFER_ISOLATE_TYPES,            \
   EW_NODE_CRYPTO_ISOLATE_TYPES,            \
   EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, \
-  EW_NODE_INSPECT_ISOLATE_TYPES,           \
   EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,        \
   EW_NODE_UTIL_ISOLATE_TYPES
 
