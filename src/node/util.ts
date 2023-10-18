@@ -17,11 +17,18 @@ import {
   ERR_INVALID_ARG_TYPE,
 } from 'node-internal:internal_errors';
 
+import {
+  inspect,
+  format,
+  formatWithOptions,
+  stripVTControlCharacters,
+} from 'node-internal:internal_inspect';
 export {
-  format
-} from 'node-internal:internal_format';
-
-import { format } from 'node-internal:internal_format';
+  inspect,
+  format,
+  formatWithOptions,
+  stripVTControlCharacters,
+};
 
 export const types = internalTypes;
 
@@ -168,7 +175,10 @@ export default {
   types,
   callbackify,
   promisify,
+  inspect,
   format,
+  formatWithOptions,
+  stripVTControlCharacters,
   inherits,
   _extend,
   MIMEParams,
@@ -178,18 +188,12 @@ export default {
 // Node.js util APIs we're currently not supporting
 // TODO(soon): Revisit these
 //
-// inspect -- the primary use case for inspect is debug/development output. Node.js'
-//            implementation if very complex/sophisticated and it's just not clear
-//            yet if the use cases for it make sense in workerd. It's better to omit
-//            it entirely for now while we decide if we ultimately do want to implement
-//            a port / analog of the Node.js algorithm.
 // debug/debuglog -- The semantics of these depend on configuration through environment
 //                   variables to enable specific debug categories. We have no notion
 //                   of that in the runtime currently and it's not yet clear if we should.
 // deprecate -- Not clear how broadly this is used in the ecosystem outside of node.js
 // getSystemErrorMap/getSystemErrorName -- libuv specific. No use in workerd?
 // is{Type} variants -- these are deprecated in Node. Use util.types
-// stripVTControlCharacters -- No use in workerd?
 // toUSVString -- Not clear how broadly this is used in the ecosystem outside of node.js.
 //                also this is soon to be obsoleted by toWellFormed in the language.
 // transferableAbortSignal/transferableAbortController -- postMessage and worker threads

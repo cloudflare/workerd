@@ -341,6 +341,8 @@ public:
                                               const kj::Path& specifier,
                                               const kj::Path& referrer) = 0;
 
+  virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
+
   // The dynamic import callback is provided by the embedder to set up any context necessary
   // for instantiating the module during a dynamic import. The handler function passed into
   // the callback is called to actually perform the instantiation of the module.
@@ -387,10 +389,14 @@ public:
     entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addBuiltinBundle(Bundle::Reader bundle) {
+  void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
-      // TODO: asChars() might be wrong for wide characters
-      addBuiltinModule(module.getName(), module.getSrc().asChars(), module.getType());
+      auto type = module.getType();
+      auto filter = maybeFilter.orDefault(type);
+      if (type == filter) {
+        // TODO: asChars() might be wrong for wide characters
+        addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
+      }
     }
   }
 
@@ -516,6 +522,16 @@ public:
 
     return js.rejectedPromise<Value>(
         js.v8Error(kj::str("No such module \"", specifier.toString(), "\".")));
+  }
+
+  Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) override {
+    auto specifierPath = kj::Path(specifier);
+    auto resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
+    auto maybeModuleInfo = resolve(js, specifierPath, resolveOption);
+    auto moduleInfo = &KJ_REQUIRE_NONNULL(maybeModuleInfo, "No such module \"", specifier, "\".");
+    auto handle = moduleInfo->module.getHandle(js);
+    jsg::instantiateModule(js, handle);
+    return js.v8Ref(handle->GetModuleNamespace());
   }
 
   CompilationObserver& getObserver() { return observer; }

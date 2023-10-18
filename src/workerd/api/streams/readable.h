@@ -270,6 +270,10 @@ public:
   // data as this ReadableStream would.
   kj::Array<jsg::Ref<ReadableStream>> tee(jsg::Lock& js);
 
+  jsg::JsString inspectState(jsg::Lock& js);
+  bool inspectSupportsBYOB();
+  jsg::Optional<uint64_t> inspectLength();
+
   JSG_RESOURCE_TYPE(ReadableStream, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(locked, isLocked);
@@ -282,6 +286,10 @@ public:
     JSG_METHOD(pipeTo);
     JSG_METHOD(tee);
     JSG_METHOD(values);
+
+    JSG_INSPECT_PROPERTY(state, inspectState);
+    JSG_INSPECT_PROPERTY(supportsBYOB, inspectSupportsBYOB);
+    JSG_INSPECT_PROPERTY(length, inspectLength);
 
     JSG_ASYNC_ITERABLE(values);
 

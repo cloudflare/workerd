@@ -135,6 +135,9 @@ public:
 
   jsg::Ref<WritableStreamDefaultWriter> getWriter(jsg::Lock& js);
 
+  jsg::JsString inspectState(jsg::Lock& js);
+  bool inspectExpectsBytes();
+
   JSG_RESOURCE_TYPE(WritableStream, CompatibilityFlags::Reader flags) {
     if (flags.getJsgPropertyOnPrototypeTemplate()) {
       JSG_READONLY_PROTOTYPE_PROPERTY(locked, isLocked);
@@ -144,6 +147,9 @@ public:
     JSG_METHOD(abort);
     JSG_METHOD(close);
     JSG_METHOD(getWriter);
+
+    JSG_INSPECT_PROPERTY(state, inspectState);
+    JSG_INSPECT_PROPERTY(expectsBytes, inspectExpectsBytes);
 
     JSG_TS_OVERRIDE(<W = any> {
       getWriter(): WritableStreamDefaultWriter<W>;

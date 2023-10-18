@@ -594,6 +594,9 @@ struct MemberCounter {
   template<const char* name, const char* moduleName, bool readOnly>
   inline void registerLazyJsInstanceProperty() { ++members; }
 
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerInspectProperty() { /* not included */ }
+
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) { ++members; }
 
@@ -713,6 +716,9 @@ struct MembersBuilder {
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
+
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerInspectProperty() { }
 
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) {

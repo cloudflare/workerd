@@ -613,6 +613,8 @@ public:
 
   bool isClosedOrErrored() const override;
 
+  bool isClosed() const override;
+
   bool isLockedToReader() const override;
 
   bool lockReader(jsg::Lock& js, Reader& reader) override;
@@ -777,6 +779,9 @@ public:
   }
 
   bool isClosedOrClosing() override;
+  bool isErrored() override;
+
+  inline bool isByteOriented() const override { return false; }
 
 private:
   jsg::Promise<void> pipeLoop(jsg::Lock& js);
@@ -2343,6 +2348,13 @@ bool ReadableStreamJsController::isClosedOrErrored() const {
   return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();
 }
 
+bool ReadableStreamJsController::isClosed() const {
+  KJ_IF_SOME(s, maybePendingState) {
+    return s.is<StreamStates::Closed>();
+  }
+  return state.is<StreamStates::Closed>();
+}
+
 bool ReadableStreamJsController::isDisturbed() { return disturbed; }
 
 bool ReadableStreamJsController::isLockedToReader() const {
@@ -3402,7 +3414,11 @@ jsg::Ref<WritableStream> WritableStreamJsController::addRef() {
 }
 
 bool WritableStreamJsController::isClosedOrClosing() {
-  KJ_UNIMPLEMENTED("Only defined in WritableStreamInternalController.");
+  return state.is<StreamStates::Closed>();
+}
+
+bool WritableStreamJsController::isErrored() {
+  return state.is<StreamStates::Errored>();
 }
 
 jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsHandled) {

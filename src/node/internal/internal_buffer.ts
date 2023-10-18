@@ -35,6 +35,12 @@ import {
   validateString,
 } from 'node-internal:validators';
 
+import internalUtil from 'node-internal:util';
+import {
+  InspectOptionsStylized,
+  inspect as utilInspect,
+} from 'node-internal:internal_inspect';
+
 // Temporary buffers to convert numbers.
 const float32Array = new Float32Array(1);
 const uInt8Float32Array = new Uint8Array(float32Array.buffer);
@@ -54,13 +60,12 @@ export const kStringMaxLength = 536870888;
 const MAX_UINT32 = 2 ** 32;
 const kIsBuffer = Symbol('kIsBuffer');
 
-// TODO(soon): Implement inspect
-// const customInspectSymbol =
-//   typeof Symbol === "function" && typeof Symbol["for"] === "function"
-//     ? Symbol["for"]("nodejs.util.inspect.custom")
-//     : null;
+const customInspectSymbol =
+  typeof Symbol === "function" && typeof Symbol["for"] === "function"
+    ? Symbol["for"]("nodejs.util.inspect.custom")
+    : null;
 
-// const INSPECT_MAX_BYTES = 50;
+const INSPECT_MAX_BYTES = 50;
 
 export const constants = {
   MAX_LENGTH: kMaxLength,
@@ -584,20 +589,42 @@ Buffer.prototype.equals = function equals(b: Buffer|Uint8Array) {
   return compare(this, b) === 0;
 };
 
-// TODO(soon): Implement inspect
-// Buffer.prototype.inspect = function inspect() {
-//   let str = "";
-//   const max = INSPECT_MAX_BYTES;
-//   str = this.toString("hex", 0, max).replace(/(.{2})/g, "$1 ").trim();
-//   if (this.length > max) {
-//     str += " ... ";
-//   }
-//   return "<Buffer " + str + ">";
-// };
+Buffer.prototype.inspect = function inspect(_recurseTimes: number, ctx: InspectOptionsStylized) {
+  let str = "";
+  const max = INSPECT_MAX_BYTES;
+  str = this.toString("hex", 0, max).replace(/(.{2})/g, "$1 ").trim();
+  const remaining = this.length - max;
+  if (remaining > 0) {
+    str += ` ... ${remaining} more byte${remaining > 1 ? 's' : ''}`;
+  }
+  // Inspect special properties as well, if possible.
+    if (ctx) {
+      let extras = false;
+      const filter = ctx.showHidden ? internalUtil.ALL_PROPERTIES : internalUtil.ONLY_ENUMERABLE;
+      const obj: Record<PropertyKey, unknown> = { __proto__: null };
+      internalUtil.getOwnNonIndexProperties(this, filter).forEach(
+        (key) => {
+          extras = true;
+          obj[key] = this[key];
+      });
+      if (extras) {
+        if (this.length !== 0)
+          str += ', ';
+        // '[Object: null prototype] {'.length === 26
+        // This is guarded with a test.
+        str += utilInspect(obj, {
+          ...ctx,
+          breakLength: Infinity,
+          compact: true,
+        }).slice(27, -2);
+      }
+    }
+  return "<Buffer " + str + ">";
+};
 
-// if (customInspectSymbol) {
-//   Buffer.prototype[customInspectSymbol] = Buffer.prototype.inspect;
-// }
+if (customInspectSymbol) {
+  Buffer.prototype[customInspectSymbol] = Buffer.prototype.inspect;
+}
 
 Buffer.prototype.compare = function compare(
   target: Buffer|Uint8Array,

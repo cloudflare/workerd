@@ -612,7 +612,16 @@ struct ResourceTypeBuilder {
         constructor(constructor),
         instance(instance),
         prototype(prototype),
-        signature(signature) { }
+        signature(signature) {
+    // Mark the prototype as belonging to a resource type. Calling `util.inspect()` will see this
+    // symbol and trigger custom inspect handling. This value of this symbol property maps names
+    // names of internal pseudo-properties to symbol-keyed-getters for accessing them.
+    // See `JSG_INSPECT_PROPERTY` for more details.
+    auto symbol = v8::Symbol::ForApi(isolate, v8StrIntern(isolate, "kResourceTypeInspect"_kj));
+    inspectProperties = v8::ObjectTemplate::New(isolate);
+    prototype->Set(symbol, inspectProperties, static_cast<v8::PropertyAttribute>(
+      v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+  }
 
   template<typename Type>
   inline void registerInherit() {
@@ -736,6 +745,26 @@ struct ResourceTypeBuilder {
   template<const char* name, const char* moduleName, bool readonly>
   inline void registerLazyJsInstanceProperty() { /* implemented in second stage */ }
 
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerInspectProperty() {
+    using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
+
+    auto v8Name = v8StrIntern(isolate, name);
+
+    // Create a new unique symbol so this property can only be access through `util.inspect()`
+    auto symbol = v8::Symbol::New(isolate, v8Name);
+    inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
+
+    prototype->SetAccessor(
+        symbol,
+        &Gcb::callback,
+        nullptr,
+        v8::Local<v8::Value>(),
+        v8::AccessControl::DEFAULT,
+        static_cast<v8::PropertyAttribute>(
+          v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+  }
+
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) {
     // The main difference between this and a read-only property is that a static constant has no
@@ -795,6 +824,7 @@ private:
   v8::Local<v8::FunctionTemplate> constructor;
   v8::Local<v8::ObjectTemplate> instance;
   v8::Local<v8::ObjectTemplate> prototype;
+  v8::Local<v8::ObjectTemplate> inspectProperties;
   v8::Local<v8::Signature> signature;
 };
 
@@ -877,6 +907,9 @@ struct JsSetup {
 
   template<const char* name, typename Getter, Getter getter, bool readOnly>
   inline void registerLazyInstanceProperty() { }
+
+  template<const char* name, typename Getter, Getter getter>
+  inline void registerInspectProperty() { }
 
   template<const char* name, typename T>
   inline void registerStaticConstant(T value) { }

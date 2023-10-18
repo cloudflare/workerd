@@ -7,6 +7,7 @@
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
 #include <workerd/util/batch-queue.h>
+#include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -35,10 +36,12 @@
 
 #if _WIN32
 #include <kj/win32-api-version.h>
+#include <io.h>
 #include <windows.h>
 #include <kj/windows-sanity.h>
 #else
 #include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 namespace v8_inspector {
@@ -158,6 +161,7 @@ const capnp::JsonCodec& getCdpJsonCodec() {
   static const kj::Own<capnp::JsonCodec> codec = makeCdpJsonCodec();
   return *codec;
 }
+
 }  // namespace
 
 // =======================================================================================
@@ -579,6 +583,7 @@ struct Worker::Isolate::Impl {
           progressCounter(impl.lockSuccessCount),
           oldCurrentApiIsolate(currentApiIsolate),
           limitEnforcer(isolate.getLimitEnforcer()),
+          consoleMode(isolate.consoleMode),
           lock(isolate.apiIsolate->lock(stackScope)) {
       if (warnAboutIsolateLockScopeCount > 0) {
         KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
@@ -631,29 +636,31 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(v8_inspector::V8ContextInfo(context, 1, toStringView("Worker")));
       }
 
-      if (impl.inspector == kj::none) {
-        // When not running in preview mode, we replace the default V8 console.log(), etc. methods,
-        // to give the worker access to logged content.
-        auto global = context->Global();
-        auto consoleStr = jsg::v8StrIntern(lock->v8Isolate, "console");
-        auto console = jsg::check(global->Get(context, consoleStr));
+      // We replace the default V8 console.log(), etc. methods, to give the worker access to
+      // logged content, and log formatted values to stdout/stderr locally.
+      auto global = context->Global();
+      auto consoleStr = jsg::v8StrIntern(lock->v8Isolate, "console");
+      auto console = jsg::check(global->Get(context, consoleStr)).As<v8::Object>();
+      auto mode = consoleMode;
 
-        auto setHandler = [&](const char* method, LogLevel level) {
-          auto methodStr = jsg::v8StrIntern(lock->v8Isolate, method);
+      auto setHandler = [&](const char* method, LogLevel level) {
+        auto methodStr = jsg::v8StrIntern(lock->v8Isolate, method);
+        v8::Global<v8::Function> original(
+          lock->v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
 
-          auto f = lock->wrapSimpleFunction(context,
-              [level](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-            handleLog(js, level, info);
-          });
-          jsg::check(console.As<v8::Object>()->Set(context, methodStr, f));
-        };
+        auto f = lock->wrapSimpleFunction(context,
+            [mode, level, original = kj::mv(original)](jsg::Lock& js,
+                const v8::FunctionCallbackInfo<v8::Value>& info) {
+          handleLog(js, mode, level, original, info);
+        });
+        jsg::check(console->Set(context, methodStr, f));
+      };
 
-        setHandler("debug", LogLevel::DEBUG_);
-        setHandler("error", LogLevel::ERROR);
-        setHandler("info", LogLevel::INFO);
-        setHandler("log", LogLevel::LOG);
-        setHandler("warn", LogLevel::WARN);
-      }
+      setHandler("debug", LogLevel::DEBUG_);
+      setHandler("error", LogLevel::ERROR);
+      setHandler("info", LogLevel::INFO);
+      setHandler("log", LogLevel::LOG);
+      setHandler("warn", LogLevel::WARN);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -687,6 +694,8 @@ struct Worker::Isolate::Impl {
     const ApiIsolate* oldCurrentApiIsolate;
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
+
+    ConsoleMode consoleMode;
 
   public:
     kj::Own<jsg::Lock> lock;
@@ -1025,10 +1034,12 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
                          kj::Own<IsolateObserver>&& metricsParam,
                          kj::StringPtr id,
                          kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
-                         InspectorPolicy inspectorPolicy)
+                         InspectorPolicy inspectorPolicy,
+                         ConsoleMode consoleMode)
     : id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       apiIsolate(kj::mv(apiIsolateParam)),
+      consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(apiIsolate->getFeatureFlags()))),
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, inspectorPolicy)),
@@ -1533,7 +1544,17 @@ Worker::~Worker() noexcept(false) {
   lock->push(kj::mv(impl));
 }
 
-void Worker::handleLog(jsg::Lock& js, LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info) {
+void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
+                          const v8::Global<v8::Function>& original,
+                          const v8::FunctionCallbackInfo<v8::Value>& info) {
+  // Call original V8 implementation so messages sent to connected inspector if any
+  // TODO(now): does this need to run within a handle scope?
+  auto context = js.v8Context();
+  int length = info.Length();
+  v8::Local<v8::Value> args[length + 1]; // + 1 used for `colors` later
+  for (auto i: kj::zeroTo(length)) args[i] = info[i];
+  jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args));
+
   // The TryCatch is initialised here to catch cases where the v8 isolate's execution is
   // terminating, usually as a result of an infinite loop. We need to perform the initialisation
   // here because `message` is called multiple times.
@@ -1621,10 +1642,39 @@ void Worker::handleLog(jsg::Lock& js, LogLevel level, const v8::FunctionCallback
     }
   }
 
-  // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
-  // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will not
-  // even evaluate its arguments, so `message()` will not be called at all.
-  KJ_LOG(INFO, "console.log()", message());
+  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+    // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
+    // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will
+    // not even evaluate its arguments, so `message()` will not be called at all.
+    KJ_LOG(INFO, "console.log()", message());
+  } else {
+    // Write to stdio if allowed by console mode
+    static bool PERMITS_COLOR = permitsColor();
+#if _WIN32
+    static bool STDOUT_TTY = _isatty(_fileno(stdout));
+    static bool STDERR_TTY = _isatty(_fileno(stderr));
+#else
+    static bool STDOUT_TTY = isatty(STDOUT_FILENO);
+    static bool STDERR_TTY = isatty(STDERR_FILENO);
+#endif
+
+    // Log warnings and errors to stderr
+    auto useStderr = level >= LogLevel::WARN;
+    auto fd  = useStderr ? stderr     : stdout;
+    auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
+    auto colors = PERMITS_COLOR && tty;
+
+    // TODO(now): does this need to run within a handle scope?
+    auto registry = jsg::ModuleRegistry::from(js);
+    auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
+    auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
+    auto formatLog = js.v8Get(inspectModuleHandle, "formatLog"_kj).As<v8::Function>();
+
+    auto recv = js.v8Undefined();
+    args[length] = v8::Boolean::New(js.v8Isolate, colors);
+    auto formatted = js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args)));
+    fprintf(fd, "%s\n", formatted.cStr());
+  }
 }
 
 Worker::Lock::TakeSynchronously::TakeSynchronously(
@@ -2691,6 +2741,7 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
+  // TODO(now): should these be logged to stderr like `console.warn()`?
   // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
   KJ_LOG(INFO, "console warning", description);
 }

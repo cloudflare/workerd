@@ -78,6 +78,13 @@ public:
 
   class LockType;
 
+  enum ConsoleMode {
+    // Only send `console.log`s to the inspector. Default, production behaviour.
+    INSPECTOR_ONLY,
+    // Send `console.log`s to the inspector and stdout/err. Behaviour running `workerd` locally.
+    STDOUT,
+  };
+
   explicit Worker(kj::Own<const Script> script,
                   kj::Own<WorkerObserver> metrics,
                   kj::FunctionParam<void(
@@ -183,8 +190,9 @@ private:
   class InspectorClient;
   class AsyncWaiter;
 
-  static void handleLog(
-      jsg::Lock& js, LogLevel level, const v8::FunctionCallbackInfo<v8::Value>& info);
+  static void handleLog(jsg::Lock& js, ConsoleMode mode, LogLevel level,
+                          const v8::Global<v8::Function>& original,
+                          const v8::FunctionCallbackInfo<v8::Value>& info);
 };
 
 // A compiled script within an Isolate, but which hasn't been instantiated into a particular
@@ -273,7 +281,8 @@ public:
                    kj::Own<IsolateObserver>&& metrics,
                    kj::StringPtr id,
                    kj::Own<IsolateLimitEnforcer> limitEnforcer,
-                   InspectorPolicy inspectorPolicy);
+                   InspectorPolicy inspectorPolicy,
+                   ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -393,6 +402,7 @@ private:
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<ApiIsolate> apiIsolate;
+  ConsoleMode consoleMode;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.

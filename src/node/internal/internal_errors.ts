@@ -29,6 +29,8 @@
 
 // TODO(soon): Fill in more of the internal/errors implementation
 
+import { inspect } from "node-internal:internal_inspect";
+
 const classRegExp = /^([A-Z][a-z0-9]*)+$/;
 
 const kTypes = [
@@ -183,13 +185,9 @@ function invalidArgTypeHelper(input: any) {
     if (input.constructor && input.constructor.name) {
       return ` Received an instance of ${input.constructor.name}`;
     }
-    return ` Received ${typeof input}`;
-    // TODO(later): Implement inspect
-    // return ` Received ${inspect(input, { depth: -1 })}`;
+    return ` Received ${inspect(input, { depth: -1 })}`;
   }
-  let inspected = `${input}`;
-  // TODO(later): Implement inspect
-  // let inspected = inspect(input, { colors: false });
+  let inspected = inspect(input, { colors: false });
   if (inspected.length > 25) {
     inspected = `${inspected.slice(0, 25)}...`;
   }
@@ -257,9 +255,7 @@ export class ERR_INVALID_ARG_TYPE extends NodeTypeError {
 export class ERR_INVALID_ARG_VALUE_RANGE extends NodeRangeError {
   constructor(name: string, value: unknown, reason: string = "is invalid") {
     const type = name.includes(".") ? "property" : "argument";
-    const inspected = `${value}`;
-    // TODO(soon): Implement inspect
-    // const inspected = inspect(value);
+    const inspected = inspect(value);
 
     super(
       "ERR_INVALID_ARG_VALUE",
@@ -271,9 +267,7 @@ export class ERR_INVALID_ARG_VALUE_RANGE extends NodeRangeError {
 export class ERR_INVALID_ARG_VALUE extends NodeTypeError {
   constructor(name: string, value: unknown, reason: string = "is invalid") {
     const type = name.includes(".") ? "property" : "argument";
-    const inspected = `${value}`;
-    // TODO(soon): Implement inspect
-    // const inspected = inspect(value);
+    const inspected = inspect(value);
 
     super(
       "ERR_INVALID_ARG_VALUE",
@@ -307,9 +301,7 @@ export class ERR_OUT_OF_RANGE extends RangeError {
       }
       received += "n";
     } else {
-      received = `${input}`;
-      // TODO(later): Implement inspect
-      // received = inspect(input);
+      received = inspect(input);
     }
     msg += ` It must be ${range}. Received ${received}`;
 
@@ -393,13 +385,9 @@ function determineSpecificType(value: any) {
     if (value.constructor?.name) {
       return `an instance of ${value.constructor.name}`;
     }
-    return `${value}`;
-    // TODO(soon): Implement inspect
-    // return `${inspect(value, { depth: -1 })}`;
+    return `${inspect(value, { depth: -1 })}`;
   }
-  let inspected = `${value}`;
-  // TODO(soon): Implement inspect
-  // let inspected = inspect(value, { colors: false });
+  let inspected = inspect(value, { colors: false });
   if (inspected.length > 28) inspected = `${inspected.slice(0, 25)}...`;
 
   return `type ${typeof value} (${inspected})`;

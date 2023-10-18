@@ -180,6 +180,22 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v
   KJ_UNREACHABLE;
 }
 
+jsg::JsString WritableStream::inspectState(jsg::Lock& js) {
+  if (controller->isErrored()) {
+    return js.strIntern("errored");
+  } else if (controller->isErroring(js) != kj::none) {
+    return js.strIntern("erroring");
+  } else if (controller->isClosedOrClosing()) {
+    return js.strIntern("closed");
+  } else {
+    return js.strIntern("writable");
+  }
+}
+
+bool WritableStream::inspectExpectsBytes() {
+  return controller->isByteOriented();
+}
+
 void WritableStreamDefaultWriter::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(closedPromise, readyPromise);
 }

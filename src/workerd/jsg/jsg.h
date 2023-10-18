@@ -367,6 +367,18 @@ namespace workerd::jsg {
     registry.template registerLazyJsInstanceProperty<NAME, MODULE_NAME, true>(); \
   } while (false)
 
+// Use inside a JSG_RESOURCE_TYPE block to declare a property that should be shown when calling
+// `node:util`'s `inspect()` function on values of this type. These properties will be shown when
+// `console.log()`ing too, and should be used to expose internal state useful for debugging.
+// `name` is the name of the property (displayed in square brackets), while `getter` is the name of
+// the C++ method that gets this property's value.
+#define JSG_INSPECT_PROPERTY(name, getter) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerInspectProperty< \
+        NAME, decltype(&Self::getter), &Self::getter>(); \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE to create a static constant member on the constructor and
 // prototype of this object. Only primitive data types (booleans, strings, numbers) are allowed.
 // Unlike the JSG_INSTANCE_PROPERTY and JSG_READONLY_PROPERTY macros, this does not use a getter
@@ -1820,7 +1832,9 @@ class JsMessage;
   V(Date) \
   V(RegExp) \
   V(Map) \
-  V(Set)
+  V(Set) \
+  V(Promise) \
+  V(Proxy)
 
 #define V(Name) class Js##Name;
   JS_TYPE_CLASSES(V)

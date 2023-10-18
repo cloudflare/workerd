@@ -49,6 +49,8 @@ import { spliceOne } from "node-internal:internal_utils";
 import { default as async_hooks } from "node-internal:async_hooks";
 const { AsyncResource } = async_hooks;
 
+import { inspect } from "node-internal:internal_inspect";
+
 const kRejection = Symbol.for("nodejs.rejection");
 const kCapture = Symbol("kCapture");
 const kErrorMonitor = Symbol("events.errorMonitor");
@@ -339,9 +341,7 @@ EventEmitter.prototype.emit = function emit(type : string | symbol, ...args: any
 
     let stringifiedEr;
     try {
-      stringifiedEr = `${er}`;
-      // TODO(soon): Implement inspect
-      // stringifiedEr = inspect(er);
+      stringifiedEr = inspect(er);
     } catch {
       stringifiedEr = er;
     }

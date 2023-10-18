@@ -411,6 +411,10 @@ void Headers::forEach(
   }
 }
 
+bool Headers::inspectImmutable() {
+  return guard != Guard::NONE;
+}
+
 // =======================================================================================
 
 namespace {

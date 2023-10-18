@@ -407,9 +407,7 @@ export function buildMessage(
   messages.push("");
   messages.push("");
   diffResult.forEach((result: DiffResult<string>) => {
-    const line = result.details?.map((detail) =>
-      detail.type !== detail.value
-    ).join("") ?? result.value;
+    const line = result.details?.map((detail) => detail.value).join("") ?? result.value;
     diffMessages.push(`${createSign(result.type)}${line}`);
   });
   messages.push(...(stringDiff ? [diffMessages.join("")] : diffMessages));

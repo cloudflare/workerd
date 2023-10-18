@@ -60,7 +60,12 @@ void registerNodeJsCompatModules(
 #undef V
 #undef NODEJS_MODULES
 
-  registry.addBuiltinBundle(NODE_BUNDLE);
+  // If the `nodejs_compat` flag isn't enabled, only register internal modules.
+  // We need these for `console.log()`ing when running `workerd` locally.
+  kj::Maybe<jsg::ModuleType> maybeFilter;
+  if (!featureFlags.getNodeJsCompat()) maybeFilter = jsg::ModuleType::INTERNAL;
+
+  registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
 }
 
 #define EW_NODE_ISOLATE_TYPES              \

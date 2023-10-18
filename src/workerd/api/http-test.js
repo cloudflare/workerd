@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from "node:assert";
+import util from "node:util";
 
 let scheduledLastCtrl;
 
@@ -70,3 +71,89 @@ export default {
     }
   }
 }
+
+export const inspect = {
+  async test(ctrl, env, ctx) {
+    // Check URL with duplicate search param keys
+    const url = new URL("http://user:pass@placeholder:8787/path?a=1&a=2&b=3");
+    assert.strictEqual(util.inspect(url),
+`URL {
+  searchParams: URLSearchParams(3) { 'a' => '1', 'a' => '2', 'b' => '3' },
+  hash: '',
+  search: '?a=1&a=2&b=3',
+  pathname: '/path',
+  port: '8787',
+  hostname: 'placeholder',
+  host: 'placeholder:8787',
+  password: 'pass',
+  username: 'user',
+  protocol: 'http:',
+  href: 'http://user:pass@placeholder:8787/path?a=1&a=2&b=3',
+  origin: 'http://placeholder:8787'
+}`
+    );
+
+    // Check FormData with lower depth
+    const formData = new FormData();
+    formData.set("string", "hello");
+    formData.set("blob", new Blob(["<h1>BLOB</h1>"], {
+      type: "text/html"
+    }));
+    formData.set("file", new File(["password123"], "passwords.txt", {
+      type: "text/plain",
+      lastModified: 1000
+    }));
+    assert.strictEqual(util.inspect(formData, { depth: 0 }),
+`FormData(3) { 'string' => 'hello', 'blob' => [File], 'file' => [File] }`
+    );
+
+    // Check request with mutable headers
+    const request = new Request("http://placeholder", {
+      method: "POST",
+      body: "message",
+      headers: { "Content-Type": "text/plain" }
+    });
+    assert.strictEqual(util.inspect(request),
+`Request {
+  keepalive: false,
+  integrity: '',
+  cf: undefined,
+  signal: AbortSignal { reason: undefined, aborted: false },
+  fetcher: null,
+  redirect: 'follow',
+  headers: Headers(1) { 'content-type' => 'text/plain', [immutable]: false },
+  url: 'http://placeholder',
+  method: 'POST',
+  bodyUsed: false,
+  body: ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: 7n
+  }
+}`
+    );
+
+    // Check response with immutable headers
+    const response = await env.SERVICE.fetch("http://placeholder/not-found");
+    assert.strictEqual(util.inspect(response),
+`Response {
+  cf: undefined,
+  webSocket: null,
+  url: 'http://placeholder/not-found',
+  redirected: false,
+  ok: false,
+  headers: Headers(0) { [immutable]: true },
+  statusText: 'Not Found',
+  status: 404,
+  bodyUsed: false,
+  body: ReadableStream {
+    locked: false,
+    [state]: 'readable',
+    [supportsBYOB]: true,
+    [length]: 0n
+  }
+}`
+    );
+  }
+};
