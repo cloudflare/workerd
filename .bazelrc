@@ -2,6 +2,17 @@ common --enable_platform_specific_config
 build --verbose_failures
 build --build_tag_filters=-off-by-default
 
+# Not using bzlmod for dependencies yet
+common --noenable_bzlmod
+
+# TODO(soon): bazel7 enables Build without the Bytes (BwoB) by default. This could significantly
+# speed up builds using the remote cache since less data needs to be fetched. Unfortunately, it
+# appears to cause build failures due to https://github.com/bazelbuild/bazel/issues/20559 at this
+# time. Use --remote_download_all to disable BwoB for now.
+# When that issue and https://github.com/bazelbuild/bazel/issues/20576 have been addressed, we can
+# also explore --remote_download_minimal.
+build --remote_download_all
+
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
@@ -39,10 +50,6 @@ build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
 # spaces. This flag is enabled in the default GN build anyway, so define it on all platforms for
 # now.
 build --per_file_copt='external/v8@-DV8_EXTERNAL_CODE_SPACE'
-
-# Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
-# https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
-build --reuse_sandbox_directories
 
 # optimized LTO build. you'll need a fairly recent clang for this to work
 build:thin-lto -c opt
@@ -176,7 +183,10 @@ build:windows --enable_runfiles
 # `#pragma once` when using symlinked virtual includes, `__atomic_*` functions,
 # a standards-compliant preprocessor, support for GNU statement expressions
 # used by some KJ macros, and understands the `.c++` extension by default.
-build:windows --compiler=clang-cl
+# As of bazel 7, incompatible_enable_cc_toolchain_resolution is enabled by default, so we need to
+# define a platform for the clang-cl build.
+build:windows --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows-clang-cl
+build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 
 # The Windows fastbuild bazel configuration is broken in that it necessarily generates PDB debug
 # information while the Linux and macOS toolchains only compile with debug information in the dbg

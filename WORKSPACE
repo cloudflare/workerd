@@ -19,6 +19,21 @@ load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
 
+# Needed for objc_library starting with bazel 7.
+
+http_archive(
+    name = "build_bazel_apple_support",
+    sha256 = "cf4d63f39c7ba9059f70e995bf5fe1019267d3f77379c2028561a5d7645ef67c",
+    url = "https://github.com/bazelbuild/apple_support/releases/download/1.11.1/apple_support.1.11.1.tar.gz",
+)
+
+load(
+    "@build_bazel_apple_support//lib:repositories.bzl",
+    "apple_support_dependencies",
+)
+
+apple_support_dependencies()
+
 # ========================================================================================
 # Simple dependencies
 
@@ -503,7 +518,8 @@ new_local_repository(
           "@platforms//os:windows": ["ntdll.lib"],
           "//conditions:default": [""],
         }),
-        strip_include_prefix = "/",
+        include_prefix = "c-api/include",
+        strip_include_prefix = "c-api/include",
         visibility = ["//visibility:public"],)""",
     path = "empty",
 )
