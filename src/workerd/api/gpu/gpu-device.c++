@@ -12,6 +12,7 @@
 #include "gpu-query-set.h"
 #include "gpu-queue.h"
 #include "gpu-sampler.h"
+#include "gpu-texture.h"
 #include "gpu-utils.h"
 #include "workerd/jsg/exception.h"
 #include "workerd/jsg/jsg.h"
@@ -26,6 +27,49 @@ jsg::Ref<GPUBuffer> GPUDevice::createBuffer(jsg::Lock& js, GPUBufferDescriptor d
   desc.usage = static_cast<wgpu::BufferUsage>(descriptor.usage);
   auto buffer = device_.CreateBuffer(&desc);
   return jsg::alloc<GPUBuffer>(js, kj::mv(buffer), kj::mv(desc), device_, kj::addRef(*async_));
+}
+
+jsg::Ref<GPUTexture> GPUDevice::createTexture(jsg::Lock& js, GPUTextureDescriptor descriptor) {
+  wgpu::TextureDescriptor desc{};
+  desc.label = descriptor.label.cStr();
+
+  KJ_SWITCH_ONEOF(descriptor.size) {
+    KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
+      switch (coords.size()) {
+      default:
+      case 3:
+        desc.size.depthOrArrayLayers = coords[2];
+        KJ_FALLTHROUGH;
+      case 2:
+        desc.size.height = coords[1];
+        KJ_FALLTHROUGH;
+      case 1:
+        desc.size.width = coords[0];
+        break;
+      case 0:
+        JSG_FAIL_REQUIRE(TypeError, "invalid value for GPUExtent3D");
+      }
+    }
+    KJ_CASE_ONEOF(size, GPUExtent3DDict) {
+      desc.size.depthOrArrayLayers = size.depthOrArrayLayers.orDefault(1);
+      desc.size.height = size.height.orDefault(1);
+      desc.size.width = size.width;
+    }
+  }
+
+  desc.mipLevelCount = descriptor.mipLevelCount.orDefault(1);
+  desc.sampleCount = descriptor.sampleCount.orDefault(1);
+  desc.dimension = parseTextureDimension(descriptor.dimension.orDefault(kj::str("2d")));
+  desc.format = parseTextureFormat(descriptor.format);
+  desc.usage = static_cast<wgpu::TextureUsage>(descriptor.usage);
+  auto viewFormats = KJ_MAP(format, descriptor.viewFormats.orDefault({}))->wgpu::TextureFormat {
+    return parseTextureFormat(format);
+  };
+  desc.viewFormats = viewFormats.begin();
+  desc.viewFormatCount = viewFormats.size();
+
+  auto texture = device_.CreateTexture(&desc);
+  return jsg::alloc<GPUTexture>(kj::mv(texture));
 }
 
 wgpu::CompareFunction parseCompareFunction(kj::StringPtr compare) {

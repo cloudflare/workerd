@@ -21,6 +21,7 @@
 #include "gpu-shader-module.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
+#include "gpu-texture.h"
 #include "gpu-utils.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -70,6 +71,8 @@ private:
       api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits, api::gpu::GPUError,            \
       api::gpu::GPUOutOfMemoryError, api::gpu::GPUInternalError, api::gpu::GPUValidationError,     \
       api::gpu::GPUDeviceLostInfo, api::gpu::GPUCompilationMessage, api::gpu::GPUCompilationInfo,  \
-      api::gpu::GPUUncapturedErrorEvent, api::gpu::GPUUncapturedErrorEventInit
+      api::gpu::GPUUncapturedErrorEvent, api::gpu::GPUUncapturedErrorEventInit,                    \
+      api::gpu::GPUTextureUsage, api::gpu::GPUTextureDescriptor, api::gpu::GPUExtent3DDict,        \
+      api::gpu::GPUTexture
 
 }; // namespace workerd::api::gpu

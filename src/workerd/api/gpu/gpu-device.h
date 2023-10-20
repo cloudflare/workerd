@@ -18,6 +18,7 @@
 #include "gpu-shader-module.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
+#include "gpu-texture.h"
 #include "workerd/jsg/promise.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -40,6 +41,7 @@ public:
     JSG_METHOD(createPipelineLayout);
     JSG_METHOD(createComputePipeline);
     JSG_METHOD(createCommandEncoder);
+    JSG_METHOD(createTexture);
     JSG_METHOD(destroy);
     JSG_METHOD(createQuerySet);
     JSG_METHOD(pushErrorScope);
@@ -61,6 +63,7 @@ private:
   kj::Own<AsyncRunner> async_;
   bool destroyed_ = false;
   jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);
+  jsg::Ref<GPUTexture> createTexture(jsg::Lock&, GPUTextureDescriptor);
   jsg::Ref<GPUBindGroupLayout> createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
   jsg::Ref<GPUBindGroup> createBindGroup(GPUBindGroupDescriptor descriptor);
   jsg::Ref<GPUSampler> createSampler(GPUSamplerDescriptor descriptor);
