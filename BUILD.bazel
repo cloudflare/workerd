@@ -27,6 +27,16 @@ capnpc_ts_bin.capnpc_ts_binary(
     visibility = ["//visibility:public"],
 )
 
+# Platform definition for using clang-cl on Windows
+platform(
+    name = "x64_windows-clang-cl",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "@bazel_tools//tools/cpp:clang-cl",
+    ],
+)
+
 # bazel enables the --ffunction-sections, --gc-sections flags used to remove dead code by default
 # on Linux opt builds. Enable the equivalent macOS flag -Wl,-dead_strip here to work around bazel
 # idiosyncrasies.
