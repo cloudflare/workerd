@@ -142,6 +142,29 @@ async function test(storage) {
     'Error: Wrong number of parameter bindings for SQL query.'
   )
 
+  // Prepared statement with whitespace
+  const preparedWithSpace = sql.prepare('SELECT 1; ')
+  const resultPreparedWithSpace = [...preparedWithSpace()]
+
+  const preparedWithCr = sql.prepare('SELECT 1;\r')
+  const resultPreparedWithCr = [...preparedWithCr()]
+
+  const preparedWithLf = sql.prepare('SELECT 1;\n')
+  const resultPreparedWithLf = [...preparedWithLf()]
+
+  const preparedWithCrlf = sql.prepare('SELECT 1;\r\n')
+  const resultPreparedWithCrlf = [...preparedWithCrlf()]
+
+  assert.equal(resultPreparedWithSpace.length, 1)
+  assert.equal(resultPreparedWithCr.length, 1)
+  assert.equal(resultPreparedWithLf.length, 1)
+  assert.equal(resultPreparedWithCrlf.length, 1)
+
+  // Prepared statement with multiple statements
+  assert.throws(() => {
+    sql.prepare('SELECT 1; SELECT 2;');
+  }, /A prepared SQL statement must contain only one statement./)
+
   // Accessing a hidden _cf_ table
   assert.throws(
     () => sql.exec('CREATE TABLE _cf_invalid (name TEXT)'),

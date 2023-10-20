@@ -387,7 +387,7 @@ kj::Own<sqlite3_stmt> SqliteDatabase::prepareSql(
     SQLITE_REQUIRE(result != nullptr, "SQL code did not contain a statement.", sqlCode);
     auto ownResult = ownSqlite(result);
 
-    while (*tail == ' ' || *tail == '\n') ++tail;
+    while (*tail == ' ' || *tail == '\r' || *tail == '\n') ++tail;
 
     switch (multi) {
       case SINGLE:
