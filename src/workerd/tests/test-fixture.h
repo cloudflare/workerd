@@ -7,6 +7,7 @@
 #include <kj/function.h>
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/modules.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
@@ -96,6 +97,8 @@ private:
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
   kj::Own<Worker::ApiIsolate> apiIsolate;
+  kj::Own<IsolateObserver> isolateObserver;
+  kj::Own<jsg::modules::ModuleRegistry> moduleRegistry;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;

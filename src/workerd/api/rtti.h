@@ -7,11 +7,49 @@
 #include <initializer_list>
 #include <kj/array.h>
 #include <kj/string.h>
+#include <kj/vector.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/rtti.h>
 
 namespace workerd::api {
+
+static constexpr auto RTTI_MODULE_SPECIFIER = "workerd:rtti"_kjc;
+
+class RttiRegistry final {
+public:
+  RttiRegistry() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(RttiRegistry);
+
+  struct CppModuleContents final {
+    kj::String structureName;
+  };
+  struct TypeScriptModuleContents final {
+    kj::StringPtr tsDeclarations;
+  };
+
+  struct Module final {
+    kj::String specifier;
+    kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
+  };
+
+  void add(jsg::Bundle::Reader bundle);
+
+  template <typename T>
+  void add(kj::StringPtr specifier) {
+    modules.add(Module {
+      .specifier = kj::str(specifier),
+      .contents = CppModuleContents {
+        .structureName = jsg::fullyQualifiedTypeName(typeid(T))
+      }
+    });
+  }
+
+  kj::Array<Module> finish();
+
+private:
+  kj::Vector<Module> modules;
+};
 
 class RTTIModule final: public jsg::Object {
 public:
@@ -22,10 +60,16 @@ public:
   }
 };
 
-template <class Registry>
-void registerRTTIModule(Registry& registry) {
-  registry.template addBuiltinModule<RTTIModule>("workerd:rtti",
-    workerd::jsg::ModuleRegistry::Type::BUILTIN);
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> registerRTTIModule(
+    jsg::CompilationObserver& observer) {
+  jsg::modules::BuiltinModuleBundleBuilder builder(jsg::modules::Module::Type::BUILTIN, observer);
+  builder.add<RTTIModule, TypeWrapper>(RTTI_MODULE_SPECIFIER);
+  return builder.finish();
+}
+
+void rttiRegisterRtti(RttiRegistry& registry, auto featureFlags) {
+  registry.add<RTTIModule>(RTTI_MODULE_SPECIFIER);
 }
 
 #define EW_RTTI_ISOLATE_TYPES api::RTTIModule

@@ -87,7 +87,7 @@ public:
 
   // Copies this Url. If the option is set of EquivalenceOption::IGNORE_FRAGMENTS, the
   // copied Url will clear any fragment/hash that exists.
-  Url clone(EquivalenceOption option = EquivalenceOption::DEFAULT) KJ_WARN_UNUSED_RESULT;
+  Url clone(EquivalenceOption option = EquivalenceOption::DEFAULT) const KJ_WARN_UNUSED_RESULT;
 
   HostType getHostType() const;
   SchemeType getSchemeType() const;

@@ -4,45 +4,97 @@
 
 #pragma once
 
-#include <kj/filesystem.h>
-#include <kj/map.h>
+#include "jsg.h"
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
-#include <set>
-#include "function.h"
-#include "promise.h"
+#include <capnp/schema.h>
+#include <kj/mutex.h>
+#include <kj/map.h>
+#include <vector>
 
-namespace workerd::jsg {
+namespace workerd::jsg::modules {
 
-class CommonJsModuleContext;
+// Defines and implements workerd's module loader subsystem.
 
-class CommonJsModuleObject: public jsg::Object {
+// Every Worker has a ModuleRegistry associated with it.
+// The ModuleRegistry is the collection of individual Modules that can be
+// imported (i.e. `import * from '...'` and `await import('...')`) or required
+// (i.e. `require('...')`).
+//
+// The ModuleRegistry is immutable once created. When the Worker::Isolate is
+// created, it's ModuleRegistry is created to contain Module definitions
+// declared by the worker bundle configuration and from within the runtime.
+// Internally, the ModuleBundle, ModuleBundleBuilder, and ModuleRegistry
+// classes are used to create the ModuleRegistry instance.
+//
+// When a v8::Isolate* is created for a particular worker, the ModuleRegistry
+// will be bound to the isolate in the form of a new IsolateModuleRegistry
+// instance. This is the interface that is actually used to resolved
+// specifiers into modules.
+//
+// The relationship between ModuleRegistry and IsolateModuleRegistry is such
+// that a ModuleRegistry can actually be shared across multiple isolates/contexts
+// safely, while the IsolateModuleRegistry is bound to an individual isolate/context
+// pair. The ModuleRegistry, ModuleBundle, and individual Module instances do
+// not store any state that is specific to an isolate.
+//
+// Specifiers are always handled as URLs.
+// Built-in modules are always identified using a prefixed-specifier that
+// can be parsed as an absolute URL. For instance, `node:buffer` is a fully
+// qualified, absolute URL whose protocol is `node:` and whose pathname is
+// `buffer`
+// Specifieers for modules that come from the worker bundle config are always
+// relative to `file:///`.
+//
+// For ESM modules, the specifier is accessible using import.meta.url.
+// All ESM modules support import.meta.resolve(...)
+// The first module in the module worker bundle must be an ESM and will specify
+// import.meta.main = true.
+//
+// All modules are evaluated lazily when they are first imported. That is,
+// the ModuleRegistry will not actually generate the v8::Local<v8::Module>,
+// compile scripts, or evaluate it until the module is actually imported.
+// This means that any modules that are never actually imported by a worker
+// will never actually be compiled or evaluated.
+//
+// The ModuleRegistry evaluates modules synchronously and all modules are
+// evaluated outside of the current IoContext (if any). This means the
+// evaluation of any module cannot perform any i/o and therefore is expected
+// to resolve synchronously. This allows for both ESM and CommonJS style
+// imports/requires.
+
+constexpr auto DEFAULT_STR = "default"_kjc;
+constexpr auto MODULE_NOT_FOUND = "Failed to evaluate module. Not found."_kjc;
+constexpr auto FILE_ROOT = "file:///"_kjc;
+
+v8::Local<v8::WasmModuleObject> compileWasmModule(Lock& js, kj::ArrayPtr<const uint8_t> code,
+                                                  const CompilationObserver& observer);
+
+class Module;
+
+// ======================================================================================
+class CommonJsModuleObject final: public Object {
 public:
-  CommonJsModuleObject(jsg::Lock& js) : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)) {}
+  CommonJsModuleObject(Lock& js);
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
-  void setExports(jsg::Value value) { exports = kj::mv(value); }
+  JsValue getExports(Lock& js);
+  void setExports(Lock& js, JsValue value);
 
   JSG_RESOURCE_TYPE(CommonJsModuleObject) {
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
   }
 private:
-  jsg::Value exports;
+  JsRef<JsValue> exports;
 };
 
-class CommonJsModuleContext: public jsg::Object {
+class CommonJsModuleContext final: public Object {
 public:
-  CommonJsModuleContext(jsg::Lock& js, kj::Path path)
-      : module(jsg::alloc<CommonJsModuleObject>(js)),
-        path(kj::mv(path)),
-        exports(js.v8Isolate, module->getExports(js)) {}
+  CommonJsModuleContext(Lock& js, Module& module);
 
-  v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
-
-  jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js) { return module.addRef(); }
-
-  v8::Local<v8::Value> getExports(jsg::Lock& js) { return exports.getHandle(js); }
-  void setExports(jsg::Value value) { exports = kj::mv(value); }
+  JsValue require(Lock& js, kj::String specifier);
+  Ref<CommonJsModuleObject> getModule(Lock& js);
+  JsValue getExports(Lock& js);
+  void setExports(Lock& js, JsValue value);
 
   JSG_RESOURCE_TYPE(CommonJsModuleContext) {
     JSG_METHOD(require);
@@ -50,12 +102,12 @@ public:
     JSG_INSTANCE_PROPERTY(exports, getExports, setExports);
   }
 
-  jsg::Ref<CommonJsModuleObject> module;
 private:
-  kj::Path path;
-  jsg::Value exports;
+  Module& inner;
+  Ref<CommonJsModuleObject> module;
 };
 
+// ======================================================================================
 // TODO(cleanup): Ideally these would exist over with the rest of the Node.js
 // compat related stuff in workerd/api/node but there's a dependency cycle issue
 // to work through there. Specifically, these are needed in jsg but jsg cannot
@@ -66,13 +118,13 @@ private:
 // expected within the global scope of a Node.js compatible module (such as
 // Buffer and process).
 
-class NodeJsModuleObject: public jsg::Object {
+class NodeJsModuleObject final: public Object {
 public:
-  NodeJsModuleObject(jsg::Lock& js, kj::String path);
+  NodeJsModuleObject(Lock& js, Module& inner);
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js);
-  void setExports(jsg::Value value);
-  kj::StringPtr getPath();
+  JsValue getExports(Lock& js);
+  void setExports(Lock& js, JsValue value);
+  kj::ArrayPtr<const char> getPath();
 
   // TODO(soon): Additional properties... We can likely get by without implementing most
   // of these (if any).
@@ -90,8 +142,8 @@ public:
     JSG_READONLY_INSTANCE_PROPERTY(path, getPath);
   }
 private:
-  jsg::Value exports;
-  kj::String path;
+  Module& inner;
+  JsRef<JsValue> exports;
 };
 
 // The NodeJsModuleContext is similar in structure to CommonJsModuleContext
@@ -101,20 +153,20 @@ private:
 //     are ignored), and
 // (b) The common Node.js globals that we implement are exposed. For instance, `process`
 //     and `Buffer` will be found at the global scope.
-class NodeJsModuleContext: public jsg::Object {
+class NodeJsModuleContext final: public Object {
 public:
-  NodeJsModuleContext(jsg::Lock& js, kj::Path path);
+  NodeJsModuleContext(Lock& js, Module& module);
 
-  v8::Local<v8::Value> require(jsg::Lock& js, kj::String specifier);
-  v8::Local<v8::Value> getBuffer(jsg::Lock& js);
-  v8::Local<v8::Value> getProcess(jsg::Lock& js);
+  JsValue require(Lock& js, kj::String specifier);
+  JsValue getBuffer(Lock& js);
+  JsValue getProcess(Lock& js);
 
   // TODO(soon): Implement setImmediate/clearImmediate
 
-  jsg::Ref<NodeJsModuleObject> getModule(jsg::Lock& js);
+  Ref<NodeJsModuleObject> getModule(Lock& js);
 
-  v8::Local<v8::Value> getExports(jsg::Lock& js);
-  void setExports(jsg::Value value);
+  JsValue getExports(Lock& js);
+  void setExports(Lock& js, JsValue value);
 
   kj::String getFilename();
   kj::String getDirname();
@@ -129,18 +181,19 @@ public:
     JSG_LAZY_INSTANCE_PROPERTY(__dirname, getDirname);
   }
 
-  jsg::Ref<NodeJsModuleObject> module;
 private:
-  kj::Path path;
-  jsg::Value exports;
+  Module& inner;
+  Ref<NodeJsModuleObject> module;
+  JsRef<JsValue> exports;
 };
 
-// jsg::NonModuleScript wraps a v8::UnboundScript.
-class NonModuleScript {
-public:
-  NonModuleScript(jsg::Lock& js, v8::Local<v8::UnboundScript> script)
-      : unboundScript(js.v8Isolate, script) {}
+// ======================================================================================
+// NonModuleScript wraps a v8::UnboundScript.
 
+// The NonModuleScript is used solely for old-style "service worker syntax" workers and
+// is not actually a part of the ModuleRegistry.
+class NonModuleScript final {
+public:
   NonModuleScript(NonModuleScript&&) = default;
   NonModuleScript& operator=(NonModuleScript&&) = default;
 
@@ -148,562 +201,486 @@ public:
   // context then will run it to completion.
   void run(v8::Local<v8::Context> context) const;
 
-  static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
+  static NonModuleScript compile(Lock& js, kj::StringPtr code, kj::StringPtr name = "worker.js");
 
 private:
+  NonModuleScript(Lock& js, v8::Local<v8::UnboundScript> script)
+      : unboundScript(js.v8Isolate, script) {}
+
   v8::Global<v8::UnboundScript> unboundScript;
 };
 
-void instantiateModule(jsg::Lock& js, v8::Local<v8::Module>& module);
+// ======================================================================================
+// Module, ModuleBundle, ModuleRegistry
 
-enum class ModuleInfoCompileOption {
-  // The BUNDLE options tells the compile operation to treat the content as coming
-  // from a worker bundle.
-  BUNDLE,
+// Specifies a module that can be imported/required by a worker.
+class Module {
+public:
+  // Identifies the general category of module.
+  // An INTERNAL type can only be imported/required by other INTERNAL or BUILTIN types,
+  // and can only import INTERNAL modules.
+  // A BUILTIN type can be imported by any module and can only import other BUILTIN or
+  // INTERNAL types.
+  // A BUNDLE type can be imported by any module and can only import BUILTIN or other
+  // BUNDLE types.
+  using Type = workerd::jsg::ModuleType;
 
-  // The BUILTIN option tells the compile operation to treat the content as a builtin
-  // module. This implies certain changes in behavior, such as treating the content
-  // as an immutable, process-lifetime buffer that will never be destroyed, and caching
-  // the compilation data.
-  BUILTIN,
+  enum class Flags {
+    NONE = 0,
+    // A Module with the MAIN flag set would specify import.meta.main = true.
+    // This is generally only suitable for worker-bundle entry point modules,
+    // but could in theory be applied to any module.
+    MAIN = 1 << 0,
+    ESM = 1 << 1,
+  };
+
+  KJ_DISALLOW_COPY_AND_MOVE(Module);
+
+  inline Type type() const { return type_; }
+  inline Flags flags() const { return flags_; }
+  inline const Url& specifier() const KJ_LIFETIMEBOUND { return specifier_; }
+
+  // True only if the ESM flag is set.
+  inline bool isEsm() const;
+
+  // Returns a v8::Module representing this Module definition for the given isolate.
+  virtual v8::Local<v8::Module> getDescriptor(Lock& js) = 0;
+
+  virtual bool load(Lock& js, v8::Local<v8::Module> module) KJ_WARN_UNUSED_RESULT = 0;
+
+  static void instantiate(Lock& js, v8::Local<v8::Module> module);
+  static JsObject evaluate(Lock& js, v8::Local<v8::Module> module);
+
+protected:
+  inline explicit Module(Type type, Url specifier, Flags flags = Flags::NONE)
+      : type_(type), specifier_(kj::mv(specifier)), flags_(flags) {}
+
+  // We use an std::vector here because we're preparing the list for v8 and it
+  // expects an std::vector.
+  virtual void listExports(Lock& js, std::vector<v8::Local<v8::String>>& exports) {}
+
+private:
+  Type type_;
+  Url specifier_;
+  Flags flags_;
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
-    kj::ArrayPtr<const uint8_t> code,
-    const CompilationObserver& observer);
-
-// The ModuleRegistry maintains the collection of modules known to a script that can be
-// required or imported.
-class ModuleRegistry {
+// A SyntheticModule is effectively any module that is not internally an ESM.
+// These will have their exports explicitly defined. We use this, for instance,
+// for any custom module type like CommonJs, NodeJs, Text, Data, Wasm, and Capnp.
+class SyntheticModule : public Module {
 public:
+  using Module::Module;
+
+  bool load(Lock& js, v8::Local<v8::Module> module) override;
+  v8::Local<v8::Module> getDescriptor(Lock& js) override;
+
+  virtual JsValue getValue(Lock& js) = 0;
+};
+
+inline constexpr Module::Flags operator|(Module::Flags a, Module::Flags b) {
+  return static_cast<Module::Flags>(static_cast<int>(a) | static_cast<int>(b));
+}
+inline constexpr Module::Flags operator&(Module::Flags a, Module::Flags b) {
+  return static_cast<Module::Flags>(static_cast<int>(a) & static_cast<int>(b));
+}
+inline constexpr Module::Flags operator~(Module::Flags a) {
+  return static_cast<Module::Flags>(~static_cast<int>(a));
+}
+
+inline bool Module::isEsm() const {
+  return (flags() & Flags::ESM) == Flags::ESM;
+}
+
+// A ModuleRegistry is a collection of individual ModuleBundles, which are collections
+// of related Modules. The ModuleBundle is the core of the implementation of the module
+// registry in that it is the specific implementation of the ModuleBundle that determines
+// exactly how a Module is resolved. The only requirement is that resolution is always
+// synchronous. Later we might introduce asynchronous evaluation of modules to support a
+// broader set of use cases. In such cases, the synchronous CommonJS `require()` might
+// not work, however, so we'll have to handle it carefully.
+class ModuleBundle {
+public:
+  using Type = workerd::jsg::ModuleType;
+
+  inline Type type() const { return type_; }
+
+  virtual kj::Maybe<Module&> resolve(const Url& specifier)
+      KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT = 0;
+
+protected:
+  inline explicit ModuleBundle(Type type) : type_(type) {}
+
+private:
+  Type type_;
+};
+
+using DynamicImportHandler = Function<Promise<Value>(Function<Value()>)>;
+
+class IsolateModuleRegistry;
+
+// The ModuleRegistry is initialized for a Worker. It holds the base definitions
+// for all modules available to the worker.
+class ModuleRegistry final {
+public:
+  inline ModuleRegistry(kj::Array<kj::Own<ModuleBundle>> bundles)
+      : bundles(kj::mv(bundles)) {}
   KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistry);
 
-  ModuleRegistry() { }
-
-  using Type = ModuleType;
-
   enum class ResolveOption {
-    // Default resolution. Check the worker bundle first, then builtins.
+    // Default resolution. Check worker bundle's first, then built-ins, ignore internal bundles.
     DEFAULT,
-    // Built-in resolution. Check only non-internal builtins.
-    BUILTIN_ONLY,
-    // Internal resolution. Check only internal builtins.
+    // Built-in resolution. Ignore worker and internal bundles.
+    BUILTIN,
+    // Internal resolution. Check only internal builtins
     INTERNAL_ONLY,
   };
 
-  static inline ModuleRegistry* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistry*>(
-        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
-  }
-
-  struct CapnpModuleInfo {
-    Value fileScope;  // default import
-    kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls;  // named imports
-
-    CapnpModuleInfo(Value fileScope,
-                    kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls);
-    CapnpModuleInfo(CapnpModuleInfo&&) = default;
-    CapnpModuleInfo& operator=(CapnpModuleInfo&&) = default;
-  };
-
-  struct NodeJsModuleInfo {
-    jsg::Ref<jsg::Object> moduleContext;
-    jsg::Function<void()> evalFunc;
-
-    NodeJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
-        : moduleContext(initModuleContext(lock, name)),
-          evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
-
-    NodeJsModuleInfo(NodeJsModuleInfo&&) = default;
-    NodeJsModuleInfo& operator=(NodeJsModuleInfo&&) = default;
-
-    static jsg::Ref<jsg::Object> initModuleContext(
-        jsg::Lock& js,
-        kj::StringPtr name);
-
-    static v8::MaybeLocal<v8::Value> evaluate(jsg::Lock& js,
-                                              NodeJsModuleInfo& info,
-                                              v8::Local<v8::Module> module);
-
-    jsg::Function<void()> initEvalFunc(
-        auto& lock,
-        jsg::Ref<jsg::Object>& moduleContext,
-        kj::StringPtr name,
-        kj::StringPtr content) {
-      v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
-      v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
-      auto context = lock.v8Context();
-      auto handle = lock.wrap(context, moduleContext.addRef());
-      auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-          context,
-          &source,
-          0, nullptr,
-          1, &handle));
-      return lock.template unwrap<jsg::Function<void()>>(context, fn);
-    }
-  };
-
-  struct CommonJsModuleInfo {
-    Ref<CommonJsModuleContext> moduleContext;
-    jsg::Function<void()> evalFunc;
-
-    CommonJsModuleInfo(auto& lock, kj::StringPtr name, kj::StringPtr content)
-        : moduleContext(initModuleContext(lock, name)),
-          evalFunc(initEvalFunc(lock, moduleContext, name, content)) {}
-
-    CommonJsModuleInfo(CommonJsModuleInfo&&) = default;
-    CommonJsModuleInfo& operator=(CommonJsModuleInfo&&) = default;
-
-    static Ref<CommonJsModuleContext> initModuleContext(
-        jsg::Lock& js,
-        kj::StringPtr name);
-
-    static jsg::Function<void()> initEvalFunc(
-        auto& lock,
-        Ref<CommonJsModuleContext>& moduleContext,
-        kj::StringPtr name,
-        kj::StringPtr content) {
-      v8::ScriptOrigin origin(lock.v8Isolate, v8StrIntern(lock.v8Isolate, name));
-      v8::ScriptCompiler::Source source(v8Str(lock.v8Isolate, content), origin);
-      auto context = lock.v8Context();
-      auto handle = lock.wrap(context, moduleContext.addRef());
-      auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-          context,
-          &source,
-          0, nullptr,
-          1, &handle));
-      return lock.template unwrap<jsg::Function<void()>>(context, fn);
-    }
-  };
-
-  template <typename T>
-  struct ValueModuleInfo {
-    jsg::V8Ref<T> value;
-
-    ValueModuleInfo(jsg::Lock& js, v8::Local<T> value) : value(js.v8Isolate, value) {}
-
-    ValueModuleInfo(ValueModuleInfo&&) = default;
-    ValueModuleInfo& operator=(ValueModuleInfo&&) = default;
-  };
-
-  using DataModuleInfo = ValueModuleInfo<v8::ArrayBuffer>;
-  using TextModuleInfo = ValueModuleInfo<v8::String>;
-  using WasmModuleInfo = ValueModuleInfo<v8::WasmModuleObject>;
-  using JsonModuleInfo = ValueModuleInfo<v8::Value>;
-  using ObjectModuleInfo = ValueModuleInfo<v8::Object>;
-
-  struct ModuleInfo {
-    HashableV8Ref<v8::Module> module;
-
-    using SyntheticModuleInfo = kj::OneOf<CapnpModuleInfo,
-                                          CommonJsModuleInfo,
-                                          DataModuleInfo,
-                                          TextModuleInfo,
-                                          WasmModuleInfo,
-                                          JsonModuleInfo,
-                                          ObjectModuleInfo,
-                                          NodeJsModuleInfo>;
-    kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
-
-    ModuleInfo(jsg::Lock& js,
-               v8::Local<v8::Module> module,
-               kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
-
-    ModuleInfo(jsg::Lock& js,
-               kj::StringPtr name,
-               kj::ArrayPtr<const char> content,
-               ModuleInfoCompileOption flags,
-               const CompilationObserver& observer);
-
-    ModuleInfo(jsg::Lock& js, kj::StringPtr name,
-               kj::Maybe<kj::ArrayPtr<kj::StringPtr>> maybeExports,
-               SyntheticModuleInfo synthetic);
-
-    ModuleInfo(ModuleInfo&&) = default;
-    ModuleInfo& operator=(ModuleInfo&&) = default;
-
-    uint hashCode() const { return module.hashCode(); }
-  };
-
-  struct ModuleRef {
-    const kj::Path& specifier;
-    Type type;
-    ModuleInfo& module;
-  };
-
-  virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
-                                         const kj::Path& specifier,
-                                         ResolveOption option = ResolveOption::DEFAULT) = 0;
-
-  virtual kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) = 0;
-
-  virtual Promise<Value> resolveDynamicImport(jsg::Lock& js,
-                                              const kj::Path& specifier,
-                                              const kj::Path& referrer) = 0;
-
-  virtual Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) = 0;
-
-  // The dynamic import callback is provided by the embedder to set up any context necessary
-  // for instantiating the module during a dynamic import. The handler function passed into
-  // the callback is called to actually perform the instantiation of the module.
-  using DynamicImportCallback = Promise<Value>(jsg::Lock& js, kj::Function<Value()> handler);
-
-  virtual void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) = 0;
-};
-
-template <typename TypeWrapper>
-v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context,
-                                                  v8::Local<v8::Data> host_defined_options,
-                                                  v8::Local<v8::Value> resource_name,
-                                                  v8::Local<v8::String> specifier,
-                                                  v8::Local<v8::FixedArray> import_assertions);
-
-template <typename TypeWrapper>
-class ModuleRegistryImpl final: public ModuleRegistry {
-public:
-  KJ_DISALLOW_COPY_AND_MOVE(ModuleRegistryImpl);
-
-  ModuleRegistryImpl(CompilationObserver& observer) : observer(observer) { }
-
-  static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
-      v8::Isolate* isolate,
-      v8::Local<v8::Context> context,
-      CompilationObserver& observer) {
-    auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
-    context->SetAlignedPointerInEmbedderData(2, registry.get());
-    isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
-    return kj::mv(registry);
-  }
-
-  static inline ModuleRegistryImpl* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistryImpl*>(
-        js.v8Context()->GetAlignedPointerFromEmbedderData(2));
-  }
-
-
-  void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
-    dynamicImportHandler = kj::mv(func);
-  }
-
-  void add(kj::Path& specifier, ModuleInfo&& info) {
-    entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
-  }
-
-  void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
-    for (auto module: bundle.getModules()) {
-      auto type = module.getType();
-      auto filter = maybeFilter.orDefault(type);
-      if (type == filter) {
-        // TODO: asChars() might be wrong for wide characters
-        addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
-      }
-    }
-  }
-
-  // Register new module accessible by a given importPath. The module is instantiated
-  // after first resolve attempt within application has failed, i.e. it is possible for
-  // application to override the module.
-  // sourceCode has to exist while this ModuleRegistry exists.
-  // The expectation is for this method to be called during the assembly of worker global context
-  // after registering all user modules.
-  void addBuiltinModule(kj::StringPtr specifier,
-                        kj::ArrayPtr<const char> sourceCode,
-                        Type type = Type::BUILTIN) {
-    KJ_ASSERT(type != Type::BUNDLE);
-    using Key = typename Entry::Key;
-
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
-    auto path = kj::Path::parse(specifier);
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
-    }
-
-    entries.insert(Entry(path, type, sourceCode));
-  }
-
-  void addBuiltinModule(kj::StringPtr specifier,
-                        kj::Function<ModuleInfo(Lock&)> factory,
-                        Type type = Type::BUILTIN) {
-    KJ_ASSERT(type != Type::BUNDLE);
-    using Key = typename Entry::Key;
-
-    auto path = kj::Path::parse(specifier);
-
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
-    }
-
-    entries.insert(Entry(path, type, kj::mv(factory)));
-  }
-
-  template <typename T>
-  void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
-    addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
-      auto& wrapper = TypeWrapper::from(js.v8Isolate);
-      auto wrap = wrapper.wrap(js.v8Context(), kj::none, alloc<T>());
-      return ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap));
-    }, type);
-  }
-
-  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
-                                 const kj::Path& specifier,
-                                 ResolveOption option = ResolveOption::DEFAULT) override {
-    using Key = typename Entry::Key;
-    if (option == ResolveOption::INTERNAL_ONLY) {
-      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::INTERNAL))) {
-        return entry.module(js, observer);
-      }
-    } else {
-      if (option == ResolveOption::DEFAULT) {
-        // First, we try to resolve a worker bundle version of the module.
-        KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUNDLE))) {
-          return entry.module(js, observer);
-        }
-      }
-      // Then we look for a built-in version of the module.
-      KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUILTIN))) {
-        return entry.module(js, observer);
-      }
-    }
-    return kj::none;
-  }
-
-  kj::Maybe<ModuleRef> resolve(jsg::Lock& js, v8::Local<v8::Module> module) override {
-    for (const Entry& entry : entries) {
-      // Unfortunately we cannot use entries.find(...) in here because the module info can
-      // be initialized lazily at any point after the entry is indexed, making the lookup
-      // by module a bit problematic. Iterating through the entries is slower but it works.
-      KJ_IF_SOME(info, entry.info.template tryGet<ModuleInfo>()) {
-        if (info.hashCode() == module->GetIdentityHash()) {
-          return ModuleRef {
-            .specifier = entry.specifier,
-            .type = entry.type,
-            .module = const_cast<ModuleInfo&>(info),
-          };
-        }
-      }
-    }
-    return kj::none;
-  }
-
-  size_t size() const { return entries.size(); }
-
-  Promise<Value> resolveDynamicImport(jsg::Lock& js,
-                                      const kj::Path& specifier,
-                                      const kj::Path& referrer) override {
-    // Here, we first need to determine if the referrer is a built-in module
-    // or not. If it is a built-in, then we are only permitted to resolve
-    // internal modules. If the worker bundle provided an override for the
-    // built-in module, then the built-in was never registered and won't
-    // be found.
-    using Key = typename Entry::Key;
-    auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
-    if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
-      resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
-    }
-
-    KJ_IF_SOME(info, resolve(js, specifier, resolveOption)) {
-      KJ_IF_SOME(func, dynamicImportHandler) {
-        auto handler = [&info, isolate = js.v8Isolate]() -> Value {
-          auto& js = Lock::from(isolate);
-          auto module = info.module.getHandle(js);
-          instantiateModule(js, module);
-          return js.v8Ref(module->GetModuleNamespace());
-        };
-        return func(js, kj::mv(handler));
-      }
-
-      // If there is no dynamicImportHandler set, then we are going to handle that as if
-      // the module does not exist and fall through to the rejected promise below.
-    }
-
-    return js.rejectedPromise<Value>(
-        js.v8Error(kj::str("No such module \"", specifier.toString(), "\".")));
-  }
-
-  Value resolveInternalImport(jsg::Lock& js, const kj::StringPtr specifier) override {
-    auto specifierPath = kj::Path(specifier);
-    auto resolveOption = jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY;
-    auto maybeModuleInfo = resolve(js, specifierPath, resolveOption);
-    auto moduleInfo = &KJ_REQUIRE_NONNULL(maybeModuleInfo, "No such module \"", specifier, "\".");
-    auto handle = moduleInfo->module.getHandle(js);
-    jsg::instantiateModule(js, handle);
-    return js.v8Ref(handle->GetModuleNamespace());
-  }
-
-  CompilationObserver& getObserver() { return observer; }
+  // Attaches the ModuleRegistry to the Isolate by creating a new IsolateModuleRegistry
+  // and associating that with the current isolate Context.
+  inline void attachToIsolate(Lock& js, DynamicImportHandler dynamicImportHandler) const;
 
 private:
-  CompilationObserver& observer;
-  kj::Maybe<kj::Function<DynamicImportCallback>> dynamicImportHandler;
+  kj::Array<kj::Own<ModuleBundle>> bundles;
 
-  // When we build a bundle containing modules, we must build a table of modules to resolve imports.
-  //
-  // Because of the design of V8's resolver callback, we end up needing a table with two indexes:
-  // we need to be able to search it by path (filename) as well as search for a specific module
-  // object by identity. We use a kj::Table!
-  struct Entry {
-    using Info = kj::OneOf<ModuleInfo,
-                           kj::ArrayPtr<const char>,
-                           kj::Function<ModuleInfo(Lock&)>>;
+  // Uses the configured bundles to resolve the module associated with the given
+  // specifier. Bundles that do not match the option specifier are ignored.
+  kj::Maybe<Module&> resolve(const Url& specifier,
+                             ResolveOption option = ResolveOption::DEFAULT)
+                             KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
-    struct Key {
-      const kj::Path& specifier;
-      const Type type = Type::BUNDLE;
-      uint hash;
-
-      Key(const kj::Path& specifier, Type type)
-          : specifier(specifier),
-            type(type),
-            hash(kj::hashCode(specifier, type)) {}
-
-      uint hashCode() const { return hash; }
-    };
-
-    kj::Path specifier;
-    Type type;
-
-    // Either instantiated module or module source code.
-    Info info;
-
-    Entry(const kj::Path& specifier, Type type, ModuleInfo info)
-        : specifier(specifier.clone()),
-          type(type),
-          info(kj::mv(info)) {}
-
-    Entry(const kj::Path& specifier,Type type, kj::ArrayPtr<const char> src)
-        : specifier(specifier.clone()),
-          type(type),
-          info(src) {}
-
-    Entry(const kj::Path& specifier, Type type, kj::Function<ModuleInfo(Lock&)> factory)
-        : specifier(specifier.clone()),
-          type(type),
-          info(kj::mv(factory)) {}
-
-    Entry(Entry&&) = default;
-    Entry& operator=(Entry&&) = default;
-
-    // Lazily instantiate module from source code if needed
-    ModuleInfo& module(jsg::Lock& js, CompilationObserver& observer) {
-      KJ_SWITCH_ONEOF(info) {
-        KJ_CASE_ONEOF(moduleInfo, ModuleInfo) {
-          return moduleInfo;
-        }
-        KJ_CASE_ONEOF(src, kj::ArrayPtr<const char>) {
-          info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
-          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
-        }
-        KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {
-          info = src(js);
-          return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-  };
-
-  struct SpecifierHashCallbacks {
-    using Key = typename Entry::Key;
-
-    const Key keyForRow(const Entry& row) const { return Key(row.specifier, row.type); }
-
-    bool matches(const Entry& row, Key key) const {
-      return row.specifier == key.specifier && row.type == key.type;
-    }
-
-    uint hashCode(Key key) const {
-      return key.hashCode();
-    }
-  };
-
-  kj::Table<Entry, kj::HashIndex<SpecifierHashCallbacks>> entries;
+  friend class IsolateModuleRegistry;
 };
 
-template <typename TypeWrapper>
-v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context,
-                                                  v8::Local<v8::Data> host_defined_options,
-                                                  v8::Local<v8::Value> resource_name,
-                                                  v8::Local<v8::String> specifier,
-                                                  v8::Local<v8::FixedArray> import_assertions) {
-  auto& js = Lock::from(context->GetIsolate());
-  auto registry = ModuleRegistry::from(js);
-  auto& wrapper = TypeWrapper::from(js.v8Isolate);
+// Wraps the ModuleRegistry for a specific isolate context.
+class IsolateModuleRegistry final {
+public:
+  static IsolateModuleRegistry& from(v8::Isolate* isolate);
 
-  // TODO(cleanup): This could probably be simplified using jsg::Promise
-  const auto makeRejected = [&](auto reason) {
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (v8::Promise::Resolver::New(context).ToLocal(&resolver) &&
-        resolver->Reject(context, reason).IsJust()) {
-      return resolver->GetPromise();
-    }
-    return v8::Local<v8::Promise>();
+  IsolateModuleRegistry(const ModuleRegistry& inner,
+                        v8::Isolate* isolate,
+                        kj::Maybe<DynamicImportHandler> dynamicImportHandler);
+  KJ_DISALLOW_COPY_AND_MOVE(IsolateModuleRegistry);
+
+  kj::Maybe<v8::Local<v8::Module>> resolve(
+      Lock& js,
+      const Url& specifier,
+      ModuleRegistry::ResolveOption option = ModuleRegistry::ResolveOption::DEFAULT)
+          KJ_WARN_UNUSED_RESULT;
+
+  kj::Maybe<Module&> resolve(Lock& js, v8::Local<v8::Module> module)
+                             KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+private:
+  const ModuleRegistry& inner;
+  kj::Maybe<DynamicImportHandler> dynamicImportHandler;
+
+  struct ModuleRef {
+    Module* ref;
+
+    inline ModuleRef(Module& module) : ref(&module) {}
+    ModuleRef(ModuleRef&&) = default;
+    ModuleRef& operator=(ModuleRef&&) = default;
+    KJ_DISALLOW_COPY(ModuleRef);
+
+    inline operator Module&() { return *ref; }
+    inline operator const Module&() const { return *ref; }
   };
 
-  // The dynamic import might be resolved synchronously or asynchronously.
-  // Accordingly, resolveDynamicImport will return a jsg::Promise<jsg::Value>
-  // that will resolve to the module's namespace object or will reject if there
-  // was any error.
-  //
-  // Importantly, we defensively catch any synchronous errors here and handle them
-  // explicitly as rejected Promises.
-  v8::TryCatch tryCatch(js.v8Isolate);
+  struct Cached {
+    V8Ref<v8::Module> ref;
+    bool internal;
+    Cached(Lock& js, v8::Local<v8::Module> module, bool internal);
+  };
 
-  // TODO(cleanup): If kj::Path::parse or kj::Path::eval fail it is most likely the application's
-  // fault. We'll return a "No such module" error. We could handle this more gracefully
-  // if kj::Path had tryParse()/tryEval() variants.
+  kj::HashMap<Url, Cached> cache;
+  kj::HashMap<HashableV8Ref<v8::Module>, ModuleRef> modules;
 
-  auto maybeReferrerPath = ([&]() -> kj::Maybe<kj::Path> {
-    try {
-      return kj::Path::parse(kj::str(resource_name));
-    } catch (kj::Exception& ex) {
-      return kj::none;
-    }
-  })();
+  static v8::MaybeLocal<v8::Promise> dynamicImport(
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Data> host_defined_options,
+      v8::Local<v8::Value> resource_name,
+      v8::Local<v8::String> specifier,
+      v8::Local<v8::FixedArray> import_assertions);
 
-  auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
-    KJ_IF_SOME(referrerPath, maybeReferrerPath) {
-      try {
-        return referrerPath.parent().eval(kj::str(specifier));
-      } catch (kj::Exception& ex) {
-        return kj::none;
-      }
-    }
-    return kj::none;
-  })();
+  static void importMeta(v8::Local<v8::Context> context,
+                         v8::Local<v8::Module> module,
+                         v8::Local<v8::Object> meta);
+};
 
-  if (maybeReferrerPath == kj::none || maybeSpecifierPath == kj::none) {
-    // If either of these are nullptr it means the kj::Path::parse or
-    // kj::Path::eval failed. We want to handle these as No such module
-    // errors.
-    return makeRejected(js.v8Error(kj::str("No such module \"", specifier, "\"")));
-  }
-
-  auto& referrerPath = KJ_ASSERT_NONNULL(maybeReferrerPath);
-  auto& specifierPath = KJ_ASSERT_NONNULL(maybeSpecifierPath);
-
-  try {
-    return wrapper.wrap(context, kj::none,
-        registry->resolveDynamicImport(js, specifierPath, referrerPath));
-  } catch (JsExceptionThrown&) {
-    // If the tryCatch.Exception().IsEmpty() here is true, no JavaScript error
-    // was scheduled which can happen in a few edge cases. Treat it as if
-    // CanContinue() is false.
-    if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
-      // There's nothing else we can reasonably do.
-      return v8::MaybeLocal<v8::Promise>();
-    }
-
-    return makeRejected(tryCatch.Exception());
-  } catch (kj::Exception& ex) {
-    return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
-  }
-  KJ_UNREACHABLE;
+inline void ModuleRegistry::attachToIsolate(
+    Lock& js, DynamicImportHandler dynamicImportHandler) const {
+  // We use new here because it is required for the v8 integration.
+  // Responsibility for cleaning up the type is passed to v8 when
+  // the context is cleaned up.
+  new IsolateModuleRegistry(*this, js.v8Isolate, kj::mv(dynamicImportHandler));
 }
 
-ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate);
+// A synthetic Module that is backed by a jsg::Object exported as its default export.
+// These are always exclusively built-in/internal modules.
+template <typename T, typename TypeWrapper>
+class JsgObjectModule final: public SyntheticModule {
+public:
 
-}  // namespace workerd::jsg
+  // TODO(soon): A JsgObjectModule currently does not support named exports other than
+  // "default". We actually could support named exports here, hwoever, by allowing the
+  // type T to explicitly define which methods to handle as named exports.
+
+  inline explicit JsgObjectModule(Type type,
+                                  Url specifier,
+                                  Flags flags = Flags::NONE)
+      : SyntheticModule(type, kj::mv(specifier), flags) {}
+  using SyntheticModule::SyntheticModule;
+
+  JsValue getValue(Lock& js) override {
+    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    return JsValue(wrapper.wrap(js.v8Context(), kj::none, alloc<T>()));
+  }
+};
+
+// A synthetic Module that is backed by a CommonJS style script.
+// These are always exclusively from the worker bundle configuration.
+template <typename TypeWrapper>
+class CjsModule final: public SyntheticModule {
+public:
+  enum class Mode {
+    // The original CommonJsModule type.
+    DEFAULT,
+    // The NodeJsCompatModule type.
+    NODEJS_COMPAT,
+  };
+
+  // TODO(soon): A CjsModule currently does not support named exports other than "default".
+  // We actually could support named exports here, however, by moving the compile/run step
+  // into the getDescriptor() method and extracting the list of own properties on the export.
+  // We would then implement a custom override of Module::load here to set the named exports
+  // explicitly from that object.
+
+  CjsModule(Type type, Url url, kj::String code, Flags flags, Mode mode)
+      : SyntheticModule(type, kj::mv(url), flags),
+        code(kj::mv(code)),
+        mode(mode) {}
+
+  JsValue getValue(Lock& js) override {
+    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    v8::Local<v8::Object> contextHandle;
+
+    kj::OneOf<Ref<CommonJsModuleContext>, Ref<NodeJsModuleContext>> contextInstance;
+
+    switch (mode) {
+      case Mode::DEFAULT: {
+        auto context = alloc<CommonJsModuleContext>(js, *this);
+        contextHandle = wrapper.wrap(js.v8Context(), kj::none, context.addRef())
+            .template As<v8::Object>();
+        contextInstance = kj::mv(context);
+        break;
+      }
+      case Mode::NODEJS_COMPAT: {
+        auto context = alloc<NodeJsModuleContext>(js, *this);
+        contextHandle = wrapper.wrap(js.v8Context(), kj::none, kj::mv(context))
+          .template As<v8::Object>();
+        contextInstance = kj::mv(context);
+        break;
+      }
+    }
+
+    v8::ScriptOrigin origin(js.v8Isolate, js.strExtern(specifier().getHref()));
+
+    auto str = js.str(code);
+
+    v8::ScriptCompiler::Source source(str, origin);
+    auto compiled = check(v8::ScriptCompiler::CompileFunction(js.v8Context(), &source, 0,
+                                                              nullptr, 1, &contextHandle));
+
+    auto eval = KJ_ASSERT_NONNULL(wrapper.tryUnwrap(js.v8Context(), compiled,
+                                                    (Function<void()>*)nullptr,
+                                                    kj::none));
+    eval(js);
+
+    // CommonJS/Node.js modules can completely replace the exported object,
+    // so we have to wait until after eval returns to grab the value that is
+    // to be used as the default export.
+    v8::Local<v8::Value> namespaceHandle;
+    KJ_SWITCH_ONEOF(contextInstance) {
+      KJ_CASE_ONEOF(cjs, Ref<CommonJsModuleContext>) {
+        namespaceHandle = cjs->getExports(js);
+      }
+      KJ_CASE_ONEOF(njs, Ref<NodeJsModuleContext>) {
+        namespaceHandle = njs->getExports(js);
+      }
+    }
+
+    return JsValue(namespaceHandle);
+  }
+
+private:
+  kj::String code;
+  Mode mode;
+};
+
+struct CapnpModuleInfo {
+  capnp::Schema schema;
+
+  struct Interface {
+    kj::String name;
+    capnp::Schema schema;
+  };
+  kj::Array<Interface> interfaces;
+};
+
+// A synthetic Module backed by a capnp capability.
+// These are always exclusively from the worker bundle configuration.
+template <typename TypeWrapper>
+class CapnpModule final: public SyntheticModule {
+public:
+  CapnpModule(Type type, Url url, CapnpModuleInfo info, Flags flags)
+      : SyntheticModule(type, kj::mv(url), flags),
+        info(kj::mv(info)) {}
+
+  bool load(Lock& js, v8::Local<v8::Module> module) override {
+    auto& wrapper = TypeWrapper::from(js.v8Isolate);
+    check(module->SetSyntheticModuleExport(js.v8Isolate,
+        js.strIntern(DEFAULT_STR),
+        wrapper.wrap(js.v8Context(), kj::none, info.schema)));
+    for (auto& interface : info.interfaces) {
+      check(module->SetSyntheticModuleExport(js.v8Isolate,
+          js.strIntern(interface.name),
+          wrapper.wrap(js.v8Context(), kj::none, interface.schema)));
+    }
+    return true;
+  }
+
+  void listExports(Lock& js, std::vector<v8::Local<v8::String>>& exports) override {
+    for (auto& interface : info.interfaces) {
+      exports.push_back(js.strIntern(interface.name));
+    }
+  }
+
+  JsValue getValue(Lock& js) override {
+    // getValue is not called in this implementation since we overload
+    // load directly.
+    KJ_UNREACHABLE;
+  }
+
+private:
+  CapnpModuleInfo info;
+};
+
+// The ModuleBundleBuilder is the abstract base used internally to initialize the
+// content of the ModuleRegistry.
+class ModuleBundleBuilder {
+public:
+  inline ModuleBundleBuilder(ModuleBundle::Type type, CompilationObserver& observer)
+      : type(type), observer_(observer) {}
+  virtual ~ModuleBundleBuilder() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(ModuleBundleBuilder);
+
+  // Register a Module backed by a factory function. The factory will be
+  // called lazily when the module is resolved.
+  using Factory = kj::Function<kj::Own<Module>(const Url& specifier)>;
+  virtual void add(kj::StringPtr specifier, Factory factory) = 0;
+
+  kj::Own<ModuleBundle> finish();
+
+  struct Entry {
+    Url specifier;
+    Factory factory;
+  };
+
+  inline CompilationObserver& observer() { return observer_; }
+
+protected:
+  kj::Vector<Entry> entries;
+  ModuleBundle::Type type;
+  CompilationObserver& observer_;
+};
+
+// Used exclusively by internals to construct the collections of built-in/internal
+// modules sourced by the runtime itself.
+class BuiltinModuleBundleBuilder final : public ModuleBundleBuilder {
+public:
+  inline BuiltinModuleBundleBuilder(ModuleBundle::Type type, CompilationObserver& observer)
+      : ModuleBundleBuilder(type, observer) {
+    KJ_DASSERT(type != ModuleBundle::Type::BUNDLE);
+  }
+
+  // Register a built-in Module backed by a const buffer.
+  // The specifier must be a fully qualified URL string.
+  void add (kj::StringPtr specifier, kj::ArrayPtr<const char> source);
+
+  // Register all built-in Modules defined in the capnp Bundle::Reader if they
+  // match the given filter.
+  void add(Bundle::Reader bundle);
+
+  // Register a built-in Module backed by a Object resource type.
+  // The specifier must be a fully qualified URL string.
+  template <typename T, typename TypeWrapper>
+  void add(kj::StringPtr specifier) {
+    // Do *not* capture this in the lambda below. The builder instance will be destroyed
+    // by the time the lambda is called.
+    add(specifier, [type=type](const Url& specifier) -> kj::Own<Module> {
+      return kj::heap<JsgObjectModule<T, TypeWrapper>>(type, specifier.clone());
+    });
+  }
+
+  void add(kj::StringPtr specifier, Factory factory) override;
+};
+
+// Used exclusively to build a ModuleBundle representing the content of a worker bundle
+// configuration.
+class WorkerModuleBundleBuilder final : public ModuleBundleBuilder {
+public:
+  WorkerModuleBundleBuilder(CompilationObserver& observer)
+      : ModuleBundleBuilder(ModuleBundle::Type::BUNDLE, observer) {}
+  KJ_DISALLOW_COPY_AND_MOVE(WorkerModuleBundleBuilder);
+
+  // If the specifier is not an absolute URL, it will be parsed relative to
+  // the default base URL file:/// that is assumed for all worker bundles.
+
+  void addTextModule(kj::StringPtr specifier, kj::String data,
+                     Module::Flags flags = Module::Flags::NONE);
+  void addDataModule(kj::StringPtr specifier, kj::Array<const kj::byte> data,
+                     Module::Flags flags = Module::Flags::NONE);
+  void addWasmModule(kj::StringPtr specifier, kj::Array<const uint8_t> code,
+                     Module::Flags flags = Module::Flags::NONE);
+  void addJsonModule(kj::StringPtr specifier, kj::String data,
+                     Module::Flags flags = Module::Flags::NONE);
+  void addEsmModule(kj::StringPtr specifier, kj::String code,
+                    Module::Flags flags = Module::Flags::NONE);
+
+  template <typename TypeWrapper>
+  void addCjsModule(kj::StringPtr specifier, kj::String code,
+                    Module::Flags flags = Module::Flags::NONE) {
+    add(specifier, [code=kj::mv(code), flags](const Url& specifier) mutable {
+      return kj::heap<CjsModule<TypeWrapper>>(
+          ModuleBundle::Type::BUNDLE,
+          specifier.clone(), kj::mv(code), flags,
+          CjsModule<TypeWrapper>::Mode::DEFAULT);
+    });
+  }
+
+  template <typename TypeWrapper>
+  void addNodejsModule(kj::StringPtr specifier, kj::String code,
+                       Module::Flags flags = Module::Flags::NONE) {
+    add(specifier, [code=kj::mv(code), flags](const Url& specifier) mutable {
+      return kj::heap<CjsModule<TypeWrapper>>(
+          ModuleBundle::Type::BUNDLE,
+          specifier.clone(), kj::mv(code), flags,
+          CjsModule<TypeWrapper>::Mode::NODEJS_COMPAT);
+    });
+  }
+
+  template <typename TypeWrapper>
+  void addCapnpModule(kj::StringPtr specifier, CapnpModuleInfo info,
+                      Module::Flags flags = Module::Flags::NONE) {
+    add(specifier, [info=kj::mv(info), flags](const Url& specifier) mutable {
+      return kj::heap<CapnpModule<TypeWrapper>>(
+          ModuleBundle::Type::BUNDLE,
+          specifier.clone(),
+          kj::mv(info), flags);
+    });
+  }
+
+  void add(kj::StringPtr specifier, Factory factory) override;
+};
+
+}  // namespace workerd::jsg::modules

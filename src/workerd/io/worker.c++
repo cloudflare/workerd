@@ -846,7 +846,7 @@ static void stopProfiling(jsg::Lock& js,
 } // anonymous namespace
 
 struct Worker::Script::Impl {
-  kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
+  kj::OneOf<jsg::modules::NonModuleScript, jsg::Url> unboundScriptOrMainModule;
 
   kj::Array<CompiledGlobal> globals;
 
@@ -854,92 +854,80 @@ struct Worker::Script::Impl {
 
   // If set, then any attempt to use this script shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
-
-  void configureDynamicImports(jsg::Lock& js, jsg::ModuleRegistry& modules) {
-    struct DynamicImportResult {
-      jsg::Value value;
-      bool isException = false;
-    };
-
-    using Handler = kj::Function<jsg::Value()>;
-
-    static auto constexpr handleDynamicImport =
-        [](kj::Own<const Worker> worker,
-           Handler handler,
-           kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext) ->
-               kj::Promise<DynamicImportResult> {
-      co_await kj::evalLater([] {});
-      auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
-
-      Worker::Lock lock(*worker, asyncLock);
-      jsg::Lock& js = lock;
-
-      co_return js.withinHandleScope([&]() -> DynamicImportResult {
-        // Cannot use js.v8Context() here because that assumes we've already entered
-        // the v8::Context::Scope...
-        auto contextScope = js.enterContextScope(lock.getContext());
-        jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
-
-        // We have to wrap the call to handler in a try catch here because
-        // we have to tunnel any jsg::JsExceptionThrown instances back.
-        v8::TryCatch tryCatch(js.v8Isolate);
-        kj::Maybe<kj::Exception> maybeLimitError;
-        try {
-          auto limitScope = worker->getIsolate().getLimitEnforcer()
-              .enterDynamicImportJs(lock, maybeLimitError);
-          return { .value = handler() };
-        } catch (jsg::JsExceptionThrown&) {
-          // Handled below...
-        } catch (kj::Exception& ex) {
-          kj::throwFatalException(kj::mv(ex));
-        }
-
-        KJ_ASSERT(tryCatch.HasCaught());
-        if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
-          // There's nothing else we can do here but throw a generic fatal exception.
-          KJ_IF_SOME(limitError, maybeLimitError) {
-            kj::throwFatalException(kj::mv(limitError));
-          } else {
-            kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, Error,
-                "Failed to load dynamic module."));
-          }
-        }
-        return { .value = js.v8Ref(tryCatch.Exception()), .isException = true };
-      });
-    };
-
-    modules.setDynamicImportCallback([](jsg::Lock& js, Handler handler) mutable {
-      if (IoContext::hasCurrent()) {
-        // If we are within the scope of a IoContext, then we are going to pop
-        // out of it to perform the actual module instantiation.
-
-        auto& context = IoContext::current();
-
-        return context.awaitIo(js,
-            handleDynamicImport(kj::atomicAddRef(context.getWorker()),
-                                kj::mv(handler),
-                                jsg::AsyncContextFrame::currentRef(js)),
-            [](jsg::Lock& js, DynamicImportResult result) {
-          if (result.isException) {
-            return js.rejectedPromise<jsg::Value>(kj::mv(result.value));
-          }
-          return js.resolvedPromise(kj::mv(result.value));
-        });
-      }
-
-      // If we got here, there is no current IoContext. We're going to perform the
-      // module resolution synchronously and we do not have to worry about blocking any
-      // i/o. We get here, for instance, when dynamic import is used at the top level of
-      // a script (which is weird, but allowed).
-      //
-      // We do not need to use limitEnforcer.enterDynamicImportJs() here because this should
-      // already be covered by the startup resource limiter.
-      return js.resolvedPromise(handler());
-    });
-  }
 };
 
 namespace {
+
+struct DynamicImportResult {
+  jsg::Value value;
+  bool isException;
+};
+
+kj::Promise<DynamicImportResult> handleDynamicImport(
+    kj::Own<const Worker> worker,
+    jsg::Function<jsg::Value()> handler,
+    kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> asyncContext) {
+  co_await kj::evalLater([] {});
+  auto asyncLock = co_await worker->takeAsyncLockWithoutRequest(nullptr);
+
+  Worker::Lock lock(*worker, asyncLock);
+  jsg::Lock& js = lock;
+
+  co_return js.withinHandleScope([&]() -> DynamicImportResult {
+    // Cannot use js.v8Context() here because that assumes we've already entered
+    // the v8::Context::Scope...
+    auto contextScope = js.enterContextScope(lock.getContext());
+    jsg::AsyncContextFrame::Scope asyncContextScope(js, asyncContext);
+
+    // We have to wrap the call to handler in a try catch here because
+    // we have to tunnel any jsg::JsExceptionThrown instances back.
+    kj::Maybe<kj::Exception> maybeLimitError;
+    auto limitScope = worker->getIsolate().getLimitEnforcer()
+        .enterDynamicImportJs(lock, maybeLimitError);
+    return js.tryCatch([&]() -> DynamicImportResult {
+      return { .value = handler(js) };
+    }, [&](jsg::Value exception) -> DynamicImportResult {
+      KJ_IF_SOME(limitError, maybeLimitError) {
+        kj::throwFatalException(kj::mv(limitError));
+      }
+      return {
+        .value = js.v8Ref(exception.getHandle(js)),
+        .isException = true,
+      };
+    });
+  });
+}
+
+jsg::Promise<jsg::Value> dynamicImportHandler(
+    jsg::Lock& js,
+    jsg::Function<jsg::Value()> handler) {
+  if (IoContext::hasCurrent()) {
+    // If we are within the scope of a IoContext, then we are going to pop
+    // out of it to perform the actual module instantiation.
+
+    auto& context = IoContext::current();
+
+    return context.awaitIo(js,
+        handleDynamicImport(kj::atomicAddRef(context.getWorker()),
+                            kj::mv(handler),
+                            jsg::AsyncContextFrame::currentRef(js)),
+        [](jsg::Lock& js, DynamicImportResult result) {
+      if (result.isException) {
+        return js.rejectedPromise<jsg::Value>(kj::mv(result.value));
+      }
+      return js.resolvedPromise(kj::mv(result.value));
+    });
+  }
+
+  // If we got here, there is no current IoContext. We're going to perform the
+  // module resolution synchronously and we do not have to worry about blocking any
+  // i/o. We get here, for instance, when dynamic import is used at the top level of
+  // a script (which is weird, but allowed).
+  //
+  // We do not need to use limitEnforcer.enterDynamicImportJs() here because this should
+  // already be covered by the startup resource limiter.
+  return js.resolvedPromise(handler(js));
+}
 
 // Given an array of strings, return a valid serialized JSON string like:
 //   {"flags":["minimal_subrequests",...]}
@@ -1034,10 +1022,12 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
                          kj::Own<IsolateObserver>&& metricsParam,
                          kj::StringPtr id,
                          kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
+                         kj::Own<jsg::modules::ModuleRegistry> moduleRegistry,
                          InspectorPolicy inspectorPolicy,
                          ConsoleMode consoleMode)
     : id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      moduleRegistry(kj::mv(moduleRegistry)),
       apiIsolate(kj::mv(apiIsolateParam)),
       consoleMode(consoleMode),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(apiIsolate->getFeatureFlags()))),
@@ -1250,7 +1240,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
               // limit just to be safe. Don't add it to the rollover bank, though.
               auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
               impl->unboundScriptOrMainModule =
-                  jsg::NonModuleScript::compile(script.mainScript, lock, script.mainScriptName);
+                  jsg::modules::NonModuleScript::compile(lock,
+                      script.mainScript, script.mainScriptName);
             }
 
             break;
@@ -1258,10 +1249,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
 
           KJ_CASE_ONEOF(modulesSource, ModulesSource) {
             auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
-            auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-            impl->configureDynamicImports(lock, modules);
-            modulesSource.compileModules(lock, *isolate->apiIsolate);
-            impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
+            isolate->getModuleRegistry().attachToIsolate(lock,
+                [](jsg::Lock& js, jsg::Function<jsg::Value()> handler) {
+              return dynamicImportHandler(js, kj::mv(handler));
+            });
+            impl->unboundScriptOrMainModule =
+                KJ_ASSERT_NONNULL(jsg::Url::tryParse(modulesSource.mainModule,
+                                                     jsg::modules::FILE_ROOT));
             break;
           }
         }
@@ -1445,22 +1439,20 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
 
         KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
-          KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
+          KJ_CASE_ONEOF(unboundScript, jsg::modules::NonModuleScript) {
             auto limitScope = script->isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
             unboundScript.run(lock.v8Context());
           }
-          KJ_CASE_ONEOF(mainModule, kj::Path) {
-            auto& registry = (*jsContext)->getModuleRegistry();
-            KJ_IF_SOME(entry, registry.resolve(lock, mainModule)) {
-              JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
-                          "Main module must be an ES module.");
-              auto module = entry.module.getHandle(lock);
-
+          KJ_CASE_ONEOF(mainModule, jsg::Url) {
+            auto& registry = jsg::modules::IsolateModuleRegistry::from(lock.v8Isolate);
+            KJ_IF_SOME(handle, registry.resolve(lock, mainModule)) {
+              auto& entry = KJ_ASSERT_NONNULL(registry.resolve(lock, handle));
+              JSG_REQUIRE(entry.isEsm(), TypeError, "Main module must be an ES module.");
+              v8::Local<v8::Value> ns;
               {
                 auto limitScope = script->isolate->getLimitEnforcer()
                     .enterStartupJs(lock, maybeLimitError);
-
-                jsg::instantiateModule(lock, module);
+                ns = jsg::modules::Module::evaluate(lock, handle);
               }
 
               if (maybeLimitError != kj::none) {
@@ -1468,8 +1460,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 // thrown an exception.
                 throw jsg::JsExceptionThrown();
               }
-
-              v8::Local<v8::Value> ns = module->GetModuleNamespace();
 
               {
                 // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
@@ -1664,15 +1654,19 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
     auto colors = PERMITS_COLOR && tty;
 
-    // TODO(now): does this need to run within a handle scope?
-    auto registry = jsg::ModuleRegistry::from(js);
-    auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
-    auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
-    auto formatLog = js.v8Get(inspectModuleHandle, "formatLog"_kj).As<v8::Function>();
+    auto& registry = jsg::modules::IsolateModuleRegistry::from(js.v8Isolate);
+    auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse("node-internal:internal_inspect"_kj));
+    auto module = KJ_ASSERT_NONNULL(registry.resolve(js, url,
+        jsg::modules::ModuleRegistry::ResolveOption::INTERNAL_ONLY));
+    auto obj = jsg::modules::Module::evaluate(js, module);
+    auto formatLog = obj.get(js, "formatLog"_kj);
+    KJ_DASSERT(formatLog.isFunction());
 
+    // TODO(soon): Wrap this as a JS Function
+    auto formatLogFn = v8::Local<v8::Value>(formatLog).As<v8::Function>();
     auto recv = js.v8Undefined();
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    auto formatted = js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args)));
+    auto formatted = js.toString(jsg::check(formatLogFn->Call(context, recv, length + 1, args)));
     fprintf(fd, "%s\n", formatted.cStr());
   }
 }

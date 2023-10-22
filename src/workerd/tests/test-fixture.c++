@@ -251,17 +251,23 @@ TestFixture::TestFixture(SetupParams params)
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>())),
+    isolateObserver(kj::atomicRefcounted<IsolateObserver>()),
+    moduleRegistry(server::WorkerdApiIsolate::compileModules(
+        config,
+        capnp::List<server::config::Extension>::Reader{},
+        *isolateObserver,
+        params.featureFlags.orDefault(CompatibilityFlags::Reader()))),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(apiIsolate),
-      kj::atomicRefcounted<IsolateObserver>(),
+      kj::atomicAddRef(*isolateObserver),
       scriptId,
       kj::mv(isolateLimitEnforcer),
+      kj::mv(moduleRegistry),
       Worker::Isolate::InspectorPolicy::DISALLOW)),
     workerScript(kj::atomicRefcounted<Worker::Script>(
       kj::atomicAddRef(*workerIsolate),
       scriptId,
-      server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter,
-          capnp::List<server::config::Extension>::Reader{}),
+      server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
       kj::atomicAddRef(*workerScript),

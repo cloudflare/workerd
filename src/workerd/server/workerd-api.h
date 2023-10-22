@@ -7,6 +7,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/api/modules.h>
 
 namespace workerd::server {
 
@@ -31,8 +32,13 @@ public:
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions);
+      Worker::ValidationErrorReporter& errorReporter);
+
+  static kj::Own<jsg::modules::ModuleRegistry> compileModules(
+      config::Worker::Reader conf,
+      capnp::List<config::Extension>::Reader extensions,
+      jsg::CompilationObserver& observer,
+      CompatibilityFlags::Reader featureFlags);
 
   // A pipeline-level binding.
   struct Global {
@@ -191,12 +197,6 @@ private:
       config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       const jsg::CompilationObserver& observer) const;
-
-  void compileModules(
-      jsg::Lock& lock,
-      config::Worker::Reader conf,
-      Worker::ValidationErrorReporter& errorReporter,
-      capnp::List<config::Extension>::Reader extensions) const;
 };
 
 }  // namespace workerd::server

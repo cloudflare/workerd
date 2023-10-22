@@ -6,11 +6,11 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/api/rtti.h>
+#include "http.h"
 #include "streams.h"
 
 namespace workerd::api {
-
-class Fetcher;
 
 enum class SecureTransportKind {
   // plain-text
@@ -178,12 +178,19 @@ public:
   }
 };
 
-template <class Registry>
-void registerSocketsModule(
-    Registry& registry, auto featureFlags) {
-  registry.template addBuiltinModule<SocketsModule>("cloudflare-internal:sockets",
-    workerd::jsg::ModuleRegistry::Type::INTERNAL);
+static constexpr auto SOCKETS_MODULE_SPECIFIER = "cloudflare-internal:sockets"_kjc;
 
+template <typename TypeWrapper>
+kj::Own<jsg::modules::ModuleBundle> registerSocketsModule(
+    auto featureFlags,
+    jsg::CompilationObserver& observer) {
+  jsg::modules::BuiltinModuleBundleBuilder builder(jsg::modules::Module::Type::INTERNAL, observer);
+  builder.add<SocketsModule, TypeWrapper>(SOCKETS_MODULE_SPECIFIER);
+  return builder.finish();
+}
+
+void socketsRegisterRtti(RttiRegistry& registry, auto featureFlags) {
+  registry.add<SocketsModule>(SOCKETS_MODULE_SPECIFIER);
 }
 
 #define EW_SOCKETS_ISOLATE_TYPES     \

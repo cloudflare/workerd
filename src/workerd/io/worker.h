@@ -13,6 +13,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
+#include <workerd/jsg/modules.h>
 #include <kj/mutex.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/actor-storage.capnp.h>
@@ -27,7 +28,6 @@ namespace jsg {
   class V8System;
   class V8StackScope;
   class DOMException;
-  class ModuleRegistry;
 }
 
 namespace api {
@@ -229,9 +229,6 @@ public:
     // Path to the main module, which can be looked up in the module registry. Pointer is valid
     // only until the Script constructor returns.
     kj::StringPtr mainModule;
-
-    // Callback which will construct the module registry and load all the modules into it.
-    kj::Function<void(jsg::Lock& lock, const ApiIsolate& apiIsolate)> compileModules;
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
@@ -281,6 +278,7 @@ public:
                    kj::Own<IsolateObserver>&& metrics,
                    kj::StringPtr id,
                    kj::Own<IsolateLimitEnforcer> limitEnforcer,
+                   kj::Own<jsg::modules::ModuleRegistry> moduleRegistry,
                    InspectorPolicy inspectorPolicy,
                    ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
 
@@ -288,6 +286,8 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
 
   const IsolateObserver& getMetrics() const { return *metrics; }
+
+  const jsg::modules::ModuleRegistry& getModuleRegistry() const { return *moduleRegistry; }
 
   inline kj::StringPtr getId() const { return id; }
 
@@ -401,6 +401,7 @@ private:
 
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
+  kj::Own<jsg::modules::ModuleRegistry> moduleRegistry;
   kj::Own<ApiIsolate> apiIsolate;
   ConsoleMode consoleMode;
 

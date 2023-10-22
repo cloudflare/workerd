@@ -3,13 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import * as assert from "node:assert";
-import { openDoor } from "test:module";
 
+import { openDoor } from "test:module";
 
 export const test_module_api = {
   test() {
-    assert.throws(() => openDoor("test key"));
-    assert.equal(openDoor("0p3n s3sam3"), true);
+   assert.throws(() => openDoor("test key"));
+   assert.equal(openDoor("0p3n s3sam3"), true);
   }
 };
 

@@ -15,10 +15,12 @@
 #include <type_traits>
 #include <kj/map.h>
 #include "util.h"
+#include "url.h"
 #include "wrappable.h"
 #include <typeindex>
 #include "meta.h"
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/observer.h>
 
 namespace std {
   inline auto KJ_HASHCODE(const std::type_index& idx) {
@@ -816,8 +818,6 @@ struct ResourceTypeBuilder {
   template<const char* tsDefine>
   inline void registerTypeScriptDefine() { /* only needed for RTTI */ }
 
-  inline void registerJsBundle(Bundle::Reader bundle) { /* handled at the second stage */ }
-
 private:
   TypeWrapper& typeWrapper;
   v8::Isolate* isolate;
@@ -835,28 +835,15 @@ struct JsSetup {
 
   JsSetup(jsg::Lock& js, v8::Local<v8::Context> context): js(js), context(context) {}
 
-  inline void registerJsBundle(Bundle::Reader bundle) {
-    ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
-  }
-
   template<const char* propertyName, const char* moduleName>
   struct LazyJsInstancePropertyCallback {
     static void callback(v8::Local<v8::Name> property,
                          const v8::PropertyCallbackInfo<v8::Value>& info) {
       liftKj(info, [&]() {
-        static auto path = kj::Path::parse(moduleName);
-
-        auto& js = Lock::from(info.GetIsolate());
-        auto context = js.v8Context();
-        auto& moduleInfo = KJ_REQUIRE_NONNULL(
-            ModuleRegistry::from(js)->resolve(js, path, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
-            "Could not resolve bootstrap module", moduleName);
-        auto module = moduleInfo.module.getHandle(js);
-        jsg::instantiateModule(js, module);
-
-        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-        auto result = check(moduleNs->Get(context, property));
-        return result;
+        return resolvePropertyFromModule(
+            Lock::from(info.GetIsolate()),
+            kj::StringPtr(moduleName),
+            kj::StringPtr(propertyName));
       });
     }
   };
@@ -1051,9 +1038,6 @@ public:
 
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
-
-    auto moduleRegistry = ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
-    ptr->setModuleRegistry(kj::mv(moduleRegistry));
 
     v8::Context::Scope context_scope(context);
     setupJavascript(js, context);

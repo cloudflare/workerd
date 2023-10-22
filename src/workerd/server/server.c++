@@ -2517,11 +2517,16 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
+
+  auto moduleRegistry = WorkerdApiIsolate::compileModules(conf, extensions, *observer,
+                                                         featureFlags);
+
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(
       kj::mv(api),
       kj::mv(observer),
       name,
       kj::mv(limitEnforcer),
+      kj::mv(moduleRegistry),
       inspectorPolicy,
       consoleMode);
 
@@ -2532,7 +2537,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   }
 
   auto script = isolate->newScript(
-      name, WorkerdApiIsolate::extractSource(name, conf, errorReporter, extensions),
+      name, WorkerdApiIsolate::extractSource(name, conf, errorReporter),
       IsolateObserver::StartType::COLD, false, errorReporter);
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
@@ -2553,7 +2558,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
       kj::mv(script),
       kj::atomicRefcounted<WorkerObserver>(),
       [&](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
-        return kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileGlobals(
+        kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileGlobals(
             lock, globals, target, 1);
       },
       IsolateObserver::StartType::COLD,

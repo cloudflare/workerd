@@ -82,52 +82,6 @@ struct EncoderErrorReporterImpl : public Worker::ValidationErrorReporter {
   kj::Vector<kj::String> errors;
 };
 
-struct EncoderModuleRegistryImpl {
-  struct CppModuleContents {
-    CppModuleContents(kj::String structureName) : structureName(kj::mv(structureName)) {}
-
-    kj::String structureName;
-  };
-  struct TypeScriptModuleContents {
-    TypeScriptModuleContents(kj::StringPtr tsDeclarations) : tsDeclarations(tsDeclarations) {}
-
-    kj::StringPtr tsDeclarations;
-  };
-  struct ModuleInfo {
-    ModuleInfo(kj::StringPtr specifier, jsg::ModuleType type, kj::OneOf<CppModuleContents,
-                TypeScriptModuleContents> contents)
-        : specifier(specifier),
-          type(type),
-          contents(kj::mv(contents)) {}
-
-    kj::StringPtr specifier;
-    jsg::ModuleType type;
-    kj::OneOf<CppModuleContents, TypeScriptModuleContents> contents;
-  };
-
-  void addBuiltinBundle(jsg::Bundle::Reader bundle, kj::Maybe<jsg::ModuleRegistry::Type> maybeFilter = kj::none) {
-    for (auto module: bundle.getModules()) {
-      auto type = module.getType();
-      auto filter = maybeFilter.orDefault(type);
-      if (type == filter) {
-        TypeScriptModuleContents contents (module.getTsDeclaration());
-        ModuleInfo info (module.getName(), type, kj::mv(contents));
-        modules.add(kj::mv(info));
-      }
-    }
-  }
-
-  template <typename T>
-  void addBuiltinModule(kj::StringPtr specifier, jsg::ModuleRegistry::Type type = jsg::ModuleRegistry::Type::BUILTIN) {
-    auto structureName = jsg::fullyQualifiedTypeName(typeid(T));
-    CppModuleContents contents (kj::mv(structureName));
-    ModuleInfo info (specifier, type, kj::mv(contents));
-    modules.add(kj::mv(info));
-  }
-
-  kj::Vector<ModuleInfo> modules;
-};
-
 CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::StringPtr compatDate,
                                         bool experimental, kj::ArrayPtr<kj::String> compatFlags) {
   // Based on src/workerd/io/compatibility-date-test.c++
@@ -157,7 +111,9 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::Stri
 
 struct TypesEncoder {
 public:
-  TypesEncoder(kj::String compatDate, kj::Array<kj::String> compatFlags): compatDate(kj::mv(compatDate)), compatFlags(kj::mv(compatFlags)) {}
+  TypesEncoder(kj::String compatDate, kj::Array<kj::String> compatFlags):
+      compatDate(kj::mv(compatDate)),
+      compatFlags(kj::mv(compatFlags)) {}
 
   kj::Array<byte> encode() {
     capnp::MallocMessageBuilder flagsMessage;
@@ -183,19 +139,20 @@ public:
 #undef EW_TYPE_GROUP_WRITE
 
     // Encode modules
-    EncoderModuleRegistryImpl registry;
-    registerModules(registry, flags);
+    RttiRegistry registry;
+    registerRtti(registry, flags);
+    auto modules = registry.finish();
 
     unsigned int i = 0;
-    auto modulesBuilder = root.initModules(registry.modules.size());
+    auto modulesBuilder = root.initModules(modules.size());
     for (auto moduleBuilder: modulesBuilder) {
-      auto& module = registry.modules[i++];
+      auto& module = modules[i++];
       moduleBuilder.setSpecifier(module.specifier);
       KJ_SWITCH_ONEOF(module.contents) {
-        KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::CppModuleContents) {
+        KJ_CASE_ONEOF(contents, RttiRegistry::CppModuleContents) {
           moduleBuilder.setStructureName(contents.structureName);
         }
-        KJ_CASE_ONEOF(contents, EncoderModuleRegistryImpl::TypeScriptModuleContents) {
+        KJ_CASE_ONEOF(contents, RttiRegistry::TypeScriptModuleContents) {
           moduleBuilder.setTsDeclarations(contents.tsDeclarations);
         }
       }
@@ -236,6 +193,21 @@ private:
 };
 
 } // namespace
+
+void RttiRegistry::add(jsg::Bundle::Reader bundle) {
+  for (auto module: bundle.getModules()) {
+    modules.add(Module {
+      .specifier = kj::str(module.getName()),
+      .contents = TypeScriptModuleContents {
+        .tsDeclarations = module.getTsDeclaration()
+      },
+    });
+  }
+}
+
+kj::Array<RttiRegistry::Module> RttiRegistry::finish() {
+  return modules.releaseAsArray();
+}
 
 kj::Array<byte> RTTIModule::exportTypes(kj::String compatDate, kj::Array<kj::String> compatFlags) {
   TypesEncoder encoder(kj::mv(compatDate), kj::mv(compatFlags));

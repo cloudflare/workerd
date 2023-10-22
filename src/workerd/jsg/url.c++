@@ -214,7 +214,7 @@ Url::HostType Url::getHostType() const {
   return static_cast<HostType>(value);
 }
 
-Url Url::clone(EquivalenceOption option) {
+Url Url::clone(EquivalenceOption option) const {
   ada_url copy = ada_copy(getInner<ada_url>(inner));
   if (option == EquivalenceOption::IGNORE_FRAGMENTS) {
     ada_clear_hash(copy);

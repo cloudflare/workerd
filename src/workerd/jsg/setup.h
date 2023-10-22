@@ -13,6 +13,7 @@
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <workerd/jsg/observer.h>
+#include <workerd/jsg/modules.h>
 
 namespace workerd::jsg {
 
@@ -412,6 +413,14 @@ private:
   kj::Own<TypeWrapper> wrapper;  // Needs to be destroyed under lock...
 };
 
+// These are JSG defined types that will be always registered with the TypeWrapper.
+#define COMMON_ISOLATE_TYPES             \
+    jsg::DOMException,                   \
+    jsg::modules::CommonJsModuleObject,  \
+    jsg::modules::CommonJsModuleContext, \
+    jsg::modules::NodeJsModuleObject,    \
+    jsg::modules::NodeJsModuleContext
+
 // This macro helps cut down on template spam in error messages. Instead of instantiating Isolate
 // directly, do:
 //
@@ -421,7 +430,7 @@ private:
 // API types.
 #define JSG_DECLARE_ISOLATE_TYPE(Type, ...) \
   class Type##_TypeWrapper; \
-  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, jsg::DOMException, ##__VA_ARGS__> \
+  typedef ::workerd::jsg::TypeWrapper<Type##_TypeWrapper, COMMON_ISOLATE_TYPES, ##__VA_ARGS__> \
       Type##_TypeWrapperBase; \
   class Type##_TypeWrapper final: public Type##_TypeWrapperBase { \
   public: \

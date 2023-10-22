@@ -653,7 +653,7 @@ KJ_TEST("Server: serve modular Worker with imports") {
           `const SQUARE = new WebAssembly.Instance(SQUARE_WASM, {});
           `export default {
           `  async fetch(request) {
-          `    return new Response([
+          `  return new Response([
           `        FOO, BAR, new TextDecoder().decode(BAZ), QUX.message, CORGE.message,
           `        "square.wasm says square(5) = " + SQUARE.exports.square(5)]
           `        .join("\n"));
@@ -675,7 +675,7 @@ KJ_TEST("Server: serve modular Worker with imports") {
       ),
       ( name = "corge.js",
         commonJsModule =
-          `module.exports.message = "Hello from corge.js";
+          `module.exports = { message: "Hello from corge.js" };
       ),
       ( name = "square.wasm",
         # Exports a function 'square(x)' that returns x^2.

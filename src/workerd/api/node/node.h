@@ -5,6 +5,7 @@
 #include "crypto.h"
 #include "diagnostics-channel.h"
 #include "util.h"
+#include <workerd/api/rtti.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <capnp/dynamic.h>
@@ -31,41 +32,40 @@ public:
   }
 };
 
-template <class Registry>
-void registerNodeJsCompatModules(
-    Registry& registry, auto featureFlags) {
+template <typename TypeWrapper>
+kj::Array<kj::Own<jsg::modules::ModuleBundle>> registerNodeJsCompatModules(
+    auto featureFlags, jsg::CompilationObserver& observer) {
+  jsg::modules::BuiltinModuleBundleBuilder internal(jsg::modules::Module::Type::INTERNAL,
+                                                    observer);
+  jsg::modules::BuiltinModuleBundleBuilder builtin(jsg::modules::Module::Type::BUILTIN,
+                                                   observer);
 
-#define NODEJS_MODULES(V)                                                       \
-  V(CompatibilityFlags, "workerd:compatibility-flags")                          \
-  V(AsyncHooksModule, "node-internal:async_hooks")                              \
-  V(BufferUtil, "node-internal:buffer")                                         \
-  V(CryptoImpl, "node-internal:crypto")                                         \
-  V(UtilModule, "node-internal:util")                                           \
-  V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")
+  internal.add<CompatibilityFlags, TypeWrapper>("workerd:compatibility-flags"_kj);
+  internal.add<AsyncHooksModule, TypeWrapper>("node-internal:async_hooks"_kj);
+  internal.add<BufferUtil, TypeWrapper>("node-internal:buffer"_kj);
+  internal.add<CryptoImpl, TypeWrapper>("node-internal:crypto"_kj);
+  internal.add<UtilModule, TypeWrapper>("node-internal:util"_kj);
+  internal.add<DiagnosticsChannelModule, TypeWrapper>("node-internal:diagnostics_channel");
 
-// Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
-// node.js compat C++ modules that should be guarded by the experimental compat
-// flag. Once they are ready to ship, move them up to the NODEJS_MODULES list.
-#define NODEJS_MODULES_EXPERIMENTAL(V)
-
-#define V(T, N)                                                                 \
-  registry.template addBuiltinModule<T>(N, workerd::jsg::ModuleRegistry::Type::INTERNAL);
-
-  NODEJS_MODULES(V)
-
-  if (featureFlags.getWorkerdExperimental()) {
-    NODEJS_MODULES_EXPERIMENTAL(V)
+  internal.add(NODE_BUNDLE);
+  if (featureFlags.getNodeJsCompat()) {
+    builtin.add(NODE_BUNDLE);
   }
 
-#undef V
-#undef NODEJS_MODULES
+  return kj::arr(internal.finish(), builtin.finish());
+}
 
-  // If the `nodejs_compat` flag isn't enabled, only register internal modules.
-  // We need these for `console.log()`ing when running `workerd` locally.
-  kj::Maybe<jsg::ModuleType> maybeFilter;
-  if (!featureFlags.getNodeJsCompat()) maybeFilter = jsg::ModuleType::INTERNAL;
-
-  registry.addBuiltinBundle(NODE_BUNDLE, maybeFilter);
+void nodeRegisterRtti(RttiRegistry& registry, auto featureFlags) {
+  registry.add<CompatibilityFlags>("workerd:compatibility-flags"_kj);
+  registry.add<CompatibilityFlags>("workerd:compatibility-flags"_kj);
+  registry.add<AsyncHooksModule>("node-internal:async_hooks"_kj);
+  registry.add<BufferUtil>("node-internal:buffer"_kj);
+  registry.add<CryptoImpl>("node-internal:crypto"_kj);
+  registry.add<UtilModule>("node-internal:util"_kj);
+  registry.add<DiagnosticsChannelModule>("node-internal:diagnostics_channel");
+  if (featureFlags.getNodeJsCompat()) {
+    registry.add(NODE_BUNDLE);
+  }
 }
 
 #define EW_NODE_ISOLATE_TYPES              \

@@ -35,7 +35,6 @@ filegroup(
             exclude = [
                 "html-rewriter.h",
                 "modules.h",
-                "rtti.h",
                 "**/*test*.h",
             ],
         ),
@@ -44,7 +43,6 @@ filegroup(
             exclude = [
                 "html-rewriter.h",
                 "modules.h",
-                "rtti.h",
                 "**/*test*.h",
                 "gpu/*.h",
             ],
@@ -59,11 +57,18 @@ wd_cc_library(
     hdrs = [
         "rtti.h",
         "modules.h",
+        "node/node.h",
+        "node/async-hooks.h",
+        "node/buffer.h",
+        "node/crypto.h",
+        "node/diagnostics-channel.h",
+        "node/util.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":html-rewriter",
         "//src/workerd/io",
+        "//src/workerd/jsg:jsg",
     ],
 )
 
@@ -115,6 +120,7 @@ kj_test(
     src = "api-rtti-test.c++",
     deps = [
         ":html-rewriter",
+        ":rtti",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],
