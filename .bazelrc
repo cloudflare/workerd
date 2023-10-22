@@ -144,6 +144,13 @@ build:macos --config=unix
 # TODO (cleanup): macOS 11.X is now EOL, bump this to macOS 12.5 soon.
 build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
 
+# Avoid emitting duplicate unwind info where compact unwind info can be used. This reduces the
+# object size by ~5% on average, improving disk space usage and link times. The final binary size
+# is not affected. Note that this is on-by-default on arm64, but turning it on for all mac builds
+# is easier than adding the flag only on x86. See https://reviews.llvm.org/D122258 for detailed
+# information on the flag.
+build:macos --copt='-femit-dwarf-unwind=no-compact-unwind'
+
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
 build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
