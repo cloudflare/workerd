@@ -2909,15 +2909,22 @@ export const utilInspect = {
 
       // This is the actual test. The other assertions in this block are about
       // making sure the test is set up correctly and isn't polluting other tests.
-      assert.strictEqual(
-        util.inspect(generator, { showHidden: true }),
+      const expected1 =
+        '[GeneratorFunction: generator] {\n' +
+        '  [length]: 0,\n' +
+        "  [name]: 'generator',\n" +
+        "  [prototype]: Object [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
+        "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
+        '}';
+      const expected2 = // TODO: Remove this once updated to new V8.
         '[GeneratorFunction: generator] {\n' +
         '  [length]: 0,\n' +
         "  [name]: 'generator',\n" +
         "  [prototype]: Iterator [Generator] { [Symbol(Symbol.toStringTag)]: 'Generator' },\n" + // eslint-disable-line max-len
         "  [Symbol(Symbol.toStringTag)]: 'GeneratorFunction'\n" +
-        '}'
-      );
+        '}';
+      const actual = util.inspect(generator, { showHidden: true });
+      assert.ok((actual == expected1) || (actual == expected2));
 
       // Reset so we don't pollute other tests
       Object.setPrototypeOf(generatorPrototype, originalProtoOfProto);
