@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-utils.h"
+#include <webgpu/webgpu_cpp.h>
 
 namespace workerd::api::gpu {
 
@@ -41,7 +42,7 @@ wgpu::FeatureName parseFeatureName(GPUFeatureName& str) {
     return wgpu::FeatureName::Float32Filterable;
   }
 
-  JSG_FAIL_REQUIRE(TypeError, "unknown GPU feature", str);
+  JSG_FAIL_REQUIRE(TypeError, "unknown GPU feature: ", str);
 }
 
 GPUTextureDimension getTextureDimension(wgpu::TextureDimension& dimension) {
@@ -390,7 +391,7 @@ wgpu::TextureDimension parseTextureDimension(kj::StringPtr dimension) {
     return wgpu::TextureDimension::e3D;
   }
 
-  JSG_FAIL_REQUIRE(TypeError, "unknown texture dimension", dimension);
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture dimension: ", dimension);
 }
 
 wgpu::TextureFormat parseTextureFormat(kj::StringPtr format) {
@@ -771,7 +772,161 @@ wgpu::TextureFormat parseTextureFormat(kj::StringPtr format) {
     return wgpu::TextureFormat::ASTC12x12UnormSrgb;
   }
 
-  JSG_FAIL_REQUIRE(TypeError, "unknown texture format", format);
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture format: ", format);
+}
+
+wgpu::TextureAspect parseTextureAspect(kj::StringPtr aspect) {
+  if (aspect == "all") {
+    return wgpu::TextureAspect::All;
+  }
+
+  if (aspect == "stencil-only") {
+    return wgpu::TextureAspect::StencilOnly;
+  }
+
+  if (aspect == "depth-only") {
+    return wgpu::TextureAspect::DepthOnly;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown aspect: ", aspect);
+}
+
+wgpu::TextureViewDimension parseTextureViewDimension(kj::StringPtr dim) {
+
+  if (dim == "1d") {
+    return wgpu::TextureViewDimension::e1D;
+  }
+
+  if (dim == "2d") {
+    return wgpu::TextureViewDimension::e2D;
+  }
+
+  if (dim == "2d-array") {
+    return wgpu::TextureViewDimension::e2DArray;
+  }
+
+  if (dim == "cube") {
+    return wgpu::TextureViewDimension::Cube;
+  }
+
+  if (dim == "cube-array") {
+    return wgpu::TextureViewDimension::CubeArray;
+  }
+
+  if (dim == "3d") {
+    return wgpu::TextureViewDimension::e3D;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown texture view dimension: ", dim);
+}
+
+wgpu::StorageTextureAccess parseStorageAccess(kj::StringPtr access) {
+  if (access == "write-only") {
+    return wgpu::StorageTextureAccess::WriteOnly;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown storage access: ", access);
+}
+
+wgpu::PrimitiveTopology parsePrimitiveTopology(kj::StringPtr topology) {
+  if (topology == "point-list") {
+    return wgpu::PrimitiveTopology::PointList;
+  }
+
+  if (topology == "line-list") {
+    return wgpu::PrimitiveTopology::LineList;
+  }
+
+  if (topology == "line-strip") {
+    return wgpu::PrimitiveTopology::LineStrip;
+  }
+
+  if (topology == "triangle-list") {
+    return wgpu::PrimitiveTopology::TriangleList;
+  }
+
+  if (topology == "triangle-strip") {
+    return wgpu::PrimitiveTopology::TriangleList;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown primitive topology: ", topology);
+}
+
+wgpu::IndexFormat parseIndexFormat(kj::StringPtr format) {
+  if (format == "uint16") {
+    return wgpu::IndexFormat::Uint16;
+  }
+
+  if (format == "uint32") {
+    return wgpu::IndexFormat::Uint32;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown index format: ", format);
+}
+
+wgpu::FrontFace parseFrontFace(kj::StringPtr frontFace) {
+  if (frontFace == "ccw") {
+    return wgpu::FrontFace::CCW;
+  }
+
+  if (frontFace == "cw") {
+    return wgpu::FrontFace::CW;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown front face: ", frontFace);
+}
+
+wgpu::CullMode parseCullMode(kj::StringPtr mode) {
+  if (mode == "none") {
+    return wgpu::CullMode::None;
+  }
+
+  if (mode == "front") {
+    return wgpu::CullMode::Front;
+  }
+
+  if (mode == "back") {
+    return wgpu::CullMode::Back;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown cull mode: ", mode);
+}
+
+wgpu::StencilOperation parseStencilOperation(kj::StringPtr operation) {
+
+  if (operation == "keep") {
+    return wgpu::StencilOperation::Keep;
+  }
+
+  if (operation == "zero") {
+    return wgpu::StencilOperation::Zero;
+  }
+
+  if (operation == "replace") {
+    return wgpu::StencilOperation::Replace;
+  }
+
+  if (operation == "invert") {
+    return wgpu::StencilOperation::Invert;
+  }
+
+  if (operation == "increment-clamp") {
+    return wgpu::StencilOperation::IncrementClamp;
+  }
+
+  if (operation == "decrement-clamp") {
+    return wgpu::StencilOperation::DecrementClamp;
+  }
+
+  if (operation == "increment-wrap") {
+    return wgpu::StencilOperation::IncrementWrap;
+  }
+
+  if (operation == "decrement-wrap") {
+    return wgpu::StencilOperation::DecrementWrap;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown stencil operation: ", operation);
 }
 
 } // namespace workerd::api::gpu

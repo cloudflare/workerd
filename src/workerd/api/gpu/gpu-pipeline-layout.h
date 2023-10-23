@@ -30,4 +30,6 @@ struct GPUPipelineLayoutDescriptor {
   JSG_STRUCT(label, bindGroupLayouts);
 };
 
+using GPUPipelineLayoutBase = kj::OneOf<jsg::NonCoercible<kj::String>, jsg::Ref<GPUPipelineLayout>>;
+
 } // namespace workerd::api::gpu

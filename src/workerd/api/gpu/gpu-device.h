@@ -14,6 +14,7 @@
 #include "gpu-pipeline-layout.h"
 #include "gpu-query-set.h"
 #include "gpu-queue.h"
+#include "gpu-render-pipeline.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
 #include "gpu-supported-features.h"
@@ -40,6 +41,7 @@ public:
     JSG_METHOD(createShaderModule);
     JSG_METHOD(createPipelineLayout);
     JSG_METHOD(createComputePipeline);
+    JSG_METHOD(createRenderPipeline);
     JSG_METHOD(createCommandEncoder);
     JSG_METHOD(createTexture);
     JSG_METHOD(destroy);
@@ -70,6 +72,7 @@ private:
   jsg::Ref<GPUShaderModule> createShaderModule(GPUShaderModuleDescriptor descriptor);
   jsg::Ref<GPUPipelineLayout> createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
   jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPURenderPipeline> createRenderPipeline(GPURenderPipelineDescriptor descriptor);
   jsg::Promise<jsg::Ref<GPUComputePipeline>>
   createComputePipelineAsync(GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPUCommandEncoder>

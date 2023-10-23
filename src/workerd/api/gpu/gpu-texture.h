@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "gpu-texture-view.h"
 #include "gpu-utils.h"
 #include "workerd/jsg/iterator.h"
 #include <webgpu/webgpu_cpp.h>
@@ -20,7 +21,7 @@ public:
   }
   explicit GPUTexture(wgpu::Texture t) : texture_(kj::mv(t)){};
   JSG_RESOURCE_TYPE(GPUTexture) {
-    // TODO(soon): createView()
+    JSG_METHOD(createView);
     JSG_METHOD(destroy);
     JSG_READONLY_PROTOTYPE_PROPERTY(width, getWidth);
     JSG_READONLY_PROTOTYPE_PROPERTY(height, getHeight);
@@ -33,6 +34,8 @@ public:
 
 private:
   wgpu::Texture texture_;
+
+  jsg::Ref<GPUTextureView> createView(jsg::Optional<GPUTextureViewDescriptor> descriptor);
 
   GPUIntegerCoordinateOut getWidth() {
     return texture_.GetWidth();
