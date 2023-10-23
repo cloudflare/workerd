@@ -533,7 +533,8 @@ void WebSocket::send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> messa
     KJ_UNREACHABLE;
   }();
 
-  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() - autoResponseStatus.queuedAutoResponses;
+  auto pendingAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size() -
+      autoResponseStatus.queuedAutoResponses;
   autoResponseStatus.queuedAutoResponses = autoResponseStatus.pendingAutoResponseDeque.size();
   outgoingMessages->insert(GatedMessage{kj::mv(maybeOutputLock), kj::mv(msg), pendingAutoResponses});
 
