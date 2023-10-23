@@ -93,7 +93,8 @@ jobs:
             BAZEL_OUTPUT_BASE=$(bazel info --ui_event_filters=-WARNING output_base)
             BAZEL_REPOSITORY_CACHE=$(bazel info --ui_event_filters=-WARNING repository_cache)
             echo "Bazel cache usage statistics"
-            du -hs -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
+            du -hs -t 1 ~/bazel-disk-cache/* || true
+            du -hs $BAZEL_REPOSITORY_CACHE
             echo "Bazel output usage statistics"
             du -hs -t 1 $BAZEL_OUTPUT_BASE
             echo "Workspace usage statistics"
