@@ -233,7 +233,7 @@ rules_rust_dependencies()
 
 rust_register_toolchains(
     edition = "2021",
-    versions = ["1.69.0"],
+    versions = ["1.72.1"],
 )
 
 load("@rules_rust//crate_universe:repositories.bzl", "crate_universe_dependencies")
@@ -424,6 +424,12 @@ new_local_repository(
         name = "lolhtml",
         hdrs = ["@workerd//rust-deps:lol_html_api"],
         deps = ["@workerd//rust-deps"],
+        # TODO(soon): This workaround appears to be needed when linking the rust library – figure
+        # out why and develop a better approach to address this.
+        linkopts = select({
+          "@platforms//os:windows": ["ntdll.lib"],
+          "//conditions:default": [""],
+        }),
         strip_include_prefix = "/",
         visibility = ["//visibility:public"],)""",
     path = "empty",
