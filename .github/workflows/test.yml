@@ -74,6 +74,9 @@ jobs:
         # 'Show timestamps' on the web interface)
         run: |
             bazelisk build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
+      - name: Report binary size
+        if: runner.os != 'Windows'
+        run: ls -l bazel-bin/src/workerd/server/workerd
       - name: Bazel tests
         # Run tests and check that there are no .bazelrc issues that prevent shutdown.
         run: |
