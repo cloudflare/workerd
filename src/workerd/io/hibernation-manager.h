@@ -40,8 +40,8 @@ public:
   // This converts our activeOrPackage from an api::WebSocket to a HibernationPackage.
   void hibernateWebSockets(Worker::Lock& lock) override;
 
-  void setWebSocketAutoResponse(jsg::Ref<api::WebSocketRequestResponsePair> reqResp) override;
-  void unsetWebSocketAutoResponse() override;
+  void setWebSocketAutoResponse(kj::Maybe<kj::StringPtr> request,
+      kj::Maybe<kj::StringPtr> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
   void setTimerChannel(TimerChannel& timerChannel) override;
 
@@ -108,11 +108,13 @@ private:
     // to the api::WebSocket.
     jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js) {
       KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
+        // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
+        // from the hibernation manager to api::websocket to prevent possible ws.send races.
         activeOrPackage.init<jsg::Ref<api::WebSocket>>(
             api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package))
-        )->setAutoResponseTimestamp(autoResponseTimestamp);
-        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
-        // that was stored in the corresponding HibernatableWebSocket.
+        )->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
+        autoResponsePromise = kj::READY_NOW;
       }
       return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
     }
@@ -151,6 +153,10 @@ private:
     // Stores the last received autoResponseRequest timestamp.
     kj::Maybe<kj::Date> autoResponseTimestamp;
 
+    // Keeps track of the currently ongoing websocket auto-response send promise. This promise may
+    // be moved to api::websocket if an hibernating websocket unhibernates.
+    kj::Promise<void> autoResponsePromise = kj::READY_NOW;
+
     friend HibernationManagerImpl;
   };
 
@@ -179,6 +185,15 @@ private:
 
     TagCollection(kj::String tag, decltype(list) list): tag(kj::mv(tag)), list(kj::mv(list)) {}
     TagCollection(TagCollection&& other) = default;
+  };
+
+  // This structure will hold the request and corresponding response for hibernatable websockets
+  // auto-response feature. Although we store 2 kj::Maybe strings, if we don't have a request set
+  // we can't have a response, and vice versa.
+  // TODO(cleanup): Remove kj::Maybe from request and response strings.
+  struct AutoRequestResponsePair {
+    kj::Maybe<kj::String> request = kj::none;
+    kj::Maybe<kj::String> response = kj::none;
   };
 
   // A hashmap of tags to HibernatableWebSockets associated with the tag.
@@ -216,7 +231,7 @@ private:
   };
   DisconnectHandler onDisconnect;
   kj::TaskSet readLoopTasks;
-  kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> autoResponsePair;
+  kj::Own<AutoRequestResponsePair> autoResponsePair = kj::heap<AutoRequestResponsePair>();
   kj::Maybe<TimerChannel&> timer;
 };
 }; // namespace workerd
