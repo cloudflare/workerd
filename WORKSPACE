@@ -275,6 +275,11 @@ load("@rules_nodejs//nodejs:repositories.bzl", "nodejs_register_toolchains")
 
 nodejs_register_toolchains(
     name = "nodejs",
+    node_urls = [
+        # github workflows may substitute a mirror URL here to avoid fetch failures.
+        # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
+        "https://nodejs.org/dist/v{version}/{filename}",
+    ],
     node_version = "18.10.0",
 )
 
