@@ -69,6 +69,13 @@ jobs:
         run: |
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=C:/tmp')
             [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'build:windows --config=windows_no_dbg')
+      - name: Configure download mirrors
+        shell: bash
+        run: |
+            if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
+              # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
+              sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+            fi
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
