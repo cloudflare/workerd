@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "webgpu-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "webgpu-windowless-test.js")
+        ],
+        durableObjectNamespaces = [
+          (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["experimental", "nodejs_compat", "webgpu"],
+      )
+    ),
+  ],
+);

@@ -496,6 +496,8 @@ public:
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUBufferUsage, GPUBufferUsage);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUShaderStage, GPUShaderStage);
     JSG_NESTED_TYPE_NAMED(api::gpu::GPUMapMode, GPUMapMode);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUTextureUsage, GPUTextureUsage);
+    JSG_NESTED_TYPE_NAMED(api::gpu::GPUColorWrite, GPUColorWrite);
 #endif
 
     JSG_TS_ROOT();

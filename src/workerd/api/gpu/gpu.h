@@ -17,10 +17,13 @@
 #include "gpu-pipeline-layout.h"
 #include "gpu-query-set.h"
 #include "gpu-queue.h"
+#include "gpu-render-pipeline.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
+#include "gpu-texture-view.h"
+#include "gpu-texture.h"
 #include "gpu-utils.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -70,6 +73,13 @@ private:
       api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits, api::gpu::GPUError,            \
       api::gpu::GPUOutOfMemoryError, api::gpu::GPUInternalError, api::gpu::GPUValidationError,     \
       api::gpu::GPUDeviceLostInfo, api::gpu::GPUCompilationMessage, api::gpu::GPUCompilationInfo,  \
-      api::gpu::GPUUncapturedErrorEvent, api::gpu::GPUUncapturedErrorEventInit
+      api::gpu::GPUUncapturedErrorEvent, api::gpu::GPUUncapturedErrorEventInit,                    \
+      api::gpu::GPUTextureUsage, api::gpu::GPUTextureDescriptor, api::gpu::GPUExtent3DDict,        \
+      api::gpu::GPUTexture, api::gpu::GPUTextureView, api::gpu::GPUTextureViewDescriptor,          \
+      api::gpu::GPUColorWrite, api::gpu::GPURenderPipeline, api::gpu::GPURenderPipelineDescriptor, \
+      api::gpu::GPUVertexState, api::gpu::GPUVertexBufferLayout, api::gpu::GPUVertexAttribute,     \
+      api::gpu::GPUPrimitiveState, api::gpu::GPUStencilFaceState, api::gpu::GPUDepthStencilState,  \
+      api::gpu::GPUMultisampleState, api::gpu::GPUFragmentState, api::gpu::GPUColorTargetState,    \
+      api::gpu::GPUBlendState, api::gpu::GPUBlendComponent
 
 }; // namespace workerd::api::gpu

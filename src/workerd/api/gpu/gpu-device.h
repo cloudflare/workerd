@@ -14,10 +14,12 @@
 #include "gpu-pipeline-layout.h"
 #include "gpu-query-set.h"
 #include "gpu-queue.h"
+#include "gpu-render-pipeline.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
 #include "gpu-supported-features.h"
 #include "gpu-supported-limits.h"
+#include "gpu-texture.h"
 #include "workerd/jsg/promise.h"
 #include <dawn/native/DawnNative.h>
 #include <webgpu/webgpu_cpp.h>
@@ -39,7 +41,9 @@ public:
     JSG_METHOD(createShaderModule);
     JSG_METHOD(createPipelineLayout);
     JSG_METHOD(createComputePipeline);
+    JSG_METHOD(createRenderPipeline);
     JSG_METHOD(createCommandEncoder);
+    JSG_METHOD(createTexture);
     JSG_METHOD(destroy);
     JSG_METHOD(createQuerySet);
     JSG_METHOD(pushErrorScope);
@@ -61,12 +65,14 @@ private:
   kj::Own<AsyncRunner> async_;
   bool destroyed_ = false;
   jsg::Ref<GPUBuffer> createBuffer(jsg::Lock&, GPUBufferDescriptor);
+  jsg::Ref<GPUTexture> createTexture(jsg::Lock&, GPUTextureDescriptor);
   jsg::Ref<GPUBindGroupLayout> createBindGroupLayout(GPUBindGroupLayoutDescriptor descriptor);
   jsg::Ref<GPUBindGroup> createBindGroup(GPUBindGroupDescriptor descriptor);
   jsg::Ref<GPUSampler> createSampler(GPUSamplerDescriptor descriptor);
   jsg::Ref<GPUShaderModule> createShaderModule(GPUShaderModuleDescriptor descriptor);
   jsg::Ref<GPUPipelineLayout> createPipelineLayout(GPUPipelineLayoutDescriptor descriptor);
   jsg::Ref<GPUComputePipeline> createComputePipeline(GPUComputePipelineDescriptor descriptor);
+  jsg::Ref<GPURenderPipeline> createRenderPipeline(GPURenderPipelineDescriptor descriptor);
   jsg::Promise<jsg::Ref<GPUComputePipeline>>
   createComputePipelineAsync(GPUComputePipelineDescriptor descriptor);
   jsg::Ref<GPUCommandEncoder>

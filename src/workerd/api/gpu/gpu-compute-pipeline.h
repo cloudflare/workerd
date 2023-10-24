@@ -27,23 +27,10 @@ private:
   jsg::Ref<GPUBindGroupLayout> getBindGroupLayout(uint32_t index);
 };
 
-using GPUPipelineConstantValue = double;
-
-struct GPUProgrammableStage {
-  jsg::Ref<GPUShaderModule> module;
-  kj::String entryPoint;
-  jsg::Optional<jsg::Dict<GPUPipelineConstantValue>> constants;
-
-  JSG_STRUCT(module, entryPoint, constants);
-};
-
-using GPUComputePipelineLayout =
-    kj::OneOf<jsg::NonCoercible<kj::String>, jsg::Ref<GPUPipelineLayout>>;
-
 struct GPUComputePipelineDescriptor {
   jsg::Optional<kj::String> label;
   GPUProgrammableStage compute;
-  GPUComputePipelineLayout layout;
+  GPUPipelineLayoutBase layout;
 
   JSG_STRUCT(label, compute, layout);
 };

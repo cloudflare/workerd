@@ -99,4 +99,12 @@ struct GPUShaderModuleDescriptor {
   JSG_STRUCT(label, code);
 };
 
+struct GPUProgrammableStage {
+  jsg::Ref<GPUShaderModule> module;
+  kj::String entryPoint;
+  jsg::Optional<jsg::Dict<GPUPipelineConstantValue>> constants;
+
+  JSG_STRUCT(module, entryPoint, constants);
+};
+
 } // namespace workerd::api::gpu
