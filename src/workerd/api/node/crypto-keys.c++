@@ -51,7 +51,7 @@ public:
   }
 
 private:
-  kj::Array<kj::byte> keyData;
+  ZeroOnFree keyData;
 };
 }  // namespace
 

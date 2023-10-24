@@ -206,4 +206,8 @@ bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
   KJ_FAIL_REQUIRE("Unable to compare raw key material for this key");
 }
 
+ZeroOnFree::~ZeroOnFree() noexcept(false) {
+  OPENSSL_cleanse(inner.begin(), inner.size());
+}
+
 }  // namespace workerd::api

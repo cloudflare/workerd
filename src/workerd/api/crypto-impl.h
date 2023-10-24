@@ -284,8 +284,10 @@ const SslDisposer<T, sslFree> SslDisposer<T, sslFree>::INSTANCE;
   OSSLCALL_OWN(T, T##_new(__VA_ARGS__), InternalDOMOperationError, "Error allocating crypto")
 
 #define BIGNUM_new BN_new
-#define BIGNUM_free BN_free
+#define BIGNUM_free BN_clear_free
 // BIGNUM obnoxiously doesn't follow the naming convention...
+// Using BN_clear_free here ensures that any potentially sensitive information in the
+// BIGNUM is also cleansed when it is freed.
 
 #define OSSL_BIO_MEM() \
   ({ \
@@ -318,6 +320,24 @@ static inline T integerCeilDivision(T a, T b) {
 
 kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk);
 kj::Own<EVP_PKEY> rsaJwkReader(SubtleCrypto::JsonWebKey&& keyDataJwk);
+
+// A wrapper for kj::Array<kj::byte> that will ensure the memory is overwritten
+// with zeroes when destroyed.
+class ZeroOnFree {
+public:
+  inline ZeroOnFree(kj::Array<kj::byte>&& inner) : inner(kj::mv(inner)) {}
+  ~ZeroOnFree() noexcept(false);
+
+  inline size_t size() const { return inner.size(); }
+  inline const kj::byte* begin() const { return inner.begin(); }
+  inline operator kj::ArrayPtr<const kj::byte>() const { return inner.asPtr(); }
+  inline operator const kj::Array<kj::byte>&() const { return inner; }
+  inline kj::ArrayPtr<kj::byte> asPtr() { return inner.asPtr(); }
+  inline kj::ArrayPtr<const kj::byte> asPtr() const { return inner.asPtr(); }
+
+private:
+  kj::Array<kj::byte> inner;
+};
 
 }  // namespace workerd::api
 

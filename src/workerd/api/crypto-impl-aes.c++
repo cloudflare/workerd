@@ -166,7 +166,7 @@ private:
   }
 
 protected:
-  kj::Array<kj::byte> keyData;
+  ZeroOnFree keyData;
   CryptoKey::AesKeyAlgorithm keyAlgorithm;
 };
 
@@ -563,7 +563,7 @@ private:
     auto cipherContext = makeCipherContext();
     // For CTR, it really does not matter whether we are encrypting or decrypting, so set enc to 0.
     JSG_REQUIRE(EVP_CipherInit_ex(cipherContext.get(), cipher, nullptr,
-        keyData.asBytes().begin(), counter.asBytes().begin(), 0),
+        keyData.asPtr().asBytes().begin(), counter.asBytes().begin(), 0),
         InternalDOMOperationError, "Error doing ", getAlgorithmName(), " encrypt/decrypt",
         internalDescribeOpensslErrors());
 
