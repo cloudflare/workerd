@@ -1674,6 +1674,7 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
     auto formatted = js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args)));
     fprintf(fd, "%s\n", formatted.cStr());
+    fflush(fd);
   }
 }
 
