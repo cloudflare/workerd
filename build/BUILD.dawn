@@ -798,10 +798,9 @@ cc_library(
     name = "dawn_native_windows",
     srcs = DAWN_SRCS + DAWN_DIRECTX_SRCS,
     hdrs = DAWN_HDRS,
-    defines = [
+    local_defines = [
         # From dawn/src/dawn/common/BUILD.gn:internal_config
         "DAWN_ENABLE_BACKEND_D3D12",
-        "WIN32_LEAN_AND_MEAN",
         "_WIN32_WINNT=0x0A00",
     ],
     includes = [
