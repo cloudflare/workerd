@@ -2415,6 +2415,14 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
           .scheme = kj::str(binding.getHyperdrive().getScheme()),
       });
     }
+    case config::Worker::Binding::UNSAFE_EVAL: {
+      if (!experimental) {
+        errorReporter.addError(kj::str("Unsafe eval is an experimental feature. ",
+            "You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+      return makeGlobal(Global::UnsafeEval {});
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "

@@ -284,6 +284,12 @@ v8::Local<v8::Value> CommonJsModuleContext::require(jsg::Lock& js, kj::String sp
   }
 }
 
+v8::Local<v8::Value> NonModuleScript::runAndReturn(v8::Local<v8::Context> context) const {
+  auto isolate = context->GetIsolate();
+  auto boundScript = unboundScript.Get(isolate)->BindToCurrentContext();
+  return check(boundScript->Run(context));
+}
+
 void NonModuleScript::run(v8::Local<v8::Context> context) const {
   auto isolate = context->GetIsolate();
   auto boundScript = unboundScript.Get(isolate)->BindToCurrentContext();

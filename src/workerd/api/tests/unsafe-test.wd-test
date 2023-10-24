@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "unsafe-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "unsafe-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "unsafe", unsafeEval = void )
+        ]
+      )
+    ),
+  ],
+);

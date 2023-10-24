@@ -27,6 +27,7 @@
 #include <workerd/api/r2.h>
 #include <workerd/api/r2-admin.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/unsafe.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
@@ -77,6 +78,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
   EW_SCHEDULED_ISOLATE_TYPES,
   EW_STREAMS_ISOLATE_TYPES,
   EW_TRACE_ISOLATE_TYPES,
+  EW_UNSAFE_ISOLATE_TYPES,
   EW_URL_ISOLATE_TYPES,
   EW_URL_STANDARD_ISOLATE_TYPES,
   EW_URLPATTERN_ISOLATE_TYPES,
@@ -623,6 +625,9 @@ static v8::Local<v8::Value> createBindingValue(
                                      kj::str(hyperdrive.user), kj::str(hyperdrive.password),
                                      kj::str(hyperdrive.scheme)));
     }
+    KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
+      value = lock.wrap(context, jsg::alloc<api::UnsafeEval>());
+    }
   }
 
   return value;
@@ -695,6 +700,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
       result.value = hyperdrive.clone();
+    }
+    KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
+      result.value = Global::UnsafeEval {};
     }
   }
 

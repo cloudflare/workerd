@@ -148,6 +148,8 @@ public:
   // context then will run it to completion.
   void run(v8::Local<v8::Context> context) const;
 
+  v8::Local<v8::Value> runAndReturn(v8::Local<v8::Context> context) const;
+
   static jsg::NonModuleScript compile(kj::StringPtr code, jsg::Lock& js, kj::StringPtr name = "worker.js");
 
 private:
