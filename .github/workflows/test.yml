@@ -97,7 +97,9 @@ jobs:
         # Exclude large benchmarking binaries created in debug and asan configurations to avoid
         # running out of disk space on the runner (nominally 14GB). We typically have two copies
         # of generated artifacts: one under bazel output-base and one in the bazel disk cache.
-        if: contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan')
+        # This should not be needed on Linux, where we can use shared linkage so binary sizes are
+        # much less of an issue.
+        if: matrix.os.name != 'linux' && (contains(matrix.config.suffix, 'debug') || contains(matrix.config.suffix, 'asan'))
         shell: bash
         run: |
           cat <<EOF >> .bazelrc
