@@ -106,6 +106,21 @@ export class DurableObjectExample {
     });
     ok(renderPipeline);
 
+    const encoder = device.createCommandEncoder();
+
+    const renderPassDescriptor = {
+      colorAttachments: [
+        {
+          clearValue: { r: 0.1, g: 0.2, b: 0.3, a: 1.0 },
+          loadOp: "clear",
+          storeOp: "store",
+          view: textureView,
+        },
+      ],
+    };
+    const renderPass = encoder.beginRenderPass(renderPassDescriptor);
+    ok(renderPass);
+
     return new Response("OK");
   }
 }

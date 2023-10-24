@@ -260,13 +260,6 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   return jsg::alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
 }
 
-struct ParsedRenderPipelineDescriptor {
-  wgpu::RenderPipelineDescriptor desc;
-  kj::Own<wgpu::PrimitiveDepthClipControl> depthClip;
-  kj::Own<wgpu::DepthStencilState> stencilState;
-  kj::Own<wgpu::FragmentState> fragment;
-};
-
 void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencilFaceState>& in) {
   KJ_IF_SOME(stencilFront, in) {
     KJ_IF_SOME(compare, stencilFront.compare) {
@@ -284,6 +277,21 @@ void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencil
   }
 }
 
+// We use this struct to maintain ownership of allocated objects to build the descriptor.
+// After the dawn call that uses this descriptor these can be cleaned up, and will be
+// when this object goes out of scope.
+struct ParsedRenderPipelineDescriptor {
+  wgpu::RenderPipelineDescriptor desc;
+  kj::Own<wgpu::PrimitiveDepthClipControl> depthClip;
+  kj::Own<wgpu::DepthStencilState> stencilState;
+  kj::Own<wgpu::FragmentState> fragment;
+  kj::Vector<kj::Array<wgpu::ConstantEntry>> constantLists;
+  kj::Array<wgpu::VertexBufferLayout> buffers;
+  kj::Vector<kj::Array<wgpu::VertexAttribute>> attributeLists;
+  kj::Array<wgpu::ColorTargetState> targets;
+  kj::Vector<wgpu::BlendState> blends;
+};
+
 ParsedRenderPipelineDescriptor
 parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
   ParsedRenderPipelineDescriptor parsedDesc{};
@@ -295,20 +303,51 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
   parsedDesc.desc.vertex.module = *descriptor.vertex.module;
   parsedDesc.desc.vertex.entryPoint = descriptor.vertex.entryPoint.cStr();
 
-  kj::Vector<wgpu::ConstantEntry> constants;
   KJ_IF_SOME(cDict, descriptor.vertex.constants) {
+    kj::Vector<wgpu::ConstantEntry> constants;
+
     for (auto& f : cDict.fields) {
       wgpu::ConstantEntry e;
       e.key = f.name.cStr();
       e.value = f.value;
       constants.add(kj::mv(e));
     }
+    auto constantsArray = constants.releaseAsArray();
+    parsedDesc.desc.vertex.constants = constantsArray.begin();
+    parsedDesc.desc.vertex.constantCount = constantsArray.size();
+    parsedDesc.constantLists.add(kj::mv(constantsArray));
   }
 
-  parsedDesc.desc.vertex.constants = constants.begin();
-  parsedDesc.desc.vertex.constantCount = constants.size();
+  KJ_IF_SOME(bList, descriptor.vertex.buffers) {
+    kj::Vector<wgpu::VertexBufferLayout> buffers;
 
-  // TODO(soon): descriptor.vertex.buffers
+    for (auto& b : bList) {
+      wgpu::VertexBufferLayout bLayout;
+      bLayout.arrayStride = b.arrayStride;
+
+      KJ_IF_SOME(stepMode, b.stepMode) {
+        bLayout.stepMode = parseVertexStepMode(stepMode);
+      }
+
+      kj::Vector<wgpu::VertexAttribute> attributes;
+      for (auto& a : b.attributes) {
+        wgpu::VertexAttribute attr;
+        attr.format = parseVertexFormat(a.format);
+        attr.offset = a.offset;
+        attr.shaderLocation = a.shaderLocation;
+        attributes.add(kj::mv(attr));
+      }
+      auto attrArray = attributes.releaseAsArray();
+      bLayout.attributes = attrArray.begin();
+      bLayout.attributeCount = attrArray.size();
+      parsedDesc.attributeLists.add(kj::mv(attrArray));
+
+      buffers.add(kj::mv(bLayout));
+    }
+    parsedDesc.buffers = buffers.releaseAsArray();
+    parsedDesc.desc.vertex.buffers = parsedDesc.buffers.begin();
+    parsedDesc.desc.vertex.bufferCount = parsedDesc.buffers.size();
+  }
 
   KJ_SWITCH_ONEOF(descriptor.layout) {
     KJ_CASE_ONEOF(autoLayoutMode, jsg::NonCoercible<kj::String>) {
@@ -388,20 +427,56 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
     fragmentState->module = *fragment.module;
     fragmentState->entryPoint = fragment.entryPoint.cStr();
 
-    kj::Vector<wgpu::ConstantEntry> constants;
     KJ_IF_SOME(cDict, fragment.constants) {
+      kj::Vector<wgpu::ConstantEntry> constants;
+
       for (auto& f : cDict.fields) {
         wgpu::ConstantEntry e;
         e.key = f.name.cStr();
         e.value = f.value;
         constants.add(kj::mv(e));
       }
+      auto constantsArray = constants.releaseAsArray();
+      fragmentState->constants = constantsArray.begin();
+      fragmentState->constantCount = constantsArray.size();
+      parsedDesc.constantLists.add(kj::mv(constantsArray));
     }
 
-    fragmentState->constants = constants.begin();
-    fragmentState->constantCount = constants.size();
+    kj::Vector<wgpu::ColorTargetState> targets;
+    for (auto& t : fragment.targets) {
+      wgpu::ColorTargetState target;
 
-    // TODO(soon): fragment.targets
+      wgpu::BlendState blend;
+      KJ_IF_SOME(dstFactor, t.blend.alpha.dstFactor) {
+        blend.alpha.dstFactor = parseBlendFactor(dstFactor);
+      }
+      KJ_IF_SOME(srcFactor, t.blend.alpha.srcFactor) {
+        blend.alpha.srcFactor = parseBlendFactor(srcFactor);
+      }
+      KJ_IF_SOME(operation, t.blend.alpha.operation) {
+        blend.alpha.operation = parseBlendOperation(operation);
+      }
+      KJ_IF_SOME(dstFactor, t.blend.color.dstFactor) {
+        blend.color.dstFactor = parseBlendFactor(dstFactor);
+      }
+      KJ_IF_SOME(srcFactor, t.blend.color.srcFactor) {
+        blend.color.srcFactor = parseBlendFactor(srcFactor);
+      }
+      KJ_IF_SOME(operation, t.blend.color.operation) {
+        blend.color.operation = parseBlendOperation(operation);
+      }
+      parsedDesc.blends.add(kj::mv(blend));
+      target.blend = &parsedDesc.blends.back();
+
+      target.format = parseTextureFormat(t.format);
+      KJ_IF_SOME(mask, t.writeMask) {
+        target.writeMask = static_cast<wgpu::ColorWriteMask>(mask);
+      }
+    }
+    auto targetsArray = targets.releaseAsArray();
+    fragmentState->targets = targetsArray.begin();
+    fragmentState->targetCount = targetsArray.size();
+    parsedDesc.targets = kj::mv(targetsArray);
 
     parsedDesc.fragment = kj::mv(fragmentState);
     parsedDesc.desc.fragment = parsedDesc.fragment;
@@ -453,6 +528,10 @@ GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descr
   return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder), kj::mv(label));
 }
 
+// TODO(soon): checks the allocations that are done during this method for dangling refs.
+// Will problably need to implement some allocator that will keep track of what needs
+// to be deallocated as it's being done in parseRenderPipelineDescriptor(). The constants
+// vector jumps to mind since we're just returning a pointer to a local variable.
 wgpu::ComputePipelineDescriptor
 parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   wgpu::ComputePipelineDescriptor desc{};

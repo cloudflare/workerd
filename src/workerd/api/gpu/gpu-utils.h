@@ -146,5 +146,9 @@ wgpu::IndexFormat parseIndexFormat(kj::StringPtr format);
 wgpu::FrontFace parseFrontFace(kj::StringPtr frontFace);
 wgpu::CullMode parseCullMode(kj::StringPtr mode);
 wgpu::StencilOperation parseStencilOperation(kj::StringPtr operation);
+wgpu::VertexStepMode parseVertexStepMode(kj::StringPtr stepMode);
+wgpu::VertexFormat parseVertexFormat(kj::StringPtr format);
+wgpu::BlendFactor parseBlendFactor(kj::StringPtr factor);
+wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation);
 
 } // namespace workerd::api::gpu
