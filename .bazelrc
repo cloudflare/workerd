@@ -5,16 +5,24 @@ build --build_tag_filters=-off-by-default
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
-# Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
+# Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
+# on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
+# have that option, so disable -Wunknown-warning-option there too.
 build --per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
 build --host_per_file_copt='external/com_googlesource_chromium_icu@-Wno-ambiguous-reversed-operator,-Wno-deprecated-declarations'
 build --per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration'
 build --host_per_file_copt='external/dawn@-Wno-shorten-64-to-32,-Wno-unneeded-internal-declaration'
+build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
+build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
 
 # Enable C++20 to support std::unordered_map::contains(). Not sure why this is needed here, V8
 # is supposed to work with C++14.
 build:unix --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@-std=c++20'
 build:windows --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@/std:c++20'
+
+# Need to redefine _WIN32_WINNT to build dawn on Windows
+build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
+build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
 
 # Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
 # https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
@@ -111,10 +119,6 @@ build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
-
-# Temporary workaround for zlib warnings and mac compilation, should no longer be needed with next
-# zlib release (https://github.com/madler/zlib/issues/633)
-build:unix --per_file_copt='external/zlib[~/].*\.c@-std=c90' --host_per_file_copt='external/zlib[~/].*\.c@-std=c90'
 
 build:linux --config=unix
 build:macos --config=unix
