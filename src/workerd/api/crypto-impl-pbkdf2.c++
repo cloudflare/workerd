@@ -46,7 +46,7 @@ private:
         "PBKDF2 iteration counts above 100000 are not supported (requested ", iterations, ").");
 
     auto output = kj::heapArray<kj::byte>(length / 8);
-    OSSLCALL(PKCS5_PBKDF2_HMAC(keyData.asChars().begin(), keyData.size(),
+    OSSLCALL(PKCS5_PBKDF2_HMAC(keyData.asPtr().asChars().begin(), keyData.size(),
                                salt.begin(), salt.size(),
                                iterations, hashType, output.size(), output.begin()));
     return kj::mv(output);
@@ -76,7 +76,7 @@ private:
            CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
-  kj::Array<kj::byte> keyData;
+  ZeroOnFree keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
 

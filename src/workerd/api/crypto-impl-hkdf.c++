@@ -63,7 +63,7 @@ private:
            CRYPTO_memcmp(keyData.begin(), other.begin(), keyData.size()) == 0;
   }
 
-  kj::Array<kj::byte> keyData;
+  ZeroOnFree keyData;
   CryptoKey::KeyAlgorithm keyAlgorithm;
 };
 
