@@ -240,8 +240,8 @@ private:
     kj::Vector<uint8_t> header(256);
     kj::Vector<uint8_t> mask(4);
 
-    KJ_IF_MAYBE(p, premature) {
-      header.add(*p);
+    KJ_IF_SOME(p, premature) {
+      header.add(p);
       premature = kj::Maybe<char>();
     }
 
