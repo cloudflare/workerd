@@ -25,9 +25,15 @@ wgpu::BufferBindingType parseBufferBindingType(kj::StringPtr bType) {
 wgpu::BufferBindingLayout parseBufferBindingLayout(GPUBufferBindingLayout& buffer) {
   wgpu::BufferBindingLayout l;
 
+  // the Dawn default here is Undefined, so we stick with what's in the spec
   l.type = parseBufferBindingType(buffer.type.orDefault([] { return "uniform"_kj; }));
-  l.hasDynamicOffset = buffer.hasDynamicOffset.orDefault(false);
-  l.minBindingSize = buffer.minBindingSize.orDefault(0);
+
+  KJ_IF_SOME(hasDynamicOffset, buffer.hasDynamicOffset) {
+    l.hasDynamicOffset = hasDynamicOffset;
+  }
+  KJ_IF_SOME(minBindingSize, buffer.minBindingSize) {
+    l.minBindingSize = minBindingSize;
+  }
 
   return kj::mv(l);
 }

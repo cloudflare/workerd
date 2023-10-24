@@ -168,20 +168,34 @@ wgpu::MipmapFilterMode parseMipmapFilterMode(kj::StringPtr mode) {
 jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   wgpu::SamplerDescriptor desc{};
 
-  desc.addressModeU =
-      parseAddressMode(descriptor.addressModeU.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeV =
-      parseAddressMode(descriptor.addressModeV.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeW =
-      parseAddressMode(descriptor.addressModeW.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.magFilter = parseFilterMode(descriptor.magFilter.orDefault([] { return "nearest"_kj; }));
-  desc.minFilter = parseFilterMode(descriptor.minFilter.orDefault([] { return "nearest"_kj; }));
-  desc.mipmapFilter =
-      parseMipmapFilterMode(descriptor.mipmapFilter.orDefault([] { return "nearest"_kj; }));
-  desc.lodMinClamp = descriptor.lodMinClamp.orDefault(0);
-  desc.lodMaxClamp = descriptor.lodMaxClamp.orDefault(32);
+  KJ_IF_SOME(addressModeU, descriptor.addressModeU) {
+    desc.addressModeU = parseAddressMode(addressModeU);
+  }
+  KJ_IF_SOME(addressModeV, descriptor.addressModeV) {
+    desc.addressModeV = parseAddressMode(addressModeV);
+  }
+  KJ_IF_SOME(addressModeW, descriptor.addressModeW) {
+    desc.addressModeW = parseAddressMode(addressModeW);
+  }
+  KJ_IF_SOME(magFilter, descriptor.magFilter) {
+    desc.magFilter = parseFilterMode(magFilter);
+  }
+  KJ_IF_SOME(minFilter, descriptor.minFilter) {
+    desc.minFilter = parseFilterMode(minFilter);
+  }
+  KJ_IF_SOME(mipmapFilter, descriptor.mipmapFilter) {
+    desc.mipmapFilter = parseMipmapFilterMode(mipmapFilter);
+  }
+  KJ_IF_SOME(lodMinClamp, descriptor.lodMinClamp) {
+    desc.lodMinClamp = lodMinClamp;
+  }
+  KJ_IF_SOME(lodMaxClamp, descriptor.lodMaxClamp) {
+    desc.lodMaxClamp = lodMaxClamp;
+  }
   desc.compare = parseCompareFunction(descriptor.compare);
-  desc.maxAnisotropy = descriptor.maxAnisotropy.orDefault(1);
+  KJ_IF_SOME(maxAnisotropy, descriptor.maxAnisotropy) {
+    desc.maxAnisotropy = maxAnisotropy;
+  }
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -255,11 +269,18 @@ struct ParsedRenderPipelineDescriptor {
 
 void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencilFaceState>& in) {
   KJ_IF_SOME(stencilFront, in) {
-    out.compare = parseCompareFunction(stencilFront.compare.orDefault([] { return "always"_kj; }));
-    out.failOp = parseStencilOperation(stencilFront.failOp.orDefault([] { return "keep"_kj; }));
-    out.depthFailOp =
-        parseStencilOperation(stencilFront.depthFailOp.orDefault([] { return "keep"_kj; }));
-    out.passOp = parseStencilOperation(stencilFront.passOp.orDefault([] { return "keep"_kj; }));
+    KJ_IF_SOME(compare, stencilFront.compare) {
+      out.compare = parseCompareFunction(compare);
+    }
+    KJ_IF_SOME(failOp, stencilFront.failOp) {
+      out.failOp = parseStencilOperation(failOp);
+    }
+    KJ_IF_SOME(depthFailOp, stencilFront.depthFailOp) {
+      out.depthFailOp = parseStencilOperation(depthFailOp);
+    }
+    KJ_IF_SOME(passOp, stencilFront.passOp) {
+      out.passOp = parseStencilOperation(passOp);
+    }
   }
 }
 
@@ -308,17 +329,18 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
       parsedDesc.desc.nextInChain = parsedDesc.depthClip;
     }
 
-    parsedDesc.desc.primitive.topology =
-        parsePrimitiveTopology(primitive.topology.orDefault([] { return "triangle-list"_kj; }));
-
+    KJ_IF_SOME(topology, primitive.topology) {
+      parsedDesc.desc.primitive.topology = parsePrimitiveTopology(topology);
+    }
     KJ_IF_SOME(indexFormat, primitive.stripIndexFormat) {
       parsedDesc.desc.primitive.stripIndexFormat = parseIndexFormat(indexFormat);
     }
-
-    parsedDesc.desc.primitive.frontFace =
-        parseFrontFace(primitive.frontFace.orDefault([] { return "ccw"_kj; }));
-    parsedDesc.desc.primitive.cullMode =
-        parseCullMode(primitive.cullMode.orDefault([] { return "none"_kj; }));
+    KJ_IF_SOME(frontFace, primitive.frontFace) {
+      parsedDesc.desc.primitive.frontFace = parseFrontFace(frontFace);
+    }
+    KJ_IF_SOME(cullMode, primitive.cullMode) {
+      parsedDesc.desc.primitive.cullMode = parseCullMode(cullMode);
+    }
   }
 
   KJ_IF_SOME(depthStencil, descriptor.depthStencil) {
@@ -329,21 +351,36 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
     parseStencilFaceState(depthStencilState->stencilFront, depthStencil.stencilFront);
     parseStencilFaceState(depthStencilState->stencilBack, depthStencil.stencilBack);
 
-    depthStencilState->stencilReadMask = depthStencil.stencilReadMask.orDefault(0xFFFFFFFF);
-    depthStencilState->stencilWriteMask = depthStencil.stencilWriteMask.orDefault(0xFFFFFFFF);
-    depthStencilState->depthBias = depthStencil.depthBias.orDefault(0);
-    depthStencilState->depthBiasSlopeScale = depthStencil.depthBiasSlopeScale.orDefault(0);
-    depthStencilState->depthBiasClamp = depthStencil.depthBiasClamp.orDefault(0);
+    KJ_IF_SOME(stencilReadMask, depthStencil.stencilReadMask) {
+      depthStencilState->stencilReadMask = stencilReadMask;
+    }
+    KJ_IF_SOME(stencilWriteMask, depthStencil.stencilWriteMask) {
+      depthStencilState->stencilWriteMask = stencilWriteMask;
+    }
+    KJ_IF_SOME(depthBias, depthStencil.depthBias) {
+      depthStencilState->depthBias = depthBias;
+    }
+    KJ_IF_SOME(depthBiasSlopeScale, depthStencil.depthBiasSlopeScale) {
+      depthStencilState->depthBiasSlopeScale = depthBiasSlopeScale;
+    }
+    KJ_IF_SOME(depthBiasClamp, depthStencil.depthBiasClamp) {
+      depthStencilState->depthBiasClamp = depthBiasClamp;
+    }
 
     parsedDesc.stencilState = kj::mv(depthStencilState);
     parsedDesc.desc.depthStencil = parsedDesc.stencilState;
   }
 
   KJ_IF_SOME(multisample, descriptor.multisample) {
-    parsedDesc.desc.multisample.count = multisample.count.orDefault(1);
-    parsedDesc.desc.multisample.mask = multisample.mask.orDefault(0xFFFFFFFF);
-    parsedDesc.desc.multisample.alphaToCoverageEnabled =
-        multisample.alphaToCoverageEnabled.orDefault(false);
+    KJ_IF_SOME(count, multisample.count) {
+      parsedDesc.desc.multisample.count = count;
+    }
+    KJ_IF_SOME(mask, multisample.mask) {
+      parsedDesc.desc.multisample.mask = mask;
+    }
+    KJ_IF_SOME(alphaToCoverageEnabled, multisample.alphaToCoverageEnabled) {
+      parsedDesc.desc.multisample.alphaToCoverageEnabled = alphaToCoverageEnabled;
+    }
   }
 
   KJ_IF_SOME(fragment, descriptor.fragment) {
