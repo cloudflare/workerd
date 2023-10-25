@@ -191,6 +191,9 @@ build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unuse
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
+# TODO
+build:windows --linkopt='ntdll.lib' --host_linkopt='ntdll.lib'
+
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
 build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
