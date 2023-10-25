@@ -355,13 +355,8 @@ struct UsvStringContext: public jsg::Object, public jsg::ContextGlobal {
     return kj::mv(str).orDefault(usv("undefined"));
   }
 
-  UsvStringPtr testUsvPtr(jsg::Optional<UsvString> str) {
-    return kj::mv(str).orDefault(usv("undefined"));
-  }
-
   JSG_RESOURCE_TYPE(UsvStringContext) {
     JSG_METHOD(testUsv);
-    JSG_METHOD(testUsvPtr);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(UsvStringIsolate, UsvStringContext);
@@ -370,7 +365,6 @@ KJ_TEST("JavaScript USVStrings") {
   Evaluator<UsvStringContext, UsvStringIsolate> e(v8System);
 
   e.expectEval("testUsv('hello')", "string", "hello");
-  e.expectEval("testUsvPtr('hello')", "string", "hello");
   e.expectEval(u8"testUsv('hello\xd8')", "string", u8"hello�");
   e.expectEval("testUsv(1)", "string", "1");
   e.expectEval("testUsv(false)", "string", "false");
