@@ -29,14 +29,14 @@ void GPUComputePassEncoder::setBindGroup(
     jsg::Optional<jsg::Sequence<GPUBufferDynamicOffset>> dynamicOffsets) {
   wgpu::BindGroup bg = nullptr;
 
-  KJ_IF_SOME (bgroup, bindGroup) {
+  KJ_IF_SOME(bgroup, bindGroup) {
     bg = *bgroup;
   }
 
   uint32_t* offsets = nullptr;
   uint32_t num_offsets = 0;
 
-  KJ_IF_SOME (dos, dynamicOffsets) {
+  KJ_IF_SOME(dos, dynamicOffsets) {
     offsets = dos.begin();
     num_offsets = dos.size();
   }

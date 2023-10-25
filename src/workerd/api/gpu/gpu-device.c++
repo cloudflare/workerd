@@ -168,20 +168,34 @@ wgpu::MipmapFilterMode parseMipmapFilterMode(kj::StringPtr mode) {
 jsg::Ref<GPUSampler> GPUDevice::createSampler(GPUSamplerDescriptor descriptor) {
   wgpu::SamplerDescriptor desc{};
 
-  desc.addressModeU =
-      parseAddressMode(descriptor.addressModeU.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeV =
-      parseAddressMode(descriptor.addressModeV.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.addressModeW =
-      parseAddressMode(descriptor.addressModeW.orDefault([] { return "clamp-to-edge"_kj; }));
-  desc.magFilter = parseFilterMode(descriptor.magFilter.orDefault([] { return "nearest"_kj; }));
-  desc.minFilter = parseFilterMode(descriptor.minFilter.orDefault([] { return "nearest"_kj; }));
-  desc.mipmapFilter =
-      parseMipmapFilterMode(descriptor.mipmapFilter.orDefault([] { return "nearest"_kj; }));
-  desc.lodMinClamp = descriptor.lodMinClamp.orDefault(0);
-  desc.lodMaxClamp = descriptor.lodMaxClamp.orDefault(32);
+  KJ_IF_SOME(addressModeU, descriptor.addressModeU) {
+    desc.addressModeU = parseAddressMode(addressModeU);
+  }
+  KJ_IF_SOME(addressModeV, descriptor.addressModeV) {
+    desc.addressModeV = parseAddressMode(addressModeV);
+  }
+  KJ_IF_SOME(addressModeW, descriptor.addressModeW) {
+    desc.addressModeW = parseAddressMode(addressModeW);
+  }
+  KJ_IF_SOME(magFilter, descriptor.magFilter) {
+    desc.magFilter = parseFilterMode(magFilter);
+  }
+  KJ_IF_SOME(minFilter, descriptor.minFilter) {
+    desc.minFilter = parseFilterMode(minFilter);
+  }
+  KJ_IF_SOME(mipmapFilter, descriptor.mipmapFilter) {
+    desc.mipmapFilter = parseMipmapFilterMode(mipmapFilter);
+  }
+  KJ_IF_SOME(lodMinClamp, descriptor.lodMinClamp) {
+    desc.lodMinClamp = lodMinClamp;
+  }
+  KJ_IF_SOME(lodMaxClamp, descriptor.lodMaxClamp) {
+    desc.lodMaxClamp = lodMaxClamp;
+  }
   desc.compare = parseCompareFunction(descriptor.compare);
-  desc.maxAnisotropy = descriptor.maxAnisotropy.orDefault(1);
+  KJ_IF_SOME(maxAnisotropy, descriptor.maxAnisotropy) {
+    desc.maxAnisotropy = maxAnisotropy;
+  }
 
   KJ_IF_SOME(label, descriptor.label) {
     desc.label = label.cStr();
@@ -246,22 +260,37 @@ jsg::Ref<GPUShaderModule> GPUDevice::createShaderModule(GPUShaderModuleDescripto
   return jsg::alloc<GPUShaderModule>(kj::mv(shader), kj::addRef(*async_));
 }
 
+void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencilFaceState>& in) {
+  KJ_IF_SOME(stencilFront, in) {
+    KJ_IF_SOME(compare, stencilFront.compare) {
+      out.compare = parseCompareFunction(compare);
+    }
+    KJ_IF_SOME(failOp, stencilFront.failOp) {
+      out.failOp = parseStencilOperation(failOp);
+    }
+    KJ_IF_SOME(depthFailOp, stencilFront.depthFailOp) {
+      out.depthFailOp = parseStencilOperation(depthFailOp);
+    }
+    KJ_IF_SOME(passOp, stencilFront.passOp) {
+      out.passOp = parseStencilOperation(passOp);
+    }
+  }
+}
+
+// We use this struct to maintain ownership of allocated objects to build the descriptor.
+// After the dawn call that uses this descriptor these can be cleaned up, and will be
+// when this object goes out of scope.
 struct ParsedRenderPipelineDescriptor {
   wgpu::RenderPipelineDescriptor desc;
   kj::Own<wgpu::PrimitiveDepthClipControl> depthClip;
   kj::Own<wgpu::DepthStencilState> stencilState;
   kj::Own<wgpu::FragmentState> fragment;
+  kj::Vector<kj::Array<wgpu::ConstantEntry>> constantLists;
+  kj::Array<wgpu::VertexBufferLayout> buffers;
+  kj::Vector<kj::Array<wgpu::VertexAttribute>> attributeLists;
+  kj::Array<wgpu::ColorTargetState> targets;
+  kj::Vector<wgpu::BlendState> blends;
 };
-
-void parseStencilFaceState(wgpu::StencilFaceState& out, jsg::Optional<GPUStencilFaceState>& in) {
-  KJ_IF_SOME(stencilFront, in) {
-    out.compare = parseCompareFunction(stencilFront.compare.orDefault([] { return "always"_kj; }));
-    out.failOp = parseStencilOperation(stencilFront.failOp.orDefault([] { return "keep"_kj; }));
-    out.depthFailOp =
-        parseStencilOperation(stencilFront.depthFailOp.orDefault([] { return "keep"_kj; }));
-    out.passOp = parseStencilOperation(stencilFront.passOp.orDefault([] { return "keep"_kj; }));
-  }
-}
 
 ParsedRenderPipelineDescriptor
 parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
@@ -274,20 +303,51 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
   parsedDesc.desc.vertex.module = *descriptor.vertex.module;
   parsedDesc.desc.vertex.entryPoint = descriptor.vertex.entryPoint.cStr();
 
-  kj::Vector<wgpu::ConstantEntry> constants;
   KJ_IF_SOME(cDict, descriptor.vertex.constants) {
+    kj::Vector<wgpu::ConstantEntry> constants;
+
     for (auto& f : cDict.fields) {
       wgpu::ConstantEntry e;
       e.key = f.name.cStr();
       e.value = f.value;
       constants.add(kj::mv(e));
     }
+    auto constantsArray = constants.releaseAsArray();
+    parsedDesc.desc.vertex.constants = constantsArray.begin();
+    parsedDesc.desc.vertex.constantCount = constantsArray.size();
+    parsedDesc.constantLists.add(kj::mv(constantsArray));
   }
 
-  parsedDesc.desc.vertex.constants = constants.begin();
-  parsedDesc.desc.vertex.constantCount = constants.size();
+  KJ_IF_SOME(bList, descriptor.vertex.buffers) {
+    kj::Vector<wgpu::VertexBufferLayout> buffers;
 
-  // TODO(soon): descriptor.vertex.buffers
+    for (auto& b : bList) {
+      wgpu::VertexBufferLayout bLayout;
+      bLayout.arrayStride = b.arrayStride;
+
+      KJ_IF_SOME(stepMode, b.stepMode) {
+        bLayout.stepMode = parseVertexStepMode(stepMode);
+      }
+
+      kj::Vector<wgpu::VertexAttribute> attributes;
+      for (auto& a : b.attributes) {
+        wgpu::VertexAttribute attr;
+        attr.format = parseVertexFormat(a.format);
+        attr.offset = a.offset;
+        attr.shaderLocation = a.shaderLocation;
+        attributes.add(kj::mv(attr));
+      }
+      auto attrArray = attributes.releaseAsArray();
+      bLayout.attributes = attrArray.begin();
+      bLayout.attributeCount = attrArray.size();
+      parsedDesc.attributeLists.add(kj::mv(attrArray));
+
+      buffers.add(kj::mv(bLayout));
+    }
+    parsedDesc.buffers = buffers.releaseAsArray();
+    parsedDesc.desc.vertex.buffers = parsedDesc.buffers.begin();
+    parsedDesc.desc.vertex.bufferCount = parsedDesc.buffers.size();
+  }
 
   KJ_SWITCH_ONEOF(descriptor.layout) {
     KJ_CASE_ONEOF(autoLayoutMode, jsg::NonCoercible<kj::String>) {
@@ -308,17 +368,18 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
       parsedDesc.desc.nextInChain = parsedDesc.depthClip;
     }
 
-    parsedDesc.desc.primitive.topology =
-        parsePrimitiveTopology(primitive.topology.orDefault([] { return "triangle-list"_kj; }));
-
+    KJ_IF_SOME(topology, primitive.topology) {
+      parsedDesc.desc.primitive.topology = parsePrimitiveTopology(topology);
+    }
     KJ_IF_SOME(indexFormat, primitive.stripIndexFormat) {
       parsedDesc.desc.primitive.stripIndexFormat = parseIndexFormat(indexFormat);
     }
-
-    parsedDesc.desc.primitive.frontFace =
-        parseFrontFace(primitive.frontFace.orDefault([] { return "ccw"_kj; }));
-    parsedDesc.desc.primitive.cullMode =
-        parseCullMode(primitive.cullMode.orDefault([] { return "none"_kj; }));
+    KJ_IF_SOME(frontFace, primitive.frontFace) {
+      parsedDesc.desc.primitive.frontFace = parseFrontFace(frontFace);
+    }
+    KJ_IF_SOME(cullMode, primitive.cullMode) {
+      parsedDesc.desc.primitive.cullMode = parseCullMode(cullMode);
+    }
   }
 
   KJ_IF_SOME(depthStencil, descriptor.depthStencil) {
@@ -329,21 +390,36 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
     parseStencilFaceState(depthStencilState->stencilFront, depthStencil.stencilFront);
     parseStencilFaceState(depthStencilState->stencilBack, depthStencil.stencilBack);
 
-    depthStencilState->stencilReadMask = depthStencil.stencilReadMask.orDefault(0xFFFFFFFF);
-    depthStencilState->stencilWriteMask = depthStencil.stencilWriteMask.orDefault(0xFFFFFFFF);
-    depthStencilState->depthBias = depthStencil.depthBias.orDefault(0);
-    depthStencilState->depthBiasSlopeScale = depthStencil.depthBiasSlopeScale.orDefault(0);
-    depthStencilState->depthBiasClamp = depthStencil.depthBiasClamp.orDefault(0);
+    KJ_IF_SOME(stencilReadMask, depthStencil.stencilReadMask) {
+      depthStencilState->stencilReadMask = stencilReadMask;
+    }
+    KJ_IF_SOME(stencilWriteMask, depthStencil.stencilWriteMask) {
+      depthStencilState->stencilWriteMask = stencilWriteMask;
+    }
+    KJ_IF_SOME(depthBias, depthStencil.depthBias) {
+      depthStencilState->depthBias = depthBias;
+    }
+    KJ_IF_SOME(depthBiasSlopeScale, depthStencil.depthBiasSlopeScale) {
+      depthStencilState->depthBiasSlopeScale = depthBiasSlopeScale;
+    }
+    KJ_IF_SOME(depthBiasClamp, depthStencil.depthBiasClamp) {
+      depthStencilState->depthBiasClamp = depthBiasClamp;
+    }
 
     parsedDesc.stencilState = kj::mv(depthStencilState);
     parsedDesc.desc.depthStencil = parsedDesc.stencilState;
   }
 
   KJ_IF_SOME(multisample, descriptor.multisample) {
-    parsedDesc.desc.multisample.count = multisample.count.orDefault(1);
-    parsedDesc.desc.multisample.mask = multisample.mask.orDefault(0xFFFFFFFF);
-    parsedDesc.desc.multisample.alphaToCoverageEnabled =
-        multisample.alphaToCoverageEnabled.orDefault(false);
+    KJ_IF_SOME(count, multisample.count) {
+      parsedDesc.desc.multisample.count = count;
+    }
+    KJ_IF_SOME(mask, multisample.mask) {
+      parsedDesc.desc.multisample.mask = mask;
+    }
+    KJ_IF_SOME(alphaToCoverageEnabled, multisample.alphaToCoverageEnabled) {
+      parsedDesc.desc.multisample.alphaToCoverageEnabled = alphaToCoverageEnabled;
+    }
   }
 
   KJ_IF_SOME(fragment, descriptor.fragment) {
@@ -351,20 +427,56 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
     fragmentState->module = *fragment.module;
     fragmentState->entryPoint = fragment.entryPoint.cStr();
 
-    kj::Vector<wgpu::ConstantEntry> constants;
     KJ_IF_SOME(cDict, fragment.constants) {
+      kj::Vector<wgpu::ConstantEntry> constants;
+
       for (auto& f : cDict.fields) {
         wgpu::ConstantEntry e;
         e.key = f.name.cStr();
         e.value = f.value;
         constants.add(kj::mv(e));
       }
+      auto constantsArray = constants.releaseAsArray();
+      fragmentState->constants = constantsArray.begin();
+      fragmentState->constantCount = constantsArray.size();
+      parsedDesc.constantLists.add(kj::mv(constantsArray));
     }
 
-    fragmentState->constants = constants.begin();
-    fragmentState->constantCount = constants.size();
+    kj::Vector<wgpu::ColorTargetState> targets;
+    for (auto& t : fragment.targets) {
+      wgpu::ColorTargetState target;
 
-    // TODO(soon): fragment.targets
+      wgpu::BlendState blend;
+      KJ_IF_SOME(dstFactor, t.blend.alpha.dstFactor) {
+        blend.alpha.dstFactor = parseBlendFactor(dstFactor);
+      }
+      KJ_IF_SOME(srcFactor, t.blend.alpha.srcFactor) {
+        blend.alpha.srcFactor = parseBlendFactor(srcFactor);
+      }
+      KJ_IF_SOME(operation, t.blend.alpha.operation) {
+        blend.alpha.operation = parseBlendOperation(operation);
+      }
+      KJ_IF_SOME(dstFactor, t.blend.color.dstFactor) {
+        blend.color.dstFactor = parseBlendFactor(dstFactor);
+      }
+      KJ_IF_SOME(srcFactor, t.blend.color.srcFactor) {
+        blend.color.srcFactor = parseBlendFactor(srcFactor);
+      }
+      KJ_IF_SOME(operation, t.blend.color.operation) {
+        blend.color.operation = parseBlendOperation(operation);
+      }
+      parsedDesc.blends.add(kj::mv(blend));
+      target.blend = &parsedDesc.blends.back();
+
+      target.format = parseTextureFormat(t.format);
+      KJ_IF_SOME(mask, t.writeMask) {
+        target.writeMask = static_cast<wgpu::ColorWriteMask>(mask);
+      }
+    }
+    auto targetsArray = targets.releaseAsArray();
+    fragmentState->targets = targetsArray.begin();
+    fragmentState->targetCount = targetsArray.size();
+    parsedDesc.targets = kj::mv(targetsArray);
 
     parsedDesc.fragment = kj::mv(fragmentState);
     parsedDesc.desc.fragment = parsedDesc.fragment;
@@ -416,6 +528,10 @@ GPUDevice::createCommandEncoder(jsg::Optional<GPUCommandEncoderDescriptor> descr
   return jsg::alloc<GPUCommandEncoder>(kj::mv(encoder), kj::mv(label));
 }
 
+// TODO(soon): checks the allocations that are done during this method for dangling refs.
+// Will problably need to implement some allocator that will keep track of what needs
+// to be deallocated as it's being done in parseRenderPipelineDescriptor(). The constants
+// vector jumps to mind since we're just returning a pointer to a local variable.
 wgpu::ComputePipelineDescriptor
 parseComputePipelineDescriptor(GPUComputePipelineDescriptor& descriptor) {
   wgpu::ComputePipelineDescriptor desc{};

@@ -23,13 +23,19 @@ wgpu::BufferBindingType parseBufferBindingType(kj::StringPtr bType) {
 }
 
 wgpu::BufferBindingLayout parseBufferBindingLayout(GPUBufferBindingLayout& buffer) {
-  wgpu::BufferBindingLayout l;
+  wgpu::BufferBindingLayout layout;
 
-  l.type = parseBufferBindingType(buffer.type.orDefault([] { return "uniform"_kj; }));
-  l.hasDynamicOffset = buffer.hasDynamicOffset.orDefault(false);
-  l.minBindingSize = buffer.minBindingSize.orDefault(0);
+  // the Dawn default here is Undefined, so we stick with what's in the spec
+  layout.type = parseBufferBindingType(buffer.type.orDefault([] { return "uniform"_kj; }));
 
-  return kj::mv(l);
+  KJ_IF_SOME(hasDynamicOffset, buffer.hasDynamicOffset) {
+    layout.hasDynamicOffset = hasDynamicOffset;
+  }
+  KJ_IF_SOME(minBindingSize, buffer.minBindingSize) {
+    layout.minBindingSize = minBindingSize;
+  }
+
+  return kj::mv(layout);
 }
 
 wgpu::SamplerBindingType parseSamplerBindingType(kj::StringPtr bType) {
@@ -49,10 +55,9 @@ wgpu::SamplerBindingType parseSamplerBindingType(kj::StringPtr bType) {
 }
 
 wgpu::SamplerBindingLayout parseSamplerBindingLayout(GPUSamplerBindingLayout& sampler) {
-  wgpu::SamplerBindingLayout s;
-  s.type = parseSamplerBindingType(sampler.type.orDefault([] { return "filtering"_kj; }));
-
-  return kj::mv(s);
+  wgpu::SamplerBindingLayout layout;
+  layout.type = parseSamplerBindingType(sampler.type.orDefault([] { return "filtering"_kj; }));
+  return kj::mv(layout);
 }
 
 wgpu::TextureSampleType parseTextureSampleType(kj::StringPtr sType) {
@@ -80,49 +85,50 @@ wgpu::TextureSampleType parseTextureSampleType(kj::StringPtr sType) {
 }
 
 wgpu::TextureBindingLayout parseTextureBindingLayout(GPUTextureBindingLayout& texture) {
-  wgpu::TextureBindingLayout t;
-  t.sampleType = parseTextureSampleType(texture.sampleType.orDefault([] { return "float"_kj; }));
-  t.viewDimension =
+  wgpu::TextureBindingLayout layout;
+  layout.sampleType =
+      parseTextureSampleType(texture.sampleType.orDefault([] { return "float"_kj; }));
+  layout.viewDimension =
       parseTextureViewDimension(texture.viewDimension.orDefault([] { return "2d"_kj; }));
-  t.multisampled = texture.multisampled.orDefault(false);
+  layout.multisampled = texture.multisampled.orDefault(false);
 
-  return kj::mv(t);
+  return kj::mv(layout);
 }
 
 wgpu::StorageTextureBindingLayout
 parseStorageTextureBindingLayout(GPUStorageTextureBindingLayout& storage) {
 
-  wgpu::StorageTextureBindingLayout s;
-  s.access = parseStorageAccess(storage.access.orDefault([] { return "write-only"_kj; }));
-  s.format = parseTextureFormat(storage.format);
-  s.viewDimension =
+  wgpu::StorageTextureBindingLayout layout;
+  layout.access = parseStorageAccess(storage.access.orDefault([] { return "write-only"_kj; }));
+  layout.format = parseTextureFormat(storage.format);
+  layout.viewDimension =
       parseTextureViewDimension(storage.viewDimension.orDefault([] { return "2d"_kj; }));
 
-  return kj::mv(s);
+  return kj::mv(layout);
 }
 
 wgpu::BindGroupLayoutEntry parseBindGroupLayoutEntry(GPUBindGroupLayoutEntry& entry) {
-  wgpu::BindGroupLayoutEntry e;
-  e.binding = entry.binding;
-  e.visibility = static_cast<wgpu::ShaderStage>(entry.visibility);
+  wgpu::BindGroupLayoutEntry layoutEntry;
+  layoutEntry.binding = entry.binding;
+  layoutEntry.visibility = static_cast<wgpu::ShaderStage>(entry.visibility);
 
   KJ_IF_SOME(buffer, entry.buffer) {
-    e.buffer = parseBufferBindingLayout(buffer);
+    layoutEntry.buffer = parseBufferBindingLayout(buffer);
   }
 
   KJ_IF_SOME(sampler, entry.sampler) {
-    e.sampler = parseSamplerBindingLayout(sampler);
+    layoutEntry.sampler = parseSamplerBindingLayout(sampler);
   }
 
   KJ_IF_SOME(texture, entry.texture) {
-    e.texture = parseTextureBindingLayout(texture);
+    layoutEntry.texture = parseTextureBindingLayout(texture);
   }
 
   KJ_IF_SOME(storage, entry.storageTexture) {
-    e.storageTexture = parseStorageTextureBindingLayout(storage);
+    layoutEntry.storageTexture = parseStorageTextureBindingLayout(storage);
   }
 
-  return kj::mv(e);
+  return kj::mv(layoutEntry);
 };
 
 } // namespace workerd::api::gpu

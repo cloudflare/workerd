@@ -7,6 +7,8 @@
 
 namespace workerd::api::gpu {
 
+// TODO(soon): use a static std::map for most of these functions, as seen
+// in kj::StringPtr CryptoImpl::getAsymmetricKeyType().
 wgpu::FeatureName parseFeatureName(GPUFeatureName& str) {
   if (str == "depth-clip-control") {
     return wgpu::FeatureName::DepthClipControl;
@@ -927,6 +929,190 @@ wgpu::StencilOperation parseStencilOperation(kj::StringPtr operation) {
   }
 
   JSG_FAIL_REQUIRE(TypeError, "unknown stencil operation: ", operation);
+}
+
+wgpu::VertexStepMode parseVertexStepMode(kj::StringPtr stepMode) {
+  if (stepMode == "vertex") {
+    return wgpu::VertexStepMode::Vertex;
+  }
+
+  if (stepMode == "instance") {
+    return wgpu::VertexStepMode::Instance;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown vertex step mode: ", stepMode);
+}
+
+wgpu::VertexFormat parseVertexFormat(kj::StringPtr format) {
+  if (format == "uint8x2") {
+    return wgpu::VertexFormat::Uint8x2;
+  }
+  if (format == "uint8x4") {
+    return wgpu::VertexFormat::Uint8x4;
+  }
+  if (format == "sint8x2") {
+    return wgpu::VertexFormat::Sint8x2;
+  }
+  if (format == "sint8x4") {
+    return wgpu::VertexFormat::Sint8x2;
+  }
+  if (format == "unorm8x2") {
+    return wgpu::VertexFormat::Unorm8x2;
+  }
+  if (format == "unorm8x4") {
+    return wgpu::VertexFormat::Unorm8x4;
+  }
+  if (format == "snorm8x2") {
+    return wgpu::VertexFormat::Snorm8x2;
+  }
+  if (format == "snorm8x4") {
+    return wgpu::VertexFormat::Snorm8x4;
+  }
+  if (format == "uint16x2") {
+    return wgpu::VertexFormat::Uint16x2;
+  }
+  if (format == "uint16x4") {
+    return wgpu::VertexFormat::Uint16x4;
+  }
+  if (format == "sint16x2") {
+    return wgpu::VertexFormat::Sint16x2;
+  }
+  if (format == "sint16x4") {
+    return wgpu::VertexFormat::Sint16x4;
+  }
+  if (format == "unorm16x2") {
+    return wgpu::VertexFormat::Unorm16x2;
+  }
+  if (format == "unorm16x4") {
+    return wgpu::VertexFormat::Unorm16x4;
+  }
+  if (format == "snorm16x2") {
+    return wgpu::VertexFormat::Snorm16x2;
+  }
+  if (format == "snorm16x4") {
+    return wgpu::VertexFormat::Snorm16x4;
+  }
+  if (format == "float16x2") {
+    return wgpu::VertexFormat::Float16x2;
+  }
+  if (format == "float16x4") {
+    return wgpu::VertexFormat::Float16x4;
+  }
+  if (format == "float32") {
+    return wgpu::VertexFormat::Float32;
+  }
+  if (format == "float32x2") {
+    return wgpu::VertexFormat::Float32x2;
+  }
+  if (format == "float32x3") {
+    return wgpu::VertexFormat::Float32x3;
+  }
+  if (format == "float32x4") {
+    return wgpu::VertexFormat::Float32x4;
+  }
+  if (format == "uint32") {
+    return wgpu::VertexFormat::Uint32;
+  }
+  if (format == "uint32x2") {
+    return wgpu::VertexFormat::Uint32x2;
+  }
+  if (format == "uint32x3") {
+    return wgpu::VertexFormat::Uint32x3;
+  }
+  if (format == "uint32x4") {
+    return wgpu::VertexFormat::Uint32x4;
+  }
+  if (format == "sint32") {
+    return wgpu::VertexFormat::Sint32;
+  }
+  if (format == "sint32x2") {
+    return wgpu::VertexFormat::Sint32x2;
+  }
+  if (format == "sint32x3") {
+    return wgpu::VertexFormat::Sint32x3;
+  }
+  if (format == "sint32x4") {
+    return wgpu::VertexFormat::Sint32x4;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown vertex format: ", format);
+}
+
+wgpu::BlendFactor parseBlendFactor(kj::StringPtr factor) {
+
+  if (factor == "zero") {
+    return wgpu::BlendFactor::Zero;
+  }
+
+  if (factor == "one") {
+    return wgpu::BlendFactor::One;
+  }
+
+  if (factor == "src") {
+    return wgpu::BlendFactor::Src;
+  }
+
+  if (factor == "one-minus-src") {
+    return wgpu::BlendFactor::OneMinusSrc;
+  }
+
+  if (factor == "src-alpha") {
+    return wgpu::BlendFactor::SrcAlpha;
+  }
+
+  if (factor == "one-minus-src-alpha") {
+    return wgpu::BlendFactor::OneMinusSrcAlpha;
+  }
+
+  if (factor == "dst") {
+    return wgpu::BlendFactor::Dst;
+  }
+
+  if (factor == "one-minus-dst") {
+    return wgpu::BlendFactor::OneMinusDst;
+  }
+
+  if (factor == "dst-alpha") {
+    return wgpu::BlendFactor::DstAlpha;
+  }
+
+  if (factor == "one-minus-dst-alpha") {
+    return wgpu::BlendFactor::OneMinusDstAlpha;
+  }
+
+  if (factor == "src-alpha-saturated") {
+    return wgpu::BlendFactor::SrcAlphaSaturated;
+  }
+
+  if (factor == "constant") {
+    return wgpu::BlendFactor::Constant;
+  }
+
+  if (factor == "one-minus-constant") {
+    return wgpu::BlendFactor::OneMinusConstant;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown blend factor: ", factor);
+}
+
+wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation) {
+  if (operation == "add") {
+    return wgpu::BlendOperation::Add;
+  }
+  if (operation == "subtract") {
+    return wgpu::BlendOperation::Subtract;
+  }
+  if (operation == "reverse-subtract") {
+    return wgpu::BlendOperation::ReverseSubtract;
+  }
+  if (operation == "min") {
+    return wgpu::BlendOperation::Min;
+  }
+  if (operation == "max") {
+    return wgpu::BlendOperation::Max;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown blend operation: ", operation);
 }
 
 } // namespace workerd::api::gpu
