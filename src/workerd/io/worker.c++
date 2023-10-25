@@ -1649,7 +1649,7 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     KJ_LOG(INFO, "console.log()", message());
   } else {
     // Write to stdio if allowed by console mode
-    static bool PERMITS_COLOR = permitsColor();
+    static ColorMode COLOR_MODE = permitsColor();
 #if _WIN32
     static bool STDOUT_TTY = _isatty(_fileno(stdout));
     static bool STDERR_TTY = _isatty(_fileno(stderr));
@@ -1662,7 +1662,8 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     auto useStderr = level >= LogLevel::WARN;
     auto fd  = useStderr ? stderr     : stdout;
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
-    auto colors = PERMITS_COLOR && tty;
+    auto colors = COLOR_MODE == ColorMode::ENABLED ||
+      (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
     // TODO(now): does this need to run within a handle scope?
     auto registry = jsg::ModuleRegistry::from(js);
@@ -1674,6 +1675,7 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
     auto formatted = js.toString(jsg::check(formatLog->Call(context, recv, length + 1, args)));
     fprintf(fd, "%s\n", formatted.cStr());
+    fflush(fd);
   }
 }
 
