@@ -36,10 +36,6 @@ jobs:
           # Skip the matrix generated Windows non-debug config to use the one added above.
           - os:     { name : windows, image : windows-2022 }
             config: { suffix: '', bazel-args: '' }
-          # Skip the matrix generated Windows debug config due to //src/workerd/jsg:string-test
-          # for Windows debug, probably caused by macro mis-configuration (TODO: fix).
-          - os:     { name : windows, image : windows-2022 }
-            config: { suffix: -debug, bazel-args: --config=debug }
       fail-fast: false
     runs-on: ${{ matrix.os.image }}
     name: test (${{ matrix.os.name }}${{ matrix.config.suffix }})
