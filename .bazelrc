@@ -3,7 +3,7 @@ build --verbose_failures
 build --build_tag_filters=-off-by-default
 
 # Enable webgpu
-build --//src/workerd/io:enable_experimental_webgpu=True
+#build --//src/workerd/io:enable_experimental_webgpu=True
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
@@ -192,7 +192,11 @@ build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unuse
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
 # TODO
+build:windows --noincompatible_use_host_features
 build:windows --linkopt='ntdll.lib' --host_linkopt='ntdll.lib'
+build:windows --linkopt='Ws2_32.lib' --host_linkopt='Ws2_32.lib'
+build:windows --features=windows_export_all_symbols
+build:windows --output_groups=+dynamic_library
 
 # enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
 build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"

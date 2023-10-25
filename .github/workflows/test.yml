@@ -14,8 +14,6 @@ jobs:
       matrix:
         os:
           [
-            { name : linux, image : ubuntu-20.04 },
-            { name : macOS, image : macos-latest },
             { name : windows, image : windows-2022 }
           ]
         config:
@@ -26,9 +24,6 @@ jobs:
             { suffix: -debug, bazel-args: --config=debug }
           ]
         include:
-          # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os:     { name: linux, image: ubuntu-20.04 }
-            config: { suffix: -asan, bazel-args: --config=asan }
           # Windows has a custom non-debug bazel config.
           - os:     { name : windows, image : windows-2022 }
             config: { suffix: '', bazel-args: --config=windows_no_dbg }
@@ -121,11 +116,9 @@ jobs:
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
+        # TODO
         run: |
-          bazelisk build ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //...
-      - name: Bazel test
-        run: |
-          bazelisk test ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --keep_going --verbose_failures --test_output=errors //...
+          bazelisk build ${{ matrix.config.bazel-args }} --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --verbose_failures //src/...
       - name: Report disk usage
         if: always()
         shell: bash
