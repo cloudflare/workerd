@@ -45,7 +45,7 @@ build:benchmark --config=profile
 build:debug -c dbg
 
 # Using simple template names saves around 5% of binary size of workerd.
-build:debug --copt='-gsimple-template-names'
+build:unix --cxxopt='-gsimple-template-names' --host_cxxopt='-gsimple-template-names'
 
 # Define a config mode which is fastbuild but with basic debug info.
 build:fastdbg -c fastbuild
