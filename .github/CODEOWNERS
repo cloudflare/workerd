@@ -1,1 +1,12 @@
 * @cloudflare/workers-runtime-1 @cloudflare/workers-durable-objects
+.github/workflows/npm.yml @cloudflare/wrangler
+.github/workflows/npm-types.yml @cloudflare/wrangler
+.github/workflows/release.yml @cloudflare/wrangler
+npm/ @cloudflare/wrangler
+build-releases.sh @cloudflare/wrangler
+RELEASE.md @cloudflare/wrangler
+package.json @cloudflare/wrangler
+pnpm-lock.yaml @cloudflare/wrangler
+types/ @cloudflare/wrangler
+src/workerd/tools/ @cloudflare/wrangler
+src/workerd/io/compatibility-date.capnp @cloudflare/wrangler
