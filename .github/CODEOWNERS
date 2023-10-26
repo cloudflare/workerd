@@ -3,7 +3,7 @@
 .github/workflows/npm-types.yml @cloudflare/wrangler
 .github/workflows/release.yml @cloudflare/wrangler
 npm/ @cloudflare/wrangler
-build-npm-package.sh @cloudflare/wrangler
+build-releases.sh @cloudflare/wrangler
 RELEASE.md @cloudflare/wrangler
 package.json @cloudflare/wrangler
 pnpm-lock.yaml @cloudflare/wrangler
