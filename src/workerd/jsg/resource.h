@@ -597,6 +597,163 @@ private:
   friend class ObjectWrapper;
 };
 
+// ======================================================================================
+// NamedIntercept implementation
+
+class JsValue;
+
+// A utility class that allows dynamic evaluation of properties on the JavaScript wrapper.
+// TODO(soon): Currently, this mechanism only supports read-only properties. The setter
+// interceptor is not implemented. That is, for a known dynamic name like `foo`, it is not
+// yet possible to set `obj.foo = whatever` in JS. However, it remains possible to
+// set unknown properties on the object (properties for which `queryNamed()` and `getNamed()`
+// would return kj::none).
+//
+// struct ProxyImpl: public jsg::Object,
+//                   public jsg::NamedIntercept {
+//   static jsg::Ref<ProxyImpl> constructor() { return jsg::alloc<ProxyImpl>(); }
+//
+//   int getBar() { return 123; }
+//
+//   // Return the value, if any, of a given named property
+//   kj::Maybe<jsg::JsValue> getNamed(jsg::Lock& js, kj::StringPtr name) override {
+//     if (name == "foo") {
+//       return kj::Maybe(js.str("bar"_kj));
+//     }
+//     return kj::none;
+//   }
+//
+//   // Return the attributes, if any, of a given named property
+//   kj::Maybe<jsg::NamedIntercept::Attribute> queryNamed(jsg::Lock& js,
+//                                                        kj::StringPtr name) override {
+//     auto list = listNamed(js);
+//     for (auto& item : list) {
+//       if (item == name) return jsg::NamedIntercept::READ_ONLY_ATTRIBUTE;
+//     }
+//     return kj::none;
+//   }
+//
+//   // Return a list of the named properties that can be handled dynamically.
+//   kj::Array<kj::String> listNamed(Lock& js) override {
+//     return kj::arr(kj::str("foo"));
+//   }
+//
+//   JSG_RESOURCE_TYPE(ProxyImpl) {
+//     JSG_READONLY_PROTOTYPE_PROPERTY(bar, getBar);
+//     JSG_NAMED_INTERCEPT();
+//   }
+// };
+class NamedIntercept {
+public:
+  enum class Attribute {
+    NONE = v8::PropertyAttribute::None,
+    READ_ONLY = v8::PropertyAttribute::ReadOnly,
+    DONT_ENUM = v8::PropertyAttribute::DontEnum,
+    DONT_DELETE = v8::PropertyAttribute::DontDelete,
+  };
+
+  // Returns the value associated with the given name, or kj::none if the name is not known.
+  virtual kj::Maybe<JsValue> getNamed(Lock& js, kj::StringPtr name);
+
+  // Returns the Attribute(s) for the given name, or kj::none if the name is not known.
+  virtual kj::Maybe<Attribute> queryNamed(Lock& js, kj::StringPtr name);
+
+  // List all names that are known (all names for which getNamed and queryNamed should never
+  // return kj::none)
+  virtual kj::Array<kj::String> listNamed(Lock& js);
+
+  static const Attribute READ_ONLY_ATTRIBUTE;
+};
+
+inline constexpr NamedIntercept::Attribute operator|(NamedIntercept::Attribute a,
+                                                     NamedIntercept::Attribute b) {
+  return static_cast<NamedIntercept::Attribute>(static_cast<int>(a) | static_cast<int>(b));
+}
+inline constexpr NamedIntercept::Attribute operator&(NamedIntercept::Attribute a,
+                                                     NamedIntercept::Attribute b) {
+  return static_cast<NamedIntercept::Attribute>(static_cast<int>(a) & static_cast<int>(b));
+}
+inline constexpr NamedIntercept::Attribute operator~(NamedIntercept::Attribute a) {
+  return static_cast<NamedIntercept::Attribute>(~static_cast<uint>(a));
+}
+
+template <typename TypeWrapper, typename T,
+          typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, T>>>
+struct NamedInterceptorCallbacks: public v8::NamedPropertyHandlerConfiguration {
+  NamedInterceptorCallbacks() : v8::NamedPropertyHandlerConfiguration(
+    getter,
+    nullptr,
+    query,
+    nullptr,
+    enumerator,
+    nullptr,
+    nullptr,
+    v8::Local<v8::Value>(),
+    static_cast<v8::PropertyHandlerFlags>(
+        static_cast<int>(v8::PropertyHandlerFlags::kNonMasking) |
+        static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
+        static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))) {}
+
+  template <typename U>
+  static kj::Maybe<T&> unwrapThis(const v8::PropertyCallbackInfo<U>& info) {
+    auto context = info.GetIsolate()->GetCurrentContext();
+    if (info.This()->InternalFieldCount() != 3) return kj::none;
+    return extractInternalPointer<T, false>(context, info.This());
+  }
+
+  static void getter(v8::Local<v8::Name> name,
+                       const v8::PropertyCallbackInfo<v8::Value>& info) {
+    auto isolate = info.GetIsolate();
+    auto& lock = Lock::from(isolate);
+    KJ_IF_SOME(self, unwrapThis(info)) {
+      lock.tryCatch([&] {
+        KJ_IF_SOME(value, self.getNamed(lock, kj::str(name.As<v8::String>()))) {
+          info.GetReturnValue().Set(v8::Local<v8::Value>(value));
+        }
+      }, [&](Value exception) {
+        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
+        // and just reschedule the exception on the isolate.
+        isolate->ThrowException(exception.getHandle(lock));
+      });
+    }
+  }
+
+  static void query(v8::Local<v8::Name> name,
+                    const v8::PropertyCallbackInfo<v8::Integer>& info) {
+    KJ_IF_SOME(self, unwrapThis(info)) {
+      auto isolate = info.GetIsolate();
+      auto& lock = Lock::from(isolate);
+      lock.tryCatch([&] {
+        KJ_IF_SOME(attr, self.queryNamed(lock, kj::str(name.As<v8::String>()))) {
+          info.GetReturnValue().Set(v8::Integer::New(isolate, static_cast<int32_t>(attr)));
+        }
+      }, [&](Value exception) {
+        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
+        // and just reschedule the exception on the isolate.
+        isolate->ThrowException(exception.getHandle(lock));
+      });
+    }
+  }
+
+  static void enumerator(const v8::PropertyCallbackInfo<v8::Array>& info) {
+    KJ_IF_SOME(self, unwrapThis(info)) {
+      auto isolate = info.GetIsolate();
+      auto& lock = Lock::from(isolate);
+      auto& wrapper = TypeWrapper::from(isolate);
+      lock.tryCatch([&] {
+        auto value = wrapper.wrap(isolate->GetCurrentContext(), kj::none, self.listNamed(lock));
+        info.GetReturnValue().Set(value.template As<v8::Array>());
+      }, [&](Value exception) {
+        // Catch any jsg::JsExceptionThrown or kj::Exceptions that are thrown
+        // and just reschedule the exception on the isolate.
+        isolate->ThrowException(exception.getHandle(lock));
+      });
+    }
+  }
+};
+
+// ======================================================================================
+
 // Used by the JSG_METHOD macro to register a method on a resource type.
 template<typename TypeWrapper, typename Self, bool isContext>
 struct ResourceTypeBuilder {
@@ -621,6 +778,12 @@ struct ResourceTypeBuilder {
     inspectProperties = v8::ObjectTemplate::New(isolate);
     prototype->Set(symbol, inspectProperties, static_cast<v8::PropertyAttribute>(
       v8::PropertyAttribute::ReadOnly | v8::PropertyAttribute::DontEnum));
+  }
+
+  template <typename Type,
+            typename = kj::EnableIf<std::is_assignable_v<NamedIntercept, Type>>>
+  inline void registerNamedIntercept() {
+    prototype->SetHandler(NamedInterceptorCallbacks<TypeWrapper, Type> {});
   }
 
   template<typename Type>
