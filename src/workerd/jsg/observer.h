@@ -6,6 +6,7 @@
 
 #include <kj/common.h>
 #include <kj/string.h>
+#include <kj/exception.h>
 
 // Forward declare v8::Isolate here, this allows us to avoid including the V8 header and compile
 // some targets without depending on V8.
@@ -37,8 +38,22 @@ struct CompilationObserver {
   }
 };
 
+struct InternalExceptionObserver {
+  virtual ~InternalExceptionObserver() noexcept(false) { }
 
-struct IsolateObserver : public CompilationObserver {
+struct Detail {
+  bool isInternal;
+  bool isFromRemote;
+  bool isDurableObjectReset;
+};
+
+  // Called when an internal exception is created (see makeInternalError).
+  // Used to collect metrics on various internal error conditions.
+  virtual void reportInternalException(const kj::Exception&, Detail detail) { }
+};
+
+struct IsolateObserver : public CompilationObserver,
+                         public InternalExceptionObserver {
   virtual ~IsolateObserver() noexcept(false) { }
 };
 

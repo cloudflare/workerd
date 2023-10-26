@@ -268,6 +268,12 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
   auto tunneledException = decodeTunneledException(isolate, desc);
 
   if (tunneledException.isInternal) {
+    auto& observer = IsolateBase::from(isolate).getObserver();
+    observer.reportInternalException(exception, {
+      .isInternal = tunneledException.isInternal,
+      .isFromRemote = tunneledException.isFromRemote,
+      .isDurableObjectReset = tunneledException.isDurableObjectReset,
+    });
     // Don't log exceptions that have been explicitly marked with worker_do_not_log or are
     // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
     if (exception.getType() != kj::Exception::Type::DISCONNECTED &&
