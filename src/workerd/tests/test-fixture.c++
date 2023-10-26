@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/io-channels.h>
@@ -11,6 +12,7 @@
 #include <workerd/io/observer.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
+#include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/stream-utils.h>
 
@@ -230,6 +232,18 @@ struct MockResponse final: public kj::HttpService::Response {
     KJ_FAIL_REQUIRE("NOT SUPPORTED");
   }
 };
+
+class MockActorLoopback : public Worker::Actor::Loopback, public kj::Refcounted {
+  public:
+  virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+    return kj::Own<WorkerInterface>();
+  };
+
+  virtual kj::Own<Worker::Actor::Loopback> addRef() {
+    return kj::addRef(*this);
+  };
+};
+
 } // namespace
 
 
@@ -275,7 +289,26 @@ TestFixture::TestFixture(SetupParams&& params)
     )),
     errorHandler(kj::heap<DummyErrorHandler>()),
     waitUntilTasks(*errorHandler),
-    headerTable(headerTableBuilder.build()) { }
+    headerTable(headerTableBuilder.build()) {
+  KJ_IF_SOME(id, params.actorId) {
+    auto lock = Worker::Lock(*worker, Worker::Lock::TakeSynchronously(kj::none));
+    auto makeActorCache = [](
+        const ActorCache::SharedLru& sharedLru, OutputGate& outputGate, ActorCache::Hooks& hooks) {
+      return kj::heap<ActorCache>(
+        kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
+    };
+    auto makeStorage = [](
+        jsg::Lock& js, const Worker::ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)
+        -> jsg::Ref<api::DurableObjectStorage> {
+      return jsg::alloc<api::DurableObjectStorage>(
+        IoContext::current().addObject(actorCache));
+    };
+    actor = kj::refcounted<Worker::Actor>(
+        *worker, /*tracker=*/kj::none, kj::mv(id), /*hasTransient=*/false, makeActorCache,
+        /*classname=*/kj::none, makeStorage, lock, kj::refcounted<MockActorLoopback>(),
+        *timerChannel, kj::refcounted<ActorObserver>(), kj::none, kj::none);
+  }
+}
 
 void TestFixture::runInIoContext(
     kj::Function<kj::Promise<void>(const Environment&)>&& callback,
@@ -310,7 +343,7 @@ void TestFixture::runInIoContext(
 
 kj::Own<IoContext::IncomingRequest> TestFixture::createIncomingRequest() {
   auto context = kj::refcounted<IoContext>(
-      threadContext, kj::atomicAddRef(*worker), nullptr, kj::heap<MockLimitEnforcer>());
+      threadContext, kj::atomicAddRef(*worker), actor, kj::heap<MockLimitEnforcer>());
   auto incomingRequest = kj::heap<IoContext::IncomingRequest>(
       kj::addRef(*context), kj::heap<DummyIoChannelFactory>(*timerChannel),
       kj::refcounted<RequestObserver>(), nullptr);

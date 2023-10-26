@@ -23,6 +23,8 @@ struct TestFixture {
     kj::Maybe<kj::WaitScope&> waitScope;
     kj::Maybe<CompatibilityFlags::Reader> featureFlags;
     kj::Maybe<kj::StringPtr> mainModuleSource;
+    // If set, make a stub of an Actor with the given id.
+    kj::Maybe<Worker::Actor::Id> actorId;
   };
 
   TestFixture(SetupParams&& params = { });
@@ -88,6 +90,7 @@ private:
   kj::Own<kj::Timer> timer;
   kj::Own<TimerChannel> timerChannel;
   kj::Own<kj::EntropySource> entropySource;
+  kj::Maybe<kj::Own<Worker::Actor>> actor;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;
