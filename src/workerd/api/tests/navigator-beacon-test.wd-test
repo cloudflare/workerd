@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const worker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "navigator-beacon-test.js")
+  ],
+  compatibilityDate = "2023-01-15",
+  compatibilityFlags = ["nodejs_compat"],
+);
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "navigator-beacon-test", worker = .worker ),
+    ( name = "internet", worker = .worker )
+  ],
+);
