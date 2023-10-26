@@ -12,7 +12,6 @@ and demonstrates following features:
 
 The sample will be extended as more functionality is implemented.
 
-
 ## Running
 
 ```
@@ -21,56 +20,67 @@ $ curl localhost:8080 -X POST -d 'veggie'
 9
 ```
 
-
 ## Demonstrated Methods
 
 ### Importable Module
 
-#### Usage
+This method demonstrates a publicly importable module, with the initialization being handled by the worker in  [worker.js](worker.js)
+
+#### Accessibility
+
 The module `burrito-shop:burrito-shop`, which is defined in the config [burrito-shop.capnp](burrito-shop.capnp), is an importable module.
 
-You can import it as shown below:
+You can import it as demonstrated in [burrito-shop.js](burrito-shop.js)
 
 ```javascript
 import { BurritoShop } from "burrito-shop:burrito-shop";
 ```
 
 #### Definition
-This import definition is demonstrated in [burrito-shop.js](burrito-shop.js).
-As shown in 
+
+This import definition is demonstrated in [burrito-shop.capnp](burrito-shop.capnp).
+
+```capnp
+...
+( name = "burrito-shop:burrito-shop", esModule = embed "burrito-shop.js" )
+...
+```
 
 ### Environment Variable (with internal initialization from environment variables)
 
-#### Usage
+#### Accessibility
 
-The module `burrito-shop:binding` is defined in the config [burrito-shop.capnp](burrito-shop.capnp) and is provided as an environment variable.
+The module `burrito-shop:binding` is defined in the config [burrito-shop.capnp](burrito-shop.capnp) and is provided as an environment variable in standard `workerd` fashion. As we're using an esmodule it's provided as an argument to the workers entrypoint.
 
-You can access it as shown below in [worker.js](worker.js) provided the modules name is shop(as defined in the bindings section of [config.capnp](config.capnp)
+You can access it as shown below in [worker.js](worker.js)
 
 ```javascript
-env.shop
+return new Response(env.shop.makeBurrito(burritoType).price());
 ```
 
-The initialization is demonstrated in [binding.js](binding.js).
+The initialization for this module is demonstrated in [binding.js](binding.js), the default behavior of worker uses the exported function for initialization, and is called by `workerd`.
 
-##### Definition
+#### Definition
 
-- The environment name of `shop` is provided in [config.capnp](config.capnp) with the field `name` located under bindings.
+- The environment name of `shop` is provided in [config.capnp](config.capnp) with the field `name` located in the binding definition used by the worker.
+
+```capnp
+bindings = [
+( 
+    ...
+    name = "shop"
+    ...
+)]
 ```
-  bindings = [
-    ( 
-        ...
-        name = "shop"
-        ...
-    )]
-```
-- An environment binding must be marked as internal.
+
+- **Note** An environment bindings module must be marked as internal, this is demonstrated in [burrito-shop.capnp](burrito-shop.capnp)
 
 #### Using a exported function that isn't default as the entrypoint
-A default exported entrypoint is not required for binding as long as you define a different entrypoint with `entrypoint = "methodname"`, for example you can define a non-default function as the entrypoint in [config.capnp](config.capnp).
-An example is provided below
+
+A default exported entrypoint is not required for binding as long as you define a different entrypoint with `entrypoint = "methodname"`, for example you can define a non-default function as the entrypoint with `entrypoint = "makeMagicBurritoBinding"` in [config.capnp](config.capnp).  An example is provided below on how you could change the entrypoint.
 
 In [binding.js](binding.js)
+
 ```javascript
 export function makeMagicBurritoBinding(env) {
     return new BurritoShop(env.recipes);
@@ -78,14 +88,13 @@ export function makeMagicBurritoBinding(env) {
 ```
 
 In [config.capnp](config.capnp)
-```
-    (
-      name = "shop",
-      wrapped = (
-        ...
-        entrypoint = "makeMagicBurritoBinding"
-        ...
-    )
-```
 
-
+```capnp
+(
+  name = "shop",
+  wrapped = (
+    ...
+    entrypoint = "makeMagicBurritoBinding" # The new entrypoint name
+    ...
+)
+```
