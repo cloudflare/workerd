@@ -234,7 +234,7 @@ struct MockResponse final: public kj::HttpService::Response {
 
 
 TestFixture::TestFixture(SetupParams params)
-  : params(params),
+  : waitScope(params.waitScope),
     config(buildConfig(params, configArena)),
     io(params.waitScope == kj::none ? kj::Maybe(kj::setupAsyncIo()) : kj::Maybe<kj::AsyncIoContext>(kj::none)),
     timer(kj::heap<MockTimer>()),

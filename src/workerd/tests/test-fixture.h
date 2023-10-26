@@ -50,7 +50,7 @@ struct TestFixture {
       -> typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
-    KJ_IF_SOME(ws, params.waitScope) {
+    KJ_IF_SOME(ws, this->waitScope) {
       waitScope = &ws;
     } else {
       waitScope = &KJ_REQUIRE_NONNULL(io).waitScope;
@@ -80,7 +80,7 @@ struct TestFixture {
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
 private:
-  SetupParams params;
+  kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;
   workerd::server::config::Worker::Reader config;
   kj::Maybe<kj::AsyncIoContext> io;
