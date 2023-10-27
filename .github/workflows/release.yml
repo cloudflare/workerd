@@ -56,7 +56,8 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
+      - if: ${{ needs.check-tag.outputs.exists != 'true' }}
+        run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
       - uses: ncipollo/release-action@v1
         id: create_release
         with:
