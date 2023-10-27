@@ -60,7 +60,7 @@ jobs:
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
-      - uses: robinraju/release-downloader@v1.5
+      - uses: robinraju/release-downloader@v1.6
         with:
           tag: v${{ needs.version.outputs.release_version }}
           fileName: workerd-${{ matrix.arch }}.gz
