@@ -4,10 +4,10 @@
 
 `workerd` (pronounced: "worker-dee") is a JavaScript / Wasm server runtime based on the same code that powers [Cloudflare Workers](https://workers.dev).
 
-You might use it:  
+You might use it:
 
 * **As an application server**, to self-host applications designed for Cloudflare Workers.
-* **As a development tool**, to develop and test such code locally. 
+* **As a development tool**, to develop and test such code locally.
 * **As a programmable HTTP proxy** (forward or reverse), to efficiently intercept, modify, and
   route network requests.
 
