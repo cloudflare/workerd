@@ -50,24 +50,19 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
     needs: [check-tag, version]
     runs-on: ubuntu-latest
+    if: ${{ needs.check-tag.outputs.exists != 'true' }}
     steps:
-      - run: echo ${{ needs.check-tag.outputs.exists }}
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - id: commit_ref
-        run: echo "prerelease_version=0.0.0-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      - id: release_tag
-        run: echo "tag=${{ needs.check-tag.outputs.exists == 'true' && steps.commit_ref.outputs.prerelease_version || needs.version.outputs.version}}" >> $GITHUB_OUTPUT
-      - run: git tag v${{ steps.release_tag.outputs.tag }} && git push origin v${{ steps.release_tag.outputs.tag }}
+      - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
       - uses: ncipollo/release-action@v1
         id: create_release
         with:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag: v${{ steps.release_tag.outputs.tag }}
-          prerelease: ${{ needs.check-tag.outputs.exists == 'true' }}
+          tag: v${{ needs.version.outputs.version }}
           
   build:
     strategy:
