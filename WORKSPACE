@@ -66,6 +66,10 @@ http_archive(
     url = "https://github.com/google/benchmark/archive/refs/tags/v1.8.2.tar.gz",
 )
 
+load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
+
+benchmark_deps()
+
 # Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
 # release version later.
 http_archive(
