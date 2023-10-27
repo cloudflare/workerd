@@ -7,7 +7,7 @@
 You might use it:  
 
 * **As an application server**, to self-host applications designed for Cloudflare Workers.
-* **As a development tool**, to develop and test such code locally.
+* **As a development tool**, to develop and test such code locally. 
 * **As a programmable HTTP proxy** (forward or reverse), to efficiently intercept, modify, and
   route network requests.
 
