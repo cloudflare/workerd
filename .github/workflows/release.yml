@@ -37,12 +37,10 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - uses: mukunku/tag-exists-action@v1.1.0
+      - uses: mukunku/tag-exists-action@v1.3.0
         id: check_tag
         with:
           tag: v${{ needs.version.outputs.version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   tag-and-release:
     name: Tag & Release
@@ -142,7 +140,7 @@ jobs:
             name: Windows-X64
     steps:
       - name: Download ${{ matrix.name }}
-        uses: actions/download-artifact@v3.0.0
+        uses: actions/download-artifact@v3.0.2
         with:
           name: ${{ matrix.name }}-binary
           path: /tmp
