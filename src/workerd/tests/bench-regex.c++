@@ -32,7 +32,7 @@ struct RegExpBenchmark: public benchmark::Fixture {
         }
       )"_kj
     };
-    fixture = kj::heap<TestFixture>(params);
+    fixture = kj::heap<TestFixture>(kj::mv(params));
   }
 
   void TearDown(benchmark::State& state) noexcept(true) override {

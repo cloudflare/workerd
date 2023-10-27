@@ -25,7 +25,7 @@ struct TestFixture {
     kj::Maybe<kj::StringPtr> mainModuleSource;
   };
 
-  TestFixture(SetupParams params = { });
+  TestFixture(SetupParams&& params = { });
 
   struct V8Environment {
     v8::Isolate* isolate;
