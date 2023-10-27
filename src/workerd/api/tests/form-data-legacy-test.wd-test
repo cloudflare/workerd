@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTestsLegacy :Workerd.Config = (
+  services = [
+    ( name = "form-data-legacy-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "form-data-legacy-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = [
+          "nodejs_compat",
+          "formdata_parser_converts_files_to_strings"
+        ],
+      )
+    ),
+  ],
+);
+
