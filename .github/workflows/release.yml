@@ -56,14 +56,17 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - if: ${{ needs.check-tag.outputs.exists != 'true' }}
-        run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
+      - id: commit_ref
+        run: echo "prerelease_version=0.0.0-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - id: release_tag
+        run: echo "tag=${{ needs.check-tag.outputs.exists == 'true' && steps.commit_ref.outputs.prerelease_version || needs.version.outputs.version}}" >> $GITHUB_OUTPUT
+      - run: git tag v${{ steps.release_tag.outputs.tag }} && git push origin v${{ steps.release_tag.outputs.tag }}
       - uses: ncipollo/release-action@v1
         id: create_release
         with:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag: v${{ needs.version.outputs.version }}
+          tag: v${{ steps.release_tag.outputs.tag }}
           prerelease: ${{ needs.check-tag.outputs.exists == 'true' }}
           
   build:
