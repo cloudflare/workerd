@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "form-data-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "form-data-test.js")
+        ],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = [
+          "nodejs_compat"
+        ],
+      )
+    ),
+  ],
+);
