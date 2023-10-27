@@ -1,1 +1,11 @@
+name: Mark Release Final
 
+on:
+  release:
+    types: [edited]
+
+jobs:
+  mark-release-final:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
