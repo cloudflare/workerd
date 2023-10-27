@@ -210,6 +210,25 @@ kj::Promise<void> updateStorageDeletes(IoContext& context,
   metrics.addStorageDeletes(deleted);
 };
 
+// Return the id of the current actor (or the empty string if there is no current actor).
+kj::Maybe<kj::String> getCurrentActorId() {
+  if (IoContext::hasCurrent()) {
+    IoContext& ioContext = IoContext::current();
+    KJ_IF_SOME(actor, ioContext.getActor()) {
+      KJ_SWITCH_ONEOF(actor.getId()) {
+	KJ_CASE_ONEOF(s, kj::String) {
+	  return kj::heapString(s);
+	}
+	KJ_CASE_ONEOF(actorId, kj::Own<ActorIdFactory::ActorId>) {
+	  return actorId->toString();
+	}
+      }
+      KJ_UNREACHABLE;
+    }
+  }
+  return kj::none;
+}
+
 }  // namespace
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(
@@ -959,9 +978,10 @@ jsg::JsValue deserializeV8Value(jsg::Lock& js,
       // include the key (to help find the data in the database if it hasn't been deleted), the
       // length of the value, and the first three bytes of the value (which is just the v8-internal
       // version header and the tag that indicates the type of the value, but not its contents).
+      kj::String actorId = getCurrentActorId().orDefault([]() { return kj::str(); });
       KJ_FAIL_ASSERT("actor storage deserialization failed",
                      "failed to deserialize stored value",
-                     exception.getHandle(js), key, buf.size(),
+                     actorId, exception.getHandle(js), key, buf.size(),
                      buf.slice(0, std::min(static_cast<size_t>(3), buf.size())));
     });
   } catch (jsg::JsExceptionThrown&) {

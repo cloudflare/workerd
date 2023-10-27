@@ -23,9 +23,11 @@ struct TestFixture {
     kj::Maybe<kj::WaitScope&> waitScope;
     kj::Maybe<CompatibilityFlags::Reader> featureFlags;
     kj::Maybe<kj::StringPtr> mainModuleSource;
+    // If set, make a stub of an Actor with the given id.
+    kj::Maybe<Worker::Actor::Id> actorId;
   };
 
-  TestFixture(SetupParams params = { });
+  TestFixture(SetupParams&& params = { });
 
   struct V8Environment {
     v8::Isolate* isolate;
@@ -50,7 +52,7 @@ struct TestFixture {
       -> typename RunReturnType<decltype(callback(kj::instance<const Environment&>()))>::Type {
     auto request = createIncomingRequest();
     kj::WaitScope* waitScope;
-    KJ_IF_SOME(ws, params.waitScope) {
+    KJ_IF_SOME(ws, this->waitScope) {
       waitScope = &ws;
     } else {
       waitScope = &KJ_REQUIRE_NONNULL(io).waitScope;
@@ -80,7 +82,7 @@ struct TestFixture {
   Response runRequest(kj::HttpMethod method, kj::StringPtr url, kj::StringPtr body);
 
 private:
-  SetupParams params;
+  kj::Maybe<kj::WaitScope&> waitScope;
   capnp::MallocMessageBuilder configArena;
   workerd::server::config::Worker::Reader config;
   kj::Maybe<kj::AsyncIoContext> io;
@@ -88,6 +90,7 @@ private:
   kj::Own<kj::Timer> timer;
   kj::Own<TimerChannel> timerChannel;
   kj::Own<kj::EntropySource> entropySource;
+  kj::Maybe<kj::Own<Worker::Actor>> actor;
   capnp::ByteStreamFactory byteStreamFactory;
   kj::HttpHeaderTable::Builder headerTableBuilder;
   ThreadContext::HeaderIdBundle threadContextHeaderBundle;

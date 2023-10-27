@@ -101,10 +101,19 @@ wd_cc_capnp_library(
     ["**/*-test.c++"],
     exclude = [
         "api-rtti-test.c++",
+        "actor-state-iocontext-test.c++",
         "cf-property-test.c++",
         "node/*-test.c++",
     ],
 )]
+
+kj_test(
+    src = "actor-state-iocontext-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ]
+)
 
 kj_test(
     src = "node/buffer-test.c++",
