@@ -263,16 +263,35 @@ jsg::Ref<Socket> connectImpl(
 }
 
 jsg::Promise<void> Socket::close(jsg::Lock& js) {
-  // Forcibly close the readable/writable streams.
-  auto cancelPromise = readable->getController().cancel(js, kj::none);
-  auto abortPromise = writable->getController().abort(js, kj::none);
-  // The below is effectively `Promise.all(cancelPromise, abortPromise)`
-  return cancelPromise.then(js, [abortPromise = kj::mv(abortPromise), this](jsg::Lock& js) mutable {
-    return abortPromise.then(js, [this](jsg::Lock& js) {
-      resolveFulfiller(js, kj::none);
-      return js.resolvedPromise();
-    }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
-  }, [this](jsg::Lock& js, jsg::Value err) { return errorHandler(js, kj::mv(err)); });
+  if (isClosing) {
+    return closedPromiseCopy.whenResolved(js);
+  }
+
+  isClosing = true;
+
+  auto flushPromise = js.resolvedPromise();
+  if (!writable->getController().isClosedOrClosing()) {
+    flushPromise = writable->getController().flush(js);
+  }
+
+  return flushPromise.then(js, [this](jsg::Lock& js) {
+    // Forcibly abort the readable/writable streams.
+    auto cancelPromise = readable->getController().cancel(js, kj::none);
+    auto abortPromise = writable->getController().abort(js, kj::none);
+    // The below is effectively `Promise.all(cancelPromise, abortPromise)`
+    return cancelPromise.then(js,
+        [abortPromise = kj::mv(abortPromise)](jsg::Lock& js) mutable {
+      return kj::mv(abortPromise);
+    });
+  }).then(js, [this](jsg::Lock& js) {
+    // Wait until the socket connects (successfully or otherwise)
+    return openedPromiseCopy.whenResolved(js);
+  }).then(js, [this](jsg::Lock& js) {
+    resolveFulfiller(js, kj::none);
+    return js.resolvedPromise();
+  }).catch_(js, [this](jsg::Lock& js, jsg::Value err) {
+    errorHandler(js, kj::mv(err));
+  });
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
