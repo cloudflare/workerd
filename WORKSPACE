@@ -257,18 +257,26 @@ rust_analyzer_dependencies()
 #
 # workerd uses Node.js scripts for generating TypeScript types.
 
+# Fetch rules_nodejs before aspect_rules_js, otherwise we'll get an outdated rules_nodejs version.
+http_archive(
+    name = "rules_nodejs",
+    sha256 = "162f4adfd719ba42b8a6f16030a20f434dc110c65dc608660ef7b3411c9873f9",
+    strip_prefix = "rules_nodejs-6.0.2",
+    url = "https://github.com/bazelbuild/rules_nodejs/releases/download/v6.0.2/rules_nodejs-v6.0.2.tar.gz",
+)
+
 http_archive(
     name = "aspect_rules_js",
-    sha256 = "686d5b345592c1958b4aea24049d935ada11b83ae5538658d22b84b353cfbb1e",
-    strip_prefix = "rules_js-1.13.1",
-    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.13.1.tar.gz",
+    sha256 = "72e8b34ed850a5acc39b4c85a8d5a0a5063e519e4688200ee41076bb0c979207",
+    strip_prefix = "rules_js-1.33.1",
+    url = "https://github.com/aspect-build/rules_js/archive/refs/tags/v1.33.1.tar.gz",
 )
 
 http_archive(
     name = "aspect_rules_ts",
-    sha256 = "6406905c5f7c5ca6dedcca5dacbffbf32bb2a5deb77f50da73e7195b2b7e8cbc",
-    strip_prefix = "rules_ts-1.0.5",
-    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.0.5.tar.gz",
+    sha256 = "4c3f34fff9f96ffc9c26635d8235a32a23a6797324486c7d23c1dfa477e8b451",
+    strip_prefix = "rules_ts-1.4.5",
+    url = "https://github.com/aspect-build/rules_ts/archive/refs/tags/v1.4.5.tar.gz",
 )
 
 load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
@@ -284,7 +292,7 @@ nodejs_register_toolchains(
         # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
         "https://nodejs.org/dist/v{version}/{filename}",
     ],
-    node_version = "18.10.0",
+    node_version = "20.8.0",
 )
 
 load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies", TS_LATEST_VERSION = "LATEST_VERSION")

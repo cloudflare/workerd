@@ -2,8 +2,8 @@ lockfileVersion: 5.4
 
 specifiers:
   '@bazel/bazelisk': ~1.12.1
-  '@types/debug': ^4.1.7
-  '@types/node': ^18.8.5
+  '@types/debug': ^4.1.10
+  '@types/node': ^20.8.10
   '@types/prettier': ^2.7.1
   '@typescript-eslint/eslint-plugin': ^5.40.0
   '@typescript-eslint/parser': ^5.40.0
@@ -24,8 +24,8 @@ dependencies:
 
 devDependencies:
   '@bazel/bazelisk': 1.12.1
-  '@types/debug': 4.1.7
-  '@types/node': 18.8.5
+  '@types/debug': 4.1.10
+  '@types/node': 20.8.10
   '@types/prettier': 2.7.1
   '@typescript-eslint/eslint-plugin': 5.40.0_ik43yucnjuzsopqc3tao6tk3x4
   '@typescript-eslint/parser': 5.40.0_l76llshcx5hpzqzl7lfng4kpb4
@@ -119,8 +119,8 @@ packages:
       fastq: 1.13.0
     dev: true
 
-  /@types/debug/4.1.7:
-    resolution: {integrity: sha512-9AonUzyTjXXhEOa0DnqpzZi6VHlqKMswga9EXjpXnnqxwLtdvPPtlO8evrI5D9S6asFRCQ6v+wpiUKbw+vKqyg==}
+  /@types/debug/4.1.10:
+    resolution: {integrity: sha512-tOSCru6s732pofZ+sMv9o4o3Zc+Sa8l3bxd/tweTQudFn06vAzb13ZX46Zi6m6EJ+RUbRTHvgQJ1gBtSgkaUYA==}
     dependencies:
       '@types/ms': 0.7.31
     dev: true
@@ -137,8 +137,10 @@ packages:
     resolution: {integrity: sha512-iiUgKzV9AuaEkZqkOLDIvlQiL6ltuZd9tGcW3gwpnX8JbuiuhFlEGmmFXEXkN50Cvq7Os88IY2v0dkDqXYWVgA==}
     dev: true
 
-  /@types/node/18.8.5:
-    resolution: {integrity: sha512-Bq7G3AErwe5A/Zki5fdD3O6+0zDChhg671NfPjtIcbtzDNZTv4NPKMRFr7gtYPG7y+B8uTiNK4Ngd9T0FTar6Q==}
+  /@types/node/20.8.10:
+    resolution: {integrity: sha512-TlgT8JntpcbmKUFzjhsyhGfP2fsiz1Mv56im6enJ905xG1DAYesxJaeSbGqQmAw8OWPdhyJGhGSQGKRNJ45u9w==}
+    dependencies:
+      undici-types: 5.26.5
     dev: true
 
   /@types/prettier/2.7.1:
@@ -1723,6 +1725,10 @@ packages:
       has-bigints: 1.0.2
       has-symbols: 1.0.3
       which-boxed-primitive: 1.0.2
+    dev: true
+
+  /undici-types/5.26.5:
+    resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
     dev: true
 
   /uri-js/4.4.1:
