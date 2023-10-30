@@ -26,6 +26,44 @@ jobs:
       - id: echo
         run: |
           echo "::set-output name=version::1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0"
+  check-tag:
+    name: Check tag is new
+    outputs:
+      exists: ${{ steps.check_tag.outputs.exists }}
+    needs: [version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: mukunku/tag-exists-action@v1.1.0
+        id: check_tag
+        with:
+          tag: v${{ needs.version.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  tag-and-release:
+    name: Tag & Release
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    needs: [check-tag, version]
+    runs-on: ubuntu-latest
+    if: ${{ needs.check-tag.outputs.exists != 'true' }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
+      - uses: ncipollo/release-action@v1
+        id: create_release
+        with:
+          generateReleaseNotes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ needs.version.outputs.version }}
+          
   build:
     strategy:
       matrix:
@@ -87,48 +125,10 @@ jobs:
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
-  check-tag:
-    name: Check tag is new
-    outputs:
-      exists: ${{ steps.check_tag.outputs.exists }}
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - uses: mukunku/tag-exists-action@v1.1.0
-        id: check_tag
-        with:
-          tag: v${{ needs.version.outputs.version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  tag-and-release:
-    name: Tag & Release
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    needs: [check-tag, version, build]
-    runs-on: ubuntu-latest
-    if: needs.check-tag.outputs.exists != 'true'
-    steps:
-      - run: echo ${{ needs.check-tag.outputs.exists }}
-      - name: Checkout Repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - run: git tag v${{ needs.version.outputs.version }} && git push origin v${{ needs.version.outputs.version }}
-      - uses: ncipollo/release-action@v1
-        id: create_release
-        with:
-          generateReleaseNotes: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: v${{ needs.version.outputs.version }}
-
+  
   upload-artifacts:
     name: Upload Artifacts
-    needs: [tag-and-release]
+    needs: [tag-and-release, build]
     runs-on: ubuntu-latest
     strategy:
       matrix:
