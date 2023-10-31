@@ -352,4 +352,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # In the WebCrypto API, the `publicExponent` field of the algorithm of RSA keys would previously
   # be an ArrayBuffer. Using this flag, publicExponent is a Uint8Array as mandated by the
   # specification.
+
+  vectorizeQueryMetadataOptional @37 :Bool
+      $compatEnableFlag("vectorize_query_metadata_optional")
+      $compatEnableDate("2023-11-08")
+      $compatDisableFlag("vectorize_query_original");
+  # Vectorize query option change to allow returning of metadata to be optional. Accompanying this:
+  # a return format change to move away from a nested object with the VectorizeVector.
 }

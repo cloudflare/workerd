@@ -7,9 +7,11 @@
  * These can be supplied in place of configuring explicit dimensions.
  */
 export enum KnownModel {
-  "openapi-text-embedding-ada-002" = "openapi-text-embedding-ada-002",
-  "workers-ai/bge-small-en" = "workers-ai/bge-small-en",
-  "cohere/embed-multilingual-v2.0" = "cohere/embed-multilingual-v2.0",
+  'openai/text-embedding-ada-002' = 'openai/text-embedding-ada-002',
+  'cohere/embed-multilingual-v2.0' = 'cohere/embed-multilingual-v2.0',
+  '@cf/baai/bge-small-en-v1.5' = '@cf/baai/bge-small-en-v1.5',
+  '@cf/baai/bge-base-en-v1.5' = '@cf/baai/bge-base-en-v1.5',
+  '@cf/baai/bge-large-en-v1.5' = '@cf/baai/bge-large-en-v1.5',
 }
 
 /**

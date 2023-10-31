@@ -26,7 +26,8 @@
     ],
     "paths": {
       "cloudflare:*": ["./*"],
-      "cloudflare-internal:*": ["./internal/*"]
+      "cloudflare-internal:*": ["./internal/*"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
     }
   },
   "include": [

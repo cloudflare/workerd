@@ -28,7 +28,8 @@ type VectorizeDistanceMetric = "euclidean" | "cosine" | "dot-product";
 interface VectorizeQueryOptions {
   topK?: number;
   namespace?: string;
-  returnVectors?: boolean;
+  returnValues?: boolean;
+  returnMetadata?: boolean;
 }
 
 /**
@@ -69,21 +70,18 @@ interface VectorizeVector {
   values: VectorFloatArray | number[];
   /** The namespace this vector belongs to. */
   namespace?: string;
-  /** Metadata associated with the binding. Includes the values of the other fields and potentially additional details. */
+  /** Metadata associated with the vector. Includes the values of the other fields and potentially additional details. */
   metadata?: Record<string, VectorizeVectorMetadata>;
 }
 
 /**
  * Represents a matched vector for a query along with its score and (if specified) the matching vector information.
  */
-interface VectorizeMatch {
-  /** The ID for the vector. This can be user-defined, and must be unique. It should uniquely identify the object, and is best set based on the ID of what the vector represents. */
-  vectorId: string;
-  /** The score or rank for similarity, when returned as a result */
-  score: number;
-  /** Vector data for the match. Included only if the user specified they want it returned (via {@link VectorizeQueryOptions}). */
-  vector?: VectorizeVector;
-}
+type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
+  Omit<VectorizeVector, "values"> & {
+    /** The score or rank for similarity, when returned as a result */
+    score: number;
+  };
 
 /**
  * A set of vector {@link VectorizeMatch} for a particular query.
