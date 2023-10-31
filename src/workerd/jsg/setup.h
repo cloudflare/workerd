@@ -340,14 +340,14 @@ public:
     // Wrap a C++ value, returning a v8::Local (possibly of a specific type).
     template <typename T>
     auto wrap(v8::Local<v8::Context> context, T&& value) {
-      return jsgIsolate.wrapper->wrap(context, nullptr, kj::fwd<T>(value));
+      return jsgIsolate.wrapper->wrap(context, kj::none, kj::fwd<T>(value));
     }
 
     // Wrap a context-independent value. Only a few built-in types, like numbers and strings,
     // can be wrapped without a context.
     template <typename T>
     auto wrapNoContext(T&& value) {
-      return jsgIsolate.wrapper->wrap(v8Isolate, nullptr, kj::fwd<T>(value));
+      return jsgIsolate.wrapper->wrap(v8Isolate, kj::none, kj::fwd<T>(value));
     }
 
     // Convert a JavaScript value to a C++ value, or throw a JS exception if the type doesn't

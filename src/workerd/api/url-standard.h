@@ -249,11 +249,11 @@ public:
 
   static kj::Maybe<UrlRecord> parse(
       jsg::UsvStringPtr input,
-      jsg::Optional<UrlRecord&> maybeBase = nullptr,
+      jsg::Optional<UrlRecord&> maybeBase = kj::none,
       kj::Maybe<UrlRecord&> maybeRecord = kj::none,
       kj::Maybe<ParseState> maybeStateOverride = kj::none);
 
-  URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = nullptr);
+  URL(jsg::UsvStringPtr url, jsg::Optional<jsg::UsvStringPtr> base = kj::none);
 
   ~URL() noexcept(false) override;
 
@@ -312,7 +312,7 @@ public:
   // ].filter((test) => URL.canParse(test));
   //
   static bool canParse(jsg::UsvString url,
-                       jsg::Optional<jsg::UsvString> base = nullptr);
+                       jsg::Optional<jsg::UsvString> base = kj::none);
 
   JSG_RESOURCE_TYPE(URL) {
     JSG_READONLY_PROTOTYPE_PROPERTY(origin, getOrigin);

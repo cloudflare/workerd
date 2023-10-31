@@ -773,7 +773,7 @@ KJ_TEST("Parse protocol with state override") {
   {
     auto record = KJ_ASSERT_NONNULL(URL::parse(jsg::usv("http://example.org")));
     record = KJ_ASSERT_NONNULL(URL::parse(
-        jsg::usv("http:"), nullptr, record, URL::ParseState::SCHEME_START));
+        jsg::usv("http:"), kj::none, record, URL::ParseState::SCHEME_START));
     KJ_ASSERT(record.scheme == jsg::usv("http"));
   }
 }

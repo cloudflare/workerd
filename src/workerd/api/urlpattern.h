@@ -99,12 +99,12 @@ public:
   kj::Maybe<URLPatternResult> exec(
       jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL = nullptr);
+      jsg::Optional<jsg::UsvString> baseURL = kj::none);
 
   bool test(
       jsg::Lock& js,
       jsg::Optional<URLPatternInput> input,
-      jsg::Optional<jsg::UsvString> baseURL = nullptr);
+      jsg::Optional<jsg::UsvString> baseURL = kj::none);
 
   jsg::UsvStringPtr getProtocol();
   jsg::UsvStringPtr getUsername();

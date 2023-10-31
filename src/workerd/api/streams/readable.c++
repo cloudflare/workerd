@@ -518,7 +518,7 @@ jsg::Optional<uint32_t> ByteLengthQueuingStrategy::size(
       return view->ByteLength();
     }
   }
-  return nullptr;
+  return kj::none;
 }
 
 }  // namespace workerd::api

@@ -964,7 +964,7 @@ jsg::Ref<AbortSignal> Request::getThisSignal(jsg::Lock& js) {
   KJ_IF_SOME(s, thisSignal) {
     return s.addRef();
   }
-  auto newSignal = jsg::alloc<AbortSignal>(nullptr, nullptr, AbortSignal::Flag::NEVER_ABORTS);
+  auto newSignal = jsg::alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   thisSignal = newSignal.addRef();
   return newSignal;
 }

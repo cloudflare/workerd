@@ -804,7 +804,7 @@ void maybeRejectPromise(
     v8::Local<v8::Value> reason) {
   KJ_IF_SOME(resolver, maybeResolver) {
     resolver.reject(js, reason);
-    maybeResolver = nullptr;
+    maybeResolver = kj::none;
   }
 }
 

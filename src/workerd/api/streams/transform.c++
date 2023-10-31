@@ -46,8 +46,8 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     auto readable = ReadableStream::constructor(
         js,
         UnderlyingSource {
-          .type = nullptr,
-          .autoAllocateChunkSize = nullptr,
+          .type = kj::none,
+          .autoAllocateChunkSize = kj::none,
           .start = maybeAddFunctor<UnderlyingSource::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),
@@ -72,7 +72,7 @@ jsg::Ref<TransformStream> TransformStream::constructor(
     auto writable = WritableStream::constructor(
         js,
         UnderlyingSink {
-          .type = nullptr,
+          .type = kj::none,
           .start = maybeAddFunctor<UnderlyingSink::StartAlgorithm>(JSG_VISITABLE_LAMBDA(
                   (controller = controller.addRef()),
                   (controller),

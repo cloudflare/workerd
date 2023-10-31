@@ -200,7 +200,7 @@ public:
 
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js) override {
     // TODO(later): The internal controller has no concept of an "erroring"
-    // state, so for now we just return nullptr here.
+    // state, so for now we just return kj::none here.
     return kj::none;
   }
 

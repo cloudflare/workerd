@@ -3127,10 +3127,10 @@ private:
             // freed. There's nothing we can do except cleanup.
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(bytes, kj::Array<kj::byte>) {
-                return readable->cancel(js, nullptr);
+                return readable->cancel(js, kj::none);
               }
               KJ_CASE_ONEOF(pumping, Pumping) {
-                return readable->cancel(js, nullptr);
+                return readable->cancel(js, kj::none);
               }
               KJ_CASE_ONEOF(closed, StreamStates::Closed) {
                 // We do not have to cancel the readable in this case because it has already

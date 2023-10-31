@@ -510,7 +510,7 @@ public:
       v8::Local<v8::Context> context, v8::Local<v8::Value> handle, Optional<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsUndefined()) {
-      return Optional<U>(nullptr);
+      return Optional<U>(kj::none);
     } else {
       return static_cast<TypeWrapper*>(this)
            ->tryUnwrap(context, handle, (kj::Decay<U>*)nullptr, parentObject)
@@ -595,7 +595,7 @@ public:
       v8::Local<v8::Context> context, v8::Local<v8::Value> handle, kj::Maybe<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsNullOrUndefined()) {
-      return kj::Maybe<U>(nullptr);
+      return kj::Maybe<U>(kj::none);
     } else if (config.noSubstituteNull) {
       // There was a bug in the initial version of this method that failed to correctly handle
       // the following tryUnwrap returning a nullptr because of an incorrect type. The

@@ -356,7 +356,7 @@ void reportStartupError(
   } catch (const jsg::JsExceptionThrown&) {
 #define LOG_AND_SET_PERM_EXCEPTION(...) \
     KJ_LOG(ERROR, __VA_ARGS__); \
-    if (permanentException == nullptr) { \
+    if (permanentException == kj::none) { \
       permanentException = KJ_EXCEPTION(FAILED, __VA_ARGS__); \
     }
 
@@ -3036,7 +3036,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
       //   We do the same for handler.ctx, as ExecutionContext related tasks are performed
       //   on the actor's state field instead.
       handler.env = js.v8Ref(js.v8Undefined());
-      handler.ctx = nullptr;
+      handler.ctx = kj::none;
 
       impl->classInstance = kj::mv(handler);
     }).catch_([this](kj::Exception&& e) {
