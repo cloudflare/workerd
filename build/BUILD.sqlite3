@@ -34,6 +34,7 @@ filegroup(
 
 configure_make(
     name = "amalgamation",
+    configure_options = ["--enable-update-limit"],
     targets = [
         "sqlite3.c",
         "sqlite3.h",
@@ -93,5 +94,6 @@ cc_library(
         "SQLITE_ENABLE_NORMALIZE",
         "SQLITE_ENABLE_MATH_FUNCTIONS",
         "SQLITE_DEFAULT_FOREIGN_KEYS=1",
+        "SQLITE_ENABLE_UPDATE_DELETE_LIMIT",
     ]
 )

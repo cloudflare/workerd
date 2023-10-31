@@ -615,5 +615,26 @@ KJ_TEST("SQLite row counters with triggers") {
   }
 }
 
+KJ_TEST("DELETE with LIMIT") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run(R"(
+    CREATE TABLE things (
+      id INTEGER PRIMARY KEY
+    );
+  )");
+
+  db.run(R"(INSERT INTO things (id) VALUES (1))");
+  db.run(R"(INSERT INTO things (id) VALUES (2))");
+  db.run(R"(INSERT INTO things (id) VALUES (3))");
+  db.run(R"(INSERT INTO things (id) VALUES (4))");
+  db.run(R"(INSERT INTO things (id) VALUES (5))");
+  db.run(R"(DELETE FROM things LIMIT 2)");
+  auto q = db.run(R"(SELECT COUNT(*) FROM things;)");
+  KJ_EXPECT(q.getInt(0) == 3);
+}
+
 }  // namespace
 }  // namespace workerd
