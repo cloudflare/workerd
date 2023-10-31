@@ -20,6 +20,11 @@ function buildNeutralLib() {
     '@cloudflare/workerd-windows-64': process.env.WORKERD_VERSION
   };
   fs.writeFileSync(pjPath, JSON.stringify(package_json, null, 2) + '\n');
+
+  const capnpPath = path.join('src', 'workerd', 'server', 'workerd.capnp');
+
+  fs.copyFileSync(capnpPath, path.join('npm', 'workerd', 'workerd.capnp'))
+
 }
 
 buildNeutralLib();
