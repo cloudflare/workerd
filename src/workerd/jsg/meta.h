@@ -6,6 +6,7 @@
 // INTERNAL IMPLEMENTATION FILE
 
 #include <kj/tuple.h>
+#include <v8-function-callback.h>
 
 namespace workerd::jsg {
 
