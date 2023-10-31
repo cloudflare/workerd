@@ -40,19 +40,6 @@ http_archive(
 )
 
 http_archive(
-    name = "sqlite3",
-    build_file = "//:build/BUILD.sqlite3",
-    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
-    strip_prefix = "sqlite-amalgamation-3400100",
-    type = "zip",
-    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
-    patches = [
-        "//:patches/sqlite/0001-row-counts-amalgamation.patch",
-    ],
-    patch_args = ["-p1"],
-)
-
-http_archive(
     name = "rules_python",
     sha256 = "84aec9e21cc56fbc7f1335035a71c850d1b9b5cc6ff497306f84cced9a769841",
     strip_prefix = "rules_python-0.23.1",
@@ -167,6 +154,39 @@ http_archive(
     strip_prefix = "google-tcmalloc-ca82471",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/ca82471188f4832e82d2e77078ecad66f4c425d5",
+)
+
+# ========================================================================================
+# SQLite3
+#
+# It needs rules_foreign_cc to build.
+#
+# Annoyingly, rules_foreign_cc transitively depends on com_google_absl
+# for some reason, so this has to come after the com_google_absl
+# archive much like rules_fuzzing_dependencies() does.
+
+http_archive(
+    name = "rules_foreign_cc",
+    url = "https://github.com/bazelbuild/rules_foreign_cc/tarball/ef3031e3874b8282c717fd3341ef5fbad2591b8f",
+    strip_prefix = "bazelbuild-rules_foreign_cc-ef3031e",
+    type = "tgz",
+    sha256 = "cac47590fbd040d485e96bbda4a525fa65973077500b5565c707e3865922f7e8",
+)
+
+load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
+rules_foreign_cc_dependencies(register_built_tools = False)
+
+http_archive(
+    name = "sqlite3",
+    build_file = "//:build/BUILD.sqlite3",
+    sha256 = "5064126aa50db20c35578b612b56c3129425c0506ed4d1610efa4a0f01bdf8d0",
+    strip_prefix = "sqlite-src-3400100",
+    type = "zip",
+    url = "https://sqlite.org/2022/sqlite-src-3400100.zip",
+    patches = [
+        "//:patches/sqlite/0001-row-counts-plain.patch",
+    ],
+    patch_args = ["-p1"],
 )
 
 # ========================================================================================
