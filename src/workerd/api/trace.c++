@@ -98,7 +98,7 @@ jsg::Optional<kj::Array<kj::String>> getTraceScriptTags(const Trace& trace) {
   if (trace.scriptTags.size() > 0) {
     return KJ_MAP(t, trace.scriptTags) -> kj::String { return kj::str(t); };
   } else {
-    return nullptr;
+    return kj::none;
   }
 }
 
@@ -119,7 +119,7 @@ kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
     if (cfJson.size() > 0) {
       return js.parseJson(cfJson).cast<v8::Object>(js);
     }
-    return nullptr;
+    return kj::none;
   };
 
   const auto getHeaders = [&]() -> kj::Array<Trace::FetchEventInfo::Header> {

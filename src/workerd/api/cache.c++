@@ -73,17 +73,17 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
   auto& context = IoContext::current();
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
-    return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>(nullptr));
+    return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
   }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
   return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
-    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), nullptr);
+    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
-      return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>(nullptr));
+      return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
     }
 
     auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js),
@@ -110,7 +110,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
         // script fail. However, it might be indicative of a larger problem, and should be
         // investigated.
         LOG_CACHE_ERROR_ONCE("Response to Cache API GET has no CF-Cache-Status: ", response);
-        return nullptr;
+        return kj::none;
       }
 
       // The status code should be a 504 on cache miss, but we need to rely on CF-Cache-Status
@@ -123,11 +123,11 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(
       //   this URL result in a 200, causing us to return true from Cache::delete_()? If so, that's
       //   a small inconsistency: we shouldn't have a match failure but a delete success.
       if (cacheStatus == "MISS" || cacheStatus == "EXPIRED" || cacheStatus == "UPDATING") {
-        return nullptr;
+        return kj::none;
       } else if (cacheStatus != "HIT") {
         // Another internal error. See above comment where we retrieve the CF-Cache-Status header.
         LOG_CACHE_ERROR_ONCE("Response to Cache API GET has invalid CF-Cache-Status: ", response);
-        return nullptr;
+        return kj::none;
       }
 
       return makeHttpResponse(
@@ -237,7 +237,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js, Request::Info requestOrUrl,
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
   return js.evalNow([&] {
-    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), nullptr);
+    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     // TODO(conform): Require that jsRequest's url has an http or https scheme. This is only
     //   important if api::Request is changed to parse its URL eagerly (as required by spec), rather
@@ -491,7 +491,7 @@ jsg::Promise<bool> Cache::delete_(
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
   return js.evalNow([&]() -> jsg::Promise<bool> {
-    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), nullptr);
+    auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {

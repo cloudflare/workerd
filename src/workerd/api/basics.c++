@@ -142,7 +142,7 @@ void EventTarget::addEventListener(jsg::Lock& js, kj::String type,
           (this, type = kj::mv(type), handler = handler.identity.addRef(js)),
           (handler),
           (jsg::Lock& js, jsg::Ref<Event>) {
-        removeEventListener(js, kj::mv(type), kj::mv(handler), nullptr);
+        removeEventListener(js, kj::mv(type), kj::mv(handler), kj::none);
       });
 
       return kj::heap<NativeHandler>(js, *signal, kj::str("abort"), kj::mv(func), true);
@@ -298,9 +298,7 @@ bool EventTarget::dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event) {
       if (callback.once) {
         KJ_SWITCH_ONEOF(callback.handler) {
           KJ_CASE_ONEOF(jsh, EventHandler::JavaScriptHandler) {
-            removeEventListener(js, kj::str(event->getType()),
-                                jsh.identity.addRef(js),
-                                nullptr);
+            removeEventListener(js, kj::str(event->getType()), jsh.identity.addRef(js), kj::none);
           }
           KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
             native.handler.detach(true /* defer clearing the data field */);
@@ -422,7 +420,7 @@ jsg::Ref<AbortSignal> AbortSignal::any(
     const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
-    return jsg::alloc<AbortSignal>(nullptr, nullptr, AbortSignal::Flag::NEVER_ABORTS);
+    return jsg::alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
   }
 
   // Let's check to see if any of the signals are already aborted. If it is, we can

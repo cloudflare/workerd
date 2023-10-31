@@ -55,40 +55,40 @@ KJ_TEST("SQLite-KV") {
   constexpr auto F = SqliteKv::FORWARD;
   constexpr auto R = SqliteKv::REVERSE;
 
-  KJ_EXPECT(list(nullptr, nullptr, nullptr, F) == "bar=def, baz=123, foo=abc, qux=321");
-  KJ_EXPECT(list("cat"_kj, nullptr, nullptr, F) == "foo=abc, qux=321");
-  KJ_EXPECT(list("foo"_kj, nullptr, nullptr, F) == "foo=abc, qux=321");
-  KJ_EXPECT(list("fop"_kj, nullptr, nullptr, F) == "qux=321");
-  KJ_EXPECT(list("foo "_kj, nullptr, nullptr, F) == "qux=321");
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "bar=def, baz=123, foo=abc, qux=321");
+  KJ_EXPECT(list("cat"_kj, kj::none, kj::none, F) == "foo=abc, qux=321");
+  KJ_EXPECT(list("foo"_kj, kj::none, kj::none, F) == "foo=abc, qux=321");
+  KJ_EXPECT(list("fop"_kj, kj::none, kj::none, F) == "qux=321");
+  KJ_EXPECT(list("foo "_kj, kj::none, kj::none, F) == "qux=321");
 
-  KJ_EXPECT(list(nullptr, "cat"_kj, nullptr, F) == "bar=def, baz=123");
-  KJ_EXPECT(list(nullptr, "foo"_kj, nullptr, F) == "bar=def, baz=123");
-  KJ_EXPECT(list(nullptr, "fop"_kj, nullptr, F) == "bar=def, baz=123, foo=abc");
+  KJ_EXPECT(list(nullptr, "cat"_kj, kj::none, F) == "bar=def, baz=123");
+  KJ_EXPECT(list(nullptr, "foo"_kj, kj::none, F) == "bar=def, baz=123");
+  KJ_EXPECT(list(nullptr, "fop"_kj, kj::none, F) == "bar=def, baz=123, foo=abc");
 
-  KJ_EXPECT(list(nullptr, nullptr, 2, F) == "bar=def, baz=123");
-  KJ_EXPECT(list(nullptr, nullptr, 3, F) == "bar=def, baz=123, foo=abc");
-  KJ_EXPECT(list("baz"_kj, nullptr, 2, F) == "baz=123, foo=abc");
+  KJ_EXPECT(list(nullptr, kj::none, 2, F) == "bar=def, baz=123");
+  KJ_EXPECT(list(nullptr, kj::none, 3, F) == "bar=def, baz=123, foo=abc");
+  KJ_EXPECT(list("baz"_kj, kj::none, 2, F) == "baz=123, foo=abc");
   KJ_EXPECT(list(nullptr, "foo"_kj, 1, F) == "bar=def");
   KJ_EXPECT(list(nullptr, "foo"_kj, 2, F) == "bar=def, baz=123");
   KJ_EXPECT(list(nullptr, "foo"_kj, 3, F) == "bar=def, baz=123");
 
-  KJ_EXPECT(list(nullptr, nullptr, nullptr, R) == "qux=321, foo=abc, baz=123, bar=def");
-  KJ_EXPECT(list("foo"_kj, nullptr, nullptr, R) == "qux=321, foo=abc");
-  KJ_EXPECT(list(nullptr, "foo"_kj, nullptr, R) == "baz=123, bar=def");
-  KJ_EXPECT(list(nullptr, nullptr, 2, R) == "qux=321, foo=abc");
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, R) == "qux=321, foo=abc, baz=123, bar=def");
+  KJ_EXPECT(list("foo"_kj, kj::none, kj::none, R) == "qux=321, foo=abc");
+  KJ_EXPECT(list(nullptr, "foo"_kj, kj::none, R) == "baz=123, bar=def");
+  KJ_EXPECT(list(nullptr, kj::none, 2, R) == "qux=321, foo=abc");
   KJ_EXPECT(list(nullptr, "foo"_kj, 1, R) == "baz=123");
 
   KJ_EXPECT(kv.delete_("baz"));
   KJ_EXPECT(!kv.delete_("corge"));
 
-  KJ_EXPECT(list(nullptr, nullptr, nullptr, F) == "bar=def, foo=abc, qux=321");
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "bar=def, foo=abc, qux=321");
 
   // Put can overwrite.
   kv.put("foo", "hello"_kj.asBytes());
-  KJ_EXPECT(list(nullptr, nullptr, nullptr, F) == "bar=def, foo=hello, qux=321");
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "bar=def, foo=hello, qux=321");
 
   kv.deleteAll();
-  KJ_EXPECT(list(nullptr, nullptr, nullptr, F) == "");
+  KJ_EXPECT(list(nullptr, kj::none, kj::none, F) == "");
 }
 
 }  // namespace

@@ -106,7 +106,7 @@ static kj::Path getPathFromWin32Handle(HANDLE handle) {
 
 kj::Maybe<kj::StringPtr> toMaybeString(const char* cstr) {
   if (cstr == nullptr) {
-    return nullptr;
+    return kj::none;
   } else {
     return kj::StringPtr(cstr);
   }
@@ -577,7 +577,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
         PragmaSignature sig = KJ_UNWRAP_OR(allowedPragmas.find(pragma), return false);
         switch (sig) {
           case PragmaSignature::NO_ARG:
-            return param2 == nullptr;
+            return param2 == kj::none;
           case PragmaSignature::BOOLEAN: {
             // We allow omitting the argument in order to read back the current value.
             auto val = KJ_UNWRAP_OR(param2, return true).asArray();
@@ -610,7 +610,7 @@ bool SqliteDatabase::isAuthorized(int actionCode,
             // Argument is not required
             auto val = KJ_UNWRAP_OR(param2, return true);
             // val is allowed if it parses to an integer
-            if (val.tryParseAs<uint>() != nullptr) return true;
+            if (val.tryParseAs<uint>() != kj::none) return true;
             // Otherwise, val must be the name of an object the user has access to
             return regulator.isAllowedName(val);
           }
@@ -1869,7 +1869,7 @@ kj::Maybe<kj::Path> SqliteDatabase::Vfs::tryAppend(kj::PathPtr suffix) const {
 #else
 kj::Maybe<kj::Path> SqliteDatabase::Vfs::tryAppend(kj::PathPtr suffix) const {
   // TODO(someday): consider implementing this on other platforms
-  return nullptr;
+  return kj::none;
 }
 #endif
 

@@ -1705,7 +1705,7 @@ void URL::setProtocol(jsg::UsvString value) {
   jsg::UsvStringBuilder builder(value.size() + 1);
   builder.addAll(value);
   builder.add(':');
-  KJ_IF_SOME(record, parse(builder.finish(), nullptr, inner, ParseState::SCHEME_START)) {
+  KJ_IF_SOME(record, parse(builder.finish(), kj::none, inner, ParseState::SCHEME_START)) {
     inner = kj::mv(record);
   }
 }
