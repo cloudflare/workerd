@@ -1,3 +1,300 @@
+"""
+Builds sqlite3 from plain source.
+
+This is just enough to build the sqlite3 library; it does not include
+the shell or any other utilities.
+"""
+
+package(default_visibility = ["//visibility:private"])
+
+SQLITE_DEFINES = [
+    "SQLITE_MAX_ALLOCATION_SIZE=16777216",  # 16MB
+    "SQLITE_PRINTF_PRECISION_LIMIT=100000",
+    "SQLITE_ENABLE_FTS5",
+    "SQLITE_ENABLE_NORMALIZE",
+    "SQLITE_ENABLE_MATH_FUNCTIONS",
+    "SQLITE_DEFAULT_FOREIGN_KEYS=1",
+]
+
+SQLITE_DEFINES_FOR_LEMON = " ".join(["-D" + x for x in SQLITE_DEFINES])
+
+GIVEN_SOURCES = glob(["src/**/*.h", "src/**/*.c", "ext/**/*.h", "ext/**/*.c"])
+GENERATED_SOURCES = []
+
+# Regarding src/vdbe.c: In the normal SQLite build process, the given
+# src/vdbe.c is run through tool/vdbe-compress.tcl before use. There
+# is an amalgamation-build-time option called SQLITE_SMALL_STACK; if
+# this option is not given, then vdbe-compress.tcl does nothing; it
+# just emits its input verbatim.
+#
+# We have not set SQLITE_SMALL_STACK, so this Bazel-build file does
+# not bother with tool/vdbe-compress.tcl.
+
+cc_binary(
+    name = "lemon",
+    srcs = ["tool/lemon.c"],
+    copts = ["-w"],
+)
+
+# ========================================================================
+# Constructs parse.{c,h} using the Lemon parser generator.
+
+genrule(
+    name = "parse_ch",
+    outs = [
+        "parse.h",
+        "parse.c",
+    ],
+    srcs = [
+        "src/parse.y",
+        "tool/lempar.c",
+    ],
+    tools = [
+        ":lemon",
+    ],
+    cmd = (
+        # lemon requires lempar.c to be in the current working
+        # directory, and parse.y has to be in a writable directory
+        # since the output files are created adjacent to it.
+        "cp $(SRCS) . "
+
+        # Creates parse.c and parse.h
+        + "&& $(execpath :lemon) {} parse.y ".format(SQLITE_DEFINES_FOR_LEMON)
+
+        # Bazel expects genrule outputs to be in RULEDIR
+        + "&& cp parse.h parse.c $(RULEDIR)"
+    ),
+)
+GENERATED_SOURCES += ["parse.h", "parse.c"]
+
+# ========================================================================
+# Constructs fts5parse.{c,h} using the Lemon parser generator.
+
+genrule(
+    name = "fts5parse_ch",
+    outs = [
+        "fts5parse.h",
+        "fts5parse.c",
+    ],
+    srcs = [
+        "ext/fts5/fts5parse.y",
+        "tool/lempar.c",
+    ],
+    tools = [
+        ":lemon",
+    ],
+    cmd = (
+        # Same as :parse_ch
+        "cp $(SRCS) . "
+        + "&& $(execpath :lemon) {} fts5parse.y ".format(SQLITE_DEFINES_FOR_LEMON)
+        # Bazel expects genrule outputs to be in RULEDIR
+        + "&& cp fts5parse.h fts5parse.c $(RULEDIR)"
+    ),
+)
+GENERATED_SOURCES += ["fts5parse.h", "fts5parse.c"]
+
+# ========================================================================
+# Constructs fts5.{c,h}. "FTS5" is version 5 of Full Text Search.
+
+filegroup(
+    name = "fts5_sources",
+    srcs = glob(["ext/fts5/*.h", "ext/fts5/*.c"]),
+)
+
+
+genrule(
+    name = "fts5_ch",
+    outs = [
+        "fts5.h",
+        "fts5.c",
+    ],
+    srcs = [
+        "fts5parse.h",
+        "fts5parse.c",
+        "manifest",
+        "manifest.uuid",
+        ":fts5_sources",
+    ],
+    tools = [
+        "ext/fts5/tool/mkfts5c.tcl",
+    ],
+    cmd = (
+        "mkdir -p $(RULEDIR)/build/ext/fts5/tool "
+
+        # Copy all the inputs over so the directory structure is to
+        # mkfts5c.tcl's liking. This ends up putting everything not in
+        # :fts5_sources in there twice, once in build/ and once in
+        # build/ext/fts5/, but it doesn't hurt anything. :shrug:
+        + "&& cp $(SRCS) $(RULEDIR)/build/ext/fts5 "
+        + "&& cp $(location manifest) $(RULEDIR)/build "
+        + "&& cp $(location manifest.uuid) $(RULEDIR)/build "
+        + "&& cp $(location fts5parse.h) $(RULEDIR)/build "
+        + "&& cp $(location fts5parse.c) $(RULEDIR)/build "
+        + "&& cp $(location ext/fts5/tool/mkfts5c.tcl) $(RULEDIR)/build/ext/fts5/tool "
+
+        # Okay, go.
+        + "&& pushd $(RULEDIR)/build >/dev/null "
+        + "&& tclsh ext/fts5/tool/mkfts5c.tcl "
+        + "&& popd >/dev/null "
+
+        # Put the outputs where Bazel will see them.
+        + "&& mv $(RULEDIR)/build/fts5.c $(RULEDIR)/build/ext/fts5/fts5.h $(RULEDIR) "
+
+        # Done. Clean up after ourselves.
+        + "&& rm -r $(RULEDIR)/build"
+    ),
+)
+GENERATED_SOURCES += ["fts5.c"]
+
+# ========================================================================
+# These rules construct various source files using provided utility programs.
+
+genrule(
+    name = "opcodes_h",
+    srcs = [
+        "parse.h",
+        "src/vdbe.c",
+    ],
+    outs = ["opcodes.h"],
+    tools = ["tool/mkopcodeh.tcl"],
+    cmd = "cat $(location parse.h) $(location src/vdbe.c) | tclsh $(location tool/mkopcodeh.tcl) > $(RULEDIR)/opcodes.h",
+)
+GENERATED_SOURCES += ["opcodes.h"]
+
+genrule(
+    name = "opcodes_c",
+    srcs = ["opcodes.h"],
+    outs = ["opcodes.c"],
+    tools = ["tool/mkopcodec.tcl"],
+    cmd = "tclsh $(location tool/mkopcodec.tcl) $(location opcodes.h) > $(RULEDIR)/opcodes.c",
+)
+GENERATED_SOURCES += ["opcodes.c"]
+
+
+cc_binary(
+    name = "mkkeywordhash",
+    srcs = ["tool/mkkeywordhash.c"],
+    copts = ["-w"],
+)
+
+genrule(
+    name = "keywordhash_h",
+    tools = [":mkkeywordhash"],
+    outs = ["keywordhash.h"],
+    cmd = "$(execpath :mkkeywordhash) > $(RULEDIR)/keywordhash.h",
+)
+GENERATED_SOURCES += ["keywordhash.h"]
+
+# ========================================================================
+# Constructs sqlite3.h.
+
+cc_binary(
+    name = "mksourceid",
+    srcs = ["tool/mksourceid.c"],
+    copts = ["-w"],
+)
+
+genrule(
+    name = "sqlite3_h",
+    tools = [
+        ":mksourceid",
+        "tool/mksqlite3h.tcl",
+    ],
+    outs = ["sqlite3.h"],
+    srcs = [
+        # The first few dependencies come from the "sqlite3.h" target
+        # in main.mk in the SQLite source distribution.
+        "src/sqlite.h.in",
+        "manifest",
+        "VERSION",
+        "ext/rtree/sqlite3rtree.h",
+
+        # These come from looking for "set filelist" in mksqlite3h.tcl
+        # and looking for files not named above. The script fails with
+        # a complaint about a missing file if these aren't here.
+        "ext/session/sqlite3session.h",
+        "ext/fts5/fts5.h",
+    ],
+
+    # mksqlite3h.tcl expects to run in a directory with a very
+    # particular structure, so we have to set that up for it.
+    #
+    # We use $(RULEDIR)/build since RULEDIR is guaranteed to be
+    # writable.
+    cmd = (
+        "mkdir -p $(RULEDIR)/build/src $(RULEDIR)/build/ext/rtree $(RULEDIR)/build/ext/session $(RULEDIR)/build/ext/fts5 "
+
+        # TODO(cleanup): come up with a less-repetitive way to do this.
+        + "&& cp $(location tool/mksqlite3h.tcl) $(RULEDIR)/build "
+        + "&& cp $(location src/sqlite.h.in) $(RULEDIR)/build/src/sqlite.h.in "
+        + "&& cp $(location manifest) $(RULEDIR)/build/manifest "
+        + "&& cp $(location VERSION) $(RULEDIR)/build/VERSION "
+        + "&& cp $(location ext/rtree/sqlite3rtree.h) $(RULEDIR)/build/ext/rtree/sqlite3rtree.h "
+        + "&& cp $(location ext/session/sqlite3session.h) $(RULEDIR)/build/ext/session/sqlite3session.h "
+        + "&& cp $(location ext/fts5/fts5.h) $(RULEDIR)/build/ext/fts5/fts5.h "
+
+        # It also expects to invoke mksourceid.
+        + "&& cp $(execpath :mksourceid) $(RULEDIR)/build/mksourceid "
+
+        # Okay, go.
+        + "&& pushd $(RULEDIR)/build >/dev/null "
+        + "&& tclsh mksqlite3h.tcl . > ../sqlite3.h "
+        + "&& popd >/dev/null "
+
+        # Done. Clean up after ourselves.
+        + "&& rm -r $(RULEDIR)/build"
+    ),
+)
+GENERATED_SOURCES += ["sqlite3.h"]
+
+# ========================================================================
+# Constructs the amalgamation. Well, the rest of it; sqlite3.h is one
+# of the files in the amalgamation.
+
+genrule(
+    name = "amalgamation",
+    tools = [
+        "tool/mksqlite3c.tcl",
+    ],
+    outs = [
+        "sqlite3.c",
+        "sqlite3ext.h",
+    ],
+    srcs = GIVEN_SOURCES + GENERATED_SOURCES,
+
+    # mksqlite3c.tcl expects to run in a directory with a very
+    # particular structure, so we have to set that up for it.
+    #
+    # We use $(RULEDIR)/build/tsrc since RULEDIR is guaranteed to be
+    # writable. ("tsrc" matches the directory name in the SQLite
+    # Makefile.)
+    cmd = (
+        "mkdir -p $(RULEDIR)/build/tsrc $(RULEDIR)/build/tool "
+
+        # Copy everything in. There's no subdirectories; everything
+        # but mksqlite3c.tcl just goes in tsrc.
+        + "&& cp $(SRCS) $(RULEDIR)/build/tsrc "
+        + "&& cp $(location tool/mksqlite3c.tcl) $(RULEDIR)/build/tool "
+
+        # Build the thing.
+        #
+        # This step ("make sqlite3c") is where the SQLite Makefile
+        # would also construct tclsqlite3.c, but we don't use that
+        # file, so we don't bother building it.
+        + "&& pushd $(RULEDIR)/build >/dev/null "
+        + "&& tclsh tool/mksqlite3c.tcl "
+        + "&& popd >/dev/null "
+
+        # Copy the outputs somewhere that Bazel will find them.
+        + "&& cp $(RULEDIR)/build/sqlite3.c $(RULEDIR)/build/tsrc/sqlite3ext.h $(RULEDIR)/ "
+
+        # Done. Clean up after ourselves.
+        + "&& rm -r $(RULEDIR)/build"
+    ),
+)
+# ========================================================================
+# Actually builds the library.
+
 cc_library(
     name = "sqlite3",
     hdrs = ["sqlite3.h", "sqlite3ext.h"],
@@ -5,12 +302,5 @@ cc_library(
     visibility = ["//visibility:public"],
     include_prefix = ".",
     copts = ["-w"],  # Ignore all warnings. This is not our code, we can't fix the warnings.
-    defines = [
-        "SQLITE_MAX_ALLOCATION_SIZE=16777216",  # 16MB
-        "SQLITE_PRINTF_PRECISION_LIMIT=100000",
-        "SQLITE_ENABLE_FTS5",
-        "SQLITE_ENABLE_NORMALIZE",
-        "SQLITE_ENABLE_MATH_FUNCTIONS",
-        "SQLITE_DEFAULT_FOREIGN_KEYS=1",
-    ]
+    defines = SQLITE_DEFINES,
 )
