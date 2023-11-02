@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
@@ -113,6 +114,19 @@ wd_cc_library(
     ],
 )
 
+genrule(
+    name = "trimmed-supported-compatibility-date-gen",
+    srcs = ["supported-compatibility-date.txt"],
+    outs = ["trimmed-supported-compatibility-date.txt"],
+    cmd = "tr -d '\n' < $(location supported-compatibility-date.txt) > $(location trimmed-supported-compatibility-date.txt)",
+    cmd_ps = "(Get-Content $(location supported-compatibility-date.txt) -Raw -Encoding Ascii).TrimEnd() | Set-Content $(location trimmed-supported-compatibility-date.txt) -NoNewLine -Encoding Ascii",
+)
+
+capnp_embed(
+    name = "trimmed-supported-compatibility-date",
+    src = ":trimmed-supported-compatibility-date-gen",
+)
+
 wd_cc_capnp_library(
     name = "capnp",
     srcs = [
@@ -124,6 +138,7 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
+        ":trimmed-supported-compatibility-date",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
 )
