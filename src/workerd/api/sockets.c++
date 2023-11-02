@@ -143,7 +143,7 @@ jsg::Ref<Socket> setupSocket(
   if (!allowHalfOpen) {
     eofPromise = readable->onEof(js);
   }
-  auto openedPrPair = js.newPromiseAndResolver<void>();
+  auto openedPrPair = js.newPromiseAndResolver<SocketInfo>();
   openedPrPair.promise.markAsHandled(js);
   auto writable = jsg::alloc<WritableStream>(
       ioContext, kj::mv(sysStreams.writable), kj::none, openedPrPair.promise.whenResolved(js));
@@ -343,7 +343,8 @@ void Socket::handleProxyStatus(
       }
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
-      openedResolver.resolve(js);
+      // TODO(later): implement local and remote address in proxy and read it here
+      openedResolver.resolve(js, SocketInfo{ kj::none, kj::none });
     }
   });
   result.markAsHandled(js);
@@ -365,7 +366,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
     if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
-      openedResolver.resolve(js);
+      // TODO(later): implement local and remote address in proxy and read it here
+      openedResolver.resolve(js, SocketInfo{ kj::none, kj::none });
     }
   });
   result.markAsHandled(js);
