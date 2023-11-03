@@ -42,10 +42,10 @@ http_archive(
 http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
-    sha256 = "5064126aa50db20c35578b612b56c3129425c0506ed4d1610efa4a0f01bdf8d0",
-    strip_prefix = "sqlite-src-3400100",
+    sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
+    strip_prefix = "sqlite-src-3440000",
     type = "zip",
-    url = "https://sqlite.org/2022/sqlite-src-3400100.zip",
+    url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
     patches = [
         "//:patches/sqlite/0001-row-counts-plain.patch",
     ],
