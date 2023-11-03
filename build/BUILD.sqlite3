@@ -75,7 +75,7 @@ genrule(
     # If we could get that out of configure_make's outputs, we could drop the "-r".
     #
     # The include dir is not one of this rule's outputs, though, so at least our dependents don't see it.
-    cmd = "cp -r $(locations :amalgamation) $(RULEDIR)/",
+    cmd = "cp -r $(execpaths :amalgamation) $(RULEDIR)/",
     visibility = ["//visibility:private"],
 )
 
