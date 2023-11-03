@@ -773,6 +773,7 @@ size_t IoContext::getTimeoutCount() {
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
   kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
+  incomingRequest.metrics->clockRead();
 
   KJ_IF_SOME (maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
