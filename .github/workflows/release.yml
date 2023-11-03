@@ -61,7 +61,7 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: v${{ needs.version.outputs.version }}
-          
+
   build:
     strategy:
       matrix:
@@ -123,7 +123,7 @@ jobs:
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
-  
+
   upload-artifacts:
     name: Upload Artifacts
     needs: [tag-and-release, build]
@@ -166,3 +166,48 @@ jobs:
           asset_path: /tmp/workerd-${{ matrix.arch }}.gz
           asset_name: workerd-${{ matrix.arch }}.gz
           asset_content_type: application/gzip
+
+  miniflare-test:
+    name: Run Miniflare tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workers-sdk
+        uses: actions/checkout@v3
+        with:
+          repository: cloudflare/workers-sdk
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8.8.0
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+      - name: Install workers-sdk dependencies
+        run: pnpm install
+
+      - name: Download workerd binary
+        uses: actions/download-artifact@v3.0.2
+        with:
+          name: Linux-X64-binary
+          path: /tmp
+      - name: Make workerd binary executable
+        run: chmod +x /tmp/workerd
+
+      - name: Run Miniflare tests
+        id: miniflare-test
+        continue-on-error: true
+        run: pnpm --filter miniflare test
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Report failure
+        if: steps.miniflare-test.outcome == 'failure'
+        run: |
+          curl $MINIFLARE_TEST_WEBHOOK -s -o /dev/null -H "Content-Type: application/json;charset=utf-8" -d "{\"text\":\"🚨 Miniflare tests failed with latest workerd binary: $RUN_URL\"}"
+        env:
+          MINIFLARE_TEST_WEBHOOK: ${{ secrets.MINIFLARE_TEST_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
