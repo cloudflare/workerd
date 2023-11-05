@@ -77,7 +77,7 @@ import {
 } from 'node-internal:validators';
 
 // In Node.js, the definition of KeyObject is a bit complicated because
-// KeyObject instances in Node.js can be transfered via postMessage() and
+// KeyObject instances in Node.js can be transferred via postMessage() and
 // structuredClone(), etc, allowing instances to be shared across multiple
 // worker threads. We do not implement that model so we're esssentially
 // re-implementing the Node.js API here instead of just taking their code.

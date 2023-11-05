@@ -135,7 +135,7 @@ struct ThenCatchPair {
 // FunctionCallback implementing a C++ .then() continuation on a JS promise.
 //
 // We expect the input is already an opaque-wrapped value, args.Data() is an opaque-wrapped C++
-// function to eoxecute, and we want to produce an opaque-wrapped output or Promise.
+// function to execute, and we want to produce an opaque-wrapped output or Promise.
 template <typename FuncPairType, bool passLock, bool isCatch, typename Input, typename Output>
 void promiseContinuation(const v8::FunctionCallbackInfo<v8::Value>& args) {
   liftKj(args, [&]() {
@@ -392,7 +392,7 @@ public:
 
   // DEPRECATED: The versions below do not take a `Lock` as the first param, but they do actually
   //   require a lock. These versions also do not pass a `Lock` to the callback.
-  // TODO(clenaup): Update all call sites to the version that passes locks. Then, remove these and
+  // TODO(cleanup): Update all call sites to the version that passes locks. Then, remove these and
   //   also remove the `isolate` parameter from this class.
 
   template <typename Func, typename ErrorFunc>
@@ -691,7 +691,7 @@ public:
         // It's possible to argue that we should actually allow only `undefined` here but
         // changing it now could break existing users, e.g. html-rewriter.ew-test is broken
         // because it writes `() => someExpression()` for a callback that's supposed to
-        // optionally return Promise<void> -- it seems like the callback isn't acutally intending
+        // optionally return Promise<void> -- it seems like the callback isn't actually intending
         // to return the result of `someExpression()` but does so by accident since the braces
         // are missing. This is probably common in user code, too.
         return resolvedPromise(context->GetIsolate());

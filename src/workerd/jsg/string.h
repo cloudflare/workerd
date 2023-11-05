@@ -387,7 +387,7 @@ inline KJ_WARN_UNUSED_RESULT UsvString usv(UsvString&& other) { return kj::mv(ot
 inline KJ_WARN_UNUSED_RESULT UsvString usv(UsvStringPtr other) { return other.clone(); }
 
 // Make a UsvString from a string literal (assumed to be UTF-8 encoded)
-// reinterpretd as a sequence of UTF-16 Unicode code units. The underlying
+// reinterpreted as a sequence of UTF-16 Unicode code units. The underlying
 // storage of utf16_t code units will be heap allocated.
 inline KJ_WARN_UNUSED_RESULT UsvString usv(const char* string) {
   return usv(kj::toCharSequence(string));

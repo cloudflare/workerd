@@ -327,7 +327,7 @@ private:
 //     static constexpr const char* getName(T* dummy);
 //     // Return the name of the type for the purpose of TypeError exception messages. Note that
 //     // you can also return `const std::type_info&` here, in which case the type name will
-//     // be derived by stripping off the namespase from the C++ type name.
+//     // be derived by stripping off the namespace from the C++ type name.
 //
 //     v8::Local<v8::Value> wrap(v8::Local<v8::Context> jsContext,
 //                               kj::Maybe<v8::Local<v8::Object>> creator,

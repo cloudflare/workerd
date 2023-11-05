@@ -167,7 +167,7 @@ public:
     __builtin_unreachable();
   }
 
-  // Get a handle to the underlying function. If this is a native funciton,
+  // Get a handle to the underlying function. If this is a native function,
   // `makeNativeWrapper(Ref<Func>&)` is called to create the wrapper.
   //
   // Only the `FunctionWrapper` TypeWrapper mixin should call this. Anyone else needs to call
@@ -299,7 +299,7 @@ public:
         // Apparently, this function has been wrapped before and already has an opaque handle.
         // That's interesting. However, unfortunately, we don't have a handle to the v8::Function
         // that was created last time, so we can't return the same function instance. This is
-        // arguably incorrect; what if the application added properties to it or somtehing?
+        // arguably incorrect; what if the application added properties to it or something?
         //
         // Unfortunately, it is exceedingly difficult for us to store the function handle for
         // reuse without introducing performance problems.
@@ -314,7 +314,7 @@ public:
         // - Another approach might be to store the v8::Function on the WrappableFunction, once
         //   it's created. This is a cyclic reference, but we could rely on GC visitation to
         //   collect it. The problem is, cyclic references can only be collected by tracing, not
-        //   by scavenging. Tracing runs much less often than scavenging. So we'd be forcingc every
+        //   by scavenging. Tracing runs much less often than scavenging. So we'd be forcing every
         //   function object to live on the heap longer than otherwise necessary.
         //
         // In practice, it probably never matters that returning the same jsg::Function twice

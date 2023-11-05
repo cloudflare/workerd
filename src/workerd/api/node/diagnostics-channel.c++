@@ -30,7 +30,7 @@ void Channel::publish(jsg::Lock& js, jsg::Value message) {
     ser.write(js, jsg::JsValue(message.getHandle(js)));
     auto tmp = ser.release();
     JSG_REQUIRE(tmp.sharedArrayBuffers.size() == 0 &&
-                tmp.transferedArrayBuffers.size() == 0, Error,
+                tmp.transferredArrayBuffers.size() == 0, Error,
                 "Diagnostic events cannot be published with SharedArrayBuffer or "
                 "transferred ArrayBuffer instances");
     tracer.addDiagnosticChannelEvent(context.now(), name.toString(js), kj::mv(tmp.data));

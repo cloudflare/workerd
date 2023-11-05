@@ -173,7 +173,7 @@ uint32_t writeInto(
   if (dest.size() == 0 || string.length(js) == 0) { return 0; }
 
   static constexpr jsg::JsString::WriteOptions flags = static_cast<jsg::JsString::WriteOptions>(
-    jsg::JsString::MANY_WRITES_EXPETED |
+    jsg::JsString::MANY_WRITES_EXPECTED |
     jsg::JsString::NO_NULL_TERMINATION |
     jsg::JsString::REPLACE_INVALID_UTF8);
 

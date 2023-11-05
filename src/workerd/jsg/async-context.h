@@ -45,7 +45,7 @@ namespace workerd::jsg {
 //
 // To implement all of this, however, we depend largely on an obscure v8 API on the
 // v8::Context object called SetContinuationPreservedEmbedderData and
-// GetContinuationPreservedEmbedderData. An AsyncContextFrame is a Wrappables because
+// GetContinuationPreservedEmbedderData. An AsyncContextFrame is a Wrappable because
 // because instances of AsyncContextFrame are set as the continuation-preserved embedder
 // data and that API requires a JS value.
 //

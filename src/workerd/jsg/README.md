@@ -45,7 +45,7 @@ public:
     // ...
   }
 
-  CFJS_RESOURCE_TYPE(Foo) {
+  JSG_RESOURCE_TYPE(Foo) {
     JSG_METHOD(foo);
   }
 };

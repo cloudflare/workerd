@@ -249,7 +249,7 @@ namespace workerd::jsg {
 // WARNING: This is usually not what you want. Usually you want JSG_PROTOTYPE_PROPERTY instead.
 // Note that V8 implements instance properties by modifying the instance immediately after
 // construction, which is inefficient and can break some optimizations. For example, any object
-// with an instance proprety will not be possible to collect during minor GCs, only major GCs.
+// with an instance property will not be possible to collect during minor GCs, only major GCs.
 // Prototype properties are on the prototype, so have no runtime overhead until they are used.
 #define JSG_INSTANCE_PROPERTY(name, getter, setter) \
   do { \
@@ -639,7 +639,7 @@ class Lock;
 //
 // Move construction and move assignment of strong jsg::Data is well-defined even without
 // holding the isolate lock. That is, it is safe to move Values unless you have implemented GC
-// visitation for them. Moving jsg::Data which are reachable via GC vistation is undefined
+// visitation for them. Moving jsg::Data which are reachable via GC visitation is undefined
 // behavior outside of an isolate lock.
 class Data {
 public:
@@ -1033,7 +1033,7 @@ private:
 //
 // Move construction and move assignment of strong jsg::Ref<T>s is well-defined even without
 // holding the isolate lock. That is, it is safe to move Refs unless you have implemented GC
-// visitation for them. Moving jsg::Ref<T>s which are reachable via GC vistation is undefined
+// visitation for them. Moving jsg::Ref<T>s which are reachable via GC visitation is undefined
 // behavior outside of an isolate lock.
 template <typename T>
 class Ref {
@@ -1236,7 +1236,7 @@ private:
 // Since the function could be backed by JavaScript, when calling it, you must always pass
 // `jsg::Lock&` as the first parameter. When implementing a `jsg::Function` using a C++ lambda,
 // the lambda should similarly take `jsg::Lock&` as the first parameter. Note that this first
-// parameter is not declared in the function's signature. For exmaple, `jsg::Function<int(int)>`
+// parameter is not declared in the function's signature. For example, `jsg::Function<int(int)>`
 // declares a function that accepts a parameter of type int and returns an int. However, when
 // actually calling it, you must still pass `jsg::Lock&`, with the `int` as the second parameter.
 // (Of course, from the JavaScript side, the lock parameter is hidden, and the `int` is in fact
@@ -1291,7 +1291,7 @@ class Constructor;
 // `.catch_()` and two-argument `.then()` are supported. Thrown exceptions are represented using
 // `jsg::Value`, since technically JavaScript allows throwing any type.
 //
-// The type T does not have to be convertable to/from JavaScript unless a Promise<T> is actually
+// The type T does not have to be convertible to/from JavaScript unless a Promise<T> is actually
 // passed to/from JavaScript. That is, you can have an intermediate Promise<U> where U is a type
 // that has no JavaScript representation. What actually happens is, when a Promise<T> is passed
 // from JS into C++, JSG adds a .then() which unwraps the value T, and when a Promise<T> is
@@ -1641,10 +1641,10 @@ public:
 template <typename T>
 class PropertyReflection {
 public:
-  // Read the property of this object called `name`, unwraping it as type `T`.
+  // Read the property of this object called `name`, unwrapping it as type `T`.
   kj::Maybe<T> get(Lock& js, kj::StringPtr name);
 
-  // Read the property of this object called `name`, unwraping it as type `T`.
+  // Read the property of this object called `name`, unwrapping it as type `T`.
   kj::Maybe<T> get(v8::Isolate* isolate, kj::StringPtr name) {
     v8::HandleScope scope(isolate);
     KJ_IF_SOME(s, self) {
@@ -1943,7 +1943,7 @@ public:
   //   assumed to be serious enough that they cannot be caught as if they were JavaScript errors,
   //   and instead unwind must continue until C++ catches them.
   //
-  // func() and errorHandler() must return the same type; the value they return will be retuned
+  // func() and errorHandler() must return the same type; the value they return will be returned
   // from `tryCatch()` itself.
   template <typename Func, typename ErrorHandler>
   auto tryCatch(Func&& func, ErrorHandler&& errorHandler) -> decltype(func()) {

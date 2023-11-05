@@ -44,7 +44,7 @@ void Data::destroy() {
       handle.Reset();
 
       // If we have a TracedReference, Reset() it too, to let V8 know that this value is no longer
-      // used. Note that merely detroying the TracedReference does nothing -- only explicitly
+      // used. Note that merely destroying the TracedReference does nothing -- only explicitly
       // calling Reset() has an effect.
       //
       // In particular, this permits `Data` values to be collected by minor (non-tracing) GC, as
