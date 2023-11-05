@@ -27,7 +27,7 @@ struct PromiseContext: public jsg::Object, public jsg::ContextGlobal {
   }
 
   void setResult(jsg::Lock& js, Promise<kj::String> promise) {
-    // Throwing away the result of `.then()` dosen't cancel it!
+    // Throwing away the result of `.then()` doesn't cancel it!
     promise.then(js, [](jsg::Lock&, kj::String str) {
       promiseTestResult = str.parseAs<int>();
     }).then(js, [](jsg::Lock&) {

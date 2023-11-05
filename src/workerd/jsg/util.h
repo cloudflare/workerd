@@ -283,10 +283,10 @@ struct LiftKj_ {
           info.GetReturnValue().Set(func());
         }
       } catch (kj::Exception& exception) {
-        // This throwInteralError() overload may decode a tunneled error. While constructing the
+        // This throwInternalError() overload may decode a tunneled error. While constructing the
         // v8::Value representing the tunneled error, it itself may cause a JS exception to be
         // thrown. This is the reason for the nested try-catch blocks -- we need to be able to
-        // swallow any JsExceptionThrowns that this catch block generates.
+        // swallow any JsExceptionThrown exceptions that this catch block generates.
         throwInternalError(isolate, kj::mv(exception));
       }
     } catch (JsExceptionThrown&) {
@@ -331,7 +331,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
         // returnRejectedPromise() may decode a tunneled error. While constructing
         // the v8::Value representing the tunneled error, it itself may cause a JS exception to be
         // thrown. This is the reason for the nested try-catch blocks -- we need to be able to
-        // swallow any JsExceptionThrowns that this catch block generates.
+        // swallow any JsExceptionThrown exceptions that this catch block generates.
         returnRejectedPromise(info, makeInternalError(isolate, kj::mv(exception)), tryCatch);
       }
     } catch (JsExceptionThrown&) {

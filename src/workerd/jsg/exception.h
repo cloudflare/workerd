@@ -142,7 +142,7 @@ struct TunneledErrorType {
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 
-// Annotate an internal message with the corresponding brokeness reason.
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason);
+// Annotate an internal message with the corresponding brokenness reason.
+kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
 
 }  // namespace workerd::jsg

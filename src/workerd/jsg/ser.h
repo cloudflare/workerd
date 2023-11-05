@@ -25,7 +25,7 @@ public:
   struct Released {
     kj::Array<kj::byte> data;
     kj::Array<std::shared_ptr<v8::BackingStore>> sharedArrayBuffers;
-    kj::Array<std::shared_ptr<v8::BackingStore>> transferedArrayBuffers;
+    kj::Array<std::shared_ptr<v8::BackingStore>> transferredArrayBuffers;
   };
 
   explicit Serializer(Lock& js, kj::Maybe<Options> maybeOptions = kj::none);
@@ -68,7 +68,7 @@ public:
   explicit Deserializer(
       Lock& js,
       kj::ArrayPtr<const kj::byte> data,
-      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = kj::none,
+      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 
@@ -88,7 +88,7 @@ public:
 private:
   void init(
       Lock& js,
-      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers = kj::none,
+      kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 
   v8::MaybeLocal<v8::SharedArrayBuffer> GetSharedArrayBufferFromId(

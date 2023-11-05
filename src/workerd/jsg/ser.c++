@@ -52,7 +52,7 @@ Serializer::Released Serializer::release() {
   return Released {
     .data = kj::Array(pair.first, pair.second, jsg::SERIALIZED_BUFFER_DISPOSER),
     .sharedArrayBuffers = sharedBackingStores.releaseAsArray(),
-    .transferedArrayBuffers = backingStores.releaseAsArray(),
+    .transferredArrayBuffers = backingStores.releaseAsArray(),
   };
 }
 
@@ -91,7 +91,7 @@ void Serializer::write(Lock& js, const JsValue& value) {
 Deserializer::Deserializer(
     Lock& js,
     kj::ArrayPtr<const kj::byte> data,
-    kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers,
+    kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedArrayBuffers,
     kj::Maybe<Options> maybeOptions)
     : deser(js.v8Isolate, data.begin(), data.size(), this),
@@ -99,7 +99,7 @@ Deserializer::Deserializer(
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Deserializer must be allocated on the stack");
 #endif
-  init(js, kj::mv(transferedArrayBuffers), kj::mv(maybeOptions));
+  init(js, kj::mv(transferredArrayBuffers), kj::mv(maybeOptions));
 }
 
 Deserializer::Deserializer(
@@ -109,13 +109,13 @@ Deserializer::Deserializer(
     : Deserializer(
         js,
         released.data.asPtr(),
-        released.transferedArrayBuffers.asPtr(),
+        released.transferredArrayBuffers.asPtr(),
         released.sharedArrayBuffers.asPtr(),
         kj::mv(maybeOptions)) {}
 
 void Deserializer::init(
     Lock& js,
-    kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferedArrayBuffers,
+    kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers,
     kj::Maybe<Options> maybeOptions) {
   auto options = maybeOptions.orDefault({});
   if (options.readHeader) {
@@ -125,7 +125,7 @@ void Deserializer::init(
     KJ_ASSERT(version >= 13, "The minimum serialization version is 13.");
     deser.SetWireFormatVersion(version);
   }
-  KJ_IF_SOME(arrayBuffers, transferedArrayBuffers) {
+  KJ_IF_SOME(arrayBuffers, transferredArrayBuffers) {
     for (auto n : kj::indices(arrayBuffers)) {
       deser.TransferArrayBuffer(n,
           v8::ArrayBuffer::New(js.v8Isolate, kj::mv((arrayBuffers)[n])));

@@ -571,7 +571,7 @@ public:
   }
 
   // The constructor here is a bit of a hack. The config is optional and might not be a JsgConfig
-  // object (or convertable to a JsgConfig) if is provided. However, because of the way TypeWrapper
+  // object (or convertible to a JsgConfig) if is provided. However, because of the way TypeWrapper
   // inherits MaybeWrapper, we always end up passing a config option (which might be std::nullptr_t)
   // The getConfig allows us to handle any case using reasonable defaults.
   MaybeWrapper(const auto& config) : config(getConfig(config)) {}
@@ -738,7 +738,7 @@ public:
     //   Requests and Responses into Initializers without them being interpreted as dictionaries. I
     //   believe this is actually what the Web IDL spec prescribes anyway, but verify.
     //
-    // TOOD(someday): Prove that this is the same algorithm as the one defined by Web IDL.
+    // TODO(someday): Prove that this is the same algorithm as the one defined by Web IDL.
     kj::OneOf<U...> result;
     if (unwrapHelper<IsResourceType>(context, handle, result)
         || unwrapHelper<IsFallibleType>(context, handle, result)
@@ -1067,8 +1067,8 @@ private:
     // KJ uses nanoseconds stored as an int64_t, which is significantly smaller but larger
     // than my lifetime.
     //
-    // For most usecases, throwing when we encounter a date outside of KJ's supported range is OK.
-    // API's that need to support time-travellers or historians may need to consider using the
+    // For most use-cases, throwing when we encounter a date outside of KJ's supported range is OK.
+    // API's that need to support time-travelers or historians may need to consider using the
     // V8 Date type directly.
     constexpr double millisToNanos = kj::MILLISECONDS / kj::NANOSECONDS;
     double nanos = millis * millisToNanos;

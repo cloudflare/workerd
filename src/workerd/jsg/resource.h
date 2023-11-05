@@ -564,7 +564,7 @@ public:
 };
 
 // TypeWrapper must list this type as its first superclass. The ResourceWrappers that it
-// subclasses will then be able to regsiter themselves in the map.
+// subclasses will then be able to register themselves in the map.
 template <typename TypeWrapper>
 class DynamicResourceTypeMap {
 private:

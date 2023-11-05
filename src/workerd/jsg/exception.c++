@@ -49,7 +49,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   Properties properties;
 
   // Remove `remote.` (if present). Note that there are cases where we return a tunneled error
-  // through multiple workers, so let's be paranoid and allow for multiple "remote." prefxies.
+  // through multiple workers, so let's be paranoid and allow for multiple "remote." prefixes.
   while (internalMessage.startsWith(ERROR_REMOTE_PREFIX)) {
     properties.isFromRemote = true;
     internalMessage = internalMessage.slice(ERROR_REMOTE_PREFIX.size());
@@ -156,10 +156,10 @@ bool isDoNotLogException(kj::StringPtr internalMessage) {
   return strstr(internalMessage.cStr(), "worker_do_not_log") != nullptr;
 }
 
-kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokenessReason) {
+kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason) {
   // TODO(soon) Once we support multiple brokenness reasons, we can make this much simpler.
 
-  KJ_LOG(INFO, "Annotating with brokenness", internalMessage, brokenessReason);
+  KJ_LOG(INFO, "Annotating with brokenness", internalMessage, brokennessReason);
   auto tunneledInfo = tunneledErrorType(internalMessage);
 
   kj::StringPtr remotePrefix;
@@ -178,7 +178,7 @@ kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokeness
   }
 
   return kj::str(
-      remotePrefix, brokenessReason, ERROR_PREFIX_DELIM, prefixType, internalErrorType,
+      remotePrefix, brokennessReason, ERROR_PREFIX_DELIM, prefixType, internalErrorType,
       tunneledInfo.message);
 }
 

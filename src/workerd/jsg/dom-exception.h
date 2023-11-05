@@ -45,7 +45,7 @@ namespace workerd::jsg {
 // throw, per Web IDL.
 //
 // Users of JSG are free (and encouraged) to use this implementation, but they can also opt into
-// the same tunneled exception feature by defining their own globally-accesible type named
+// the same tunneled exception feature by defining their own globally-accessible type named
 // "DOMException".
 class DOMException: public Object {
 public:
