@@ -14,18 +14,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
-      - name: Cache
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: ~/bazel-disk-cache
-          key: capnp-cache-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: build capnp
-        run: |
-          bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
       - id: echo
         run: |
-          echo "::set-output name=version::1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0"
+          echo "::set-output name=version::1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0"
   check-tag:
     name: Check tag is new
     outputs:
@@ -61,7 +52,7 @@ jobs:
           generateReleaseNotes: true
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: v${{ needs.version.outputs.version }}
-          
+
   build:
     strategy:
       matrix:
@@ -123,7 +114,7 @@ jobs:
         with:
           name: ${{ runner.os }}-${{ runner.arch }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
-  
+
   upload-artifacts:
     name: Upload Artifacts
     needs: [tag-and-release, build]

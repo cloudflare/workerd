@@ -22,20 +22,11 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
-      - name: Cache
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: ~/bazel-disk-cache
-          key: capnp-cache-${{ runner.os }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: build capnp
-        run: |
-          bazel build --disk_cache=~/bazel-disk-cache --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev @capnp-cpp//src/capnp:capnp_tool
       - id: echo
         run: |
-          echo "date=$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '"')" >> $GITHUB_OUTPUT;
-          echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
-          echo "release_version=1.$(bazel-bin/external/capnp-cpp/src/capnp/capnp_tool eval src/workerd/io/compatibility-date.capnp supportedCompatibilityDate | tr -d '-' | tr -d '"').0" >> $GITHUB_OUTPUT;
+          echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
+          echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
   publish-arch-specific:
     # if: github.repository_owner == 'cloudflare'
     name: Publish arch-specific packages to npm
