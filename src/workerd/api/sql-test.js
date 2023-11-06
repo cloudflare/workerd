@@ -143,7 +143,7 @@ async function test(storage) {
   )
 
   // Prepared statement with whitespace
-  const whitespace = [' ', '\t', '\n', '\r', '\v', '\f']
+  const whitespace = [' ', '\t', '\n', '\r', '\v', '\f', '\r\n']
 
   for (const char of whitespace) {
     const prepared = sql.prepare(`SELECT 1;${char}`);
