@@ -102,7 +102,8 @@ async function test(storage) {
   assert.throws(() => sql.exec(';'), 'SQL code did not contain a statement')
 
   // Invalid statements
-  assert.throws(() => sql.exec('SELECT ;'), 'syntax error')
+  assert.throws(() => sql.exec('SELECT ;'), /syntax error at offset 7/)
+  assert.throws(() => sql.exec('SELECT -;'), /syntax error at offset 8/)
 
   // Incorrect number of binding values
   assert.throws(

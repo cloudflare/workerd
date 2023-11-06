@@ -51,14 +51,24 @@ namespace workerd {
     int _ec = code; \
     /* SQLITE_MISUSE doesn't put error info on the database object, so check it separately */ \
     KJ_ASSERT(_ec != SQLITE_MISUSE, "SQLite misused: " #code, ##__VA_ARGS__); \
-    SQLITE_REQUIRE(_ec == SQLITE_OK, sqlite3_errmsg(db), " " #code, ##__VA_ARGS__); \
+    kj::String msg = kj::str(sqlite3_errmsg(db)); \
+    int offset = sqlite3_error_offset(db); \
+    if (offset != -1) { \
+      msg = kj::str(msg, " at offset ", offset); \
+    } \
+    SQLITE_REQUIRE(_ec == SQLITE_OK, msg, " " #code, ##__VA_ARGS__); \
   } while (false)
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
 // aren't really errors.
 #define SQLITE_CALL_FAILED(code, error, ...) do { \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__); \
-    SQLITE_REQUIRE(error == SQLITE_OK, sqlite3_errmsg(db), " " code, ##__VA_ARGS__); \
+    kj::String msg = kj::str(sqlite3_errmsg(db)); \
+    int offset = sqlite3_error_offset(db); \
+    if (offset != -1) { \
+      msg = kj::str(msg, " at offset ", offset); \
+    } \
+    SQLITE_REQUIRE(error == SQLITE_OK, msg, " " code, ##__VA_ARGS__); \
   } while (false);
 
 namespace {
