@@ -8,7 +8,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 $Cxx.allowCancellation;
 
-const supportedCompatibilityDate :Text = "2023-10-30";
+const supportedCompatibilityDate :Text = embed "/trimmed-supported-compatibility-date.txt";
 # Newest compatibility date that can safely be set using code compiled from this repo. Trying to
 # run a Worker with a newer compatibility date than this will fail.
 #

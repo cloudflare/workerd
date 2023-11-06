@@ -9,4 +9,4 @@ package.json @cloudflare/wrangler
 pnpm-lock.yaml @cloudflare/wrangler
 types/ @cloudflare/wrangler
 src/workerd/tools/ @cloudflare/wrangler
-src/workerd/io/compatibility-date.capnp @cloudflare/wrangler
+src/workerd/io/supported-compatibility-date.txt @cloudflare/wrangler
