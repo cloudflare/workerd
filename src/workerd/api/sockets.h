@@ -52,6 +52,7 @@ public:
       : connectionStream(context.addObject(kj::mv(connectionStream))),
         readable(kj::mv(readableParam)), writable(kj::mv(writable)),
         closedResolver(kj::mv(closedPrPair.resolver)),
+        closedPromiseCopy(closedPrPair.promise.whenResolved(js)),
         closedPromise(kj::mv(closedPrPair.promise)),
         watchForDisconnectTask(context.addObject(kj::heap(kj::mv(watchForDisconnectTask)))),
         options(kj::mv(options)),
@@ -60,7 +61,9 @@ public:
         domain(kj::mv(domain)),
         isDefaultFetchPort(isDefaultFetchPort),
         openedResolver(kj::mv(openedPrPair.resolver)),
-        openedPromise(kj::mv(openedPrPair.promise)) { };
+        openedPromiseCopy(openedPrPair.promise.whenResolved(js)),
+        openedPromise(kj::mv(openedPrPair.promise)),
+        isClosing(false) { };
 
   jsg::Ref<ReadableStream> getReadable() { return readable.addRef(); }
   jsg::Ref<WritableStream> getWritable() { return writable.addRef(); }
@@ -112,6 +115,9 @@ private:
   jsg::Ref<WritableStream> writable;
   // This fulfiller is used to resolve the `closedPromise` below.
   jsg::Promise<void>::Resolver closedResolver;
+  // Copy kept so that it can be returned from `close`.
+  jsg::Promise<void> closedPromiseCopy;
+  // Memoized copy that is returned by the `closed` attribute.
   jsg::MemoizedIdentity<jsg::Promise<void>> closedPromise;
   IoOwn<kj::Promise<void>> watchForDisconnectTask;
   jsg::Optional<SocketOptions> options;
@@ -126,7 +132,11 @@ private:
   bool isDefaultFetchPort;
   // This fulfiller is used to resolve the `openedPromise` below.
   jsg::Promise<void>::Resolver openedResolver;
+  // Copy kept so that it can be used in `close`.
+  jsg::Promise<void> openedPromiseCopy;
   jsg::MemoizedIdentity<jsg::Promise<void>> openedPromise;
+  // Used to keep track of a pending `close` operation on the socket.
+  bool isClosing;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
@@ -142,10 +152,9 @@ private:
     }
   };
 
-  jsg::Promise<void> errorHandler(jsg::Lock& js, jsg::Value err) {
+  void errorHandler(jsg::Lock& js, jsg::Value err) {
     auto jsException = err.getHandle(js);
     resolveFulfiller(js, jsg::createTunneledException(js.v8Isolate, jsException));
-    return js.resolvedPromise();
   };
 
   void visitForGc(jsg::GcVisitor& visitor) {
