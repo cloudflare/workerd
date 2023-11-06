@@ -1168,7 +1168,9 @@ public:
       auto content = kj::str("{\"Browser\": \"workerd\", \"Protocol-Version\": \"1.3\" }");
       auto out = response.send(200, "OK", responseHeaders, content.size());
       co_return co_await out->write(content.begin(), content.size());
-    } else if (url.endsWith("/json") || url.endsWith("/json/list")) {
+    } else if (url.endsWith("/json") ||
+               url.endsWith("/json/list") ||
+               url.endsWith("/json/list?for_tab")) {
       responseHeaders.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
       auto baseWsUrl = KJ_UNWRAP_OR(headers.get(kj::HttpHeaderId::HOST), {
@@ -1185,7 +1187,7 @@ public:
         // We'll lazily clean up whenever we detect that the ref has been invalidated.
         //
         // TODO(cleanup): If we ever enable reloading of isolates for live services, we may
-        // want to refactor this such thatthe WorkerService holds a handle to the registration
+        // want to refactor this such that the WorkerService holds a handle to the registration
         // as opposed to using this lazy cleanup mechanism. For now, however, this is
         // sufficient.
         KJ_IF_SOME(ref, entry.value->tryAddStrongRef()) {
