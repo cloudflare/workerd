@@ -348,7 +348,7 @@ private:
       if (pending.filled >= pending.minBytes) {
         auto p = kj::mv(pending);
         pendingReads.pop_front();
-        p.promise->fulfill(kj::mv(pending.filled));
+        p.promise->fulfill(kj::mv(p.filled));
         continue;
       }
 
