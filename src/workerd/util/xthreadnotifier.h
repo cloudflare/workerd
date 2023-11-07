@@ -4,9 +4,8 @@
 
 #pragma once
 
-#include <kj/refcount.h>
 #include <kj/async.h>
-#include <kj/debug.h>
+#include <kj/mutex.h>
 
 namespace workerd {
 
@@ -21,36 +20,26 @@ class XThreadNotifier final: public kj::AtomicRefcounted {
   //   could cancel that notification directly.
 public:
   static inline kj::Own<XThreadNotifier> create() {
-    return kj::atomicRefcounted<XThreadNotifier>(kj::getCurrentThreadExecutor());
+    return kj::atomicRefcounted<XThreadNotifier>();
   }
 
-  XThreadNotifier(const kj::Executor& executor) : executor(executor) { }
-
-  void clear() {
-    // Must call in main thread before it drops its reference.
-    paf = kj::none;
-  }
+  XThreadNotifier() : paf(kj::newPromiseAndCrossThreadFulfiller<void>()) { }
 
   kj::Promise<void> awaitNotification() {
-    auto promise = kj::mv(KJ_ASSERT_NONNULL(paf).promise);
+    auto promise = kj::mv(paf.lockExclusive()->promise);
     co_await promise;
-    paf = kj::newPromiseAndFulfiller<void>();
+    auto lockedPaf = paf.lockExclusive();
+    auto nextPaf = kj::newPromiseAndCrossThreadFulfiller<void>();
+    lockedPaf->promise = kj::mv(nextPaf.promise);
+    lockedPaf->fulfiller = kj::mv(nextPaf.fulfiller);
   }
 
   void notify() const {
-    executor.executeAsync([ref = kj::atomicAddRef(*this)]() {
-      KJ_IF_SOME(p, ref->paf) {
-        p.fulfiller->fulfill();
-      }
-    }).detach([](kj::Exception&& exception) {
-      KJ_LOG(ERROR, exception);
-    });
+    paf.lockExclusive()->fulfiller->fulfill();
   }
 
 private:
-  const kj::Executor& executor;
-  mutable kj::Maybe<kj::PromiseFulfillerPair<void>> paf = kj::newPromiseAndFulfiller<void>();
-  // Accessed only in notifier's owning thread.
+  kj::MutexGuarded<kj::PromiseCrossThreadFulfillerPair<void>> paf;
 };
 
 }  // namespace workerd

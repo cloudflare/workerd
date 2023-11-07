@@ -447,14 +447,12 @@ public:
   void runMessageLoopOnPause(int contextGroupId) override {
     auto lockedState = state.lockExclusive();
     KJ_IF_SOME(channel, lockedState->channel) {
-      pauseIncomingMessages(channel);
       runMessageLoop = true;
       do {
         if (!dispatchOneMessageDuringPause(channel)) {
           break;
         }
       } while (runMessageLoop);
-      resumeIncomingMessages(channel);
     }
   }
 
@@ -464,8 +462,6 @@ public:
   }
 
 private:
-  static void pauseIncomingMessages(Worker::Isolate::InspectorChannelImpl& channel);
-  static void resumeIncomingMessages(Worker::Isolate::InspectorChannelImpl& channel);
   static bool dispatchOneMessageDuringPause(Worker::Isolate::InspectorChannelImpl& channel);
 
   struct InspectorTimerInfo {
@@ -2123,6 +2119,12 @@ private:
   kj::Maybe<kj::VectorOutputStream> inner;
 };
 
+struct MessageQueue {
+  kj::Vector<kj::String> messages;
+  size_t head;
+  enum class Status { ACTIVE, CLOSED } status;
+};
+
 class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspector::Channel {
 public:
   InspectorChannelImpl(kj::Own<const Worker::Isolate> isolateParam, kj::WebSocket& webSocket)
@@ -2296,11 +2298,30 @@ public:
     return ioHandler.messagePump();
   }
 
-  void dispatchProtocolMessages(kj::ArrayPtr<kj::String> messages) {
+  kj::Promise<void> dispatchProtocolMessages(kj::MutexGuarded<MessageQueue>& incomingQueue) {
+    // This method is called on the I/O thread, which also adds messages to the `incomingQueue`.
+    // So long as this method does not yield/resume mid-way, there is no concern about how
+    // long the queue lock is held for whilst dispatching messages.
+    auto i = kj::atomicAddRef(*this->state.lockExclusive()->get()->isolate);
+    auto asyncLock = co_await i->takeAsyncLockWithoutRequest(nullptr);
+
     auto lockedState = this->state.lockExclusive();
-    for (auto& message : messages) {
-      dispatchProtocolMessage(lockedState, kj::mv(message));
+    v8_inspector::V8InspectorSession& session = *lockedState->get()->session;
+    Isolate& isolate = const_cast<Isolate&>(*lockedState->get()->isolate);
+    jsg::V8StackScope stackScope;
+    Isolate::Impl::Lock recordedLock(isolate, asyncLock, stackScope);
+
+    auto lockedQueue = incomingQueue.lockExclusive();
+    if (lockedQueue->status != MessageQueue::Status::ACTIVE) {
+      co_return;
     }
+
+    auto messages = lockedQueue->messages.slice(lockedQueue->head, lockedQueue->messages.size());
+    for (auto& message : messages) {
+      dispatchProtocolMessage(kj::mv(message), session, isolate, stackScope, recordedLock);
+    }
+    lockedQueue->messages.clear();
+    lockedQueue->head = 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -2339,14 +2360,6 @@ public:
     // delay signaling the outgoing loop until this call?
   }
 
-  // Stops the delivery of CDP messages on the I/O worker thread. Called when the isolate hits a
-  // breakpoint or debugger statement.
-  void pauseIncomingMessages();
-
-  // Resumes delivery of CDP messages on the I/O worker thread. Called when execution resumes after
-  // a breakpoint or debugger statement.
-  void resumeIncomingMessages();
-
   // Dispatches one message whilst automatic CDP messages on the I/O worker thread is paused, called
   // on the thread executing the isolate whilst execution is suspended due to a breakpoint or
   // debugger statement.
@@ -2363,11 +2376,8 @@ private:
         : webSocket(webSocket) {
       // Assume we are being instantiated on the InspectorService thread, the thread that will do
       // I/O for CDP messages. Messages are delivered to the InspectorChannelImpl on the Isolate thread.
+      incomingQueueNotifier = XThreadNotifier::create();
       outgoingQueueNotifier = XThreadNotifier::create();
-    }
-
-    ~WebSocketIoHandler() noexcept(false) {
-      outgoingQueueNotifier->clear();
     }
 
     // Sets the channel that messages are delivered to.
@@ -2380,43 +2390,26 @@ private:
       shutdown();
     }
 
-    void pauseIncomingMessages() {
-      auto lockedIncomingQueue = incomingQueue.lockExclusive();
-      if (lockedIncomingQueue->status == MessageQueue::Status::CLOSED) {
-        return;
-      }
-      lockedIncomingQueue->status = MessageQueue::Status::PAUSED;
-    }
-
-    void resumeIncomingMessages() {
-      auto lockedIncomingQueue = incomingQueue.lockExclusive();
-      if (lockedIncomingQueue->status == MessageQueue::Status::CLOSED) {
-        return;
-      }
-      lockedIncomingQueue->status = MessageQueue::Status::ACTIVE;
-      deliverProtocolMessages(channel, lockedIncomingQueue);
-    }
-
     // Blocked the current thread until a message arrives. This is intended
     // for use in the InspectorClient when breakpoints are hit. The InspectorClient
     // has to remain in runMessageLoopOnPause() but still receive CDP messages
     // (e.g. resume).
     kj::Maybe<kj::String> waitForMessage() {
       return incomingQueue.when(
-        [](const MessageQueue& incomingQueue) {
-          return (incomingQueue.head < incomingQueue.messages.size() ||
-                  incomingQueue.status == MessageQueue::Status::CLOSED);
-        },
-        [](MessageQueue& incomingQueue) -> kj::Maybe<kj::String> {
-          if (incomingQueue.status == MessageQueue::Status::CLOSED) return {};
-          return pollMessage(incomingQueue);
-        });
+          [](const MessageQueue& incomingQueue) {
+            return (incomingQueue.head < incomingQueue.messages.size() ||
+                    incomingQueue.status == MessageQueue::Status::CLOSED);
+          },
+          [](MessageQueue& incomingQueue) -> kj::Maybe<kj::String> {
+            if (incomingQueue.status == MessageQueue::Status::CLOSED) return {};
+            return pollMessage(incomingQueue);
+          });
     }
 
     // Message pumping promise that should be evaluated on the InspectorService
     // thread.
     kj::Promise<void> messagePump() {
-      return incomingLoop().exclusiveJoin(outgoingLoop());
+      return receiveLoop().exclusiveJoin(dispatchLoop()).exclusiveJoin(transmitLoop());
     }
 
     void send(kj::String message) {
@@ -2427,12 +2420,6 @@ private:
     }
 
   private:
-    struct MessageQueue {
-      kj::Vector<kj::String> messages;
-      size_t head;
-      enum class Status { ACTIVE, PAUSED, CLOSED } status;
-    };
-
     static kj::Maybe<kj::String> pollMessage(MessageQueue& messageQueue) {
       if (messageQueue.head < messageQueue.messages.size()) {
         kj::String message = kj::mv(messageQueue.messages[messageQueue.head++]);
@@ -2443,18 +2430,6 @@ private:
         return kj::mv(message);
       }
       return {};
-    }
-
-    static void deliverProtocolMessages(kj::Maybe<InspectorChannelImpl&>& channel,
-                                        kj::Locked<MessageQueue>& incomingQueue) {
-      KJ_REQUIRE(incomingQueue->status == MessageQueue::Status::ACTIVE);
-      KJ_IF_SOME(c, channel) {
-        kj::ArrayPtr<kj::String> messages = incomingQueue->messages.slice(
-            incomingQueue->head, incomingQueue->messages.size());
-        c.dispatchProtocolMessages(messages);
-        incomingQueue->messages.clear();
-        incomingQueue->head = 0;
-      }
     }
 
     void shutdown() {
@@ -2475,16 +2450,13 @@ private:
       outgoingQueueNotifier->notify();
     }
 
-    kj::Promise<void> incomingLoop() {
-      for (;;) {
+    kj::Promise<void> receiveLoop() {
+     for (;;) {
         auto message = co_await webSocket.receive();
         KJ_SWITCH_ONEOF(message) {
           KJ_CASE_ONEOF(text, kj::String) {
-            auto lockedIncomingQueue = incomingQueue.lockExclusive();
-            lockedIncomingQueue->messages.add(kj::mv(text));
-            if (lockedIncomingQueue->status == MessageQueue::Status::ACTIVE) {
-              deliverProtocolMessages(channel, lockedIncomingQueue);
-            }
+            incomingQueue.lockExclusive()->messages.add(kj::mv(text));
+            incomingQueueNotifier->notify();
           }
           KJ_CASE_ONEOF(blob, kj::Array<byte>){
             // Ignore.
@@ -2496,7 +2468,16 @@ private:
       }
     }
 
-    kj::Promise<void> outgoingLoop() {
+    kj::Promise<void> dispatchLoop() {
+      for (;;) {
+        co_await incomingQueueNotifier->awaitNotification();
+        KJ_IF_SOME(c, channel) {
+          co_await c.dispatchProtocolMessages(this->incomingQueue);
+        }
+      }
+    }
+
+    kj::Promise<void> transmitLoop() {
       for (;;) {
         co_await outgoingQueueNotifier->awaitNotification();
         try {
@@ -2523,6 +2504,8 @@ private:
     }
 
     kj::MutexGuarded<MessageQueue> incomingQueue;
+    kj::Own<XThreadNotifier> incomingQueueNotifier;
+
     kj::MutexGuarded<MessageQueue> outgoingQueue;
     kj::Own<XThreadNotifier> outgoingQueueNotifier;
 
@@ -2627,33 +2610,12 @@ private:
 
   // Not under `state` lock due to lock ordering complications.
   volatile bool networkEnabled = false;
-
-  void dispatchProtocolMessage(
-      kj::Locked<kj::Own<workerd::Worker::Isolate::InspectorChannelImpl::State>>& lockedState,
-      kj::String message) {
-    v8_inspector::V8InspectorSession& session = *lockedState->get()->session;
-    // const_cast OK because we're going to lock it
-    Isolate& isolate = const_cast<Isolate&>(*lockedState->get()->isolate);
-    jsg::V8StackScope stackScope;
-    Isolate::Impl::Lock recordedLock(isolate, InspectorLock(kj::none), stackScope);
-    dispatchProtocolMessage(kj::mv(message), session, isolate, stackScope, recordedLock);
-  }
 };
-
-void Worker::Isolate::InspectorChannelImpl::pauseIncomingMessages() {
-  ioHandler.pauseIncomingMessages();
-}
-
-void Worker::Isolate::InspectorChannelImpl::resumeIncomingMessages() {
-  ioHandler.resumeIncomingMessages();
-}
 
 bool Worker::Isolate::InspectorChannelImpl::dispatchOneMessageDuringPause() {
   auto maybeMessage = ioHandler.waitForMessage();
-
   // We can be paused by either hitting a debugger statement in a script or from hitting
   // a breakpoint or someone hit break.
-
   KJ_IF_SOME(message, maybeMessage) {
     auto lockedState = this->state.lockExclusive();
     // Received a message whilst script is running, probably in a breakpoint.
@@ -2669,14 +2631,6 @@ bool Worker::Isolate::InspectorChannelImpl::dispatchOneMessageDuringPause() {
     // No message from waitForMessage() implies the connection is broken.
     return false;
   }
-}
-
-void Worker::InspectorClient::pauseIncomingMessages(Worker::Isolate::InspectorChannelImpl& channel) {
-  channel.pauseIncomingMessages();
-}
-
-void Worker::InspectorClient::resumeIncomingMessages(Worker::Isolate::InspectorChannelImpl& channel) {
-  channel.resumeIncomingMessages();
 }
 
 bool Worker::InspectorClient::dispatchOneMessageDuringPause(Worker::Isolate::InspectorChannelImpl& channel) {
