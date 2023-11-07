@@ -1613,6 +1613,14 @@ bool WritableStreamInternalController::Pipe::checkSignal(jsg::Lock& js) {
   KJ_IF_SOME(signal, maybeSignal) {
     if ((signal)->getAborted()) {
       auto reason = signal->getReason(js);
+
+      // abort process might call parent.drain which will delete this,
+      // move/copy everything we need after into temps.
+      auto& parent = this->parent;
+      auto& source = this->source;
+      auto preventCancel = this->preventCancel;
+      auto promise = kj::mv(this->promise);
+
       if (!preventAbort) {
         if (parent.state.tryGet<Writable>() != kj::none) {
           parent.state.get<Writable>()->abort(js.exceptionToKj(reason));
