@@ -418,9 +418,11 @@ void SpanBuilder::addLog(kj::Date timestamp, kj::ConstString key, TagValue value
 }
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
-  KJ_IF_SOME(p, parentTracer) {
-    for (auto& t: traces) {
-      p->traces.add(kj::addRef(*t));
+  if (logLevel != PipelineLogLevel::NONE) {
+    KJ_IF_SOME(p, parentTracer) {
+      for (auto& t: traces) {
+        p->traces.add(kj::addRef(*t));
+      }
     }
   }
   KJ_IF_SOME(f, completeFulfiller) {
