@@ -253,7 +253,7 @@ void doLockTest(bool walMode) {
           db2.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(kj::_::hasSubstring(e.getDescription(), "database is locked"), e);
+          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
           break;
         }
       }
@@ -267,7 +267,7 @@ void doLockTest(bool walMode) {
           db.run(INCREMENT);
           counter.fetch_add(1, std::memory_order_relaxed);
         })) {
-          KJ_EXPECT(kj::_::hasSubstring(e.getDescription(), "database is locked"), e);
+          KJ_EXPECT(e.getDescription().contains("database is locked"), e);
           break;
         }
       }

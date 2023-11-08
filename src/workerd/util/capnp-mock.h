@@ -85,7 +85,7 @@ public:
         KJ_FAIL_ASSERT_AT(location, "expected call to throw exception but instead it returned",
             expectedType, expectedMessageSubstring);
       }, [&](kj::Exception&& e) {
-        KJ_ASSERT_AT(kj::_::hasSubstring(e.getDescription(), expectedMessageSubstring), location,
+        KJ_ASSERT_AT(e.getDescription().contains(expectedMessageSubstring), location,
             expectedMessageSubstring, e);
         KJ_ASSERT_AT(e.getType() == expectedType, location, e);
       }).wait(ws);
