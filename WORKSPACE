@@ -42,12 +42,12 @@ http_archive(
 http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
-    sha256 = "49112cc7328392aa4e3e5dae0b2f6736d0153430143d21f69327788ff4efe734",
-    strip_prefix = "sqlite-amalgamation-3400100",
+    sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
+    strip_prefix = "sqlite-src-3440000",
     type = "zip",
-    url = "https://sqlite.org/2022/sqlite-amalgamation-3400100.zip",
+    url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
     patches = [
-        "//:patches/sqlite/0001-row-counts-amalgamation.patch",
+        "//:patches/sqlite/0001-row-counts-plain.patch",
     ],
     patch_args = ["-p1"],
 )
