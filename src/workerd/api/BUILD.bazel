@@ -64,6 +64,7 @@ wd_cc_library(
     deps = [
         ":html-rewriter",
         "//src/workerd/io",
+        "//src/node",
     ],
 )
 

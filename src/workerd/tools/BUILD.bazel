@@ -18,6 +18,7 @@ wd_cc_library(
         "//src/workerd/io",
         "//src/workerd/jsg",
         "//src/workerd/jsg:rtti",
+        "//src/node",
         "@capnp-cpp//src/capnp",
     ],
 )
