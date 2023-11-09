@@ -179,7 +179,7 @@ Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these.
 * On Linux:
   * glibc 2.31 or higher (already included on e.g. Ubuntu 20.04, Debian Bullseye)
 * On macOS:
-  * macOS 11 or higher
+  * macOS 11.5 or higher
   * The Xcode command line tools, which can be installed with `xcode-select --install`
 
 ### Local Worker development with `wrangler`

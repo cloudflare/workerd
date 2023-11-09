@@ -1,3 +1,6 @@
+# TODO(later): llvm-toolchain-16 is expected to be backported to Bullseye with the 11.9 point
+# release (https://tracker.debian.org/pkg/llvm-toolchain-16). Switch to using the regular packages
+# instead of packages from LLVM's APT repo once 11.9 is available and we have upgraded to LLVM 16.
 FROM node:bullseye AS builder
 
 WORKDIR /workerd

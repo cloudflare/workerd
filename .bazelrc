@@ -134,7 +134,8 @@ build:macos --config=unix
 
 # Support macOS 11 as the minimum version. There should be at least a warning when backward
 # compatibility is broken as -Wunguarded-availability-new is enabled by default.
-build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
+# TODO (cleanup): macOS 11.X is now EOL, bump this to macOS 12.5 soon.
+build:macos --macos_minimum_os=11.5 --host_macos_minimum_os=11.5
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
 # macOS links with dynamic libc++ by default, which has good backwards compatibility.
