@@ -21,6 +21,7 @@ def wd_ts_bundle(
         internal_modules,
         tsconfig_json,
         eslintrc_json,
+        internal_wasm_modules = [],
         lint = True,
         deps = []):
     """Compiles typescript modules and generates api bundle with the result.
@@ -64,10 +65,27 @@ def wd_ts_bundle(
         include_prefix = import_name,
         # internal modules are accessible under "<import_name>-internal:<module_name>" name
         # without "internal/" folder prefix.
-        internal_modules = dict([(
-            _to_js(m),
-            import_name + "-internal:" + _to_name(m.removeprefix("internal/")),
-        ) for m in internal_modules if not m.endswith(".d.ts")]),
+        internal_modules = dict(
+            [
+                (
+                    _to_js(m),
+                    import_name + "-internal:" + _to_name(m.removeprefix("internal/")),
+                )
+                for m in internal_modules
+                if not m.endswith(".d.ts")
+            ]
+        ),
+        internal_wasm_modules=dict(
+            [
+                (
+                    m,
+                    import_name
+                    + "-internal:"
+                    + m.removeprefix("internal/").removesuffix(".wasm"),
+                )
+                for m in internal_wasm_modules
+            ]
+        ),
         declarations = declarations,
         schema_id = schema_id,
     )

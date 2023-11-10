@@ -7,6 +7,7 @@
 #include <kj/filesystem.h>
 #include <kj/map.h>
 #include <workerd/jsg/modules.capnp.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/observer.h>
 #include <set>
 #include "function.h"
@@ -421,11 +422,36 @@ public:
       return;
     }
 
+    if (type == Type::INTERNAL_WASM) {
+      type = Type::INTERNAL;
+
+      addBuiltinModule(specifier, [specifier, sourceCode](Lock& lock, CompilationObserver& obs) {
+        lock.setAllowEval(true);
+        KJ_DEFER(lock.setAllowEval(false));
+
+        // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
+        // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
+        // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
+        // compiles fast but runs slower.
+        AllowV8BackgroundThreadsScope scope;
+        auto wasmModule = jsg::compileWasmModule(lock, sourceCode.asBytes(), obs);
+        return jsg::ModuleRegistry::ModuleInfo(
+              lock,
+              specifier,
+              kj::none,
+              jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+      }, type);
+
+      return;
+    }
+
+
+
     entries.insert(Entry(path, type, sourceCode));
   }
 
   void addBuiltinModule(kj::StringPtr specifier,
-                        kj::Function<ModuleInfo(Lock&)> factory,
+                        kj::Function<ModuleInfo(Lock&, CompilationObserver&)> factory,
                         Type type = Type::BUILTIN) {
     KJ_ASSERT(type != Type::BUNDLE);
     using Key = typename Entry::Key;
@@ -443,7 +469,7 @@ public:
 
   template <typename T>
   void addBuiltinModule(kj::StringPtr specifier, Type type = Type::BUILTIN) {
-    addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js) {
+    addBuiltinModule(specifier, [specifier=kj::str(specifier)](Lock& js, CompilationObserver& obs) {
       auto& wrapper = TypeWrapper::from(js.v8Isolate);
       auto wrap = wrapper.wrap(js.v8Context(), kj::none, alloc<T>());
       return ModuleInfo(js, specifier, kj::none, ObjectModuleInfo(js, wrap));
@@ -550,7 +576,7 @@ private:
   struct Entry {
     using Info = kj::OneOf<ModuleInfo,
                            kj::ArrayPtr<const char>,
-                           kj::Function<ModuleInfo(Lock&)>>;
+                           kj::Function<ModuleInfo(Lock&, CompilationObserver&)>>;
 
     struct Key {
       const kj::Path& specifier;
@@ -581,7 +607,7 @@ private:
           type(type),
           info(src) {}
 
-    Entry(const kj::Path& specifier, Type type, kj::Function<ModuleInfo(Lock&)> factory)
+    Entry(const kj::Path& specifier, Type type, kj::Function<ModuleInfo(Lock&, CompilationObserver&)> factory)
         : specifier(specifier.clone()),
           type(type),
           info(kj::mv(factory)) {}
@@ -599,8 +625,8 @@ private:
           info = ModuleInfo(js, specifier.toString(), src, ModuleInfoCompileOption::BUILTIN, observer);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
-        KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&)>) {
-          info = src(js);
+        KJ_CASE_ONEOF(src, kj::Function<ModuleInfo(Lock&, CompilationObserver&)>) {
+          info = src(js, observer);
           return KJ_ASSERT_NONNULL(info.tryGet<ModuleInfo>());
         }
       }

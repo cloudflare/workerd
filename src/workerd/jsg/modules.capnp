@@ -31,4 +31,7 @@ enum ModuleType {
 
   internal @2;
   # Provided by runtime but can only imported by builtin modules.
+
+  internalWasm @3;
+  # Provided by runtime but can only imported by builtin modules.
 }
