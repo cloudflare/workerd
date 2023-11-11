@@ -27,9 +27,9 @@ You might use it:
 
 * **Always backwards compatible:** Updating `workerd` to a newer version will never break your JavaScript code. `workerd`'s version number is simply a date, corresponding to the maximum ["compatibility date"](https://developers.cloudflare.com/workers/platform/compatibility-dates/) supported by that version. You can always configure your worker to a past date, and `workerd` will emulate the API as it existed on that date.
 
-[Read the blog post to learn more about these principles.](https://blog.cloudflare.com/workerd-open-source-workers-runtime/).
+[Read the blog post to learn more about these principles.](https://blog.cloudflare.com/workerd-open-source-workers-runtime/)
 
-### WARNING: This is a beta. Work in progress.
+### WARNING: This is a beta. Work in progress
 
 Although most of `workerd`'s code has been used in Cloudflare Workers for years, the `workerd` configuration format and top-level server code is brand new. We don't yet have much experience running this in production. As such, there will be rough edges, maybe even a few ridiculous bugs. Deploy to production at your own risk (but please tell us what goes wrong!).
 
@@ -60,8 +60,8 @@ In theory, `workerd` should work on any POSIX system that is supported by V8 and
 
 In practice, `workerd` is tested on:
 
-- Linux and macOS (x86-64 and arm64 architectures)
-- Windows (x86-64 architecture)
+* Linux and macOS (x86-64 and arm64 architectures)
+* Windows (x86-64 architecture)
 
 On other platforms, you may have to do tinkering to make things work.
 
@@ -91,7 +91,7 @@ To build `workerd`, you need:
 
 You may then build `workerd` at the command-line with:
 
-```
+```sh
 bazel build //src/workerd/server:workerd
 ```
 
@@ -101,13 +101,13 @@ The compiled binary will be located at `bazel-bin/src/workerd/server/workerd`.
 
 If you run a Bazel build before you've installed some dependencies (like clang or libc++), and then you install the dependencies, you must resync locally cached toolchains, or clean Bazel's cache, otherwise you might get strange errors:
 
-```
+```sh
 bazel sync --configure
 ```
 
 If that fails, you can try:
 
-```
+```sh
 bazel clean --expunge
 ```
 
@@ -116,7 +116,7 @@ The cache will now be cleaned and you can try building again.
 If you have a fairly recent clang packages installed you can build a more performant release
 version of workerd:
 
-```
+```sh
 bazel build --config=thin-lto //src/workerd/server:workerd
 ```
 
@@ -175,6 +175,7 @@ To serve your config, do:
 For more details about command-line usage, use `workerd --help`.
 
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:
+
 * On Linux:
   * glibc 2.31 or higher (already included on e.g. Ubuntu 20.04, Debian Bullseye)
 * On macOS:
@@ -195,7 +196,7 @@ One good way to manage `workerd` in production is using `systemd`. Particularly 
 
 Here's an example system service file, assuming your config defines two sockets named `http` and `https`:
 
-```
+```sh
 # /etc/systemd/system/workerd.service
 [Unit]
 Description=workerd runtime
@@ -224,7 +225,7 @@ WantedBy=multi-user.target
 
 And corresponding sockets file:
 
-```
+```sh
 # /etc/systemd/system/workerd.socket
 [Unit]
 Description=sockets for workerd
