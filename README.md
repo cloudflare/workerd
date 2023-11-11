@@ -75,10 +75,11 @@ To build `workerd`, you need:
   * Clang 11+ (e.g. package `clang` on Debian Bullseye)
   * libc++ 11+ (e.g. packages `libc++-dev` and `libc++abi-dev` on Debian Bullseye)
   * LLD 11+ (e.g. package `lld` on Debian Bullseye)
-  * `python3` and `python3-distutils`
+  * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
   * Xcode 13+ installation
   * macOS 11 or higher
+  * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
     from the Microsoft Store for the `winget` package manager and then run
