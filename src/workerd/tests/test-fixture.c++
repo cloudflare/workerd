@@ -315,7 +315,7 @@ void TestFixture::runInIoContext(
     kj::ArrayPtr<kj::StringPtr> errorsToIgnore) {
   auto ignoreDescription = [&errorsToIgnore](kj::StringPtr description) {
     return std::any_of(errorsToIgnore.begin(), errorsToIgnore.end(), [&description](auto error) {
-      return strstr(description.cStr(), error.cStr());
+      return description.contains(error);
     });
   };
 
