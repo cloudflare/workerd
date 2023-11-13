@@ -57,12 +57,10 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
 
   auto findDelim = [](kj::StringPtr msg) -> size_t {
     // Either return 0 if no matches or the index past the first delim if there are.
-    auto match = strstr(msg.cStr(), ERROR_PREFIX_DELIM.cStr());
-    if (!match) {
-      return 0;
-    } else {
-      return (match - msg.cStr()) + ERROR_PREFIX_DELIM.size();
+    KJ_IF_SOME(i, msg.find(ERROR_PREFIX_DELIM)) {
+      return i + ERROR_PREFIX_DELIM.size();
     }
+    return 0;
   };
 
   auto tryExtractError = [](kj::StringPtr msg, Properties properties)
