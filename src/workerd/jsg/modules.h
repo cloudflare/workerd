@@ -6,6 +6,7 @@
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <workerd/jsg/buffersource.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/jsg/observer.h>
@@ -445,7 +446,33 @@ public:
       return;
     }
 
+    if (type == Type::INTERNAL_DATA) {
+      type = Type::INTERNAL;
 
+      addBuiltinModule(specifier, [specifier, sourceCode](Lock& lock, CompilationObserver& obs) {
+        auto value = kj::heapArray(sourceCode.asBytes());
+        v8::Local<v8::ArrayBuffer> data;
+        {
+          // Code duplicated from ArrayBufferWrapper::wrap in value.h because I
+          // couldn't figure out how to use ArrayBufferWrapper directly.
+          // TODO: Avoid code duplication
+          byte* begin = value.begin();
+          size_t size = value.size();
+          auto ownerPtr = new kj::Array<byte>(kj::mv(value));
+
+          std::unique_ptr<v8::BackingStore> backing =
+              v8::ArrayBuffer::NewBackingStore(begin, size,
+                  [](void* begin, size_t size, void* ownerPtr){
+                    delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
+                  }, ownerPtr);
+          data = v8::ArrayBuffer::New(lock.v8Isolate, kj::mv(backing));
+        }
+
+        return jsg::ModuleRegistry::ModuleInfo(lock, specifier, kj::none,
+                                               jsg::ModuleRegistry::DataModuleInfo(lock, data));
+      }, type);
+      return;
+    }
 
     entries.insert(Entry(path, type, sourceCode));
   }
