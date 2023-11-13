@@ -81,7 +81,7 @@ kj::Maybe<kj::String> readContentTypeParameter(kj::StringPtr contentType,
 kj::Maybe<kj::Exception> translateKjException(const kj::Exception& exception,
     std::initializer_list<ErrorTranslation> translations) {
   for (auto& t: translations) {
-    if (strstr(exception.getDescription().cStr(), t.kjDescription.cStr()) != nullptr) {
+    if (exception.getDescription().contains(t.kjDescription)) {
       return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
           kj::str(JSG_EXCEPTION(TypeError) ": ", t.jsDescription));
     }
