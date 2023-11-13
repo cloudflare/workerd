@@ -1,7 +1,17 @@
+interface D1Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+}
+
 interface D1Result<T = unknown> {
   results: T[];
   success: true;
-  meta: any;
+  meta: D1Meta & Record<string, unknown>;
   error?: never;
 }
 
