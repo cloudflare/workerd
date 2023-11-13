@@ -153,7 +153,7 @@ bool isTunneledException(kj::StringPtr internalMessage) {
 }
 
 bool isDoNotLogException(kj::StringPtr internalMessage) {
-  return strstr(internalMessage.cStr(), "worker_do_not_log") != nullptr;
+  return internalMessage.contains("worker_do_not_log"_kjc);
 }
 
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason) {

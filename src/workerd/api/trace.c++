@@ -276,11 +276,11 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
       //(name == "authorization"_kj) || // covered below
       (name == "cookie"_kj) ||
       (name == "set-cookie"_kj) ||
-      (strstr(name.cStr(), "auth") != nullptr) ||
-      (strstr(name.cStr(), "jwt") != nullptr) ||
-      (strstr(name.cStr(), "key") != nullptr) ||
-      (strstr(name.cStr(), "secret") != nullptr) ||
-      (strstr(name.cStr(), "token") != nullptr)
+      name.contains("auth"_kjc) ||
+      name.contains("jwt"_kjc) ||
+      name.contains("key"_kjc) ||
+      name.contains("secret"_kjc) ||
+      name.contains("token"_kjc)
     );
   };
 
