@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": [ "ESNext" ],
+    "alwaysStrict": true,
+    "strict": true,
+    "allowJs": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "exactOptionalPropertyTypes": true,
+    "moduleResolution": "node",
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strictNullChecks": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "types": [
+      // todo: consume generated workerd types
+      // "@cloudflare/workers-types"
+      "@types/node",
+    ],
+    "paths": {
+      "node:*": ["./*"],
+      "node:stream/*": ["./*"],
+      "node-internal:*": ["./internal/*"],
+      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+    }
+  },
+  "include": [
+    "*.ts",
+    "stream/*.ts",
+    "stream/*.js",
+    "internal/*.ts"
+  ],
+}

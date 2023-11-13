@@ -1,0 +1,25 @@
+{
+  "env": {
+      "es2022": true,
+      "worker": true
+  },
+  "extends": [
+      "plugin:@typescript-eslint/recommended",
+      "plugin:@typescript-eslint/recommended-requiring-type-checking",
+      "plugin:@typescript-eslint/strict"
+  ],
+  "overrides": [],
+  "parserOptions": {
+      "ecmaVersion": "latest",
+      "sourceType": "module",
+      "project": "src/node/tsconfig.json"
+    },
+  "rules": {
+      "@typescript-eslint/explicit-function-return-type": "error",
+      "@typescript-eslint/explicit-member-accessibility": "error",
+      "@typescript-eslint/explicit-module-boundary-types": "error",
+      "@typescript-eslint/no-require-imports": "error",
+      "@typescript-eslint/prefer-enum-initializers": "error",
+      "@typescript-eslint/type-annotation-spacing": "error"
+  }
+}

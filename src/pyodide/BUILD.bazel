@@ -1,0 +1,22 @@
+load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
+
+wd_ts_bundle(
+    name = "pyodide",
+    import_name = "pyodide",
+    internal_modules = glob([
+        "internal/*.ts",
+        "internal/*.js",
+    ]),
+    modules = glob([
+        "*.ts",
+        "*.js",
+        "stream/*.js",
+    ]),
+    internal_wasm_modules = glob([
+        "internal/*.wasm"
+    ]),
+    internal_data_modules = ["internal/python_stdlib.zip"],
+    schema_id = "0xbcc8f57c63814005",
+    tsconfig_json = "tsconfig.json",
+    eslintrc_json = ".eslintrc.json",
+)
