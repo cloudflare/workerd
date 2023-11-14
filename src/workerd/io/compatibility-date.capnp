@@ -359,4 +359,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("vectorize_query_original");
   # Vectorize query option change to allow returning of metadata to be optional. Accompanying this:
   # a return format change to move away from a nested object with the VectorizeVector.
+
+  wasmGc @38 :Bool
+      $compatEnableFlag("wasm_gc")
+      $experimental;
+  # Enables WASM GC (https://developer.chrome.com/blog/wasmgc/).
 }

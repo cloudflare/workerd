@@ -91,6 +91,11 @@ public:
   inline void setCommonJsExportDefault(kj::Badge<Lock>, bool exportDefault) {
     exportCommonJsDefault = exportDefault;
   }
+  inline void setWasmGcEnabled(kj::Badge<Lock>, bool value) {
+    v8::WasmGCEnabledCallback enabled = [](v8::Local<v8::Context>) { return true; };
+    v8::WasmGCEnabledCallback disabled = [](v8::Local<v8::Context>) { return false; };
+    ptr->SetWasmGCEnabledCallback(value ? enabled : disabled);
+  }
 
   inline bool areWarningsLogged() const { return maybeLogger != kj::none; }
 

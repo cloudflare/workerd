@@ -274,6 +274,7 @@ void WorkerdApiIsolate::compileModules(
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
+  lock.setWasmGcEnabled(getFeatureFlags().getWasmGc());
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 

@@ -2107,6 +2107,7 @@ public:
 
   void setCaptureThrowsAsRejections(bool capture);
   void setCommonJsExportDefault(bool exportDefault);
+  void setWasmGcEnabled(bool value);
 
   using Logger = void(Lock&, kj::StringPtr);
   void setLoggerCallback(kj::Function<Logger>&& logger);

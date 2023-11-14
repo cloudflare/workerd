@@ -196,6 +196,10 @@ void Lock::setCommonJsExportDefault(bool exportDefault) {
   IsolateBase::from(v8Isolate).setCommonJsExportDefault({}, exportDefault);
 }
 
+void Lock::setWasmGcEnabled(bool value) {
+  IsolateBase::from(v8Isolate).setWasmGcEnabled({}, value);
+}
+
 void Lock::setLoggerCallback(kj::Function<Logger>&& logger) {
   IsolateBase::from(v8Isolate).setLoggerCallback({}, kj::mv(logger));
 }
