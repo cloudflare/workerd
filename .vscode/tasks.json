@@ -251,6 +251,14 @@
       "runOptions": {
         "reevaluateOnRerun": true,
       }
+    },
+    {
+      "label": "Generate doxygen",
+      "command": "doxygen",
+      "args": ["doxyfile"],
+      "hide": false,
+      "type": "shell",
+      "problemMatcher": []
     }
   ]
 }
