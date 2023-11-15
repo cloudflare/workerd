@@ -389,7 +389,7 @@ public:
   }
 
   void add(kj::Path& specifier, ModuleInfo&& info) {
-    entries.insert(Entry(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
+    entries.insert(Entry(specifier, Type::USER, kj::fwd<ModuleInfo>(info)));
   }
 
   void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
@@ -398,9 +398,22 @@ public:
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
         // TODO: asChars() might be wrong for wide characters
-        addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
+        addBuiltinModule(module, type);
       }
     }
+  }
+
+  void addBuiltinModule(kj::StringPtr specifier,
+                        kj::ArrayPtr<const char> sourceCode,
+                        Type type = Type::BUILTIN) {
+    addEntryUnlessOverriden(Entry(kj::Path::parse(specifier), type, sourceCode));
+  }
+
+
+  void addBuiltinModule(kj::StringPtr specifier,
+                        kj::Function<ModuleInfo(Lock&, CompilationObserver&)> factory,
+                        Type type = Type::BUILTIN) {
+    addEntryUnlessOverriden(Entry(kj::Path::parse(specifier), type, kj::mv(factory)));
   }
 
   // Register new module accessible by a given importPath. The module is instantiated
@@ -409,62 +422,41 @@ public:
   // sourceCode has to exist while this ModuleRegistry exists.
   // The expectation is for this method to be called during the assembly of worker global context
   // after registering all user modules.
-  void addBuiltinModule(kj::StringPtr specifier,
-                        kj::ArrayPtr<const char> sourceCode,
+  void addBuiltinModule(Module::Reader module,
                         Type type = Type::BUILTIN) {
-    KJ_ASSERT(type != Type::BUNDLE);
-    using Key = typename Entry::Key;
+    auto specifier = module.getName();
+    switch (module.which()) {
+      case Module::SRC: {
+        addEntryUnlessOverriden(Entry(kj::Path::parse(specifier), type, module.getSrc().asChars()));
+        return;
+      }
 
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
-    auto path = kj::Path::parse(specifier);
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
+      case Module::WASM: {
+        addBuiltinModule(specifier, [specifier, module](Lock& lock, CompilationObserver& obs) {
+          lock.setAllowEval(true);
+          KJ_DEFER(lock.setAllowEval(false));
+
+          // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
+          // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
+          // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
+          // compiles fast but runs slower.
+          AllowV8BackgroundThreadsScope scope;
+          auto wasmModule = jsg::compileWasmModule(lock, module.getWasm().asBytes(), obs);
+          return jsg::ModuleRegistry::ModuleInfo(
+                lock,
+                specifier,
+                kj::none,
+                jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+        }, type);
+
+        return;
+      }
+
+
+      default: {
+        KJ_UNREACHABLE;
+      }
     }
-
-    if (type == Type::INTERNAL_WASM) {
-      type = Type::INTERNAL;
-
-      addBuiltinModule(specifier, [specifier, sourceCode](Lock& lock, CompilationObserver& obs) {
-        lock.setAllowEval(true);
-        KJ_DEFER(lock.setAllowEval(false));
-
-        // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
-        // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
-        // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
-        // compiles fast but runs slower.
-        AllowV8BackgroundThreadsScope scope;
-        auto wasmModule = jsg::compileWasmModule(lock, sourceCode.asBytes(), obs);
-        return jsg::ModuleRegistry::ModuleInfo(
-              lock,
-              specifier,
-              kj::none,
-              jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
-      }, type);
-
-      return;
-    }
-
-
-
-    entries.insert(Entry(path, type, sourceCode));
-  }
-
-  void addBuiltinModule(kj::StringPtr specifier,
-                        kj::Function<ModuleInfo(Lock&, CompilationObserver&)> factory,
-                        Type type = Type::BUILTIN) {
-    KJ_ASSERT(type != Type::BUNDLE);
-    using Key = typename Entry::Key;
-
-    auto path = kj::Path::parse(specifier);
-
-    // We need to make sure there is not an existing worker bundle module with the same
-    // name if type == Type::BUILTIN
-    if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-      return;
-    }
-
-    entries.insert(Entry(path, type, kj::mv(factory)));
   }
 
   template <typename T>
@@ -487,7 +479,7 @@ public:
     } else {
       if (option == ResolveOption::DEFAULT) {
         // First, we try to resolve a worker bundle version of the module.
-        KJ_IF_SOME(entry, entries.find(Key(specifier, Type::BUNDLE))) {
+        KJ_IF_SOME(entry, entries.find(Key(specifier, Type::USER))) {
           return entry.module(js, observer);
         }
       }
@@ -580,7 +572,7 @@ private:
 
     struct Key {
       const kj::Path& specifier;
-      const Type type = Type::BUNDLE;
+      const Type type = Type::USER;
       uint hash;
 
       Key(const kj::Path& specifier, Type type)
@@ -633,6 +625,21 @@ private:
       KJ_UNREACHABLE;
     }
   };
+
+  // For adding BUILTIN or INTERNAL modules.
+  // If there is aready a USER override with the same specifier, we don't want
+  // to shadow it. INTERNAL modules cannot shadow USER modules so we don't need
+  // the check for them.
+  void addEntryUnlessOverriden(Entry entry) {
+    KJ_ASSERT(entry.type != Type::USER);
+    using Key = typename Entry::Key;
+    // We need to make sure there is not an existing worker bundle module with the same
+    // name if type == Type::BUILTIN
+    if (entry.type == Type::BUILTIN && entries.find(Key(entry.specifier, Type::USER)) != kj::none) {
+      return;
+    }
+    entries.insert(kj::mv(entry));
+  }
 
   struct SpecifierHashCallbacks {
     using Key = typename Entry::Key;

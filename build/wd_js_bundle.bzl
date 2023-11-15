@@ -13,7 +13,7 @@ const {const_name} :Modules.Bundle = (
 ]);
 """
 
-MODULE_TEMPLATE = """    (name = "{name}", src = embed "{path}", type = {type}, {ts_declaration})"""
+MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {ts_declaration})"""
 
 def _to_d_ts(file_name):
     return file_name.removesuffix(".js") + ".d.ts"
@@ -26,34 +26,35 @@ def _relative_path(file_path, dir_path):
 def _gen_api_bundle_capnpn_impl(ctx):
     output_dir = ctx.outputs.out.dirname + "/"
 
-    def _render_module(name, label, type):
+    def _render_module(name, label, src_type, type):
         return MODULE_TEMPLATE.format(
             name = name,
             # capnp doesn't allow ".." dir escape, make paths relative.
             # this won't work for embedding paths outside of rule directory subtree.
+            src_type = src_type,
             path = _relative_path(
                 ctx.expand_location("$(location {})".format(label), ctx.attr.data),
                 output_dir,
             ),
+            type = type,
             ts_declaration = (
                 "tsDeclaration = embed \"" + _relative_path(
                     ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
                     output_dir,
                 ) + "\", "
             ) if name in ctx.attr.declarations else "",
-            type = type,
         )
 
     modules = [
-        _render_module(ctx.attr.builtin_modules[m], m.label, "builtin")
+        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin")
         for m in ctx.attr.builtin_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_modules[m], m.label, "internal")
+        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal")
         for m in ctx.attr.internal_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_wasm_modules[m], m.label, "internalWasm")
+        _render_module(ctx.attr.internal_wasm_modules[m], m.label,  "wasm", "internal")
         for m in ctx.attr.internal_wasm_modules
     ]
 
