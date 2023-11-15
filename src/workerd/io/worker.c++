@@ -1028,6 +1028,15 @@ jsg::Promise<void> addCrossThreadPromiseWaiter(jsg::Lock& js,
   return IoContext::current().awaitIo(js, kj::mv(waiter.promise));
 }
 
+struct HeapSnapshotDeleter: public kj::Disposer {
+  static const HeapSnapshotDeleter INSTANCE;
+  void disposeImpl(void* ptr) const override {
+    auto snapshot = const_cast<v8::HeapSnapshot*>(static_cast<const v8::HeapSnapshot*>(ptr));
+    snapshot->Delete();
+  }
+};
+const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
+
 }  // namespace
 
 Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
@@ -2575,9 +2584,10 @@ private:
     Activity activity(*this);
     Writer writer(*this);
 
-    std::unique_ptr<const v8::HeapSnapshot> snapshot(
-        js.v8Isolate->GetHeapProfiler()->TakeHeapSnapshot(&activity, nullptr,
-            exposeInternals, captureNumericValue));
+    auto profiler = js.v8Isolate->GetHeapProfiler();
+    auto snapshot = kj::Own<const v8::HeapSnapshot>(
+        profiler->TakeHeapSnapshot(&activity, nullptr, exposeInternals, captureNumericValue),
+        HeapSnapshotDeleter::INSTANCE);
     snapshot->Serialize(&writer);
   }
 
