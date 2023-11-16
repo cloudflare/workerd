@@ -121,6 +121,8 @@ export class DurableObjectExample {
     const renderPass = encoder.beginRenderPass(renderPassDescriptor);
     ok(renderPass);
 
+    renderPass.setPipeline(renderPipeline);
+
     return new Response("OK");
   }
 }

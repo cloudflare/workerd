@@ -17,6 +17,7 @@
 #include "gpu-pipeline-layout.h"
 #include "gpu-query-set.h"
 #include "gpu-queue.h"
+#include "gpu-render-pass-encoder.h"
 #include "gpu-render-pipeline.h"
 #include "gpu-sampler.h"
 #include "gpu-shader-module.h"
@@ -80,6 +81,9 @@ private:
       api::gpu::GPUVertexState, api::gpu::GPUVertexBufferLayout, api::gpu::GPUVertexAttribute,     \
       api::gpu::GPUPrimitiveState, api::gpu::GPUStencilFaceState, api::gpu::GPUDepthStencilState,  \
       api::gpu::GPUMultisampleState, api::gpu::GPUFragmentState, api::gpu::GPUColorTargetState,    \
-      api::gpu::GPUBlendState, api::gpu::GPUBlendComponent
+      api::gpu::GPUBlendState, api::gpu::GPUBlendComponent, api::gpu::GPURenderPassEncoder,        \
+      api::gpu::GPURenderPassDescriptor, api::gpu::GPURenderPassColorAttachment,                   \
+      api::gpu::GPUColorDict, api::gpu::GPURenderPassDepthStencilAttachment,                       \
+      api::gpu::GPURenderPassTimestampWrite
 
 }; // namespace workerd::api::gpu
