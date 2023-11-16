@@ -5,6 +5,7 @@
 #pragma once
 
 #include "gpu-query-set.h"
+#include "gpu-render-pipeline.h"
 #include "gpu-texture-view.h"
 #include "gpu-utils.h"
 #include <webgpu/webgpu_cpp.h>
@@ -15,10 +16,16 @@ namespace workerd::api::gpu {
 class GPURenderPassEncoder : public jsg::Object {
 public:
   explicit GPURenderPassEncoder(wgpu::RenderPassEncoder e) : encoder_(kj::mv(e)){};
-  JSG_RESOURCE_TYPE(GPURenderPassEncoder) {}
+  JSG_RESOURCE_TYPE(GPURenderPassEncoder) {
+    JSG_METHOD(setPipeline);
+    JSG_METHOD(draw);
+  }
 
 private:
   wgpu::RenderPassEncoder encoder_;
+  void setPipeline(jsg::Ref<GPURenderPipeline> pipeline);
+  void draw(GPUSize32 vertexCount, jsg::Optional<GPUSize32> instanceCount,
+            jsg::Optional<GPUSize32> firstVertex, jsg::Optional<GPUSize32> firstInstance);
 };
 
 struct GPURenderPassDepthStencilAttachment {

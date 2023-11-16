@@ -31,7 +31,8 @@ export class DurableObjectExample {
     const textureView = texture.createView();
     ok(textureView);
 
-    const outputBufferSize = 4 * textureSize * textureSize;
+    const u32Size = 4;
+    const outputBufferSize = u32Size * textureSize * textureSize;
     const outputBuffer = device.createBuffer({
       size: outputBufferSize,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -122,6 +123,25 @@ export class DurableObjectExample {
     ok(renderPass);
 
     renderPass.setPipeline(renderPipeline);
+    renderPass.draw(3);
+
+    encoder.copy_texture_to_buffer(
+      {
+        aspect: "all",
+        texture: texture,
+        mip_level: 0,
+        origin: "zero",
+      },
+      {
+        buffer: outputBuffer,
+        layout: {
+          offset: 0,
+          bytes_per_row: u32Size * textureSize,
+          rows_per_image: textureSize,
+        },
+      },
+      textureDesc.size
+    );
 
     return new Response("OK");
   }
