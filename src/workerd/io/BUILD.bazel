@@ -133,6 +133,7 @@ wd_cc_capnp_library(
         "actor-storage.capnp",
         "cdp.capnp",
         "compatibility-date.capnp",
+        "supported-compatibility-date.capnp",
         "worker-interface.capnp",
     ],
     visibility = ["//visibility:public"],
