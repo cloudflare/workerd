@@ -6,6 +6,7 @@
 
 #include "gpu-command-buffer.h"
 #include "gpu-compute-pass-encoder.h"
+#include "gpu-render-pass-encoder.h"
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
@@ -18,6 +19,7 @@ public:
   JSG_RESOURCE_TYPE(GPUCommandEncoder) {
     JSG_READONLY_PROTOTYPE_PROPERTY(label, getLabel);
     JSG_METHOD(beginComputePass);
+    JSG_METHOD(beginRenderPass);
     JSG_METHOD(copyBufferToBuffer);
     JSG_METHOD(finish);
   }
@@ -31,6 +33,7 @@ private:
 
   jsg::Ref<GPUComputePassEncoder>
   beginComputePass(jsg::Optional<GPUComputePassDescriptor> descriptor);
+  jsg::Ref<GPURenderPassEncoder> beginRenderPass(GPURenderPassDescriptor descriptor);
   jsg::Ref<GPUCommandBuffer> finish(jsg::Optional<GPUCommandBufferDescriptor>);
   void copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
                           jsg::Ref<GPUBuffer> destination, GPUSize64 destinationOffset,

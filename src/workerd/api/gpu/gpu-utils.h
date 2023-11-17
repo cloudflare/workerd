@@ -51,6 +51,8 @@ using GPUIndexFormat = kj::String;
 using GPUStencilOperation = kj::String;
 using GPUBlendOperation = kj::String;
 using GPUBlendFactor = kj::String;
+using GPULoadOp = kj::String;
+using GPUStoreOp = kj::String;
 
 struct GPUMapMode : public jsg::Object {
   static constexpr GPUFlagsConstant READ = 0x0001;
@@ -150,5 +152,9 @@ wgpu::VertexStepMode parseVertexStepMode(kj::StringPtr stepMode);
 wgpu::VertexFormat parseVertexFormat(kj::StringPtr format);
 wgpu::BlendFactor parseBlendFactor(kj::StringPtr factor);
 wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation);
+wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp);
+wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp);
+wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location);
+wgpu::RenderPassTimestampLocation parseRenderPassTimestampLocation(kj::StringPtr location);
 
 } // namespace workerd::api::gpu
