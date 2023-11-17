@@ -1394,7 +1394,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           }
           KJ_CASE_ONEOF(mainModule, kj::Path) {
             auto& registry = (*jsContext)->getModuleRegistry();
-            KJ_IF_SOME(entry, registry.resolve(lock, mainModule)) {
+            KJ_IF_SOME(entry, registry.resolve(lock, mainModule, kj::none)) {
               JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError,
                           "Main module must be an ES module.");
               auto module = entry.module.getHandle(lock);

@@ -1012,7 +1012,7 @@ struct JsSetup {
         auto& js = Lock::from(info.GetIsolate());
         auto context = js.v8Context();
         auto& moduleInfo = KJ_REQUIRE_NONNULL(
-            ModuleRegistry::from(js)->resolve(js, path, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
+            ModuleRegistry::from(js)->resolve(js, path, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY),
             "Could not resolve bootstrap module", moduleName);
         auto module = moduleInfo.module.getHandle(js);
         jsg::instantiateModule(js, module);

@@ -589,6 +589,9 @@ struct Worker {
 
   # TODO(someday): Support distributing objects across a cluster. At present, objects are always
   #   local to one instance of the runtime.
+
+  moduleFallback @13 :Text;
+
 }
 
 struct ExternalServer {

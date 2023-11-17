@@ -646,7 +646,8 @@ kj::Own<Server::Service> Server::makeExternalService(
       auto rewriter = kj::heap<HttpRewriter>(conf.getHttp(), headerTableBuilder);
       auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
       return kj::heap<ExternalHttpService>(
-          kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
+          kj::mv(addr), kj::mv(rewriter), headerTableBuilder.getFutureTable(),
+          timer, entropySource);
     }
     case config::ExternalServer::HTTPS: {
       auto httpsConf = conf.getHttps();
@@ -658,7 +659,8 @@ kj::Own<Server::Service> Server::makeExternalService(
       auto addr = kj::heap<PromisedNetworkAddress>(
           makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443));
       return kj::heap<ExternalHttpService>(
-          kj::mv(addr), kj::mv(rewriter), globalContext->headerTable, timer, entropySource);
+          kj::mv(addr), kj::mv(rewriter), headerTableBuilder.getFutureTable(),
+          timer, entropySource);
     }
     case config::ExternalServer::TCP: {
       auto tcpConf = conf.getTcp();
@@ -1312,6 +1314,7 @@ public:
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
         waitUntilTasks(*this) {
+
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
       kj::StringPtr epPtr = ep.key;
@@ -2515,6 +2518,175 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   // with the inspector service.
   KJ_IF_SOME(isolateRegistrar, inspectorIsolateRegistrar) {
     isolateRegistrar->registerIsolate(name, isolate.get());
+  }
+
+  if (conf.hasModuleFallback()) {
+    KJ_REQUIRE(experimental,
+               "The module fallback service is an experimental feature. "
+               "You must run workerd with `--experimental` to use this feature.");
+    // If the config has the moduleFallback option, then we are going to set up the ability
+    // to load certain modules from a fallback service. This is generally intended for local
+    // dev/testing purposes only.
+    auto& apiIsolate = isolate->getApi();
+    apiIsolate.setModuleFallbackCallback(
+        [address=kj::str(conf.getModuleFallback()), featureFlags=apiIsolate.getFeatureFlags()]
+        (jsg::Lock& js,
+         kj::StringPtr specifier,
+         kj::Maybe<kj::String> referrer,
+         jsg::CompilationObserver& observer,
+         jsg::ModuleRegistry::ResolveMethod method) mutable
+            -> kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>> {
+      kj::Maybe<kj::String> jsonPayload;
+      bool redirect = false;
+      bool prefixed = false;
+      kj::Url url;
+      kj::StringPtr actualSpecifier = nullptr;
+      // TODO(cleanup): This is a bit of a hack based on the current
+      // design of the module registry loader algorithms handling of
+      // prefixed modules. This will be simplified with the upcoming
+      // module registry refactor.
+      KJ_IF_SOME(pos, specifier.findLast('/')) {
+        auto segment = specifier.slice(pos + 1);
+        if (segment.startsWith("node:") ||
+            segment.startsWith("cloudflare:") ||
+            segment.startsWith("workerd:")) {
+          actualSpecifier = segment;
+          url.query.add(kj::Url::QueryParam {
+            .name = kj::str("specifier"),
+            .value = kj::str(segment)
+          });
+          prefixed = true;
+        }
+      }
+      if (!prefixed) {
+        actualSpecifier = specifier;
+        if (actualSpecifier.startsWith("/")) {
+          actualSpecifier = specifier.slice(1);
+        }
+        url.query.add(
+          kj::Url::QueryParam { kj::str("specifier"), kj::str(specifier) }
+        );
+      }
+      KJ_IF_SOME(ref, referrer) {
+        url.query.add(
+          kj::Url::QueryParam { kj::str("referrer"), kj::mv(ref) }
+        );
+      }
+
+      auto spec = url.toString(kj::Url::HTTP_REQUEST);
+
+      {
+        // Module loading in workerd is expected to be synchronous but we need to perform
+        // an async HTTP request to the fallback service. To accomplish that we wrap the
+        // actual request in a kj::Thread, perform the GET, and drop the thread immediately
+        // so that the destructor joins the current thread (blocking it). The thread will
+        // either set the jsonPayload variable or not.
+        kj::Thread loaderThread(
+          [&spec,
+           referrer=kj::mv(referrer),
+           address=address.asPtr(),
+           &jsonPayload,
+           &redirect,
+           method]() mutable {
+          try {
+            const auto toStr = [](jsg::ModuleRegistry::ResolveMethod method) {
+              switch (method) {
+                case jsg::ModuleRegistry::ResolveMethod::IMPORT: return "import"_kjc;
+                case jsg::ModuleRegistry::ResolveMethod::REQUIRE: return "require"_kjc;
+              }
+              KJ_UNREACHABLE;
+            };
+
+            kj::AsyncIoContext io = kj::setupAsyncIo();
+
+            kj::HttpHeaderTable::Builder builder;
+            kj::HttpHeaderId kMethod = builder.add("x-resolve-method");
+            auto headerTable = builder.build();
+
+            auto addr = io.provider->getNetwork().parseAddress(address, 80).wait(io.waitScope);
+
+            auto client = kj::newHttpClient(
+                io.provider->getTimer(),
+                *headerTable,
+                *addr, { });
+
+            kj::HttpHeaders headers(*headerTable);
+            headers.set(kMethod, toStr(method));
+            headers.set(kj::HttpHeaderId::HOST, "localhost"_kj);
+
+            auto request = client->request(kj::HttpMethod::GET, spec, headers, kj::none);
+
+            kj::HttpClient::Response resp = request.response.wait(io.waitScope);
+
+            if (resp.statusCode == 301) {
+              // The fallback service responded with a redirect.
+              KJ_IF_SOME(loc, resp.headers->get(kj::HttpHeaderId::LOCATION)) {
+                redirect = true;
+                jsonPayload = kj::str(loc);
+              } else {
+                KJ_LOG(ERROR, "Fallback service returned a redirect with no location", spec);
+              }
+            } else if (resp.statusCode != 200) {
+              // Failed! Log the body of the respnose, if any, and fall through without
+              // setting jsonPayload to signal that the fallback service failed to return
+              // a module for this specifier.
+              auto payload = resp.body->readAllText().wait(io.waitScope);
+              KJ_LOG(ERROR, "Fallback service failed to fetch module", payload, spec);
+            } else {
+              jsonPayload = resp.body->readAllText().wait(io.waitScope);
+            }
+          } catch (...) {
+            auto exception = kj::getCaughtExceptionAsKj();
+            KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, spec);
+          }
+        });
+      }
+
+      KJ_IF_SOME(payload, jsonPayload) {
+        // If the payload is empty then the fallback service failed to fetch the module.
+        if (payload.size() == 0) return kj::none;
+
+        // If redirect is true then the fallback service returned a 301 redirect. The
+        // payload is the specifier of the new target module.
+        if (redirect) {
+          return kj::Maybe(kj::mv(payload));
+        }
+
+        // The response from the fallback service must be a valid JSON serialization
+        // of the workerd module configuration. If it is not, or if there is any other
+        // error when processing here, we'll log the exception and return nothing.
+        try {
+          capnp::MallocMessageBuilder moduleMessage;
+          capnp::JsonCodec json;
+          json.handleByAnnotation<config::Worker::Module>();
+          auto moduleBuilder = moduleMessage.initRoot<config::Worker::Module>();
+          json.decode(payload, moduleBuilder);
+
+          // If the module fallback service returns a name in the module then it has to
+          // match the specifier we passed in. This is an optional sanity check.
+          if (moduleBuilder.hasName()) {
+            if (moduleBuilder.getName() != actualSpecifier) {
+              KJ_LOG(ERROR,
+                    "Fallback service failed to fetch module: returned module "
+                    "name does not match specifier",
+                    moduleBuilder.getName(), actualSpecifier);
+              return kj::none;
+            }
+          } else {
+            moduleBuilder.setName(kj::str(actualSpecifier));
+          }
+
+          return WorkerdApi::tryCompileModule(js, moduleBuilder, observer, featureFlags);
+        } catch (...) {
+          auto exception = kj::getCaughtExceptionAsKj();
+          KJ_LOG(ERROR, "Fallback service failed to fetch module", exception, spec);
+          return kj::none;
+        }
+      }
+
+      // If we got here, no jsonPayload was received and we return nothing.
+      return kj::none;
+    });
   }
 
   auto script = isolate->newScript(
