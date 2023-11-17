@@ -49,13 +49,6 @@ kj::String errorsToString(
 }
 }
 
-SslArrayDisposer SslArrayDisposer::INSTANCE;
-
-void SslArrayDisposer::disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                  size_t capacity, void (*destroyElement)(void*)) const {
-  OPENSSL_free(firstElement);
-}
-
 // Call when an OpenSSL function returns an error code to convert that into an exception and
 // throw it.
 void throwOpensslError(const char* file, int line, kj::StringPtr code) {

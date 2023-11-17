@@ -251,14 +251,6 @@ struct CryptoAlgorithm {
   //   function, which seemed slightly too annoying to implement now.
 };
 
-class SslArrayDisposer : public kj::ArrayDisposer {
-public:
-  static SslArrayDisposer INSTANCE;
-
-  void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                   size_t capacity, void (*destroyElement)(void*)) const;
-};
-
 template <typename T, void (*sslFree)(T*)>
 class SslDisposer: public kj::Disposer {
 public:

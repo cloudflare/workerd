@@ -95,6 +95,16 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "crypto-utils",
+    srcs = ["crypto-utils.c++"],
+    hdrs = ["crypto-utils.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj/compat:kj-tls"
+    ]
+)
+
 [kj_test(
     src = f,
     deps = [

@@ -15,6 +15,7 @@
 #include <type_traits>
 #include "util.h"
 #include <workerd/io/features.h>
+#include <workerd/util/crypto-utils.h>
 
 namespace workerd::api {
 namespace {

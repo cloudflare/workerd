@@ -18,13 +18,12 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
 #include <time.h>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
+#include <workerd/util/crypto-utils.h>
 #include <workerd/util/mimetype.h>
 #include "workerd-api.h"
 #include "workerd/io/hibernation-manager.h"
@@ -33,42 +32,6 @@
 namespace workerd::server {
 
 namespace {
-
-struct PemData {
-  kj::String type;
-  kj::Array<byte> data;
-};
-
-// Decode PEM format using OpenSSL helpers.
-static kj::Maybe<PemData> decodePem(kj::ArrayPtr<const char> text) {
-  // TODO(cleanup): Should this be part of the KJ TLS library? We don't technically use it for TLS.
-  //   Maybe KJ should have a general crypto library that wraps OpenSSL?
-
-  BIO* bio = BIO_new_mem_buf(const_cast<char*>(text.begin()), text.size());
-  KJ_DEFER(BIO_free(bio));
-
-  class OpenSslDisposer: public kj::ArrayDisposer {
-  public:
-    void disposeImpl(void* firstElement, size_t elementSize, size_t elementCount,
-                     size_t capacity, void (*destroyElement)(void*)) const override {
-      OPENSSL_free(firstElement);
-    }
-  };
-  static constexpr OpenSslDisposer disposer;
-
-  char* namePtr = nullptr;
-  char* headerPtr = nullptr;
-  byte* dataPtr = nullptr;
-  long dataLen = 0;
-  if (!PEM_read_bio(bio, &namePtr, &headerPtr, &dataPtr, &dataLen)) {
-    return kj::none;
-  }
-  kj::Array<char> nameArr(namePtr, strlen(namePtr) + 1, disposer);
-  KJ_DEFER(OPENSSL_free(headerPtr));
-  kj::Array<kj::byte> data(dataPtr, dataLen, disposer);
-
-  return PemData { kj::String(kj::mv(nameArr)), kj::mv(data) };
-}
 
 // Returns a time string in the format HTTP likes to use.
 static kj::String httpTime(kj::Date date) {
