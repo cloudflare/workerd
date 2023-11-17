@@ -124,4 +124,7 @@ public:
   virtual void reportMetrics(RequestObserver& requestMetrics) = 0;
 };
 
+// Create an IsolateLimitEnforcer that enforces no limits.
+kj::Own<IsolateLimitEnforcer> newNullIsolateLimitEnforcer();
+
 }  // namespace workerd

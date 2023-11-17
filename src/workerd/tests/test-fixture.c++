@@ -138,41 +138,6 @@ struct MockLimitEnforcer final: public LimitEnforcer {
 
 };
 
-struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
-   v8::Isolate::CreateParams getCreateParams() override { return {}; }
-    void customizeIsolate(v8::Isolate* isolate) override {}
-    ActorCacheSharedLruOptions getActorCacheLruOptions() override {
-      return {
-        .softLimit = 16 * (1ull << 20), // 16 MiB
-        .hardLimit = 128 * (1ull << 20), // 128 MiB
-        .staleTimeout = 30 * kj::SECONDS,
-        .dirtyListByteLimit = 8 * (1ull << 20), // 8 MiB
-        .maxKeysPerRpc = 128,
-        .neverFlush = true
-      };
-    }
-    kj::Own<void> enterStartupJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
-      return {};
-    }
-    kj::Own<void> enterDynamicImportJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
-      return {};
-    }
-    kj::Own<void> enterLoggingJs(
-        jsg::Lock& lock, kj::Maybe<kj::Exception>& error) const override {
-      return {};
-    }
-    kj::Own<void> enterInspectorJs(
-        jsg::Lock& loc, kj::Maybe<kj::Exception>& error) const override {
-      return {};
-    }
-    void completedRequest(kj::StringPtr id) const override {}
-    bool exitJs(jsg::Lock& lock) const override { return false; }
-    void reportMetrics(IsolateObserver& isolateMetrics) const override {}
-
-};
-
 struct MockErrorReporter final: public Worker::ValidationErrorReporter {
   void addError(kj::String error) override {
     KJ_FAIL_REQUIRE("unexpected error", error);
@@ -258,7 +223,7 @@ TestFixture::TestFixture(SetupParams&& params)
     httpOverCapnpFactory(byteStreamFactory,
       capnp::HttpOverCapnpFactory::HeaderIdBundle(headerTableBuilder)),
     threadContext(*timer, *entropySource, threadContextHeaderBundle, httpOverCapnpFactory, byteStreamFactory, false),
-    isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
+    isolateLimitEnforcer(newNullIsolateLimitEnforcer()),
     errorReporter(kj::heap<MockErrorReporter>()),
     apiIsolate(kj::heap<server::WorkerdApiIsolate>(
       testV8System,
