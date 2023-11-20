@@ -19,6 +19,7 @@
 #include <workerd/jsg/setup.h>
 #include <openssl/rand.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/supported-compatibility-date.capnp.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
