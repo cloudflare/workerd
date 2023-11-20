@@ -36,9 +36,23 @@ public:
       jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
       const jsg::TypeHandler<UnsafeEvalFunction>& handler);
 
+  // Compiles and returns a new Async Function using the given script. The function
+  // does not capture any part of the outer scope other than globalThis and globally
+  // scoped variables. The optional `name` will be set as the name of the function
+  // and will appear in stack traces for any errors thrown. An optional list of
+  // arguments names can be passed in. If your function needs to use the await
+  // key, use this instead of newFunction.
+  UnsafeEvalFunction newAsyncFunction(
+      jsg::Lock& js,
+      jsg::JsString script,
+      jsg::Optional<kj::String> name,
+      jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
+      const jsg::TypeHandler<UnsafeEvalFunction>& handler);
+
   JSG_RESOURCE_TYPE(UnsafeEval) {
     JSG_METHOD(eval);
     JSG_METHOD(newFunction);
+    JSG_METHOD(newAsyncFunction);
   }
 };
 
