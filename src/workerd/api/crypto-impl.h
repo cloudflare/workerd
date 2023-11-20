@@ -201,6 +201,14 @@ public:
         "Unrecognized or unsupported export of \"", getAlgorithmName(), "\" requested.");
   }
 
+  // The tryExportKeyAsync variant supports cases where the key data must be exported
+  // asynchronously (e.g. for secret store crypto keys).
+  virtual kj::Maybe<jsg::Promise<SubtleCrypto::ExportKeyData>> tryExportKeyAsync(
+      jsg::Lock& js,
+      kj::StringPtr format) const {
+    return kj::none;
+  }
+
   virtual kj::StringPtr getAlgorithmName() const = 0;
 
   virtual CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail() const {
@@ -338,6 +346,12 @@ public:
 private:
   kj::Array<kj::byte> inner;
 };
+
+jsg::Ref<CryptoKey> newSecretStoreCryptoKey(
+    uint channel,
+    kj::StringPtr id,
+    bool exportable,
+    uint32_t ownerId);
 
 }  // namespace workerd::api
 

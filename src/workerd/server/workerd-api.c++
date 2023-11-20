@@ -628,6 +628,13 @@ static v8::Local<v8::Value> createBindingValue(
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
       value = lock.wrap(context, jsg::alloc<api::UnsafeEval>());
     }
+    KJ_CASE_ONEOF(secret, Global::Secret) {
+      value = lock.wrap(context, api::newSecretStoreCryptoKey(
+          secret.subrequestChannel,
+          secret.id,
+          secret.exportable,
+          ownerId));
+    }
   }
 
   return value;
@@ -703,6 +710,9 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
     }
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
       result.value = Global::UnsafeEval {};
+    }
+    KJ_CASE_ONEOF(secret, Global::Secret) {
+      result.value = secret.clone();
     }
   }
 

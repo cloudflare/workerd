@@ -2378,6 +2378,24 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
       }
       return makeGlobal(Global::UnsafeEval {});
     }
+    case config::Worker::Binding::SECRET: {
+      if (!experimental) {
+        errorReporter.addError(kj::str("The secret store is an experimental feature. ",
+            "You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      auto secret = binding.getSecret();
+      subrequestChannels.add(FutureSubrequestChannel {
+        secret.getDesignator(),
+        kj::mv(errorContext)
+      });
+      return makeGlobal(Global::Secret {
+        .subrequestChannel = channel,
+        .id = kj::str(secret.getId()),
+        .exportable = secret.getExportable(),
+      });
+    }
   }
   errorReporter.addError(kj::str(
       errorContext, "has unrecognized type. Was the config compiled with a newer version of "

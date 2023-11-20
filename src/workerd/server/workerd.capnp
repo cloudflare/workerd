@@ -369,6 +369,8 @@ struct Worker {
       unsafeEval @23 :Void;
       # A simple binding that enables access to the UnsafeEval API.
 
+      secret @24 :Secret;
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -484,6 +486,12 @@ struct Worker {
       # Inner bindings that will be created and passed in the env dictionary.
       # These bindings shall be used to implement end-user api, and are not available to the
       # binding consumers unless "re-exported" in wrapBindings function.
+    }
+
+    struct Secret {
+      designator @0 :ServiceDesignator;
+      id @1 :Text;
+      exportable @2 :Bool = true;
     }
   }
 
