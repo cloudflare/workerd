@@ -257,6 +257,7 @@ private:
   // Used by Sockets code to ensure the connection is established before the associated
   // WritableStream is closed.
   kj::Maybe<jsg::Promise<void>> maybeClosureWaitable;
+  bool waitingOnClosureWritableAlready = false;
 
   void increaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);
   void decreaseCurrentWriteBufferSize(jsg::Lock& js, uint64_t amount);

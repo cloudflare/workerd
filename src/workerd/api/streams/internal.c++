@@ -957,14 +957,22 @@ jsg::Promise<void> WritableStreamInternalController::close(
     jsg::Lock& js,
     bool markAsHandled) {
   KJ_IF_SOME(closureWaitable, maybeClosureWaitable) {
-    return closureWaitable
+    // If we're already waiting on the closure waitable, then we do not want to try scheduling
+    // it again, let's just wait for the existing one to be resolved.
+    if (waitingOnClosureWritableAlready) {
+      return closureWaitable.whenResolved(js);
+    }
+    waitingOnClosureWritableAlready = true;
+    auto promise = closureWaitable
         .then(js, [markAsHandled, this](jsg::Lock& js) {
           return closeImpl(js, markAsHandled);
-        }, [](jsg::Lock& js, jsg::V8Ref<v8::Value> val) {
+        }, [](jsg::Lock& js, jsg::Value) {
           // Ignore rejection as it will be reported in the Socket's `closed`/`opened` promises
           // instead.
           return js.resolvedPromise();
         });
+    maybeClosureWaitable = promise.whenResolved(js);
+    return kj::mv(promise);
   } else {
     return closeImpl(js, markAsHandled);
   }
