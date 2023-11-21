@@ -22,6 +22,86 @@ GPUCommandEncoder::finish(jsg::Optional<GPUCommandBufferDescriptor> descriptor) 
   return jsg::alloc<GPUCommandBuffer>(kj::mv(buffer));
 };
 
+void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
+                                            GPUImageCopyBuffer destination, GPUExtent3D copySize) {
+  wgpu::ImageCopyTexture src{};
+  src.texture = *source.texture;
+
+  KJ_IF_SOME(mipLevel, source.mipLevel) {
+    src.mipLevel = mipLevel;
+  }
+  KJ_IF_SOME(origin, source.origin) {
+    KJ_SWITCH_ONEOF(origin) {
+      KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
+        JSG_REQUIRE(coords.size() == 3, Error, "Wrong number of elements in origin");
+        src.origin.x = coords[0];
+        src.origin.y = coords[1];
+        src.origin.z = coords[2];
+      }
+      KJ_CASE_ONEOF(gpuOriginDict, GPUOrigin3DDict) {
+        KJ_IF_SOME(x, gpuOriginDict.x) {
+          src.origin.x = x;
+        }
+        KJ_IF_SOME(y, gpuOriginDict.y) {
+          src.origin.y = y;
+        }
+        KJ_IF_SOME(z, gpuOriginDict.z) {
+          src.origin.z = z;
+        }
+      }
+    }
+  }
+  KJ_IF_SOME(aspect, source.aspect) {
+    src.aspect = parseTextureAspect(aspect);
+  }
+
+  wgpu::ImageCopyBuffer dst{};
+  dst.buffer = *destination.buffer;
+
+  KJ_IF_SOME(offset, destination.offset) {
+    dst.layout.offset = offset;
+  }
+  KJ_IF_SOME(bytesPerRow, destination.bytesPerRow) {
+    dst.layout.bytesPerRow = bytesPerRow;
+  }
+  KJ_IF_SOME(rowsPerImage, destination.rowsPerImage) {
+    dst.layout.rowsPerImage = rowsPerImage;
+  }
+
+  wgpu::Extent3D size{};
+  KJ_SWITCH_ONEOF(copySize) {
+    KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
+      // if we have a sequence of coordinates we assume that the order is: width, heigth, depth, if
+      // available, and ignore all the rest.
+      switch (coords.size()) {
+      default:
+      case 3:
+        size.depthOrArrayLayers = coords[2];
+        KJ_FALLTHROUGH;
+      case 2:
+        size.height = coords[1];
+        KJ_FALLTHROUGH;
+      case 1:
+        size.width = coords[0];
+        break;
+      case 0:
+        JSG_FAIL_REQUIRE(TypeError, "invalid value for GPUExtent3D");
+      }
+    }
+    KJ_CASE_ONEOF(size, GPUExtent3DDict) {
+      KJ_IF_SOME(depthOrArrayLayers, size.depthOrArrayLayers) {
+        size.depthOrArrayLayers = depthOrArrayLayers;
+      }
+      KJ_IF_SOME(height, size.height) {
+        size.height = height;
+      }
+      size.width = size.width;
+    }
+  }
+
+  encoder_.CopyTextureToBuffer(&src, &dst, &size);
+}
+
 void GPUCommandEncoder::copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
                                            jsg::Ref<GPUBuffer> destination,
                                            GPUSize64 destinationOffset, GPUSize64 size) {

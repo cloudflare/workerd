@@ -472,6 +472,8 @@ parseRenderPipelineDescriptor(GPURenderPipelineDescriptor& descriptor) {
       KJ_IF_SOME(mask, t.writeMask) {
         target.writeMask = static_cast<wgpu::ColorWriteMask>(mask);
       }
+
+      targets.add(kj::mv(target));
     }
     auto targetsArray = targets.releaseAsArray();
     fragmentState->targets = targetsArray.begin();
