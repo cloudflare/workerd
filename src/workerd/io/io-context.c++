@@ -1203,8 +1203,11 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
       // Check if we hit a limit.
       limitEnforcer->requireLimitsNotExceeded();
 
-      // That should have thrown, so we shouldn't get here.
-      KJ_FAIL_ASSERT("script terminated for unknown reasons");
+      // That should have thrown, so we shouldn't get here. If we do end up here tho,
+      // it is because of some other kind of terminal error thrown by v8. An OOM,
+      // perhaps? Either way there's not much else we can do here but fail. But
+      // try try not to fail too noisily, shall we?
+      KJ_FAIL_ASSERT("NOSENTRY script terminated for unknown reasons");
     } else {
       if (tryCatch.Message().IsEmpty()) {
         // Should never happen, but check for it because otherwise V8 will crash.
