@@ -25,8 +25,8 @@ struct Module {
 
 
 enum ModuleType {
-  user @0;
-  # Provided by the worker bundle.
+  bundle @0;
+  # Provided by the worker bundle. TODO: rename this to e.g., user?
 
   builtin @1;
   # Provided by the runtime and can be imported by the worker bundle.
