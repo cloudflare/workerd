@@ -19,6 +19,7 @@ public:
   JSG_RESOURCE_TYPE(GPURenderPassEncoder) {
     JSG_METHOD(setPipeline);
     JSG_METHOD(draw);
+    JSG_METHOD(end);
   }
 
 private:
@@ -26,6 +27,9 @@ private:
   void setPipeline(jsg::Ref<GPURenderPipeline> pipeline);
   void draw(GPUSize32 vertexCount, jsg::Optional<GPUSize32> instanceCount,
             jsg::Optional<GPUSize32> firstVertex, jsg::Optional<GPUSize32> firstInstance);
+  void end() {
+    encoder_.End();
+  };
 };
 
 struct GPURenderPassDepthStencilAttachment {

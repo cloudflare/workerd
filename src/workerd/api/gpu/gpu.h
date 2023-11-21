@@ -84,6 +84,7 @@ private:
       api::gpu::GPUBlendState, api::gpu::GPUBlendComponent, api::gpu::GPURenderPassEncoder,        \
       api::gpu::GPURenderPassDescriptor, api::gpu::GPURenderPassColorAttachment,                   \
       api::gpu::GPUColorDict, api::gpu::GPURenderPassDepthStencilAttachment,                       \
-      api::gpu::GPURenderPassTimestampWrite
+      api::gpu::GPURenderPassTimestampWrite, api::gpu::GPUImageCopyTexture,                        \
+      api::gpu::GPUImageCopyBuffer, api::gpu::GPUOrigin3DDict
 
 }; // namespace workerd::api::gpu

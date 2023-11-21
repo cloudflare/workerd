@@ -4,13 +4,38 @@
 
 #pragma once
 
+#include "gpu-buffer.h"
 #include "gpu-command-buffer.h"
 #include "gpu-compute-pass-encoder.h"
 #include "gpu-render-pass-encoder.h"
+#include "gpu-texture.h"
 #include <webgpu/webgpu_cpp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api::gpu {
+
+struct GPUOrigin3DDict {
+  jsg::Optional<GPUIntegerCoordinate> x, y, z;
+  JSG_STRUCT(x, y, z);
+};
+
+using GPUOrigin3D = kj::OneOf<jsg::Sequence<GPUIntegerCoordinate>, GPUOrigin3DDict>;
+
+struct GPUImageCopyTexture {
+  jsg::Ref<GPUTexture> texture;
+  jsg::Optional<GPUIntegerCoordinate> mipLevel;
+  jsg::Optional<GPUOrigin3D> origin;
+  jsg::Optional<GPUTextureAspect> aspect;
+  JSG_STRUCT(texture, mipLevel, origin, aspect);
+};
+
+struct GPUImageCopyBuffer {
+  jsg::Ref<GPUBuffer> buffer;
+  jsg::Optional<GPUSize64> offset;
+  jsg::Optional<GPUSize32> bytesPerRow;
+  jsg::Optional<GPUSize32> rowsPerImage;
+  JSG_STRUCT(buffer, offset, bytesPerRow, rowsPerImage);
+};
 
 class GPUCommandEncoder : public jsg::Object {
 public:
@@ -22,6 +47,7 @@ public:
     JSG_METHOD(beginRenderPass);
     JSG_METHOD(copyBufferToBuffer);
     JSG_METHOD(finish);
+    JSG_METHOD(copyTextureToBuffer);
   }
 
 private:
@@ -38,6 +64,8 @@ private:
   void copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64 sourceOffset,
                           jsg::Ref<GPUBuffer> destination, GPUSize64 destinationOffset,
                           GPUSize64 size);
+  void copyTextureToBuffer(GPUImageCopyTexture source, GPUImageCopyBuffer destination,
+                           GPUExtent3D copySize);
 };
 
 struct GPUCommandEncoderDescriptor {

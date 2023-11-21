@@ -124,24 +124,33 @@ export class DurableObjectExample {
 
     renderPass.setPipeline(renderPipeline);
     renderPass.draw(3);
+    renderPass.end();
 
-    encoder.copy_texture_to_buffer(
+    encoder.copyTextureToBuffer(
       {
         aspect: "all",
         texture: texture,
-        mip_level: 0,
-        origin: "zero",
+        mipLevel: 0,
+        origin: {},
       },
       {
         buffer: outputBuffer,
-        layout: {
-          offset: 0,
-          bytes_per_row: u32Size * textureSize,
-          rows_per_image: textureSize,
-        },
+        offset: 0,
+        bytesPerRow: u32Size * textureSize,
+        rowsPerImage: textureSize,
       },
       textureDesc.size
     );
+
+    // Submit GPU commands.
+    const gpuCommands = encoder.finish();
+    device.queue.submit([gpuCommands]);
+
+    await outputBuffer.mapAsync(GPUMapMode.READ);
+
+    const data = outputBuffer.getMappedRange();
+    ok(data);
+    outputBuffer.unmap();
 
     return new Response("OK");
   }
