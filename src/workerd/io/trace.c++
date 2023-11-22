@@ -25,6 +25,16 @@ static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
 
 } // namespace
 
+Trace::ConnectEventInfo::ConnectEventInfo(kj::String cfJson)
+    : cfJson(kj::mv(cfJson)) {}
+
+Trace::ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader)
+    : cfJson(kj::str(reader.getCfJson())) {}
+
+void Trace::ConnectEventInfo::copyTo(rpc::Trace::ConnectEventInfo::Builder builder) {
+  builder.setCfJson(cfJson);
+}
+
 Trace::FetchEventInfo::FetchEventInfo(kj::HttpMethod method, kj::String url, kj::String cfJson,
     kj::Array<Header> headers)
     : method(method), url(kj::mv(url)), cfJson(kj::mv(cfJson)), headers(kj::mv(headers)) {}
@@ -313,6 +323,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
         auto jsRpcBuilder = eventInfoBuilder.initJsRpc();
         jsRpc.copyTo(jsRpcBuilder);
       }
+      KJ_CASE_ONEOF(connect, ConnectEventInfo) {
+        auto connectBuilder = eventInfoBuilder.initConnect();
+        connect.copyTo(connectBuilder);
+      }
       KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
         auto scheduledBuilder = eventInfoBuilder.initScheduled();
         scheduled.copyTo(scheduledBuilder);
@@ -420,6 +434,9 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
         break;
       case rpc::Trace::EventInfo::Which::JS_RPC:
         eventInfo = JsRpcEventInfo(e.getJsRpc());
+        break;
+      case rpc::Trace::EventInfo::Which::CONNECT:
+        eventInfo = ConnectEventInfo(e.getConnect());
         break;
       case rpc::Trace::EventInfo::Which::SCHEDULED:
         eventInfo = ScheduledEventInfo(e.getScheduled());
@@ -661,6 +678,16 @@ void WorkerTracer::setEventInfo(kj::Date timestamp, Trace::EventInfo&& info) {
       }
     }
     KJ_CASE_ONEOF(_, Trace::JsRpcEventInfo) {}
+    KJ_CASE_ONEOF(connect, Trace::ConnectEventInfo) {
+      newSize += connect.cfJson.size();
+      if (newSize > MAX_TRACE_BYTES) {
+        trace->logs.add(
+            timestamp, LogLevel::WARN,
+            kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
+        trace->eventInfo = Trace::ConnectEventInfo(kj::str());
+        return;
+      }
+    }
     KJ_CASE_ONEOF(_, Trace::ScheduledEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::AlarmEventInfo) {}
     KJ_CASE_ONEOF(_, Trace::QueueEventInfo) {}

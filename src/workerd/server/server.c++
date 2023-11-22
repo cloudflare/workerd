@@ -28,10 +28,10 @@
 #include <workerd/io/request-tracker.h>
 #include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
-#include <workerd/util/mimetype.h>
-#include <workerd/util/uuid.h>
-#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/util/mimetype.h>
+#include <workerd/util/use-perfetto-categories.h>
+#include <workerd/util/stream-utils.h>
 #include "workerd-api.h"
 #include "workerd/io/hibernation-manager.h"
 #include <stdlib.h>
@@ -3351,6 +3351,92 @@ private:
   };
 };
 
+class Server::TcpListener final: public kj::Refcounted {
+public:
+  TcpListener(Server& owner, kj::Own<kj::ConnectionReceiver> listener, Service& service,
+              kj::HttpHeaderTable& headerTable, kj::Own<HttpRewriter> rewriter)
+      : owner(owner),
+        listener(kj::mv(listener)),
+        service(service),
+        headerTable(headerTable),
+        rewriter(kj::mv(rewriter)) {}
+
+  kj::Promise<void> run() {
+    for (;;) {
+      kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+
+      kj::Maybe<kj::String> cfBlobJson;
+      if (!rewriter->hasCfBlobHeader()) {
+        // Construct a cf blob describing the client identity.
+
+        kj::PeerIdentity* peerId;
+
+        KJ_IF_SOME(tlsId,
+            kj::dynamicDowncastIfAvailable<kj::TlsPeerIdentity>(*stream.peerIdentity)) {
+          peerId = &tlsId.getNetworkIdentity();
+
+          // TODO(someday): Add client certificate info to the cf blob? At present, KJ only
+          //   supplies the common name, but that doesn't even seem to be one of the fields that
+          //   Cloudflare-hosted Workers receive. We should probably try to match those.
+        } else {
+          peerId = stream.peerIdentity;
+        }
+
+        KJ_IF_SOME(remote,
+            kj::dynamicDowncastIfAvailable<kj::NetworkPeerIdentity>(*peerId)) {
+          cfBlobJson = kj::str("{\"clientIp\": \"", escapeJsonString(remote.toString()), "\"}");
+        } else KJ_IF_SOME(local,
+            kj::dynamicDowncastIfAvailable<kj::LocalPeerIdentity>(*peerId)) {
+          auto creds = local.getCredentials();
+
+          kj::Vector<kj::String> parts;
+          KJ_IF_SOME(p, creds.pid) {
+            parts.add(kj::str("\"clientPid\":", p));
+          }
+          KJ_IF_SOME(u, creds.uid) {
+            parts.add(kj::str("\"clientUid\":", u));
+          }
+
+          cfBlobJson = kj::str("{", kj::strArray(parts, ","), "}");
+        }
+      }
+
+      IoChannelFactory::SubrequestMetadata metadata;
+      metadata.cfBlobJson = cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); });
+      auto req = service.startRequest(kj::mv(metadata));
+      auto response = kj::heap<ResponseWrapper>();
+      kj::HttpHeaders headers(headerTable);
+      // The empty string here is the host parameter that is required by the API
+      // but is not actually used in the implementation at this point.
+      owner.tasks.add(req->connect(""_kj, headers, *stream.stream, *response, {})
+          .attach(kj::mv(stream.stream), kj::mv(response)).attach(kj::mv(req)));
+    }
+  }
+
+private:
+  Server& owner;
+  kj::Own<kj::ConnectionReceiver> listener;
+  Service& service;
+  kj::HttpHeaderTable& headerTable;
+  kj::Own<HttpRewriter> rewriter;
+
+  struct ResponseWrapper final: public kj::HttpService::ConnectResponse {
+    void accept(uint statusCode,
+                kj::StringPtr statusText,
+                const kj::HttpHeaders& headers) override {
+      // Ok.. we're accepting the connection... anything to do?
+    }
+    kj::Own<kj::AsyncOutputStream> reject(
+        uint statusCode,
+        kj::StringPtr statusText,
+        const kj::HttpHeaders& headers,
+        kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+      // Doh... we're rejecting the connection... anything to do?
+      return newNullOutputStream();
+    }
+  };
+};
+
 kj::Promise<void> Server::listenHttp(
     kj::Own<kj::ConnectionReceiver> listener, Service& service,
     kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter) {
@@ -3358,6 +3444,16 @@ kj::Promise<void> Server::listenHttp(
                                           physicalProtocol, kj::mv(rewriter),
                                           globalContext->headerTable, timer,
                                           globalContext->httpOverCapnpFactory);
+  co_return co_await obj->run();
+}
+
+kj::Promise<void> Server::listenTcp(
+    kj::Own<kj::ConnectionReceiver> listener,
+    Service& service,
+    kj::Own<HttpRewriter> rewriter) {
+  auto obj = kj::refcounted<TcpListener>(*this, kj::mv(listener), service,
+                                         globalContext->headerTable,
+                                         kj::mv(rewriter));
   co_return co_await obj->run();
 }
 
@@ -3624,18 +3720,31 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     config::HttpOptions::Reader httpOptions;
     kj::Maybe<kj::Own<kj::TlsContext>> tls;
     kj::StringPtr physicalProtocol;
+    bool isHttp = false;
     switch (sock.which()) {
       case config::Socket::HTTP:
+        isHttp = true;
         defaultPort = 80;
         httpOptions = sock.getHttp();
         physicalProtocol = "http";
         goto validSocket;
       case config::Socket::HTTPS: {
+        isHttp = true;
         auto https = sock.getHttps();
         defaultPort = 443;
         httpOptions = https.getOptions();
         tls = makeTlsContext(https.getTlsOptions());
         physicalProtocol = "https";
+        goto validSocket;
+      }
+      case config::Socket::TCP: {
+        isHttp = false;
+        auto tcp = sock.getTcp();
+        // No default port
+        // No physical protocol mention here.
+        if (tcp.hasTlsOptions()) {
+          tls = makeTlsContext(tcp.getTlsOptions());
+        }
         goto validSocket;
       }
     }
@@ -3665,27 +3774,47 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
       })(kj::mv(listener), kj::mv(t));
     }
 
-    // Need to create rewriter before waiting on anything since `headerTableBuilder` will no longer
-    // be available later.
+    // Need to create rewriter before waiting on anything since `headerTableBuilder` will
+    // no longer be available later.
     auto rewriter = kj::heap<HttpRewriter>(httpOptions, headerTableBuilder);
 
-    auto handle = kj::coCapture(
-        [this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
-        (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
-            mutable -> kj::Promise<void> {
-      TRACE_EVENT("workerd", "setup listenHttp");
-      auto listener = co_await promise;
-      KJ_IF_SOME(stream, controlOverride) {
-        auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
-        try {
-          stream->write(message.asBytes());
-        } catch (kj::Exception& e) {
-          KJ_LOG(ERROR, e);
+    if (isHttp) {
+      auto handle = kj::coCapture(
+          [this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
+          (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
+              mutable -> kj::Promise<void> {
+        TRACE_EVENT("workerd", "setup listenHttp");
+        auto listener = co_await promise;
+        KJ_IF_SOME(stream, controlOverride) {
+          auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
+          try {
+            stream->write(message.asBytes());
+          } catch (kj::Exception& e) {
+            KJ_LOG(ERROR, e);
+          }
         }
-      }
-      co_await listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
-    });
-    tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
+        co_await listenHttp(kj::mv(listener), service, physicalProtocol, kj::mv(rewriter));
+      });
+      tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
+    } else {
+      auto handle = kj::coCapture(
+          [this,&service, rewriter = kj::mv(rewriter), name]
+          (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
+              mutable -> kj::Promise<void> {
+        TRACE_EVENT("workerd", "setup listenTcp");
+        auto listener = co_await promise;
+        KJ_IF_SOME(stream, controlOverride) {
+          auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");
+          try {
+            stream->write(message.asBytes());
+          } catch (kj::Exception& e) {
+            KJ_LOG(ERROR, e);
+          }
+        }
+        co_await listenTcp(kj::mv(listener), service, kj::mv(rewriter));
+      });
+      tasks.add(handle(kj::mv(listener)).exclusiveJoin(forkedDrainWhen.addBranch()));
+    }
   }
 
   for (auto& unmatched: socketOverrides) {
