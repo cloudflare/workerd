@@ -282,6 +282,34 @@ class AlarmInvocationInfo: public jsg::Object {
   uint32_t retryCount = 0;
 };
 
+class ConnectEvent final: public Event {
+ public:
+  static jsg::Ref<ConnectEvent> constructor() = delete;
+
+  ConnectEvent(jsg::Ref<ReadableStream> inbound, CfProperty&& cf)
+      : Event("connect"),
+        inbound(kj::mv(inbound)),
+        cf(kj::mv(cf)) {}
+
+  jsg::Ref<ReadableStream> getInbound() {
+    return inbound.addRef();
+  }
+
+  // Returns the `cf` field containing Cloudflare feature flags.
+  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js) {
+    return cf.get(js);
+  }
+
+  JSG_RESOURCE_TYPE(ConnectEvent) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(inbound, getInbound);
+    JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
+  }
+
+ private:
+  jsg::Ref<ReadableStream> inbound;
+  CfProperty cf;
+};
+
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -296,6 +324,11 @@ struct ExportedHandler {
   using TailHandler = kj::Promise<void>(kj::Array<jsg::Ref<TraceItem>> events,
       jsg::Value env,
       jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  using ConnectHandler = jsg::Promise<jsg::Ref<api::ReadableStream>>(jsg::Ref<ConnectEvent> connect,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
+
   jsg::LenientOptional<jsg::Function<TailHandler>> tail;
   jsg::LenientOptional<jsg::Function<TailHandler>> trace;
 
@@ -332,6 +365,7 @@ struct ExportedHandler {
   jsg::SelfRef self;
 
   JSG_STRUCT(fetch,
+      connect,
       tail,
       trace,
       tailStream,
@@ -349,6 +383,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+    type ExportedHandlerConnectHandler<Env = unknown> = (readable: ReadableStream, env: Env, ctx: ExecutionContext) => ReadableStream | Promise<ReadableStream>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTailStreamHandler<Env = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -359,6 +394,7 @@ struct ExportedHandler {
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
     email?: EmailExportedHandler<Env>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+    connect?: ExportedHandlerConnectHandler<Env>;
     tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
     tailStream?: ExportedHandlerTailStreamHandler<Env>;
@@ -457,6 +493,13 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       kj::Maybe<jsg::Ref<AbortSignal>> abortSignal);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
+
+  // Received TCP/socket ingress (called from C++, not JS).
+  kj::Promise<DeferredProxy<void>> connect(kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& response,
+      kj::Maybe<kj::StringPtr> cfBlobJson,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
@@ -936,6 +979,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::AlarmInvocationInfo, api::Immediate, api::ConnectEvent, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
