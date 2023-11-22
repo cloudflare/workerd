@@ -86,6 +86,7 @@ jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& functi
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
     .fetch{mapAddRef(js, fetch)},
+    .connect{mapAddRef(js, connect)},
     .tail{mapAddRef(js, tail)},
     .trace{mapAddRef(js, trace)},
     .tailStream{mapAddRef(js, tailStream)},
@@ -116,6 +117,56 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
 void ServiceWorkerGlobalScope::clear() {
   removeAllHandlers();
   unhandledRejections.clear();
+}
+
+kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
+    const kj::HttpHeaders& headers,
+    kj::AsyncIoStream& connection,
+    kj::HttpService::ConnectResponse& response,
+    Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Connect ingress is not currently supported with Service Workers syntax.");
+  KJ_REQUIRE(FeatureFlags::get(lock).getWorkerdExperimental(),
+      "connect handling requires the experimental flag.");
+
+  KJ_IF_SOME(handler, eh.connect) {
+    // Has a connect handler!
+    response.accept(200, "OK", headers);
+
+    // Using neuterable stream to manage lifetime of stream promises
+    auto ownConnection = newNeuterableIoStream(connection);
+
+    auto& ioContext = IoContext::current();
+    jsg::Lock& js = lock;
+
+    auto input = kj::str("fake://", host);
+    auto url = JSG_REQUIRE_NONNULL(
+        jsg::Url::tryParse(input.asPtr()), TypeError, "Specified address could not be parsed.");
+    auto hostName = url.getHostname();
+    auto port = url.getPort();
+    JSG_REQUIRE(hostName != ""_kj, TypeError, "Specified address is missing hostname.");
+    JSG_REQUIRE(port != ""_kj, TypeError, "Specified address is missing port.");
+
+    // TLS support is not implemented so far.
+    auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
+    // We set isDefaultFetchPort here based on if we have a port that's generally used for HTTP –
+    // this matches the logic used in sockets.c++ and results in a more descriptive error message,
+    // consider revisting in the future.
+    jsg::Ref<Socket> jsSocket = setupSocket(js, kj::mv(ownConnection), kj::mv(host), kj::none,
+        kj::mv(nullTlsStarter), SecureTransportKind::OFF, kj::str(hostName),
+        port == "443"_kj || port == "80"_kj, kj::none);
+    // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
+    // connection is already open at this point, exception handling is not required.
+    jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+
+    kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
+    auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
+    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span));
+  }
+  lock.logWarningOnce("Received a connect event but we lack a handler. "
+                      "Did you remember to export a connect() function?");
+  JSG_FAIL_REQUIRE(Error, "Handler does not export a connect() function.");
 }
 
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
