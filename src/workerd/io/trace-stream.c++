@@ -385,6 +385,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
+    // TODO
+    KJ_CASE_ONEOF(custom, ConnectEventInfo) {
+      // obj.set(js, INFO_STR, ToJs(js, custom, cache));
+    }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }

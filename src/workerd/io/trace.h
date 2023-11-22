@@ -362,6 +362,17 @@ struct JsRpcEventInfo final {
   kj::String toString() const;
 };
 
+class ConnectEventInfo {
+ public:
+  explicit ConnectEventInfo(kj::String cfJson);
+  explicit ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader);
+
+  kj::String cfJson;
+
+  void copyTo(rpc::Trace::ConnectEventInfo::Builder builder) const;
+  ConnectEventInfo clone() const;
+};
+
 // Describes a scheduled request
 struct ScheduledEventInfo final {
   explicit ScheduledEventInfo(double scheduledTime, kj::String cron);
@@ -577,6 +588,7 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
+    ConnectEventInfo,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
