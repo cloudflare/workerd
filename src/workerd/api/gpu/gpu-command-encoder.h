@@ -48,6 +48,9 @@ public:
     JSG_METHOD(copyBufferToBuffer);
     JSG_METHOD(finish);
     JSG_METHOD(copyTextureToBuffer);
+    JSG_METHOD(copyBufferToTexture);
+    JSG_METHOD(copyTextureToTexture);
+    JSG_METHOD(clearBuffer);
   }
 
 private:
@@ -66,6 +69,12 @@ private:
                           GPUSize64 size);
   void copyTextureToBuffer(GPUImageCopyTexture source, GPUImageCopyBuffer destination,
                            GPUExtent3D copySize);
+  void copyBufferToTexture(GPUImageCopyBuffer source, GPUImageCopyTexture destination,
+                           GPUExtent3D copySize);
+  void copyTextureToTexture(GPUImageCopyTexture source, GPUImageCopyTexture destination,
+                            GPUExtent3D copySize);
+  void clearBuffer(jsg::Ref<GPUBuffer> buffer, jsg::Optional<GPUSize64> offset,
+                   jsg::Optional<GPUSize64> size);
 };
 
 struct GPUCommandEncoderDescriptor {
