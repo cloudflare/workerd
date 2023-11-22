@@ -3,6 +3,15 @@ import { ok, deepEqual, equal } from "node:assert";
 // run manually for now
 // bazel run --//src/workerd/io:enable_experimental_webgpu //src/workerd/server:workerd -- test `realpath ./src/workerd/api/gpu/webgpu-windowless-test.gpu-wd-test` --verbose --experimental
 
+async function hash(data) {
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray
+    .map((bytes) => bytes.toString(16).padStart(2, "0"))
+    .join("");
+  return hashHex;
+}
+
 export class DurableObjectExample {
   constructor(state) {
     this.state = state;
@@ -150,6 +159,11 @@ export class DurableObjectExample {
 
     const data = outputBuffer.getMappedRange();
     ok(data);
+    const result = await hash(data);
+    equal(
+      result,
+      "dd7fd0917e7f9383fd7f2ae5027bf6a4f8f90b2ab5c69c52d4f29a856bd9165a"
+    );
     outputBuffer.unmap();
 
     return new Response("OK");

@@ -22,8 +22,7 @@ GPUCommandEncoder::finish(jsg::Optional<GPUCommandBufferDescriptor> descriptor) 
   return jsg::alloc<GPUCommandBuffer>(kj::mv(buffer));
 };
 
-void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
-                                            GPUImageCopyBuffer destination, GPUExtent3D copySize) {
+wgpu::ImageCopyTexture parseGPUImageCopyTexture(GPUImageCopyTexture source) {
   wgpu::ImageCopyTexture src{};
   src.texture = *source.texture;
 
@@ -55,6 +54,10 @@ void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
     src.aspect = parseTextureAspect(aspect);
   }
 
+  return kj::mv(src);
+}
+
+wgpu::ImageCopyBuffer parseGPUImageCopyBuffer(GPUImageCopyBuffer destination) {
   wgpu::ImageCopyBuffer dst{};
   dst.buffer = *destination.buffer;
 
@@ -68,6 +71,10 @@ void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
     dst.layout.rowsPerImage = rowsPerImage;
   }
 
+  return kj::mv(dst);
+}
+
+wgpu::Extent3D parseGPUExtent3D(GPUExtent3D copySize) {
   wgpu::Extent3D size{};
   KJ_SWITCH_ONEOF(copySize) {
     KJ_CASE_ONEOF(coords, jsg::Sequence<GPUIntegerCoordinate>) {
@@ -88,16 +95,45 @@ void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
         JSG_FAIL_REQUIRE(TypeError, "invalid value for GPUExtent3D");
       }
     }
-    KJ_CASE_ONEOF(size, GPUExtent3DDict) {
-      KJ_IF_SOME(depthOrArrayLayers, size.depthOrArrayLayers) {
+    KJ_CASE_ONEOF(someSize, GPUExtent3DDict) {
+      KJ_IF_SOME(depthOrArrayLayers, someSize.depthOrArrayLayers) {
         size.depthOrArrayLayers = depthOrArrayLayers;
       }
-      KJ_IF_SOME(height, size.height) {
+      KJ_IF_SOME(height, someSize.height) {
         size.height = height;
       }
-      size.width = size.width;
+      size.width = someSize.width;
     }
   }
+
+  return kj::mv(size);
+}
+
+void GPUCommandEncoder::copyTextureToTexture(GPUImageCopyTexture source,
+                                             GPUImageCopyTexture destination,
+                                             GPUExtent3D copySize) {
+  wgpu::ImageCopyTexture src = parseGPUImageCopyTexture(kj::mv(source));
+  wgpu::ImageCopyTexture dst = parseGPUImageCopyTexture(kj::mv(destination));
+  wgpu::Extent3D size = parseGPUExtent3D(kj::mv(copySize));
+
+  encoder_.CopyTextureToTexture(&src, &dst, &size);
+}
+
+void GPUCommandEncoder::copyBufferToTexture(GPUImageCopyBuffer source,
+                                            GPUImageCopyTexture destination, GPUExtent3D copySize) {
+
+  wgpu::ImageCopyBuffer src = parseGPUImageCopyBuffer(kj::mv(source));
+  wgpu::ImageCopyTexture dst = parseGPUImageCopyTexture(kj::mv(destination));
+  wgpu::Extent3D size = parseGPUExtent3D(kj::mv(copySize));
+
+  encoder_.CopyBufferToTexture(&src, &dst, &size);
+}
+
+void GPUCommandEncoder::copyTextureToBuffer(GPUImageCopyTexture source,
+                                            GPUImageCopyBuffer destination, GPUExtent3D copySize) {
+  wgpu::ImageCopyTexture src = parseGPUImageCopyTexture(kj::mv(source));
+  wgpu::ImageCopyBuffer dst = parseGPUImageCopyBuffer(kj::mv(destination));
+  wgpu::Extent3D size = parseGPUExtent3D(kj::mv(copySize));
 
   encoder_.CopyTextureToBuffer(&src, &dst, &size);
 }
@@ -108,6 +144,14 @@ void GPUCommandEncoder::copyBufferToBuffer(jsg::Ref<GPUBuffer> source, GPUSize64
 
   encoder_.CopyBufferToBuffer(*source, sourceOffset, *destination, destinationOffset, size);
 };
+
+void GPUCommandEncoder::clearBuffer(jsg::Ref<GPUBuffer> buffer, jsg::Optional<GPUSize64> offset,
+                                    jsg::Optional<GPUSize64> size) {
+  uint64_t o = offset.orDefault(0);
+  uint64_t s = size.orDefault(wgpu::kWholeSize);
+
+  encoder_.ClearBuffer(*buffer, o, s);
+}
 
 jsg::Ref<GPURenderPassEncoder>
 GPUCommandEncoder::beginRenderPass(GPURenderPassDescriptor descriptor) {
