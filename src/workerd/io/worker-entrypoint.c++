@@ -438,7 +438,129 @@ kj::Promise<void> WorkerEntrypoint::request(
 kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host, const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection, ConnectResponse& response,
     kj::HttpConnectSettings settings) {
-  JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");
+  auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
+                                "connect() can only be called once"));
+  this->incomingRequest = kj::none;
+  incomingRequest->delivered();
+  auto& context = incomingRequest->getContext();
+  bool isActor = context.getActor() != kj::none;
+
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    auto timestamp = context.now();
+    kj::String cfJson;
+    KJ_IF_SOME(c, cfBlobJson) {
+      cfJson = kj::str(c);
+    }
+
+    t.setEventInfo(timestamp, Trace::ConnectEventInfo(kj::mv(cfJson)));
+  }
+
+  auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
+
+  return context.run(
+      [this, &context, &connection, &response, entrypointName = entrypointName]
+      (Worker::Lock& lock) mutable {
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+
+    return lock.getGlobalScope().connect(
+        connection, response, cfBlobJson, lock,
+        lock.getExportedHandler(entrypointName, context.getActor()));
+  }).then([this](api::DeferredProxy<void> deferredProxy) {
+    proxyTask = kj::mv(deferredProxy.proxyTask);
+  }).exclusiveJoin(context.onAbort())
+      .catch_([this,&context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+
+    // Log JS exceptions to the JS console, if fiddle is attached. This also has the effect of
+    // logging internal errors to syslog.
+    loggedExceptionEarlier = true;
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER,
+                                      kj::cp(exception));
+
+    // Do not allow the exception to escape the isolate without waiting for the output gate to
+    // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
+    return context.waitForOutputLocks()
+        .then([exception = kj::mv(exception)]() mutable
+              -> kj::Promise<void> { return kj::mv(exception); });
+  }).attach(kj::defer([this,incomingRequest = kj::mv(incomingRequest),&context]() mutable {
+    // The request has been canceled, but allow it to continue executing in the background.
+    auto promise = incomingRequest->drain().attach(kj::mv(incomingRequest));
+    waitUntilTasks.add(maybeAddGcPassForTest(context, kj::mv(promise)));
+  })).then([this]() -> kj::Promise<void> {
+    // Now that the IoContext is dropped (unless it had waitUntil()s), we can finish proxying
+    // without pinning it or the isolate into memory.
+    KJ_IF_SOME(p, proxyTask) {
+      return kj::mv(p);
+    } else {
+      return kj::READY_NOW;
+    }
+  }).attach(kj::defer([this]() mutable {
+    // If we're being cancelled, we need to make sure `proxyTask` gets canceled.
+    proxyTask = kj::none;
+  })).catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch)]
+             (kj::Exception&& exception) mutable -> kj::Promise<void> {
+    // Don't return errors to end user.
+
+    auto isInternalException = !jsg::isTunneledException(exception.getDescription())
+        && !jsg::isDoNotLogException(exception.getDescription());
+    if (!loggedExceptionEarlier) {
+      // This exception seems to have originated during the deferred proxy task, so it was not
+      // logged to the IoContext earlier.
+      if (exception.getType() != kj::Exception::Type::DISCONNECTED && isInternalException) {
+        LOG_EXCEPTION("workerEntrypoint", exception);
+      } else {
+        KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
+      }
+    }
+
+    auto exceptionToPropagate = [&]() {
+      if (isInternalException) {
+        // We've already logged it here, the only thing that matters to the client is that we failed
+        // due to an internal error. Note that this does not need to be labeled "remote." since jsg
+        // will sanitize it as an internal error. Note that we use `setDescription()` to preserve
+        // the exception type for `cjfs::makeInternalError(...)` downstream.
+        exception.setDescription(kj::str(
+            "worker_do_not_log; Request failed due to internal error"));
+        return kj::mv(exception);
+      } else {
+        // We do not care how many remote capnp servers this went through since we are returning
+        // it to the worker via jsg.
+        // TODO(someday) We also do this stripping when making the tunneled exception for
+        // `jsg::isTunneledException(...)`. It would be lovely if we could simply store some type
+        // instead of `loggedExceptionEarlier`. It would save use some work.
+        auto description = jsg::stripRemoteExceptionPrefix(exception.getDescription());
+        if (!description.startsWith("remote.")) {
+          // If we already were annotated as remote from some other worker entrypoint, no point
+          // adding an additional prefix.
+          exception.setDescription(kj::str("remote.", description));
+        }
+        return kj::mv(exception);
+      }
+
+    };
+
+    if (isActor || tunnelExceptions) {
+      // We want to tunnel exceptions from actors back to the caller.
+      // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
+      // worker, not just for actors (and W2W below), but getting that right will require cleaning
+      // up error handling more generally.
+      return exceptionToPropagate();
+    } else {
+      // Return error.
+
+      // We're catching the exception and replacing it with 5xx, but metrics should still indicate
+      // an exception.
+      metrics->reportFailure(exception);
+
+      kj::HttpHeaders headers(threadContext.getHeaderTable());
+      if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+        response.reject(503, "Service Unavailable", headers, uint64_t(0));
+      } else {
+        response.reject(500, "Internal Server Error", headers, uint64_t(0));
+      }
+
+      return kj::READY_NOW;
+    }
+  });
 }
 
 void WorkerEntrypoint::prewarm(kj::StringPtr url) {

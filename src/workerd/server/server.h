@@ -207,6 +207,9 @@ private:
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
                                kj::StringPtr physicalProtocol, kj::Own<HttpRewriter> rewriter);
 
+  kj::Promise<void> listenTcp(kj::Own<kj::ConnectionReceiver> listener, Service& service,
+                              kj::Own<HttpRewriter> rewriter);
+
   class InvalidConfigService;
   class ExternalHttpService;
   class ExternalTcpService;
@@ -215,6 +218,7 @@ private:
   class WorkerService;
   class WorkerEntrypointService;
   class HttpListener;
+  class TcpListener;
 
   void startServices(jsg::V8System& v8System, config::Config::Reader config,
                      kj::HttpHeaderTable::Builder& headerTableBuilder,

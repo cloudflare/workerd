@@ -219,6 +219,32 @@ private:
   uint32_t retryCount = 0;
 };
 
+class ConnectEvent final: public Event {
+public:
+  static jsg::Ref<ConnectEvent> constructor() = delete;
+
+  ConnectEvent(jsg::Ref<ReadableStream> inbound, CfProperty&& cf)
+      : Event("connect"),
+        inbound(kj::mv(inbound)),
+        cf(kj::mv(cf)) {}
+
+  jsg::Ref<ReadableStream> getInbound() { return inbound.addRef(); }
+
+  // Returns the `cf` field containing Cloudflare feature flags.
+  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js) {
+    return cf.get(js);
+  }
+
+  JSG_RESOURCE_TYPE(ConnectEvent) {
+    JSG_READONLY_PROTOTYPE_PROPERTY(inbound, getInbound);
+    JSG_READONLY_PROTOTYPE_PROPERTY(cf, getCf);
+  }
+
+private:
+  jsg::Ref<ReadableStream> inbound;
+  CfProperty cf;
+};
+
 // Type signature for handlers exported from the root module.
 //
 // We define each handler method as a LenientOptional rather than as a plain Optional in order to
@@ -228,6 +254,12 @@ struct ExportedHandler {
   typedef jsg::Promise<jsg::Ref<api::Response>> FetchHandler(
       jsg::Ref<api::Request> request, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
   jsg::LenientOptional<jsg::Function<FetchHandler>> fetch;
+
+  typedef jsg::Promise<jsg::Ref<api::ReadableStream>> ConnectHandler(
+      jsg::Ref<ConnectEvent> connect,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<ConnectHandler>> connect;
 
   typedef kj::Promise<void> TailHandler(
       kj::Array<jsg::Ref<TraceItem>> events, jsg::Value env, jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
@@ -259,7 +291,8 @@ struct ExportedHandler {
   // Self-ref potentially allows extracting other custom handlers from the object.
   jsg::SelfRef self;
 
-  JSG_STRUCT(fetch, tail, trace, scheduled, alarm, test, webSocketMessage, webSocketClose, webSocketError, self);
+  JSG_STRUCT(fetch, connect, tail, trace, scheduled, alarm, test,
+             webSocketMessage, webSocketClose, webSocketError, self);
 
   JSG_STRUCT_TS_ROOT();
   // ExportedHandler isn't included in the global scope, but we still want to
@@ -267,6 +300,7 @@ struct ExportedHandler {
 
   JSG_STRUCT_TS_DEFINE(
     type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (request: Request<CfHostMetadata, IncomingRequestCfProperties<CfHostMetadata>>, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+    type ExportedHandlerConnectHandler<Env = unknown> = (readable: ReadableStream, env: Env, ctx: ExecutionContext) => ReadableStream | Promise<ReadableStream>;
     type ExportedHandlerTailHandler<Env = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext) => void | Promise<void>;
     type ExportedHandlerScheduledHandler<Env = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext) => void | Promise<void>;
@@ -276,6 +310,7 @@ struct ExportedHandler {
   JSG_STRUCT_TS_OVERRIDE(<Env = unknown, QueueHandlerMessage = unknown, CfHostMetadata = unknown> {
     email?: EmailExportedHandler<Env>;
     fetch?: ExportedHandlerFetchHandler<Env, CfHostMetadata>;
+    connect?: ExportedHandlerConnectHandler<Env>;
     tail?: ExportedHandlerTailHandler<Env>;
     trace?: ExportedHandlerTraceHandler<Env>;
     scheduled?: ExportedHandlerScheduledHandler<Env>;
@@ -333,6 +368,14 @@ public:
       Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
   // TODO(cleanup): Factor out the shared code used between old-style event listeners vs. module
   //   exports and move that code somewhere more appropriate.
+
+  // Received TCP/socket ingress (called from C++, not JS).
+  kj::Promise<DeferredProxy<void>> connect(
+      kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& response,
+      kj::Maybe<kj::StringPtr> cfBlobJson,
+      Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler);
 
   // Received sendTraces (called from C++, not JS).
   void sendTraces(kj::ArrayPtr<kj::Own<Trace>> traces,
@@ -759,6 +802,7 @@ private:
   api::PromiseRejectionEvent,                            \
   api::Navigator,                                        \
   api::Performance,                                      \
+  api::ConnectEvent,                                     \
   api::AlarmInvocationInfo
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
