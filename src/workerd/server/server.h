@@ -288,6 +288,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::Promise<void> listenDebugPort(kj::Own<kj::ConnectionReceiver> listener);
 
+  kj::Promise<void> listenTcp(kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::Own<HttpRewriter> rewriter);
+
   class InvalidConfigService;
   class InvalidConfigActorClass;
   class ExternalHttpService;
@@ -299,6 +303,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   class WorkerdBootstrapImpl;
   class HttpListener;
   class DebugPortListener;
+  class TcpListener;
 
   struct ErrorReporter;
   struct ConfigErrorReporter;
