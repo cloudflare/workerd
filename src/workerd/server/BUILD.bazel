@@ -124,7 +124,7 @@ wd_cc_library(
     srcs = ["autogate.c++"],
     hdrs = ["autogate.h"],
     visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj:kj", ":workerd_capnp"],
+    deps = ["@capnp-cpp//src/kj:kj", ":workerd_capnp", "//src/workerd/util:sentry"],
 )
 
 [kj_test(
