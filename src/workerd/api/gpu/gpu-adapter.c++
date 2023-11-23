@@ -79,7 +79,7 @@ GPUAdapter::requestDevice(jsg::Lock& js, jsg::Optional<GPUDeviceDescriptor> desc
         requiredFeatures.add(parseFeatureName(required));
       }
 
-      desc.requiredFeaturesCount = requiredFeatures.size();
+      desc.requiredFeatureCount = requiredFeatures.size();
       desc.requiredFeatures = requiredFeatures.begin();
     }
 
