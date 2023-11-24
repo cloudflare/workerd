@@ -23,13 +23,6 @@ namespace v8 { class Isolate; }
 
 namespace workerd {
 
-namespace jsg {
-  class V8System;
-  class V8StackScope;
-  class DOMException;
-  class ModuleRegistry;
-}
-
 namespace api {
   class DurableObjectState;
   class DurableObjectStorage;
