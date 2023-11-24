@@ -4,6 +4,7 @@ build --build_tag_filters=-off-by-default
 
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
+build --//src/workerd/util:workerd_perfetto=True
 
 # Dawn tint build flags
 build --@dawn//src/tint:tint_build_glsl_writer=False

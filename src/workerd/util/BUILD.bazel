@@ -1,6 +1,30 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+
+bool_flag(
+    name = "workerd_perfetto",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "set_workerd_perfetto",
+    flag_values = {"workerd_perfetto": "True"},
+)
+
+wd_cc_library(
+    name = "perfetto",
+    srcs = ["tracing.c++"],
+    hdrs = ["tracing.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj"
+    ] + select({
+        ":set_workerd_perfetto": ["@perfetto//:libperfetto_client_experimental"],
+        "//conditions:default": ["@workerd-v8//:v8"],
+    }),
+)
 
 wd_cc_library(
     name = "util",
@@ -12,7 +36,8 @@ wd_cc_library(
             "symbolizer.c++",
             "sqlite*.c++",
             "thread-scopes.c++",
-            "autogate.c++"
+            "autogate.c++",
+            "tracing.c++",
         ],
     ),
     hdrs = glob(
@@ -23,7 +48,8 @@ wd_cc_library(
             "own-util.h",
             "thread-scopes.h",
             "sentry.h",
-            "autogate.h"
+            "autogate.h",
+            "tracing.h",
         ],
     ),
     visibility = ["//visibility:public"],

@@ -26,6 +26,7 @@
 #include <workerd/util/http-util.h>
 #include <workerd/api/actor-state.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/tracing.h>
 #include "workerd-api.h"
 #include "workerd/io/hibernation-manager.h"
 #include <stdlib.h>
@@ -478,6 +479,7 @@ private:
   kj::Promise<void> connect(
       kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
       ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "ExternalTcpService::connect()", "host", host.cStr());
       auto io_stream = co_await addr->connect();
 
       auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
@@ -550,6 +552,7 @@ private:
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+      TRACE_EVENT("workerd", "ExternalHttpServer::request()");
       KJ_REQUIRE(wrappedResponse == kj::none, "object should only receive one request");
       wrappedResponse = response;
       if (parent.rewriter->needsRewriteRequest()) {
@@ -564,6 +567,7 @@ private:
     kj::Promise<void> connect(
         kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
         ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+      TRACE_EVENT("workerd", "ExternalHttpServer::connect()");
       return parent.serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
     }
 
@@ -590,6 +594,7 @@ private:
     kj::Own<kj::AsyncOutputStream> send(
         uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
         kj::Maybe<uint64_t> expectedBodySize) override {
+      TRACE_EVENT("workerd", "ExternalHttpService::send()", "status", statusCode);
       auto& response = KJ_ASSERT_NONNULL(wrappedResponse);
       if (parent.rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
@@ -601,6 +606,7 @@ private:
     }
 
     kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+      TRACE_EVENT("workerd", "ExternalHttpService::acceptWebSocket()");
       auto& response = KJ_ASSERT_NONNULL(wrappedResponse);
       if (parent.rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
@@ -616,6 +622,7 @@ private:
 kj::Own<Server::Service> Server::makeExternalService(
     kj::StringPtr name, config::ExternalServer::Reader conf,
     kj::HttpHeaderTable::Builder& headerTableBuilder) {
+  TRACE_EVENT("workerd", "Server::makeExternalService()", "name", name.cStr());
   kj::StringPtr addrStr = nullptr;
   kj::String ownAddrStr = nullptr;
 
@@ -705,12 +712,14 @@ private:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+    TRACE_EVENT("workerd", "NetworkService::request()");
     return serviceAdapter->request(method, url, headers, requestBody, response);
   }
 
   kj::Promise<void> connect(
       kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
       ConnectResponse& tunnel, kj::HttpConnectSettings settings) override {
+    TRACE_EVENT("workerd", "NetworkService::connect()");
     // This code is hit when the global `connect` function is called in a JS worker script.
     // It represents a proxy-less TCP connection, which means we can simply defer the handling of
     // the connection to the service adapter (likely NetworkHttpClient). Its behaviour will be to
@@ -735,6 +744,7 @@ private:
 };
 
 kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf) {
+  TRACE_EVENT("workerd", "Server::makeNetworkService()");
   auto restrictedNetwork = network.restrictPeers(
       KJ_MAP(a, conf.getAllow()) -> kj::StringPtr { return a; },
       KJ_MAP(a, conf.getDeny() ) -> kj::StringPtr { return a; });
@@ -787,6 +797,7 @@ private:
   kj::Promise<void> request(
       kj::HttpMethod method, kj::StringPtr urlStr, const kj::HttpHeaders& requestHeaders,
       kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+    TRACE_EVENT("workerd", "DiskDirectoryService::request()", "url", urlStr.cStr());
     auto url = kj::Url::parse(urlStr);
 
     bool blockedPath = false;
@@ -991,6 +1002,7 @@ private:
 kj::Own<Server::Service> Server::makeDiskDirectoryService(
     kj::StringPtr name, config::DiskDirectory::Reader conf,
     kj::HttpHeaderTable::Builder& headerTableBuilder) {
+  TRACE_EVENT("workerd", "Server::makeDiskDirectoryService()");
   kj::StringPtr pathStr = nullptr;
   kj::String ownPathStr;
 
@@ -1354,6 +1366,7 @@ public:
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
+    TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
     return newWorkerEntrypoint(
         threadContext,
         kj::atomicAddRef(*worker),
@@ -2082,6 +2095,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
   // creates binding object or returns null and reports an error
   using Global = WorkerdApi::Global;
   kj::StringPtr bindingName = binding.getName();
+  TRACE_EVENT("workerd", "Server::WorkerService::createBinding()",
+              "name", workerName.cStr(),
+              "binding", bindingName.cStr());
   auto makeGlobal = [&](auto&& value) {
     return Global{.name = kj::str(bindingName), .value = kj::mv(value)};
   };
@@ -2388,6 +2404,7 @@ uint startInspector(kj::StringPtr inspectorAddress, Server::InspectorServiceIsol
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
+  TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
   struct ErrorReporter: public Worker::ValidationErrorReporter {
@@ -2699,8 +2716,10 @@ public:
         rewriter(kj::mv(rewriter)) {}
 
   kj::Promise<void> run() {
+    TRACE_EVENT("workerd", "HttpListener::run");
     for (;;) {
       kj::AuthenticatedStream stream = co_await listener->acceptAuthenticated();
+      TRACE_EVENT("workerd", "HTTPListener handle connection");
 
       kj::Maybe<kj::String> cfBlobJson;
       if (!rewriter->hasCfBlobHeader()) {
@@ -2786,12 +2805,14 @@ private:
       kj::Own<kj::AsyncOutputStream> send(
           uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
           kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+        TRACE_EVENT("workerd", "ResponseWrapper::send()");
         auto rewrite = headers.cloneShallow();
         rewriter.rewriteResponse(rewrite);
         return inner.send(statusCode, statusText, rewrite, expectedBodySize);
       }
 
       kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
+        TRACE_EVENT("workerd", "ResponseWrapper::acceptWebSocket()");
         auto rewrite = headers.cloneShallow();
         rewriter.rewriteResponse(rewrite);
         return inner.acceptWebSocket(rewrite);
@@ -2808,6 +2829,7 @@ private:
     kj::Promise<void> request(
         kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
         kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override {
+      TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); });
 
@@ -2859,6 +2881,7 @@ kj::Promise<void> Server::listenHttp(
 
 kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
   co_await drainWhen;
+  TRACE_EVENT("workerd", "Server::handleDrain()");
   // Tell all HttpServers to drain. This causes them to disconnect any connections that don't
   // have a request in-flight.
   auto drainPromises = kj::heapArrayBuilder<kj::Promise<void>>(httpServers.size());
@@ -2870,6 +2893,7 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
 
 kj::Promise<void> Server::run(jsg::V8System& v8System, config::Config::Reader config,
                               kj::Promise<void> drainWhen) {
+  TRACE_EVENT("workerd", "Server.run");
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
@@ -2956,7 +2980,7 @@ void Server::startServices(jsg::V8System& v8System, config::Config::Reader confi
                            kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure services
-
+  TRACE_EVENT("workerd", "startServices");
   // First pass: Extract actor namespace configs.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
@@ -3080,7 +3104,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
                                           kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Start sockets
-
+  TRACE_EVENT("workerd", "listenOnSockets");
   for (auto sock: config.getSockets()) {
     kj::StringPtr name = sock.getName();
     kj::StringPtr addrStr = nullptr;
@@ -3163,6 +3187,7 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
         [this, &service, rewriter = kj::mv(rewriter), physicalProtocol, name]
         (kj::Promise<kj::Own<kj::ConnectionReceiver>> promise)
             mutable -> kj::Promise<void> {
+      TRACE_EVENT("workerd", "setup listenHttp");
       auto listener = co_await promise;
       KJ_IF_SOME(stream, controlOverride) {
         auto message = kj::str("{\"event\":\"listen\",\"socket\":\"", name, "\",\"port\":", listener->getPort(), "}\n");

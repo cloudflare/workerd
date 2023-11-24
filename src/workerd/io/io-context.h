@@ -21,6 +21,9 @@
 #include <kj/function.h>
 #include <capnp/dynamic.h>
 #include <workerd/util/weak-refs.h>
+#include <workerd/io/limit-enforcer.h>
+#include <workerd/io/io-channels.h>
+#include <workerd/util/tracing.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
 

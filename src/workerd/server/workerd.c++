@@ -60,6 +60,8 @@
 #define environ (*_NSGetEnviron())
 #endif
 
+#include <workerd/util/tracing.h>
+
 namespace workerd::server {
 
 static kj::StringPtr getVersionString() {
@@ -591,6 +593,9 @@ public:
                           "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
                           "Enable the inspector protocol to connect to the address <addr>.")
+        .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
+                           "<path>=<categories>",
+                           "Enable perfetto tracing output to the specified file.")
         .addOption({'w', "watch"}, CLI_METHOD(watch),
                    "Watch configuration files (and server binary) and reload if they change. "
                    "Useful for development, but not recommended in production.")
@@ -764,6 +769,12 @@ public:
   void overrideExternal(kj::StringPtr param) {
     auto [ name, value ] = parseOverride(param);
     server.overrideExternal(kj::mv(name), kj::str(value));
+  }
+
+  void enablePerfetto(kj::StringPtr param) {
+    auto [ name, value ] = parseOverride(param);
+    perfettoTraceDestination = kj::str(name);
+    perfettoTraceCategories = kj::str(value);
   }
 
   void enableInspector(kj::StringPtr param) {
@@ -1027,6 +1038,12 @@ public:
         context.exit();
       }
     } else {
+      kj::Maybe<PerfettoSession> maybePerfettoSession;
+      KJ_IF_SOME(dest, perfettoTraceDestination) {
+        maybePerfettoSession = PerfettoSession(dest,
+            kj::mv(perfettoTraceCategories).orDefault(kj::str()));
+      }
+      TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
@@ -1040,6 +1057,10 @@ public:
         }));
       }
       promise.wait(io.waitScope);
+      KJ_IF_SOME(perfettoSession, maybePerfettoSession) {
+        auto dropMe = kj::mv(perfettoSession);
+        maybePerfettoSession = kj::none;
+      }
       context.exit();
     }
   }
@@ -1138,6 +1159,9 @@ private:
 
   kj::Maybe<kj::String> testServicePattern;
   kj::Maybe<kj::String> testEntrypointPattern;
+
+  kj::Maybe<kj::String> perfettoTraceDestination;
+  kj::Maybe<kj::String> perfettoTraceCategories;
 
   Server server;
 
