@@ -6,6 +6,7 @@
 -Ibazel-bin/external/dawn/include
 -Ibazel-bin/external/ada-url/_virtual_includes/ada-url/
 -Ibazel-bin/external/com_cloudflare_lol_html/_virtual_includes/lolhtml
+-Iexternal/perfetto-sdk/sdk/
 -Iexternal/ada-url/
 -Iexternal/com_google_benchmark/include/
 -Iexternal/dawn/include
@@ -44,6 +45,7 @@
 -isystemexternal/v8/include
 -isystemexternal/zlib
 -isystemexternal/sqlite3
+-isystemexternal/perfetto-sdk/sdk
 -D_FORTIFY_SOURCE=1
 -DCAPNP_VERSION=11000
 -DDEBUG
@@ -86,6 +88,9 @@
 -DV8_TARGET_ARCH_X64
 -DV8_TARGET_OS_LINUX
 -DV8_TYPED_ARRAY_MAX_SIZE_IN_HEAP=64
+-DV8_USE_PERFETTO
+-DWORKERD_USE_PERFETTO
+-DPERFETTO_ENABLE_LEGACY_TRACE_EVENTS=1
 -DWORKERD_ICU_DATA_EMBED
 -Wall
 -Werror=dangling

@@ -1,6 +1,28 @@
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
+
+wd_cc_library(
+    name = "perfetto",
+    srcs = ["perfetto-tracing.c++"],
+    hdrs = ["perfetto-tracing.h", "use-perfetto-categories.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj"
+    ] + select({
+        "@platforms//os:windows": ["@workerd-v8//:v8"],
+        "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
+    }),
+    defines = select({
+        "@platforms//os:windows": [],
+        "//conditions:default": ["WORKERD_USE_PERFETTO"],
+    }),
+)
+# TODO(later): Currently perfetto support is not enabled on Windows simply because the
+# perfetto bazel build fails on windows for some reason and it's currently not worth
+# the time to invest of figuring out why. If some intrepid soul wishes to figure out
+# why the Windows build is failing, we could simplify things here a bit.
 
 wd_cc_library(
     name = "util",
@@ -12,7 +34,8 @@ wd_cc_library(
             "symbolizer.c++",
             "sqlite*.c++",
             "thread-scopes.c++",
-            "autogate.c++"
+            "autogate.c++",
+            "perfetto-tracing.c++",
         ],
     ),
     hdrs = glob(
@@ -23,7 +46,8 @@ wd_cc_library(
             "own-util.h",
             "thread-scopes.h",
             "sentry.h",
-            "autogate.h"
+            "autogate.h",
+            "perfetto-tracing.h",
         ],
     ),
     visibility = ["//visibility:public"],

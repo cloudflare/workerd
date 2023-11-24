@@ -32,6 +32,7 @@
 #include <workerd/api/node/node.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
@@ -196,6 +197,7 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) {
+  TRACE_EVENT("workerd", "WorkerdApiIsolate::extractSource()");
   switch (conf.which()) {
     case config::Worker::MODULES: {
       auto modules = conf.getModules();
@@ -241,6 +243,7 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(
       jsg::Lock& lockParam, config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       const jsg::CompilationObserver& observer) const {
+  TRACE_EVENT("workerd", "WorkerdApiIsolate::compileScriptGlobals()");
   // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
   // at script load time.
 
@@ -271,12 +274,15 @@ void WorkerdApi::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
+  TRACE_EVENT("workerd", "WorkerdApiIsolate::compileModules()");
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
 
     for (auto module: conf.getModules()) {
       auto path = kj::Path::parse(module.getName());
+      TRACE_EVENT("workerd", "WorkerdApiIsolate::compileModules() module",
+                  "path", path.toString(true).cStr());
 
       switch (module.which()) {
         case config::Worker::Module::TEXT: {
@@ -499,6 +505,7 @@ static v8::Local<v8::Value> createBindingValue(
     const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId) {
+  TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
 
@@ -635,6 +642,7 @@ void WorkerdApi::compileGlobals(
     jsg::Lock& lockParam, kj::ArrayPtr<const Global> globals,
     v8::Local<v8::Object> target,
     uint32_t ownerId) const {
+  TRACE_EVENT("workerd", "WorkerdApiIsolate::compileGlobals()");
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   lockParam.withinHandleScope([&] {
     auto& featureFlags = *impl->features;

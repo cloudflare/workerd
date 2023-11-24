@@ -10,6 +10,7 @@
 #include <workerd/api/util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <kj/compat/http.h>
 
 namespace workerd {
@@ -174,6 +175,7 @@ void WorkerEntrypoint::init(
     kj::Own<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
 
@@ -208,6 +210,7 @@ void WorkerEntrypoint::init(
 kj::Promise<void> WorkerEntrypoint::request(
     kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody, Response& response) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::request()");
   auto incomingRequest = kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest,
                                 "request() can only be called once"));
   this->incomingRequest = kj::none;
@@ -254,6 +257,7 @@ kj::Promise<void> WorkerEntrypoint::request(
        &metrics = incomingRequest->getMetrics(),
        &wrappedResponse = *wrappedResponse, entrypointName = entrypointName]
       (Worker::Lock& lock) mutable {
+    TRACE_EVENT("workerd", "WorkerEntrypoint::request() main");
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     return lock.getGlobalScope().request(
