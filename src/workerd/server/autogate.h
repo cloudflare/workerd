@@ -26,26 +26,30 @@ enum class AutogateKey {
 //     #include <workerd/server/autogate.h>
 //     Autogate::isEnabled(AutogateKey::YOUR_FEATURE_KEY)
 //
-// When making structural changes here, ensure you align them with autogate.h in workerd.
+// When making structural changes here, ensure you align them with autogate.h in the internal repo.
 class Autogate {
 
 public:
-  Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+  static bool isEnabled(AutogateKey key);
 
-  bool isEnabled(AutogateKey key) const;
-
+  // Creates a global Autogate and seeds it with gates that are specified in the config.
+  //
+  // This function is not thread safe, it should be called exactly once close to the start of the
+  // process before any threads are created.
+  static void initAutogate(config::Config::Reader config);
+  static void initAutogate(
+      capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+  // Destroys an initialised global Autogate instance. Used only for testing.
+  static void deinitAutogate();
 private:
   kj::HashMap<AutogateKey, bool> gates;
+
+  Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
 };
 
 // Retrieves the name of the gate.
 //
 // When adding a new gate, add it into this method as well.
 kj::StringPtr KJ_STRINGIFY(AutogateKey key);
-
-extern kj::Maybe<Autogate> globalAutogate;
-
-void initAutogate(config::Config::Reader config);
-void initAutogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
 
 }  // namespace workerd::server

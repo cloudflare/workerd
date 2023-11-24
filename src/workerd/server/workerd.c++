@@ -849,7 +849,7 @@ public:
     }
 
     KJ_IF_SOME(c, config) {
-      initAutogate(c);
+      Autogate::initAutogate(c);
     }
   }
 

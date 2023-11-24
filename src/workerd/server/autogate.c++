@@ -2,8 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 #include "autogate.h"
+#include <workerd/util/sentry.h>
 
 namespace workerd::server {
+
+kj::Maybe<Autogate> globalAutogate;
 
 kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
@@ -21,6 +24,7 @@ Autogate::Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::R
     }
     auto name = autogate.getName();
     if (!name.startsWith("workerd-autogate-")) {
+      LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;
     }
     auto sliced = name.slice(17);
@@ -35,12 +39,16 @@ Autogate::Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::R
   }
 }
 
-bool Autogate::isEnabled(AutogateKey key) const {
-  return gates.find(key).orDefault(false);
+bool Autogate::isEnabled(AutogateKey key) {
+  KJ_IF_SOME(a, globalAutogate) {
+    return a.gates.find(key).orDefault(false);
+  }
+  LOG_ERROR_PERIODICALLY(
+      kj::str("Autogates not initialised, check for ", key, " will have no effect"));
+  return false;
 }
 
-kj::Maybe<Autogate> globalAutogate;
-void initAutogate(config::Config::Reader config) {
+void Autogate::initAutogate(config::Config::Reader config) {
   if (!config.hasAutogates()) {
     return;
   }
@@ -48,8 +56,11 @@ void initAutogate(config::Config::Reader config) {
   globalAutogate = Autogate(config.getAutogates());
 }
 
-void initAutogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
+void Autogate::initAutogate(capnp::List<config::Config::Autogate,
+    capnp::Kind::STRUCT>::Reader autogates) {
   globalAutogate = Autogate(autogates);
 }
+
+void Autogate::deinitAutogate() { globalAutogate = kj::none; }
 
 }  // namespace workerd::server
