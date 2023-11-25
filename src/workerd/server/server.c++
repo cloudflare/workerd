@@ -13,7 +13,6 @@
 #include <capnp/compat/json.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/io/worker-interface.h>
-#include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
@@ -1354,7 +1353,7 @@ public:
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
-    return WorkerEntrypoint::construct(
+    return newWorkerEntrypoint(
         threadContext,
         kj::atomicAddRef(*worker),
         entrypointName,
