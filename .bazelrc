@@ -35,6 +35,11 @@ build:windows --per_file_copt='external/v8/src/compiler/graph-visualizer.cc@/std
 build:windows --per_file_copt='external/dawn@-Wno-macro-redefined'
 build:windows --host_per_file_copt='external/dawn@-Wno-macro-redefined'
 
+# V8 is experiencing crashes on (at least) arm64 macOS as of 12.0 without enabling external code
+# spaces. This flag is enabled in the default GN build anyway, so define it on all platforms for
+# now.
+build --per_file_copt='external/v8@-DV8_EXTERNAL_CODE_SPACE'
+
 # Speed up sandboxed compilation, particularly on I/O-constrained and non-Linux systems
 # https://bazel.build/reference/command-line-reference#flag--reuse_sandbox_directories
 build --reuse_sandbox_directories

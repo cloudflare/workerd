@@ -347,28 +347,28 @@ http_archive(
         "//:patches/v8/0012-Fix-V8-ICU-build.patch",
         "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     ],
-    sha256 = "5a28ff9feff6d5efee118b11ba994319c63224192f25530e4e296464cf7b8f96",
-    strip_prefix = "v8-v8-934b99f",
+    sha256 = "1202ec7841f98d7dda35f998dc0e29f177f01c2d573adcde900d8633da4668dc",
+    strip_prefix = "v8-v8-5eefc59",
     type = "tgz",
-    url = "https://github.com/v8/v8/tarball/934b99feafeaaafca2d9e587d586afc8687dea80",
+    url = "https://github.com/v8/v8/tarball/5eefc590c868d8dfb411e53053c963fe42dcda74",
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "de4ce0071eb47ed54cbda54869001210cf3a8ae5",
+    commit = "a622de35ac311c5ad390a7af80724634e5dc61ed",
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    shallow_since = "1690331196 +0000",
+    shallow_since = "1697047535 +0000",
 )
 
 new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
-    commit = "147f65333c38ddd1ebf554e89965c243c8ce50b3",
+    commit = "29ac73db520575590c3aceb0a6f1f58dda8934f6",
     remote = "https://chromium.googlesource.com/chromium/src/base/trace_event/common.git",
-    shallow_since = "1676317690 -0800",
+    shallow_since = "1695357423 -0700",
 )
 
 # This sets up a hermetic python3, rather than depending on what is installed.
