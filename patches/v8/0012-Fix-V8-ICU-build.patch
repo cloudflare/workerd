@@ -1,4 +1,4 @@
-From abcde551a7250a782f17de08ad1d00828a170c54 Mon Sep 17 00:00:00 2001
+From d444292cf748824683144c754b702a8a3a97a709 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 26 Jul 2023 18:40:13 +0200
 Subject: Fix V8/ICU build
@@ -16,10 +16,10 @@ Subject: Fix V8/ICU build
  2 files changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 3c0fb68f710778b969ef5a90c70da32814f3fbd6..7c2adbb0c4aa584a37170328e5adbac66d6e5384 100644
+index 4ec995b8140f39e3b1ec25f7e8fc487262067e66..f271a38f7d65a2ac46e37be971dbfb9755c01fb3 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4004,7 +4004,6 @@ v8_binary(
+@@ -4069,7 +4069,6 @@ v8_binary(
          "UNISTR_FROM_CHAR_EXPLICIT=",
      ],
      deps = [

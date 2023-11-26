@@ -1,4 +1,4 @@
-From 2d534151fc4a0f852876f33b816321bf03cdd554 Mon Sep 17 00:00:00 2001
+From f8aac383c1e5f3e075a084cde64007cadf1219f2 Mon Sep 17 00:00:00 2001
 From: Orion Hodson <orion@cloudflare.com>
 Date: Wed, 13 Sep 2023 15:38:15 +0100
 Subject: Randomize the initial ExecutionContextId used by the inspector
@@ -11,7 +11,7 @@ live workers (https://chat.google.com/room/AAAAnS2bXT4/GX5-pa8O0ts).
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/inspector/v8-inspector-impl.cc b/src/inspector/v8-inspector-impl.cc
-index 60ad12aece057b4ff8eb12f99b830a4a44e12cc0..20d06e4f011714977e053b5409fb26003ea94cb9 100644
+index 60ad12aece057b4ff8eb12f99b830a4a44e12cc0..4edf6bf7a41ca3471cc6b38418fe3d943b7fc5c8 100644
 --- a/src/inspector/v8-inspector-impl.cc
 +++ b/src/inspector/v8-inspector-impl.cc
 @@ -66,7 +66,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,

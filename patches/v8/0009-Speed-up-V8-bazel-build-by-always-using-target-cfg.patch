@@ -1,4 +1,4 @@
-From 4f79d6ff2fab319f0c61fba66ba80feb1ff5d05e Mon Sep 17 00:00:00 2001
+From b9440c851a29e834ea7834e794cc279210473bfc Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Wed, 7 Jun 2023 21:40:54 -0400
 Subject: Speed up V8 bazel build by always using target cfg
@@ -16,7 +16,7 @@ this also improves build times.
  2 files changed, 57 insertions(+), 16 deletions(-)
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 67442408206c3221317e32606e7f18fb349ec2e2..baaa3d6b1a14c23f017c9e4c7675de0a99df10ea 100644
+index a723ce02345a342da06ec4627926a93d8bdcaa36..cb12609f12374905c31892534cf9d44d555202bd 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -17,6 +17,7 @@ load(
@@ -27,7 +27,7 @@ index 67442408206c3221317e32606e7f18fb349ec2e2..baaa3d6b1a14c23f017c9e4c7675de0a
  )
  load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
  
-@@ -3778,22 +3779,20 @@ filegroup(
+@@ -3843,22 +3844,20 @@ filegroup(
      }),
  )
  
@@ -56,7 +56,7 @@ index 67442408206c3221317e32606e7f18fb349ec2e2..baaa3d6b1a14c23f017c9e4c7675de0a
  )
  
  v8_mksnapshot(
-@@ -3990,8 +3989,6 @@ v8_binary(
+@@ -4055,8 +4054,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -65,7 +65,7 @@ index 67442408206c3221317e32606e7f18fb349ec2e2..baaa3d6b1a14c23f017c9e4c7675de0a
      ],
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
-@@ -4003,6 +4000,7 @@ v8_binary(
+@@ -4068,6 +4065,7 @@ v8_binary(
      ],
      deps = [
          "//external:absl_optional",
@@ -74,7 +74,7 @@ index 67442408206c3221317e32606e7f18fb349ec2e2..baaa3d6b1a14c23f017c9e4c7675de0a
      ],
  )
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index b77cc065b2f5881c5dfb8da39d2019f5d62428a2..6b5482d259ceadff5f9926244eb14a0f6e9eb5ca 100644
+index 0c59518819cb685fe9f68080d6bdbeb0b7ff5033..7053ca31b999ae7423e7485ee6392a09f9de4aa9 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -336,6 +336,15 @@ def v8_library(
@@ -127,7 +127,7 @@ index b77cc065b2f5881c5dfb8da39d2019f5d62428a2..6b5482d259ceadff5f9926244eb14a0f
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -635,3 +647,34 @@ def v8_build_config(name):
+@@ -636,3 +648,34 @@ def v8_build_config(name):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )
