@@ -4,6 +4,12 @@ namespace workerd::api {
 
 namespace {
 static constexpr auto EVAL_STR = "eval"_kjc;
+static constexpr auto ANON_STR = "anonymous"_kjc;
+static constexpr auto ASYNC_FN_PREFIX = "async function "_kjc;
+static constexpr auto ASYNC_FN_ARG_OPEN = "("_kjc;
+static constexpr auto ASYNC_FN_ARG_CLOSE = ") {"_kjc;
+static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
+
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
   return name.map([](kj::String& str) {
     return str.asPtr();
@@ -28,7 +34,7 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
 
-  auto nameStr = js.str(getName(name, EVAL_STR));
+  auto nameStr = js.str(getName(name, ANON_STR));
   v8::ScriptOrigin origin(js.v8Isolate, nameStr);
   v8::ScriptCompiler::Source source(script, origin);
 
@@ -41,6 +47,56 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(
   fn->SetName(nameStr);
 
   return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, fn));
+}
+
+UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(
+    jsg::Lock& js,
+    jsg::JsString script,
+    jsg::Optional<kj::String> name,
+    jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
+    const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
+  js.setAllowEval(true);
+  KJ_DEFER(js.setAllowEval(false));
+
+  auto nameStr = js.str(getName(name, ANON_STR));
+
+  // This case is sadly a bit more complicated than the newFunction variant
+  // because v8 currently (surprisingly) does not actually expose a way
+  // CompileAsyncFunction variant (silly v8). What we end up doing here is
+  // building a string that wraps the script provided by the caller:
+  //
+  //   async function {name}({args}) { {script} }; {name}
+  //
+  // Where {name} is the name of the function as provided by the user or
+  // "anonymous" by default, {args} is the list of args provided by the
+  // caller, if any. We end the constructed string with the name of the
+  // function so that the result of running the compiled script is a reference
+  // to the compiled function.
+
+  auto prepared = v8::String::Concat(js.v8Isolate,
+                                     js.strIntern(ASYNC_FN_PREFIX),
+                                     nameStr);
+  prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(ASYNC_FN_ARG_OPEN));
+
+  for (auto& arg : args) {
+    prepared = v8::String::Concat(js.v8Isolate, prepared, arg.getHandle(js));
+    prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(","));
+  }
+  prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(ASYNC_FN_ARG_CLOSE));
+  prepared = v8::String::Concat(js.v8Isolate, prepared, script);
+  prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(ASYNC_FN_SUFFIX));
+  prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(";"));
+  prepared = v8::String::Concat(js.v8Isolate, prepared, nameStr);
+
+  v8::ScriptOrigin origin(js.v8Isolate, nameStr);
+  v8::ScriptCompiler::Source source(prepared, origin);
+
+  auto compiled = jsg::check(v8::ScriptCompiler::Compile(js.v8Context(), &source));
+  auto result = jsg::check(compiled->Run(js.v8Context()));
+
+  KJ_REQUIRE(result->IsAsyncFunction());
+
+  return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, result.As<v8::Function>()));
 }
 
 }  // namespace workerd::api

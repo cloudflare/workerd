@@ -28,3 +28,5 @@ package-lock.json
 /.bazel-cache
 
 /workerd-*
+
+/docs/api

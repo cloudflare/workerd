@@ -3,9 +3,52 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu-utils.h"
+#include <map>
 #include <webgpu/webgpu_cpp.h>
 
 namespace workerd::api::gpu {
+
+wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp) {
+  static std::map<kj::StringPtr, wgpu::StoreOp> mapping{
+      {"store", wgpu::StoreOp::Store},
+      {"discard", wgpu::StoreOp::Discard},
+  };
+  auto found = mapping.find(storeOp);
+  JSG_REQUIRE(found != mapping.end(), TypeError, "unload GPU store operation: ", storeOp);
+  return found->second;
+}
+
+wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp) {
+  static std::map<kj::StringPtr, wgpu::LoadOp> mapping{
+      {"load", wgpu::LoadOp::Load},
+      {"clear", wgpu::LoadOp::Clear},
+  };
+  auto found = mapping.find(loadOp);
+  JSG_REQUIRE(found != mapping.end(), TypeError, "unload GPU load operation: ", loadOp);
+  return found->second;
+}
+
+wgpu::RenderPassTimestampLocation parseRenderPassTimestampLocation(kj::StringPtr location) {
+  static std::map<kj::StringPtr, wgpu::RenderPassTimestampLocation> mapping{
+      {"beginning", wgpu::RenderPassTimestampLocation::Beginning},
+      {"end", wgpu::RenderPassTimestampLocation::End},
+  };
+  auto found = mapping.find(location);
+  JSG_REQUIRE(found != mapping.end(), TypeError,
+              "unknown render pass timestamp location: ", location);
+  return found->second;
+}
+
+wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location) {
+  static std::map<kj::StringPtr, wgpu::ComputePassTimestampLocation> mapping{
+      {"beginning", wgpu::ComputePassTimestampLocation::Beginning},
+      {"end", wgpu::ComputePassTimestampLocation::End},
+  };
+  auto found = mapping.find(location);
+  JSG_REQUIRE(found != mapping.end(), TypeError,
+              "unknown compute pass timestamp location: ", location);
+  return found->second;
+}
 
 // TODO(soon): use a static std::map for most of these functions, as seen
 // in kj::StringPtr CryptoImpl::getAsymmetricKeyType().

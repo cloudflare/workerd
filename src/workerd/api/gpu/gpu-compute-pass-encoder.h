@@ -57,6 +57,4 @@ struct GPUComputePassDescriptor {
   JSG_STRUCT(label, timestampWrites);
 };
 
-wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location);
-
 } // namespace workerd::api::gpu

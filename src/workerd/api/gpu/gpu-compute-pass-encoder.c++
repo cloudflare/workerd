@@ -44,16 +44,4 @@ void GPUComputePassEncoder::setBindGroup(
   encoder_.SetBindGroup(index, bg, num_offsets, offsets);
 }
 
-wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location) {
-  if (location == "beginning") {
-    return wgpu::ComputePassTimestampLocation::Beginning;
-  }
-
-  if (location == "end") {
-    return wgpu::ComputePassTimestampLocation::End;
-  }
-
-  JSG_FAIL_REQUIRE(TypeError, "unknown compute pass timestamp location", location);
-}
-
 } // namespace workerd::api::gpu

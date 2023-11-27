@@ -32,3 +32,27 @@ export const newFunction = {
     strictEqual(fn(fn), fn);
   }
 };
+
+export const newAsyncFunction = {
+  async test(ctx, env) {
+    const fn = env.unsafe.newAsyncFunction('return await m', 'bar', 'm');
+    strictEqual(fn.length, 1);
+    strictEqual(fn.name, 'bar');
+    strictEqual(await fn(), undefined);
+    strictEqual(await fn(1), 1);
+    strictEqual(await fn(fn), fn);
+    strictEqual(await fn(Promise.resolve(1)), 1);
+  }
+};
+
+export const newAsyncFunction2 = {
+  async test(ctx, env) {
+    const fn = env.unsafe.newAsyncFunction('return await arguments[0]');
+    strictEqual(fn.length, 0);
+    strictEqual(fn.name, 'anonymous');
+    strictEqual(await fn(), undefined);
+    strictEqual(await fn(1), 1);
+    strictEqual(await fn(fn), fn);
+    strictEqual(await fn(Promise.resolve(1)), 1);
+  }
+};

@@ -25,7 +25,7 @@ jobs:
       - id: echo
         run: |
           echo "date=$(cat src/workerd/io/supported-compatibility-date.txt)" >> $GITHUB_OUTPUT;
-          echo "version=${{ inputs.prerelease == false && '1' || '0'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
+          echo "version=${{ inputs.prerelease == false && '4' || '0'}}.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').${{ inputs.patch }}" >> $GITHUB_OUTPUT;
           echo "release_version=1.$(cat src/workerd/io/supported-compatibility-date.txt | tr -d '-').0" >> $GITHUB_OUTPUT;
   build-and-publish-types:
     runs-on: ubuntu-22.04

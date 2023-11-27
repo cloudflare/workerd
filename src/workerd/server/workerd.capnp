@@ -76,6 +76,15 @@ struct Config {
   extensions @3 :List(Extension);
   # Extensions provide capabilities to all workers. Extensions are usually prepared separately
   # and are late-linked with the app using this config field.
+
+  autogates @4 :List(Autogate);
+  # A list of gates and a corresponding value of whether they are enabled.
+  # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
+  # config definition in our internal repo for more details.
+  struct Autogate {
+    enabled @0 :Bool;
+    name @1 :Text;
+  }
 }
 
 # ========================================================================================
