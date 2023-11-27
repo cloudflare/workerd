@@ -58,6 +58,7 @@ wd_cc_binary(
     }),
 )
 
+
 wd_cc_library(
     name = "alarm-scheduler",
     srcs = [
@@ -126,6 +127,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj:kj", ":workerd_capnp", "//src/workerd/util:sentry"],
 )
+
+exports_files(["autogate.h"])
 
 [kj_test(
     src = f,

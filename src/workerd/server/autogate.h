@@ -12,6 +12,7 @@ namespace workerd::server {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
+  BUILTIN_WASM,
   NumOfKeys // Reserved for iteration.
 };
 

@@ -12,6 +12,7 @@
 #include <set>
 #include "function.h"
 #include "promise.h"
+#include <workerd/server/autogate.h>
 
 namespace workerd::jsg {
 
@@ -398,9 +399,7 @@ public:
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
         if (module.which() == Module::WASM) {
-          // if (!experimental_builtin_wasm_feature_gate) {
-          //    FAIL_HERE;
-          // }
+          KJ_ASSERT(server::Autogate::isEnabled(server::AutogateKey::BUILTIN_WASM));
           using Key = typename Entry::Key;
           auto specifier = module.getName();
           auto path = kj::Path::parse(specifier);
@@ -424,7 +423,7 @@ public:
                   kj::none,
                   jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
           }, type);
-          return;
+          continue;
         }
         // TODO: asChars() might be wrong for wide characters
         addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
