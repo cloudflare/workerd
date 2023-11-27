@@ -404,8 +404,9 @@ public:
       auto path = kj::Path::parse(specifier);
       using Key = typename Entry::Key;
       if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-        return;
+        continue;
       }
+
       switch (module.which()) {
       case Module::SRC:
         // TODO: asChars() might be wrong for wide characters
