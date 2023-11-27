@@ -64,7 +64,7 @@ public:
     const kj::Clock& clock,
     kj::Timer& timer,
     const SqliteDatabase::Vfs& vfs,
-    kj::PathPtr path);
+    kj::Path path);
 
   kj::Maybe<kj::Date> getAlarm(ActorKey actor);
   bool setAlarm(ActorKey actor, kj::Date scheduledTime);

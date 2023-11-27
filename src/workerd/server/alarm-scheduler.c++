@@ -28,11 +28,12 @@ AlarmScheduler::AlarmScheduler(
     const kj::Clock& clock,
     kj::Timer& timer,
     const SqliteDatabase::Vfs& vfs,
-    kj::PathPtr path)
+    kj::Path path)
     : clock(clock), timer(timer), random(makeSeededRandomEngine()),
       db([&]{
         auto db = kj::heap<SqliteDatabase>(vfs, path,
-            kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+            kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT)
+                .attach(kj::mv(path));
         ensureInitialized(*db);
         return kj::mv(db);
       }()),
