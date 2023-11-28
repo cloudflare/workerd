@@ -3,8 +3,9 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "autogate.h"
 #include <workerd/util/sentry.h>
+#include <kj/common.h>
 
-namespace workerd::server {
+namespace workerd::util {
 
 kj::Maybe<Autogate> globalAutogate;
 
@@ -17,7 +18,7 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   }
 }
 
-Autogate::Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
+void Autogate::addGates(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
   for (auto autogate : autogates) {
     if (!autogate.hasName()) {
       continue;
@@ -48,17 +49,10 @@ bool Autogate::isEnabled(AutogateKey key) {
   return false;
 }
 
-void Autogate::initAutogate(config::Config::Reader config) {
-  if (!config.hasAutogates()) {
-    return;
-  }
-
-  globalAutogate = Autogate(config.getAutogates());
-}
-
-void Autogate::initAutogate(capnp::List<config::Config::Autogate,
-    capnp::Kind::STRUCT>::Reader autogates) {
-  globalAutogate = Autogate(autogates);
+void Autogate::initAutogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader gates) {
+  Autogate autogate;
+  autogate.addGates(gates);
+  globalAutogate = kj::mv(autogate);
 }
 
 void Autogate::deinitAutogate() { globalAutogate = kj::none; }

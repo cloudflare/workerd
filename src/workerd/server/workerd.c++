@@ -20,7 +20,7 @@
 #include <openssl/rand.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/supported-compatibility-date.capnp.h>
-#include <workerd/server/autogate.h>
+#include <workerd/util/autogate.h>
 
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
@@ -477,6 +477,8 @@ kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name) {
     return kj::heap<BuiltinSchemaFileImpl>("/capnp/c++.capnp", CPP_CAPNP_SCHEMA);
   } else if (name == "/workerd/workerd.capnp") {
     return kj::heap<BuiltinSchemaFileImpl>("/workerd/workerd.capnp", WORKERD_CAPNP_SCHEMA);
+  } else if (name == "/workerd/util/autogate.capnp") {
+    return kj::heap<BuiltinSchemaFileImpl>("/workerd/util/autogate.capnp", AUTOGATE_CAPNP_SCHEMA);
   } else {
     return kj::none;
   }
@@ -848,9 +850,11 @@ public:
       }
     }
 
-    KJ_IF_SOME(c, config) {
-      Autogate::initAutogate(c);
-    }
+    // We'll fail at getConfig() if there are multiple top level Config objects.
+    // The error message says that you have to specify which config to use, but
+    // it's not clear that there is any mechanism to do that??
+    config::Config::Reader config = getConfig();
+    util::Autogate::initAutogate(config.getAutogates());
   }
 
   void setConstName(kj::StringPtr name) {

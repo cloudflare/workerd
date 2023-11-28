@@ -38,6 +38,8 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
 $Cxx.allowCancellation;
 
+using import "/workerd/util/autogate.capnp".Autogate;
+
 struct Config {
   # Top-level configuration for a workerd instance.
 
@@ -81,10 +83,6 @@ struct Config {
   # A list of gates and a corresponding value of whether they are enabled.
   # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
   # config definition in our internal repo for more details.
-  struct Autogate {
-    enabled @0 :Bool;
-    name @1 :Text;
-  }
 }
 
 # ========================================================================================
