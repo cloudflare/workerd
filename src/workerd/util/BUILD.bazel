@@ -113,8 +113,6 @@ wd_cc_library(
     deps = [":autogate_capnp", ":sentry"],
 )
 
-exports_files(["autogate.h"])
-
 [kj_test(
     src = f,
     deps = [
