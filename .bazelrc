@@ -5,6 +5,17 @@ build --build_tag_filters=-off-by-default
 # Enable webgpu
 build --//src/workerd/io:enable_experimental_webgpu=True
 
+# Dawn tint build flags
+build --@dawn//src/tint:tint_build_glsl_writer=False
+build --@dawn//src/tint:tint_build_glsl_validator=False
+build --@dawn//src/tint:tint_build_hlsl_writer=True
+build --@dawn//src/tint:tint_build_ir=False
+build --@dawn//src/tint:tint_build_msl_writer=True
+build --@dawn//src/tint:tint_build_spv_reader=False
+build --@dawn//src/tint:tint_build_spv_writer=True
+build --@dawn//src/tint:tint_build_wgsl_reader=True
+build --@dawn//src/tint:tint_build_wgsl_writer=True
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
@@ -73,7 +84,6 @@ build:fastdbg --@rules_rust//:extra_exec_rustc_flags=-C,panic=unwind,-C,debug-as
 # significantly – disable it for now due to compile errors and wrong code generation when bazel and
 # rust use different LLVM versions.
 build:thin-lto --@rules_rust//:extra_rustc_flags=-C,panic=abort,-C,codegen-units=1,-C,embed-bitcode=n
-
 
 # common sanitizers options
 build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False

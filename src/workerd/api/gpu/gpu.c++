@@ -22,9 +22,7 @@ void initialize() {
   dawnProcSetProcs(&dawn::native::GetProcs());
 }
 
-GPU::GPU() {
-  instance_.DiscoverDefaultAdapters();
-}
+GPU::GPU() {}
 
 kj::String parseAdapterType(wgpu::AdapterType type) {
   switch (type) {
@@ -52,7 +50,7 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   KJ_UNREACHABLE;
 #endif
 
-  auto adapters = instance_.GetAdapters();
+  auto adapters = instance_.EnumerateAdapters();
   if (adapters.empty()) {
     KJ_LOG(WARNING, "no webgpu adapters found");
     return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
@@ -72,7 +70,7 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
     break;
   }
 
-  KJ_IF_SOME (a, adapter) {
+  KJ_IF_SOME(a, adapter) {
     kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a);
     return js.resolvedPromise(kj::mv(gpuAdapter));
   }

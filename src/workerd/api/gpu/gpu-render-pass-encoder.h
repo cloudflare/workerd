@@ -63,12 +63,12 @@ struct GPURenderPassColorAttachment {
   JSG_STRUCT(view, depthSlice, resolveTarget, clearValue, loadOp, storeOp);
 };
 
-struct GPURenderPassTimestampWrite {
+struct GPURenderPassTimestampWrites {
   jsg::Ref<GPUQuerySet> querySet;
-  GPUSize32 queryIndex;
-  kj::String location;
+  jsg::Optional<GPUSize32> beginningOfPassWriteIndex;
+  jsg::Optional<GPUSize32> endOfPassWriteIndex;
 
-  JSG_STRUCT(querySet, queryIndex, location);
+  JSG_STRUCT(querySet, beginningOfPassWriteIndex, endOfPassWriteIndex);
 };
 
 struct GPURenderPassDescriptor {
@@ -76,7 +76,7 @@ struct GPURenderPassDescriptor {
   jsg::Sequence<GPURenderPassColorAttachment> colorAttachments;
   jsg::Optional<GPURenderPassDepthStencilAttachment> depthStencilAttachment;
   jsg::Optional<jsg::Ref<GPUQuerySet>> occlusionQuerySet;
-  jsg::Optional<kj::Array<GPURenderPassTimestampWrite>> timestampWrites;
+  jsg::Optional<GPURenderPassTimestampWrites> timestampWrites;
   jsg::Optional<GPUSize64> maxDrawCount;
   JSG_STRUCT(label, colorAttachments, depthStencilAttachment, occlusionQuerySet, timestampWrites,
              maxDrawCount);

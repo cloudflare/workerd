@@ -230,18 +230,18 @@ GPUCommandEncoder::beginRenderPass(GPURenderPassDescriptor descriptor) {
     desc.occlusionQuerySet = *occlusionQuerySet;
   }
 
-  kj::Vector<wgpu::RenderPassTimestampWrite> timestamps;
   KJ_IF_SOME(timestampWrites, descriptor.timestampWrites) {
-    for (auto& timestamp : timestampWrites) {
-      wgpu::RenderPassTimestampWrite t{};
-      t.querySet = *timestamp.querySet;
-      t.queryIndex = timestamp.queryIndex;
-      t.location = parseRenderPassTimestampLocation(timestamp.location);
-      timestamps.add(kj::mv(t));
+    wgpu::RenderPassTimestampWrites t{};
+    t.querySet = *timestampWrites.querySet;
+    KJ_IF_SOME(beginIndex, timestampWrites.beginningOfPassWriteIndex) {
+      t.beginningOfPassWriteIndex = beginIndex;
     }
+    KJ_IF_SOME(endIndex, timestampWrites.endOfPassWriteIndex) {
+      t.endOfPassWriteIndex = endIndex;
+    }
+
+    desc.timestampWrites = &t;
   }
-  desc.timestampWrites = timestamps.begin();
-  desc.timestampWriteCount = timestamps.size();
 
   // TODO: maxDrawCount is not supported by dawn yet
 
@@ -254,24 +254,24 @@ GPUCommandEncoder::beginComputePass(jsg::Optional<GPUComputePassDescriptor> desc
 
   wgpu::ComputePassDescriptor desc{};
 
-  kj::Vector<wgpu::ComputePassTimestampWrite> timestamps;
   KJ_IF_SOME(d, descriptor) {
     KJ_IF_SOME(label, d.label) {
       desc.label = label.cStr();
     }
 
     KJ_IF_SOME(timestampWrites, d.timestampWrites) {
-      for (auto& timestamp : timestampWrites) {
-        wgpu::ComputePassTimestampWrite t{};
-        t.querySet = *timestamp.querySet;
-        t.queryIndex = timestamp.queryIndex;
-        t.location = parseComputePassTimestampLocation(timestamp.location);
-        timestamps.add(kj::mv(t));
+      wgpu::ComputePassTimestampWrites t{};
+      t.querySet = *timestampWrites.querySet;
+      KJ_IF_SOME(beginIndex, timestampWrites.beginningOfPassWriteIndex) {
+        t.beginningOfPassWriteIndex = beginIndex;
       }
+      KJ_IF_SOME(endIndex, timestampWrites.endOfPassWriteIndex) {
+        t.endOfPassWriteIndex = endIndex;
+      }
+
+      desc.timestampWrites = &t;
     }
   }
-  desc.timestampWrites = timestamps.begin();
-  desc.timestampWriteCount = timestamps.size();
 
   auto computePassEncoder = encoder_.BeginComputePass(&desc);
   return jsg::alloc<GPUComputePassEncoder>(kj::mv(computePassEncoder));

@@ -42,14 +42,14 @@ http_archive(
 http_archive(
     name = "sqlite3",
     build_file = "//:build/BUILD.sqlite3",
+    patch_args = ["-p1"],
+    patches = [
+        "//:patches/sqlite/0001-row-counts-plain.patch",
+    ],
     sha256 = "ab9aae38a11b931f35d8d1c6d62826d215579892e6ffbf89f20bdce106a9c8c5",
     strip_prefix = "sqlite-src-3440000",
     type = "zip",
     url = "https://sqlite.org/2023/sqlite-src-3440000.zip",
-    patches = [
-        "//:patches/sqlite/0001-row-counts-plain.patch",
-    ],
-    patch_args = ["-p1"],
 )
 
 http_archive(
@@ -83,11 +83,11 @@ http_archive(
 http_archive(
     name = "ada-url",
     build_file = "//:build/BUILD.ada-url",
+    patch_args = ["-p1"],
+    patches = [],
     sha256 = "d6be6a559745a79be191bc63c1190015c702a30bacad10028d32b479644a0785",
     type = "zip",
     url = "https://github.com/ada-url/ada/releases/download/v2.7.0/singleheader.zip",
-    patches = [],
-    patch_args = ["-p1"],
 )
 
 # ========================================================================================
@@ -98,30 +98,30 @@ http_archive(
 git_repository(
     name = "dawn",
     build_file = "//:build/BUILD.dawn",
-    commit = "fd61f6244fb00ea42390f5a77267a4c195d90a06",
-    patches = [
-        "@//:patches/dawn_spirv.patch",
-    ],
+    commit = "c5169ef5b9982e17a8caddd1218aa0ad5e24a4e3",
     remote = "https://dawn.googlesource.com/dawn.git",
+    repo_mapping = {
+        "@abseil_cpp": "@com_google_absl",
+    },
 )
 
 git_repository(
-    name = "vulkan_tools",
-    build_file = "//:build/BUILD.vulkan_tools",
-    commit = "ca8bb4ee3cc9afdeca4b49c5ef758bad7cce2c72",
-    remote = "https://github.com/KhronosGroup/Vulkan-Tools.git",
+    name = "vulkan_utility_libraries",
+    build_file = "//:build/BUILD.vulkan_utility_libraries",
+    commit = "5b3147a535e28a48ae760efacdf97b296d9e8c73",
+    remote = "https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git",
 )
 
 git_repository(
     name = "vulkan_headers",
     build_file = "//:build/BUILD.vulkan_headers",
-    commit = "c1a8560c5cf5e7bd6dbc71fe69b1a317411c36b8",
+    commit = "aff5071d4ee6215c60a91d8d983cad91bb25fb57",
     remote = "https://github.com/KhronosGroup/Vulkan-Headers.git",
 )
 
 git_repository(
     name = "spirv_headers",
-    commit = "6e09e44cd88a5297433411b2ee52f4cf9f50fa90",
+    commit = "88bc5e321c2839707df8b1ab534e243e00744177",
     remote = "https://github.com/KhronosGroup/SPIRV-Headers.git",
 )
 
@@ -331,7 +331,6 @@ npm_repositories()
 
 http_archive(
     name = "v8",
-    sha256 = "5a28ff9feff6d5efee118b11ba994319c63224192f25530e4e296464cf7b8f96",
     patch_args = ["-p1"],
     patches = [
         "//:patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -348,6 +347,7 @@ http_archive(
         "//:patches/v8/0012-Fix-V8-ICU-build.patch",
         "//:patches/v8/0013-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     ],
+    sha256 = "5a28ff9feff6d5efee118b11ba994319c63224192f25530e4e296464cf7b8f96",
     strip_prefix = "v8-v8-934b99f",
     type = "tgz",
     url = "https://github.com/v8/v8/tarball/934b99feafeaaafca2d9e587d586afc8687dea80",
@@ -360,7 +360,7 @@ new_git_repository(
     patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
     patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
     remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
-    shallow_since = "1690331196 +0000"
+    shallow_since = "1690331196 +0000",
 )
 
 new_git_repository(

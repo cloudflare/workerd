@@ -39,20 +39,18 @@ private:
   //                  GPUSize32 dynamicOffsetsDataLength);
 };
 
-struct GPUComputePassTimestampWrite {
+struct GPUComputePassTimestampWrites {
   jsg::Ref<GPUQuerySet> querySet;
-  GPUSize32 queryIndex;
-  kj::String location;
+  jsg::Optional<GPUSize32> beginningOfPassWriteIndex;
+  jsg::Optional<GPUSize32> endOfPassWriteIndex;
 
-  JSG_STRUCT(querySet, queryIndex, location);
+  JSG_STRUCT(querySet, beginningOfPassWriteIndex, endOfPassWriteIndex);
 };
 
 struct GPUComputePassDescriptor {
   jsg::Optional<kj::String> label;
 
-  // TODO(someday): this part of the spec is changing, but implementations haven't caught up
-  // https://github.com/gpuweb/gpuweb/commit/bc76364f128f41efbf5584049757707bfb3a1715
-  jsg::Optional<kj::Array<GPUComputePassTimestampWrite>> timestampWrites;
+  jsg::Optional<GPUComputePassTimestampWrites> timestampWrites;
 
   JSG_STRUCT(label, timestampWrites);
 };
