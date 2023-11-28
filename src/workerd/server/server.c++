@@ -13,6 +13,7 @@
 #include <capnp/compat/json.h>
 #include <workerd/api/analytics-engine.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>

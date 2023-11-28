@@ -10,6 +10,7 @@ using kj::uint;
 
 namespace workerd {
 
+namespace {
 // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
 // interface the promise resolved to.
 class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
@@ -93,6 +94,7 @@ private:
   kj::ForkedPromise<void> promise;
   kj::Maybe<kj::Own<WorkerInterface>> worker;
 };
+}
 
 kj::Own<WorkerInterface> newPromisedWorkerInterface(
     kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise) {
@@ -104,7 +106,7 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
 }
 
 // =======================================================================================
-
+namespace {
 // A Revocable WebSocket wrapper, revoked when revokeProm rejects
 class RevocableWebSocket final: public kj::WebSocket {
 public:
@@ -265,6 +267,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
     RevocableWebSocketWorkerInterface::customEvent(kj::Own<CustomEvent> event) {
   return worker.customEvent(kj::mv(event));
 }
+
+}  // namespace
 
 kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
     kj::Own<WorkerInterface> worker,

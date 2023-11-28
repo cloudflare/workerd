@@ -106,4 +106,18 @@ public:  // For kj::heap() only; pretend this is private.
                    kj::Maybe<kj::String> cfBlobJson);
 };
 
+kj::Own<WorkerInterface> newWorkerEntrypoint(
+    ThreadContext& threadContext,
+    kj::Own<const Worker> worker,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    kj::Maybe<kj::Own<Worker::Actor>> actor,
+    kj::Own<LimitEnforcer> limitEnforcer,
+    kj::Own<void> ioContextDependency,
+    kj::Own<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> metrics,
+    kj::TaskSet& waitUntilTasks,
+    bool tunnelExceptions,
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+    kj::Maybe<kj::String> cfBlobJson);
+
 } // namespace workerd
