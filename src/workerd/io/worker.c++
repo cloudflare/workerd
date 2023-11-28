@@ -6,6 +6,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
+#include "worker-entrypoint.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -3367,18 +3368,6 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(
                                       startType, logNewScript, errorReporter);
 }
 
-kj::Own<WorkerInterface> Worker::Isolate::wrapSubrequestClient(
-    kj::Own<WorkerInterface> client,
-    kj::HttpHeaderId contentEncodingHeaderId,
-    RequestObserver& requestMetrics) const {
-  if (impl->inspector != kj::none) {
-    client = kj::heap<SubrequestClient>(
-        kj::atomicAddRef(*this), kj::mv(client), contentEncodingHeaderId, requestMetrics);
-  }
-
-  return client;
-}
-
 void Worker::Isolate::completedRequest() const {
   limitEnforcer->completedRequest(id);
 }
@@ -3526,6 +3515,34 @@ private:
   LimitedBodyWrapper decodedBuf;
   kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
   RequestObserver& requestMetrics;
+};
+
+class Worker::Isolate::SubrequestClient final: public WorkerInterface {
+public:
+  explicit SubrequestClient(kj::Own<const Isolate> isolate,
+      kj::Own<WorkerInterface> inner, kj::HttpHeaderId contentEncodingHeaderId,
+      RequestObserver& requestMetrics)
+      : constIsolate(kj::mv(isolate)), inner(kj::mv(inner)),
+        contentEncodingHeaderId(contentEncodingHeaderId),
+        requestMetrics(kj::addRef(requestMetrics)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override;
+  kj::Promise<void> connect(
+      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& tunnel,
+      kj::HttpConnectSettings settings) override;
+  void prewarm(kj::StringPtr url) override;
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
+
+private:
+  kj::Own<const Isolate> constIsolate;
+  kj::Own<WorkerInterface> inner;
+  kj::HttpHeaderId contentEncodingHeaderId;
+  kj::Own<RequestObserver> requestMetrics;
 };
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::request(
@@ -3747,6 +3764,18 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::run
 kj::Promise<WorkerInterface::CustomEvent::Result>
     Worker::Isolate::SubrequestClient::customEvent(kj::Own<CustomEvent> event) {
   return inner->customEvent(kj::mv(event));
+}
+
+kj::Own<WorkerInterface> Worker::Isolate::wrapSubrequestClient(
+    kj::Own<WorkerInterface> client,
+    kj::HttpHeaderId contentEncodingHeaderId,
+    RequestObserver& requestMetrics) const {
+  if (impl->inspector != kj::none) {
+    client = kj::heap<SubrequestClient>(
+        kj::atomicAddRef(*this), kj::mv(client), contentEncodingHeaderId, requestMetrics);
+  }
+
+  return client;
 }
 
 }  // namespace workerd

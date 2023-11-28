@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <kj/common.h>
-#include <kj/debug.h>
 #include <kj/refcount.h>
 
 namespace workerd {
@@ -22,7 +20,7 @@ public:
   };
 
   // An object that should be associated with (attached to) a request.
-  class ActiveRequest {
+  class ActiveRequest final {
   public:
     // On creation, if the parent RequestTracker has 0 active requests, we call the `active()` hook.
     // On destruction, if the RequestTracker has 0 active requests, we call the `inactive()` hook.

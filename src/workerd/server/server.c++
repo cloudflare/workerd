@@ -1354,7 +1354,7 @@ public:
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Maybe<kj::StringPtr> entrypointName,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none) {
-    return WorkerEntrypoint::construct(
+    return newWorkerEntrypoint(
         threadContext,
         kj::atomicAddRef(*worker),
         entrypointName,

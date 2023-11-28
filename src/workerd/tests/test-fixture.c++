@@ -10,7 +10,6 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
-#include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
