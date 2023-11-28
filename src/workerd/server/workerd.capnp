@@ -38,6 +38,9 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
 $Cxx.allowCancellation;
 
+# Any capnp files imported here must be:
+# 1. embedded into workerd-meta.capnp
+# 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
 using import "/workerd/util/autogate.capnp".Autogate;
 
 struct Config {

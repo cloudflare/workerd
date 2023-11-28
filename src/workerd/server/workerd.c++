@@ -852,9 +852,8 @@ public:
 
     // We'll fail at getConfig() if there are multiple top level Config objects.
     // The error message says that you have to specify which config to use, but
-    // it's not clear that there is any mechanism to do that??
-    config::Config::Reader config = getConfig();
-    util::Autogate::initAutogate(config.getAutogates());
+    // it's not clear that there is any mechanism to do that.
+    util::Autogate::initAutogate(getConfig().getAutogates());
   }
 
   void setConstName(kj::StringPtr name) {
@@ -1239,6 +1238,10 @@ private:
         auto names = KJ_MAP(cnst, topLevelConfigConstants) {
           return cnst.getShortDisplayName();
         };
+        // TODO: this error message says "you must specify which one to use".
+        // This is not actaully possible? Either fix the error message to say
+        // **how** to specify which config object to use or tell user to define
+        // exactly one top level Config constant.
         context.exitError(kj::str(
             "The config file defines multiple top-level constants of type 'Config', so you must "
             "specify which one to use. The options are: ", kj::strArray(names, ", ")));
