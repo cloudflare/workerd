@@ -43,8 +43,7 @@ public:
 private:
   kj::HashMap<AutogateKey, bool> gates;
 
-  Autogate() {};
-  void addGates(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+  Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
 };
 
 // Retrieves the name of the gate.

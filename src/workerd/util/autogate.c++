@@ -18,7 +18,7 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   }
 }
 
-void Autogate::addGates(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
+Autogate::Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
   for (auto autogate : autogates) {
     if (!autogate.hasName()) {
       continue;
@@ -50,9 +50,7 @@ bool Autogate::isEnabled(AutogateKey key) {
 }
 
 void Autogate::initAutogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader gates) {
-  Autogate autogate;
-  autogate.addGates(gates);
-  globalAutogate = kj::mv(autogate);
+  globalAutogate = Autogate(gates);
 }
 
 void Autogate::deinitAutogate() { globalAutogate = kj::none; }

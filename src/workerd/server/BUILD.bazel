@@ -109,7 +109,6 @@ wd_cc_capnp_library(
     deps = [
         "//src/workerd/util:autogate_capnp",
     ],
-    includes = ["//"]
 )
 
 wd_cc_capnp_library(
