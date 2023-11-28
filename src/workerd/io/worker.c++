@@ -1553,7 +1553,6 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
                           const v8::Global<v8::Function>& original,
                           const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
-  // TODO(now): does this need to run within a handle scope?
   auto context = js.v8Context();
   int length = info.Length();
   v8::Local<v8::Value> args[length + 1]; // + 1 used for `colors` later
@@ -1670,7 +1669,6 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     auto colors = COLOR_MODE == ColorMode::ENABLED ||
       (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    // TODO(now): does this need to run within a handle scope?
     auto registry = jsg::ModuleRegistry::from(js);
     auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
     auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
@@ -2707,9 +2705,13 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
-  // TODO(now): should these be logged to stderr like `console.warn()`?
-  // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
-  KJ_LOG(INFO, "console warning", description);
+  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+    // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
+    KJ_LOG(INFO, "console warning", description);
+  } else {
+    fprintf(stderr, "%s\n", description.cStr());
+    fflush(stderr);
+  }
 }
 
 void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
