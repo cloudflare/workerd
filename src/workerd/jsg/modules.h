@@ -404,9 +404,10 @@ public:
           auto specifier = module.getName();
           auto path = kj::Path::parse(specifier);
           if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
-            return;
+            continue;
           }
 
+          // The body of this callback is copied from `compileWasmGlobal` in src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier, [specifier, module, this](Lock& lock) {
             lock.setAllowEval(true);
             KJ_DEFER(lock.setAllowEval(false));
