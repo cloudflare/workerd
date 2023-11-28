@@ -1472,7 +1472,7 @@ public:
             KJ_IF_SOME(m, a->getHibernationManager()) {
               // The hibernation manager needs to survive actor eviction and be passed to the actor
               // constructor next time we create it.
-              manager = kj::addRef(*static_cast<HibernationManagerImpl*>(&m));
+              manager = m.addRef();
             }
           }
           shutdownTask = handleShutdown().eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
