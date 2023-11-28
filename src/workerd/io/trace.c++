@@ -185,9 +185,11 @@ Trace::Exception::Exception(kj::Date timestamp, kj::String name, kj::String mess
     : timestamp(timestamp), name(kj::mv(name)), message(kj::mv(message)) {}
 
 Trace::Trace(kj::Maybe<kj::String> stableId, kj::Maybe<kj::String> scriptName,
-  kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags)
+  kj::Maybe<kj::String> scriptVersionId,  kj::Maybe<kj::String> dispatchNamespace,
+  kj::Array<kj::String> scriptTags)
     : stableId(kj::mv(stableId)),
     scriptName(kj::mv(scriptName)),
+    scriptVersionId(kj::mv(scriptVersionId)),
     dispatchNamespace(kj::mv(dispatchNamespace)),
     scriptTags(kj::mv(scriptTags)) {}
 Trace::Trace(rpc::Trace::Reader reader) {
@@ -214,11 +216,14 @@ void Trace::copyTo(rpc::Trace::Builder builder) {
   builder.setOutcome(outcome);
   builder.setCpuTime(cpuTime / kj::MILLISECONDS);
   builder.setWallTime(wallTime / kj::MILLISECONDS);
-  KJ_IF_SOME(s, scriptName) {
-    builder.setScriptName(s);
+  KJ_IF_SOME(name, scriptName) {
+    builder.setScriptName(name);
   }
-  KJ_IF_SOME(s, dispatchNamespace) {
-    builder.setDispatchNamespace(s);
+  KJ_IF_SOME(id, scriptVersionId) {
+    builder.setScriptVersionId(id);
+  }
+  KJ_IF_SOME(ns, dispatchNamespace) {
+    builder.setDispatchNamespace(ns);
   }
 
   {
@@ -296,11 +301,16 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   wallTime = reader.getWallTime() * kj::MILLISECONDS;
 
   // mergeFrom() is called both when deserializing traces from a sandboxed
-  // worker and when deserializing traces sent to a sandboxed trace worker.  In
-  // the former case, the trace's scriptName is already set and the deserialized
-  // value is missing, so we need to be careful not to overwrite the set value.
+  // worker and when deserializing traces sent to a sandboxed trace worker. In
+  // the former case, the trace's scriptName (and other fields like
+  // scriptVersionId) are already set and the deserialized value is missing, so
+  // we need to be careful not to overwrite the set value.
   if (reader.hasScriptName()) {
     scriptName = kj::str(reader.getScriptName());
+  }
+
+  if (reader.hasScriptVersionId()) {
+    scriptVersionId = kj::str(reader.getScriptVersionId());
   }
 
   if (reader.hasDispatchNamespace()) {
@@ -438,8 +448,10 @@ kj::Promise<kj::Array<kj::Own<Trace>>> PipelineTracer::onComplete() {
 
 kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(
     PipelineLogLevel pipelineLogLevel, kj::Maybe<kj::String> stableId,
-    kj::Maybe<kj::String> scriptName,  kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags) {
-  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(dispatchNamespace), kj::mv(scriptTags));
+    kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> scriptVersionId,
+    kj::Maybe<kj::String> dispatchNamespace, kj::Array<kj::String> scriptTags) {
+  auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersionId),
+      kj::mv(dispatchNamespace), kj::mv(scriptTags));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(kj::addRef(*this), kj::mv(trace), pipelineLogLevel);
 }
@@ -450,7 +462,7 @@ WorkerTracer::WorkerTracer(kj::Own<PipelineTracer> parentPipeline,
       parentPipeline(kj::mv(parentPipeline)) {}
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel)
     : pipelineLogLevel(pipelineLogLevel),
-      trace(kj::refcounted<Trace>(nullptr, nullptr, nullptr, nullptr)) {}
+      trace(kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, nullptr)) {}
 
 void WorkerTracer::log(kj::Date timestamp, LogLevel logLevel, kj::String message) {
   if (trace->exceededLogLimit) {
