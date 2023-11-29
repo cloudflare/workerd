@@ -50,7 +50,7 @@ struct CompatDate {
     uint year, month, day;
     // TODO(someday): use `kj::parse` here instead
     auto result = sscanf(text.cStr(), "%d-%d-%d", &year, &month, &day);
-    if (result == EOF) return kj::none;
+    if (result == EOF || result < 3) return kj::none;
     // Basic validation, notably this will happily accept invalid dates like 2022-02-30
     if (year < 2000 || year >= 3000) return kj::none;
     if (month < 1 || month > 12) return kj::none;
