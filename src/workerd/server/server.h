@@ -192,11 +192,13 @@ private:
       kj::StringPtr name, config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Own<Service> makeWorker(kj::StringPtr name, config::Worker::Reader conf,
-      capnp::List<config::Extension>::Reader extensions);
+      capnp::List<config::Extension>::Reader extensions,
+      config::Config::WebgpuBackend::Reader webgpuBackend);
   kj::Own<Service> makeService(
       config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
-      capnp::List<config::Extension>::Reader extensions);
+      capnp::List<config::Extension>::Reader extensions,
+      config::Config::WebgpuBackend::Reader webgpuBackend);
 
   // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
   void abortAllActors();

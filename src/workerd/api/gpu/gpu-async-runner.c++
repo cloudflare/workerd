@@ -23,6 +23,12 @@ void AsyncRunner::End() {
   count_--;
 }
 
+void AsyncRunner::MaybeFlush() {
+  KJ_IF_SOME(flusher, flusher) {
+    flusher.Flush();
+  }
+}
+
 void AsyncRunner::QueueTick() {
   if (tick_queued_) {
     return;

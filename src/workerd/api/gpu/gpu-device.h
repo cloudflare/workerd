@@ -29,12 +29,14 @@
 namespace workerd::api::gpu {
 
 struct UncapturedErrorContext {
+  UncapturedErrorContext(IoContext& context) : context(context), target(kj::none) {};
+  IoContext& context;
   kj::Maybe<EventTarget*> target;
 };
 
 class GPUDevice : public EventTarget {
 public:
-  explicit GPUDevice(jsg::Lock& js, wgpu::Device d, kj::Own<AsyncRunner> async,
+  explicit GPUDevice(wgpu::Device d, kj::Own<AsyncRunner> async,
                      kj::Own<AsyncContext<jsg::Ref<GPUDeviceLostInfo>>> deviceLostCtx,
                      kj::Own<UncapturedErrorContext> uErrorCtx);
   ~GPUDevice();

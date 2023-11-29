@@ -15,6 +15,8 @@ filegroup(
                 "**/*test*.c++",
                 "pyodide.c++",
                 "pyodide/pyodide.c++",
+                "gpu/voodoo/*.c++",
+                "gpu/gpu-wire-container.c++",
             ],
         ),
         "//conditions:default": glob(
@@ -26,9 +28,13 @@ filegroup(
                 "**/*test*.c++",
                 "pyodide.c++",
                 "pyodide/pyodide.c++",
+                "gpu/voodoo/*.c++",
                 "gpu/*.c++",
             ],
         ),
+    }) + select({
+        "//src/workerd/io:set_enable_experimental_webgpu_remote": ["gpu/gpu-wire-container.c++"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
 )
@@ -40,6 +46,8 @@ api_header_exclusions = [
     "modules.h",
     "rtti.h",
     "**/*test*.h",
+    "gpu/voodoo/*.h",
+    "gpu/gpu-wire-container.h",
 ]
 
 filegroup(
@@ -53,8 +61,31 @@ filegroup(
             ["**/*.h"],
             exclude = api_header_exclusions + ["gpu/*.h"],
         ),
+    }) + select({
+        "//src/workerd/io:set_enable_experimental_webgpu_remote": ["gpu/gpu-wire-container.h"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
+)
+
+wd_cc_library(
+    name = "voodoo",
+    srcs = glob(
+        ["gpu/voodoo/*.c++"],
+    ),
+    hdrs = glob(
+        ["gpu/voodoo/*.h"],
+    ),
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj:kj-async",
+        "@dawn",
+        "@dawn//:dawn_wire",
+    ],
 )
 
 wd_cc_library(
@@ -145,19 +176,21 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
 )
 
-[kj_test(
-    src = f,
-    deps = [
-        "//src/workerd/io",
-    ],
-) for f in [
-    "actor-state-test.c++",
-    "basics-test.c++",
-    "crypto/aes-test.c++",
-    "crypto/impl-test.c++",
-    "streams/queue-test.c++",
-    "streams/standard-test.c++",
-    "util-test.c++",
+[
+    kj_test(
+        src = f,
+        deps = [
+            "//src/workerd/io",
+        ],
+    )
+    for f in [
+        "actor-state-test.c++",
+        "basics-test.c++",
+        "crypto/aes-test.c++",
+        "crypto/impl-test.c++",
+        "streams/queue-test.c++",
+        "streams/standard-test.c++",
+        "util-test.c++",
     ]
 ]
 
@@ -223,7 +256,10 @@ kj_test(
 
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
-    args = ["--experimental", "--no-verbose"],
+    args = [
+        "--experimental",
+        "--no-verbose",
+    ],
     data = ["tests/js-rpc-test.js"],
 )
 

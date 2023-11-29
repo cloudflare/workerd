@@ -3,6 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "gpu.h"
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU_REMOTE
+#include "gpu-wire-container.h"
+#else
+#include "gpu-native-container.h"
+#endif
 #include "workerd/jsg/exception.h"
 #include <dawn/dawn_proc.h>
 
@@ -14,15 +19,28 @@ void initialize() {
   KJ_FAIL_REQUIRE("unsupported platform for webgpu");
 #endif
 
-  // Dawn native initialization. Dawn proc allows us to point the webgpu methods
+  // Dawn proc allows us to point the webgpu methods
   // to different implementations such as native, wire, or our custom
-  // implementation. For now we will use the native version but in the future we
-  // can make use of the wire version if we separate the GPU process or a custom
-  // version as a stub in tests.
+  // implementation.
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU_REMOTE
+  // remote wire version
+  dawnProcSetProcs(&dawn::wire::client::GetProcs());
+#else
+  // native version
   dawnProcSetProcs(&dawn::native::GetProcs());
+#endif
 }
 
-GPU::GPU() : async_(kj::refcounted<AsyncRunner>(instance_.Get())) {}
+GPU::GPU() {
+#ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU_REMOTE
+  dawnContainer_ = kj::heap<DawnWireContainer>();
+#else
+  dawnContainer_ = kj::heap<DawnNativeContainer>();
+#endif
+
+  instance_ = dawnContainer_->getInstance();
+  async_ = kj::refcounted<AsyncRunner>(instance_, &*dawnContainer_);
+}
 
 kj::String parseAdapterType(wgpu::AdapterType type) {
   switch (type) {
@@ -35,6 +53,19 @@ kj::String parseAdapterType(wgpu::AdapterType type) {
   case wgpu::AdapterType::Unknown:
     return kj::str("Unknown");
   }
+}
+
+wgpu::PowerPreference parsePowerPreference(GPUPowerPreference& pf) {
+
+  if (pf == "low-power") {
+    return wgpu::PowerPreference::LowPower;
+  }
+
+  if (pf == "high-performance") {
+    return wgpu::PowerPreference::HighPerformance;
+  }
+
+  JSG_FAIL_REQUIRE(TypeError, "unknown power preference", pf);
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<GPUAdapter>>>
@@ -50,33 +81,42 @@ GPU::requestAdapter(jsg::Lock& js, jsg::Optional<GPURequestAdapterOptions> optio
   KJ_UNREACHABLE;
 #endif
 
-  auto adapters = instance_.EnumerateAdapters();
-  if (adapters.empty()) {
-    KJ_LOG(WARNING, "no webgpu adapters found");
-    return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
-  }
+  wgpu::RequestAdapterOptions adapterOptions{};
+  // TODO(soon): don't set this for remote wire instances
+  adapterOptions.backendType = defaultBackendType;
 
-  kj::Maybe<dawn::native::Adapter> adapter;
-  for (auto& a : adapters) {
-    wgpu::AdapterInfo info;
-    a.GetInfo(&info);
-    if (info.backendType != defaultBackendType) {
-      continue;
+  KJ_IF_SOME(opt, options) {
+    adapterOptions.powerPreference = parsePowerPreference(opt.powerPreference);
+    KJ_IF_SOME(forceFallbackAdapter, opt.forceFallbackAdapter) {
+      adapterOptions.forceFallbackAdapter = forceFallbackAdapter;
     }
-
-    KJ_LOG(INFO, kj::str("found webgpu device '", info.device, "' of type ",
-                         parseAdapterType(info.adapterType)));
-    adapter = a;
-    break;
   }
 
-  KJ_IF_SOME(a, adapter) {
-    kj::Maybe<jsg::Ref<GPUAdapter>> gpuAdapter = jsg::alloc<GPUAdapter>(a, kj::addRef(*async_));
-    return js.resolvedPromise(kj::mv(gpuAdapter));
-  }
+  using RequestAdapterContext = AsyncContext<kj::Maybe<jsg::Ref<GPUAdapter>>>;
+  auto ctx = kj::heap<RequestAdapterContext>(js, kj::addRef(*async_));
+  auto promise = kj::mv(ctx->promise_);
 
-  KJ_LOG(WARNING, "did not find an adapter that matched what we wanted");
-  return js.resolvedPromise(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
+  instance_.RequestAdapter(
+      &adapterOptions, wgpu::CallbackMode::AllowProcessEvents,
+      [ctx = kj::mv(ctx), asyncRunner = kj::addRef(*async_)](
+          wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, char const* message) mutable {
+        wgpu::AdapterInfo info;
+        switch (status) {
+        case wgpu::RequestAdapterStatus::Success:
+          adapter.GetInfo(&info);
+          KJ_LOG(INFO, kj::str("found webgpu device '", info.device, "' of type ",
+                               parseAdapterType(info.adapterType)));
+
+          ctx->fulfiller_->fulfill(jsg::alloc<GPUAdapter>(adapter, kj::mv(asyncRunner)));
+          break;
+        default:
+          KJ_LOG(WARNING, "did not find an adapter that matched what we wanted", (uint32_t)status,
+                 message);
+          ctx->fulfiller_->fulfill(kj::Maybe<jsg::Ref<GPUAdapter>>(kj::none));
+        }
+      });
+  async_->MaybeFlush();
+  return promise;
 }
 
 } // namespace workerd::api::gpu

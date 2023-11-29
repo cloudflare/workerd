@@ -12,11 +12,17 @@
 
 namespace workerd::api::gpu {
 
+class Flusher {
+public:
+  virtual void Flush() = 0;
+};
+
 // AsyncRunner is used to poll a wgpu::Instance with calls to ProcessEvents() while there
 // are asynchronous tasks in flight.
 class AsyncRunner : public kj::Refcounted {
 public:
-  AsyncRunner(wgpu::Instance instance) : instance_(instance){};
+  AsyncRunner(wgpu::Instance instance, kj::Maybe<Flusher&> flusher)
+      : instance_(instance), flusher(flusher){};
 
   // Begin() should be called when a new asynchronous task is started.
   // If the number of executing asynchronous tasks transitions from 0 to 1, then
@@ -29,9 +35,15 @@ public:
   // Every call to Begin() should eventually result in a call to End().
   void End();
 
+  // MaybeFlush() should be called after we send async commands to Dawn.
+  // Some serialization protocols require it while for native instances it is
+  // not needed;
+  void MaybeFlush();
+
 private:
   void QueueTick();
   wgpu::Instance const instance_;
+  kj::Maybe<Flusher&> flusher;
   uint64_t count_ = 0;
   bool tick_queued_ = false;
   TimeoutId::Generator timeoutIdGenerator;

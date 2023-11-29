@@ -60,6 +60,21 @@ wd_cc_binary(
     }),
 )
 
+wd_cc_binary(
+    name = "voodoo",
+    srcs = [
+        "voodoo.c++",
+    ],
+    target_compatible_with = select({
+        "//src/workerd/io:set_enable_experimental_webgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:voodoo",
+    ],
+)
+
 wd_cc_library(
     name = "alarm-scheduler",
     srcs = [
