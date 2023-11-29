@@ -8,8 +8,7 @@
 #include <workerd/api/web-socket.h>
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/actor-state.h>
-#include "v8-isolate.h"
-#include <workerd/jsg/ser.h>
+#include <workerd/jsg/jsg.h>
 
 #include <list>
 
@@ -18,11 +17,7 @@ namespace workerd {
 // Implements the HibernationManager class.
 class HibernationManagerImpl final : public Worker::Actor::HibernationManager {
 public:
-  HibernationManagerImpl(kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType)
-      : loopback(kj::mv(loopback)),
-        hibernationEventType(hibernationEventType),
-        onDisconnect(DisconnectHandler{}),
-        readLoopTasks(onDisconnect) {}
+  HibernationManagerImpl(kj::Own<Worker::Actor::Loopback> loopback, uint16_t hibernationEventType);
   ~HibernationManagerImpl() noexcept(false);
 
   // Tells the HibernationManager to create a new HibernatableWebSocket with the associated tags
@@ -44,6 +39,8 @@ public:
       kj::Maybe<kj::StringPtr> response) override;
   kj::Maybe<jsg::Ref<api::WebSocketRequestResponsePair>> getWebSocketAutoResponse() override;
   void setTimerChannel(TimerChannel& timerChannel) override;
+
+  kj::Own<HibernationManager> addRef() override;
 
   friend class api::HibernatableWebSocketEvent;
 
@@ -74,50 +71,14 @@ private:
   public:
     HibernatableWebSocket(jsg::Ref<api::WebSocket> websocket,
                           kj::ArrayPtr<kj::String> tags,
-                          HibernationManagerImpl& manager)
-        : tagItems(kj::heapArray<TagListItem>(tags.size())),
-          activeOrPackage(kj::mv(websocket)),
-          // Extract's the kj::Own<kj::WebSocket> from api::WebSocket so the HibernatableWebSocket
-          // can own it. The api::WebSocket retains a reference to our ws.
-          ws(activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable()),
-          manager(manager) {}
-
-    ~HibernatableWebSocket() noexcept(false) {
-      // We expect this dtor to be called when we're removing a HibernatableWebSocket
-      // from our `allWs` collection in the HibernationManager.
-
-      // This removal is fast because we have direct access to each kj::List, as well as direct
-      // access to each TagListItem we want to remove.
-      for (auto& item: tagItems) {
-        KJ_IF_SOME(list, item.list) {
-          // The list reference is non-null, so we still have a valid reference to this
-          // TagListItem in the list, which we will now remove.
-          list.remove(item);
-          if (list.empty()) {
-            // Remove the bucket in tagToWs if the tag has no more websockets.
-            manager.tagToWs.erase(kj::mv(item.tag));
-          }
-        }
-        item.hibWS = nullptr;
-        item.list = nullptr;
-      }
-    }
+                          HibernationManagerImpl& manager);
+    ~HibernatableWebSocket() noexcept(false);
+    KJ_DISALLOW_COPY_AND_MOVE(HibernatableWebSocket);
 
     // Returns a reference to the active websocket. If the websocket is currently hibernating,
     // we have to unhibernate it first. The process moves values from the HibernatableWebSocket
     // to the api::WebSocket.
-    jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js) {
-      KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
-        // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
-        // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
-        // from the hibernation manager to api::websocket to prevent possible ws.send races.
-        activeOrPackage.init<jsg::Ref<api::WebSocket>>(
-            api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package))
-        )->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
-        autoResponsePromise = kj::READY_NOW;
-      }
-      return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
-    }
+    jsg::Ref<api::WebSocket> getActiveOrUnhibernate(jsg::Lock& js);
 
     kj::ListLink<HibernatableWebSocket> link;
 
