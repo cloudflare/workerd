@@ -165,4 +165,57 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   });
 }
 
+HibernatableWebSocketEvent::ItemsForRelease::ItemsForRelease(
+    jsg::Ref<WebSocket> ref, kj::Own<kj::WebSocket> owned)
+    : webSocketRef(kj::mv(ref)), ownedWebSocket(kj::mv(owned)) {}
+
+HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
+    uint16_t typeId,
+    kj::TaskSet& waitUntilTasks,
+    kj::Own<HibernationReader> params,
+    kj::Maybe<Worker::Actor::HibernationManager&> manager)
+  : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)) {}
+HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
+    uint16_t typeId,
+    kj::TaskSet& waitUntilTasks,
+    HibernatableSocketParams params,
+    Worker::Actor::HibernationManager& manager)
+  : typeId(typeId), waitUntilTasks(waitUntilTasks), params(kj::mv(params)), manager(manager) {}
+
+HibernatableSocketParams HibernatableWebSocketCustomEventImpl::consumeParams() {
+  KJ_IF_SOME(p, params.tryGet<kj::Own<HibernationReader>>()) {
+    kj::Maybe<HibernatableSocketParams> eventParameters;
+    auto websocketId = kj::str(p->getMessage().getWebsocketId());
+    auto payload = p->getMessage().getPayload();
+    switch(payload.which()) {
+      case rpc::HibernatableWebSocketEventMessage::Payload::TEXT: {
+        eventParameters.emplace(kj::str(payload.getText()), kj::mv(websocketId));
+        break;
+      }
+      case rpc::HibernatableWebSocketEventMessage::Payload::DATA: {
+        kj::Array<byte> b = kj::heapArray(payload.getData().asBytes());
+        eventParameters.emplace(kj::mv(b), kj::mv(websocketId));
+        break;
+      }
+      case rpc::HibernatableWebSocketEventMessage::Payload::CLOSE: {
+        auto close = payload.getClose();
+        eventParameters.emplace(
+            close.getCode(),
+            kj::str(close.getReason()),
+            close.getWasClean(),
+            kj::mv(websocketId));
+        break;
+      }
+      case rpc::HibernatableWebSocketEventMessage::Payload::ERROR: {
+        eventParameters.emplace(
+            KJ_EXCEPTION(FAILED, kj::str(payload.getError())),
+            kj::mv(websocketId));
+        break;
+      }
+    }
+    return kj::mv(KJ_REQUIRE_NONNULL(eventParameters));
+  }
+  return kj::mv(KJ_REQUIRE_NONNULL(params.tryGet<HibernatableSocketParams>()));
+}
+
 }  // namespace workerd::api
