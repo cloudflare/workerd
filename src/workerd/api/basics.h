@@ -31,30 +31,30 @@ public:
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
+  inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
       : type(ownType),
         ownType(kj::mv(ownType)),
         init(init),
         trusted(trusted) {}
 
-  explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
+  inline explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
       : type(type),
         init(init),
         trusted(trusted) {}
 
-  bool isPreventDefault() { return preventedDefault; }
-  void clearPreventDefault() { preventedDefault = false; }
+  inline bool isPreventDefault() const { return preventedDefault; }
+  inline void clearPreventDefault() { preventedDefault = false; }
 
   void beginDispatch(jsg::Ref<EventTarget> target);
-  void endDispatch() { isBeingDispatched = false; }
+  inline void endDispatch() { isBeingDispatched = false; }
 
-  bool isStopped() { return stopped; }
+  inline bool isStopped() const { return stopped; }
 
   static jsg::Ref<Event> constructor(kj::String type, jsg::Optional<Init> init);
   kj::StringPtr getType();
 
-  void stopImmediatePropagation() { stopped = true; }
-  void preventDefault() { preventedDefault = true; }
+  inline void stopImmediatePropagation() { stopped = true; }
+  inline void preventDefault() { preventedDefault = true; }
 
   // The only phases we actually use are NONE and AT_TARGET but we provide
   // all of them to meet spec compliance.
@@ -65,31 +65,31 @@ public:
     BUBBLING_PHASE,
   };
 
-  int getEventPhase() const { return isBeingDispatched ? AT_TARGET : NONE; }
+  inline int getEventPhase() const { return isBeingDispatched ? AT_TARGET : NONE; }
 
   // Much of the following is not used in our implementation of Event
   // simply because we do not support the notion of bubbled events
   // (events propagated up through a hierarchy of objects). They are
   // provided to fill-out Event spec compliance.
 
-  bool getCancelBubble() { return propagationStopped; }
-  void setCancelBubble(bool stopped) { propagationStopped = stopped; }
-  void stopPropagation() { propagationStopped = true; }
-  bool getComposed() { return init.composed.orDefault(false); }
-  bool getBubbles() { return init.bubbles.orDefault(false); }
-  bool getCancelable() { return init.cancelable.orDefault(false); }
-  bool getDefaultPrevented() { return getCancelable() && preventedDefault; }
-  bool getReturnValue() { return !getDefaultPrevented(); }
+  inline bool getCancelBubble() const { return propagationStopped; }
+  inline void setCancelBubble(bool stopped) { propagationStopped = stopped; }
+  inline void stopPropagation() { propagationStopped = true; }
+  inline bool getComposed() const { return init.composed.orDefault(false); }
+  inline bool getBubbles() const { return init.bubbles.orDefault(false); }
+  inline bool getCancelable() const { return init.cancelable.orDefault(false); }
+  inline bool getDefaultPrevented() const { return getCancelable() && preventedDefault; }
+  inline bool getReturnValue() const { return !getDefaultPrevented(); }
 
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
   // on this property for timing details.
-  double getTimestamp() { return 0.0; }
+  inline double getTimestamp() const { return 0.0; }
 
   // What makes an Event trusted? It's pretty simple... any Event created
   // by EW internally is Trusted, any Event created using new Event() in JS
   // is not trusted.
-  bool getIsTrusted() { return trusted; }
+  inline bool getIsTrusted() const { return trusted; }
 
   // The currentTarget is the EventTarget on which the Event is being
   // dispatched. This will be set every time dispatchEvent() is called
@@ -224,73 +224,7 @@ class EventTarget: public jsg::Object {
 public:
 
   // RAII-style listener that can be attached to an EventTarget.
-  class NativeHandler {
-  public:
-    using Signature = void(jsg::Ref<Event>);
-
-    inline explicit NativeHandler(
-        jsg::Lock& js,
-        EventTarget& target,
-        kj::String type,
-        jsg::Function<Signature> func,
-        bool once = false)
-        : type(kj::mv(type)),
-          target(target),
-          func(kj::mv(func)),
-          once(once) {
-      KJ_ASSERT_NONNULL(this->target).addNativeListener(js, *this);
-    }
-
-    inline ~NativeHandler() noexcept(false) { detach(); }
-
-    NativeHandler(NativeHandler&&) = default;
-    NativeHandler& operator=(NativeHandler&&) = default;
-
-    inline void detach(bool deferClearData = false) {
-      KJ_IF_SOME(t, target) {
-        t.removeNativeListener(*this);
-        target = kj::none;
-        // If deferClearData is true, we're going to wait to clear
-        // the maybeData field until after the func is invoked. This
-        // is because detach will be called immediately before the
-        // operator() using the maybeData is called.
-        if (!deferClearData) {
-          auto drop KJ_UNUSED = kj::mv(func);
-        }
-      }
-    }
-
-    inline void operator()(jsg::Lock& js, jsg::Ref<Event> event) {
-      if (once && !isAttached()) {
-        // Arrange to drop the func after running it. Note that the function itself is allowed to
-        // delete the NativeHandler, so we have to pull it off in advance, rather than after the
-        // call.
-        auto funcToDrop = kj::mv(func);
-        funcToDrop(js, kj::mv(event));
-      } else {
-        func(js, kj::mv(event));
-      }
-    }
-
-    inline bool isAttached() { return target != kj::none; }
-
-    inline uint hashCode() const {
-      return kj::hashCode(this);
-    }
-
-    // The visitForGc here must be called from EventTarget's visitForGc implementation.
-    inline void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(func);
-    }
-
-  private:
-    kj::String type;
-    kj::Maybe<EventTarget&> target;
-    jsg::Function<Signature> func;
-    bool once;
-
-    friend class EventTarget;
-  };
+  class NativeHandler;
 
   ~EventTarget() noexcept(false);
 
@@ -300,9 +234,9 @@ public:
 
   bool dispatchEventImpl(jsg::Lock& js, jsg::Ref<Event> event);
 
-  void removeAllHandlers() { typeMap.clear(); }
+  inline void removeAllHandlers() { typeMap.clear(); }
 
-  void enableWarningOnSpecialEvents() { warnOnSpecialEvents = true; }
+  inline void enableWarningOnSpecialEvents() { warnOnSpecialEvents = true; }
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -365,6 +299,15 @@ public:
 
   static jsg::Ref<EventTarget> constructor();
 
+  // Registers a lambda that will be called when the given event type is emitted.
+  // The handler will be registered for as long as the returned opaque kj::Own<void>
+  // handle is held. If the EventTarget is destroyed while the native handler handle
+  // is held, it will be automatically detached.
+  kj::Own<void> newNativeHandler(jsg::Lock& js,
+      kj::String type,
+      jsg::Function<void(jsg::Ref<Event>)> func,
+      bool once = false);
+
 private:
   void addNativeListener(jsg::Lock& js, NativeHandler& handler);
   bool removeNativeListener(NativeHandler& handler);
@@ -398,69 +341,16 @@ private:
   };
 
   struct EventHandlerHashCallbacks {
-    auto& keyForRow(const EventHandler& row) const {
-      // The key for each EventHandler struct is the handler, which is a kj::OneOf
-      // of either a JavaScriptHandler or NativeHandler.
-      return row.handler;
-    }
-
-    inline bool matches(const EventHandler& a, const jsg::HashableV8Ref<v8::Object>& b) const {
-      KJ_IF_SOME(jsA, a.handler.tryGet<EventHandler::JavaScriptHandler>()) {
-        return jsA.identity == b;
-      }
-      return false;
-    }
-
-    inline bool matches(const EventHandler& a, const NativeHandler& b) const {
-      KJ_IF_SOME(ref, a.handler.tryGet<EventHandler::NativeHandlerRef>()) {
-        return &ref.handler == &b;
-      }
-      return false;
-    }
-
-    inline bool matches(const EventHandler& a, const EventHandler::NativeHandlerRef& b) const {
-      return matches(a, b.handler);
-    }
-
-    inline bool matches(const EventHandler& a, const EventHandler::Handler& b) const {
-      KJ_SWITCH_ONEOF(b) {
-        KJ_CASE_ONEOF(jsB, EventHandler::JavaScriptHandler) {
-          return matches(a, jsB.identity);
-        }
-        KJ_CASE_ONEOF(nativeB, EventHandler::NativeHandlerRef) {
-          return matches(a, nativeB);
-        }
-      }
-      KJ_UNREACHABLE;
-    }
-
-    inline uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const {
-      return obj.hashCode();
-    }
-
-    inline uint hashCode(const NativeHandler& handler) const {
-      return handler.hashCode();
-    }
-
-    inline uint hashCode(const EventHandler::NativeHandlerRef& handler) const {
-      return hashCode(handler.handler);
-    }
-
-    inline uint hashCode(const EventHandler::JavaScriptHandler& handler) const {
-      return hashCode(handler.identity);
-    }
-
-    inline uint hashCode(const EventHandler::Handler& handler) const {
-      KJ_SWITCH_ONEOF(handler) {
-        KJ_CASE_ONEOF(js, EventHandler::JavaScriptHandler) {
-          return hashCode(js);
-        }
-        KJ_CASE_ONEOF(native, EventHandler::NativeHandlerRef) {
-          return hashCode(native);
-        }
-      }
-      KJ_UNREACHABLE;
-    }
+    const EventHandler::Handler& keyForRow(const EventHandler& row) const;
+    bool matches(const EventHandler& a, const jsg::HashableV8Ref<v8::Object>& b) const;
+    bool matches(const EventHandler& a, const NativeHandler& b) const;
+    bool matches(const EventHandler& a, const EventHandler::NativeHandlerRef& b) const;
+    bool matches(const EventHandler& a, const EventHandler::Handler& b) const;
+    uint hashCode(const jsg::HashableV8Ref<v8::Object>& obj) const;
+    uint hashCode(const NativeHandler& handler) const;
+    uint hashCode(const EventHandler::NativeHandlerRef& handler) const;
+    uint hashCode(const EventHandler::JavaScriptHandler& handler) const;
+    uint hashCode(const EventHandler::Handler& handler) const;
   };
 
   struct EventHandlerSet {
@@ -500,11 +390,7 @@ public:
 
   AbortSignal(kj::Maybe<kj::Exception> exception = kj::none,
               jsg::Optional<jsg::JsRef<jsg::JsValue>> maybeReason = kj::none,
-              Flag flag = Flag::NONE) :
-      canceler(IoContext::current().addObject(
-          kj::refcounted<RefcountedCanceler>(kj::cp(exception)))),
-      flag(flag),
-      reason(kj::mv(maybeReason)) {}
+              Flag flag = Flag::NONE);
 
   // The AbortSignal explicitly does not expose a constructor(). It is
   // illegal for user code to create an AbortSignal directly.
@@ -512,17 +398,12 @@ public:
 
   bool getAborted() { return canceler->isCanceled(); }
 
-  jsg::JsValue getReason(jsg::Lock& js) {
-    KJ_IF_SOME(r, reason) {
-      return r.getHandle(js);
-    }
-    return js.undefined();
-  }
+  jsg::JsValue getReason(jsg::Lock& js);
 
   // Will synchronously throw an error if the abort signal has been triggered.
   void throwIfAborted(jsg::Lock& js);
 
-  bool getNeverAborts() const { return flag == Flag::NEVER_ABORTS; }
+  inline bool getNeverAborts() const { return flag == Flag::NEVER_ABORTS; }
 
   // The static abort() function here returns an AbortSignal that
   // has been pre-emptively aborted. It's useful when it might still
@@ -649,6 +530,8 @@ public:
 
 private:
 };
+
+KJ_DECLARE_NON_POLYMORPHIC(workerd::api::EventTarget::NativeHandler);
 
 #define EW_BASICS_ISOLATE_TYPES                \
     api::Event,                                \
