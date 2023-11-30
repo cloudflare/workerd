@@ -13,9 +13,6 @@ wd_ts_bundle(
         "*.js",
         "stream/*.js",
     ]),
-    internal_wasm_modules = glob([
-        "internal/*.wasm"
-    ]),
     schema_id = "0xbcc8f57c63814005",
     tsconfig_json = "tsconfig.json",
     deps = ["//:node_modules/@types/node"],
