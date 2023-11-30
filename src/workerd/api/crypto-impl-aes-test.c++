@@ -85,6 +85,11 @@ KJ_TEST("AES-KW key wrap") {
   }
 }
 
+// Disable null pointer checks (a subset of UBSan) here due to the null reference being passed for
+// jwkHandler. Using attribute push as annotating just the test itself didn't seem to work.
+#if __clang__ && __has_feature(undefined_behavior_sanitizer)
+#pragma clang attribute push (__attribute__((no_sanitize("null"))), apply_to=function)
+#endif
 KJ_TEST("AES-CTR key wrap") {
   // Basic test that let me repro an issue where using an AES key that's not AES-KW would fail to
   // wrap if it didn't have "encrypt" in its usages when created.
@@ -169,6 +174,9 @@ KJ_TEST("AES-CTR key wrap") {
     KJ_ASSERT(completed, "Microtasks did not run fully.");
   });
 }
+#if __clang__ && __has_feature(undefined_behavior_sanitizer)
+#pragma clang attribute pop // __attribute__((no_sanitize("null"))
+#endif
 
 }  // namespace
 }  // namespace workerd::api
