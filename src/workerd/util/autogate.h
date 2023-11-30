@@ -12,7 +12,9 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  BUILTIN_WASM,
+  // Allow builtin modules to be wasm modules. Used for Python project.
+  // Gates code in jsg/modules.h
+  BUILTIN_WASM_MODULES,
   NumOfKeys // Reserved for iteration.
 };
 

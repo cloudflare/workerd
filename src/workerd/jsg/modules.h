@@ -399,7 +399,7 @@ public:
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
         if (module.which() == Module::WASM) {
-          KJ_ASSERT(util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM));
+          KJ_ASSERT(util::Autogate::isEnabled(utilg::AutogateKey::BUILTIN_WASM_MODULES));
           using Key = typename Entry::Key;
           auto specifier = module.getName();
           auto path = kj::Path::parse(specifier);
