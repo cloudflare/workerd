@@ -6,6 +6,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
+#include "worker-entrypoint.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
@@ -1553,7 +1554,6 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
                           const v8::Global<v8::Function>& original,
                           const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
-  // TODO(now): does this need to run within a handle scope?
   auto context = js.v8Context();
   int length = info.Length();
   v8::Local<v8::Value> args[length + 1]; // + 1 used for `colors` later
@@ -1670,7 +1670,6 @@ void Worker::handleLog(jsg::Lock& js, ConsoleMode consoleMode, LogLevel level,
     auto colors = COLOR_MODE == ColorMode::ENABLED ||
       (COLOR_MODE == ColorMode::ENABLED_IF_TTY && tty);
 
-    // TODO(now): does this need to run within a handle scope?
     auto registry = jsg::ModuleRegistry::from(js);
     auto inspectModule = registry->resolveInternalImport(js, "node-internal:internal_inspect"_kj);
     auto inspectModuleHandle = inspectModule.getHandle(js).As<v8::Object>();
@@ -2707,9 +2706,13 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
-  // TODO(now): should these be logged to stderr like `console.warn()`?
-  // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
-  KJ_LOG(INFO, "console warning", description);
+  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+    // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
+    KJ_LOG(INFO, "console warning", description);
+  } else {
+    fprintf(stderr, "%s\n", description.cStr());
+    fflush(stderr);
+  }
 }
 
 void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
@@ -3365,18 +3368,6 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(
                                       startType, logNewScript, errorReporter);
 }
 
-kj::Own<WorkerInterface> Worker::Isolate::wrapSubrequestClient(
-    kj::Own<WorkerInterface> client,
-    kj::HttpHeaderId contentEncodingHeaderId,
-    RequestObserver& requestMetrics) const {
-  if (impl->inspector != kj::none) {
-    client = kj::heap<SubrequestClient>(
-        kj::atomicAddRef(*this), kj::mv(client), contentEncodingHeaderId, requestMetrics);
-  }
-
-  return client;
-}
-
 void Worker::Isolate::completedRequest() const {
   limitEnforcer->completedRequest(id);
 }
@@ -3524,6 +3515,34 @@ private:
   LimitedBodyWrapper decodedBuf;
   kj::Maybe<kj::OneOf<kj::GzipOutputStream, kj::BrotliOutputStream>> compStream;
   RequestObserver& requestMetrics;
+};
+
+class Worker::Isolate::SubrequestClient final: public WorkerInterface {
+public:
+  explicit SubrequestClient(kj::Own<const Isolate> isolate,
+      kj::Own<WorkerInterface> inner, kj::HttpHeaderId contentEncodingHeaderId,
+      RequestObserver& requestMetrics)
+      : constIsolate(kj::mv(isolate)), inner(kj::mv(inner)),
+        contentEncodingHeaderId(contentEncodingHeaderId),
+        requestMetrics(kj::addRef(requestMetrics)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) override;
+  kj::Promise<void> connect(
+      kj::StringPtr host, const kj::HttpHeaders& headers, kj::AsyncIoStream& connection,
+      kj::HttpService::ConnectResponse& tunnel,
+      kj::HttpConnectSettings settings) override;
+  void prewarm(kj::StringPtr url) override;
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
+
+private:
+  kj::Own<const Isolate> constIsolate;
+  kj::Own<WorkerInterface> inner;
+  kj::HttpHeaderId contentEncodingHeaderId;
+  kj::Own<RequestObserver> requestMetrics;
 };
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::request(
@@ -3745,6 +3764,18 @@ kj::Promise<WorkerInterface::AlarmResult> Worker::Isolate::SubrequestClient::run
 kj::Promise<WorkerInterface::CustomEvent::Result>
     Worker::Isolate::SubrequestClient::customEvent(kj::Own<CustomEvent> event) {
   return inner->customEvent(kj::mv(event));
+}
+
+kj::Own<WorkerInterface> Worker::Isolate::wrapSubrequestClient(
+    kj::Own<WorkerInterface> client,
+    kj::HttpHeaderId contentEncodingHeaderId,
+    RequestObserver& requestMetrics) const {
+  if (impl->inspector != kj::none) {
+    client = kj::heap<SubrequestClient>(
+        kj::atomicAddRef(*this), kj::mv(client), contentEncodingHeaderId, requestMetrics);
+  }
+
+  return client;
 }
 
 }  // namespace workerd

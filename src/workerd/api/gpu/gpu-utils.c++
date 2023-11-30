@@ -28,28 +28,6 @@ wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp) {
   return found->second;
 }
 
-wgpu::RenderPassTimestampLocation parseRenderPassTimestampLocation(kj::StringPtr location) {
-  static std::map<kj::StringPtr, wgpu::RenderPassTimestampLocation> mapping{
-      {"beginning", wgpu::RenderPassTimestampLocation::Beginning},
-      {"end", wgpu::RenderPassTimestampLocation::End},
-  };
-  auto found = mapping.find(location);
-  JSG_REQUIRE(found != mapping.end(), TypeError,
-              "unknown render pass timestamp location: ", location);
-  return found->second;
-}
-
-wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location) {
-  static std::map<kj::StringPtr, wgpu::ComputePassTimestampLocation> mapping{
-      {"beginning", wgpu::ComputePassTimestampLocation::Beginning},
-      {"end", wgpu::ComputePassTimestampLocation::End},
-  };
-  auto found = mapping.find(location);
-  JSG_REQUIRE(found != mapping.end(), TypeError,
-              "unknown compute pass timestamp location: ", location);
-  return found->second;
-}
-
 // TODO(soon): use a static std::map for most of these functions, as seen
 // in kj::StringPtr CryptoImpl::getAsymmetricKeyType().
 wgpu::FeatureName parseFeatureName(GPUFeatureName& str) {

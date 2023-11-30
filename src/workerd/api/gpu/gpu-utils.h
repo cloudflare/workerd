@@ -154,7 +154,5 @@ wgpu::BlendFactor parseBlendFactor(kj::StringPtr factor);
 wgpu::BlendOperation parseBlendOperation(kj::StringPtr operation);
 wgpu::LoadOp parseGPULoadOp(kj::StringPtr loadOp);
 wgpu::StoreOp parseGPUStoreOp(kj::StringPtr storeOp);
-wgpu::ComputePassTimestampLocation parseComputePassTimestampLocation(kj::StringPtr location);
-wgpu::RenderPassTimestampLocation parseRenderPassTimestampLocation(kj::StringPtr location);
 
 } // namespace workerd::api::gpu

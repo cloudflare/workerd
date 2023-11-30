@@ -47,7 +47,7 @@ wd_cc_binary(
     tags = ["no-arm64"],
     visibility = ["//visibility:public"],
     deps = [
-        ":autogate",
+        "//src/workerd/util:autogate",
         ":server",
         ":workerd-meta_capnp",
         ":workerd_capnp",
@@ -108,6 +108,7 @@ wd_cc_capnp_library(
     srcs = ["workerd.capnp"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/util:autogate_capnp",
     ],
 )
 
@@ -119,16 +120,6 @@ wd_cc_capnp_library(
         ":workerd_capnp",
     ],
 )
-
-wd_cc_library(
-    name = "autogate",
-    srcs = ["autogate.c++"],
-    hdrs = ["autogate.h"],
-    visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj:kj", ":workerd_capnp", "//src/workerd/util:sentry"],
-)
-
-exports_files(["autogate.h"])
 
 [kj_test(
     src = f,

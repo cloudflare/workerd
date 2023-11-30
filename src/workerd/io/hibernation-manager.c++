@@ -2,17 +2,75 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "io-context.h"
-#include <workerd/io/hibernation-manager.h>
+#include "io-channels.h"
+#include "hibernation-manager.h"
 #include <workerd/util/uuid.h>
 
 namespace workerd {
+
+HibernationManagerImpl::HibernatableWebSocket::HibernatableWebSocket(
+    jsg::Ref<api::WebSocket> websocket,
+    kj::ArrayPtr<kj::String> tags,
+    HibernationManagerImpl& manager)
+    : tagItems(kj::heapArray<TagListItem>(tags.size())),
+      activeOrPackage(kj::mv(websocket)),
+      // Extract's the kj::Own<kj::WebSocket> from api::WebSocket so the HibernatableWebSocket
+      // can own it. The api::WebSocket retains a reference to our ws.
+      ws(activeOrPackage.get<jsg::Ref<api::WebSocket>>()->acceptAsHibernatable()),
+      manager(manager) {}
+
+HibernationManagerImpl::HibernatableWebSocket::~HibernatableWebSocket() noexcept(false) {
+  // We expect this dtor to be called when we're removing a HibernatableWebSocket
+  // from our `allWs` collection in the HibernationManager.
+
+  // This removal is fast because we have direct access to each kj::List, as well as direct
+  // access to each TagListItem we want to remove.
+  for (auto& item: tagItems) {
+    KJ_IF_SOME(list, item.list) {
+      // The list reference is non-null, so we still have a valid reference to this
+      // TagListItem in the list, which we will now remove.
+      list.remove(item);
+      if (list.empty()) {
+        // Remove the bucket in tagToWs if the tag has no more websockets.
+        manager.tagToWs.erase(kj::mv(item.tag));
+      }
+    }
+    item.hibWS = nullptr;
+    item.list = nullptr;
+  }
+}
+
+jsg::Ref<api::WebSocket> HibernationManagerImpl::HibernatableWebSocket::getActiveOrUnhibernate(
+    jsg::Lock& js) {
+  KJ_IF_SOME(package, activeOrPackage.tryGet<api::WebSocket::HibernationPackage>()) {
+    // Now that we unhibernated the WebSocket, we can set the last received autoResponse timestamp
+    // that was stored in the corresponding HibernatableWebSocket. We also move autoResponsePromise
+    // from the hibernation manager to api::websocket to prevent possible ws.send races.
+    activeOrPackage.init<jsg::Ref<api::WebSocket>>(
+        api::WebSocket::hibernatableFromNative(js, *KJ_REQUIRE_NONNULL(ws), kj::mv(package))
+    )->setAutoResponseStatus(autoResponseTimestamp, kj::mv(autoResponsePromise));
+    autoResponsePromise = kj::READY_NOW;
+  }
+  return activeOrPackage.get<jsg::Ref<api::WebSocket>>().addRef();
+}
+
+HibernationManagerImpl::HibernationManagerImpl(
+    kj::Own<Worker::Actor::Loopback> loopback,
+    uint16_t hibernationEventType)
+    : loopback(kj::mv(loopback)),
+      hibernationEventType(hibernationEventType),
+      onDisconnect(DisconnectHandler{}),
+      readLoopTasks(onDisconnect) {}
 
 HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
   KJ_ASSERT(tagToWs.size() == 0, "tagToWs hashmap wasn't cleared.");
+}
+
+kj::Own<Worker::Actor::HibernationManager> HibernationManagerImpl::addRef() {
+  return kj::addRef(*this);
 }
 
 void HibernationManagerImpl::acceptWebSocket(

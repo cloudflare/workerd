@@ -68,7 +68,7 @@ private:
       api::gpu::GPUComputePipelineDescriptor, api::gpu::GPUProgrammableStage,                      \
       api::gpu::GPUCommandEncoder, api::gpu::GPUCommandEncoderDescriptor,                          \
       api::gpu::GPUComputePassEncoder, api::gpu::GPUComputePassDescriptor, api::gpu::GPUQuerySet,  \
-      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrite,                     \
+      api::gpu::GPUQuerySetDescriptor, api::gpu::GPUComputePassTimestampWrites,                    \
       api::gpu::GPUCommandBufferDescriptor, api::gpu::GPUCommandBuffer, api::gpu::GPUQueue,        \
       api::gpu::GPUMapMode, api::gpu::GPURequestAdapterOptions, api::gpu::GPUAdapterInfo,          \
       api::gpu::GPUSupportedFeatures, api::gpu::GPUSupportedLimits, api::gpu::GPUError,            \
@@ -84,7 +84,7 @@ private:
       api::gpu::GPUBlendState, api::gpu::GPUBlendComponent, api::gpu::GPURenderPassEncoder,        \
       api::gpu::GPURenderPassDescriptor, api::gpu::GPURenderPassColorAttachment,                   \
       api::gpu::GPUColorDict, api::gpu::GPURenderPassDepthStencilAttachment,                       \
-      api::gpu::GPURenderPassTimestampWrite, api::gpu::GPUImageCopyTexture,                        \
+      api::gpu::GPURenderPassTimestampWrites, api::gpu::GPUImageCopyTexture,                       \
       api::gpu::GPUImageCopyBuffer, api::gpu::GPUOrigin3DDict
 
 }; // namespace workerd::api::gpu

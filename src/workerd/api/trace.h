@@ -71,6 +71,11 @@ public:
   kj::ArrayPtr<jsg::Ref<TraceException>> getExceptions();
   kj::ArrayPtr<jsg::Ref<TraceDiagnosticChannelEvent>> getDiagnosticChannelEvents();
   kj::Maybe<kj::StringPtr> getScriptName();
+  // TODO(someday): we expose this as jsg::Optional for now, since that ensures that the property will
+  // not show up when calling JSON.stringify() on the object if it has not been explicitly set.
+  // At some point, we may want to align the behaviour with getScriptName() which shows up as
+  // `null` when not explicitly set.
+  jsg::Optional<kj::StringPtr> getScriptVersionId();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
   kj::StringPtr getOutcome();
@@ -85,6 +90,7 @@ public:
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(exceptions, getExceptions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(diagnosticsChannelEvents, getDiagnosticChannelEvents);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptVersionId, getScriptVersionId);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
@@ -97,6 +103,7 @@ private:
   kj::Array<jsg::Ref<TraceException>> exceptions;
   kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents;
   kj::Maybe<kj::String> scriptName;
+  jsg::Optional<kj::String> scriptVersionId;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::String outcome;

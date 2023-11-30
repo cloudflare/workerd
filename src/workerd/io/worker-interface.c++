@@ -10,6 +10,7 @@ using kj::uint;
 
 namespace workerd {
 
+namespace {
 // A WorkerInterface that delays requests until some promise resolves, then forwards them to the
 // interface the promise resolved to.
 class PromisedWorkerInterface final: public kj::Refcounted, public WorkerInterface {
@@ -93,6 +94,7 @@ private:
   kj::ForkedPromise<void> promise;
   kj::Maybe<kj::Own<WorkerInterface>> worker;
 };
+}
 
 kj::Own<WorkerInterface> newPromisedWorkerInterface(
     kj::TaskSet& waitUntilTasks, kj::Promise<kj::Own<WorkerInterface>> promise) {
@@ -103,6 +105,8 @@ kj::Own<kj::HttpClient> asHttpClient(kj::Own<WorkerInterface> workerInterface) {
   return kj::newHttpClient(*workerInterface).attach(kj::mv(workerInterface));
 }
 
+// =======================================================================================
+namespace {
 // A Revocable WebSocket wrapper, revoked when revokeProm rejects
 class RevocableWebSocket final: public kj::WebSocket {
 public:
@@ -205,6 +209,27 @@ private:
   kj::ForkedPromise<void> revokeProm;
 };
 
+// A WorkerInterface that cancels WebSockets when revokeProm is rejected.
+// Currently only supports cancelling for upgrades.
+class RevocableWebSocketWorkerInterface final: public WorkerInterface {
+public:
+  RevocableWebSocketWorkerInterface(WorkerInterface& worker, kj::Promise<void> revokeProm);
+  kj::Promise<void> request(
+      kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody, Response& response) override;
+  kj::Promise<void> connect(kj::StringPtr host, const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection, ConnectResponse& response,
+      kj::HttpConnectSettings settings) override;
+  void prewarm(kj::StringPtr url) override;
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override;
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime) override;
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
+
+private:
+  WorkerInterface& worker;
+  kj::ForkedPromise<void> revokeProm;
+};
+
 kj::Promise<void> RevocableWebSocketWorkerInterface::request(
     kj::HttpMethod method, kj::StringPtr url, const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody, kj::HttpService::Response& response) {
@@ -243,9 +268,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   return worker.customEvent(kj::mv(event));
 }
 
-kj::Own<RevocableWebSocketWorkerInterface> newRevocableWebSocketWorkerInterface(kj::Own<WorkerInterface> worker,
+}  // namespace
+
+kj::Own<WorkerInterface> newRevocableWebSocketWorkerInterface(
+    kj::Own<WorkerInterface> worker,
     kj::Promise<void> revokeProm) {
-  return kj::heap<RevocableWebSocketWorkerInterface>(*worker, kj::mv(revokeProm)).attach(kj::mv(worker));
+  return kj::heap<RevocableWebSocketWorkerInterface>(*worker, kj::mv(revokeProm))
+      .attach(kj::mv(worker));
 }
 
 // =======================================================================================
