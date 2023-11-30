@@ -150,20 +150,6 @@ public:
 private:
   kj::Own<const Script> script;
 
-  // RAII object to call `teardownFinished()` on an observer for you.
-  template <typename Observer>
-  class TeardownFinishedGuard {
-  public:
-    TeardownFinishedGuard(Observer& ref): ref(ref) {}
-    ~TeardownFinishedGuard() noexcept(false) {
-      ref.teardownFinished();
-    }
-    KJ_DISALLOW_COPY_AND_MOVE(TeardownFinishedGuard);
-
-  private:
-    Observer& ref;
-  };
-
   kj::Own<WorkerObserver> metrics;
 
   // metrics needs to be first to be destroyed last to correctly capture destruction timing.
@@ -366,7 +352,7 @@ private:
   kj::Maybe<kj::String> featureFlagsForFl;
 
   kj::Own<IsolateObserver> metrics;
-  Worker::TeardownFinishedGuard<IsolateObserver&> teardownGuard { *metrics };
+  TeardownFinishedGuard<IsolateObserver&> teardownGuard { *metrics };
 
   struct Impl;
   kj::Own<Impl> impl;
