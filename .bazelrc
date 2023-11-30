@@ -52,7 +52,7 @@ build:thin-lto --linkopt='-flto=thin'
 # configuration used for performance profiling
 build:profile --config=thin-lto
 build:profile --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
-build:profile --copt='-gline-tables-only' --linkopt='-gline-tables-only' --strip=never
+build:profile --copt='-g1' --linkopt='-g1' --strip=never
 
 # configuration used for performance benchmarking is the same as profiling for consistency
 build:benchmark --config=profile
@@ -65,8 +65,8 @@ build:unix --cxxopt='-gsimple-template-names' --host_cxxopt='-gsimple-template-n
 
 # Define a config mode which is fastbuild but with basic debug info.
 build:fastdbg -c fastbuild
-build:fastdbg --cxxopt='-gline-tables-only' --host_cxxopt='-gline-tables-only'
-build:fastdbg --linkopt='-gline-tables-only' --host_linkopt='-gline-tables-only'
+build:fastdbg --cxxopt='-g1' --host_cxxopt='-g1'
+build:fastdbg --linkopt='-g1' --host_linkopt='-g1'
 build:fastdbg --strip=never
 build:fastdbg --//:dead_strip=False
 
@@ -109,8 +109,6 @@ build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:unix --workspace_status_command=./tools/unix/workspace-status.sh
 
 build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20'
-build:unix --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
-build:unix --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:unix --@capnp-cpp//src/kj:libdl=True
 
 build:unix --action_env=BAZEL_COMPILER=clang
@@ -139,6 +137,8 @@ build:macos --config=unix
 build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
 
 # On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
+build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
+build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
 build:linux --action_env=BAZEL_LINKLIBS='-l%:libc++.a -lm -static-libgcc'
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
