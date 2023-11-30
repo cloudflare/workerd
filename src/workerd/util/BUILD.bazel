@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 
 wd_cc_library(
     name = "util",
@@ -11,6 +12,7 @@ wd_cc_library(
             "symbolizer.c++",
             "sqlite*.c++",
             "thread-scopes.c++",
+            "autogate.c++"
         ],
     ),
     hdrs = glob(
@@ -21,6 +23,7 @@ wd_cc_library(
             "own-util.h",
             "thread-scopes.h",
             "sentry.h",
+            "autogate.h"
         ],
     ),
     visibility = ["//visibility:public"],
@@ -93,6 +96,21 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
+)
+
+wd_cc_capnp_library(
+    name = "autogate_capnp",
+    srcs = ["autogate.capnp"],
+    visibility = ["//visibility:public"],
+    deps = [],
+)
+
+wd_cc_library(
+    name = "autogate",
+    srcs = ["autogate.c++"],
+    hdrs = ["autogate.h"],
+    visibility = ["//visibility:public"],
+    deps = [":autogate_capnp", ":sentry"],
 )
 
 [kj_test(

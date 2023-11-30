@@ -5,9 +5,9 @@
 
 #include "kj/debug.h"
 #include <kj/map.h>
-#include <workerd/server/workerd.capnp.h>
+#include <workerd/util/autogate.capnp.h>
 
-namespace workerd::server {
+namespace workerd::util {
 
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
@@ -36,15 +36,14 @@ public:
   //
   // This function is not thread safe, it should be called exactly once close to the start of the
   // process before any threads are created.
-  static void initAutogate(config::Config::Reader config);
   static void initAutogate(
-      capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+      capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
 private:
   kj::HashMap<AutogateKey, bool> gates;
 
-  Autogate(capnp::List<config::Config::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+  Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
 };
 
 // Retrieves the name of the gate.
