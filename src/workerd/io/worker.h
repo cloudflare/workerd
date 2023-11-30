@@ -19,6 +19,7 @@
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/util/weak-refs.h>
+#include <workerd/util/thread-scopes.h>
 
 namespace v8 { class Isolate; }
 
@@ -141,26 +142,10 @@ public:
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
-  // Create on stack in scopes where any attempt to take an isolate lock should log a warning.
-  // Isolate locks can block for a relatively long time, so we especially try to avoid taking
-  // them while any other locks are held.
-  class WarnAboutIsolateLockScope {
-  public:
-    WarnAboutIsolateLockScope();
-    inline ~WarnAboutIsolateLockScope() noexcept(false) {
-      if (!released) release();
-    }
-    KJ_DISALLOW_COPY(WarnAboutIsolateLockScope);
-    inline WarnAboutIsolateLockScope(WarnAboutIsolateLockScope&& other)
-        : released(other.released) {
-      other.released = true;
-    }
-
-    void release();
-
-  private:
-    bool released = false;
-  };
+  // TODO(cleanup): This is currently used in exactly one place in the internal
+  // repo. Once that is updated to use workerd::WarnAboutIsolateLockScope directly
+  // this alias can be removed.
+  using WarnAboutIsolateLockScope = workerd::WarnAboutIsolateLockScope;
 
 private:
   kj::Own<const Script> script;

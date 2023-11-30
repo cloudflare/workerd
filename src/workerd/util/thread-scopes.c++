@@ -113,4 +113,36 @@ void ThreadProgressCounter::acknowledgeProgress() {
   }
 }
 
+// ======================================================================================
+
+namespace {
+thread_local uint warnAboutIsolateLockScopeCount = 0;
+}  // namespace
+
+WarnAboutIsolateLockScope::WarnAboutIsolateLockScope() {
+  ++warnAboutIsolateLockScopeCount;
+}
+
+WarnAboutIsolateLockScope::~WarnAboutIsolateLockScope() noexcept(false) {
+  if (!released) release();
+}
+
+WarnAboutIsolateLockScope::WarnAboutIsolateLockScope(WarnAboutIsolateLockScope&& other)
+    : released(other.released) {
+  other.released = true;
+}
+
+void WarnAboutIsolateLockScope::release() {
+  if (!released) {
+    --warnAboutIsolateLockScopeCount;
+    released = true;
+  }
+}
+
+void WarnAboutIsolateLockScope::maybeWarn() {
+  if (warnAboutIsolateLockScopeCount > 0) {
+    KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
+  }
+}
+
 }  // namespace workerd

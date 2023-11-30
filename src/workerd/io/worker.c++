@@ -489,23 +489,11 @@ private:
 // Defined later in this file.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
 
-static thread_local uint warnAboutIsolateLockScopeCount = 0;
 static thread_local const Worker::ApiIsolate* currentApiIsolate = nullptr;
 
 const Worker::ApiIsolate& Worker::ApiIsolate::current() {
   KJ_REQUIRE(currentApiIsolate != nullptr, "not running JavaScript");
   return *currentApiIsolate;
-}
-
-Worker::WarnAboutIsolateLockScope::WarnAboutIsolateLockScope() {
-  ++warnAboutIsolateLockScopeCount;
-}
-
-void Worker::WarnAboutIsolateLockScope::release() {
-  if (!released) {
-    --warnAboutIsolateLockScopeCount;
-    released = true;
-  }
 }
 
 struct Worker::Impl {
@@ -582,9 +570,7 @@ struct Worker::Isolate::Impl {
           limitEnforcer(isolate.getLimitEnforcer()),
           consoleMode(isolate.consoleMode),
           lock(isolate.apiIsolate->lock(stackScope)) {
-      if (warnAboutIsolateLockScopeCount > 0) {
-        KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
-      }
+      WarnAboutIsolateLockScope::maybeWarn();
 
       // Increment the success count to expose forward progress to all threads.
       __atomic_add_fetch(&impl.lockSuccessCount, 1, __ATOMIC_RELAXED);
