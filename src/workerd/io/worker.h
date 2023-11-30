@@ -82,7 +82,7 @@ public:
 
   class LockType;
 
-  enum ConsoleMode {
+  enum class ConsoleMode {
     // Only send `console.log`s to the inspector. Default, production behaviour.
     INSPECTOR_ONLY,
     // Send `console.log`s to the inspector and stdout/err. Behaviour running `workerd` locally.
