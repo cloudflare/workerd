@@ -100,7 +100,6 @@ def _copy_modules(modules, declarations):
         result[new_filename] = modules[m]
     return result, declarations_result
 
-
 def wd_js_bundle(
         name,
         schema_id,
