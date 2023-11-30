@@ -58,7 +58,6 @@ wd_cc_binary(
     }),
 )
 
-
 wd_cc_library(
     name = "alarm-scheduler",
     srcs = [
