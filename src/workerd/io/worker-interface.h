@@ -56,6 +56,24 @@ public:
     EventOutcome outcome = EventOutcome::UNKNOWN;
   };
 
+  class AlarmFulfiller {
+  public:
+    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller);
+    KJ_DISALLOW_COPY(AlarmFulfiller);
+    AlarmFulfiller(AlarmFulfiller&&) = default;
+    AlarmFulfiller& operator=(AlarmFulfiller&&) = default;
+    ~AlarmFulfiller() noexcept(false);
+    void fulfill(const AlarmResult& result);
+    void reject(const kj::Exception& e);
+    void cancel();
+
+  private:
+    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
+    kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller();
+  };
+
+  using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
+
   // Trigger a scheduled event with the given scheduled (unix timestamp) time and cron string.
   // The cron string must be valid until the returned promise completes.
   // Async work is queued in a "waitUntil" task set.

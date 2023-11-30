@@ -408,7 +408,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
   KJ_SWITCH_ONEOF(scheduleAlarmResult) {
-    KJ_CASE_ONEOF(af, Worker::Actor::AlarmFulfiller) {
+    KJ_CASE_ONEOF(af, WorkerInterface::AlarmFulfiller) {
       // We're now in charge of running this alarm!
       auto cancellationGuard = kj::defer([&af]() {
         // Our promise chain was cancelled, let's cancel our fulfiller for any other requests
@@ -442,7 +442,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         throw;
       }
     }
-    KJ_CASE_ONEOF(result, Worker::Actor::AlarmResult) {
+    KJ_CASE_ONEOF(result, WorkerInterface::AlarmResult) {
       // The alarm was cancelled while we were waiting to run, go ahead and return the result.
       co_return result;
     }
