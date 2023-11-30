@@ -6,7 +6,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/io/promise-wrapper.h>
 #include "actor-cache.h"
-#include "worker-entrypoint.h"
 #include <workerd/util/batch-queue.h>
 #include <workerd/util/color-util.h>
 #include <workerd/util/mimetype.h>
