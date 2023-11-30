@@ -79,17 +79,7 @@ KJ_TEST("compatibility flag parsing") {
     auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
     auto output = outputOrphan.get();
 
-    struct ErrorReporterImpl: public Worker::ValidationErrorReporter {
-      void addError(kj::String error) override {
-        errors.add(kj::mv(error));
-      }
-      void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
-        KJ_UNREACHABLE;
-      }
-
-      kj::Vector<kj::String> errors;
-    };
-    ErrorReporterImpl errorReporter;
+    SimpleWorkerErrorReporter errorReporter;
     compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
                               dateValidation);
 
@@ -210,17 +200,7 @@ KJ_TEST("encode to flag list for FL") {
     auto outputOrphan = orphanage.newOrphan<CompatibilityFlags>();
     auto output = outputOrphan.get();
 
-    struct ErrorReporterImpl: public Worker::ValidationErrorReporter {
-      void addError(kj::String error) override {
-        errors.add(kj::mv(error));
-      }
-      void addHandler(kj::Maybe<kj::StringPtr> exportName, kj::StringPtr type) override {
-        KJ_UNREACHABLE;
-      }
-
-      kj::Vector<kj::String> errors;
-    };
-    ErrorReporterImpl errorReporter;
+    SimpleWorkerErrorReporter errorReporter;
 
     compileCompatibilityFlags(compatDate, flagList.asReader(), output, errorReporter, experimental,
                               dateValidation);

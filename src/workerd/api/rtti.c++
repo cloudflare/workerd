@@ -72,16 +72,6 @@ namespace workerd::api {
 
 namespace {
 
-struct EncoderErrorReporterImpl : public Worker::ValidationErrorReporter {
-  void addError(kj::String error) override { errors.add(kj::mv(error)); }
-  void addHandler(kj::Maybe<kj::StringPtr> exportName,
-                  kj::StringPtr type) override {
-    KJ_UNREACHABLE;
-  }
-
-  kj::Vector<kj::String> errors;
-};
-
 struct EncoderModuleRegistryImpl {
   struct CppModuleContents {
     CppModuleContents(kj::String structureName) : structureName(kj::mv(structureName)) {}
@@ -140,7 +130,7 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message, kj::Stri
   }
 
   auto output = message.initRoot<CompatibilityFlags>();
-  EncoderErrorReporterImpl errorReporter;
+  SimpleWorkerErrorReporter errorReporter;
 
   compileCompatibilityFlags(compatDate, flagList.asReader(), output,
                             errorReporter, experimental,

@@ -80,16 +80,6 @@ namespace {
 
 using namespace jsg;
 
-struct ApiEncoderErrorReporterImpl : public Worker::ValidationErrorReporter {
-  void addError(kj::String error) override { errors.add(kj::mv(error)); }
-  void addHandler(kj::Maybe<kj::StringPtr> exportName,
-                  kj::StringPtr type) override {
-    KJ_UNREACHABLE;
-  }
-
-  kj::Vector<kj::String> errors;
-};
-
 struct ApiEncoderMain {
   explicit ApiEncoderMain(kj::ProcessContext &context) : context(context) {}
 
@@ -128,7 +118,7 @@ struct ApiEncoderMain {
     }
 
     auto output = message.initRoot<CompatibilityFlags>();
-    ApiEncoderErrorReporterImpl errorReporter;
+    SimpleWorkerErrorReporter errorReporter;
 
     compileCompatibilityFlags(compatDate, flagList.asReader(), output,
                               errorReporter, experimental,

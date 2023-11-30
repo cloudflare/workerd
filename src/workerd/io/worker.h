@@ -798,4 +798,18 @@ inline const Worker::Isolate& Worker::getIsolate() const { return *script->isola
 
 KJ_DECLARE_NON_POLYMORPHIC(Worker::AsyncWaiter);
 
+// An implementation of Worker::ValidationErrorReporter that collects errors into
+// a kj::Vector<kj::String>.
+struct SimpleWorkerErrorReporter final : public Worker::ValidationErrorReporter {
+  void addError(kj::String error) override { errors.add(kj::mv(error)); }
+  void addHandler(kj::Maybe<kj::StringPtr> exportName,
+                  kj::StringPtr type) override {
+    KJ_UNREACHABLE;
+  }
+
+  SimpleWorkerErrorReporter() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(SimpleWorkerErrorReporter);
+  kj::Vector<kj::String> errors;
+};
+
 } // namespace workerd
