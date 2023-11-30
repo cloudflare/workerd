@@ -396,6 +396,45 @@ uint64_t getCurrentThreadId() {
 
 }  // namespace
 
+// Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
+// `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
+class Worker::AsyncWaiter: public kj::Refcounted {
+public:
+  AsyncWaiter(kj::Own<const Isolate> isolate);
+  ~AsyncWaiter() noexcept;
+  KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
+
+private:
+  // Executor for this waiter's thread.
+  const kj::Executor& executor;
+
+  // The isolate for which this waiter is currently waiting.
+  kj::Own<const Isolate> isolate;
+
+  // Promise/fulfiller to fire when the waiter reaches the front of the list for the corresponding
+  // isolate.
+  kj::ForkedPromise<void> readyPromise = nullptr;
+  kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
+
+  // Promise/fulfiller to fire when the AsyncLock is finally released. This is used when a thread
+  // tries to take locks on multiple different isolates concurrently, in order to serialize the
+  // locks so only one is taken at a time. This is NOT a cross-thread fulfiller; it can only be
+  // fulfilled by the thread that owns the waiter.
+  kj::ForkedPromise<void> releasePromise = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
+
+  // Protected by the lock on `Isolate::asyncWaiters` for the isolate identified by
+  // `currentIsolate`. Must be null if `currentIsolate` is null. (All other members of `Waiter`
+  // can only be accessed by the thread that created the `Waiter`.)
+  kj::Maybe<AsyncWaiter&> next;
+  kj::Maybe<AsyncWaiter&>* prev;
+
+  static thread_local AsyncWaiter* threadCurrentWaiter;
+
+  friend class Worker::Isolate;
+  friend class Worker::AsyncLock;
+};
+
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
 public:
   // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
