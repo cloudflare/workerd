@@ -109,6 +109,8 @@ wd_cc_library(
     name = "autogate",
     srcs = ["autogate.c++"],
     hdrs = ["autogate.h"],
+    # Make missing string repr for an autogate into a hard error
+    copts = ["-Werror=switch"],
     visibility = ["//visibility:public"],
     deps = [":autogate_capnp", ":sentry"],
 )
