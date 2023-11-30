@@ -1049,7 +1049,7 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(apiIsolate->getFeatureFlags()))),
       metrics(kj::mv(metricsParam)),
       impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, inspectorPolicy)),
-      weakIsolateRef(kj::atomicRefcounted<WeakIsolateRef>(this)),
+      weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -1289,6 +1289,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
                         impl->permanentException);
     }
   });
+}
+
+kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() const {
+  return weakIsolateRef->addRef();
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
