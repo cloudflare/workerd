@@ -1325,7 +1325,7 @@ KJ_TEST("ActorCache flush hard failure") {
   {
     mockStorage->expectCall("put", ws)
         .withParams(CAPNP(entries = [(key = "foo", value = "123")]))
-        .thenThrow(JSG_KJ_EXCEPTION(FAILED, Error, "flush failed hard"));
+        .thenThrow(KJ_EXCEPTION(FAILED, "jsg.Error: flush failed hard"));
   }
 
   KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: flush failed hard", promise.wait(ws));
@@ -1350,7 +1350,7 @@ KJ_TEST("ActorCache flush hard failure with output gate bypass") {
   {
     mockStorage->expectCall("put", ws)
         .withParams(CAPNP(entries = [(key = "foo", value = "123")]))
-        .thenThrow(JSG_KJ_EXCEPTION(FAILED, Error, "flush failed hard"));
+        .thenThrow(KJ_EXCEPTION(FAILED, "jsg.Error: flush failed hard"));
   }
 
   // The failure was still propagated to the output gate.
