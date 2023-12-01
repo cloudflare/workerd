@@ -4,6 +4,7 @@
 
 #include "web-socket.h"
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
@@ -980,6 +981,149 @@ void WebSocket::assertNoError(jsg::Lock& js) {
   KJ_IF_SOME(e, error) {
     js.throwException(e.addRef(js));
   }
+}
+
+void WebSocket::setMaybePair(jsg::Ref<WebSocket> other) {
+  maybePair = other.addRef();
+}
+
+kj::Own<kj::WebSocket> WebSocket::acceptAsHibernatable() {
+  KJ_IF_SOME(hibernatable, farNative->state.tryGet<AwaitingAcceptanceOrCoupling>()) {
+    // We can only request hibernation if we have not called accept.
+    auto ws = kj::mv(hibernatable.ws);
+    // We pass a reference to the kj::WebSocket for the api::WebSocket to refer to when calling
+    // `send()` or `close()`.
+    farNative->state.init<Accepted>(
+        Accepted::Hibernatable{ .ws = *ws }, *farNative, IoContext::current());
+    return kj::mv(ws);
+  }
+  JSG_FAIL_REQUIRE(TypeError,
+      "Tried to make an api::WebSocket hibernatable when it was in an incompatible state.");
+}
+
+void WebSocket::initiateHibernatableRelease(jsg::Lock& js,
+    kj::Own<kj::WebSocket> ws,
+    HibernatableReleaseState releaseState) {
+  // TODO(soon): We probably want this to be an assert, since this is meant to be called once
+  // at the end of a websocket connection and if it doesn't run then it's likely that no close
+  // or error event will get dispatched.
+  KJ_IF_SOME(state, farNative->state.tryGet<Accepted>()) {
+    KJ_REQUIRE(state.isHibernatable(),
+        "tried to initiate hibernatable release but websocket wasn't hibernatable");
+    state.ws.initiateHibernatableRelease(js, kj::mv(ws), releaseState);
+    farNative->closedIncoming = true;
+  } else {
+    KJ_LOG(WARNING, "Unexpected Hibernatable WebSocket state on release", farNative->state);
+  }
+}
+
+bool WebSocket::awaitingHibernatableError() {
+  KJ_IF_SOME(accepted, farNative->state.tryGet<Accepted>()) {
+    return (accepted.ws.isAwaitingError());
+  }
+  return false;
+}
+
+bool WebSocket::awaitingHibernatableRelease() {
+  KJ_IF_SOME(accepted, farNative->state.tryGet<Accepted>()) {
+    return (accepted.ws.isAwaitingRelease());
+  }
+  return false;
+}
+
+void WebSocket::setRemoteOnPair() {
+  JSG_REQUIRE_NONNULL(maybePair, Error,
+      "this WebSocket is not one end of a WebSocketPair")->locality = REMOTE;
+}
+
+bool WebSocket::pairIsAwaitingCoupling() {
+  KJ_IF_SOME(pair, maybePair) {
+    return pair->farNative->state.is<AwaitingAcceptanceOrCoupling>();
+  }
+  return false;
+}
+
+WebSocket::HibernationPackage WebSocket::buildPackageForHibernation() {
+  // TODO(cleanup): It would be great if we could limit this so only the HibernationManager
+  // (or a derived class) could call it.
+  return HibernationPackage {
+    .url = kj::mv(url),
+    .protocol = kj::mv(protocol),
+    .extensions = kj::mv(extensions),
+    .serializedAttachment = kj::mv(serializedAttachment),
+    .closedOutgoingConnection = closedOutgoingForHib,
+  };
+}
+
+WebSocket::Accepted::WrappedWebSocket::WrappedWebSocket(Hibernatable ws) {
+  inner.init<Hibernatable>(kj::mv(ws));
+}
+
+WebSocket::Accepted::WrappedWebSocket::WrappedWebSocket(kj::Own<kj::WebSocket> ws) {
+  inner.init<kj::Own<kj::WebSocket>>(kj::mv(ws));
+}
+
+kj::WebSocket* WebSocket::Accepted::WrappedWebSocket::operator->() {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(owned, kj::Own<kj::WebSocket>) {
+      return owned.get();
+    }
+    KJ_CASE_ONEOF(hibernatable, Hibernatable) {
+      return &hibernatable.ws;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::WebSocket& WebSocket::Accepted::WrappedWebSocket::operator*() {
+  KJ_SWITCH_ONEOF(inner) {
+    KJ_CASE_ONEOF(owned, kj::Own<kj::WebSocket>) {
+      return *owned;
+    }
+    KJ_CASE_ONEOF(hibernatable, Hibernatable) {
+      return hibernatable.ws;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Maybe<kj::Own<kj::WebSocket>&> WebSocket::Accepted::WrappedWebSocket::getIfNotHibernatable() {
+  // The implication of getting nullptr is that this websocket is hibernatable. This is useful
+  // if the caller only ever expects to get a regular websocket, for example, if they are in
+  // any method that should be inaccessible to hibernatable websockets (ex. readLoop).
+  return inner.tryGet<kj::Own<kj::WebSocket>>();
+}
+
+kj::Maybe<WebSocket::Accepted::Hibernatable&>
+WebSocket::Accepted::WrappedWebSocket::getIfHibernatable() {
+  return inner.tryGet<Hibernatable>();
+}
+
+void WebSocket::Accepted::WrappedWebSocket::initiateHibernatableRelease(jsg::Lock& js,
+    kj::Own<kj::WebSocket> ws,
+    HibernatableReleaseState state) {
+  auto& hibernatable = KJ_REQUIRE_NONNULL(getIfHibernatable());
+  hibernatable.releaseState = state;
+  // Note that we move the owned kj::WebSocket here.
+  hibernatable.attachedForClose = kj::mv(ws);
+}
+
+bool WebSocket::Accepted::WrappedWebSocket::isAwaitingRelease() {
+  KJ_IF_SOME(ws, getIfHibernatable()) {
+    return (ws.releaseState != HibernatableReleaseState::NONE);
+  }
+  return false;
+}
+
+bool WebSocket::Accepted::WrappedWebSocket::isAwaitingError() {
+  KJ_IF_SOME(ws, getIfHibernatable()) {
+    return (ws.releaseState == HibernatableReleaseState::ERROR);
+  }
+  return false;
+}
+
+bool WebSocket::Accepted::isHibernatable() {
+  return ws.getIfNotHibernatable() == kj::none;
 }
 
 }  // namespace workerd::api
