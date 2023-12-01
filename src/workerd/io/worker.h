@@ -18,6 +18,7 @@
 #include <workerd/io/actor-storage.capnp.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
+#include <workerd/util/weak-refs.h>
 
 namespace v8 { class Isolate; }
 
@@ -362,40 +363,9 @@ public:
   // after the refcount reaches 0, `tryAddStrongRef` is always still safe to invoke even if the
   // underlying Isolate memory has been deallocated (provided ownership of the weak isolate
   // reference is retained).
-  class WeakIsolateRef: public kj::AtomicRefcounted {
-    // TODO(someday): This can be templatized & even integrated into KJ. That's why the method
-    // bodies are defined inline.
-  public:
-    WeakIsolateRef(Isolate* thisArg) : this_(thisArg) {}
+  using WeakIsolateRef = AtomicWeakRef<Isolate>;
 
-    // This tries to materialize a strong reference to the isolate. It will fail if the isolate's
-    // refcount has already dropped to 0. As discussed in the class, the lifetime of this weak
-    // reference can exceed the lifetime of the isolate it's tracking.
-    kj::Maybe<kj::Own<const Worker::Isolate>> tryAddStrongRef() const {
-      auto lock = this_.lockShared();
-      if (*lock == nullptr) {
-        return kj::none;
-      }
-
-      return kj::atomicAddRefWeak(**lock);
-    }
-
-    // This is invoked by the Isolate destructor to clear the pointer. That means that any racing
-    // code will never try to invoke `atomicAddRefWeak` on the instance any more. Any code racing
-    // in between the refcount dropping to 0 and the invalidation getting invoked will still fail
-    // to acquire a strong reference. Any code acquiring a strong reference prior to the refcount
-    // dropping to 0 will prevent invalidation until that extra reference is dropped.
-    void invalidate() const {
-      *this_.lockExclusive() = nullptr;
-    }
-
-  private:
-    kj::MutexGuarded<const Isolate*> this_;
-  };
-
-  kj::Own<const WeakIsolateRef> getWeakRef() const {
-    return kj::atomicAddRef(*weakIsolateRef);
-  }
+  kj::Own<const WeakIsolateRef> getWeakRef() const;
 
 private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
