@@ -58,7 +58,7 @@ def _gen_api_bundle_capnpn_impl(ctx):
         for m in ctx.attr.internal_wasm_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_data_modules[m], m.label,  "wasm", "internal")
+        _render_module(ctx.attr.internal_data_modules[m], m.label,  "data", "internal")
         for m in ctx.attr.internal_data_modules
     ]
 
