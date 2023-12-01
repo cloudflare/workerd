@@ -34,14 +34,12 @@
 # afraid to fall back to code for anything the config cannot express, as Workers are very fast
 # to execute!
 
-using Cxx = import "/capnp/c++.capnp";
-$Cxx.namespace("workerd::server::config");
-$Cxx.allowCancellation;
-
 # Any capnp files imported here must be:
 # 1. embedded into workerd-meta.capnp
 # 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
-using import "/workerd/util/autogate.capnp".Autogate;
+using Cxx = import "/capnp/c++.capnp";
+$Cxx.namespace("workerd::server::config");
+$Cxx.allowCancellation;
 
 struct Config {
   # Top-level configuration for a workerd instance.
@@ -82,8 +80,8 @@ struct Config {
   # Extensions provide capabilities to all workers. Extensions are usually prepared separately
   # and are late-linked with the app using this config field.
 
-  autogates @4 :List(Autogate);
-  # A list of gates and a corresponding value of whether they are enabled.
+  autogates @4 :List(Text);
+  # A list of gates which are enabled.
   # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
   # config definition in our internal repo for more details.
 }

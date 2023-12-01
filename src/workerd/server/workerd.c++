@@ -477,8 +477,6 @@ kj::Maybe<kj::Own<capnp::SchemaFile>> tryImportBulitin(kj::StringPtr name) {
     return kj::heap<BuiltinSchemaFileImpl>("/capnp/c++.capnp", CPP_CAPNP_SCHEMA);
   } else if (name == "/workerd/workerd.capnp") {
     return kj::heap<BuiltinSchemaFileImpl>("/workerd/workerd.capnp", WORKERD_CAPNP_SCHEMA);
-  } else if (name == "/workerd/util/autogate.capnp") {
-    return kj::heap<BuiltinSchemaFileImpl>("/workerd/util/autogate.capnp", AUTOGATE_CAPNP_SCHEMA);
   } else {
     return kj::none;
   }

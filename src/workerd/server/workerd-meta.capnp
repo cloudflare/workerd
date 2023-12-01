@@ -6,4 +6,3 @@ $import "/capnp/c++.capnp".namespace("workerd::server");
 
 const cppCapnpSchema :Text = embed "/capnp/c++.capnp";
 const workerdCapnpSchema :Text = embed "workerd.capnp";
-const autogateCapnpSchema :Text = embed "../util/autogate.capnp";

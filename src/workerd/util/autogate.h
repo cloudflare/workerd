@@ -5,7 +5,8 @@
 
 #include "kj/debug.h"
 #include <kj/map.h>
-#include <workerd/util/autogate.capnp.h>
+#include <capnp/common.h>
+#include <capnp/list.h>
 
 namespace workerd::util {
 
@@ -37,13 +38,13 @@ public:
   // This function is not thread safe, it should be called exactly once close to the start of the
   // process before any threads are created.
   static void initAutogate(
-      capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+      capnp::List<capnp::Text>::Reader autogates);
   // Destroys an initialised global Autogate instance. Used only for testing.
   static void deinitAutogate();
 private:
-  kj::HashMap<AutogateKey, bool> gates;
+  bool gates[(unsigned long)AutogateKey::NumOfKeys];
 
-  Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates);
+  Autogate(capnp::List<capnp::Text>::Reader autogates);
 };
 
 // Retrieves the name of the gate.

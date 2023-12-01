@@ -98,19 +98,12 @@ wd_cc_library(
     ],
 )
 
-wd_cc_capnp_library(
-    name = "autogate_capnp",
-    srcs = ["autogate.capnp"],
-    visibility = ["//visibility:public"],
-    deps = [],
-)
-
 wd_cc_library(
     name = "autogate",
     srcs = ["autogate.c++"],
     hdrs = ["autogate.h"],
     visibility = ["//visibility:public"],
-    deps = [":autogate_capnp", ":sentry"],
+    deps = [":sentry", "@capnp-cpp//src/kj", "@capnp-cpp//src/capnp"],
 )
 
 [kj_test(

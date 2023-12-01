@@ -106,9 +106,7 @@ wd_cc_capnp_library(
     name = "workerd_capnp",
     srcs = ["workerd.capnp"],
     visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/util:autogate_capnp",
-    ],
+    deps = [],
 )
 
 wd_cc_capnp_library(

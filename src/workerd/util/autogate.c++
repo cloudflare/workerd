@@ -18,12 +18,13 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   }
 }
 
-Autogate::Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader autogates) {
-  for (auto autogate : autogates) {
-    if (!autogate.hasName()) {
-      continue;
-    }
-    auto name = autogate.getName();
+Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
+  // Init all gates to false.
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
+    gates[(unsigned long)i] = false;
+  }
+
+  for (auto name : autogates) {
     if (!name.startsWith("workerd-autogate-")) {
       LOG_ERROR_ONCE("Autogate configuration includes gate with invalid prefix.");
       continue;
@@ -33,7 +34,7 @@ Autogate::Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader 
     // Parse the gate name into a AutogateKey.
     for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
       if (kj::str(i) == sliced) {
-        gates.insert(i, autogate.getEnabled());
+        gates[(unsigned long)i] = true;
         break;
       }
     }
@@ -42,14 +43,14 @@ Autogate::Autogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader 
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates.find(key).orDefault(false);
+    return a.gates[(unsigned long)key];
   }
   LOG_ERROR_PERIODICALLY(
       kj::str("Autogates not initialised, check for ", key, " will have no effect"));
   return false;
 }
 
-void Autogate::initAutogate(capnp::List<autogate::Autogate, capnp::Kind::STRUCT>::Reader gates) {
+void Autogate::initAutogate(capnp::List<capnp::Text>::Reader gates) {
   globalAutogate = Autogate(gates);
 }
 
