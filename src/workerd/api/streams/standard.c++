@@ -713,7 +713,7 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
   ~WritableStreamJsController() noexcept(false) override {
-    weakRef->reset();
+    weakRef->invalidate();
   }
 
   jsg::Promise<void> abort(jsg::Lock& js,
@@ -1542,9 +1542,10 @@ kj::Maybe<T&> tryGetAs(auto& ref) {
 
 class AllReaderBase {
 public:
-  AllReaderBase() : ref(kj::refcounted<WeakRef<AllReaderBase>>(*this)) {}
+  AllReaderBase()
+      : ref(kj::refcounted<WeakRef<AllReaderBase>>(kj::Badge<AllReaderBase>(), *this)) {}
   virtual ~AllReaderBase() noexcept(false) {
-    ref->reset();
+    ref->invalidate();
   }
   KJ_DISALLOW_COPY_AND_MOVE(AllReaderBase);
 
@@ -1892,10 +1893,11 @@ ReadableStreamDefaultController::ReadableStreamDefaultController(
     StreamQueuingStrategy queuingStrategy)
     : ioContext(tryGetIoContext()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)),
-      weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(*this)) {}
+      weakRef(kj::refcounted<WeakRef<ReadableStreamDefaultController>>(
+          kj::Badge<ReadableStreamDefaultController>(), *this)) {}
 
 ReadableStreamDefaultController::~ReadableStreamDefaultController() noexcept(false) {
-  weakRef->reset();
+  weakRef->invalidate();
 }
 
 kj::Own<WeakRef<ReadableStreamDefaultController>> ReadableStreamDefaultController::getWeakRef() {
@@ -3372,15 +3374,18 @@ jsg::Promise<void> WritableStreamDefaultController::write(
 // ======================================================================================
 WritableStreamJsController::WritableStreamJsController()
     : ioContext(tryGetIoContext()),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(*this)) {}
+      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+          kj::Badge<WritableStreamJsController>(), *this)) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
     : ioContext(tryGetIoContext()), state(closed),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(*this)) {}
+      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+          kj::Badge<WritableStreamJsController>(), *this)) {}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Errored errored)
     : ioContext(tryGetIoContext()), state(kj::mv(errored)),
-      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(*this)) {}
+      weakRef(kj::refcounted<WeakRef<WritableStreamJsController>>(
+          kj::Badge<WritableStreamJsController>(), *this)) {}
 
 jsg::Promise<void> WritableStreamJsController::abort(
     jsg::Lock& js,

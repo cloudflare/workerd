@@ -19,6 +19,7 @@
 #include <capnp/dynamic.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/util/weak-refs.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
 
@@ -452,33 +453,7 @@ public:
   //   }
   // });
   // ```
-  class WeakRef : public kj::Refcounted {
-  public:
-    WeakRef(kj::Badge<IoContext>, IoContext& context) : maybeContext(context) {}
-
-    // Run the functor and return true if the context is alive, otherwise return false. Note that
-    // since the `IoContext` might not be alive for any async continuation, we do not provide
-    // a `kj::Maybe<IoContext&> tryGet()` function. You are expected to invoke this function
-    // again in the next continuation to re-check if the `IoContext` is still around.
-    template<typename F>
-    bool runIfAlive(F&& f) {
-      KJ_IF_SOME(context, maybeContext) {
-        kj::fwd<F>(f)(context);
-        return true;
-      }
-
-      return false;
-    }
-
-  private:
-    friend class IoContext;
-
-    void kill() {
-      maybeContext = nullptr;
-    }
-
-    kj::Maybe<IoContext&> maybeContext;
-  };
+  using WeakRef = workerd::WeakRef<IoContext>;
 
   kj::Own<WeakRef> getWeakRef() {
     return kj::addRef(*selfRef);

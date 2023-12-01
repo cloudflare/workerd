@@ -51,4 +51,57 @@ private:
   friend T;
 };
 
+// A WeakRef is a weak reference to a thing. Note that because T may not itself be ref-counted,
+// we cannot follow the usual pattern of a weak reference that potentially converts to a strong
+// reference. Instead, intended usage looks like so:
+// ```
+//   kj::Own<WeakRef<Foo>> weakFoo = getWeakRefSomehow();
+//
+//   auto wasValid = weak->runIfAlive([](Foo& thing){
+//     // Use thing
+//   });
+// ```
+//
+// TODO(cleanup): It would eventually be nice to replace kj::Own<WeakRef<T>> with a
+// kj::WeakOwn<T> type with the same basic characteristics.
+template <typename T>
+class WeakRef final: public kj::Refcounted {
+public:
+  inline WeakRef(kj::Badge<T>, T& thing) : maybeThing(thing) {}
+
+  // The use of the kj::Badge<T> in the constructor ensures that the initial instances
+  // of WeakRef<T> can only be created within an instance of T. The instance T is responsible
+  // for creating the initial refcounted kj::Own<WeakRef<T>>, and is responsible for calling
+  // invalidate() in the destructor.
+
+  KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
+
+  // Run the functor and return true if the context is alive, otherwise return false. Note that
+  // since the `IoContext` might not be alive for any async continuation, we do not provide
+  // a `kj::Maybe<IoContext&> tryGet()` function. You are expected to invoke this function
+  // again in the next continuation to re-check if the `IoContext` is still around.
+  template<typename F>
+  inline bool runIfAlive(F&& f) const {
+    KJ_IF_SOME(thing, maybeThing) {
+      kj::fwd<F>(f)(thing);
+      return true;
+    }
+
+    return false;
+  }
+
+  inline kj::Maybe<T&> tryGet() { return maybeThing; }
+  inline kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
+  inline bool isValid() const { return maybeThing != kj::none; }
+
+private:
+  friend T;
+
+  inline void invalidate() {
+    maybeThing = nullptr;
+  }
+
+  kj::Maybe<T&> maybeThing;
+};
+
 }  // namespace workerd

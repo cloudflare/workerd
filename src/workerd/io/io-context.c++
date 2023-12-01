@@ -299,7 +299,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
 
 IoContext::~IoContext() noexcept(false) {
   // Kill the sentinel so that no weak references can refer to this IoContext anymore.
-  selfRef->kill();
+  selfRef->invalidate();
 }
 
 InputGate::Lock IoContext::getInputLock() {
@@ -738,7 +738,7 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
     // canceled anyway.
-    if (context.selfRef->maybeContext != kj::none) {
+    if (context.selfRef->isValid()) {
       bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
       if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());

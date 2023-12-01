@@ -7,6 +7,7 @@
 #include "common.h"
 #include "queue.h"
 #include <workerd/jsg/function.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
@@ -122,20 +123,6 @@ namespace workerd::api {
 
 class ReadableStreamJsController;
 class WritableStreamJsController;
-
-template <typename T>
-class WeakRef: public kj::Refcounted {
-  // Used to allow holding safe weak pointers to type T
-public:
-  WeakRef(T& ref) : ref(ref) {}
-  KJ_DISALLOW_COPY_AND_MOVE(WeakRef);
-  kj::Maybe<T&> tryGet() { return ref; }
-  kj::Own<WeakRef> addRef() { return kj::addRef(*this); }
-private:
-  void reset() { ref = nullptr; }
-  kj::Maybe<T&> ref;
-  friend T;
-};
 
 // =======================================================================================
 // The ReadableImpl provides implementation that is common to both the
