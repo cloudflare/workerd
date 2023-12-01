@@ -4,21 +4,20 @@
 
 #pragma once
 
+#include "io-channels.h"
+#include "io-gate.h"
+#include "io-thread-context.h"
+#include "limit-enforcer.h"
+#include "trace.h"
+#include "worker.h"
+#include <workerd/api/deferred-proxy.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/jsg.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 #include <kj/function.h>
-
-#include <workerd/io/trace.h>
-#include <workerd/io/worker.h>
-#include <workerd/jsg/async-context.h>
-#include <workerd/jsg/jsg.h>
-#include <v8.h>
-#include <workerd/io/io-gate.h>
-#include <workerd/api/deferred-proxy.h>
 #include <capnp/dynamic.h>
-#include <workerd/io/limit-enforcer.h>
-#include <workerd/io/io-channels.h>
 #include <workerd/util/weak-refs.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
@@ -40,54 +39,7 @@ using RemoveIoOwn = typename RemoveIoOwn_<T>::Type;
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
-class ThreadContext;
 class IoContext;
-
-// Thread-level stuff needed to construct a IoContext. One of these is created for each
-// request-handling thread.
-class ThreadContext {
-public:
-  struct HeaderIdBundle {
-    HeaderIdBundle(kj::HttpHeaderTable::Builder& builder);
-
-    const kj::HttpHeaderTable& table;
-
-    const kj::HttpHeaderId contentEncoding;
-    const kj::HttpHeaderId cfCacheStatus;         // used by cache API implementation
-    const kj::HttpHeaderId cacheControl;
-    const kj::HttpHeaderId cfCacheNamespace;       // used by Cache binding implementation
-    const kj::HttpHeaderId cfKvMetadata;          // used by KV binding implementation
-    const kj::HttpHeaderId cfR2ErrorHeader;       // used by R2 binding implementation
-    const kj::HttpHeaderId cfBlobMetadataSize;    // used by R2 binding implementation
-    const kj::HttpHeaderId cfBlobRequest;         // used by R2 binding implementation
-    const kj::HttpHeaderId authorization;         // used by R2 binding implementation
-    const kj::HttpHeaderId secWebSocketProtocol;
-  };
-
-  ThreadContext(
-      kj::Timer& timer, kj::EntropySource& entropySource,
-      HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-          capnp::ByteStreamFactory& byteStreamFactory, bool isFiddle);
-
-  // This should only be used to costruct TimerChannel. Everything else should use TimerChannel.
-  kj::Timer& getUnsafeTimer() { return timer; }
-
-  kj::EntropySource& getEntropySource() { return entropySource; }
-  const kj::HttpHeaderTable& getHeaderTable() { return headerIds.table; }
-  const HeaderIdBundle& getHeaderIds() { return headerIds; }
-  capnp::HttpOverCapnpFactory& getHttpOverCapnpFactory() { return httpOverCapnpFactory; }
-  capnp::ByteStreamFactory& getByteStreamFactory() { return byteStreamFactory; }
-  bool isFiddle() { return fiddle; }
-
-private:
-  // NOTE: This timer only updates when entering the event loop!
-  kj::Timer& timer;
-  kj::EntropySource& entropySource;
-  HeaderIdBundle headerIds;
-  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  capnp::ByteStreamFactory& byteStreamFactory;
-  bool fiddle;
-};
 
 // A TimeoutId is a positive non-zero integer value that explicitly identifies a timeout set on an
 // isolate.
