@@ -14,6 +14,7 @@
 #include "hibernation-event-params.h"
 #include "blob.h"
 #include "streams.h"
+#include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif

@@ -548,19 +548,6 @@ kj::Own<void> IoContext::registerPendingEvent() {
   }
 }
 
-TimeoutId TimeoutId::Generator::getNext() {
-  // The maximum integer value that we can represent as a double to convey to jsg.
-  constexpr ValueType MAX_SAFE_INTEGER = (1ull << 53) - 1;
-
-  auto id = nextId++;
-  if (nextId > MAX_SAFE_INTEGER) {
-    KJ_LOG(WARNING, "Unable to set timeout because there are no more unique ids");
-    JSG_FAIL_REQUIRE(Error, "Unable to set timeout because there are no more unique ids "
-        "less than Number.MAX_SAFE_INTEGER.");
-  }
-  return TimeoutId(id);
-}
-
 IoContext::TimeoutManagerImpl::TimeoutState::TimeoutState(
     TimeoutManagerImpl& manager, TimeoutParameters params)
     : manager(manager), params(kj::mv(params)) {
