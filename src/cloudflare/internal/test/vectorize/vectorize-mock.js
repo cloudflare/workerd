@@ -100,7 +100,10 @@ export default {
         /** @type {VectorizeQueryOptions & {vector: number[], compat: { queryMetadataOptional: boolean }}} */
         const body = await request.json();
         // check that the compatibility flags are set
-        if (!body.compat.queryMetadataOptional) throw Error('expected to get `queryMetadataOptional` compat flag with a value of true')
+        if (!body.compat.queryMetadataOptional)
+          throw Error(
+            "expected to get `queryMetadataOptional` compat flag with a value of true"
+          );
         const returnSet = exampleVectorMatches;
         if (!body?.returnValues)
           returnSet.forEach((v) => {
