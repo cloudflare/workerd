@@ -399,7 +399,9 @@ public:
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
         if (module.which() == Module::WASM) {
-          KJ_ASSERT(util::Autogate::isEnabled(utilg::AutogateKey::BUILTIN_WASM_MODULES));
+          if (!util::Autogate::isEnabled(utilg::AutogateKey::BUILTIN_WASM_MODULES)) {
+            LOG_ERROR_ONCE("Builtin wasm module used without passing builtin-wasm-modules autogate flag");
+          }
           using Key = typename Entry::Key;
           auto specifier = module.getName();
           auto path = kj::Path::parse(specifier);
