@@ -401,6 +401,7 @@ public:
         if (module.which() == Module::WASM) {
           if (!util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
             LOG_ERROR_ONCE("Builtin wasm module used without passing builtin-wasm-modules autogate flag");
+            continue;
           }
           using Key = typename Entry::Key;
           auto specifier = module.getName();
