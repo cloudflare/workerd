@@ -23,7 +23,6 @@
 #include <kj/async.h>
 #include <kj/one-of.h>
 #include <kj/list.h>
-#include <workerd/jsg/jsg.h>
 
 #include <type_traits>
 
