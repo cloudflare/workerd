@@ -126,7 +126,7 @@ def wd_js_bundle(
      builtin_modules: js src label -> module name dictionary
      internal_modules: js src label -> module name dictionary
      internal_wasm_modules: wasm src label -> module name dictionary
-     internal_data_modules: wasm src label -> module name dictionary
+     internal_data_modules: data src label -> module name dictionary
      declarations: d.ts label set
      const_name: capnp constant name that will contain bundle definition
      schema_id: capnpn schema id
