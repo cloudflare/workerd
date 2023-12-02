@@ -396,6 +396,45 @@ uint64_t getCurrentThreadId() {
 
 }  // namespace
 
+// Represents a thread's attempt to take an async lock. Each Isolate has a linked list of
+// `AsyncWaiter`s. A particular thread only ever owns one `AsyncWaiter` at a time.
+class Worker::AsyncWaiter: public kj::Refcounted {
+public:
+  AsyncWaiter(kj::Own<const Isolate> isolate);
+  ~AsyncWaiter() noexcept;
+  KJ_DISALLOW_COPY_AND_MOVE(AsyncWaiter);
+
+private:
+  // Executor for this waiter's thread.
+  const kj::Executor& executor;
+
+  // The isolate for which this waiter is currently waiting.
+  kj::Own<const Isolate> isolate;
+
+  // Promise/fulfiller to fire when the waiter reaches the front of the list for the corresponding
+  // isolate.
+  kj::ForkedPromise<void> readyPromise = nullptr;
+  kj::Own<kj::CrossThreadPromiseFulfiller<void>> readyFulfiller;
+
+  // Promise/fulfiller to fire when the AsyncLock is finally released. This is used when a thread
+  // tries to take locks on multiple different isolates concurrently, in order to serialize the
+  // locks so only one is taken at a time. This is NOT a cross-thread fulfiller; it can only be
+  // fulfilled by the thread that owns the waiter.
+  kj::ForkedPromise<void> releasePromise = nullptr;
+  kj::Own<kj::PromiseFulfiller<void>> releaseFulfiller;
+
+  // Protected by the lock on `Isolate::asyncWaiters` for the isolate identified by
+  // `currentIsolate`. Must be null if `currentIsolate` is null. (All other members of `Waiter`
+  // can only be accessed by the thread that created the `Waiter`.)
+  kj::Maybe<AsyncWaiter&> next;
+  kj::Maybe<AsyncWaiter&>* prev;
+
+  static thread_local AsyncWaiter* threadCurrentWaiter;
+
+  friend class Worker::Isolate;
+  friend class Worker::AsyncLock;
+};
+
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
 public:
   // Wall time in milliseconds with millisecond precision. console.time() and friends rely on this
@@ -489,23 +528,11 @@ private:
 // Defined later in this file.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
 
-static thread_local uint warnAboutIsolateLockScopeCount = 0;
 static thread_local const Worker::ApiIsolate* currentApiIsolate = nullptr;
 
 const Worker::ApiIsolate& Worker::ApiIsolate::current() {
   KJ_REQUIRE(currentApiIsolate != nullptr, "not running JavaScript");
   return *currentApiIsolate;
-}
-
-Worker::WarnAboutIsolateLockScope::WarnAboutIsolateLockScope() {
-  ++warnAboutIsolateLockScopeCount;
-}
-
-void Worker::WarnAboutIsolateLockScope::release() {
-  if (!released) {
-    --warnAboutIsolateLockScopeCount;
-    released = true;
-  }
 }
 
 struct Worker::Impl {
@@ -582,9 +609,7 @@ struct Worker::Isolate::Impl {
           limitEnforcer(isolate.getLimitEnforcer()),
           consoleMode(isolate.consoleMode),
           lock(isolate.apiIsolate->lock(stackScope)) {
-      if (warnAboutIsolateLockScopeCount > 0) {
-        KJ_LOG(WARNING, "taking isolate lock at a bad time", kj::getStackTrace());
-      }
+      WarnAboutIsolateLockScope::maybeWarn();
 
       // Increment the success count to expose forward progress to all threads.
       __atomic_add_fetch(&impl.lockSuccessCount, 1, __ATOMIC_RELAXED);

@@ -109,4 +109,22 @@ private:
 
   friend class Watchdog;
 };
+
+// ======================================================================================
+
+// Create on stack in scopes where any attempt to take an isolate lock should log a warning.
+// Isolate locks can block for a relatively long time, so we especially try to avoid taking
+// them while any other locks are held.
+class WarnAboutIsolateLockScope {
+public:
+  WarnAboutIsolateLockScope();
+  ~WarnAboutIsolateLockScope() noexcept(false);
+  KJ_DISALLOW_COPY(WarnAboutIsolateLockScope);
+  WarnAboutIsolateLockScope(WarnAboutIsolateLockScope&&);
+  void release();
+
+  static void maybeWarn();
+private:
+  bool released = false;
+};
 }  // namespace workerd

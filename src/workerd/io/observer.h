@@ -223,4 +223,18 @@ public:
   virtual void shutdown(uint16_t reasonCode, LimitEnforcer& limitEnforcer) {}
 };
 
+// RAII object to call `teardownFinished()` on an observer for you.
+template <typename Observer>
+class TeardownFinishedGuard {
+public:
+  TeardownFinishedGuard(Observer& ref): ref(ref) {}
+  ~TeardownFinishedGuard() noexcept(false) {
+    ref.teardownFinished();
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(TeardownFinishedGuard);
+
+private:
+  Observer& ref;
+};
+
 }  // namespace workerd
