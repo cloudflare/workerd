@@ -430,24 +430,7 @@ public:
             continue;
           case Module::DATA:
             addBuiltinModule(specifier, [specifier, module](Lock& lock) {
-              auto value = kj::heapArray(module.getData().asBytes().asBytes());
-              v8::Local<v8::ArrayBuffer> data;
-              {
-                // Code duplicated from ArrayBufferWrapper::wrap in value.h because I
-                // couldn't figure out how to use ArrayBufferWrapper directly.
-                // TODO: Avoid code duplication
-                byte* begin = value.begin();
-                size_t size = value.size();
-                auto ownerPtr = new kj::Array<byte>(kj::mv(value));
-
-                std::unique_ptr<v8::BackingStore> backing =
-                    v8::ArrayBuffer::NewBackingStore(begin, size,
-                        [](void* begin, size_t size, void* ownerPtr){
-                          delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
-                        }, ownerPtr);
-                data = v8::ArrayBuffer::New(lock.v8Isolate, kj::mv(backing));
-              }
-
+              v8::Local<v8::ArrayBuffer> data = lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
               return jsg::ModuleRegistry::ModuleInfo(lock, specifier, kj::none,
                                                      jsg::ModuleRegistry::DataModuleInfo(lock, data));
             }, type);
