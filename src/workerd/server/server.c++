@@ -1760,7 +1760,7 @@ public:
             });
           };
 
-          auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
+          auto makeStorage = [](jsg::Lock& js, const Worker::Api& api,
                                 ActorCacheInterface& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
             return jsg::alloc<api::DurableObjectStorage>(
@@ -2515,8 +2515,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto worker = kj::atomicRefcounted<Worker>(
       kj::mv(script),
       kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
-        return kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileGlobals(
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+        return kj::downcast<const WorkerdApiIsolate>(api).compileGlobals(
             lock, globals, target, 1);
       },
       IsolateObserver::StartType::COLD,

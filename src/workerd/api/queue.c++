@@ -504,7 +504,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
       (Worker::Lock& lock) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
-    auto& typeHandler = lock.getWorker().getIsolate().getApiIsolate().getQueueTypeHandler(lock);
+    auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
     queueEvent->event = startQueueEvent(lock.getGlobalScope(), kj::mv(params), context.addObject(result), lock,
         lock.getExportedHandler(entrypointName, context.getActor()), typeHandler);
   }));

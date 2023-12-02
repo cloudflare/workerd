@@ -72,7 +72,8 @@ class Worker: public kj::AtomicRefcounted {
 public:
   class Script;
   class Isolate;
-  class ApiIsolate;
+  class Api;
+  using ApiIsolate = Api;
 
   class ValidationErrorReporter {
   public:
@@ -92,7 +93,7 @@ public:
   explicit Worker(kj::Own<const Script> script,
                   kj::Own<WorkerObserver> metrics,
                   kj::FunctionParam<void(
-                      jsg::Lock& lock, const ApiIsolate& apiIsolate,
+                      jsg::Lock& lock, const Api& api,
                       v8::Local<v8::Object> target)> compileBindings,
                   IsolateObserver::StartType startType,
                   SpanParent parentSpan, LockType lockType,
@@ -197,7 +198,7 @@ public:
     kj::StringPtr mainScriptName;
 
     // Callback which will compile the script-level globals, returning a list of them.
-    kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer)>
+    kj::Function<kj::Array<CompiledGlobal>(jsg::Lock& lock, const Api& api, const jsg::CompilationObserver& observer)>
         compileGlobals;
   };
   struct ModulesSource {
@@ -206,7 +207,7 @@ public:
     kj::StringPtr mainModule;
 
     // Callback which will construct the module registry and load all the modules into it.
-    kj::Function<void(jsg::Lock& lock, const ApiIsolate& apiIsolate)> compileModules;
+    kj::Function<void(jsg::Lock& lock, const Api& api)> compileModules;
   };
   using Source = kj::OneOf<ScriptSource, ModulesSource>;
 
@@ -252,7 +253,7 @@ public:
   // Usually it matches the script ID. An exception is preview isolates: there, each preview
   // session has one isolate which may load many iterations of the script (this allows the
   // inspector session to stay open across them).
-  explicit Isolate(kj::Own<ApiIsolate> apiIsolate,
+  explicit Isolate(kj::Own<Api> api,
                    kj::Own<IsolateObserver>&& metrics,
                    kj::StringPtr id,
                    kj::Own<IsolateLimitEnforcer> limitEnforcer,
@@ -273,7 +274,9 @@ public:
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
   const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
-  const ApiIsolate& getApiIsolate() const { return *apiIsolate; }
+
+  const Api& getApi() const { return *api; }
+  [[deprecated("use getApi()")]] const Api& getApiIsolate() const { return *api; }
 
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
@@ -345,7 +348,7 @@ private:
 
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
-  kj::Own<ApiIsolate> apiIsolate;
+  kj::Own<Api> api;
   ConsoleMode consoleMode;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
@@ -406,11 +409,10 @@ private:
 //
 // In contrast, the rest of the classes in `worker.h` are concerned more with lifecycle
 // management.
-class Worker::ApiIsolate {
-  // TODO(cleanup): Find a better name for this, we have too many things called "isolate".
+class Worker::Api {
 public:
-  // Get the current `ApiIsolate` or throw if we're not currently executing JavaScript.
-  static const ApiIsolate& current();
+  // Get the current `Api` or throw if we're not currently executing JavaScript.
+  static const Api& current();
   // TODO(cleanup): This is a hack thrown in quickly because IoContext::current() doesn't work in
   //   the global scope (when no request is running). We need a better design here.
 
@@ -421,7 +423,7 @@ public:
   //   to the event loop.
 
   // Get the FeatureFlags this isolate is configured with. Returns a Reader that is owned by the
-  // ApiIsolate.
+  // Api.
   virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
 
   // Create the context (global scope) object.
@@ -596,7 +598,7 @@ public:
   // Callback which constructs the `DurableObjectStorage` instance for an actor. This can be used
   // to customize the JavaScript API.
   using MakeStorageFunc = kj::Function<jsg::Ref<api::DurableObjectStorage>(
-      jsg::Lock& js, const ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)>;
+      jsg::Lock& js, const Api& api, ActorCacheInterface& actorCache)>;
   // TODO(cleanup): Can we refactor the (internal-codebase) user of this so that it doesn't need
   //   to customize the JS API but only the underlying ActorCacheInterface?
 

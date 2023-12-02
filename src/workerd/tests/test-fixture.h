@@ -98,7 +98,7 @@ private:
   ThreadContext threadContext;
   kj::Own<IsolateLimitEnforcer> isolateLimitEnforcer;
   kj::Own<Worker::ValidationErrorReporter> errorReporter;
-  kj::Own<Worker::ApiIsolate> apiIsolate;
+  kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;

@@ -511,7 +511,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 namespace {
 void requestGc(const Worker& worker) {
   jsg::V8StackScope stackScope;
-  auto lock = worker.getIsolate().getApiIsolate().lock(stackScope);
+  auto lock = worker.getIsolate().getApi().lock(stackScope);
   lock->requestGcForTesting();
 }
 

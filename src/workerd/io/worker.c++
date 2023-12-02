@@ -238,7 +238,7 @@ void addExceptionToTrace(jsg::Lock& js,
                          WorkerTracer& tracer,
                          UncaughtExceptionSource source,
                          const jsg::JsValue& exception,
-                         const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
+                         const jsg::TypeHandler<Worker::Api::ErrorInterface>&
                              errorTypeHandler) {
   if (source == UncaughtExceptionSource::INTERNAL ||
       source == UncaughtExceptionSource::INTERNAL_ASYNC) {
@@ -528,11 +528,11 @@ private:
 // Defined later in this file.
 void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> context);
 
-static thread_local const Worker::ApiIsolate* currentApiIsolate = nullptr;
+static thread_local const Worker::Api* currentApi = nullptr;
 
-const Worker::ApiIsolate& Worker::ApiIsolate::current() {
-  KJ_REQUIRE(currentApiIsolate != nullptr, "not running JavaScript");
-  return *currentApiIsolate;
+const Worker::Api& Worker::Api::current() {
+  KJ_REQUIRE(currentApi != nullptr, "not running JavaScript");
+  return *currentApi;
 }
 
 struct Worker::Impl {
@@ -605,10 +605,10 @@ struct Worker::Isolate::Impl {
             KJ_UNREACHABLE;
           }()),
           progressCounter(impl.lockSuccessCount),
-          oldCurrentApiIsolate(currentApiIsolate),
+          oldCurrentApi(currentApi),
           limitEnforcer(isolate.getLimitEnforcer()),
           consoleMode(isolate.consoleMode),
-          lock(isolate.apiIsolate->lock(stackScope)) {
+          lock(isolate.api->lock(stackScope)) {
       WarnAboutIsolateLockScope::maybeWarn();
 
       // Increment the success count to expose forward progress to all threads.
@@ -629,10 +629,10 @@ struct Worker::Isolate::Impl {
         workerImpl = nullptr;
       }
 
-      currentApiIsolate = isolate.apiIsolate.get();
+      currentApi = isolate.api.get();
     }
     ~Lock() noexcept(false) {
-      currentApiIsolate = oldCurrentApiIsolate;
+      currentApi = oldCurrentApi;
 
 #ifdef KJ_DEBUG
       // We lack a KJ_DASSERT_NONNULL because it would have to look a lot like KJ_IF_SOME, thus
@@ -713,7 +713,7 @@ struct Worker::Isolate::Impl {
     IsolateObserver::LockRecord metrics;
     ThreadProgressCounter progressCounter;
     bool shouldReportIsolateMetrics = false;
-    const ApiIsolate* oldCurrentApiIsolate;
+    const Api* oldCurrentApi;
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
 
@@ -746,13 +746,13 @@ struct Worker::Isolate::Impl {
   //   because our GlobalScope object needs to have a function called on it, and any attached
   //   inspector needs to be notified. JSG doesn't know about these things.
 
-  Impl(const ApiIsolate& apiIsolate, IsolateObserver& metrics,
+  Impl(const Api& api, IsolateObserver& metrics,
        IsolateLimitEnforcer& limitEnforcer, InspectorPolicy inspectorPolicy)
       : metrics(metrics),
         inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()) {
     jsg::V8StackScope stackScope;
-    auto lock = apiIsolate.lock(stackScope);
+    auto lock = api.lock(stackScope);
     limitEnforcer.customizeIsolate(lock->v8Isolate);
 
     if (inspectorPolicy != InspectorPolicy::DISALLOW) {
@@ -1061,7 +1061,7 @@ const HeapSnapshotDeleter HeapSnapshotDeleter::INSTANCE;
 
 }  // namespace
 
-Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
+Worker::Isolate::Isolate(kj::Own<Api> apiParam,
                          kj::Own<IsolateObserver>&& metricsParam,
                          kj::StringPtr id,
                          kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
@@ -1069,18 +1069,18 @@ Worker::Isolate::Isolate(kj::Own<ApiIsolate> apiIsolateParam,
                          ConsoleMode consoleMode)
     : id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
-      apiIsolate(kj::mv(apiIsolateParam)),
+      api(kj::mv(apiParam)),
       consoleMode(consoleMode),
-      featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(apiIsolate->getFeatureFlags()))),
+      featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       metrics(kj::mv(metricsParam)),
-      impl(kj::heap<Impl>(*apiIsolate, *metrics, *limitEnforcer, inspectorPolicy)),
+      impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
       traceAsyncContextKey(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
   metrics->created();
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::V8StackScope stackScope;
-  auto lock = apiIsolate->lock(stackScope);
-  auto features = apiIsolate->getFeatureFlags();
+  auto lock = api->lock(stackScope);
+  auto features = api->getFeatureFlags();
 
   lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
   lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
@@ -1218,7 +1218,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
     v8::Local<v8::Context> context;
     if (modular) {
       // Modules can't be compiled for multiple contexts. We need to create the real context now.
-      auto& mContext = impl->moduleContext.emplace(isolate->apiIsolate->newContext(lock));
+      auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock));
       mContext->enableWarningOnSpecialEvents();
       context = mContext.getHandle(lock);
       recordedLock.setupContext(context);
@@ -1273,7 +1273,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
       try {
         KJ_SWITCH_ONEOF(source) {
           KJ_CASE_ONEOF(script, ScriptSource) {
-            impl->globals = script.compileGlobals(lock, *isolate->apiIsolate, isolate->impl->metrics);
+            impl->globals = script.compileGlobals(lock, isolate->getApi(), isolate->impl->metrics);
 
             {
               // It's unclear to me if CompileUnboundScript() can get trapped in any infinite loops or
@@ -1291,7 +1291,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
             auto limitScope = isolate->getLimitEnforcer().enterStartupJs(lock, maybeLimitError);
             auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
             impl->configureDynamicImports(lock, modules);
-            modulesSource.compileModules(lock, *isolate->apiIsolate);
+            modulesSource.compileModules(lock, isolate->getApi());
             impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
             break;
           }
@@ -1386,7 +1386,7 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 Worker::Worker(kj::Own<const Script> scriptParam,
                kj::Own<WorkerObserver> metricsParam,
                kj::FunctionParam<void(
-                      jsg::Lock& lock, const ApiIsolate& apiIsolate,
+                      jsg::Lock& lock, const Api& api,
                       v8::Local<v8::Object> target)> compileBindings,
                IsolateObserver::StartType startType,
                SpanParent parentSpan, LockType lockType,
@@ -1434,7 +1434,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       currentSpan.setTag("module_context"_kjc, true);
     } else {
       // Create a new context.
-      jsContext = &this->impl->context.emplace(script->isolate->apiIsolate->newContext(lock));
+      jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock));
     }
 
     v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
@@ -1474,7 +1474,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           lock.v8Set(bindingsScope, global.name, global.value);
         }
 
-        compileBindings(lock, *script->isolate->apiIsolate, bindingsScope);
+        compileBindings(lock, script->isolate.getApi(), bindingsScope);
 
         // Execute script.
         currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
@@ -1517,7 +1517,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
               impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
 
-              auto handlers = script->isolate->apiIsolate->unwrapExports(lock, ns);
+              auto handlers = script->isolate->getApi().unwrapExports(lock, ns);
 
               for (auto& handler: handlers.fields) {
                 KJ_SWITCH_ONEOF(handler.value) {
@@ -1858,7 +1858,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
       js.withinHandleScope([&] {
         auto contextScope = js.enterContextScope(getContext());
         addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
-            worker.getIsolate().apiIsolate->getErrorInterfaceTypeHandler(*this));
+            worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }
   }
@@ -3021,7 +3021,7 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
 
       kj::Maybe<jsg::Ref<api::DurableObjectStorage>> storage;
       KJ_IF_SOME(c, impl->actorCache) {
-        storage = impl->makeStorage(lock, *worker->getIsolate().apiIsolate, *c);
+        storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
       auto handler = cls(lock,
           jsg::alloc<api::DurableObjectState>(cloneId(), kj::mv(storage)),
@@ -3162,7 +3162,7 @@ kj::Own<Worker::Actor::Loopback> Worker::Actor::getLoopback() {
 kj::Maybe<jsg::Ref<api::DurableObjectStorage>>
     Worker::Actor::makeStorageForSwSyntax(Worker::Lock& lock) {
   return impl->actorCache.map([&](kj::Own<ActorCacheInterface>& cache) {
-    return impl->makeStorage(lock, *worker->getIsolate().apiIsolate, *cache);
+    return impl->makeStorage(lock, worker->getIsolate().getApi(), *cache);
   });
 }
 
