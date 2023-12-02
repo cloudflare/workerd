@@ -73,7 +73,7 @@ public:
   class Script;
   class Isolate;
   class Api;
-  using ApiIsolate = Api;
+  using ApiIsolate [[deprecated("Use Workerd::Api")]] = Api;
 
   class ValidationErrorReporter {
   public:

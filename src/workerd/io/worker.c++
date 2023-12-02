@@ -1474,7 +1474,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           lock.v8Set(bindingsScope, global.name, global.value);
         }
 
-        compileBindings(lock, script->isolate.getApi(), bindingsScope);
+        compileBindings(lock, script->isolate->getApi(), bindingsScope);
 
         // Execute script.
         currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);

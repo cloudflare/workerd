@@ -259,7 +259,7 @@ TestFixture::TestFixture(SetupParams&& params)
     threadContext(*timer, *entropySource, threadContextHeaderBundle, httpOverCapnpFactory, byteStreamFactory, false),
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
     errorReporter(kj::heap<MockErrorReporter>()),
-    api(kj::heap<server::WorkerdApiIsolate>(
+    api(kj::heap<server::WorkerdApi>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
@@ -273,7 +273,7 @@ TestFixture::TestFixture(SetupParams&& params)
     workerScript(kj::atomicRefcounted<Worker::Script>(
       kj::atomicAddRef(*workerIsolate),
       scriptId,
-      server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter,
+      server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter,
           capnp::List<server::config::Extension>::Reader{}),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
