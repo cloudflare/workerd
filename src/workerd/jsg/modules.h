@@ -6,13 +6,12 @@
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
-#include <workerd/jsg/modules.capnp.h>
-#include <workerd/util/thread-scopes.h>
-#include <workerd/jsg/observer.h>
-#include <set>
-#include "function.h"
-#include "promise.h"
 #include <workerd/util/autogate.h>
+#include <workerd/util/thread-scopes.h>
+#include <workerd/jsg/function.h>
+#include <workerd/jsg/modules.capnp.h>
+#include <workerd/jsg/observer.h>
+#include <workerd/jsg/promise.h>
 
 namespace workerd::jsg {
 
