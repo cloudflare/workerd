@@ -9,6 +9,7 @@
 
 namespace workerd::api {
 
+namespace {
 // Concatenate an array of segments (parameter to Blob constructor).
 static kj::Array<byte> concat(jsg::Optional<Blob::Bits> maybeBits) {
   // TODO(perf): Make it so that a Blob can keep references to the input data rather than copy it.
@@ -78,6 +79,12 @@ static kj::String normalizeType(kj::String type) {
 
   return kj::mv(type);
 }
+}  // namespace
+
+Blob::Blob(kj::Array<byte> data, kj::String type)
+    : ownData(kj::mv(data)), data(ownData.get<kj::Array<byte>>()), type(kj::mv(type)) {}
+Blob::Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
+    : ownData(kj::mv(parent)), data(data), type(kj::mv(type)) {}
 
 jsg::Ref<Blob> Blob::constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options) {
   kj::String type;  // note: default value is intentionally empty string
@@ -190,7 +197,17 @@ jsg::Ref<ReadableStream> Blob::stream() {
       kj::heap<BlobInputStream>(JSG_THIS));
 }
 
+void Blob::visitForGc(jsg::GcVisitor& visitor) {
+  KJ_IF_SOME(b, ownData.tryGet<jsg::Ref<Blob>>()) {
+    visitor.visit(b);
+  }
+}
+
 // =======================================================================================
+
+File::File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
+    : Blob(kj::mv(data), kj::mv(type)),
+      name(kj::mv(name)), lastModified(lastModified) {}
 
 jsg::Ref<File> File::constructor(jsg::Optional<Bits> bits,
     kj::String name, jsg::Optional<Options> options) {

@@ -14,10 +14,8 @@ class ReadableStream;
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
 public:
-  Blob(kj::Array<byte> data, kj::String type)
-      : ownData(kj::mv(data)), data(ownData.get<kj::Array<byte>>()), type(kj::mv(type)) {}
-  Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type)
-      : ownData(kj::mv(parent)), data(data), type(kj::mv(type)) {}
+  explicit Blob(kj::Array<byte> data, kj::String type);
+  explicit Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
   inline kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND { return data; }
 
@@ -35,8 +33,8 @@ public:
 
   static jsg::Ref<Blob> constructor(jsg::Optional<Bits> bits, jsg::Optional<Options> options);
 
-  int getSize() const { return data.size(); }
-  kj::StringPtr getType() const { return type; }
+  inline int getSize() const { return data.size(); }
+  inline kj::StringPtr getType() const { return type; }
 
   jsg::Ref<Blob> slice(jsg::Optional<int> start, jsg::Optional<int> end,
                         jsg::Optional<kj::String> type);
@@ -65,11 +63,7 @@ private:
   kj::ArrayPtr<const byte> data;
   kj::String type;
 
-  void visitForGc(jsg::GcVisitor& visitor) {
-    KJ_IF_SOME(b, ownData.tryGet<jsg::Ref<Blob>>()) {
-      visitor.visit(b);
-    }
-  }
+  void visitForGc(jsg::GcVisitor& visitor);
 
   class BlobInputStream;
 };
@@ -77,9 +71,7 @@ private:
 // An implementation of the Web Platform Standard File API
 class File: public Blob {
 public:
-  File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified)
-      : Blob(kj::mv(data), kj::mv(type)),
-        name(kj::mv(name)), lastModified(lastModified) {}
+  File(kj::Array<byte> data, kj::String name, kj::String type, double lastModified);
 
   struct Options {
     jsg::Optional<kj::String> type;
@@ -92,8 +84,8 @@ public:
   static jsg::Ref<File> constructor(jsg::Optional<Bits> bits,
       kj::String name, jsg::Optional<Options> options);
 
-  kj::StringPtr getName() { return name; }
-  double getLastModified() { return lastModified; }
+  inline kj::StringPtr getName() { return name; }
+  inline double getLastModified() { return lastModified; }
 
   JSG_RESOURCE_TYPE(File, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Blob);
