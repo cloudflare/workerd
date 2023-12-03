@@ -13,7 +13,7 @@ const {const_name} :Modules.Bundle = (
 ]);
 """
 
-MODULE_TEMPLATE = """    (name = "{name}", src = embed "{path}", type = {type}, {ts_declaration})"""
+MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {ts_declaration})"""
 
 def _to_d_ts(file_name):
     return file_name.removesuffix(".js") + ".d.ts"
@@ -26,31 +26,36 @@ def _relative_path(file_path, dir_path):
 def _gen_api_bundle_capnpn_impl(ctx):
     output_dir = ctx.outputs.out.dirname + "/"
 
-    def _render_module(name, label, type):
+    def _render_module(name, label, src_type, type):
         return MODULE_TEMPLATE.format(
             name = name,
             # capnp doesn't allow ".." dir escape, make paths relative.
             # this won't work for embedding paths outside of rule directory subtree.
+            src_type = src_type,
             path = _relative_path(
                 ctx.expand_location("$(location {})".format(label), ctx.attr.data),
                 output_dir,
             ),
+            type = type,
             ts_declaration = (
                 "tsDeclaration = embed \"" + _relative_path(
                     ctx.expand_location("$(location {})".format(ctx.attr.declarations[name]), ctx.attr.data),
                     output_dir,
                 ) + "\", "
             ) if name in ctx.attr.declarations else "",
-            type = type,
         )
 
     modules = [
-        _render_module(ctx.attr.builtin_modules[m], m.label, "builtin")
+        _render_module(ctx.attr.builtin_modules[m], m.label, "src", "builtin")
         for m in ctx.attr.builtin_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_modules[m], m.label, "internal")
+        _render_module(ctx.attr.internal_modules[m], m.label, "src", "internal")
         for m in ctx.attr.internal_modules
+    ]
+    modules += [
+        _render_module(ctx.attr.internal_wasm_modules[m], m.label,  "wasm", "internal")
+        for m in ctx.attr.internal_wasm_modules
     ]
 
     content = CAPNP_TEMPLATE.format(
@@ -67,6 +72,7 @@ gen_api_bundle_capnpn = rule(
         "out": attr.output(mandatory = True),
         "builtin_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_modules": attr.label_keyed_string_dict(allow_files = True),
+        "internal_wasm_modules": attr.label_keyed_string_dict(allow_files = True),
         "declarations": attr.string_dict(),
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
@@ -100,8 +106,10 @@ def wd_js_bundle(
         const_name,
         builtin_modules = {},
         internal_modules = {},
+        internal_wasm_modules = {},
         declarations = [],
-        **kwargs):
+        **kwargs
+):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -111,6 +119,7 @@ def wd_js_bundle(
      name: cc_capnp_library rule name
      builtin_modules: js src label -> module name dictionary
      internal_modules: js src label -> module name dictionary
+     internal_wasm_modules: wasm src label -> module name dictionary
      declarations: d.ts label set
      const_name: capnp constant name that will contain bundle definition
      schema_id: capnpn schema id
@@ -118,9 +127,21 @@ def wd_js_bundle(
     """
 
     builtin_modules, builtin_declarations = _copy_modules(builtin_modules, declarations)
-    internal_modules, internal_declarations = _copy_modules(internal_modules, declarations)
+    internal_modules, internal_declarations = _copy_modules(
+        internal_modules, declarations
+    )
+    internal_wasm_modules, internal_wasm_declarations = _copy_modules(
+        internal_wasm_modules, declarations
+    )
 
-    data = list(builtin_modules) + list(internal_modules) + list(builtin_declarations.values()) + list(internal_declarations.values())
+    data = (
+        list(builtin_modules)
+        + list(internal_modules)
+        + list(internal_wasm_modules)
+        + list(builtin_declarations.values())
+        + list(internal_declarations.values())
+        + list(internal_wasm_declarations.values())
+    )
 
     gen_api_bundle_capnpn(
         name = name + "@gen",
@@ -129,7 +150,8 @@ def wd_js_bundle(
         const_name = const_name,
         builtin_modules = builtin_modules,
         internal_modules = internal_modules,
-        declarations = builtin_declarations | internal_declarations,
+        internal_wasm_modules = internal_wasm_modules,
+        declarations = builtin_declarations | internal_declarations | internal_wasm_declarations,
         data = data,
     )
 

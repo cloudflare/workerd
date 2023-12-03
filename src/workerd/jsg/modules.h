@@ -6,11 +6,12 @@
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <workerd/util/autogate.h>
+#include <workerd/util/thread-scopes.h>
+#include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
-#include <set>
-#include "function.h"
-#include "promise.h"
+#include <workerd/jsg/promise.h>
 
 namespace workerd::jsg {
 
@@ -396,6 +397,37 @@ public:
       auto type = module.getType();
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
+        if (module.which() == Module::WASM) {
+          if (!util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
+            LOG_ERROR_ONCE("Builtin wasm module used without passing builtin-wasm-modules autogate flag");
+            continue;
+          }
+          using Key = typename Entry::Key;
+          auto specifier = module.getName();
+          auto path = kj::Path::parse(specifier);
+          if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
+            continue;
+          }
+
+          // The body of this callback is copied from `compileWasmGlobal` in src/workerd/server/workerd-api.c++.
+          addBuiltinModule(specifier, [specifier, module, this](Lock& lock) {
+            lock.setAllowEval(true);
+            KJ_DEFER(lock.setAllowEval(false));
+
+            // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
+            // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
+            // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
+            // compiles fast but runs slower.
+            AllowV8BackgroundThreadsScope scope;
+            auto wasmModule = jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
+            return jsg::ModuleRegistry::ModuleInfo(
+                  lock,
+                  specifier,
+                  kj::none,
+                  jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+          }, type);
+          continue;
+        }
         // TODO: asChars() might be wrong for wide characters
         addBuiltinModule(module.getName(), module.getSrc().asChars(), type);
       }

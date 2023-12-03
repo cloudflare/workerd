@@ -14,7 +14,10 @@ struct Module {
   # Javascript module with its source code.
 
   name @0 :Text;
-  src @1 :Data;
+  union {
+    src @1 :Data; # JS / TS code
+    wasm @4 :Data; # Wasm module
+  }
   tsDeclaration @3 :Text;
 
   type @2 :ModuleType;
@@ -23,7 +26,7 @@ struct Module {
 
 enum ModuleType {
   bundle @0;
-  # Provided by the worker bundle.
+  # Provided by the worker bundle. TODO: rename this to e.g., user?
 
   builtin @1;
   # Provided by the runtime and can be imported by the worker bundle.

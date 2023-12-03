@@ -102,9 +102,13 @@ wd_cc_library(
     name = "autogate",
     srcs = ["autogate.c++"],
     hdrs = ["autogate.h"],
+    # Make missing string repr for an autogate into a hard error
+    copts = ["-Werror=switch"],
     visibility = ["//visibility:public"],
     deps = [":sentry", "@capnp-cpp//src/kj", "@capnp-cpp//src/capnp"],
 )
+
+exports_files(["autogate.h"])
 
 [kj_test(
     src = f,

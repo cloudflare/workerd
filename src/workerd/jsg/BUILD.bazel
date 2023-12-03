@@ -20,7 +20,7 @@ wd_cc_library(
             "observer.h",
             "rtti.h",
         ],
-    ),
+    ) + ["//src/workerd/util:autogate.h"],
     visibility = ["//visibility:public"],
     deps = [
         ":exception",
@@ -30,6 +30,7 @@ wd_cc_library(
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
+        "//src/workerd/util:autogate",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
