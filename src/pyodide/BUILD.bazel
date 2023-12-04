@@ -3,37 +3,46 @@ load(":patch_pyodide_js.bzl", "patch_pyodide_js")
 load("@workerd//:build/wd_ts_bundle.bzl", "wd_ts_bundle")
 
 
-copy_file(name = "pyodide.asm.wasm", src = "@pyodide//:pyodide/pyodide.asm.wasm", out = "pyodide-bundle/pyodide.asm.wasm")
-copy_file(name = "python_stdlib.zip", src = "@pyodide//:pyodide/python_stdlib.zip", out = "pyodide-bundle/python_stdlib.zip")
+copy_file(
+    name="pyodide.asm.wasm",
+    src="@pyodide//:pyodide/pyodide.asm.wasm",
+    out="pyodide-bundle/pyodide.asm.wasm",
+)
+copy_file(
+    name="python_stdlib.zip",
+    src="@pyodide//:pyodide/python_stdlib.zip",
+    out="pyodide-bundle/python_stdlib.zip",
+)
 
 py_binary(
-    name = "patch_pyodide_js",
-    srcs = ["patch_pyodide_js.py"],
+    name="patch_pyodide_js",
+    srcs=["patch_pyodide_js.py"],
 )
 
 patch_pyodide_js(
-    name = "pyodide.asm.js",
-    input = "@pyodide//:pyodide/pyodide.asm.js",
-    output = "pyodide-bundle/pyodide.asm.js",
+    name="pyodide.asm.js",
+    input="@pyodide//:pyodide/pyodide.asm.js",
+    output="pyodide-bundle/pyodide.asm.js",
 )
 
 wd_ts_bundle(
-    name = "pyodide",
-    import_name = "pyodide",
-    internal_modules = [
+    name="pyodide",
+    import_name="pyodide",
+    internal_modules=[
         "pyodide-bundle/pyodide.asm.js",
-    ] + glob([
-        "internal/*.js"
-    ]),
-    modules = glob([
-        "*.ts",
-        "*.js",
-        "stream/*.js",
-    ]),
-    internal_wasm_modules = ["pyodide-bundle/pyodide.asm.wasm"],
-    internal_data_modules = ["pyodide-bundle/python_stdlib.zip"],
-    schema_id = "0xbcc8f57c63814005",
-    tsconfig_json = "tsconfig.json",
-    eslintrc_json = ".eslintrc.json",
-    deps = ["pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"]
+    ]
+    + glob(["internal/*.js"]),
+    modules=glob(
+        [
+            "*.ts",
+            "*.js",
+            "stream/*.js",
+        ]
+    ),
+    internal_wasm_modules=["pyodide-bundle/pyodide.asm.wasm"],
+    internal_data_modules=["pyodide-bundle/python_stdlib.zip"],
+    schema_id="0xbcc8f57c63814005",
+    tsconfig_json="tsconfig.json",
+    eslintrc_json=".eslintrc.json",
+    deps=["pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"],
 )

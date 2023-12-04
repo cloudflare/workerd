@@ -8,7 +8,7 @@ function addEventListener(){}
 
 REPLACEMENTS = [
     ["var _createPyodideModule", "export const _createPyodideModule"],
-    ["globalThis._createPyodideModule = _createPyodideModule;", ""]
+    ["globalThis._createPyodideModule = _createPyodideModule;", ""],
 ]
 
 
@@ -22,10 +22,12 @@ def patch_pyodide(input, output):
     Path(output).write_text(text)
     return 0
 
+
 def main(argv):
     return patch_pyodide(argv[1], argv[2])
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main(sys.argv))
