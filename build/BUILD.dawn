@@ -1,6 +1,11 @@
 load("@py_deps//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_binary")
 
+COPTS = [
+    "-fno-rtti",
+    "-fno-exceptions",
+]
+
 py_binary(
     name = "dawn_json_generator",
     srcs = [
@@ -858,7 +863,7 @@ objc_library(
     copts = [
         "-std=c++20",
         "-fno-objc-arc",
-    ],
+    ] + COPTS,
     defines = [
         # From dawn/src/dawn/common/BUILD.gn:internal_config
         "DAWN_ENABLE_BACKEND_METAL",
@@ -889,6 +894,7 @@ cc_library(
     name = "dawn_native_windows",
     srcs = DAWN_SRCS + DAWN_DIRECTX_SRCS,
     hdrs = DAWN_HDRS,
+    copts = COPTS,
     includes = [
         "include",
         "src",
@@ -920,14 +926,14 @@ cc_library(
         # Skia has its own vulkan headers and we do not want these to
         # interfere/override those.
         "-Iexternal/vulkan_headers/include",
-    ],
-    defines = [
-        # From dawn/src/dawn/common/BUILD.gn:internal_config
-        "DAWN_ENABLE_BACKEND_VULKAN",
-    ],
+    ] + COPTS,
     includes = [
         "include",
         "src",
+    ],
+    local_defines = [
+        # From dawn/src/dawn/common/BUILD.gn:internal_config
+        "DAWN_ENABLE_BACKEND_VULKAN",
     ],
     target_compatible_with = select({
         "@platforms//os:linux": [],
@@ -953,6 +959,7 @@ cc_library(
         "include/dawn/webgpu_cpp_chained_struct.h",
         "src/dawn/webgpu_cpp.cpp",
     ],
+    copts = COPTS,
     includes = [
         "include",
     ],
@@ -970,6 +977,7 @@ cc_library(
         "src/dawn/dawn_proc.c",
         "src/dawn/dawn_thread_dispatch_proc.cpp",
     ],
+    copts = COPTS,
     includes = [
         "include",
     ],
@@ -1020,6 +1028,8 @@ cc_library(
         "src/dawn/wire/client/ClientInlineMemoryTransferService.cpp",
         "src/dawn/wire/client/Device.cpp",
         "src/dawn/wire/client/Device.h",
+        "src/dawn/wire/client/EventManager.cpp",
+        "src/dawn/wire/client/EventManager.h",
         "src/dawn/wire/client/Instance.cpp",
         "src/dawn/wire/client/Instance.h",
         "src/dawn/wire/client/LimitsAndFeatures.cpp",
@@ -1035,6 +1045,8 @@ cc_library(
         "src/dawn/wire/client/RequestTracker.h",
         "src/dawn/wire/client/ShaderModule.cpp",
         "src/dawn/wire/client/ShaderModule.h",
+        "src/dawn/wire/client/SwapChain.cpp",
+        "src/dawn/wire/client/SwapChain.h",
         "src/dawn/wire/client/Texture.cpp",
         "src/dawn/wire/client/Texture.h",
         "src/dawn/wire/server/ObjectStorage.h",
@@ -1054,6 +1066,7 @@ cc_library(
         "include/dawn/wire/WireServer.h",
         "include/dawn/wire/dawn_wire_export.h",
     ],
+    copts = COPTS,
     includes = [
         "include",
         "src",
@@ -1083,12 +1096,9 @@ cc_library(
 
 cc_library(
     name = "tint",
-    hdrs = glob(
-        [
-            "include/**/*.h",
-        ],
-        allow_empty = False,
-    ),
+    hdrs = [
+        "include/tint/tint.h",
+    ],
     defines = [
         "TINT_BUILD_SPV_WRITER=1",
         "TINT_BUILD_WGSL_READER=1",
