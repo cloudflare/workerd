@@ -978,6 +978,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
   auto lock = api->lock(stackScope);
   auto features = api->getFeatureFlags();
 
+  KJ_DASSERT(lock->v8Isolate->GetNumberOfDataSlots() >= 3);
+  KJ_DASSERT(lock->v8Isolate->GetData(3) == nullptr);
+  lock->v8Isolate->SetData(3, this);
+
   lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
   lock->setCommonJsExportDefault(features.getExportCommonJsDefaultNamespace());
 
@@ -1249,6 +1253,12 @@ Worker::Script::~Script() noexcept(false) {
     recordedLock.disposeContext(kj::mv(c));
   }
   impl = nullptr;
+}
+
+const Worker::Isolate& Worker::Isolate::from(jsg::Lock& js) {
+  auto ptr = js.v8Isolate->GetData(3);
+  KJ_ASSERT(ptr != nullptr);
+  return *static_cast<const Worker::Isolate*>(ptr);
 }
 
 bool Worker::Isolate::Impl::Lock::checkInWithLimitEnforcer(Worker::Isolate& isolate) {

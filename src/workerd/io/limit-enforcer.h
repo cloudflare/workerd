@@ -12,6 +12,8 @@ namespace workerd {
 struct ActorCacheSharedLruOptions;
 class IoContext;
 
+static constexpr size_t DEFAULT_MAX_PBKDF2_ITERATIONS = 100'000;
+
 // Interface for an object that enforces resource limits on an Isolate level.
 //
 // See also LimitEnforcer, which enforces on a per-request level.
@@ -57,6 +59,21 @@ public:
 
   // Report resource usage metrics to the given isolate metrics object.
   virtual void reportMetrics(IsolateObserver& isolateMetrics) const = 0;
+
+  // Called when performing a cypto key derivation function (like pbkdf2) to determine if
+  // if the requested number of iterations is acceptable. If kj::none is returned, the
+  // number of iterations requested is acceptable. If a number is returned, the requested
+  // iterations is unacceptable and the return value specifies the maximum.
+  virtual kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& js, size_t iterations) const {
+    // By default, historically we've limited this to 100,000 iterations max. We'll set
+    // that as the default for now. To set a default of no-limit, this would be changed
+    // to return kj::none. Note, this current default limit is *WAY* below the recommended
+    // minimum iterations for pbkdf2.
+    // TODO(maybe): We might consider emitting a warning if the number of iterations is
+    // too low to be safe.
+    if (iterations > DEFAULT_MAX_PBKDF2_ITERATIONS) return DEFAULT_MAX_PBKDF2_ITERATIONS;
+    return kj::none;
+  }
 };
 
 // Abstract interface that enforces resource limits on a IoContext.

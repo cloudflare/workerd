@@ -2524,12 +2524,18 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
     void completedRequest(kj::StringPtr id) const override {}
     bool exitJs(jsg::Lock& lock) const override { return false; }
     void reportMetrics(IsolateObserver& isolateMetrics) const override {}
+    kj::Maybe<size_t> checkPbkdfIterations(jsg::Lock& lock, size_t iterations) const override {
+      // No limit on the number of iterations in workerd
+      return kj::none;
+    }
   };
 
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System,
-      featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
+                                  featureFlags.asReader(),
+                                  *limitEnforcer,
+                                  kj::atomicAddRef(*observer));
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.

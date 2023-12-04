@@ -106,6 +106,12 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "limit-enforcer",
+    hdrs = ["limit-enforcer.h"],
+    visibility = ["//visibility:public"]
+)
+
+wd_cc_library(
     name = "worker-interface",
     srcs = ["worker-interface.c++"],
     hdrs = ["worker-interface.h"],

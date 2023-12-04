@@ -110,8 +110,12 @@ public:
                               kj::Array<kj::byte> info, uint32_t length);
 
   // Pbkdf2
-  kj::Array<kj::byte> getPbkdf(kj::Array<kj::byte> password, kj::Array<kj::byte> salt,
-                               uint32_t num_iterations, uint32_t keylen, kj::String name);
+  kj::Array<kj::byte> getPbkdf(jsg::Lock& js,
+                               kj::Array<kj::byte> password,
+                               kj::Array<kj::byte> salt,
+                               uint32_t num_iterations,
+                               uint32_t keylen,
+                               kj::String name);
 
   // Keys
   struct KeyExportOptions {

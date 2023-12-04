@@ -643,7 +643,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
 void requestGc(const Worker& worker) {
   TRACE_EVENT("workerd", "Debug: requestGc()");
   jsg::V8StackScope stackScope;
-  auto lock = worker.getIsolate().getApi().lock(stackScope);
+  auto& isolate = worker.getIsolate();
+  auto lock = isolate.getApi().lock(stackScope);
   lock->requestGcForTesting();
 }
 

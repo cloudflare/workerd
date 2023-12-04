@@ -339,6 +339,11 @@ private:
   kj::Array<kj::byte> inner;
 };
 
+// Check that the requested number of iterations for a key-derivation function
+// is acceptable. If the requested iterations is not acceptable, a JS error will
+// be thrown. Otherwise the method will return normally.
+void checkPbkdfLimits(jsg::Lock& js, size_t iterations);
+
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(DH);
