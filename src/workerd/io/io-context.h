@@ -4,180 +4,31 @@
 
 #pragma once
 
+#include "io-channels.h"
+#include "io-gate.h"
+#include "io-own.h"
+#include "io-timers.h"
+#include "io-thread-context.h"
+#include "limit-enforcer.h"
+#include "trace.h"
+#include "worker.h"
+#include <workerd/api/deferred-proxy.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/jsg.h>
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 #include <kj/function.h>
-
-#include <workerd/io/trace.h>
-#include <workerd/io/worker.h>
-#include <workerd/jsg/async-context.h>
-#include <workerd/jsg/jsg.h>
-#include <v8.h>
-#include <workerd/io/io-gate.h>
-#include <workerd/api/deferred-proxy.h>
 #include <capnp/dynamic.h>
-#include <workerd/io/limit-enforcer.h>
-#include <workerd/io/io-channels.h>
 #include <workerd/util/weak-refs.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
 
 namespace workerd {
 
-template <typename T> class IoOwn;
-template <typename T> class IoPtr;
-
-template <typename T>
-struct RemoveIoOwn_ { typedef T Type; static constexpr bool is = false; };
-template <typename T>
-struct RemoveIoOwn_<IoOwn<T>> { typedef T Type; static constexpr bool is = true; };
-
-template <typename T>
-constexpr bool isIoOwn() { return RemoveIoOwn_<T>::is; }
-template <typename T>
-using RemoveIoOwn = typename RemoveIoOwn_<T>::Type;
-
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
-class ThreadContext;
 class IoContext;
-
-// Thread-level stuff needed to construct a IoContext. One of these is created for each
-// request-handling thread.
-class ThreadContext {
-public:
-  struct HeaderIdBundle {
-    HeaderIdBundle(kj::HttpHeaderTable::Builder& builder);
-
-    const kj::HttpHeaderTable& table;
-
-    const kj::HttpHeaderId contentEncoding;
-    const kj::HttpHeaderId cfCacheStatus;         // used by cache API implementation
-    const kj::HttpHeaderId cacheControl;
-    const kj::HttpHeaderId cfCacheNamespace;       // used by Cache binding implementation
-    const kj::HttpHeaderId cfKvMetadata;          // used by KV binding implementation
-    const kj::HttpHeaderId cfR2ErrorHeader;       // used by R2 binding implementation
-    const kj::HttpHeaderId cfBlobMetadataSize;    // used by R2 binding implementation
-    const kj::HttpHeaderId cfBlobRequest;         // used by R2 binding implementation
-    const kj::HttpHeaderId authorization;         // used by R2 binding implementation
-    const kj::HttpHeaderId secWebSocketProtocol;
-  };
-
-  ThreadContext(
-      kj::Timer& timer, kj::EntropySource& entropySource,
-      HeaderIdBundle headerIds, capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-          capnp::ByteStreamFactory& byteStreamFactory, bool isFiddle);
-
-  // This should only be used to costruct TimerChannel. Everything else should use TimerChannel.
-  kj::Timer& getUnsafeTimer() { return timer; }
-
-  kj::EntropySource& getEntropySource() { return entropySource; }
-  const kj::HttpHeaderTable& getHeaderTable() { return headerIds.table; }
-  const HeaderIdBundle& getHeaderIds() { return headerIds; }
-  capnp::HttpOverCapnpFactory& getHttpOverCapnpFactory() { return httpOverCapnpFactory; }
-  capnp::ByteStreamFactory& getByteStreamFactory() { return byteStreamFactory; }
-  bool isFiddle() { return fiddle; }
-
-private:
-  // NOTE: This timer only updates when entering the event loop!
-  kj::Timer& timer;
-  kj::EntropySource& entropySource;
-  HeaderIdBundle headerIds;
-  capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  capnp::ByteStreamFactory& byteStreamFactory;
-  bool fiddle;
-};
-
-// A TimeoutId is a positive non-zero integer value that explicitly identifies a timeout set on an
-// isolate.
-//
-// Lastly, timeout ids can experience integer roll over. It is expected that the
-// setTimeout/clearTimeout implementation will enforce id uniqueness for *active* timeouts. This
-// does not mean that an external user cannot have cached a timeout id for a long expired timeout.
-// However, clearTimeout implementations are expected to only have access to timeouts set via that
-// same implementation.
-class TimeoutId {
-public:
-  // Use a double so that we can exceed the maximum value for uint32_t.
-  using NumberType = double;
-
-  // Store as a uint64_t so that we treat this id as an integer.
-  using ValueType = uint64_t;
-
-  class Generator;
-
-  // Convert an externally provided double into a TimeoutId. If you are making a new TimeoutId,
-  // use a Generator instead.
-  static TimeoutId fromNumber(NumberType id) {
-    return TimeoutId(ValueType(id));
-  }
-
-  // Convert a TimeoutId to an integer-covertable double for external consumption.
-  // Note that this is expected to be less than or equal to JavaScript Number.MAX_SAFE_INTEGER
-  // (2^53 - 1). To reach greater than that value in normal operation, we'd need a Generator to
-  // live far far longer than our normal release/restart cycle, be initialized with a large
-  // starting value, or experience active concurrency _somehow_.
-  NumberType toNumber() const {
-    return value;
-  }
-
-  bool operator<(TimeoutId id) const {
-    return value < id.value;
-  }
-
-private:
-  constexpr explicit TimeoutId(ValueType value): value(value) {}
-
-  ValueType value;
-};
-
-class TimeoutId::Generator {
-public:
-  Generator() = default;
-  Generator(const Generator&) = delete;
-  Generator& operator=(const Generator&) = delete;
-  Generator(Generator&&) = delete;
-  Generator& operator=(Generator&&) = delete;
-
-  // Get the next TimeoutId for this generator. This function will never return a TimeoutId <= 0.
-  TimeoutId getNext();
-
-private:
-  // We always skip 0 per the spec:
-  // https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timers.
-  TimeoutId::ValueType nextId = 1;
-};
-
-class TimeoutManager {
-public:
-  // Upper bound on the number of timeouts a user can *ever* have active.
-  constexpr static auto MAX_TIMEOUTS = 10'000;
-
-  struct TimeoutParameters {
-    TimeoutParameters(bool repeat, int64_t msDelay, jsg::Function<void()> function)
-        : repeat(repeat), msDelay(msDelay), function(kj::mv(function)) {
-      // Don't allow pushing Date.now() backwards! This should be checked before TimeoutParameters
-      // is created but just in case...
-      if (msDelay < 0) {
-        this->msDelay = 0;
-      }
-    }
-
-    bool repeat;
-    int64_t msDelay;
-
-    // This is a maybe to allow cancel to clear it and free the reference
-    // when it is no longer needed.
-    kj::Maybe<jsg::Function<void()>> function;
-  };
-
-  virtual TimeoutId setTimeout(
-      IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) = 0;
-  virtual void clearTimeout(IoContext& context, TimeoutId id) = 0;
-  virtual size_t getTimeoutCount() const = 0;
-  virtual kj::Maybe<kj::Date> getNextTimeout() const = 0;
-};
 
 // Represents one incoming request being handled by a IoContext. In non-actor scenarios,
 // there is only ever one IncomingRequest per IoContext, but with actors there could be many.
@@ -611,44 +462,6 @@ public:
   template <typename Func>
   auto addFunctor(Func&& func);
 
-  // If an object passed to addObject(Own<T>) implements Finalizeable, then once it is known to
-  // be the case that no code will ever run in the context of this IoContext again,
-  // finalize() will be called.
-  //
-  // This is primarily used to proactively fail out hanging promises once we know they can never
-  // be fulfilled, so that requests fail fast rather than hang forever.
-  //
-  // Finalizers should NOT call into JavaScript or really do much of anything except for calling
-  // reject() on some Fulfiller object. It can optionally return a warning which should be
-  // logged if the inspector is attached.
-  class Finalizeable {
-  public:
-
-    KJ_DISALLOW_COPY_AND_MOVE(Finalizeable);
-
-#ifdef KJ_DEBUG
-    Finalizeable();
-    ~Finalizeable() noexcept(false);
-    // In debug mode, we assert that this object was actually finalized. A Finalizeable object that
-    // doesn't get finalized typically arises when a derived class multiply-inherits from
-    // Finalizeable and some other non-Finalizeable class T, then gets passed to
-    // `IoContext::addObject()` as a T. This can be a source of baffling bugs.
-#else
-    Finalizeable() = default;
-#endif
-
-  private:
-    virtual kj::Maybe<kj::StringPtr> finalize() = 0;
-    friend class IoContext;
-
-#ifdef KJ_DEBUG
-    IoContext& context;
-
-    // Set true by IoContext::runFinalizers();
-    bool finalized = false;
-#endif
-  };
-
   // Call this to indicate that the caller expects to call into JavaScript in this IoContext
   // at some point in the future, in response to some *external* event that the caller is waiting
   // for. Then, hold on to the returned handle until that time. This prevents finalizers from being
@@ -887,80 +700,6 @@ private:
   kj::Maybe<Worker::Lock&> currentLock;
   kj::Maybe<InputGate::Lock> currentInputLock;
 
-  struct OwnedObject {
-    kj::Maybe<kj::Own<OwnedObject>> next;
-    kj::Maybe<kj::Own<OwnedObject>>* prev;
-    kj::Maybe<Finalizeable&> finalizer;
-  };
-
-  template <typename T>
-  struct SpecificOwnedObject: public OwnedObject {
-    SpecificOwnedObject(kj::Own<T> ptr): ptr(kj::mv(ptr)) {}
-    kj::Own<T> ptr;
-  };
-
-  class OwnedObjectList {
-  public:
-    OwnedObjectList() = default;
-    KJ_DISALLOW_COPY_AND_MOVE(OwnedObjectList);
-    ~OwnedObjectList() noexcept(false);
-
-    void link(kj::Own<OwnedObject> object);
-    static void unlink(OwnedObject& object);
-
-    // Runs the finalizer for each object in forward order and returns a vector of any warnings
-    // returned from those finalizers.
-    kj::Vector<kj::StringPtr> finalize();
-
-    bool isFinalized() {
-      return finalizersRan;
-    }
-
-  private:
-    kj::Maybe<kj::Own<OwnedObject>> head;
-
-    bool finalizersRan = false;
-  };
-
-  // Object which receives possibly-cross-thread deletions of owned objects.
-  class DeleteQueue: public kj::AtomicRefcounted {
-  public:
-    DeleteQueue()
-        : crossThreadDeleteQueue(State { kj::Vector<OwnedObject*>() }) {}
-
-    void scheduleDeletion(OwnedObject* object) const;
-
-    struct State {
-      kj::Vector<OwnedObject*> queue;
-    };
-
-    // Pointers from IoOwns that were dropped in other threads, and therefore should be deleted
-    // whenever the IoContext gets around to it. The maybe is changed to kj::none when the
-    // IoContext goes away, at which point all OwnedObjects have already been deleted so
-    // cross-thread deletions can just be ignored.
-    kj::MutexGuarded<kj::Maybe<State>> crossThreadDeleteQueue;
-
-    // Implements the corresponding methods of IoContext and ActorContext.
-    template <typename T> IoOwn<T> addObject(kj::Own<T> obj, OwnedObjectList& ownedObjects);
-  };
-
-  // When the IoContext is destroyed, we need to null out the DeleteQueue. Complicating
-  // matters a bit, we need to cancel all tasks (destroy the TaskSet) before this happens, so
-  // we can't just do it in IoContext's destrucrtor. As a hack, we customize our pointer
-  // to the delete queue to get the tear-down order right.
-  class DeleteQueuePtr: public kj::Own<DeleteQueue> {
-  public:
-    DeleteQueuePtr(kj::Own<DeleteQueue> value)
-        : kj::Own<DeleteQueue>(kj::mv(value)) {}
-    KJ_DISALLOW_COPY_AND_MOVE(DeleteQueuePtr);
-    ~DeleteQueuePtr() noexcept(false) {
-      auto ptr = get();
-      if (ptr != nullptr) {
-        *ptr->crossThreadDeleteQueue.lockExclusive() = kj::none;
-      }
-    }
-  };
-
   DeleteQueuePtr deleteQueue;
 
   kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
@@ -1069,72 +808,9 @@ private:
 
   class ThreadScope;
   class Scope;
-};
 
-// Owned pointer held by a V8 heap object, pointing to a KJ event loop object. Cannot be
-// dereferenced unless the isolate is executing on the appropriate event loop thread.
-template <typename T>
-class IoOwn {
-
-public:
-  IoOwn(IoOwn&& other);
-  IoOwn(decltype(nullptr)): item(nullptr) {}
-  ~IoOwn() noexcept(false);
-  KJ_DISALLOW_COPY(IoOwn);
-
-  T* operator->();
-  T& operator*() { return *operator->(); }
-  operator kj::Own<T>() &&;
-  IoOwn& operator=(IoOwn&& other);
-  IoOwn& operator=(decltype(nullptr));
-
-  // Releases this object from the IoOwn, but instead of deleting it, attaches it to the
-  // IoContext (or ActorContext) such that it won't be destroyed until that context is torn
-  // down.
-  //
-  // This may need to be used in cases where an application could directly observe the destruction
-  // of this object. If that's the case, then the object cannot be destroyed during GC, as this
-  // would let the application observe GC, which might enable side channels. So, the destructor
-  // of the owning object must manually call `deferGcToContext()` to pass all such objects away
-  // to their respective contexts.
-  //
-  // Since this is expected to be called during GC, it is safe to call from a thread other than
-  // the one that owns the IoContext.
-  void deferGcToContext() &&;
-
-private:
-  friend class IoContext;
-
-  kj::Own<const IoContext::DeleteQueue> deleteQueue;
-  IoContext::SpecificOwnedObject<T>* item;
-
-  IoOwn(kj::Own<const IoContext::DeleteQueue> deleteQueue,
-         IoContext::SpecificOwnedObject<T>* item)
-      : deleteQueue(kj::mv(deleteQueue)), item(item) {}
-};
-
-// Reference held by a V8 heap object, pointing to a KJ event loop object. Cannot be
-// dereferenced unless the isolate is executing on the appropriate event loop thread.
-template <typename T>
-class IoPtr {
-public:
-  IoPtr(const IoPtr& other)
-      : deleteQueue(kj::atomicAddRef(*other.deleteQueue)), ptr(other.ptr) {}
-  IoPtr(IoPtr&& other) = default;
-
-  T* operator->();
-  T& operator*() { return *operator->(); }
-  IoPtr& operator=(decltype(nullptr));
-
-private:
-  friend class IoContext;
-
-  kj::Own<const IoContext::DeleteQueue> deleteQueue;
-  T* ptr;
-
-  IoPtr(kj::Own<const IoContext::DeleteQueue> deleteQueue,
-         T* ptr)
-      : deleteQueue(kj::mv(deleteQueue)), ptr(ptr) {}
+  friend class Finalizeable;
+  friend class DeleteQueue;
 };
 
 // =======================================================================================
@@ -1383,7 +1059,7 @@ jsg::Promise<IoContext::MaybeIoOwn<addIoOwn, T>> IoContext::awaitIoImpl(
 template <typename T>
 kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
-  struct RefcountedFulfiller: public IoContext::Finalizeable, public kj::Refcounted {
+  struct RefcountedFulfiller: public Finalizeable, public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
     bool isDone = false;
 
@@ -1468,34 +1144,6 @@ inline IoOwn<T> IoContext::addObject(kj::Own<T> obj) {
 }
 
 template <typename T>
-inline IoOwn<T> IoContext::DeleteQueue::addObject(
-    kj::Own<T> obj, OwnedObjectList& ownedObjects) {
-  auto& ref = *obj;
-
-  // HACK: We need an Own<OwnedObject>, but we actually need to allocate it as the subclass
-  //   SpecificOwnedObject<T>. OwnedObject is not polymorphic, which means kj::Own will refuse
-  //   to upcast kj::Own<SpecificOwnedObject<T>> to kj::Own<OwnedObject> since it can't guarantee
-  //   the disposers are compatible. However, since we're only using single inheritance here, the
-  //   disposers *are* compatible (the numeric value of pointers to SpecificOwnedObject<T> and
-  //   its parent OwnedObject are equal). So, instead of forcing OwnedObject to be polymorphic
-  //   (which would have forced a bunch of useless vtables and vtable pointers)... I'm manually
-  //   constructing the kj::Own<> using a disposer that I know is compatible.
-  // TODO(cleanup): Can KJ be made to support this use case?
-  kj::Own<OwnedObject> ownedObject(
-      new SpecificOwnedObject<T>(kj::mv(obj)),
-      kj::_::HeapDisposer<SpecificOwnedObject<T>>::instance);
-
-  if constexpr (kj::canConvert<T&, Finalizeable&>()) {
-    ownedObject->finalizer = ref;
-  }
-
-  IoOwn<T> result(kj::atomicAddRef(*this),
-      static_cast<SpecificOwnedObject<T>*>(ownedObject.get()));
-  ownedObjects.link(kj::mv(ownedObject));
-  return result;
-}
-
-template <typename T>
 inline IoPtr<T> IoContext::addObject(T& obj) {
   requireCurrent();
   return IoPtr<T>(kj::atomicAddRef(*deleteQueue), &obj);
@@ -1525,79 +1173,6 @@ auto IoContext::addFunctorIoOwnParam(Func&& func) {
       return (*func)(kj::mv(*param));
     };
   }
-}
-
-template <typename T>
-IoOwn<T>::IoOwn(IoOwn&& other)
-    : deleteQueue(kj::mv(other.deleteQueue)),
-      item(other.item) {
-  other.item = nullptr;
-}
-
-template <typename T>
-IoOwn<T>::~IoOwn() noexcept(false) {
-  if (item != nullptr) {
-    deleteQueue->scheduleDeletion(item);
-  }
-}
-
-template <typename T>
-inline T* IoOwn<T>::operator->() {
-  IoContext::current().checkFarGet(deleteQueue.get());
-  return item->ptr;
-}
-
-template <typename T>
-inline IoOwn<T>::operator kj::Own<T>() && {
-  auto& context = IoContext::current();
-  context.checkFarGet(deleteQueue);
-  auto result = kj::mv(item->ptr);
-  IoContext::OwnedObjectList::unlink(*item);
-  item = nullptr;
-  deleteQueue = nullptr;  // not needed anymore, might as well drop the refcount
-  return result;
-}
-
-template <typename T>
-IoOwn<T>& IoOwn<T>::operator=(IoOwn<T>&& other) {
-  if (item != nullptr) {
-    deleteQueue->scheduleDeletion(item);
-  }
-  deleteQueue = kj::mv(other.deleteQueue);
-  item = other.item;
-  other.item = nullptr;
-  return *this;
-}
-
-template <typename T>
-IoOwn<T>& IoOwn<T>::operator=(decltype(nullptr)) {
-  if (item != nullptr) {
-    deleteQueue->scheduleDeletion(item);
-  }
-  deleteQueue = nullptr;
-  item = nullptr;
-  return *this;
-}
-
-template <typename T>
-void IoOwn<T>::deferGcToContext() && {
-  // Turns out, if we simply *don't* enqueue the item for deletion, we get the behavior we want.
-  // So we can just null out the pointers here...
-  item = nullptr;
-  deleteQueue = nullptr;
-}
-
-template <typename T>
-inline T* IoPtr<T>::operator->() {
-  IoContext::current().checkFarGet(deleteQueue.get());
-  return ptr;
-}
-
-template <typename T>
-IoPtr<T>& IoPtr<T>::operator=(decltype(nullptr)) {
-  deleteQueue = nullptr;
-  ptr = nullptr;
-  return *this;
 }
 
 template <typename Func>

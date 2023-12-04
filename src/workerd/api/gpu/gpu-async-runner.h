@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "workerd/io/io-context.h"
+#include <workerd/io/io-timers.h>
 #include <kj/timer.h>
 #include <webgpu/webgpu_cpp.h>
 
