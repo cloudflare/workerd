@@ -11,14 +11,15 @@
  ****************************** /
 
 /**
+ * Data types supported for holding vector metadata.
+ */
+type VectorizeVectorMetadataValue = string | number | boolean | string[];
+/**
  * Additional information to associate with a vector.
  */
 type VectorizeVectorMetadata =
-  | string
-  | number
-  | boolean
-  | string[]
-  | Record<string, string | number | boolean | string[]>;
+  | VectorizeVectorMetadataValue
+  | Record<string, VectorizeVectorMetadataValue>;
 
 type VectorFloatArray = Float32Array | Float64Array;
 
@@ -26,6 +27,28 @@ interface VectorizeError {
   code?: number;
   error: string;
 }
+
+/**
+ * Comparison logic/operation to use for metadata filtering.
+ *
+ * This list is expected to grow as support for more operations are released.
+ */
+type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+
+/**
+ * Filter criteria for vector metadata used to limit the retrieved query result set.
+ */
+type VectorizeVectorMetadataFilter = {
+  [field: string]:
+    | Exclude<VectorizeVectorMetadataValue, string[]>
+    | null
+    | {
+        [Op in VectorizeVectorMetadataFilterOp]?: Exclude<
+          VectorizeVectorMetadataValue,
+          string[]
+        > | null;
+      };
+};
 
 /**
  * Supported distance metrics for an index.
@@ -38,6 +61,7 @@ interface VectorizeQueryOptions {
   namespace?: string;
   returnValues?: boolean;
   returnMetadata?: boolean;
+  filter?: VectorizeVectorMetadataFilter;
 }
 
 /**

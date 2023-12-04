@@ -104,7 +104,17 @@ export default {
           throw Error(
             "expected to get `queryMetadataOptional` compat flag with a value of true"
           );
-        const returnSet = exampleVectorMatches;
+        let returnSet = structuredClone(exampleVectorMatches);
+        if (
+          body?.filter?.["text"] &&
+          typeof body?.filter?.["text"] === "object" &&
+          body?.filter?.["text"]?.["$eq"] !== undefined
+        ) {
+          const criteria = body?.filter?.["text"]?.["$eq"];
+          returnSet = returnSet.filter(
+            (m) => m.metadata?.["text"] === criteria
+          );
+        }
         if (!body?.returnValues)
           returnSet.forEach((v) => {
             delete v.values;
