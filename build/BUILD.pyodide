@@ -1,0 +1,8 @@
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+
+
+exports_files(
+  glob(
+    ["pyodide/*"]
+  )
+)

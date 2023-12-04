@@ -82,7 +82,7 @@ def wd_ts_bundle(
                     m,
                     import_name
                     + "-internal:"
-                    + m.removeprefix("internal/").removesuffix(".wasm"),
+                    + m.removeprefix("internal/"),
                 )
                 for m in internal_wasm_modules
             ]
@@ -100,6 +100,7 @@ def wd_ts_bundle(
         ),
         declarations = declarations,
         schema_id = schema_id,
+        deps=deps
     )
 
     if lint:
