@@ -94,7 +94,7 @@ private:
   template <typename T>
   kj::Promise<T> maybeAddGcPassForTest(IoContext& context, kj::Promise<T> promise);
 
-  kj::Promise<WorkerEntrypoint::AlarmResult> runAlarmImpl(
+  kj::Promise<WorkerInterface::AlarmResult> runAlarmImpl(
       kj::Own<IoContext::IncomingRequest> incomingRequest, kj::Date scheduledTime);
 
 public:  // For kj::heap() only; pretend this is private.

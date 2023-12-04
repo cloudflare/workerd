@@ -715,62 +715,17 @@ public:
   void assertCanSetAlarm();
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
 
-  using AlarmResult = WorkerInterface::AlarmResult;
   // If there is a scheduled or running alarm with the given `scheduledTime`, return a promise to
   // its result. This allows use to de-dupe multiple requests to a single `IoContext::run()`.
-  kj::Maybe<kj::Promise<AlarmResult>> getAlarm(kj::Date scheduledTime);
+  kj::Maybe<kj::Promise<WorkerInterface::AlarmResult>> getAlarm(kj::Date scheduledTime);
 
-  class AlarmFulfiller {
-  public:
-    AlarmFulfiller(kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller)
-      : maybeFulfiller(kj::mv(fulfiller)) {}
-    KJ_DISALLOW_COPY(AlarmFulfiller);
-    AlarmFulfiller(AlarmFulfiller&&) = default;
-    AlarmFulfiller& operator=(AlarmFulfiller&&) = default;
-    ~AlarmFulfiller() noexcept(false) {
-      KJ_IF_SOME(fulfiller, getFulfiller()) {
-        fulfiller.reject(KJ_EXCEPTION(FAILED, "AlarmFulfiller destroyed without resolution"));
-      }
-    }
-    void fulfill(const AlarmResult& result) {
-      KJ_IF_SOME(fulfiller, getFulfiller()) {
-        fulfiller.fulfill(kj::cp(result));
-      }
-    }
-    void reject(const kj::Exception& e) {
-      KJ_IF_SOME(fulfiller, getFulfiller()) {
-        fulfiller.reject(kj::cp(e));
-      }
-    }
-    void cancel() {
-      KJ_IF_SOME(fulfiller, getFulfiller()) {
-        fulfiller.fulfill(AlarmResult{
-          .retry = false,
-          .outcome = EventOutcome::CANCELED,
-        });
-      }
-    }
-
-  private:
-    kj::Maybe<kj::Own<kj::PromiseFulfiller<AlarmResult>>> maybeFulfiller;
-    kj::Maybe<kj::PromiseFulfiller<AlarmResult>&> getFulfiller() {
-      KJ_IF_SOME(fulfiller, maybeFulfiller) {
-        if (fulfiller.get()->isWaiting()) {
-          return *fulfiller;
-        }
-      }
-
-      return kj::none;
-    }
-  };
-  using ScheduleAlarmResult = kj::OneOf<AlarmResult, AlarmFulfiller>;
   // Wait for `Date.now()` to be greater than or equal to `scheduledTime`. If the promise resolves
   // to an `AlarmFulfiller`, then the caller is responsible for invoking `fulfill()`, `reject()`, or
   // `cancel()`. Otherwise, the scheduled alarm was overriden by another call to `scheduleAlarm()`
   // and thus was cancelled. Note that callers likely want to invoke `getAlarm()` first to see if
   // there is an existing alarm at `scheduledTime` for which they want to wait (instead of
   // cancelling it).
-  kj::Promise<ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
+  kj::Promise<WorkerInterface::ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
 
   kj::Own<Worker::Actor> addRef() {
     KJ_IF_SOME(t, tracker) {
@@ -780,7 +735,7 @@ public:
     }
   }
 private:
-  kj::Promise<ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
+  kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
 
   kj::Own<const Worker> worker;
   kj::Maybe<kj::Own<RequestTracker>> tracker;

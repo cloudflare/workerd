@@ -2907,7 +2907,8 @@ struct Worker::Actor::Impl {
   kj::PromiseFulfillerPair<void> constructorFailedPaf = kj::newPromiseAndFulfiller<void>();
 
   struct ScheduledAlarm {
-    ScheduledAlarm(kj::Date scheduledTime, kj::PromiseFulfillerPair<AlarmResult> pf)
+    ScheduledAlarm(kj::Date scheduledTime,
+                   kj::PromiseFulfillerPair<WorkerInterface::AlarmResult> pf)
       : scheduledTime(scheduledTime), resultFulfiller(kj::mv(pf.fulfiller)),
         resultPromise(pf.promise.fork()) {}
     KJ_DISALLOW_COPY(ScheduledAlarm);
@@ -2915,17 +2916,17 @@ struct Worker::Actor::Impl {
     ~ScheduledAlarm() noexcept(false) {}
 
     kj::Date scheduledTime;
-    AlarmFulfiller resultFulfiller;
-    kj::ForkedPromise<AlarmResult> resultPromise;
+    WorkerInterface::AlarmFulfiller resultFulfiller;
+    kj::ForkedPromise<WorkerInterface::AlarmResult> resultPromise;
     kj::Promise<void> cleanupPromise =
-        resultPromise.addBranch().then([](AlarmResult&&){}, [](kj::Exception&&){});
+        resultPromise.addBranch().then([](WorkerInterface::AlarmResult&&){}, [](kj::Exception&&){});
     // The first thing we do after we get a result should be to remove the running alarm (if we got
     // that far). So we grab the first branch now and ignore any results, before anyone else has a
     // chance to do so.
   };
   struct RunningAlarm {
     kj::Date scheduledTime;
-    kj::ForkedPromise<AlarmResult> resultPromise;
+    kj::ForkedPromise<WorkerInterface::AlarmResult> resultPromise;
   };
   // If valid, we have an alarm invocation that has not yet received an `AlarmFulfiller` and thus
   // is either waiting for a running alarm or its scheduled time.
@@ -3223,7 +3224,8 @@ void Worker::Actor::Impl::HooksImpl::updateAlarmInMemory(kj::Maybe<kj::Date> new
   maybeAlarmPreviewTask = retry();
 }
 
-auto Worker::Actor::getAlarm(kj::Date scheduledTime) -> kj::Maybe<kj::Promise<AlarmResult>> {
+kj::Maybe<kj::Promise<WorkerInterface::AlarmResult>> Worker::Actor::getAlarm(
+    kj::Date scheduledTime) {
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm.scheduledTime == scheduledTime) {
       // The running alarm has the same time, we can just wait for it.
@@ -3241,7 +3243,8 @@ auto Worker::Actor::getAlarm(kj::Date scheduledTime) -> kj::Maybe<kj::Promise<Al
   return kj::none;
 }
 
-auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<ScheduleAlarmResult> {
+kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::scheduleAlarm(
+    kj::Date scheduledTime) {
   KJ_IF_SOME(runningAlarm, impl->maybeRunningAlarm) {
     if (runningAlarm.scheduledTime == scheduledTime) {
       // The running alarm has the same time, we can just wait for it.
@@ -3258,11 +3261,12 @@ auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<Schedul
 
   KJ_IASSERT(impl->maybeScheduledAlarm == kj::none);
   auto& scheduledAlarm = impl->maybeScheduledAlarm.emplace(
-      scheduledTime, kj::newPromiseAndFulfiller<AlarmResult>());
+      scheduledTime, kj::newPromiseAndFulfiller<WorkerInterface::AlarmResult>());
 
   // Probably don't need to use kj::coCapture for this but doing so just to be on the
   // safe side...
-  auto whenCanceled = (kj::coCapture([&scheduledAlarm]() -> kj::Promise<ScheduleAlarmResult> {
+  auto whenCanceled = (kj::coCapture([&scheduledAlarm]()
+      -> kj::Promise<WorkerInterface::ScheduleAlarmResult> {
     // We've been cancelled, so return that result. Note that we cannot be resolved any other
     // way until we return an AlarmFulfiller below.
     co_return co_await scheduledAlarm.resultPromise;
@@ -3277,7 +3281,8 @@ auto Worker::Actor::scheduleAlarm(kj::Date scheduledTime) -> kj::Promise<Schedul
   co_return co_await handleAlarm(scheduledTime).exclusiveJoin(kj::mv(whenCanceled));
 }
 
-kj::Promise<Worker::Actor::ScheduleAlarmResult> Worker::Actor::handleAlarm(kj::Date scheduledTime) {
+kj::Promise<WorkerInterface::ScheduleAlarmResult> Worker::Actor::handleAlarm(
+    kj::Date scheduledTime) {
   // Let's wait for any running alarm to cleanup before we even delay.
   co_await impl->runningAlarmTask;
 

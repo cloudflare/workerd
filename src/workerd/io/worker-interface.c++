@@ -391,5 +391,48 @@ kj::Promise<WorkerInterface::CustomEvent::Result>
   return event->sendRpc(httpOverCapnpFactory, byteStreamFactory, waitUntilTasks, dispatcher);
 }
 
+// ======================================================================================
+WorkerInterface::AlarmFulfiller::AlarmFulfiller(
+    kj::Own<kj::PromiseFulfiller<AlarmResult>> fulfiller)
+  : maybeFulfiller(kj::mv(fulfiller)) {}
+
+WorkerInterface::AlarmFulfiller::~AlarmFulfiller() noexcept(false) {
+  KJ_IF_SOME(fulfiller, getFulfiller()) {
+    fulfiller.reject(KJ_EXCEPTION(FAILED, "AlarmFulfiller destroyed without resolution"));
+  }
+}
+
+void WorkerInterface::AlarmFulfiller::fulfill(const AlarmResult& result) {
+  KJ_IF_SOME(fulfiller, getFulfiller()) {
+    fulfiller.fulfill(kj::cp(result));
+  }
+}
+
+void WorkerInterface::AlarmFulfiller::reject(const kj::Exception& e) {
+  KJ_IF_SOME(fulfiller, getFulfiller()) {
+    fulfiller.reject(kj::cp(e));
+  }
+}
+
+void WorkerInterface::AlarmFulfiller::cancel() {
+  KJ_IF_SOME(fulfiller, getFulfiller()) {
+    fulfiller.fulfill(AlarmResult{
+      .retry = false,
+      .outcome = EventOutcome::CANCELED,
+    });
+  }
+}
+
+kj::Maybe<kj::PromiseFulfiller<WorkerInterface::AlarmResult>&>
+WorkerInterface::AlarmFulfiller::getFulfiller() {
+  KJ_IF_SOME(fulfiller, maybeFulfiller) {
+    if (fulfiller.get()->isWaiting()) {
+      return *fulfiller;
+    }
+  }
+
+  return kj::none;
+}
+
 } // namespace workerd
 
