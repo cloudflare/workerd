@@ -13,10 +13,10 @@ import { KnownModel, DistanceMetric } from "cloudflare:vectorize";
 
 export const test_vector_search_vector_query = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       // with returnValues = true, returnMetadata = true
@@ -88,10 +88,10 @@ export const test_vector_search_vector_query = {
 
 export const test_vector_search_vector_insert = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       /** @type {Array<VectorizeVector>}  */
@@ -115,10 +115,10 @@ export const test_vector_search_vector_insert = {
 
 export const test_vector_search_vector_insert_error = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       /** @type {Array<VectorizeVector>}  */
@@ -147,10 +147,10 @@ export const test_vector_search_vector_insert_error = {
 
 export const test_vector_search_vector_upsert = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       /** @type {Array<VectorizeVector>}  */
@@ -174,10 +174,10 @@ export const test_vector_search_vector_upsert = {
 
 export const test_vector_search_vector_delete_ids = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       const results = await IDX.deleteByIds([
@@ -195,10 +195,10 @@ export const test_vector_search_vector_delete_ids = {
 
 export const test_vector_search_vector_get_ids = {
   /**
-   * @param {unknown} ctr
+   * @param {unknown} _
    * @param {Env} env
    */
-  async test(ctr, env) {
+  async test(_, env) {
     const IDX = env["vector-search"];
     {
       const results = await IDX.getByIds([

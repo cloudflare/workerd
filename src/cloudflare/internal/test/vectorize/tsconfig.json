@@ -2,13 +2,8 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "checkJs": true,
-    "noEmit": true,
+    "noEmit": true
   },
-  "include": [
-    "*.ts",
-    "*.js",
-  ],
-  "files": [
-    "../../../../../types/defines/vectorize.d.ts"
-  ]
+  "include": ["*.ts", "*.js"],
+  "files": ["../../../../../types/defines/vectorize.d.ts"]
 }

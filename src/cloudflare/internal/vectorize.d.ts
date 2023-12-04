@@ -85,10 +85,11 @@ interface VectorizeVector {
 /**
  * Represents a matched vector for a query along with its score and (if specified) the matching vector information.
  */
-type VectorizeMatch = Pick<Partial<VectorizeVector>, 'values'> & Omit<VectorizeVector, 'values'> & {
-  /** The score or rank for similarity, when returned as a result */
-  score: number;
-}
+type VectorizeMatch = Pick<Partial<VectorizeVector>, "values"> &
+  Omit<VectorizeVector, "values"> & {
+    /** The score or rank for similarity, when returned as a result */
+    score: number;
+  };
 
 /**
  * A set of vector {@link VectorizeMatch} for a particular query.

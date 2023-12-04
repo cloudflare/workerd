@@ -1,7 +1,7 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import * as flags from 'workerd:compatibility-flags'
+import { default as flags } from "workerd:compatibility-flags";
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -20,7 +20,7 @@ class VectorizeIndexImpl implements VectorizeIndex {
   public constructor(
     private readonly fetcher: Fetcher,
     private readonly indexId: string
-  ) { }
+  ) {}
 
   public async describe(): Promise<VectorizeIndexDetails> {
     const res = await this._send(
@@ -38,6 +38,9 @@ class VectorizeIndexImpl implements VectorizeIndex {
     vector: VectorFloatArray | number[],
     options: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
+    const compat = {
+      queryMetadataOptional: flags.vectorizeQueryMetadataOptional,
+    };
     const res = await this._send(
       Operation.VECTOR_QUERY,
       `indexes/${this.indexId}/query`,
@@ -46,16 +49,12 @@ class VectorizeIndexImpl implements VectorizeIndex {
         body: JSON.stringify({
           ...options,
           vector: Array.isArray(vector) ? vector : Array.from(vector),
-          compat: {
-            queryMetadataOptional: !!flags.vectorizeQueryMetadataOptional,
-          },
+          compat,
         }),
         headers: {
           "content-type": "application/json",
           accept: "application/json",
-          "cf-vector-search-query-compat": JSON.stringify({
-            queryMetadataOptional: !!flags.vectorizeQueryMetadataOptional,
-          })
+          "cf-vector-search-query-compat": JSON.stringify(compat),
         },
       }
     );
@@ -172,13 +171,16 @@ class VectorizeIndexImpl implements VectorizeIndex {
       try {
         const errResponse = (await res.json()) as VectorizeError;
         err = new Error(
-          `${Operation[operation]}_ERROR ${typeof errResponse.code === "number" ? `(code = ${errResponse.code})` : ""
+          `${Operation[operation]}_ERROR${
+            typeof errResponse.code === "number"
+              ? ` (code = ${errResponse.code})`
+              : ""
           }: ${errResponse.error}`,
           {
             cause: new Error(errResponse.error),
           }
         );
-      } catch (e) { }
+      } catch (e) {}
 
       if (err) {
         throw err;
@@ -203,9 +205,10 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
     return JSON.parse(body) as T;
   } catch (e) {
     throw new Error(
-      `Failed to parse body as JSON, got: ${body.length > maxBodyLogChars
-        ? `${body.slice(0, maxBodyLogChars)}…`
-        : body
+      `Failed to parse body as JSON, got: ${
+        body.length > maxBodyLogChars
+          ? `${body.slice(0, maxBodyLogChars)}…`
+          : body
       }`
     );
   }

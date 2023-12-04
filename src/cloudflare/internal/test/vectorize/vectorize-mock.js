@@ -62,7 +62,7 @@ export default {
             name: "my-first-index",
             config: {
               dimensions: 1536,
-              preset: "openapi-text-embedding-ada-002",
+              preset: "openai/text-embedding-ada-002",
               metric: "euclidean",
             },
             vectorsCount: 500000,
@@ -85,7 +85,7 @@ export default {
           name: pathname.split("/")[2] || "my-index",
           config: {
             dimensions: 1536,
-            preset: "openapi-text-embedding-ada-002",
+            preset: "openai/text-embedding-ada-002",
             metric: "euclidean",
           },
           vectorsCount: 850850,
@@ -97,8 +97,13 @@ export default {
       ) {
         return Response.json({});
       } else if (request.method === "POST" && pathname.endsWith("/query")) {
-        /** @type {VectorizeQueryOptions & {vector: number[]}} */
+        /** @type {VectorizeQueryOptions & {vector: number[], compat: { queryMetadataOptional: boolean }}} */
         const body = await request.json();
+        // check that the compatibility flags are set
+        if (!body.compat.queryMetadataOptional)
+          throw Error(
+            "expected to get `queryMetadataOptional` compat flag with a value of true"
+          );
         const returnSet = exampleVectorMatches;
         if (!body?.returnValues)
           returnSet.forEach((v) => {
