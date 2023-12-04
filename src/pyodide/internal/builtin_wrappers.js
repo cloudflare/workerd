@@ -1,5 +1,20 @@
 import {default as Eval} from "pyodide-internal:eval";
 
+function checkCallee() {
+  const stack = new Error().stack;
+  // First line is Error:, 2nd line is this call frame, 3rd line is
+  // `new WebAssembly.Module()`, 4th line is callee.
+  let calleeLine = stack.split("\n")[3];
+  // Remove position info from line
+  const secondToLastColon = calleeLine.lastIndexOf(":", calleeLine.lastIndexOf(":") - 1);
+  calleeLine = calleeLine.slice(0, secondToLastColon);
+  if (calleeLine !== "    at convertJsFunctionToWasm (pyodide-internal:pyodide-bundle/pyodide.asm") {
+    console.warn("Unexpected call to WebAssembly.new");
+    console.warn("$" + calleeLine + "$");
+    throw new Error();
+  }
+}
+
 // Wrapper for WebAssembly that makes WebAssembly.Module work by temporarily
 // turning on eval
 const origWebAssembly = globalThis.WebAssembly;
@@ -10,6 +25,7 @@ export const WebAssembly = new Proxy(origWebAssembly, {get(target, val) {
   }
   return new Proxy(result, {
     construct() {
+      checkCallee();
       try {
         Eval.enableEval();
         return Reflect.construct(...arguments);
