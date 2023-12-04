@@ -397,9 +397,10 @@ public:
       auto type = module.getType();
       auto filter = maybeFilter.orDefault(type);
       if (type == filter) {
-        if (module.which() == Module::WASM) {
+        if (module.which() != Module::SRC) {
           if (!util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
-            LOG_ERROR_ONCE("Builtin wasm module used without passing builtin-wasm-modules autogate flag");
+            LOG_ERROR_ONCE(
+                "Builtin wasm module or data module used without passing builtin-wasm-modules autogate flag");
             continue;
           }
           using Key = typename Entry::Key;
@@ -408,25 +409,43 @@ public:
           if (type == Type::BUILTIN && entries.find(Key(path, Type::BUNDLE)) != kj::none) {
             continue;
           }
+          switch (module.which()) {
+          case Module::WASM:
+            // The body of this callback is copied from `compileWasmGlobal` in
+            // src/workerd/server/workerd-api.c++.
+            addBuiltinModule(
+                specifier,
+                [specifier, module, this](Lock& lock) {
+                  lock.setAllowEval(true);
+                  KJ_DEFER(lock.setAllowEval(false));
 
-          // The body of this callback is copied from `compileWasmGlobal` in src/workerd/server/workerd-api.c++.
-          addBuiltinModule(specifier, [specifier, module, this](Lock& lock) {
-            lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
-
-            // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
-            // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
-            // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
-            // compiles fast but runs slower.
-            AllowV8BackgroundThreadsScope scope;
-            auto wasmModule = jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-            return jsg::ModuleRegistry::ModuleInfo(
-                  lock,
-                  specifier,
-                  kj::none,
-                  jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
-          }, type);
-          continue;
+                  // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
+                  // recompiling Wasm with optimizations in the background. Otherwise Wasm startup
+                  // is way too slow. Until tier-up finishes, requests will be handled using
+                  // Liftoff-generated code, which compiles fast but runs slower.
+                  AllowV8BackgroundThreadsScope scope;
+                  auto wasmModule =
+                      jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
+                  return jsg::ModuleRegistry::ModuleInfo(
+                      lock, specifier, kj::none,
+                      jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+                },
+                type);
+            continue;
+          case Module::DATA:
+            addBuiltinModule(
+                specifier,
+                [specifier, module](Lock& lock) {
+                  v8::Local<v8::ArrayBuffer> data =
+                      lock.wrapBytes(kj::heapArray(module.getData().asBytes()));
+                  return jsg::ModuleRegistry::ModuleInfo(
+                      lock, specifier, kj::none, jsg::ModuleRegistry::DataModuleInfo(lock, data));
+                },
+                type);
+            continue;
+          case Module::SRC:
+            KJ_UNREACHABLE
+          }
         }
         // TODO: asChars() might be wrong for wide characters
         addBuiltinModule(module.getName(), module.getSrc().asChars(), type);

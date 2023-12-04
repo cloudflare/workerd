@@ -17,6 +17,7 @@ struct Module {
   union {
     src @1 :Data; # JS / TS code
     wasm @4 :Data; # Wasm module
+    data @5 :Data; # Binary data module
   }
   tsDeclaration @3 :Text;
 

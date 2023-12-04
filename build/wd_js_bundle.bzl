@@ -57,6 +57,10 @@ def _gen_api_bundle_capnpn_impl(ctx):
         _render_module(ctx.attr.internal_wasm_modules[m], m.label,  "wasm", "internal")
         for m in ctx.attr.internal_wasm_modules
     ]
+    modules += [
+        _render_module(ctx.attr.internal_data_modules[m], m.label,  "data", "internal")
+        for m in ctx.attr.internal_data_modules
+    ]
 
     content = CAPNP_TEMPLATE.format(
         schema_id = ctx.attr.schema_id,
@@ -73,6 +77,7 @@ gen_api_bundle_capnpn = rule(
         "builtin_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_wasm_modules": attr.label_keyed_string_dict(allow_files = True),
+        "internal_data_modules": attr.label_keyed_string_dict(allow_files = True),
         "declarations": attr.string_dict(),
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
@@ -107,6 +112,7 @@ def wd_js_bundle(
         builtin_modules = {},
         internal_modules = {},
         internal_wasm_modules = {},
+        internal_data_modules = {},
         declarations = [],
         **kwargs
 ):
@@ -120,6 +126,7 @@ def wd_js_bundle(
      builtin_modules: js src label -> module name dictionary
      internal_modules: js src label -> module name dictionary
      internal_wasm_modules: wasm src label -> module name dictionary
+     internal_data_modules: data src label -> module name dictionary
      declarations: d.ts label set
      const_name: capnp constant name that will contain bundle definition
      schema_id: capnpn schema id
@@ -130,17 +137,20 @@ def wd_js_bundle(
     internal_modules, internal_declarations = _copy_modules(
         internal_modules, declarations
     )
-    internal_wasm_modules, internal_wasm_declarations = _copy_modules(
+    internal_wasm_modules, _ = _copy_modules(
         internal_wasm_modules, declarations
+    )
+    internal_data_modules, _ = _copy_modules(
+        internal_data_modules, declarations
     )
 
     data = (
         list(builtin_modules)
         + list(internal_modules)
         + list(internal_wasm_modules)
+        + list(internal_data_modules)
         + list(builtin_declarations.values())
         + list(internal_declarations.values())
-        + list(internal_wasm_declarations.values())
     )
 
     gen_api_bundle_capnpn(
@@ -151,7 +161,8 @@ def wd_js_bundle(
         builtin_modules = builtin_modules,
         internal_modules = internal_modules,
         internal_wasm_modules = internal_wasm_modules,
-        declarations = builtin_declarations | internal_declarations | internal_wasm_declarations,
+        internal_data_modules = internal_data_modules,
+        declarations = builtin_declarations | internal_declarations,
         data = data,
     )
 
