@@ -22,6 +22,10 @@
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/util/autogate.h>
 
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <workerd/util/asan-options.h>
+#endif
+
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif
@@ -1307,6 +1311,12 @@ private:
 };
 
 }  // namespace workerd::server
+
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+// Sets up the ASAN Runtime
+SANITIZER_HOOK_ATTRIBUTE const char* __asan_default_options() { return ASAN_DEFAULT_OPTIONS }
+#endif
+
 
 int main(int argc, char* argv[]) {
   ::kj::TopLevelProcessContext context(argv[0]);

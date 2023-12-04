@@ -101,7 +101,6 @@ build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-f
 # address sanitizer (https://github.com/google/sanitizers/wiki/AddressSanitizer)
 build:asan --config=sanitizer-common
 build:asan --copt="-fsanitize=address" --linkopt="-fsanitize=address"
-build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 
 #
 # Linux and macOS
