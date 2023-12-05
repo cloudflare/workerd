@@ -20,22 +20,9 @@
     "strictNullChecks": true,
     "esModuleInterop": true,
     "declaration": true,
-    "types": [
-      // todo: consume generated workerd types
-      // "@cloudflare/workers-types"
-      "@types/node",
-    ],
-    "paths": {
-      "node:*": ["./*"],
-      "node:stream/*": ["./*"],
-      "node-internal:*": ["./internal/*"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
-    }
+    "types": [],
   },
   "include": [
-    "*.ts",
-    "stream/*.ts",
-    "stream/*.js",
-    "internal/*.ts"
+    "*.ts"
   ],
 }
