@@ -1741,9 +1741,14 @@ public:
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_SOME(as, channels.actorStorage) {
+                // The idPtr can end up being freed if the Actor gets hibernated so we need
+                // to create a copy that is ensured to live as long as the ActorSqliteHooks
+                // instance we're creating here.
+                // TODO(cleanup): Is there a better way to handle the ActorKey in general here?
+                auto idStr = kj::str(idPtr);
                 auto sqliteHooks = kj::heap<ActorSqliteHooks>(channels.alarmScheduler, ActorKey{
-                  .uniqueKey = d.uniqueKey, .actorId = idPtr
-                });
+                  .uniqueKey = d.uniqueKey, .actorId = idStr
+                }).attach(kj::mv(idStr));
 
                 auto db = kj::heap<SqliteDatabase>(*as,
                     kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
