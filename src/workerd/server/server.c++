@@ -12,6 +12,7 @@
 #include <capnp/message.h>
 #include <capnp/compat/json.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/io/actor-id.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
