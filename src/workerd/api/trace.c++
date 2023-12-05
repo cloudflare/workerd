@@ -80,6 +80,10 @@ kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents
   };
 }
 
+kj::Maybe<kj::Own<workerd::ScriptVersion::Reader>> getTraceScriptVersion(const Trace& trace) {
+  return trace.scriptVersion.map([](const auto& version) { return capnp::clone(*version); });
+}
+
 double getTraceExceptionTimestamp(const Trace::Exception& ex) {
   if (isPredictableModeForTest()) {
     return 0;
@@ -172,7 +176,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       exceptions(getTraceExceptions(trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
       scriptName(trace.scriptName.map([](auto& name) { return kj::str(name); })),
-      scriptVersionId(trace.scriptVersionId.map([](auto& id) { return kj::str(id); })),
+      scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
       outcome(getTraceOutcome(trace)),
@@ -214,8 +218,8 @@ kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
   return scriptName.map([](auto& name) -> kj::StringPtr { return name; });
 }
 
-jsg::Optional<kj::StringPtr> TraceItem::getScriptVersionId() {
-  return scriptVersionId.map([](auto& scriptVersionId) -> kj::StringPtr { return scriptVersionId; });
+jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
+  return scriptVersion.map([](auto& version) { return ScriptVersion(*version); });
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
@@ -415,6 +419,26 @@ jsg::JsValue TraceDiagnosticChannelEvent::getMessage(jsg::Lock& js) {
 }
 
 double TraceDiagnosticChannelEvent::getTimestamp() { return timestamp; }
+
+ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
+    : id{[&]() -> kj::Maybe<kj::String> {
+        if (version.hasId()) {
+          return kj::str(version.getId());
+        }
+        return kj::none;
+      }()},
+      tag{[&]() -> kj::Maybe<kj::String> {
+        if (version.hasTag()) {
+          return kj::str(version.getTag());
+        }
+        return kj::none;
+      }()},
+      message{[&]() -> kj::Maybe<kj::String> {
+        if (version.hasMessage()) {
+          return kj::str(version.getMessage());
+        }
+        return kj::none;
+      }()} {}
 
 TraceItem::CustomEventInfo::CustomEventInfo(const Trace& trace,
                                             const Trace::CustomEventInfo& eventInfo)
