@@ -55,7 +55,6 @@ def wd_ts_bundle(
         allow_js = True,
         declaration = True,
         tsconfig = name + "@tsconfig",
-        deps = deps,
     )
 
     wd_js_bundle(
