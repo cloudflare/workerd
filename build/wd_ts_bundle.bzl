@@ -24,7 +24,8 @@ def wd_ts_bundle(
         internal_wasm_modules = [],
         internal_data_modules = [],
         lint = True,
-        deps = []):
+        deps = [],
+        jsdeps = []):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -55,6 +56,7 @@ def wd_ts_bundle(
         allow_js = True,
         declaration = True,
         tsconfig = name + "@tsconfig",
+        deps = deps,
     )
 
     wd_js_bundle(
@@ -99,7 +101,7 @@ def wd_ts_bundle(
         ),
         declarations = declarations,
         schema_id = schema_id,
-        deps=deps
+        deps=jsdeps
     )
 
     if lint:
