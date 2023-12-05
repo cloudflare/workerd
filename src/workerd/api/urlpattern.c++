@@ -411,6 +411,7 @@ bool isAsciiDigit(auto c) { return c >= '0' && c <= '9'; };
 
 jsg::UsvString canonicalizeProtocol(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
+  url::UrlRecord dummyUrl;
 
   auto& suffix = getCommonStrings().DUMMY_URL;
 
@@ -421,7 +422,7 @@ jsg::UsvString canonicalizeProtocol(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   auto str = builder.finish();
 
   auto result = JSG_REQUIRE_NONNULL(
-      url::URL::parse(str, kj::none, kj::none),
+      url::URL::parse(str, kj::none, dummyUrl),
       TypeError,
       "Invalid protocol scheme.");
 
@@ -430,20 +431,21 @@ jsg::UsvString canonicalizeProtocol(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
 
 jsg::UsvString canonicalizeUsername(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   dummyUrl.setUsername(input);
   return kj::mv(dummyUrl.username);
 }
 
 jsg::UsvString canonicalizePassword(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   dummyUrl.setPassword(input);
   return kj::mv(dummyUrl.password);
 }
 
 jsg::UsvString canonicalizeHostname(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
+  url::UrlRecord dummyUrl;
 
   // This additional check deals with a known bug in the URLPattern spec. The URL parser will
   // allow (and generally ignore) invalid characters in the hostname when running with the
@@ -463,7 +465,7 @@ jsg::UsvString canonicalizeHostname(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvS
   }
 
   auto result = JSG_REQUIRE_NONNULL(
-      url::URL::parse(input, kj::none, kj::none, url::URL::ParseState::HOSTNAME),
+      url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::HOSTNAME),
       TypeError,
       "Invalid URL hostname component.");
 
@@ -487,7 +489,7 @@ jsg::UsvString canonicalizePort(
     jsg::UsvStringPtr input,
     kj::Maybe<jsg::UsvStringPtr> maybeProtocol) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   KJ_IF_SOME(protocol, maybeProtocol) {
     dummyUrl.scheme = jsg::usv(protocol);
   }
@@ -542,8 +544,9 @@ jsg::UsvString canonicalizePort(
 
 jsg::UsvString canonicalizePathname(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
+  url::UrlRecord dummyUrl;
   auto result = JSG_REQUIRE_NONNULL(
-    url::URL::parse(input, kj::none, kj::none, url::URL::ParseState::PATH_START),
+    url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::PATH_START),
     TypeError,
     "Invalid URL pathname component.");
 
@@ -560,7 +563,7 @@ jsg::UsvString canonicalizeOpaquePathname(
     jsg::UsvStringPtr input,
     kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   dummyUrl.path = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
       url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::OPAQUE_PATH),
@@ -571,7 +574,7 @@ jsg::UsvString canonicalizeOpaquePathname(
 
 jsg::UsvString canonicalizeSearch(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   dummyUrl.query = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
     url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::QUERY),
@@ -585,7 +588,7 @@ jsg::UsvString canonicalizeSearch(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStr
 
 jsg::UsvString canonicalizeHash(jsg::UsvStringPtr input, kj::Maybe<jsg::UsvStringPtr>) {
   if (input.size() == 0) return jsg::usv();
-  url::UrlRecord dummyUrl {};
+  url::UrlRecord dummyUrl;
   dummyUrl.fragment = jsg::usv();
   auto result = JSG_REQUIRE_NONNULL(
     url::URL::parse(input, kj::none, dummyUrl, url::URL::ParseState::FRAGMENT),
