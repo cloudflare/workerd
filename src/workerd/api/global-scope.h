@@ -5,19 +5,17 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/jsg/dom-exception.h>
 #include "basics.h"
 #include "http.h"
-#include "url.h"
-#include "url-standard.h"
-#include "form-data.h"
 #include "hibernation-event-params.h"
-#include "blob.h"
-#include "streams.h"
 #include <workerd/io/io-timers.h>
 #ifdef WORKERD_EXPERIMENTAL_ENABLE_WEBGPU
 #include <workerd/api/gpu/gpu.h>
 #endif
+
+namespace workerd::jsg {
+class DOMException;
+}  // namespace jsg
 
 namespace workerd::api {
 
@@ -34,8 +32,31 @@ class Response;
 class TraceItem;
 class ScheduledController;
 class ScheduledEvent;
+class ReadableStream;
+class ReadableStreamDefaultReader;
+class ReadableStreamBYOBReader;
 class ReadableStreamBYOBRequest;
+class WritableStream;
+class WritableStreamDefaultWriter;
+class ReadableStreamBYOBRequest;
+class ReadableStreamDefaultController;
+class ReadableByteStreamController;
+class WritableStreamDefaultController;
+class CompressionStream;
+class DecompressionStream;
+class TextEncoderStream;
+class TextDecoderStream;
 class URLPattern;
+class Blob;
+class File;
+class FormData;
+
+class URL;
+class URLSearchParams;
+namespace url {
+class URL;
+class URLSearchParams;
+}  // namespace
 
 // We need access to DOMException within this namespace so JSG_NESTED_TYPE can name it correctly.
 using DOMException = jsg::DOMException;
