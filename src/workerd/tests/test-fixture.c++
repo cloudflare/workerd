@@ -259,13 +259,13 @@ TestFixture::TestFixture(SetupParams&& params)
     threadContext(*timer, *entropySource, threadContextHeaderBundle, httpOverCapnpFactory, byteStreamFactory, false),
     isolateLimitEnforcer(kj::heap<MockIsolateLimitEnforcer>()),
     errorReporter(kj::heap<MockErrorReporter>()),
-    apiIsolate(kj::heap<server::WorkerdApiIsolate>(
+    api(kj::heap<server::WorkerdApi>(
       testV8System,
       params.featureFlags.orDefault(CompatibilityFlags::Reader()),
       *isolateLimitEnforcer,
       kj::atomicRefcounted<IsolateObserver>())),
     workerIsolate(kj::atomicRefcounted<Worker::Isolate>(
-      kj::mv(apiIsolate),
+      kj::mv(api),
       kj::atomicRefcounted<IsolateObserver>(),
       scriptId,
       kj::mv(isolateLimitEnforcer),
@@ -273,13 +273,13 @@ TestFixture::TestFixture(SetupParams&& params)
     workerScript(kj::atomicRefcounted<Worker::Script>(
       kj::atomicAddRef(*workerIsolate),
       scriptId,
-      server::WorkerdApiIsolate::extractSource(mainModuleName, config, *errorReporter,
+      server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter,
           capnp::List<server::config::Extension>::Reader{}),
       IsolateObserver::StartType::COLD, false, nullptr)),
     worker(kj::atomicRefcounted<Worker>(
       kj::atomicAddRef(*workerScript),
       kj::atomicRefcounted<WorkerObserver>(),
-      [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
+      [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>) {
         // no bindings, nothing to do
       },
       IsolateObserver::StartType::COLD,
@@ -297,7 +297,7 @@ TestFixture::TestFixture(SetupParams&& params)
         kj::heap<server::EmptyReadOnlyActorStorageImpl>(), sharedLru, outputGate, hooks);
     };
     auto makeStorage = [](
-        jsg::Lock& js, const Worker::ApiIsolate& apiIsolate, ActorCacheInterface& actorCache)
+        jsg::Lock& js, const Worker::Api& api, ActorCacheInterface& actorCache)
         -> jsg::Ref<api::DurableObjectStorage> {
       return jsg::alloc<api::DurableObjectStorage>(
         IoContext::current().addObject(actorCache));

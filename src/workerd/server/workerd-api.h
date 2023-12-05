@@ -10,14 +10,16 @@
 
 namespace workerd::server {
 
-// An ApiIsolate implementation with support for all the APIs supported by the OSS runtime.
-class WorkerdApiIsolate final: public Worker::ApiIsolate {
+// A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
+class WorkerdApi final: public Worker::Api {
 public:
-  WorkerdApiIsolate(jsg::V8System& v8System,
+  WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
       IsolateLimitEnforcer& limitEnforcer,
       kj::Own<jsg::IsolateObserver> observer);
-  ~WorkerdApiIsolate() noexcept(false);
+  ~WorkerdApi() noexcept(false);
+
+  static const WorkerdApi& from(const Worker::Api&);
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
