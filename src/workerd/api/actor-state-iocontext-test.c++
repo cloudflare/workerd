@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor-state.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/io/actor-id.h>
 
 namespace workerd::api {
 namespace {

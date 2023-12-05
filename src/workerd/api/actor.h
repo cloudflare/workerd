@@ -13,6 +13,7 @@
 #include <capnp/compat/http-over-capnp.h>
 #include <workerd/api/http.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/io/actor-id.h>
 
 namespace workerd {
   template <typename T> class IoOwn;

@@ -10,6 +10,7 @@
 #include <workerd/jsg/util.h>
 #include <v8.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-id.h>
 #include <workerd/io/actor-storage.h>
 #include <workerd/io/actor-sqlite.h>
 #include "sql.h"

@@ -7,6 +7,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/io/actor-cache.h>
+#include <workerd/io/actor-id.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
