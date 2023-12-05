@@ -25,7 +25,8 @@ def wd_ts_bundle(
         internal_data_modules = [],
         lint = True,
         deps = [],
-        jsdeps = []):
+        ts = True,
+):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -41,23 +42,25 @@ def wd_ts_bundle(
       lint: enables/disables source linting
       deps: additional typescript dependencies
     """
-    ts_config(
-        name = name + "@tsconfig",
-        src = tsconfig_json,
-    )
+    if ts:
+        ts_config(
+            name = name + "@tsconfig",
+            src = tsconfig_json,
+        )
 
     srcs = modules + internal_modules
     ts_srcs = [src for src in srcs if src.endswith(".ts")]
     declarations = [_to_d_ts(src) for src in ts_srcs if not src.endswith(".d.ts")]
 
-    ts_project(
-        name = name + "@tsproject",
-        srcs = ts_srcs,
-        allow_js = True,
-        declaration = True,
-        tsconfig = name + "@tsconfig",
-        deps = deps,
-    )
+    if ts:
+        ts_project(
+            name = name + "@tsproject",
+            srcs = ts_srcs,
+            allow_js = True,
+            declaration = True,
+            tsconfig = name + "@tsconfig",
+            deps = deps,
+        )
 
     wd_js_bundle(
         name = name,
@@ -101,7 +104,7 @@ def wd_ts_bundle(
         ),
         declarations = declarations,
         schema_id = schema_id,
-        deps=jsdeps
+        deps=deps
     )
 
     if lint:

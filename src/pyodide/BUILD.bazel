@@ -42,7 +42,9 @@ wd_ts_bundle(
     internal_wasm_modules=["pyodide-bundle/pyodide.asm.wasm"],
     internal_data_modules=["pyodide-bundle/python_stdlib.zip"],
     schema_id="0xbcc8f57c63814005",
-    tsconfig_json="tsconfig.json",
-    eslintrc_json=".eslintrc.json",
-    jsdeps=["pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"],
+    tsconfig_json="",
+    eslintrc_json="",
+    deps=["pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"],
+    ts=False,
+    lint=False,
 )
