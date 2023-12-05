@@ -1,18 +1,43 @@
 import { default as Eval } from "pyodide-internal:eval";
 
-const EXPECTED_CALLEE =
-  "    at convertJsFunctionToWasm (pyodide-internal:pyodide-bundle/pyodide.asm";
+let evalableFuncs = undefined;
+export function setEvalableFunctions(funcs) {
+  if (evalableFuncs) {
+    return;
+  }
+  console.log("setEvalableFunctions", { funcs });
+  evalableFuncs = funcs;
+}
+
+function prepareStackTrace(error, stack) {
+  if (stack.length < 3) {
+    return false;
+  }
+  delete Error.prepareStackTrace;
+  try {
+    const funcName = stack[2].getFunctionName();
+    const fileName = stack[2].getFileName();
+    return (
+      funcName === "convertJsFunctionToWasm" &&
+      fileName === "pyodide-internal:pyodide-bundle/pyodide.asm"
+    );
+  } catch (e) {
+    console.warn(e);
+    return false;
+  }
+}
 
 function checkCallee() {
-  const stack = new Error().stack;
-  // First line is Error:, 2nd line is this call frame, 3rd line is
-  // `new WebAssembly.Module()`, 4th line is callee.
-  let calleeLine = stack.split("\n")[3];
-  // Remove position info from line
-  const secondToLastColonPos = calleeLine.lastIndexOf(":", calleeLine.lastIndexOf(":") - 1);
-  calleeLine = calleeLine.slice(0, secondToLastColonPos);
-  if (calleeLine !== EXPECTED_CALLEE) {
-    console.warn("$" + calleeLine + "$");
+  const origPrepareStackTrace = Error.prepareStackTrace;
+  let isOkay;
+  try {
+    Error.prepareStackTrace = prepareStackTrace;
+    isOkay = new Error().stack;
+  } finally {
+    Error.prepareStackTrace = origPrepareStackTrace;
+  }
+  if (!isOkay) {
+    console.warn("Invalid call to `WebAssembly.Module`");
     throw new Error();
   }
 }
