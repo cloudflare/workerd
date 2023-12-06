@@ -56,7 +56,7 @@ export const WebAssembly = new Proxy(origWebAssembly, {
         checkCallee();
         try {
           Eval.enableEval();
-          return Reflect.construct(...arguments);
+          return new origWebAssembly.Module(...arguments);
         } finally {
           Eval.disableEval();
         }
