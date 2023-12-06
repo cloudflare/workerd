@@ -6,16 +6,16 @@
 #     bazel run @//rust-deps:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # MIT OR Apache-2.0
+#     "TODO",  # BSD-2-Clause OR Apache-2.0 OR MIT
 # ])
 
-rust_proc_macro(
-    name = "serde_derive",
+rust_library(
+    name = "zerocopy",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -29,22 +29,17 @@ rust_proc_macro(
         ],
     ),
     crate_features = [
-        "default",
+        "simd",
     ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2018",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_derive",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.188",
-    deps = [
-        "@crates_vendor__proc-macro2-1.0.67//:proc_macro2",
-        "@crates_vendor__quote-1.0.33//:quote",
-        "@crates_vendor__syn-2.0.37//:syn",
-    ],
+    version = "0.7.29",
 )

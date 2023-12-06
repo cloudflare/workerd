@@ -41,16 +41,16 @@ rust_library(
     version = "1.0.83",
     deps = select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.148//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.148//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.148//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.148//:libc",  # cfg(unix)
+            "@crates_vendor__libc-0.2.150//:libc",  # cfg(unix)
         ],
         "//conditions:default": [],
     }),

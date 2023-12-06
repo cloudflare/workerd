@@ -32,7 +32,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2021",
     proc_macro_deps = [
-        "@crates_vendor__thiserror-impl-1.0.49//:thiserror_impl",
+        "@crates_vendor__thiserror-impl-1.0.50//:thiserror_impl",
     ],
     rustc_flags = ["--cap-lints=allow"],
     tags = [
@@ -42,9 +42,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.49",
+    version = "1.0.50",
     deps = [
-        "@crates_vendor__thiserror-1.0.49//:build_script_build",
+        "@crates_vendor__thiserror-1.0.50//:build_script_build",
     ],
 )
 
@@ -75,7 +75,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.49",
+    version = "1.0.50",
     visibility = ["//visibility:private"],
 )
 
