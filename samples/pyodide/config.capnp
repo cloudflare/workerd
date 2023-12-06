@@ -24,6 +24,7 @@ const mainWorker :Workerd.Worker = (
     (name = "worker.py", data = embed "./worker.py"),
   ],
   compatibilityDate = "2023-02-28",
+  compatibilityFlags = ["experimental"],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );
