@@ -57,11 +57,11 @@ def _gen_api_bundle_capnpn_impl(ctx):
         for m in ctx.attr.internal_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_wasm_modules[m], m.label,  "wasm", "internal")
+        _render_module(ctx.attr.internal_wasm_modules[m], m.label, "wasm", "internal")
         for m in ctx.attr.internal_wasm_modules
     ]
     modules += [
-        _render_module(ctx.attr.internal_data_modules[m], m.label,  "data", "internal")
+        _render_module(ctx.attr.internal_data_modules[m], m.label, "data", "internal")
         for m in ctx.attr.internal_data_modules
     ]
 
@@ -118,8 +118,7 @@ def wd_js_bundle(
         internal_wasm_modules = [],
         internal_data_modules = [],
         declarations = [],
-        deps = [],
-        **kwargs):
+        deps = []):
     """Generate cc capnp library with js api bundle.
 
     NOTE: Due to capnpc embed limitation all modules must be in the same or sub directory of the
@@ -137,44 +136,49 @@ def wd_js_bundle(
      internal_wasm_modules: list of wasm source files
      internal_data_modules: list of data source files
      declarations: d.ts label set
-     **kwargs: rest of cc_capnp_library arguments
+     deps: dependency list
     """
     builtin_modules_dict = {
-        m: "{}:{}".format(import_name, _to_name(m)) for m in builtin_modules
+        m: "{}:{}".format(import_name, _to_name(m))
+        for m in builtin_modules
     }
     internal_modules_dict = {
-        m : "{}-internal:{}".format(import_name, _to_name(m.removeprefix("internal/")))
+        m: "{}-internal:{}".format(import_name, _to_name(m.removeprefix("internal/")))
         for m in internal_modules
     }
     internal_wasm_modules_dict = {
-        m : "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
         for m in internal_wasm_modules
     }
     internal_data_modules_dict = {
-        m : "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        m: "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
         for m in internal_data_modules
     }
 
     builtin_modules_dict, builtin_declarations = _copy_modules(
-        builtin_modules_dict, declarations
+        builtin_modules_dict,
+        declarations,
     )
     internal_modules_dict, internal_declarations = _copy_modules(
-        internal_modules_dict, declarations
+        internal_modules_dict,
+        declarations,
     )
     internal_wasm_modules_dict, _ = _copy_modules(
-        internal_wasm_modules_dict, declarations
+        internal_wasm_modules_dict,
+        declarations,
     )
     internal_data_modules_dict, _ = _copy_modules(
-        internal_data_modules_dict, declarations
+        internal_data_modules_dict,
+        declarations,
     )
 
     data = (
-        list(builtin_modules_dict)
-        + list(internal_modules_dict)
-        + list(internal_wasm_modules_dict)
-        + list(internal_data_modules_dict)
-        + list(builtin_declarations.values())
-        + list(internal_declarations.values())
+        list(builtin_modules_dict) +
+        list(internal_modules_dict) +
+        list(internal_wasm_modules_dict) +
+        list(internal_data_modules_dict) +
+        list(builtin_declarations.values()) +
+        list(internal_declarations.values())
     )
 
     gen_api_bundle_capnpn(

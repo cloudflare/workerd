@@ -21,8 +21,7 @@ def wd_ts_bundle(
         internal_wasm_modules = [],
         internal_data_modules = [],
         lint = True,
-        deps = [],
-):
+        deps = []):
     """Compiles typescript modules and generates api bundle with the result.
 
     Args:
@@ -62,15 +61,15 @@ def wd_ts_bundle(
         name = name,
         import_name = import_name,
         # builtin modules are accessible under "<import_name>:<module_name>" name
-        builtin_modules = [ _to_js(m) for m in modules ],
+        builtin_modules = [_to_js(m) for m in modules],
         # internal modules are accessible under "<import_name>-internal:<module_name>" name
         # without "internal/" folder prefix.
-        internal_modules = [ _to_js(m) for m in internal_modules if not m.endswith(".d.ts") ],
+        internal_modules = [_to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
         internal_wasm_modules = internal_wasm_modules,
         internal_data_modules = internal_data_modules,
         declarations = declarations,
         schema_id = schema_id,
-        deps=deps
+        deps = deps,
     )
 
     if lint:
