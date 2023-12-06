@@ -15,6 +15,9 @@ const {const_name} :Modules.Bundle = (
 
 MODULE_TEMPLATE = """    (name = "{name}", {src_type} = embed "{path}", type = {type}, {ts_declaration})"""
 
+def _to_name(file_name):
+    return file_name.removesuffix(".js")
+
 def _to_d_ts(file_name):
     return file_name.removesuffix(".js") + ".d.ts"
 
@@ -108,12 +111,12 @@ def _copy_modules(modules, declarations):
 
 def wd_js_bundle(
         name,
+        import_name,
         schema_id,
-        const_name,
-        builtin_modules = {},
-        internal_modules = {},
-        internal_wasm_modules = {},
-        internal_data_modules = {},
+        builtin_modules,
+        internal_modules = [],
+        internal_wasm_modules = [],
+        internal_data_modules = [],
         declarations = [],
         deps = [],
         **kwargs):
@@ -124,32 +127,52 @@ def wd_js_bundle(
 
     Args:
      name: cc_capnp_library rule name
-     builtin_modules: js src label -> module name dictionary
-     internal_modules: js src label -> module name dictionary
-     internal_wasm_modules: wasm src label -> module name dictionary
-     internal_data_modules: data src label -> module name dictionary
-     declarations: d.ts label set
-     const_name: capnp constant name that will contain bundle definition
+     import_name: The js import specifier. builtin modules are accessible from
+                  user code under `<import_name>:<module_name>`, internal modules
+                  are accessible from builtin modules under
+                  `<import_name>-internal:<module_name>`
      schema_id: capnpn schema id
+     builtin_modules: list of js and ts source files for builtin modules
+     internal_modules: list of js and ts source files for internal modules
+     internal_wasm_modules: list of wasm source files
+     internal_data_modules: list of data source files
+     declarations: d.ts label set
      **kwargs: rest of cc_capnp_library arguments
     """
+    builtin_modules_dict = {
+        m: "{}:{}".format(import_name, _to_name(m)) for m in builtin_modules
+    }
+    internal_modules_dict = {
+        m : "{}-internal:{}".format(import_name, _to_name(m.removeprefix("internal/")))
+        for m in internal_modules
+    }
+    internal_wasm_modules_dict = {
+        m : "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        for m in internal_wasm_modules
+    }
+    internal_data_modules_dict = {
+        m : "{}-internal:{}".format(import_name, m.removeprefix("internal/"))
+        for m in internal_data_modules
+    }
 
-    builtin_modules, builtin_declarations = _copy_modules(builtin_modules, declarations)
-    internal_modules, internal_declarations = _copy_modules(
-        internal_modules, declarations
+    builtin_modules_dict, builtin_declarations = _copy_modules(
+        builtin_modules_dict, declarations
     )
-    internal_wasm_modules, _ = _copy_modules(
-        internal_wasm_modules, declarations
+    internal_modules_dict, internal_declarations = _copy_modules(
+        internal_modules_dict, declarations
     )
-    internal_data_modules, _ = _copy_modules(
-        internal_data_modules, declarations
+    internal_wasm_modules_dict, _ = _copy_modules(
+        internal_wasm_modules_dict, declarations
+    )
+    internal_data_modules_dict, _ = _copy_modules(
+        internal_data_modules_dict, declarations
     )
 
     data = (
-        list(builtin_modules)
-        + list(internal_modules)
-        + list(internal_wasm_modules)
-        + list(internal_data_modules)
+        list(builtin_modules_dict)
+        + list(internal_modules_dict)
+        + list(internal_wasm_modules_dict)
+        + list(internal_data_modules_dict)
         + list(builtin_declarations.values())
         + list(internal_declarations.values())
     )
@@ -158,11 +181,11 @@ def wd_js_bundle(
         name = name + "@gen",
         out = name + ".capnp",
         schema_id = schema_id,
-        const_name = const_name,
-        builtin_modules = builtin_modules,
-        internal_modules = internal_modules,
-        internal_wasm_modules = internal_wasm_modules,
-        internal_data_modules = internal_data_modules,
+        const_name = import_name + "Bundle",
+        builtin_modules = builtin_modules_dict,
+        internal_modules = internal_modules_dict,
+        internal_wasm_modules = internal_wasm_modules_dict,
+        internal_data_modules = internal_data_modules_dict,
         declarations = builtin_declarations | internal_declarations,
         data = data,
         deps = deps,
@@ -175,5 +198,5 @@ def wd_js_bundle(
         visibility = ["//visibility:public"],
         data = data,
         deps = ["@workerd//src/workerd/jsg:modules_capnp"],
-        **kwargs
+        include_prefix = import_name,
     )
