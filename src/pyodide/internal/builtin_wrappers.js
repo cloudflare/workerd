@@ -1,4 +1,4 @@
-import { default as Eval } from "pyodide-internal:eval";
+import { default as Eval } from "internal:eval";
 
 let evalableFuncs = undefined;
 export function setEvalableFunctions(funcs) {
@@ -52,13 +52,12 @@ export const WebAssembly = new Proxy(origWebAssembly, {
       return result;
     }
     return new Proxy(result, {
-      construct() {
+      construct(_target, args, _newTarget) {
         checkCallee();
         try {
-          Eval.enableEval();
-          return new origWebAssembly.Module(...arguments);
-        } finally {
-          Eval.disableEval();
+          return Eval.newWasmModule(...args);
+        } catch (e) {
+          console.warn(e);
         }
       },
     });

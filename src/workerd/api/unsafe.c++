@@ -99,4 +99,19 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(
   return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, result.As<v8::Function>()));
 }
 
-}  // namespace workerd::api
+jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, v8::Local<v8::Uint8Array> src) {
+  js.setAllowEval(true);
+  KJ_DEFER(js.setAllowEval(false));
+
+  v8::Local<v8::ArrayBuffer> buffer = src->Buffer();
+  auto backing_store = buffer->GetBackingStore();
+  const uint8_t* start =
+      reinterpret_cast<const uint8_t*>(backing_store->Data()) + src->ByteOffset();
+  size_t length = src->ByteLength();
+  auto x =
+      v8::WasmModuleObject::Compile(js.v8Isolate, v8::MemorySpan<const uint8_t>(start, length));
+  auto y = jsg::check(x);
+  return jsg::JsValue(y);
+}
+
+} // namespace workerd::api

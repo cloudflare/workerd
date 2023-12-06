@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/node/node.h>
+#include <workerd/api/unsafe.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
@@ -17,6 +18,7 @@ template <class Registry>
 void registerModules(Registry& registry, auto featureFlags) {
   node::registerNodeJsCompatModules(registry, featureFlags);
   pyodide::registerPyodideModules(registry, featureFlags);
+  workerd::api::registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
   }

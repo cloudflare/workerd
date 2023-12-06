@@ -49,14 +49,22 @@ public:
       jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
       const jsg::TypeHandler<UnsafeEvalFunction>& handler);
 
+  // We could expand this to allow not just Uint8Array but a general BufferSource
+  jsg::JsValue newWasmModule(jsg::Lock& js, v8::Local<v8::Uint8Array> src);
+
   JSG_RESOURCE_TYPE(UnsafeEval) {
     JSG_METHOD(eval);
     JSG_METHOD(newFunction);
     JSG_METHOD(newAsyncFunction);
+    JSG_METHOD(newWasmModule);
   }
 };
 
 #define EW_UNSAFE_ISOLATE_TYPES                      \
   api::UnsafeEval
 
+template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
+  registry.template addBuiltinModule<UnsafeEval>("internal:eval",
+                                                  workerd::jsg::ModuleRegistry::Type::INTERNAL);
+}
 }  // namespace workerd::api
