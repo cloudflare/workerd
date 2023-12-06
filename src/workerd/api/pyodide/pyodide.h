@@ -7,11 +7,10 @@
 namespace workerd::api::pyodide {
 
 template <class Registry> void registerPyodideModules(Registry& registry, auto featureFlags) {
-  if (!featureFlags.getWorkerdExperimental() ||
-      !util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
-    return;
+  if (featureFlags.getWorkerdExperimental() &&
+      util::Autogate::isEnabled(util::AutogateKey::BUILTIN_WASM_MODULES)) {
+    registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
   }
-  registry.addBuiltinBundle(PYODIDE_BUNDLE, kj::none);
 }
 
 } // namespace workerd::api::pyodide
