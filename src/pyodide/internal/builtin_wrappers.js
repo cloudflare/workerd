@@ -13,7 +13,7 @@ function prepareStackTrace(error, stack) {
   if (stack.length < 3) {
     return false;
   }
-  delete Error.prepareStackTrace;
+  Error.prepareStackTrace = undefined;
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
