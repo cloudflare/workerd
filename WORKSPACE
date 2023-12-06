@@ -70,14 +70,12 @@ load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
 
 benchmark_deps()
 
-# Using latest brotli commit due to macOS and clang-cl compile issues with v1.0.9, switch to a
-# release version later.
 http_archive(
     name = "brotli",
-    sha256 = "9795b1b2afcc62c254012b1584e849e0c628ceb306756efee8d4539b4c583c09",
-    strip_prefix = "google-brotli-ec107cf",
+    sha256 = "e720a6ca29428b803f4ad165371771f5398faba397edf6778837a18599ea13ff",
+    strip_prefix = "brotli-1.1.0",
     type = "tgz",
-    urls = ["https://github.com/google/brotli/tarball/ec107cf015139c791f79afac0f96c3a2c45e157f"],
+    urls = ["https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz"],
 )
 
 http_archive(
@@ -177,39 +175,66 @@ http_archive(
 # the build process. To update the dependency, update the reference commit in
 # rust-deps/BUILD.bazel and run `bazel run //rust-deps:crates_vendor -- --repin`
 
+# Based on https://github.com/bazelbuild/bazel/blob/master/third_party/zlib/BUILD.
+_zlib_build = """
+cc_library(
+    name = "zlib",
+    srcs = glob(["*.c"]),
+    hdrs = glob(["*.h"]),
+    includes = ["."],
+    # Workaround for zlib warnings and mac compilation. Some issues were resolved in v1.3, but there are still implicit function declarations.
+    copts = [
+        "-w",
+        "-Dverbose=-1",
+    ] + select({
+        "@platforms//os:macos": [ "-Wno-implicit-function-declaration" ],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)
+"""
+
+http_archive(
+    name = "zlib",
+    build_file_content = _zlib_build,
+    sha256 = "8a9ba2898e1d0d774eca6ba5b4627a11e5588ba85c8851336eb38de4683050a7",
+    strip_prefix = "zlib-1.3",
+    urls = ["https://zlib.net/zlib-1.3.tar.xz"],
+)
+
 http_file(
     name = "cargo_bazel_linux_x64",
     executable = True,
-    sha256 = "802c67ce797673f74f6053206b30c38df5d213cfe576505bd70c3ed85e65687a",
+    sha256 = "cd19f960cb97b1ee7f31c9297f8e6f7f08a229e28ab4bb1c2c776a7aba2e211d",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/cargo-bazel-x86_64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_linux_arm64",
     executable = True,
-    sha256 = "ac65915f702b97479924b290895dd9d759e0883b8a60bce44b9cc43ba4cca18b",
+    sha256 = "0d9c9b089737b3d3dea5cc5ce2c42ea5cbcfd0e103c47a00ab29953d65dc0b2d",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/cargo-bazel-aarch64-unknown-linux-gnu",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-aarch64-unknown-linux-gnu",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_x64",
     executable = True,
-    sha256 = "756f26c97d46b88fa94f098de0805ae9b6cc25d01708dd7606af57d632bc504a",
+    sha256 = "b3f02c5691ceeac06869ce1a7aff06094879b51941fadd57393a55ee0598448f",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/cargo-bazel-x86_64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-apple-darwin",
     ],
 )
 
 http_file(
     name = "cargo_bazel_macos_arm64",
     executable = True,
-    sha256 = "73ea17706d2b875ecce78015c8534435536211ff52d3ff8e23797457a386bfea",
+    sha256 = "f9968243c677349a8cbbea360e39e3f9bb696cf853c031ece57e887ecd1bf523",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/cargo-bazel-aarch64-apple-darwin",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-aarch64-apple-darwin",
     ],
 )
 
@@ -217,17 +242,17 @@ http_file(
     name = "cargo_bazel_win_x64",
     downloaded_file_path = "downloaded.exe",  # .exe extension required for Windows to recognise as executable
     executable = True,
-    sha256 = "838f456e84c04b5ba939adcaa017a6bcf87e0d8c9673524463c12c76c314e9a5",
+    sha256 = "6da386d85533ce38d7501a41bd072fb5cd27c7f9d801d2336150eeb9f8cf3849",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/cargo-bazel-x86_64-pc-windows-msvc.exe",
     ],
 )
 
 http_archive(
     name = "rules_rust",
-    sha256 = "c46bdafc582d9bd48a6f97000d05af4829f62d5fee10a2a3edddf2f3d9a232c1",
+    sha256 = "1e7114ea2af800c6987ca38daeee13e3ae6e934875b4f7ca24b798857f95431e",
     urls = [
-        "https://github.com/bazelbuild/rules_rust/releases/download/0.28.0/rules_rust-v0.28.0.tar.gz",
+        "https://github.com/bazelbuild/rules_rust/releases/download/0.32.0/rules_rust-v0.32.0.tar.gz",
     ],
 )
 

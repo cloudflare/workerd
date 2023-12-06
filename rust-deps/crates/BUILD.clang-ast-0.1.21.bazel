@@ -38,9 +38,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.20",
+    version = "0.1.21",
     deps = [
         "@crates_vendor__rustc-hash-1.1.0//:rustc_hash",
-        "@crates_vendor__serde-1.0.188//:serde",
+        "@crates_vendor__serde-1.0.193//:serde",
     ],
 )

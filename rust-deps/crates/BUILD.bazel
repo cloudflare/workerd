@@ -33,13 +33,13 @@ alias(
 
 alias(
     name = "clang-ast",
-    actual = "@crates_vendor__clang-ast-0.1.20//:clang_ast",
+    actual = "@crates_vendor__clang-ast-0.1.21//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.0.27//:flate2",
+    actual = "@crates_vendor__flate2-1.0.28//:flate2",
     tags = ["manual"],
 )
 
@@ -63,12 +63,12 @@ alias(
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.188//:serde",
+    actual = "@crates_vendor__serde-1.0.193//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.107//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.108//:serde_json",
     tags = ["manual"],
 )

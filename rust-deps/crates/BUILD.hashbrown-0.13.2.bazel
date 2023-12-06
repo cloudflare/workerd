@@ -45,6 +45,6 @@ rust_library(
     ],
     version = "0.13.2",
     deps = [
-        "@crates_vendor__ahash-0.8.3//:ahash",
+        "@crates_vendor__ahash-0.8.6//:ahash",
     ],
 )
