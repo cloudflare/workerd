@@ -44,44 +44,21 @@ function checkCallee() {
 
 // Wrapper for WebAssembly that makes WebAssembly.Module work by temporarily
 // turning on eval
-const origWebAssembly = globalThis.WebAssembly;
-export const WebAssembly = new Proxy(origWebAssembly, {
-  get(target, val) {
-    const result = Reflect.get(...arguments);
-    if (val !== "Module") {
-      return result;
-    }
-    return new Proxy(result, {
-      construct(_target, args, _newTarget) {
-        checkCallee();
-        try {
-          return Eval.newWasmModule(...args);
-        } catch (e) {
-          console.warn(e);
-        }
-      },
-    });
-  },
-});
+export function newWasmModule(buffer) {
+  checkCallee();
+  return Eval.newWasmModule(buffer);
+}
 
 // Wrapper for Date.now that always advances by at least a millisecond.
 let lastTime;
 let lastDelta = 0;
-const origDate = globalThis.Date;
-export const Date = new Proxy(origDate, {
-  get(target, val) {
-    if (val === "now") {
-      return function now() {
-        const now = origDate.now();
-        if (now === lastTime) {
-          lastDelta++;
-        } else {
-          lastTime = now;
-          lastDelta = 0;
-        }
-        return now + lastDelta;
-      };
-    }
-    return Reflect.get(...arguments);
-  },
-});
+export function monotonicDateNow() {
+  const now = Date.now();
+  if (now === lastTime) {
+    lastDelta++;
+  } else {
+    lastTime = now;
+    lastDelta = 0;
+  }
+  return now + lastDelta;
+}

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 PRELUDE = """
-import {WebAssembly, Date} from "pyodide-internal:builtin_wrappers";
+import { newWasmModule, monotonicDateNow } from "pyodide-internal:builtin_wrappers";
 
 function addEventListener(){}
 """
@@ -9,6 +9,8 @@ function addEventListener(){}
 REPLACEMENTS = [
     ["var _createPyodideModule", "export const _createPyodideModule"],
     ["globalThis._createPyodideModule = _createPyodideModule;", ""],
+    ["new WebAssembly.Module", "newWasmModule"],
+    ["Date.now", "monotonicDateNow"],
 ]
 
 
