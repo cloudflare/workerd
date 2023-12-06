@@ -10,7 +10,7 @@ export default {
       canOwn: true,
     });
     const t2 = performance.now();
-    const result = await pyodide.pyimport("worker").onfetch(request);
+    const result = await pyodide.pyimport("worker").fetch(request);
     const t3 = performance.now();
     console.log("bootstrap", t2 - t1);
     console.log("handle", t3 - t2);

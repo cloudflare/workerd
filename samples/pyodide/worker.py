@@ -1,5 +1,5 @@
 from js import Response
 
 
-def onfetch(request):
+def fetch(request):
   return Response.new("hello world")
