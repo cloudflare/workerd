@@ -27,6 +27,16 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "perfetto-public",
+    srcs = ["tracing-public.c++"],
+    hdrs = ["tracing-public.h"],
+    visibility = ["//visibility:public"],
+    implementation_deps = [
+        ":perfetto",
+    ],
+)
+
+wd_cc_library(
     name = "util",
     srcs = glob(
         ["*.c++"],
@@ -38,6 +48,7 @@ wd_cc_library(
             "thread-scopes.c++",
             "autogate.c++",
             "tracing.c++",
+            "tracing-public.c++",
         ],
     ),
     hdrs = glob(
@@ -50,6 +61,7 @@ wd_cc_library(
             "sentry.h",
             "autogate.h",
             "tracing.h",
+            "tracing-public.h",
         ],
     ),
     visibility = ["//visibility:public"],
