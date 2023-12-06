@@ -1,4 +1,4 @@
-import { default as Eval } from "internal:eval";
+import { default as Eval } from "internal:unsafe-eval";
 
 let evalableFuncs = undefined;
 export function setEvalableFunctions(funcs) {

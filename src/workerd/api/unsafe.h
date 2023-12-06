@@ -64,7 +64,7 @@ public:
   api::UnsafeEval
 
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
-  registry.template addBuiltinModule<UnsafeEval>("internal:eval",
+  registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
                                                   workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
 }  // namespace workerd::api
