@@ -22,6 +22,18 @@ export function monotonicDateNow() {
  * First check that the callee is what we expect, then use `UnsafeEval` to
  * construct a `WasmModule`.
  *
+ * What we expect of the callee is that:
+ * 1. it's in pyodide.asm.js
+ * 2. it's in one of the locations that are required for it to work. We can
+ *    pretty easily make a whitelist of these.
+ *
+ * In particular, we specifically don't want to allow calls from places that
+ * call arbitrary functions for the user like `JsvFunction_CallBound` or
+ * `raw_call_js`; if a user somehow gets there hands on a reference to
+ * `newWasmModule` and tries to call it from Python the call would come from one
+ * of these places. Currently we only need to allow `convertJsFunctionToWasm`
+ * but if we enable JSPI we'll need to whitelist a few more locations.
+ *
  * Some remarks:
  * 1. I don't really think that this `builtin_wrappers.newWasmModule` function
  *    can leak from `pyodide.asm.js`, but the code for `pyodide.asm.js` is
@@ -32,11 +44,10 @@ export function monotonicDateNow() {
  *    `builtin_wrappers.newWasmModule` I don't think it can spoof a call that
  *    passes this check.
  * 3. In normal Python code, this will only be called a fixed number of times
- *    every time we load a .so file.
- *    If we ever get to the position where `checkCallee` is a performance
- *    bottleneck, that would be a great successs.
- *    Using ctypes, one can arrange to call a lot
- *    more times by repeatedly allocating and discarding closures. But:
+ *    every time we load a .so file. If we ever get to the position where
+ *    `checkCallee` is a performance bottleneck, that would be a great successs.
+ *    Using ctypes, one can arrange to call a lot more times by repeatedly
+ *    allocating and discarding closures. But:
  *      - ctypes is quite slow even by Python's standards
  *      - Normally ctypes allocates all closures up front
  */
@@ -67,9 +78,9 @@ function checkCallee() {
 }
 
 /**
- * Helper function for checkCallee, returns `true` if the callee is valid,
- * `false` if not. This will set the `stack` field in the error so we can read
- * back the result there.
+ * Helper function for checkCallee, returns `true` if the callee is
+ * `convertJsFunctionToWasm` in `pyodide.asm.js`, `false` if not. This will set
+ * the `stack` field in the error so we can read back the result there.
  */
 function prepareStackTrace(_error, stack) {
   // In case a logic error is ever introduced in this function, defend against
