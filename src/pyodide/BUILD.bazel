@@ -3,13 +3,13 @@ load(":patch_pyodide_js.bzl", "patch_pyodide_js")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 copy_file(
-    name = "pyodide.asm.wasm",
+    name = "pyodide.asm.wasm@rule",
     src = "@pyodide//:pyodide/pyodide.asm.wasm",
     out = "pyodide-bundle/pyodide.asm.wasm",
 )
 
 copy_file(
-    name = "python_stdlib.zip",
+    name = "python_stdlib.zip@rule",
     src = "@pyodide//:pyodide/python_stdlib.zip",
     out = "pyodide-bundle/python_stdlib.zip",
 )
@@ -20,7 +20,7 @@ py_binary(
 )
 
 patch_pyodide_js(
-    name = "pyodide.asm.js",
+    name = "pyodide.asm.js@rule",
     input = "@pyodide//:pyodide/pyodide.asm.js",
     output = "pyodide-bundle/pyodide.asm.js",
 )
@@ -42,8 +42,8 @@ wd_js_bundle(
     internal_wasm_modules = ["pyodide-bundle/pyodide.asm.wasm"],
     schema_id = "0xbcc8f57c63814005",
     deps = [
-        "pyodide.asm.js",
-        "pyodide.asm.wasm",
-        "python_stdlib.zip",
+        "pyodide.asm.js@rule",
+        "pyodide.asm.wasm@rule",
+        "python_stdlib.zip@rule",
     ],
 )
