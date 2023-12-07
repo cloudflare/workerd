@@ -1,6 +1,6 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
+load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 def _to_js(file_name):
     if file_name.endswith(".ts"):
@@ -9,9 +9,6 @@ def _to_js(file_name):
 
 def _to_d_ts(file_name):
     return file_name.removesuffix(".ts") + ".d.ts"
-
-def _to_name(file_name):
-    return file_name.removesuffix(".ts").removesuffix(".js")
 
 def wd_ts_bundle(
         name,
@@ -34,9 +31,11 @@ def wd_ts_bundle(
           "<import_name>-internal:<module_name>".
       schema_id: bundle capnp schema id,
       modules: list of js and ts source files for builtin modules
-      internal_modules: list of js and ts source files for internal modules
+      internal_modules: list of js, ts, and d.ts source files for internal modules
       tsconfig_json: tsconfig.json label
       eslintrc_json: eslintrc.json label
+      internal_wasm_modules: list of wasm source files
+      internal_data_modules: list of data source files
       lint: enables/disables source linting
       deps: additional typescript dependencies
     """
@@ -60,46 +59,17 @@ def wd_ts_bundle(
 
     wd_js_bundle(
         name = name,
+        import_name = import_name,
         # builtin modules are accessible under "<import_name>:<module_name>" name
-        builtin_modules = dict([(_to_js(m), import_name + ":" + _to_name(m)) for m in modules]),
-        const_name = import_name + "Bundle",
-        include_prefix = import_name,
+        builtin_modules = [_to_js(m) for m in modules],
         # internal modules are accessible under "<import_name>-internal:<module_name>" name
         # without "internal/" folder prefix.
-        internal_modules = dict(
-            [
-                (
-                    _to_js(m),
-                    import_name + "-internal:" + _to_name(m.removeprefix("internal/")),
-                )
-                for m in internal_modules
-                if not m.endswith(".d.ts")
-            ]
-        ),
-        internal_wasm_modules = dict(
-            [
-                (
-                    m,
-                    import_name
-                    + "-internal:"
-                    + m.removeprefix("internal/").removesuffix(".wasm"),
-                )
-                for m in internal_wasm_modules
-            ]
-        ),
-        internal_data_modules = dict(
-            [
-                (
-                    m,
-                    import_name
-                    + "-internal:"
-                    + m.removeprefix("internal/"),
-                )
-                for m in internal_data_modules
-            ]
-        ),
+        internal_modules = [_to_js(m) for m in internal_modules if not m.endswith(".d.ts")],
+        internal_wasm_modules = internal_wasm_modules,
+        internal_data_modules = internal_data_modules,
         declarations = declarations,
         schema_id = schema_id,
+        deps = deps,
     )
 
     if lint:
