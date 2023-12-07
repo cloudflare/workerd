@@ -130,9 +130,11 @@ def wd_js_bundle(
                   user code under `<import_name>:<module_name>`, internal modules
                   are accessible from builtin modules under
                   `<import_name>-internal:<module_name>`
+                  The capnproto bundle object generated will be called
+                  `import_name` + "Bundle"
      schema_id: capnpn schema id
-     builtin_modules: list of js and ts source files for builtin modules
-     internal_modules: list of js and ts source files for internal modules
+     builtin_modules: list of js source files for builtin modules
+     internal_modules: list of js source files for internal modules
      internal_wasm_modules: list of wasm source files
      internal_data_modules: list of data source files
      declarations: d.ts label set
