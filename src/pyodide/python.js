@@ -11,8 +11,8 @@
  * _createPyodideModule and pyodideWasmModule together are produced by the
  * Emscripten linker
  */
-import { _createPyodideModule } from "pyodide-internal:pyodide-bundle/pyodide.asm";
-import pyodideWasmModule from "pyodide-internal:pyodide-bundle/pyodide.asm.wasm";
+import { _createPyodideModule } from "pyodide-internal:generated/pyodide.asm";
+import pyodideWasmModule from "pyodide-internal:generated/pyodide.asm.wasm";
 
 
 /**
@@ -24,7 +24,7 @@ import pyodideWasmModule from "pyodide-internal:pyodide-bundle/pyodide.asm.wasm"
  * with a bunch of C libs to unpack various archive formats, but they need stuff
  * in this zip file to initialize their runtime state.
  */
-import stdlib from "pyodide-internal:pyodide-bundle/python_stdlib.zip";
+import stdlib from "pyodide-internal:generated/python_stdlib.zip";
 
 /**
  * Global variable for the memory snapshot. On the first run we stick a copy of

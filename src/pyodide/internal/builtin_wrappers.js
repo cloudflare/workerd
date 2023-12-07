@@ -48,7 +48,7 @@ export function newWasmModule(buffer) {
 /**
  * Check that the callee is `convertJsFunctionToWasm` by formatting a stack
  * trace and using `prepareStackTrace` to read out the callee. It should be
- * `convertJsFunctionToWasm` in `"pyodide-internal:pyodide-bundle/pyodide.asm"`,
+ * `convertJsFunctionToWasm` in `"pyodide-internal:generated/pyodide.asm"`,
  * if it's anything else we'll bail.
  */
 function checkCallee() {
@@ -85,7 +85,7 @@ function prepareStackTrace(_error, stack) {
     const fileName = stack[2].getFileName();
     return (
       funcName === "convertJsFunctionToWasm" &&
-      fileName === "pyodide-internal:pyodide-bundle/pyodide.asm"
+      fileName === "pyodide-internal:generated/pyodide.asm"
     );
   } catch (e) {
     console.warn(e);
