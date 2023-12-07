@@ -124,9 +124,9 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
 
   auto iter = ALGORITHMS.find(CryptoAlgorithm {name});
   if (iter == ALGORITHMS.end()) {
-    // No such built-in algorithm, so fall back to checking if the ApiIsolate has a custom
+    // No such built-in algorithm, so fall back to checking if the Api has a custom
     // algorithm registered.
-    return Worker::ApiIsolate::current().getCryptoAlgorithm(name);
+    return Worker::Api::current().getCryptoAlgorithm(name);
   } else {
     return *iter;
   }

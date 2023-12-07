@@ -6,12 +6,11 @@
 #include "util.h"
 #include <kj/vector.h>
 #include <kj/encoding.h>
-#include <algorithm>
-#include <functional>
-#include <regex>
 #include <kj/parse/char.h>
 #include <kj/compat/http.h>
 #include <workerd/util/mimetype.h>
+#include <algorithm>
+#include <regex>
 
 #if !_MSC_VER
 #include <strings.h>

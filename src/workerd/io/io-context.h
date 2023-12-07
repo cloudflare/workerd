@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "actor-id.h"
 #include "io-channels.h"
 #include "io-gate.h"
 #include "io-own.h"

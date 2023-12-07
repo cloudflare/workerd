@@ -3,14 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "hyperdrive.h"
+#include "sockets.h"
+#include "http.h"
 #include <openssl/rand.h>
-#include <cstdint>
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
-#include "sockets.h"
-#include "global-scope.h"
 #include <kj/string.h>
-#include <workerd/util/uuid.h>
 
 namespace workerd::api {
 Hyperdrive::Hyperdrive(uint clientIndex, kj::String database,

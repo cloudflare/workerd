@@ -12,6 +12,7 @@
 #include <capnp/message.h>
 #include <capnp/compat/json.h>
 #include <workerd/api/analytics-engine.capnp.h>
+#include <workerd/io/actor-id.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/compatibility-date.h>
@@ -1741,9 +1742,14 @@ public:
             return config.tryGet<Durable>()
                 .map([&](const Durable& d) -> kj::Own<ActorCacheInterface> {
               KJ_IF_SOME(as, channels.actorStorage) {
+                // The idPtr can end up being freed if the Actor gets hibernated so we need
+                // to create a copy that is ensured to live as long as the ActorSqliteHooks
+                // instance we're creating here.
+                // TODO(cleanup): Is there a better way to handle the ActorKey in general here?
+                auto idStr = kj::str(idPtr);
                 auto sqliteHooks = kj::heap<ActorSqliteHooks>(channels.alarmScheduler, ActorKey{
-                  .uniqueKey = d.uniqueKey, .actorId = idPtr
-                });
+                  .uniqueKey = d.uniqueKey, .actorId = idStr
+                }).attach(kj::mv(idStr));
 
                 auto db = kj::heap<SqliteDatabase>(*as,
                     kj::Path({d.uniqueKey, kj::str(idPtr, ".sqlite")}),
@@ -1760,7 +1766,7 @@ public:
             });
           };
 
-          auto makeStorage = [](jsg::Lock& js, const Worker::ApiIsolate& apiIsolate,
+          auto makeStorage = [](jsg::Lock& js, const Worker::Api& api,
                                 ActorCacheInterface& actorCache)
                             -> jsg::Ref<api::DurableObjectStorage> {
             return jsg::alloc<api::DurableObjectStorage>(
@@ -2070,7 +2076,7 @@ struct FutureActorChannel {
   kj::String errorContext;
 };
 
-static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
+static kj::Maybe<WorkerdApi::Global> createBinding(
     kj::StringPtr workerName,
     config::Worker::Reader conf,
     config::Worker::Binding::Reader binding,
@@ -2080,7 +2086,7 @@ static kj::Maybe<WorkerdApiIsolate::Global> createBinding(
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
-  using Global = WorkerdApiIsolate::Global;
+  using Global = WorkerdApi::Global;
   kj::StringPtr bindingName = binding.getName();
   auto makeGlobal = [&](auto&& value) {
     return Global{.name = kj::str(bindingName), .value = kj::mv(value)};
@@ -2473,7 +2479,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
 
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::heap<NullIsolateLimitEnforcer>();
-  auto api = kj::heap<WorkerdApiIsolate>(globalContext->v8System,
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System,
       featureFlags.asReader(), *limitEnforcer, kj::atomicAddRef(*observer));
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -2495,14 +2501,14 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   }
 
   auto script = isolate->newScript(
-      name, WorkerdApiIsolate::extractSource(name, conf, errorReporter, extensions),
+      name, WorkerdApi::extractSource(name, conf, errorReporter, extensions),
       IsolateObserver::StartType::COLD, false, errorReporter);
 
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
 
   auto confBindings = conf.getBindings();
-  using Global = WorkerdApiIsolate::Global;
+  using Global = WorkerdApi::Global;
   kj::Vector<Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global, createBinding(name, conf, binding, errorReporter,
@@ -2515,8 +2521,8 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   auto worker = kj::atomicRefcounted<Worker>(
       kj::mv(script),
       kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, v8::Local<v8::Object> target) {
-        return kj::downcast<const WorkerdApiIsolate>(apiIsolate).compileGlobals(
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+        return WorkerdApi::from(api).compileGlobals(
             lock, globals, target, 1);
       },
       IsolateObserver::StartType::COLD,

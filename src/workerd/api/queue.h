@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <atomic>
-
 #include <kj/async.h>
 #include <kj/common.h>
 

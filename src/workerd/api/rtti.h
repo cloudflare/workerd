@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <initializer_list>
 #include <kj/array.h>
 #include <kj/string.h>
 #include <workerd/io/compatibility-date.h>

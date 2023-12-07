@@ -4,17 +4,12 @@
 
 #pragma once
 
-#include <kj/vector.h>
-#include <kj/compat/url.h>
-#include <workerd/jsg/jsg.h>
 #include "blob.h"
+#include <kj/vector.h>
+#include <workerd/jsg/jsg.h>
 #include <workerd/io/compatibility-date.capnp.h>
 
 namespace workerd::api {
-
-namespace url {
-class URLSearchParams;
-}  // namespace url
 
 // Implements the FormData interface as prescribed by:
 // https://xhr.spec.whatwg.org/#interface-formdata
@@ -168,8 +163,6 @@ private:
       KJ_UNREACHABLE;
     }
   }
-
-  friend class url::URLSearchParams;
 };
 
 #define EW_FORMDATA_ISOLATE_TYPES     \

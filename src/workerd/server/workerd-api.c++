@@ -93,13 +93,13 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
 
   jsg::TypeWrapperExtension<PromiseWrapper>,
   jsg::InjectConfiguration<CompatibilityFlags::Reader>,
-  Worker::ApiIsolate::ErrorInterface,
+  Worker::Api::ErrorInterface,
   jsg::CommonJsModuleObject,
   jsg::CommonJsModuleContext,
   jsg::NodeJsModuleObject,
   jsg::NodeJsModuleContext);
 
-struct WorkerdApiIsolate::Impl {
+struct WorkerdApi::Impl {
   kj::Own<CompatibilityFlags::Reader> features;
   JsgWorkerdIsolate jsgIsolate;
 
@@ -159,40 +159,40 @@ struct WorkerdApiIsolate::Impl {
 
 };
 
-WorkerdApiIsolate::WorkerdApiIsolate(jsg::V8System& v8System,
+WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     CompatibilityFlags::Reader features,
     IsolateLimitEnforcer& limitEnforcer,
     kj::Own<jsg::IsolateObserver> observer)
     : impl(kj::heap<Impl>(v8System, features, limitEnforcer, kj::mv(observer))) {}
-WorkerdApiIsolate::~WorkerdApiIsolate() noexcept(false) {}
+WorkerdApi::~WorkerdApi() noexcept(false) {}
 
-kj::Own<jsg::Lock> WorkerdApiIsolate::lock(jsg::V8StackScope& stackScope) const {
+kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
   return kj::heap<JsgWorkerdIsolate::Lock>(impl->jsgIsolate, stackScope);
 }
-CompatibilityFlags::Reader WorkerdApiIsolate::getFeatureFlags() const {
+CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
 }
 jsg::JsContext<api::ServiceWorkerGlobalScope>
-    WorkerdApiIsolate::newContext(jsg::Lock& lock) const {
+    WorkerdApi::newContext(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .newContext<api::ServiceWorkerGlobalScope>(lock.v8Isolate);
 }
-jsg::Dict<NamedExport> WorkerdApiIsolate::unwrapExports(
+jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock)
       .unwrap<jsg::Dict<NamedExport>>(lock.v8Context(), moduleNamespace);
 }
-const jsg::TypeHandler<Worker::ApiIsolate::ErrorInterface>&
-    WorkerdApiIsolate::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
+const jsg::TypeHandler<Worker::Api::ErrorInterface>&
+    WorkerdApi::getErrorInterfaceTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<ErrorInterface>();
 }
 
 const jsg::TypeHandler<api::QueueExportedHandler>&
-    WorkerdApiIsolate::getQueueTypeHandler(jsg::Lock& lock) const {
+    WorkerdApi::getQueueTypeHandler(jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
-Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
+Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) {
@@ -206,9 +206,8 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
 
       return Worker::Script::ModulesSource {
         modules[0].getName(),
-        [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate) {
-          return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
-              .compileModules(lock, conf, errorReporter, extensions);
+        [conf,&errorReporter, extensions](jsg::Lock& lock, const Worker::Api& api) {
+          return WorkerdApi::from(api).compileModules(lock, conf, errorReporter, extensions);
         }
       };
     }
@@ -216,9 +215,8 @@ Worker::Script::Source WorkerdApiIsolate::extractSource(kj::StringPtr name,
       return Worker::Script::ScriptSource {
         conf.getServiceWorkerScript(),
         name,
-        [conf,&errorReporter](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer) {
-          return kj::downcast<const WorkerdApiIsolate>(apiIsolate)
-              .compileScriptGlobals(lock, conf, errorReporter, observer);
+        [conf,&errorReporter](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer) {
+          return WorkerdApi::from(api).compileScriptGlobals(lock, conf, errorReporter, observer);
         }
       };
     case config::Worker::INHERIT:
@@ -232,14 +230,14 @@ invalid:
   return Worker::Script::ScriptSource {
     ""_kj,
     name,
-    [](jsg::Lock& lock, const Worker::ApiIsolate& apiIsolate, const jsg::CompilationObserver& observer)
+    [](jsg::Lock& lock, const Worker::Api& api, const jsg::CompilationObserver& observer)
         -> kj::Array<Worker::Script::CompiledGlobal> {
       return nullptr;
     }
   };
 }
 
-kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobals(
+kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileScriptGlobals(
       jsg::Lock& lockParam, config::Worker::Reader conf,
       Worker::ValidationErrorReporter& errorReporter,
       const jsg::CompilationObserver& observer) const {
@@ -269,7 +267,7 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApiIsolate::compileScriptGlobal
   return compiledGlobals.finish();
 }
 
-void WorkerdApiIsolate::compileModules(
+void WorkerdApi::compileModules(
     jsg::Lock& lockParam, config::Worker::Reader conf,
     Worker::ValidationErrorReporter& errorReporter,
     capnp::List<config::Extension>::Reader extensions) const {
@@ -498,10 +496,10 @@ private:
 
 static v8::Local<v8::Value> createBindingValue(
     JsgWorkerdIsolate::Lock& lock,
-    const WorkerdApiIsolate::Global& global,
+    const WorkerdApi::Global& global,
     CompatibilityFlags::Reader featureFlags,
     uint32_t ownerId) {
-  using Global = WorkerdApiIsolate::Global;
+  using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
 
   v8::Local<v8::Value> value;
@@ -633,7 +631,7 @@ static v8::Local<v8::Value> createBindingValue(
   return value;
 }
 
-void WorkerdApiIsolate::compileGlobals(
+void WorkerdApi::compileGlobals(
     jsg::Lock& lockParam, kj::ArrayPtr<const Global> globals,
     v8::Local<v8::Object> target,
     uint32_t ownerId) const {
@@ -654,7 +652,7 @@ void WorkerdApiIsolate::compileGlobals(
 
 // =======================================================================================
 
-WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
+WorkerdApi::Global WorkerdApi::Global::clone() const {
   Global result;
   result.name = kj::str(name);
 
@@ -707,6 +705,10 @@ WorkerdApiIsolate::Global WorkerdApiIsolate::Global::clone() const {
   }
 
   return result;
+}
+
+const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
+  return kj::downcast<const WorkerdApi>(api);
 }
 
 }  // namespace workerd::server

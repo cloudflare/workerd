@@ -4,15 +4,12 @@
 
 #pragma once
 
-#include "streams.h"
-#include <capnp/compat/json.h>
-#include <cstdint>
-#include <kj/common.h>
-#include <kj/async-io.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/http-util.h>
+#include <kj/async-io.h>
 
 namespace workerd::api {
+
+class Socket;
 
 // A Hyperdrive resource for development integrations.
 //
@@ -35,7 +32,7 @@ public:
 
   kj::String getConnectionString();
 
-  JSG_RESOURCE_TYPE(Hyperdrive, CompatibilityFlags::Reader flags) {
+  JSG_RESOURCE_TYPE(Hyperdrive) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(database, getDatabase);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(user, getUser);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(password, getPassword);

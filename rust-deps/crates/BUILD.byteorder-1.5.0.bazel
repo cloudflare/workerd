@@ -11,11 +11,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 # licenses([
-#     "TODO",  # BSD-3-Clause
+#     "TODO",  # Unlicense OR MIT
 # ])
 
 rust_library(
-    name = "lol_html",
+    name = "byteorder",
     srcs = glob(["**/*.rs"]),
     compile_data = glob(
         include = ["**"],
@@ -28,29 +28,19 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = ["--cap-lints=allow"],
     tags = [
         "cargo-bazel",
-        "crate-name=lol_html",
+        "crate-name=byteorder",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.1.1",
-    deps = [
-        "@crates_vendor__bitflags-2.4.1//:bitflags",
-        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
-        "@crates_vendor__cssparser-0.27.2//:cssparser",
-        "@crates_vendor__encoding_rs-0.8.33//:encoding_rs",
-        "@crates_vendor__hashbrown-0.13.2//:hashbrown",
-        "@crates_vendor__lazy_static-1.4.0//:lazy_static",
-        "@crates_vendor__lazycell-1.3.0//:lazycell",
-        "@crates_vendor__memchr-2.6.4//:memchr",
-        "@crates_vendor__mime-0.3.17//:mime",
-        "@crates_vendor__safemem-0.3.3//:safemem",
-        "@crates_vendor__selectors-0.22.0//:selectors",
-        "@crates_vendor__thiserror-1.0.50//:thiserror",
-    ],
+    version = "1.5.0",
 )
