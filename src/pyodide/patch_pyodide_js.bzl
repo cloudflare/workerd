@@ -1,6 +1,7 @@
 """
 The patch_pyodide_js rule. The rule invokes `patch_pyodide_js.py` with arguments
-the input and output paths.
+the input and output paths. Before using it, it's necessary to first make a
+`py_binary` from `patch_pyodide_js.py`.
 """
 
 
