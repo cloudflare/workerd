@@ -1,6 +1,6 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
-load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 load("@npm//:eslint/package_json.bzl", eslint_bin = "bin")
+load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 def _to_js(file_name):
     if file_name.endswith(".ts"):
