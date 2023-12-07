@@ -1,5 +1,15 @@
 """
-This file patches various details in pyodide.asm.js.
+This file patches various details in pyodide.asm.js. We should eventually switch
+to using `.patch` files here and patch the sources of these upstream files. Some
+of these patches can be resolved by passing an extra flag to the Emscripten
+linker. `Date.now()` and `WebAssembly.Module()` are from Emscripten's runtime
+libraries injected at link time, so we can also patch them in Emscripten.
+
+Because the file we are patching is a minified generated file, it's not
+appropriate for patch files since the patch context is likely to change due to
+stuff that doesn't matter for our sake. In fact, if we just want to substitute
+`Date.now()` for `monotonicDateNow()` patch context would be extra stuff we'd
+have to maintain for not much benefit.
 
 1. `pyodide.asm.js` exposes `_createPyodideModule` via assignment to
    `globalThis` because module workers in Firefox have < 1 year of support. This
@@ -23,10 +33,6 @@ This file patches various details in pyodide.asm.js.
    that throws errors so we dummy it out. This junk is unnecessary for us and
    wasting large amounts of initialization time, when we set up our own Pyodide
    build we'll get rid of it and this won't be necessary.
-
-Most of these changes can be removed when we make our own Pyodide build, but the
-replacements for `Date.now()` and `WebAssembly.Module` will most likely need to
-stay.
 """
 
 PRELUDE = """
