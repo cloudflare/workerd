@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load(":patch_pyodide_js.bzl", "patch_pyodide_js")
 load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
+load(":patch_pyodide_js.bzl", "patch_pyodide_js")
 
 copy_file(
     name = "pyodide.asm.wasm@rule",
@@ -12,11 +12,6 @@ copy_file(
     name = "python_stdlib.zip@rule",
     src = "@pyodide//:pyodide/python_stdlib.zip",
     out = "generated/python_stdlib.zip",
-)
-
-py_binary(
-    name = "patch_pyodide_js",
-    srcs = ["patch_pyodide_js.py"],
 )
 
 patch_pyodide_js(

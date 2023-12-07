@@ -139,7 +139,7 @@ async function instantiateEmscriptenModule(emscriptenSettings) {
     // Force Emscripten to feature detect the way we want
     // They used to have an `environment` setting that did this but it has been
     // removed =(
-    // TODO: consider patching this in patch_pyodide_js.py instead.
+    // TODO: consider patching this in patch_pyodide_js.bzl instead.
     globalThis.window = {};       // makes ENVIRONMENT_IS_WEB    = true
     globalThis.importScripts = 1; // makes ENVIRONMENT_IS_WORKER = false
     const p = _createPyodideModule(emscriptenSettings);
