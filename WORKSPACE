@@ -32,11 +32,11 @@ http_archive(
 
 http_archive(
     name = "ssl",
-    sha256 = "81bd4b20f53b0aa4bccc3f8bc7c5eda18550a91697ba956668dbeba0e3d0965d",
-    strip_prefix = "google-boringssl-f7cf966",
+    sha256 = "57261442e663ad0a0dc5c4eae59322440bfce61f1edc4fe4338179a6abc14034",
+    strip_prefix = "google-boringssl-8ae84b5",
     type = "tgz",
     # from master-with-bazel branch
-    urls = ["https://github.com/google/boringssl/tarball/f7cf966f3ddc6923104f6a354bf0ba5c618f3320"],
+    urls = ["https://github.com/google/boringssl/tarball/8ae84b558b3d3af50a323c7e3800998764e77375"],
 )
 
 http_archive(
