@@ -45,7 +45,7 @@ import stdlib from "pyodide-internal:generated/python_stdlib.zip";
  * Possibly we could make many scripts share the same memory snapshot to get
  * decent performance/memory usage tradeoff.
  */
-let memory = undefined;
+let MEMORY = undefined;
 
 /**
  * Much simpified version of the `prepareFileSystem` function here:
@@ -64,43 +64,45 @@ function prepareFileSystem(Module) {
   Module.FS.mkdir(Module.API.config.env.HOME);
 }
 
+const SNAPSHOT_IMPORTS = [
+  "_pyodide.docstring",
+  "_pyodide._core_docs",
+  "traceback",
+  "collections.abc",
+  // Asyncio is the really slow one here. In native Python3.11 on my machine,
+  // `import asyncio` takes ~50 ms.
+  "asyncio",
+  "inspect",
+  "tarfile",
+  "importlib.metadata",
+  "re",
+  "shutil",
+  "sysconfig",
+  "importlib.machinery",
+  "pathlib",
+  "site",
+  "tempfile",
+  "typing",
+  "zipfile",
+];
+
 async function makeSnapshot(Module, run) {
   // This is the list of all packages imported by the Python bootstrap. We don't
   // want to spend time initializing these packages, so we make sure here that
   // the heap snapshot has them already initialized.
   // Can get this list by starting Python and filtering sys.modules for modules
   // whose importer is not FrozenImporter or BuiltinImporter.
-  const imports = [
-    "_pyodide.docstring",
-    "_pyodide._core_docs",
-    "traceback",
-    "collections.abc",
-    // Asyncio is the really slow one here. In native Python3.11 on my machine,
-    // `import asyncio` takes ~50 ms.
-    "asyncio",
-    "inspect",
-    "tarfile",
-    "importlib.metadata",
-    "re",
-    "shutil",
-    "sysconfig",
-    "importlib.machinery",
-    "pathlib",
-    "site",
-    "tempfile",
-    "typing",
-    "zipfile",
-  ];
-  const to_import = imports.join(",");
-  const to_delete = Array.from(
-    new Set(imports.map((x) => x.split(".")[0]))
+
+  const toImport = SNAPSHOT_IMPORTS.join(",");
+  const toDelete = Array.from(
+    new Set(SNAPSHOT_IMPORTS.map((x) => x.split(".")[0]))
   ).join(",");
-  run(`import ${to_import}`);
+  run(`import ${toImport}`);
   run("sysconfig.get_config_vars()");
   // Delete to avoid polluting top level namespace
-  run(`del ${to_delete}`);
+  run(`del ${toDelete}`);
   // store a copy
-  memory = Module.HEAP8.slice();
+  MEMORY = Module.HEAP8.slice();
 }
 
 export async function loadPyodide() {
@@ -110,7 +112,7 @@ export async function loadPyodide() {
   // Settings to control runtime instantiation.
   const emscriptenModule = {
     // skip running main() if we have a snapshot
-    noInitialRun: !!memory,
+    noInitialRun: !!MEMORY,
     locateFile: (x) => x,
     instantiateWasm(info, receiveInstance) {
       (async function () {
@@ -156,11 +158,11 @@ export async function loadPyodide() {
     }
   }
 
-  if (!memory) {
+  if (!MEMORY) {
     await makeSnapshot(emscriptenModule, run);
   } else {
-    emscriptenModule.growMemory(memory.byteLength);
-    emscriptenModule.HEAP8.set(new Uint8Array(memory));
+    emscriptenModule.growMemory(MEMORY.byteLength);
+    emscriptenModule.HEAP8.set(new Uint8Array(MEMORY));
   }
 
   let [err, captured_stderr] = internalAPI.rawRun("import _pyodide_core");
