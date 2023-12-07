@@ -10,6 +10,7 @@
 #include <v8-cppgc.h>
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
+#include <sanitizer/asan_interface.h>
 
 namespace workerd::jsg {
 
@@ -170,6 +171,24 @@ void HeapTracer::clearFreelistedShims() {
 
 kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
   KJ_IF_SOME(shim, cppgcShim) {
+    // There's a possibility that the CppgcShim has already been found to be unreachable by a GC
+    // pass, but has not actually been destroyed yet. For some reason, cppgc likes to delay the
+    // calling of actual destructors. However, in ASAN builds, cppgc will poison the memory in the
+    // meantime, because it figures that we "shouldn't" be accessing unreachable memory. This
+    // assumption makes sense in the abstract, but not for our specific use case, where we are
+    // essentially maintaining a weak pointer to the CppgcShim. If the destructor had been called,
+    // then `cppgcShim` here would have been nulled out at that time. We're expecting that until
+    // the destructor is called, we can still safely access the object to detach the wrapper.
+    //
+    // So to work around cppgc's incorrect assumption, we manually unpoison the memory.
+    //
+    // Note: An alternative strategy could have been for CppgcShim itself to allocate a separate
+    // C++ heap object to store its own state in, so that that state could be modified even while
+    // the CppgcShim object itself is poisoned. In this case `Wrappable::cppgcShim` would change to
+    // point at this state object, not to the `CppgcShim` itself. However, this approach would
+    // require extra heap allocation for everyone, just to satisfy ASAN, which seems undesirable.
+    ASAN_UNPOISON_MEMORY_REGION(&shim, sizeof(shim));
+
     auto& tracer = HeapTracer::getTracer(isolate);
     auto result = kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<CppgcShim::Active>()).wrappable);
     if (shouldFreelistShim) {
