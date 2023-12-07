@@ -48,6 +48,7 @@ private:
 class TraceItem final: public jsg::Object {
 public:
   class FetchEventInfo;
+  class ConnectEventInfo;
   class ScheduledEventInfo;
   class AlarmEventInfo;
   class QueueEventInfo;
@@ -58,6 +59,7 @@ public:
   explicit TraceItem(jsg::Lock& js, const Trace& trace);
 
   typedef kj::OneOf<jsg::Ref<FetchEventInfo>,
+                    jsg::Ref<ConnectEventInfo>,
                     jsg::Ref<ScheduledEventInfo>,
                     jsg::Ref<AlarmEventInfo>,
                     jsg::Ref<QueueEventInfo>,
@@ -204,6 +206,21 @@ public:
 
 private:
   uint16_t status;
+};
+
+class TraceItem::ConnectEventInfo final: public jsg::Object {
+public:
+  explicit ConnectEventInfo(jsg::Lock& js, const Trace& trace,
+                            const Trace::ConnectEventInfo& eventInfo);
+
+  jsg::Optional<jsg::V8Ref<v8::Object>> getCf(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(ConnectEventInfo) {
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(cf, getCf);
+  }
+
+private:
+  jsg::Optional<jsg::V8Ref<v8::Object>> cf;
 };
 
 class TraceItem::ScheduledEventInfo final: public jsg::Object {

@@ -964,7 +964,7 @@ public:
   kj::Maybe<jsg::Ref<WebSocket>> getWebSocket(jsg::Lock& js);
 
   // Returns the `cf` field containing Cloudflare feature flags.
-  jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
+jsg::Optional<jsg::JsObject> getCf(jsg::Lock& js);
 
   // This relates to CORS, which doesn't apply on the edge -- see Request::Initializer::mode.
   // In discussing with other runtime implementations that do not implement CORS, it was

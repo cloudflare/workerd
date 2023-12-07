@@ -141,6 +141,9 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
       KJ_CASE_ONEOF(fetch, Trace::FetchEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::FetchEventInfo>(js, trace, fetch, trace.fetchResponseInfo));
       }
+      KJ_CASE_ONEOF(connect, Trace::ConnectEventInfo) {
+        return kj::Maybe(jsg::alloc<TraceItem::ConnectEventInfo>(js, trace, connect));
+      }
       KJ_CASE_ONEOF(scheduled, Trace::ScheduledEventInfo) {
         return kj::Maybe(jsg::alloc<TraceItem::ScheduledEventInfo>(trace, scheduled));
       }
@@ -535,6 +538,29 @@ auto TraceCustomEventImpl::sendRpc(
   co_return Result {
     .outcome = workerd::EventOutcome::OK,
   };
+}
+
+namespace {
+jsg::Optional<jsg::V8Ref<v8::Object>> getConnectCf(
+    jsg::Lock& js,
+    const Trace::ConnectEventInfo& eventInfo) {
+  const auto& cfJson = eventInfo.cfJson;
+  if (cfJson.size() > 0) {
+    return js.parseJson(cfJson).cast<v8::Object>(js);
+  }
+  return kj::none;
+};
+}  // namespace
+
+TraceItem::ConnectEventInfo::ConnectEventInfo(jsg::Lock& js,
+                                              const Trace& trace,
+                                              const Trace::ConnectEventInfo& eventInfo)
+    : cf(getConnectCf(js, eventInfo)) {}
+
+jsg::Optional<jsg::V8Ref<v8::Object>> TraceItem::ConnectEventInfo::getCf(jsg::Lock& js) {
+  return cf.map([&](jsg::V8Ref<v8::Object>& obj) {
+    return obj.addRef(js);
+  });
 }
 
 }  // namespace workerd::api

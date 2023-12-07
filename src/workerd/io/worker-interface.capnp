@@ -52,6 +52,7 @@ struct Trace @0x8e8d911203762d34 {
     custom @13 :CustomEventInfo;
     email @16 :EmailEventInfo;
     trace @18 :TraceEventInfo;
+    connect @19 :ConnectEventInfo;
   }
   struct FetchEventInfo {
     method @0 :HttpMethod;
@@ -63,6 +64,10 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
+  }
+
+  struct ConnectEventInfo {
+    cfJson @0 :Text;
   }
 
   struct ScheduledEventInfo {
