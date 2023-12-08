@@ -81,8 +81,8 @@ struct PerfettoSession::Impl {
   kj::AutoCloseFd fd;
   std::unique_ptr<perfetto::TracingSession> session;
 
-  Impl(int fd, kj::StringPtr categories)
-      : fd(fd), session(createTracingSession(fd, categories)) {
+  Impl(kj::AutoCloseFd dest, kj::StringPtr categories)
+      : fd(kj::mv(dest)), session(createTracingSession(fd.get(), categories)) {
     session->StartBlocking();
   }
 };
@@ -91,7 +91,7 @@ PerfettoSession::PerfettoSession(kj::StringPtr path, kj::StringPtr categories)
     : impl(kj::heap<Impl>(openTraceFile(path), categories)) {}
 
 PerfettoSession::PerfettoSession(int fd, kj::StringPtr categories)
-    : impl(kj::heap<Impl>(fd, categories)) {}
+    : impl(kj::heap<Impl>(kj::AutoCloseFd(fd), categories)) {}
 
 PerfettoSession::~PerfettoSession() noexcept(false) {
   if (impl) {

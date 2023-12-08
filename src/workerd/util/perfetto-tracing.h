@@ -42,10 +42,15 @@ private:
   friend constexpr bool _kj_internal_isPolymorphic(PerfettoSession::Impl*);
 };
 
+#define PERFETTO_FLOW_FROM_POINTER(ptr) perfetto::Flow::FromPointer(ptr)
+#define PERFETTO_TERMINATING_FLOW_FROM_POINTER(ptr) perfetto::TerminatingFlow::FromPointer(ptr)
+#define PERFETTO_TRACK_FROM_POINTER(ptr) perfetto::Track::FromPointer(ptr)
+
 KJ_DECLARE_NON_POLYMORPHIC(PerfettoSession::Impl);
 }  // workerd
 
 #else  // defined(WORKERD_USE_PERFETTO)
+struct PerfettoNoop {};
 // We define non-op versions of the instrumentation macros here so that we can
 // still instrument and build when perfetto is not enabled.
 #define TRACE_EVENT(...)
@@ -54,4 +59,7 @@ KJ_DECLARE_NON_POLYMORPHIC(PerfettoSession::Impl);
 #define TRACE_EVENT_INSTANT(...)
 #define TRACE_COUNTER(...)
 #define TRACE_EVENT_CATEGORY_ENABLED(...) false
+#define PERFETTO_FLOW_FROM_POINTER(ptr) PerfettoNoop {}
+#define PERFETTO_TERMINATING_FLOW_FROM_POINTER(ptr) PerfettoNoop {}
+#define PERFETTO_TRACK_FROM_POINTER(ptr) PerfettoNoop {}
 #endif  // defined(WORKERD_USE_PERFETTO)
