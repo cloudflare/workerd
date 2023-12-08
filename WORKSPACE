@@ -92,7 +92,7 @@ http_archive(
     name = "pyodide",
     sha256 = "d1d910bd994df3f37a5a91744534c2f70a1d124d641cf6a1cbe2df6da31f9c11",
     type = "tar.bz2",
-    urls=["https://github.com/pyodide/pyodide/releases/download/0.25.0a1/pyodide-core-0.25.0a1.tar.bz2"],
+    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0a1/pyodide-core-0.25.0a1.tar.bz2"],
     build_file = "//:build/BUILD.pyodide",
 )
 
