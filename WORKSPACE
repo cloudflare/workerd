@@ -388,6 +388,31 @@ new_git_repository(
     shallow_since = "1697047535 +0000",
 )
 
+git_repository(
+    name = "perfetto",
+    commit = "d136f355bb32288122dd2a0273e4fab280654d3a",
+    remote = "https://android.googlesource.com/platform/external/perfetto.git",
+    patches = [
+        "//:patches/perfetto/0001-Rename-ui-build-to-ui-build.sh-to-allow-bazel-build-.patch",
+    ],
+    patch_args = ["-p1"],
+    repo_mapping = {"@perfetto_dep_zlib" : "@zlib"},
+)
+
+# For use with perfetto
+new_git_repository(
+    name = "com_google_protobuf",
+    commit = "6a59a2ad1f61d9696092f79b6d74368b4d7970a3",
+    remote = "https://chromium.googlesource.com/external/github.com/google/protobuf"
+)
+
+# For use with perfetto
+new_local_repository(
+    name = "perfetto_cfg",
+    path = "build/perfetto",
+    build_file_content = ""
+)
+
 new_git_repository(
     name = "com_googlesource_chromium_base_trace_event_common",
     build_file = "@v8//:bazel/BUILD.trace_event_common",
@@ -445,11 +470,14 @@ bind(
 # We indirect through `@workerd-v8` to allow dependents to override how and where `v8` is built.
 #
 # TODO(cleanup): There must be a better way to do this?
+# TODO(soon): Figure out how to build v8 with perfetto enabled. It does not appear
+#             as if the v8 bazel build currently includes support for building with
+#             perfetto enabled as an option.
 new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
-        deps = ["@v8//:v8_icu", "@workerd//:icudata-embed"],
+        deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
 )

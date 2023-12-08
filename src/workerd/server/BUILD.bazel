@@ -51,6 +51,7 @@ wd_cc_binary(
         ":server",
         ":workerd-meta_capnp",
         ":workerd_capnp",
+        "//src/workerd/util:perfetto",
         "@capnp-cpp//src/capnp:capnpc",
     ] + select({
         "@platforms//os:windows": [],
@@ -99,6 +100,7 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/io",
         "//src/workerd/jsg",
+        "//src/workerd/util:perfetto",
     ],
 )
 

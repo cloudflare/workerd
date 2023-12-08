@@ -21,6 +21,7 @@
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/util.h>
 #include <workerd/util/stream-utils.h>
+#include <workerd/util/use-perfetto-categories.h>
 
 namespace workerd::api {
 
@@ -103,6 +104,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(
     kj::AsyncInputStream& requestBody, kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
     Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler) {
+  TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
   // that it can drop the reference whenever it gets GC'd. But in this case the stream's lifetime
   // is not under our control -- it's attached to the request. So, we wrap it in a

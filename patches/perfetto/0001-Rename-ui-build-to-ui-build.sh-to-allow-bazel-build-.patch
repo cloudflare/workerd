@@ -1,0 +1,17 @@
+From ce2bc7a2ee9ce1a52f2c17b3b9a83329b58bf2f7 Mon Sep 17 00:00:00 2001
+From: James M Snell <jasnell@gmail.com>
+Date: Tue, 5 Dec 2023 08:04:46 -0800
+Subject: [PATCH] Rename ui/build to ui/build.sh to allow bazel build to work
+
+---
+ ui/{build => build.sh} | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename ui/{build => build.sh} (100%)
+
+diff --git a/ui/build b/ui/build.sh
+similarity index 100%
+rename from ui/build
+rename to ui/build.sh
+-- 
+2.40.1
+
