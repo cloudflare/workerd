@@ -18,6 +18,7 @@
 #include <workerd/api/streams.h>  // for api::StreamEncoding
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/inspector.h>
 #include <workerd/jsg/modules.h>
 #include <workerd/jsg/util.h>
 #include <workerd/io/cdp.capnp.h>
@@ -44,62 +45,9 @@
 #include <unistd.h>
 #endif
 
-namespace v8_inspector {
-  kj::String KJ_STRINGIFY(const v8_inspector::StringView& view) {
-    if (view.is8Bit()) {
-      auto bytes = kj::arrayPtr(view.characters8(), view.length());
-      for (auto b: bytes) {
-        if (b & 0x80) {
-          // Ugh, the bytes aren't just ASCII. We need to re-encode.
-          auto utf16 = kj::heapArray<char16_t>(bytes.size());
-          for (auto i: kj::indices(bytes)) {
-            utf16[i] = bytes[i];
-          }
-          return kj::decodeUtf16(utf16);
-        }
-      }
-
-      // Looks like it's all ASCII.
-      return kj::str(bytes.asChars());
-    } else {
-      return kj::decodeUtf16(kj::arrayPtr(
-          reinterpret_cast<const char16_t*>(view.characters16()), view.length()));
-    }
-  }
-}
-
 namespace workerd {
 
 namespace {
-
-class StringViewWithScratch: public v8_inspector::StringView {
-public:
-  StringViewWithScratch(v8_inspector::StringView text, kj::Array<char16_t>&& scratch)
-      : v8_inspector::StringView(text), scratch(kj::mv(scratch)) {}
-
-private:
-  kj::Array<char16_t> scratch;
-};
-
-StringViewWithScratch toStringView(kj::StringPtr text) {
-  bool isAscii = true;
-  for (char c: text) {
-    if (c & 0x80) {
-      isAscii = false;
-      break;
-    }
-  }
-
-  if (isAscii) {
-    return { v8_inspector::StringView(text.asBytes().begin(), text.size()), nullptr };
-  } else {
-    kj::Array<char16_t> scratch = kj::encodeUtf16(text);
-    return {
-      v8_inspector::StringView(reinterpret_cast<uint16_t*>(scratch.begin()), scratch.size()),
-      kj::mv(scratch)
-    };
-  }
-}
 
 void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   std::map<kj::StringPtr, kj::Vector<kj::StringPtr>> inMap;
@@ -179,19 +127,6 @@ kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value) {
 }
 
 namespace {
-// Inform the inspector of a problem not associated with any particular exception object.
-//
-// Passes `description` as the exception's detailed message, dummy values for everything else.
-void sendExceptionToInspector(jsg::Lock& js,
-                              v8_inspector::V8Inspector& inspector,
-                              kj::StringPtr description) {
-  inspector.exceptionThrown(js.v8Context(),
-                            v8_inspector::StringView(),
-                            v8::Local<v8::Value>(),
-                            toStringView(description),
-                            v8_inspector::StringView(),
-                            0, 0, nullptr, 0);
-}
 
 // Inform the inspector of an exception thrown.
 //
@@ -202,34 +137,7 @@ void sendExceptionToInspector(jsg::Lock& js,
                               UncaughtExceptionSource source,
                               const jsg::JsValue& exception,
                               jsg::JsMessage message) {
-  if (!message) {
-    // This exception didn't come with a Message. This can happen for exceptions delivered via
-    // v8::Promise::Catch(), or for exceptions which were tunneled through C++ promises. In the
-    // latter case, V8 will create a Message based on the current stack trace, but it won't be
-    // super meaningful.
-    message = jsg::JsMessage::create(js, jsg::JsValue(exception));
-  }
-
-  // TODO(cleanup): Move the inspector stuff into a utility within jsg to better
-  // encapsulate
-  KJ_ASSERT(message);
-  v8::Local<v8::Message> msg = message;
-
-  auto context = js.v8Context();
-
-  auto stackTrace = msg->GetStackTrace();
-
-  // The resource name is whatever we set in the Script ctor, e.g. "worker.js".
-  auto scriptResourceName = msg->GetScriptResourceName();
-
-  auto lineNumber = msg->GetLineNumber(context).FromMaybe(0);
-  auto startColumn = msg->GetStartColumn(context).FromMaybe(0);
-
-  // TODO(soon): EW-2636 Pass a real "script ID" as the last parameter instead of 0. I suspect this
-  //   has something to do with the incorrect links in the console when it logs uncaught exceptions.
-  inspector.exceptionThrown(context, toStringView(kj::str(source)), exception,
-      toStringView(kj::str(msg->Get())), toStringView(kj::str(scriptResourceName)),
-      lineNumber, startColumn, inspector.createStackTrace(stackTrace), 0);
+  jsg::sendExceptionToInspector(js, inspector, kj::str(source), exception, message);
 }
 
 void addExceptionToTrace(jsg::Lock& js,
@@ -291,7 +199,7 @@ void reportStartupError(
         // We want to extend just enough cpu time as is necessary to report the exception
         // to the inspector here. 10 milliseconds should be more than enough.
         auto limitScope = limitEnforcer.enterLoggingJs(js, maybeLimitError2);
-        sendExceptionToInspector(js, *i.get(), description);
+        jsg::sendExceptionToInspector(js, *i.get(), description);
         // When the inspector is active, we don't want to throw here because then the inspector
         // won't be able to connect and the developer will never know what happened.
       } else {
@@ -654,7 +562,8 @@ struct Worker::Isolate::Impl {
 
       // The V8Inspector implements the `console` object.
       KJ_IF_SOME(i, impl.inspector) {
-        i.get()->contextCreated(v8_inspector::V8ContextInfo(context, 1, toStringView("Worker")));
+        i.get()->contextCreated(v8_inspector::V8ContextInfo(context, 1,
+            jsg::toInspectorStringView("Worker")));
       }
 
       // We replace the default V8 console.log(), etc. methods, to give the worker access to
@@ -1252,7 +1161,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam, kj::StringPtr id,
     KJ_IF_SOME(i, isolate->impl->inspector) {
       if (!source.is<ModulesSource>()) {
         i.get()->contextCreated(v8_inspector::V8ContextInfo(context,
-            1, toStringView("Compiler")));
+            1, jsg::toInspectorStringView("Compiler")));
       }
     }
     KJ_DEFER({
@@ -1838,7 +1747,7 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
     js.withinHandleScope([&] {
       auto context = getContext();
       auto contextScope = js.enterContextScope(context);
-      sendExceptionToInspector(js, *i.get(), description);
+      jsg::sendExceptionToInspector(js, *i.get(), description);
     });
   }
 
@@ -2284,7 +2193,7 @@ public:
     kj::Maybe<kj::Exception> maybeLimitError;
     {
       auto limitScope = isolate.getLimitEnforcer().enterInspectorJs(*lock, maybeLimitError);
-      session.dispatchProtocolMessage(toStringView(message));
+      session.dispatchProtocolMessage(jsg::toInspectorStringView(message));
     }
 
     // Run microtasks in case the user made an async call.
@@ -2309,7 +2218,7 @@ public:
                 reinterpret_cast<const uint8_t*>("Worker"), 6)));
         {
           auto contextScope = lock->enterContextScope(dummyContext);
-          sendExceptionToInspector(*lock, inspector,
+          jsg::sendExceptionToInspector(*lock, inspector,
               jsg::extractTunneledExceptionDescription(limitError.getDescription()));
         }
         inspector.contextDestroyed(dummyContext);
