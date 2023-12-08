@@ -450,6 +450,19 @@ public:
   virtual kj::Maybe<const api::CryptoAlgorithm&> getCryptoAlgorithm(kj::StringPtr name) const {
     return kj::none;
   }
+
+  // Set the module fallback service callback, if any.
+  using ModuleFallbackCallback =
+      kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
+          jsg::Lock& js,
+          kj::StringPtr,
+          kj::Maybe<kj::String>,
+          jsg::CompilationObserver&,
+          jsg::ModuleRegistry::ResolveMethod);
+  virtual void setModuleFallbackCallback(
+      kj::Function<ModuleFallbackCallback>&& callback) const {
+    // By default does nothing.
+  }
 };
 
 enum class UncaughtExceptionSource {

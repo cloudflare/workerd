@@ -84,6 +84,24 @@ public:
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
     maybeLogger = kj::mv(logger);
   }
+
+  using ModuleFallbackCallback =
+      kj::Maybe<kj::OneOf<kj::String, jsg::ModuleRegistry::ModuleInfo>>(
+          jsg::Lock&,
+          kj::StringPtr,
+          kj::Maybe<kj::String>,
+          jsg::CompilationObserver&,
+          jsg::ModuleRegistry::ResolveMethod);
+  inline void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) {
+    maybeModuleFallbackCallback = kj::mv(callback);
+  }
+  inline kj::Maybe<kj::Function<ModuleFallbackCallback>&> tryGetModuleFallback() {
+    KJ_IF_SOME(moduleFallbackCallback, maybeModuleFallbackCallback) {
+      return moduleFallbackCallback;
+    }
+    return kj::none;
+  }
+
   inline void setAllowEval(kj::Badge<Lock>, bool allow) { evalAllowed = allow; }
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
@@ -149,6 +167,7 @@ private:
   bool asyncContextTrackingEnabled = false;
 
   kj::Maybe<kj::Function<Logger>> maybeLogger;
+  kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
 
   // FunctionTemplate used by Wrappable::attachOpaqueWrapper(). Just a constructor for an empty
   // object with 2 internal fields.

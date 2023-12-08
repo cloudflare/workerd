@@ -185,6 +185,16 @@ public:
                       v8::Local<v8::Object> target,
                       uint32_t ownerId) const;
 
+  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(
+      jsg::Lock& js,
+      config::Worker::Module::Reader conf,
+      jsg::CompilationObserver& observer,
+      CompatibilityFlags::Reader featureFlags);
+
+  using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
+  void setModuleFallbackCallback(
+       kj::Function<ModuleFallbackCallback>&& callback) const override;
+
 private:
   struct Impl;
   kj::Own<Impl> impl;
