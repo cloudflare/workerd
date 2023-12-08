@@ -3279,6 +3279,14 @@ kj::Maybe<uint16_t> Worker::Actor::getHibernationEventType() {
   return impl->hibernationEventType;
 }
 
+kj::Own<Worker::Actor> Worker::Actor::addRef() {
+  KJ_IF_SOME(t, tracker) {
+    return kj::addRef(*this).attach(t.get()->startRequest());
+  } else {
+    return kj::addRef(*this);
+  }
+}
+
 // =======================================================================================
 
 uint Worker::Isolate::getCurrentLoad() const {
