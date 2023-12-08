@@ -1,0 +1,58 @@
+load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@workerd//:build/wd_js_bundle.bzl", "wd_js_bundle")
+
+copy_file(
+    name = "pyodide.asm.wasm@rule",
+    src = "@pyodide//:pyodide/pyodide.asm.wasm",
+    out = "generated/pyodide.asm.wasm",
+)
+
+copy_file(
+    name = "python_stdlib.zip@rule",
+    src = "@pyodide//:pyodide/python_stdlib.zip",
+    out = "generated/python_stdlib.zip",
+)
+
+PRELUDE = """
+import { newWasmModule, monotonicDateNow } from "pyodide-internal:builtin_wrappers";
+
+function addEventListener(){}
+"""
+
+REPLACEMENTS = [
+    ["var _createPyodideModule", PRELUDE + "export const _createPyodideModule"],
+    ["globalThis._createPyodideModule = _createPyodideModule;", ""],
+    ["new WebAssembly.Module", "newWasmModule"],
+    ["Date.now", "monotonicDateNow"],
+]
+
+expand_template(
+    name = "pyodide.asm.js@rule",
+    out = "generated/pyodide.asm.js",
+    template = "@pyodide//:pyodide/pyodide.asm.js",
+    substitutions = dict(REPLACEMENTS),
+)
+
+wd_js_bundle(
+    name = "pyodide",
+    builtin_modules = glob(
+        [
+            "*.js",
+        ],
+    ),
+    import_name = "pyodide",
+    internal_data_modules = ["generated/python_stdlib.zip"],
+    internal_modules = [
+        "generated/pyodide.asm.js",
+    ] + glob([
+        "internal/*.js",
+    ]),
+    internal_wasm_modules = ["generated/pyodide.asm.wasm"],
+    schema_id = "0xbcc8f57c63814005",
+    deps = [
+        "pyodide.asm.js@rule",
+        "pyodide.asm.wasm@rule",
+        "python_stdlib.zip@rule",
+    ],
+)

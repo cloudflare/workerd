@@ -49,14 +49,20 @@ public:
       jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
       const jsg::TypeHandler<UnsafeEvalFunction>& handler);
 
+  jsg::JsValue newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src);
+
   JSG_RESOURCE_TYPE(UnsafeEval) {
     JSG_METHOD(eval);
     JSG_METHOD(newFunction);
     JSG_METHOD(newAsyncFunction);
+    JSG_METHOD(newWasmModule);
   }
 };
 
-#define EW_UNSAFE_ISOLATE_TYPES                      \
-  api::UnsafeEval
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval
 
-}  // namespace workerd::api
+template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
+  registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
+                                                 workerd::jsg::ModuleRegistry::Type::INTERNAL);
+}
+} // namespace workerd::api

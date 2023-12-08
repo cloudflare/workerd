@@ -190,6 +190,14 @@ inline server::config::Worker::Reader buildConfig(
   auto modules = config.initModules(1);
   modules[0].setName(mainModuleName);
   modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
+
+  // Initialise autogates with an empty config. TODO(later): allow TestFixture to accept autogate
+  // states and pass them in here.
+  //
+  // This needs to happen here because `buildConfig` is called early in the construction of
+  // `TestFixture`.
+  util::Autogate::initAutogate({});
+
   return config;
 }
 

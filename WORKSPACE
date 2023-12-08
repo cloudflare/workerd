@@ -8,10 +8,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file"
 
 http_archive(
     name = "bazel_skylib",
-    sha256 = "f7be3474d42aae265405a592bb7da8e171919d74c16f082a5457840f06054728",
+    sha256 = "cd55a062e763b9349921f0f5db8c3933288dc8ba4f76dd9416aac68acee3cb94",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.2.1/bazel-skylib-1.2.1.tar.gz",
-        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.2.1/bazel-skylib-1.2.1.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
     ],
 )
 
@@ -86,6 +86,14 @@ http_archive(
     sha256 = "d6be6a559745a79be191bc63c1190015c702a30bacad10028d32b479644a0785",
     type = "zip",
     url = "https://github.com/ada-url/ada/releases/download/v2.7.0/singleheader.zip",
+)
+
+http_archive(
+    name = "pyodide",
+    sha256 = "d1d910bd994df3f37a5a91744534c2f70a1d124d641cf6a1cbe2df6da31f9c11",
+    type = "tar.bz2",
+    urls = ["https://github.com/pyodide/pyodide/releases/download/0.25.0a1/pyodide-core-0.25.0a1.tar.bz2"],
+    build_file = "//:build/BUILD.pyodide",
 )
 
 # ========================================================================================

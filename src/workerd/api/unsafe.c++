@@ -11,26 +11,21 @@ static constexpr auto ASYNC_FN_ARG_CLOSE = ") {"_kjc;
 static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
 
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
-  return name.map([](kj::String& str) {
-    return str.asPtr();
-  }).orDefault(def);
+  return name.map([](kj::String& str) { return str.asPtr(); }).orDefault(def);
 }
-}  // namespace
+} // namespace
 
-jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script,
-                              jsg::Optional<kj::String> name) {
+jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script, jsg::Optional<kj::String> name) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
   auto compiled = jsg::NonModuleScript::compile(script, js, getName(name, EVAL_STR));
   return jsg::JsValue(compiled.runAndReturn(js.v8Context()));
 }
 
-UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(
-    jsg::Lock& js,
-    jsg::JsString script,
-    jsg::Optional<kj::String> name,
-    jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
-    const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
+UnsafeEval::UnsafeEvalFunction
+UnsafeEval::newFunction(jsg::Lock& js, jsg::JsString script, jsg::Optional<kj::String> name,
+                        jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
+                        const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
 
@@ -42,19 +37,17 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(
     return v8::Local<v8::String>(arg.getHandle(js));
   };
 
-  auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(
-      js.v8Context(), &source, argNames.size(), argNames.begin(), 0, nullptr));
+  auto fn = jsg::check(v8::ScriptCompiler::CompileFunction(js.v8Context(), &source, argNames.size(),
+                                                           argNames.begin(), 0, nullptr));
   fn->SetName(nameStr);
 
   return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, fn));
 }
 
-UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(
-    jsg::Lock& js,
-    jsg::JsString script,
-    jsg::Optional<kj::String> name,
-    jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
-    const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
+UnsafeEval::UnsafeEvalFunction
+UnsafeEval::newAsyncFunction(jsg::Lock& js, jsg::JsString script, jsg::Optional<kj::String> name,
+                             jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
+                             const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
 
@@ -73,9 +66,7 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(
   // function so that the result of running the compiled script is a reference
   // to the compiled function.
 
-  auto prepared = v8::String::Concat(js.v8Isolate,
-                                     js.strIntern(ASYNC_FN_PREFIX),
-                                     nameStr);
+  auto prepared = v8::String::Concat(js.v8Isolate, js.strIntern(ASYNC_FN_PREFIX), nameStr);
   prepared = v8::String::Concat(js.v8Isolate, prepared, js.strIntern(ASYNC_FN_ARG_OPEN));
 
   for (auto& arg : args) {
@@ -99,4 +90,13 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(
   return KJ_ASSERT_NONNULL(handler.tryUnwrap(js, result.As<v8::Function>()));
 }
 
-}  // namespace workerd::api
+jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src) {
+  js.setAllowEval(true);
+  KJ_DEFER(js.setAllowEval(false));
+
+  auto maybeWasmModule = v8::WasmModuleObject::Compile(
+      js.v8Isolate, v8::MemorySpan<const uint8_t>(src.begin(), src.size()));
+  return jsg::JsValue(jsg::check(maybeWasmModule));
+}
+
+} // namespace workerd::api
