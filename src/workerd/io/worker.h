@@ -75,7 +75,6 @@ public:
   class Script;
   class Isolate;
   class Api;
-  using ApiIsolate [[deprecated("Use Workerd::Api")]] = Api;
 
   class ValidationErrorReporter {
   public:
@@ -278,7 +277,6 @@ public:
   const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
 
   const Api& getApi() const { return *api; }
-  [[deprecated("use getApi()")]] const Api& getApiIsolate() const { return *api; }
 
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
