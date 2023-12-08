@@ -25,6 +25,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/util/perfetto-tracing.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 namespace capnp { class HttpOverCapnpFactory; }
 

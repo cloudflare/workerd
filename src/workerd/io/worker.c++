@@ -114,18 +114,6 @@ const capnp::JsonCodec& getCdpJsonCodec() {
 
 // =======================================================================================
 
-kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value) {
-  switch (value) {
-    case UncaughtExceptionSource::INTERNAL:         return "Uncaught"_kj;
-    case UncaughtExceptionSource::INTERNAL_ASYNC:   return "Uncaught (in promise)"_kj;
-    case UncaughtExceptionSource::ASYNC_TASK:       return "Uncaught (async)"_kj;
-    case UncaughtExceptionSource::REQUEST_HANDLER:  return "Uncaught (in response)"_kj;
-    case UncaughtExceptionSource::TRACE_HANDLER:    return "Uncaught (in trace)"_kj;
-    case UncaughtExceptionSource::ALARM_HANDLER:    return "Uncaught (in alarm)"_kj;
-  };
-  KJ_UNREACHABLE;
-}
-
 namespace {
 
 // Inform the inspector of an exception thrown.

@@ -21,6 +21,7 @@
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/util/weak-refs.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 namespace v8 { class Isolate; }
 
@@ -464,19 +465,6 @@ public:
     // By default does nothing.
   }
 };
-
-enum class UncaughtExceptionSource {
-  INTERNAL,
-  INTERNAL_ASYNC,
-  // We catch, log, and rethrow some exceptions at these intermediate levels, in case higher-level
-  // handlers fail.
-
-  ASYNC_TASK,
-  REQUEST_HANDLER,
-  TRACE_HANDLER,
-  ALARM_HANDLER,
-};
-kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value);
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
 // execute on one thread at a time. Each thread must therefore lock the Worker while executing
