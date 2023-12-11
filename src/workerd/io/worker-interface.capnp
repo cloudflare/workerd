@@ -12,6 +12,7 @@ $Cxx.namespace("workerd::rpc");
 using import "/capnp/compat/http-over-capnp.capnp".HttpMethod;
 using import "/capnp/compat/http-over-capnp.capnp".HttpService;
 using import "/workerd/io/outcome.capnp".EventOutcome;
+using import "/workerd/io/script-version.capnp".ScriptVersion;
 
 struct Trace @0x8e8d911203762d34 {
   logs @0 :List(Log);
@@ -39,7 +40,7 @@ struct Trace @0x8e8d911203762d34 {
 
   outcome @2 :EventOutcome;
   scriptName @4 :Text;
-  scriptVersionId @19 :Text;
+  scriptVersion @19 :ScriptVersion;
 
   eventTimestampNs @5 :Int64;
 

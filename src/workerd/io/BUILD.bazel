@@ -141,6 +141,7 @@ wd_cc_capnp_library(
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
+        ":script_version_capnp",
         ":trimmed-supported-compatibility-date",
         "@capnp-cpp//src/capnp/compat:http-over-capnp_capnp",
     ],
@@ -149,6 +150,12 @@ wd_cc_capnp_library(
 wd_cc_capnp_library(
     name = "outcome_capnp",
     srcs = ["outcome.capnp"],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_capnp_library(
+    name = "script_version_capnp",
+    srcs = ["script-version.capnp"],
     visibility = ["//visibility:public"],
 )
 
