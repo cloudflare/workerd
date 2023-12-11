@@ -178,6 +178,9 @@ private:
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
+  // Aborts all actors in this server except those in namespaces marked with `preventEviction`.
+  void abortAllActors();
+
   // Can only be called in the link stage.
   Service& lookupService(config::ServiceDesignator::Reader designator, kj::String errorContext);
 

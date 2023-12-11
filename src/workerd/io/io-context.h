@@ -639,6 +639,10 @@ public:
     return getIoChannelFactory().getColoLocalActor(channel, id, kj::mv(parentSpan));
   }
 
+  void abortAllActors() {
+    return getIoChannelFactory().abortAllActors();
+  }
+
   // Get an HttpClient to use for Cache API subrequests.
   kj::Own<CacheClient> getCacheClient();
 

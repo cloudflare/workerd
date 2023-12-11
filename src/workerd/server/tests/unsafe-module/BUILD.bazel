@@ -1,0 +1,10 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    src = "unsafe-module-test.wd-test",
+    data = glob([
+        "*.js",
+        "*.capnp",
+    ]),
+    args = ["--experimental"],
+)
