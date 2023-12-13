@@ -8,6 +8,9 @@
 #include <kj/debug.h>
 
 namespace workerd {
+namespace {
+constexpr char HEX_DIGITS[] = "0123456789abcdef";
+}  // namespace
 
 kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   kj::byte buffer[16];
@@ -19,8 +22,6 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   }
   buffer[6] = kj::byte((buffer[6] & 0x0f) | 0x40);
   buffer[8] = kj::byte((buffer[8] & 0x3f) | 0x80);
-
-  static constexpr char HEX_DIGITS[] = "0123456789abcdef";
 
 #define HEX(b) (char)(HEX_DIGITS[(b >> 4) & 0xf]), (char)(HEX_DIGITS[b & 0xf])
 
@@ -66,6 +67,49 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   ));
 
 #undef HEX
+}
+
+kj::String UUIDToString(uint64_t upper, uint64_t lower) {
+  // clang-format off
+  return kj::str(
+    HEX_DIGITS[(upper >> 60u) & 0xf],
+    HEX_DIGITS[(upper >> 56u) & 0xf],
+    HEX_DIGITS[(upper >> 52u) & 0xf],
+    HEX_DIGITS[(upper >> 48u) & 0xf],
+    HEX_DIGITS[(upper >> 44u) & 0xf],
+    HEX_DIGITS[(upper >> 40u) & 0xf],
+    HEX_DIGITS[(upper >> 36u) & 0xf],
+    HEX_DIGITS[(upper >> 32u) & 0xf],
+    '-',
+    HEX_DIGITS[(upper >> 28u) & 0xf],
+    HEX_DIGITS[(upper >> 24u) & 0xf],
+    HEX_DIGITS[(upper >> 20u) & 0xf],
+    HEX_DIGITS[(upper >> 16u) & 0xf],
+    '-',
+    HEX_DIGITS[(upper >> 12u) & 0xf],
+    HEX_DIGITS[(upper >>  8u) & 0xf],
+    HEX_DIGITS[(upper >>  4u) & 0xf],
+    HEX_DIGITS[(upper >>  0u) & 0xf],
+    '-',
+    HEX_DIGITS[(lower >> 60u) & 0xf],
+    HEX_DIGITS[(lower >> 56u) & 0xf],
+    HEX_DIGITS[(lower >> 52u) & 0xf],
+    HEX_DIGITS[(lower >> 48u) & 0xf],
+    '-',
+    HEX_DIGITS[(lower >> 44u) & 0xf],
+    HEX_DIGITS[(lower >> 40u) & 0xf],
+    HEX_DIGITS[(lower >> 36u) & 0xf],
+    HEX_DIGITS[(lower >> 32u) & 0xf],
+    HEX_DIGITS[(lower >> 28u) & 0xf],
+    HEX_DIGITS[(lower >> 24u) & 0xf],
+    HEX_DIGITS[(lower >> 20u) & 0xf],
+    HEX_DIGITS[(lower >> 16u) & 0xf],
+    HEX_DIGITS[(lower >> 12u) & 0xf],
+    HEX_DIGITS[(lower >>  8u) & 0xf],
+    HEX_DIGITS[(lower >>  4u) & 0xf],
+    HEX_DIGITS[(lower >>  0u) & 0xf]
+  );
+  // clang-format on
 }
 
 }

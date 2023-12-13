@@ -47,6 +47,7 @@ private:
 
 struct ScriptVersion {
   explicit ScriptVersion(workerd::ScriptVersion::Reader version);
+  ScriptVersion(const ScriptVersion&);
 
   jsg::Optional<kj::String> id;
   jsg::Optional<kj::String> tag;
@@ -109,7 +110,7 @@ private:
   kj::Array<jsg::Ref<TraceException>> exceptions;
   kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents;
   kj::Maybe<kj::String> scriptName;
-  kj::Maybe<kj::Own<workerd::ScriptVersion::Reader>> scriptVersion;
+  kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
   kj::String outcome;
