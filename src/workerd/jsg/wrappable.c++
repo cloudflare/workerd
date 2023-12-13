@@ -10,7 +10,9 @@
 #include <v8-cppgc.h>
 #include <cppgc/allocation.h>
 #include <cppgc/garbage-collected.h>
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h>
+#endif
 
 namespace workerd::jsg {
 
@@ -171,6 +173,7 @@ void HeapTracer::clearFreelistedShims() {
 
 kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
   KJ_IF_SOME(shim, cppgcShim) {
+#if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
     // There's a possibility that the CppgcShim has already been found to be unreachable by a GC
     // pass, but has not actually been destroyed yet. For some reason, cppgc likes to delay the
     // calling of actual destructors. However, in ASAN builds, cppgc will poison the memory in the
@@ -188,6 +191,7 @@ kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
     // point at this state object, not to the `CppgcShim` itself. However, this approach would
     // require extra heap allocation for everyone, just to satisfy ASAN, which seems undesirable.
     ASAN_UNPOISON_MEMORY_REGION(&shim, sizeof(shim));
+#endif
 
     auto& tracer = HeapTracer::getTracer(isolate);
     auto result = kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<CppgcShim::Active>()).wrappable);
