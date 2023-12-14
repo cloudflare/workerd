@@ -14,4 +14,10 @@ namespace workerd {
 // source, it is safe to assume that the output of this function is unique.
 kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource);
 
+// Convert a UUID represented by two 64-bit integers to a string in the 8-4-4-4-12 format i.e.
+// a dash-separated hex string in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
+// The `upper` parameter represents the most signficant bits and `lower` the least significant bits
+// of the UUID value.
+kj::String UUIDToString(uint64_t upper, uint64_t lower);
+
 }

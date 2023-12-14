@@ -8,10 +8,15 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd");
 
 struct ScriptVersion {
-  id @0 :Text;
-  # An ID that should be used to uniquely identify this version.
-  tag @1 :Text;
+  id :group {
+    upper @0 :UInt64;
+    # Most significant bits of the UUID.
+    lower @1 :UInt64;
+    # Least significant bits of the UUID.
+  }
+  # A UUID identifying this version.
+  tag @2 :Text;
   # An optional tag to associate with this version.
-  message @2 :Text;
+  message @3 :Text;
   # An optional message that can be used to describe this version.
 }

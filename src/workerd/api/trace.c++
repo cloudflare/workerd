@@ -12,6 +12,7 @@
 #include <capnp/schema.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/uuid.h>
 
 namespace workerd::api {
 
@@ -80,8 +81,8 @@ kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> getTraceDiagnosticChannelEvents
   };
 }
 
-kj::Maybe<kj::Own<workerd::ScriptVersion::Reader>> getTraceScriptVersion(const Trace& trace) {
-  return trace.scriptVersion.map([](const auto& version) { return capnp::clone(*version); });
+kj::Maybe<ScriptVersion> getTraceScriptVersion(const Trace& trace) {
+  return trace.scriptVersion.map([](const auto& version) { return ScriptVersion(*version); });
 }
 
 double getTraceExceptionTimestamp(const Trace::Exception& ex) {
@@ -219,7 +220,7 @@ kj::Maybe<kj::StringPtr> TraceItem::getScriptName() {
 }
 
 jsg::Optional<ScriptVersion> TraceItem::getScriptVersion() {
-  return scriptVersion.map([](auto& version) { return ScriptVersion(*version); });
+  return scriptVersion;
 }
 
 jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
@@ -422,10 +423,12 @@ double TraceDiagnosticChannelEvent::getTimestamp() { return timestamp; }
 
 ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
     : id{[&]() -> kj::Maybe<kj::String> {
-        if (version.hasId()) {
-          return kj::str(version.getId());
+        auto upper = version.getId().getUpper();
+        auto lower = version.getId().getLower();
+        if (upper == 0 && lower == 0) {
+          return kj::none;
         }
-        return kj::none;
+        return UUIDToString(upper, lower);
       }()},
       tag{[&]() -> kj::Maybe<kj::String> {
         if (version.hasTag()) {
@@ -439,6 +442,11 @@ ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
         }
         return kj::none;
       }()} {}
+
+ScriptVersion::ScriptVersion(const ScriptVersion& other)
+    : id{other.id.map([](const auto& id) { return kj::str(id); })},
+      tag{other.tag.map([](const auto& tag) { return kj::str(tag); })},
+      message{other.message.map([](const auto& message) { return kj::str(message); })} {}
 
 TraceItem::CustomEventInfo::CustomEventInfo(const Trace& trace,
                                             const Trace::CustomEventInfo& eventInfo)
