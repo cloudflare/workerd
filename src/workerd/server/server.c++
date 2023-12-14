@@ -1303,17 +1303,18 @@ public:
     AlarmScheduler& alarmScheduler;
   };
   using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
+  using AbortActorsCallback = kj::Function<void()>;
 
   WorkerService(ThreadContext& threadContext, kj::Own<const Worker> worker,
                 kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
                 kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypointsParam,
                 const kj::HashMap<kj::String, ActorConfig>& actorClasses,
-                LinkCallback linkCallback)
+                LinkCallback linkCallback, AbortActorsCallback abortActorsCallback)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
-        waitUntilTasks(*this) {
+        waitUntilTasks(*this), abortActorsCallback(kj::mv(abortActorsCallback)) {
 
     namedEntrypoints.reserve(namedEntrypointsParam.size());
     for (auto& ep: namedEntrypointsParam) {
@@ -1603,6 +1604,10 @@ public:
       friend class ActorContainer;
     };
 
+    void abortAll() {
+      actors.clear();
+    }
+
   private:
     WorkerService& service;
     kj::StringPtr className;
@@ -1874,6 +1879,7 @@ private:
   kj::HashMap<kj::String, EntrypointService> namedEntrypoints;
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
+  AbortActorsCallback abortActorsCallback;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
   public:
@@ -2042,6 +2048,10 @@ private:
         "Actor namespace configuration was invalid.");
     KJ_REQUIRE(ns.getConfig().is<Ephemeral>());  // should have been verified earlier
     return ns.getActorChannel(kj::str(id));
+  }
+
+  void abortAllActors() override {
+    abortActorsCallback();
   }
 
   // ---------------------------------------------------------------------------
@@ -2410,6 +2420,25 @@ static kj::Maybe<WorkerdApi::Global> createBinding(
 }
 
 uint startInspector(kj::StringPtr inspectorAddress, Server::InspectorServiceIsolateRegistrar& registrar);
+
+void Server::abortAllActors() {
+  for (auto& service: services) {
+    if (WorkerService* worker = dynamic_cast<WorkerService*>(&*service.value)) {
+      for (auto& [className, ns] : worker->getActorNamespaces()) {
+        bool isEvictable = true;
+        KJ_SWITCH_ONEOF(ns->getConfig()) {
+          KJ_CASE_ONEOF(c, Durable) {
+            isEvictable = c.isEvictable;
+          }
+          KJ_CASE_ONEOF(c, Ephemeral) {
+            isEvictable = c.isEvictable;
+          }
+        }
+        if (isEvictable) ns->abortAll();
+      }
+    }
+  }
+}
 
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -2808,7 +2837,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name, config::Worker::
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
                                  kj::mv(errorReporter.defaultEntrypoint),
                                  kj::mv(errorReporter.namedEntrypoints), localActorConfigs,
-                                 kj::mv(linkCallback));
+                                 kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors));
 }
 
 // =======================================================================================

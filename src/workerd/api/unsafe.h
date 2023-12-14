@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/io/io-context.h>
 
 namespace workerd::api {
 
@@ -59,7 +60,23 @@ public:
   }
 };
 
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval
+class UnsafeModule: public jsg::Object {
+public:
+  jsg::Promise<void> abortAllDurableObjects(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(UnsafeModule) {
+    JSG_METHOD(abortAllDurableObjects);
+  }
+};
+
+template <class Registry>
+void registerUnsafeModule(Registry& registry) {
+  registry.template addBuiltinModule<UnsafeModule>("workerd:unsafe",
+    workerd::jsg::ModuleRegistry::Type::BUILTIN);
+}
+
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, \
+  api::UnsafeModule
 
 template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",

@@ -6,6 +6,7 @@
 
 #include "actor-id.h"
 #include <kj/string.h>
+#include <kj/debug.h>
 #include <workerd/io/trace.h>
 
 namespace kj { class HttpClient; }
@@ -147,6 +148,11 @@ public:
   // Get an actor stub from the given namespace for the actor with the given name.
   virtual kj::Own<ActorChannel> getColoLocalActor(uint channel, kj::StringPtr id,
       SpanParent parentSpan) = 0;
+
+  // Aborts all actors except those in namespaces marked with `preventEviction`.
+  virtual void abortAllActors() {
+    KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
+  }
 };
 
 } // namespace workerd

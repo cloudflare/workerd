@@ -9,6 +9,7 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
+#include <workerd/api/unsafe.h>
 #include <workerd/io/worker.h>
 #include <cloudflare/cloudflare.capnp.h>
 
@@ -21,6 +22,9 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerUnsafeModules(registry, featureFlags);
   if (featureFlags.getRttiApi()) {
     registerRTTIModule(registry);
+  }
+  if (featureFlags.getUnsafeModule()) {
+    registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);

@@ -99,4 +99,11 @@ jsg::JsValue UnsafeEval::newWasmModule(jsg::Lock& js, kj::Array<kj::byte> src) {
   return jsg::JsValue(jsg::check(maybeWasmModule));
 }
 
+jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
+  auto& context = IoContext::current();
+  // Abort all actors asynchronously to avoid recursively taking isolate lock in actor destructor
+  auto promise = kj::evalLater([&] () { return context.abortAllActors(); });
+  return context.awaitIo(js, kj::mv(promise));
+}
+
 } // namespace workerd::api

@@ -346,4 +346,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("vectorize_query_original");
   # Vectorize query option change to allow returning of metadata to be optional. Accompanying this:
   # a return format change to move away from a nested object with the VectorizeVector.
+
+  unsafeModule @38 :Bool
+      $compatEnableFlag("unsafe_module")
+      $experimental;
+  # Enables the `workerd:unsafe` module for performing dangerous operations from JavaScript.
+  # Intended for local development and testing use cases. Currently just supports aborting all
+  # Durable Objects running in a `workerd` process.
 }
