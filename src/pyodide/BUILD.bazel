@@ -36,11 +36,9 @@ expand_template(
 
 wd_js_bundle(
     name = "pyodide",
-    builtin_modules = glob(
-        [
-            "*.js",
-        ],
-    ),
+    builtin_modules = [
+        "python.js",
+    ],
     import_name = "pyodide",
     internal_data_modules = ["generated/python_stdlib.zip"],
     internal_modules = [
