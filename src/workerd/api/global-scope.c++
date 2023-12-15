@@ -22,6 +22,7 @@
 #include <workerd/api/util.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/use-perfetto-categories.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 namespace workerd::api {
 

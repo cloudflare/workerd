@@ -9,6 +9,7 @@
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
+#include <workerd/util/uncaught-exception-source.h>
 #include <map>
 
 namespace workerd {

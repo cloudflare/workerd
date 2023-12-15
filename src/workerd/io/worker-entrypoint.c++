@@ -11,6 +11,7 @@
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
+#include <workerd/util/uncaught-exception-source.h>
 #include <kj/compat/http.h>
 
 namespace workerd {

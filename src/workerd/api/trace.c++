@@ -13,6 +13,7 @@
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/own-util.h>
 #include <workerd/util/uuid.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 namespace workerd::api {
 

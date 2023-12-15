@@ -21,6 +21,7 @@
 #include <workerd/io/actor-cache.h>  // because we can't forward-declare ActorCache::SharedLru.
 #include <workerd/util/weak-refs.h>
 #include <workerd/util/thread-scopes.h>
+#include <workerd/util/uncaught-exception-source.h>
 
 namespace v8 { class Isolate; }
 
@@ -74,7 +75,6 @@ public:
   class Script;
   class Isolate;
   class Api;
-  using ApiIsolate [[deprecated("Use Workerd::Api")]] = Api;
 
   class ValidationErrorReporter {
   public:
@@ -105,10 +105,11 @@ public:
   ~Worker() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Worker);
 
-  const Script& getScript() const { return *script; }
-  const Isolate& getIsolate() const;
+  inline const Script& getScript() const { return *script; }
 
-  const WorkerObserver& getMetrics() const { return *metrics; }
+  inline const Isolate& getIsolate() const;
+
+  inline const WorkerObserver& getMetrics() const { return *metrics; }
 
   class Lock;
 
@@ -180,9 +181,8 @@ public:
   KJ_DISALLOW_COPY_AND_MOVE(Script);
 
   inline kj::StringPtr getId() const { return id; }
-  const Isolate& getIsolate() const { return *isolate; }
-
-  bool isModular() const { return modular; }
+  inline const Isolate& getIsolate() const { return *isolate; }
+  inline bool isModular() const { return modular; }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -264,7 +264,7 @@ public:
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
 
-  const IsolateObserver& getMetrics() const { return *metrics; }
+  inline const IsolateObserver& getMetrics() const { return *metrics; }
 
   inline kj::StringPtr getId() const { return id; }
 
@@ -274,10 +274,9 @@ public:
       IsolateObserver::StartType startType, bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none) const;
 
-  const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
+  inline const IsolateLimitEnforcer& getLimitEnforcer() const { return *limitEnforcer; }
 
-  const Api& getApi() const { return *api; }
-  [[deprecated("use getApi()")]] const Api& getApiIsolate() const { return *api; }
+  inline const Api& getApi() const { return *api; }
 
   // Returns the number of threads currently blocked trying to lock this isolate's mutex (using
   // takeAsyncLock()).
@@ -315,7 +314,7 @@ public:
       kj::HttpHeaderId contentEncodingHeaderId,
       RequestObserver& requestMetrics) const;
 
-  kj::Maybe<kj::StringPtr> getFeatureFlagsForFl() const {
+  inline kj::Maybe<kj::StringPtr> getFeatureFlagsForFl() const {
     return featureFlagsForFl;
   }
 
@@ -464,19 +463,6 @@ public:
     // By default does nothing.
   }
 };
-
-enum class UncaughtExceptionSource {
-  INTERNAL,
-  INTERNAL_ASYNC,
-  // We catch, log, and rethrow some exceptions at these intermediate levels, in case higher-level
-  // handlers fail.
-
-  ASYNC_TASK,
-  REQUEST_HANDLER,
-  TRACE_HANDLER,
-  ALARM_HANDLER,
-};
-kj::StringPtr KJ_STRINGIFY(UncaughtExceptionSource value);
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
 // execute on one thread at a time. Each thread must therefore lock the Worker while executing
@@ -726,7 +712,7 @@ public:
   // Only needs to be called when allocating a HibernationManager!
   kj::Maybe<uint16_t> getHibernationEventType();
 
-  const Worker& getWorker() { return *worker; }
+  inline const Worker& getWorker() { return *worker; }
 
   void assertCanSetAlarm();
   kj::Promise<void> makeAlarmTaskForPreview(kj::Date scheduledTime);
@@ -743,13 +729,8 @@ public:
   // cancelling it).
   kj::Promise<WorkerInterface::ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
 
-  kj::Own<Worker::Actor> addRef() {
-    KJ_IF_SOME(t, tracker) {
-      return kj::addRef(*this).attach(t.get()->startRequest());
-    } else {
-      return kj::addRef(*this);
-    }
-  }
+  kj::Own<Worker::Actor> addRef();
+
 private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);
 
