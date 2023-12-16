@@ -519,6 +519,8 @@ public:
   jsg::Promise<ScheduledResult> scheduled(jsg::Lock& js, jsg::Optional<ScheduledOptions> options);
 
   JSG_RESOURCE_TYPE(Fetcher, CompatibilityFlags::Reader flags) {
+    // WARNING: New JSG_METHODs on Fetcher should be gated via compatibility flag to prevent
+    // objects that use WorkerRpc from breaking. See `worker-rpc.h` for more detail.
     JSG_METHOD(fetch);
     JSG_METHOD(connect);
 

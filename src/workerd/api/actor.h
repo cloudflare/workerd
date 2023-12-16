@@ -12,6 +12,7 @@
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/http-over-capnp.h>
 #include <workerd/api/http.h>
+#include <workerd/api/worker-rpc.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/io/actor-id.h>
 
@@ -27,7 +28,7 @@ public:
   ColoLocalActorNamespace(uint channel)
     : channel(channel) {}
 
-  jsg::Ref<Fetcher> get(kj::String actorId);
+  jsg::Ref<WorkerRpc> get(kj::String actorId);
 
   JSG_RESOURCE_TYPE(ColoLocalActorNamespace) {
     JSG_METHOD(get);
@@ -70,19 +71,19 @@ private:
 };
 
 // Stub object used to send messages to a remote durable object.
-class DurableObject: public Fetcher {
+class DurableObject final: public WorkerRpc {
 
 public:
   DurableObject(jsg::Ref<DurableObjectId> id, IoOwn<OutgoingFactory> outgoingFactory,
                 RequiresHostAndProtocol requiresHost)
-    : Fetcher(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
+    : WorkerRpc(kj::mv(outgoingFactory), requiresHost, true /* isInHouse */),
       id(kj::mv(id)) {}
 
   jsg::Ref<DurableObjectId> getId() { return id.addRef(); };
   jsg::Optional<kj::StringPtr> getName() { return id->getName(); }
 
   JSG_RESOURCE_TYPE(DurableObject) {
-    JSG_INHERIT(Fetcher);
+    JSG_INHERIT(WorkerRpc);
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
