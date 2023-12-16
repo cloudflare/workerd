@@ -353,4 +353,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the `workerd:unsafe` module for performing dangerous operations from JavaScript.
   # Intended for local development and testing use cases. Currently just supports aborting all
   # Durable Objects running in a `workerd` process.
+
+  jsRpc @39 :Bool
+      $compatEnableFlag("js_rpc")
+      $experimental;
+  # Enables JS RPC on the server side.
+  # The client stub is currently guarded by the experimental flag, however, we don't want to let
+  # experimental clients call JS methods over RPC if the Worker receiving the request hasn't
+  # explicitly exposed its methods to RPC.
 }

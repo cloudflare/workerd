@@ -405,7 +405,7 @@ public:
     v8::Local<v8::Promise> wrapSimplePromise(jsg::Promise<jsg::Value> promise) override {
       return jsgIsolate.wrapper->wrap(v8Context(), kj::none, kj::mv(promise));
     }
-    jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Promise> promise) override {
+    jsg::Promise<jsg::Value> toPromise(v8::Local<v8::Value> promise) override {
       return jsgIsolate.wrapper->template unwrap<jsg::Promise<jsg::Value>>(
           v8Isolate->GetCurrentContext(), promise, jsg::TypeErrorContext::other());
     }
