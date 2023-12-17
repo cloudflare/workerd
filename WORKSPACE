@@ -210,6 +210,7 @@ cc_library(
         "-w",
         "-Dverbose=-1",
     ] + select({
+        "@platforms//os:linux": [ "-Wno-implicit-function-declaration" ],
         "@platforms//os:macos": [ "-Wno-implicit-function-declaration" ],
         "//conditions:default": [],
     }),
