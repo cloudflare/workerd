@@ -78,7 +78,7 @@ To build `workerd`, you need:
   * LLD 15+ (e.g. package `lld-15`).
   * `python3`, `python3-distutils`, and `tcl8.6`
 * On macOS:
-  * Xcode 14.3+ installation (available on macOS 13 and higher)
+  * Xcode 15 installation (available on macOS 13 and higher)
   * Homebrew installed `tcl-tk` package (provides Tcl 8.6)
 * On Windows:
   * Install [App Installer](https://learn.microsoft.com/en-us/windows/package-manager/winget/#install-winget)
