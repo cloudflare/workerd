@@ -60,6 +60,8 @@ jobs:
         # libc++, but this appears to cause errors so they are also being explicitly installed.
         # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
         # to use APT much otherwise.
+        # TODO(cleanup): Upgrade this to LLVM 16 as soon as it is available on the latest Ubuntu
+        # LTS release. Debian includes LLVM 16 since the Bookworm 12.4 point release.
         run: |
           export DEBIAN_FRONTEND=noninteractive
           wget https://apt.llvm.org/llvm.sh
@@ -71,16 +73,16 @@ jobs:
           sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-15/bin/llvm-symbolizer%" .bazelrc
       - name: Setup macOS
         if: matrix.os.name == 'macOS'
-        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 15
+        # TODO: We want to symbolize stacks for crashes on CI. Xcode is currently based on LLVM 16
         # and the macos-13 image has llvm@15 installed:
         # https://github.com/actions/runner-images/blob/main/images/macos/macos-13-Readme.md
         #
         # Not enabled because symbolication does not work on workerd macOS builds yet and running
         # llvm-symbolizer in the currently broken state causes some tests to time out on the
         # runner.
-        # Use Xcode 14.3.1 for now, upgrade once 15.1 is available on the runner image.
+        # Use latest available Xcode version – runner still defaults to 14.3.1.
         run: |
-          sudo xcode-select -s "/Applications/Xcode_14.3.1.app"
+          sudo xcode-select -s "/Applications/Xcode_15.1.app"
           # export LLVM_SYMBOLIZER=$(brew --prefix llvm@15)/bin/llvm-symbolizer
           # sed -i -e "s%llvm-symbolizer%${LLVM_SYMBOLIZER}%" .bazelrc
       - name: Setup Windows
