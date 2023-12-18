@@ -7,6 +7,11 @@ def kj_test(
     native.cc_test(
         name = test_name,
         srcs = [src],
+        linkstatic = select({
+          "@platforms//os:linux": 0,
+          "@platforms//os:windows": 0,
+          "//conditions:default": 1,
+        }),
         deps = [
             "@capnp-cpp//src/kj:kj-test",
         ] + select({

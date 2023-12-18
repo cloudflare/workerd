@@ -33,10 +33,7 @@ selects.config_setting_group(
 # current malloc in use
 wd_cc_library(
     name = "malloc",
-    deps = select({
-        ":really_use_tcmalloc": ["@com_google_tcmalloc//tcmalloc"],
-        "//conditions:default": ["@bazel_tools//tools/cpp:malloc"],
-    }),
+    deps = ["@bazel_tools//tools/cpp:malloc"],
     visibility = ["//visibility:public"],
 )
 
