@@ -410,6 +410,20 @@ namespace workerd::jsg {
     registry.template registerStaticConstant<NAME, decltype(Self::name)>(Self::name); \
   } while (false)
 
+// This works the same as JSG_STATIC_CONSTANT but allows us to provide an alias to an arbitrary c++
+// constant instead. For example:
+//     struct Interface {
+//       static Interface constructor()
+//       JSG_RESOURCE_TYPE {
+//         JSG_STATIC_CONSTANT_NAMED(FOO_BAR, SOME_SYSTEM_CONSTANT);
+//       }
+//     };
+#define JSG_STATIC_CONSTANT_NAMED(name, constant) \
+  do { \
+    static const char NAME[] = #name; \
+    registry.template registerStaticConstant<NAME, decltype(constant)>(constant); \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare that this type inherits from another type,
 // which must also have a JSG_RESOURCE_TYPE block. This type must singly, non-virtually inherit
 // from the specified type. (Multiple inheritance and virtual inheritance will not work since we
