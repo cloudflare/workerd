@@ -67,8 +67,12 @@ public:
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed() {
     return closedPromise;
   }
-  jsg::MemoizedIdentity<jsg::Promise<void>>& getOpened() {
-    return openedPromise;
+  jsg::MemoizedIdentity<jsg::Promise<void>>& getOpened(jsg::Lock& js) {
+    if (maybeOpenedPromise == kj::none) {
+      maybeOpenedPromise = jsg::MemoizedIdentity<jsg::Promise<void>>(
+          openedPromise.whenResolved(js));
+    }
+    return KJ_ASSERT_NONNULL(maybeOpenedPromise);
   }
 
   // Closes the socket connection.
@@ -126,7 +130,8 @@ private:
   bool isDefaultFetchPort;
   // This fulfiller is used to resolve the `openedPromise` below.
   jsg::Promise<void>::Resolver openedResolver;
-  jsg::MemoizedIdentity<jsg::Promise<void>> openedPromise;
+  jsg::Promise<void> openedPromise;
+  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> maybeOpenedPromise;
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
