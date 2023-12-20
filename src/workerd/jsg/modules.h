@@ -344,15 +344,6 @@ public:
   using ModuleCallback =
       kj::Function<kj::Maybe<ModuleInfo>(Lock&, ResolveMethod, kj::Maybe<const kj::Path&>&)>;
 
-  // This version of the signature is currently used in the internal repo. Remove it
-  // once the internal repo has been updated.
-  [[deprecated("Use the overload that takes a referrer")]]
-  kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
-                                 const kj::Path& specifier,
-                                 ResolveOption option = ResolveOption::DEFAULT) {
-    return resolve(js, specifier, kj::none, option);
-  }
-
   virtual kj::Maybe<ModuleInfo&> resolve(jsg::Lock& js,
                                          const kj::Path& specifier,
                                          kj::Maybe<const kj::Path&> referrer = kj::none,
