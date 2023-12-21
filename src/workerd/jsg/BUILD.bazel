@@ -19,6 +19,8 @@ wd_cc_library(
             "exception.h",
             "observer.h",
             "rtti.h",
+            "url-test-corpus-failures.h",
+            "url-test-corpus-success.h",
         ],
     ) + ["//src/workerd/util:autogate.h"],
     visibility = ["//visibility:public"],
@@ -39,7 +41,9 @@ wd_cc_library(
 wd_cc_library(
     name = "url",
     srcs = ["url.c++"],
-    hdrs = ["url.h"],
+    hdrs = [
+        "url.h",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",
@@ -125,6 +129,7 @@ wd_cc_library(
         "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
+        "url-test.c++",
     ],
 )]
 
@@ -132,7 +137,6 @@ wd_cc_library(
 # smaller.
 kj_test(
     src = "macro-meta-test.c++",
-    tags = ["no-arm64"],
     deps = [
         ":macro-meta",
     ],
@@ -140,12 +144,28 @@ kj_test(
 
 kj_test(
     src = "rtti-test.c++",
-    tags = ["no-arm64"],
     deps = [
         ":rtti",
         ":rtti_test_capnp",
         # todo: move text encoding out
         "@capnp-cpp//src/capnp:capnpc",
+    ],
+)
+
+wd_cc_library(
+    name = "url-test-corpus",
+    hdrs = [
+        "url-test-corpus-failures.h",
+        "url-test-corpus-success.h",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+kj_test(
+    src = "url-test.c++",
+    deps = [
+        ":jsg",
+        ":url-test-corpus",
     ],
 )
 
