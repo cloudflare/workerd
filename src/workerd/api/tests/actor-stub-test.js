@@ -7,7 +7,9 @@
 import * as assert from 'node:assert'
 
 export class DurableObjectExample {
-  constructor() {}
+  constructor() {
+    this.check = true;
+  }
 
   async fetch(request) {
     return new Response("OK");
@@ -16,6 +18,13 @@ export class DurableObjectExample {
   async foo() {
     // Server side impl of foo.
     return "foo from remote";
+  }
+
+  thisCheck() {
+    if (this.check !== true) {
+      throw new Error('incorrect this within rpc function call');
+    }
+    return true;
   }
 }
 
@@ -37,6 +46,11 @@ export default {
       }
     } catch(e) {
       throw new Error(`Expected ${expected} but got ${e}`);
+    }
+
+    // Let's check to make sure the `this` in the called function is correct
+    if ((await obj.thisCheck()) !== true) {
+      throw new Error('Checking `this` in the DO stub failed');
     }
 
     // Let's also look at the keys of our stub.

@@ -111,13 +111,17 @@ public:
       JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
           "The receiving Worker does not allow its methods to be called over RPC.");
 
+      auto& handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
+                                         "Failed to get handler to worker.");
+      auto handle = handler.self.getHandle(lock);
+
       // We will try to get the function, if we can't we'll throw an error to the client.
-      auto fn = tryGetFn(lock, ctx, methodName);
+      auto fn = tryGetFn(lock, ctx, handle, methodName);
 
       // We have a function, so let's call it and serialize the result for RPC.
       // If the function returns a promise we will wait for the promise to finish so we can
       // serialize the result.
-      return ctx.awaitJs(js, js.toPromise(invokeFn(js, fn, serializedArgs))
+      return ctx.awaitJs(js, js.toPromise(invokeFn(js, fn, handle, serializedArgs))
           .then(js, ctx.addFunctor([callContext](jsg::Lock& js, jsg::Value value) mutable {
         auto result = serializeV8(js, jsg::JsValue(value.getHandle(js)));
         auto builder = callContext.initResults(capnp::MessageSize { result.size() / 8 + 8, 0 });
@@ -146,12 +150,8 @@ private:
   inline v8::Local<v8::Function> tryGetFn(
       Worker::Lock& lock,
       IoContext& ctx,
+      v8::Local<v8::Object> handle,
       kj::StringPtr methodName) {
-
-    auto& handler = KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, ctx.getActor()),
-        "Failed to get handler to worker.");
-
-    auto handle = handler.self.getHandle(lock);
     auto methodStr = jsg::v8StrIntern(lock.getIsolate(), methodName);
     auto fnHandle = jsg::check(handle->Get(lock.getContext(), methodStr));
 
@@ -174,6 +174,7 @@ private:
   v8::Local<v8::Value> invokeFn(
       jsg::Lock& js,
       v8::Local<v8::Function> fn,
+      v8::Local<v8::Object> thisArg,
       kj::ArrayPtr<const kj::byte> serializedArgs) {
     // We received arguments from the client, deserialize them back to JS.
     if (serializedArgs.size() > 0) {
@@ -185,9 +186,9 @@ private:
       for (size_t i = 0; i < args.size(); ++i) {
         arguments[i] = args.get(js, i);
       }
-      return jsg::check(fn->Call(js.v8Context(), fn, args.size(), arguments.begin()));
+      return jsg::check(fn->Call(js.v8Context(), thisArg, args.size(), arguments.begin()));
     } else {
-      return jsg::check(fn->Call(js.v8Context(), fn, 0, nullptr));
+      return jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr));
     }
   };
 
