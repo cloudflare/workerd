@@ -1729,7 +1729,8 @@ ImportAsymmetricResult importEllipticRaw(SubtleCrypto::ImportKeyData keyData, in
 
 }  // namespace
 
-kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk) {
+kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyDataJwk,
+                                    kj::StringPtr normalizedName) {
   if (curveId == NID_ED25519 || curveId == NID_X25519) {
     auto evpId = curveId == NID_X25519 ? EVP_PKEY_X25519 : EVP_PKEY_ED25519;
     auto curveName = curveId == NID_X25519 ? "X25519" : "Ed25519";
@@ -1782,22 +1783,25 @@ kj::Own<EVP_PKEY> ellipticJwkReader(int curveId, SubtleCrypto::JsonWebKey&& keyD
       "Elliptic curve \"jwk\" key import requires a JSON Web Key with Key Type parameter "
       "\"kty\" (\"", keyDataJwk.kty, "\") equal to \"EC\".");
 
-  KJ_IF_SOME(alg, keyDataJwk.alg) {
-    // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
-    // importKey().
-    static std::map<kj::StringPtr, int> ecdsaAlgorithms {
-      {"ES256", NID_X9_62_prime256v1},
-      {"ES384", NID_secp384r1},
-      {"ES512", NID_secp521r1},
-    };
+  if (normalizedName == "ECDSA") {
+    KJ_IF_SOME(alg, keyDataJwk.alg) {
+      // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
+      // importKey().
+      static std::map<kj::StringPtr, int> ecdsaAlgorithms {
+        {"ES256", NID_X9_62_prime256v1},
+        {"ES384", NID_secp384r1},
+        {"ES512", NID_secp521r1},
+      };
 
-    auto iter = ecdsaAlgorithms.find(alg);
-    JSG_REQUIRE(iter != ecdsaAlgorithms.end(), DOMNotSupportedError,
-        "Unrecognized or unimplemented algorithm \"", alg,
-        "\" listed in JSON Web Key Algorithm parameter.");
+      auto iter = ecdsaAlgorithms.find(alg);
+      JSG_REQUIRE(iter != ecdsaAlgorithms.end(), DOMNotSupportedError,
+          "Unrecognized or unimplemented algorithm \"", alg,
+          "\" listed in JSON Web Key Algorithm parameter.");
 
-    JSG_REQUIRE(iter->second == curveId, DOMDataError,
-        "JSON Web Key Algorithm parameter \"alg\" (\"", alg, "\") does not match requested curve.");
+      JSG_REQUIRE(iter->second == curveId, DOMDataError,
+          "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
+          "\") does not match requested curve.");
+    }
   }
 
   auto ecKey = OSSLCALL_OWN(EC_KEY, EC_KEY_new_by_curve_name(curveId), DOMOperationError,
@@ -1863,8 +1867,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdsa(
       return importAsymmetric(
           js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
-          [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-        return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
+          [curveId = curveId, normalizedName = kj::str(normalizedName)]
+          (SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
+        return ellipticJwkReader(curveId, kj::mv(keyDataJwk), normalizedName);
       }, CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
       return importEllipticRaw(kj::mv(keyData), curveId, normalizedName, keyUsages,
@@ -1919,8 +1924,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEcdh(
       return importAsymmetric(
           js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
           // Verbose lambda capture needed because: https://bugs.llvm.org/show_bug.cgi?id=35984
-          [curveId = curveId](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-        return ellipticJwkReader(curveId, kj::mv(keyDataJwk));
+          [curveId = curveId, normalizedName = kj::str(normalizedName)]
+          (SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
+        return ellipticJwkReader(curveId, kj::mv(keyDataJwk), normalizedName);
       }, CryptoKeyUsageSet::derivationKeyMask());
     } else {
       // The usage set is required to be empty for public ECDH keys, including raw keys.
@@ -2274,8 +2280,9 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importEddsa(
     if (format != "raw") {
       return importAsymmetric(
           js, format, kj::mv(keyData), normalizedName, extractable, keyUsages,
-          [nid](SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
-        return ellipticJwkReader(nid, kj::mv(keyDataJwk));
+          [nid, normalizedName = kj::str(normalizedName)]
+          (SubtleCrypto::JsonWebKey keyDataJwk) -> kj::Own<EVP_PKEY> {
+        return ellipticJwkReader(nid, kj::mv(keyDataJwk), normalizedName);
       }, normalizedName == "X25519" ? CryptoKeyUsageSet::derivationKeyMask() :
          CryptoKeyUsageSet::sign() | CryptoKeyUsageSet::verify());
     } else {
