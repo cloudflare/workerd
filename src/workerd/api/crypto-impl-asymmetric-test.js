@@ -70,3 +70,20 @@ export const publicExponent_type_test = {
     assert.ok(key.publicKey.algorithm.publicExponent[Symbol.toStringTag] == "Uint8Array");
   }
 }
+
+export const ecdhJwkTest = {
+  async test() {
+    const publicJwk = {
+      kty: 'EC',
+      crv: 'P-256',
+      alg: 'THIS CAN BE ANYTHING',
+      x: 'Ze2loSV3wrroKUN_4zhwGhCqo3Xhu1td4QjeQ5wIVR0',
+      y: 'HlLtdXARY_f55A3fnzQbPcm6hgr34Mp8p-nuzQCE0Zw',
+    }
+
+    // The import should succeed with no errors.
+    // Refs: https://github.com/cloudflare/workerd/issues/1403
+    await crypto.subtle.importKey('jwk', publicJwk,
+                                  { name: 'ECDH', namedCurve: 'P-256' }, true, []);
+  }
+};
