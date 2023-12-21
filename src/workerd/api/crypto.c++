@@ -611,12 +611,23 @@ jsg::Promise<SubtleCrypto::ExportKeyData> SubtleCrypto::exportKey(
     jsg::Lock& js, kj::String format, const CryptoKey& key) {
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, key.getAlgorithmName());
 
-  return js.evalNow([&] {
+  if (!key.getExtractable()) {
     // TODO(someday): Throw a NotSupportedError? The Web Crypto API spec says InvalidAccessError,
     //   but Web IDL says that's deprecated.
-    JSG_REQUIRE(key.getExtractable(), DOMInvalidAccessError,
-        "Attempt to export non-extractable ", key.getAlgorithmName(), " key.");
+    return js.rejectedPromise<SubtleCrypto::ExportKeyData>(
+        KJ_EXCEPTION(FAILED,
+            kj::str("jsg.DOMException(InvalidAccessError): Attempt to export non-extractable ",
+                    key.getAlgorithmName(), " key.")));
+  }
 
+  // The typical case is for the key export to happen fully synchronously using the
+  // key.impl->exportKey(...) call. Some key impls (such as the secret service impl
+  // will export the key data asynchronously)
+  KJ_IF_SOME(promise, key.impl->tryExportKeyAsync(js, format)) {
+    return kj::mv(promise);
+  }
+
+  return js.evalNow([&] {
     return key.impl->exportKey(format);
   });
 }

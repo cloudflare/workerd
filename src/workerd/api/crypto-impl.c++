@@ -10,6 +10,7 @@
 #include <openssl/ec.h>
 #include <openssl/rsa.h>
 #include <openssl/crypto.h>
+#include <kj/async-io.h>
 
 namespace workerd::api {
 namespace {
@@ -208,6 +209,106 @@ bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
 
 ZeroOnFree::~ZeroOnFree() noexcept(false) {
   OPENSSL_cleanse(inner.begin(), inner.size());
+}
+
+// ======================================================================================
+
+namespace {
+constexpr auto SECRET = "secret"_kjc;
+
+class SecretStoreCryptoKeyImpl final: public CryptoKey::Impl {
+public:
+  SecretStoreCryptoKeyImpl(uint channel, kj::StringPtr id, bool exportable, uint32_t ownerId)
+      : CryptoKey::Impl(exportable, CryptoKeyUsageSet()),
+        channel(channel),
+        id(kj::str(id)),
+        ownerId(ownerId),
+        headerTable(headerTableBuilder.build()) {
+
+  }
+
+  kj::StringPtr getAlgorithmName() const override {
+    return SECRET;
+  }
+
+  CryptoKey::AlgorithmVariant getAlgorithm(jsg::Lock& js) const override {
+    return CryptoKey::KeyAlgorithm {
+      .name = SECRET,
+    };
+  }
+
+  bool equals(const CryptoKey::Impl& other) const override final {
+    // We ignore the actual key data here and instead check to ensure that the
+    // two instances refer to the same secret service designator and secret id.
+    KJ_IF_SOME(otherImpl, kj::dynamicDowncastIfAvailable<const SecretStoreCryptoKeyImpl>(other)) {
+      return otherImpl.channel == channel && otherImpl.id == id;
+    }
+    return false;
+  }
+
+  kj::Maybe<jsg::Promise<SubtleCrypto::ExportKeyData>> tryExportKeyAsync(
+      jsg::Lock& js,
+      kj::StringPtr format) const override {
+    if (!IoContext::hasCurrent()) {
+      return js.rejectedPromise<SubtleCrypto::ExportKeyData>(KJ_EXCEPTION(FAILED,
+          "jsg.DOMException(InvalidAccessError): Unable to export secret data "
+          "outside of the context of a request"));
+    }
+    auto& context = IoContext::current();
+
+    kj::HttpHeaders headers(*headerTable);
+
+    auto client = context.getHttpClient(channel, true, kj::none, "get secret"_kjc);
+    auto request = client->request(kj::HttpMethod::GET, id, headers, kj::none);
+
+    struct Results {
+      uint statusCode;
+      kj::Array<kj::byte> payload;
+    };
+
+    auto payloadPromise = request.response.then([](kj::HttpClient::Response&& response) {
+      return response.body->readAllBytes().then(
+          [statusCode=response.statusCode](kj::Array<kj::byte> payload) {
+        return Results {
+          .statusCode = statusCode,
+          .payload = kj::mv(payload),
+        };
+      }).attach(kj::mv(response.body));
+    }).attach(kj::mv(client));
+
+    return context.awaitIo(js, kj::mv(payloadPromise)).then(js,
+        context.addFunctor([](jsg::Lock& js, Results&& results)
+            -> jsg::Promise<SubtleCrypto::ExportKeyData> {
+      if (results.statusCode == 200) {
+        return js.resolvedPromise<SubtleCrypto::ExportKeyData>(kj::mv(results.payload));
+      } else {
+        KJ_LOG(ERROR, "Failed to load secret from store", results.payload.asChars());
+        return js.rejectedPromise<SubtleCrypto::ExportKeyData>(KJ_EXCEPTION(FAILED,
+            "jsg.DOMException(NotFoundError): Secret key data could not be exported."));
+      }
+    }), [](jsg::Lock& js, auto&& exception) -> jsg::Promise<SubtleCrypto::ExportKeyData> {
+      KJ_LOG(ERROR, "Failed to load secret from store", exception.getHandle(js));
+      return js.rejectedPromise<SubtleCrypto::ExportKeyData>(KJ_EXCEPTION(FAILED,
+          "jsg.DOMException(NotFoundError): Secret key data could not be exported."));
+    });
+  }
+
+private:
+  uint channel;
+  kj::String id;
+  uint32_t ownerId KJ_UNUSED; // Unused for now
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  kj::Own<kj::HttpHeaderTable> headerTable;
+};
+}  // namespace
+
+jsg::Ref<CryptoKey> newSecretStoreCryptoKey(
+    uint channel,
+    kj::StringPtr id,
+    bool exportable,
+    uint32_t ownerId) {
+  return jsg::alloc<CryptoKey>(kj::heap<SecretStoreCryptoKeyImpl>(
+      channel, id, exportable, ownerId));
 }
 
 }  // namespace workerd::api
