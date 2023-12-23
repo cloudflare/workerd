@@ -10,6 +10,7 @@
 #include <openssl/ec.h>
 #include <openssl/rsa.h>
 #include <openssl/crypto.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 namespace {
@@ -208,6 +209,15 @@ bool CryptoKey::Impl::equals(const kj::Array<kj::byte>& other) const {
 
 ZeroOnFree::~ZeroOnFree() noexcept(false) {
   OPENSSL_cleanse(inner.begin(), inner.size());
+}
+
+void checkPbkdfLimits(jsg::Lock& js, size_t iterations) {
+  auto& limits = Worker::Isolate::from(js).getLimitEnforcer();
+  KJ_IF_SOME(max, limits.checkPbkdfIterations(js, iterations)) {
+    JSG_FAIL_REQUIRE(DOMNotSupportedError,
+        kj::str("Pbkdf2 failed: iteration counts above ", max ," are not supported (requested ",
+                iterations, ")."));
+  }
 }
 
 }  // namespace workerd::api

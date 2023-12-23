@@ -264,6 +264,9 @@ public:
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
 
+  // Get the current Worker::Isolate from the current jsg::Lock
+  static const Isolate& from(jsg::Lock& js);
+
   inline const IsolateObserver& getMetrics() const { return *metrics; }
 
   inline kj::StringPtr getId() const { return id; }

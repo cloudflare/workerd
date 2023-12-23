@@ -38,12 +38,12 @@ private:
         "PBKDF2 requires a positive iteration count (requested ", iterations, ").");
 
     // Note: The user could DoS us by selecting a very high iteration count. Our dead man's switch
-    //   would kick in, resulting in a process restart. We guard against this by limiting the maximum
-    //   iteration count a user can select -- this is an intentional non-conformity. Another approach
-    //   might be to fork OpenSSL's PKCS5_PBKDF2_HMAC() function and insert a check for
-    //   v8::Isolate::IsExecutionTerminating() in the loop, but for now a hard cap seems wisest.
-    JSG_REQUIRE(iterations <= 100000, DOMNotSupportedError,
-        "PBKDF2 iteration counts above 100000 are not supported (requested ", iterations, ").");
+    // would kick in, resulting in a process restart. We guard against this by limiting the
+    // maximum iteration count a user can select -- this is an intentional non-conformity.
+    // Another approach might be to fork OpenSSL's PKCS5_PBKDF2_HMAC() function and insert a
+    // check for v8::Isolate::IsExecutionTerminating() in the loop, but for now a hard cap seems
+    // wisest.
+    checkPbkdfLimits(js, iterations);
 
     auto output = kj::heapArray<kj::byte>(length / 8);
     OSSLCALL(PKCS5_PBKDF2_HMAC(keyData.asPtr().asChars().begin(), keyData.size(),
