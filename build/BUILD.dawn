@@ -1,10 +1,19 @@
 load("@py_deps//:requirements.bzl", "requirement")
 load("@rules_python//python:defs.bzl", "py_binary")
 
-COPTS = [
+COPTS_UNIX = [
     "-fno-rtti",
     "-fno-exceptions",
 ]
+
+# TODO(debloat): Disable exceptions and RTTI for dawn, this greatly improves binary size. Note that
+# these flags are not supported by clang-cl and cause warnings there – explore enabling the
+# corresponding flags '/GX-', '/GR-' on Windows after confirming they are safe.
+COPTS = select({
+        "@platforms//os:osx": COPTS_UNIX,
+        "@platforms//os:linux": COPTS_UNIX,
+        "//conditions:default": [],
+})
 
 py_binary(
     name = "dawn_json_generator",
