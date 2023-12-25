@@ -1,7 +1,6 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
-load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 
 wd_cc_library(
     name = "perfetto",
@@ -26,18 +25,12 @@ wd_cc_library(
 
 wd_cc_library(
     name = "util",
-    srcs = glob(
-        ["*.c++"],
-        exclude = [
-            "*-test.c++",
-            "capnp-mock.c++",
-            "symbolizer.c++",
-            "sqlite*.c++",
-            "thread-scopes.c++",
-            "autogate.c++",
-            "perfetto-tracing.c++",
-        ],
-    ),
+    srcs = [
+        "mimetype.c++",
+        "stream-utils.c++",
+        "uuid.c++",
+        "wait-list.c++",
+    ],
     hdrs = glob(
         ["*.h"],
         exclude = [
@@ -48,6 +41,7 @@ wd_cc_library(
             "sentry.h",
             "autogate.h",
             "perfetto-tracing.h",
+            "use-perfetto-categories.h",
         ],
     ),
     visibility = ["//visibility:public"],

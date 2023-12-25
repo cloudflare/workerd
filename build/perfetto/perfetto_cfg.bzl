@@ -41,7 +41,7 @@ PERFETTO_CONFIG = struct(
         version_header = ["//:cc_perfetto_version_header"],
 
         # Target exposing platform-specific functionality for base. This is
-        # overriden in Google internal builds.
+        # overridden in Google internal builds.
         base_platform = ["//:perfetto_base_default_platform"],
 
         zlib = ["@perfetto_dep_zlib//:zlib"],
@@ -109,7 +109,7 @@ PERFETTO_CONFIG = struct(
     # to rules like cc_binary. Prefixed rules (e.g. perfetto_cc_binary) will
     # look into this struct before falling back on native.cc_binary().
     # This field is completely optional, the embedder can omit the whole
-    # |rule_overrides| or invidivual keys. They are assigned to None or noop
+    # |rule_overrides| or individual keys. They are assigned to None or noop
     # actions here just for documentation purposes.
     rule_overrides = struct(
         proto_library = None,
@@ -132,8 +132,8 @@ PERFETTO_CONFIG = struct(
         jspb_proto_library = None,
     ),
 
-    # The default copts which we use to compile C++ code.
-    default_copts = [
-        "-std=c++17",
-    ]
+    # The default copts used to compile perfetto. The cfg example sets the C++ standard here, but
+    # for now we shouldn't need any perfetto-specific compiler options, should already be set up
+    # properly through .bazelrc.
+    default_copts = [],
 )
