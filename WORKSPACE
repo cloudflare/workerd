@@ -126,24 +126,32 @@ git_repository(
     },
 )
 
-git_repository(
+http_archive(
     name = "vulkan_utility_libraries",
     build_file = "//:build/BUILD.vulkan_utility_libraries",
-    commit = "5b3147a535e28a48ae760efacdf97b296d9e8c73",
-    remote = "https://github.com/KhronosGroup/Vulkan-Utility-Libraries.git",
+    sha256 = "11a51175598c84ba171fd82ba7f1a109ee4133338684d84f6b3c4bbe9ea52a8d",
+    strip_prefix = "KhronosGroup-Vulkan-Utility-Libraries-5b3147a",
+    type = "tgz",
+    url = "https://github.com/KhronosGroup/Vulkan-Utility-Libraries/tarball/5b3147a535e28a48ae760efacdf97b296d9e8c73",
+
 )
 
-git_repository(
+http_archive(
     name = "vulkan_headers",
     build_file = "//:build/BUILD.vulkan_headers",
-    commit = "aff5071d4ee6215c60a91d8d983cad91bb25fb57",
-    remote = "https://github.com/KhronosGroup/Vulkan-Headers.git",
+    sha256 = "559d4bff13acddb58e08bdd862aa6f7fccfda9a97d1799a7f8592e847c723a03",
+    strip_prefix = "KhronosGroup-Vulkan-Headers-aff5071",
+    type = "tgz",
+    url = "https://github.com/KhronosGroup/Vulkan-Headers/tarball/aff5071d4ee6215c60a91d8d983cad91bb25fb57",
+
 )
 
-git_repository(
+http_archive(
     name = "spirv_headers",
-    commit = "88bc5e321c2839707df8b1ab534e243e00744177",
-    remote = "https://github.com/KhronosGroup/SPIRV-Headers.git",
+    sha256 = "c1ef22607cc34489933d987f55b59ad5b3ef98b1f22fc16b2b603de23950aca6",
+    strip_prefix = "KhronosGroup-SPIRV-Headers-88bc5e3",
+    type = "tgz",
+    url = "https://github.com/KhronosGroup/SPIRV-Headers/tarball/88bc5e321c2839707df8b1ab534e243e00744177",
 )
 
 # ========================================================================================
@@ -412,22 +420,27 @@ new_git_repository(
     shallow_since = "1697047535 +0000",
 )
 
-git_repository(
+http_archive(
     name = "perfetto",
-    commit = "d136f355bb32288122dd2a0273e4fab280654d3a",
-    remote = "https://android.googlesource.com/platform/external/perfetto.git",
     patches = [
         "//:patches/perfetto/0001-Rename-ui-build-to-ui-build.sh-to-allow-bazel-build-.patch",
     ],
     patch_args = ["-p1"],
     repo_mapping = {"@perfetto_dep_zlib" : "@zlib"},
+    sha256 = "241cbaddc9ff4e5d1de2d28497fef40b5510e9ca60808815bf4944d0d2f026db",
+    strip_prefix = "perfetto-39.0",
+    type = "tgz",
+    url = "https://github.com/google/perfetto/archive/refs/tags/v39.0.tar.gz",
+
 )
 
 # For use with perfetto
-new_git_repository(
+http_archive(
     name = "com_google_protobuf",
-    commit = "6a59a2ad1f61d9696092f79b6d74368b4d7970a3",
-    remote = "https://chromium.googlesource.com/external/github.com/google/protobuf"
+    strip_prefix = "protobuf-3.9.0",
+    type = "tgz",
+    sha256 = "2ee9dcec820352671eb83e081295ba43f7a4157181dad549024d7070d079cf65",
+    url = "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.9.0.tar.gz",
 )
 
 # For use with perfetto
