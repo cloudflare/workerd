@@ -1126,9 +1126,11 @@ void IoContext::runImpl(Runnable& runnable, bool takePendingEvent,
 }
 
 static constexpr auto kAsyncIoErrorMessage =
-    "Some functionality, such as asynchronous I/O, timeouts, and "
-    "generating random values, can only be performed while handling a "
-    "request.";
+    "Disallowed operation called within global scope. Asynchronous I/O "
+    "(ex: fetch() or connect()), setting a timeout, and generating random "
+    "values are not allowed within global scope. To fix this error, perform this "
+    "operation within a handler. "
+    "https://developers.cloudflare.com/workers/runtime-apis/handlers/";
 
 IoContext& IoContext::current() {
   if (threadLocalRequest == nullptr) {
