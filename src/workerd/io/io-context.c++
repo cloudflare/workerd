@@ -5,7 +5,6 @@
 #include "io-context.h"
 #include <workerd/io/io-gate.h>
 #include <workerd/io/worker.h>
-#include <kj/threadlocal.h>
 #include <kj/debug.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/sentry.h>
@@ -14,8 +13,8 @@
 
 namespace workerd {
 
-KJ_THREADLOCAL_PTR(IoContext) threadLocalRequest = nullptr;
-KJ_THREADLOCAL_PTR(void) threadId = nullptr;
+static thread_local IoContext* threadLocalRequest = nullptr;
+static thread_local void* threadId = nullptr;
 
 static void* getThreadId() {
   if (threadId == nullptr) threadId = new int;
