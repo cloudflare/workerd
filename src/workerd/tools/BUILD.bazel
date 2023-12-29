@@ -20,6 +20,10 @@ wd_cc_library(
         "//src/workerd/jsg:rtti",
         "@capnp-cpp//src/capnp",
     ],
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )
 
 api_encoder_src = "api-encoder.c++"

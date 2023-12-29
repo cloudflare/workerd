@@ -10,7 +10,7 @@ wd_cc_library(
     deps = [
         "@capnp-cpp//src/kj"
     ] + select({
-        "@platforms//os:windows": ["@workerd-v8//:v8"],
+        "@platforms//os:windows": [],
         "//conditions:default": ["@perfetto//:libperfetto_client_experimental"],
     }),
     defines = select({
