@@ -14,7 +14,8 @@ struct ScriptVersion {
     lower @1 :UInt64;
     # Least significant bits of the UUID.
   }
-  # A UUID identifying this version.
+  # An optional UUID identifying this version. A null UUID value (where both upper and lower values
+  # are 0) can be used to indicate the absence of an ID.
   tag @2 :Text;
   # An optional tag to associate with this version.
   message @3 :Text;
