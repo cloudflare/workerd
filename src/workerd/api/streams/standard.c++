@@ -262,7 +262,15 @@ template <typename Controller>
 void ReadableLockImpl<Controller>::onClose(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(locked, ReaderLocked) {
-      maybeResolvePromise(js, locked.getClosedFulfiller());
+      try {
+        maybeResolvePromise(js, locked.getClosedFulfiller());
+      } catch (jsg::JsExceptionThrown&) {
+        // Resolving the promise could end up throwing an exception in some cases,
+        // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
+        // we are already in the process of closing the stream and an error at this
+        // point is not recoverable. Log and move on.
+        LOG_NOSENTRY(ERROR, "Error resolving ReadableStream reader closed promise");
+      };
     }
     KJ_CASE_ONEOF(locked, ReadableLockImpl::PipeLocked) {
       state.template init<Unlocked>();
@@ -276,7 +284,15 @@ template <typename Controller>
 void ReadableLockImpl<Controller>::onError(jsg::Lock& js, v8::Local<v8::Value> reason) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(locked, ReaderLocked) {
-      maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
+      try {
+        maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
+      } catch (jsg::JsExceptionThrown&) {
+        // Rejecting the promise could end up throwing an exception in some cases,
+        // causing a jsg::JsExceptionThrown to be thrown. At this point, however,
+        // we are already in the process of closing the stream and an error at this
+        // point is not recoverable. Log and move on.
+        LOG_NOSENTRY(ERROR, "Error rejecting ReadableStream reader closed promise");
+      }
     }
     KJ_CASE_ONEOF(locked, ReadableLockImpl::PipeLocked) {
       state.template init<Unlocked>();
