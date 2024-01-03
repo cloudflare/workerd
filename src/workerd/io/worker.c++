@@ -226,23 +226,8 @@ void reportStartupError(
           message.addJsStackTrace(js, lines);
           auto trace = kj::strArray(lines, "; ");
           auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
-          if (description == "jsg.SyntaxError: \\8 and \\9 are not allowed in template strings.") {
-            // HACK: There are two scripts in production that throw this at startup and we can't get
-            //   in contact with the owners to fix them. It should be impossible to upload new
-            //   scripts with this problem as the validator will block it. We'll return normally
-            //   here, which means that script startup will appear to succeed, but all requests to
-            //   the isolate will throw the original exception, via `permanentException`. This
-            //   avoids log spam and avoids reloading the script from scratch on every request.
-            //
-            // TODO(soon): We add logging here to see if this hack is still necessary or if it can
-            // be removed. Adding this additional logging should be temporary! If we hit this log in
-            // sentry even once, then we'll keep the hack, otherwise we can likely safely remove it.
-            JSG_WARN_ONCE("reportStartupError() customer-specific SyntaxError hack "
-                          "is still relevant.");
-          } else {
-            KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
-            KJ_FAIL_REQUIRE("script startup threw exception");
-          }
+          KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
+          KJ_FAIL_REQUIRE("script startup threw exception");
         }
       });
     } else {
