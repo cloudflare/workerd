@@ -15,7 +15,7 @@ copy_file(
 )
 
 PRELUDE = """
-import { newWasmModule, monotonicDateNow } from "pyodide-internal:builtin_wrappers";
+import { newWasmModule, monotonicDateNow, wasmInstantiate } from "pyodide-internal:builtin_wrappers";
 
 function addEventListener(){}
 """
@@ -24,6 +24,7 @@ REPLACEMENTS = [
     ["var _createPyodideModule", PRELUDE + "export const _createPyodideModule"],
     ["globalThis._createPyodideModule = _createPyodideModule;", ""],
     ["new WebAssembly.Module", "newWasmModule"],
+    ["WebAssembly.instantiate", "wasmInstantiate"],
     ["Date.now", "monotonicDateNow"],
 ]
 

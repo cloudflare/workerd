@@ -79,7 +79,7 @@ function checkCallee() {
 
 /**
  * Helper function for checkCallee, returns `true` if the callee is
- * `convertJsFunctionToWasm` in `pyodide.asm.js`, `false` if not. This will set
+ * `convertJsFunctionToWasm` or `loadModule` in `pyodide.asm.js`, `false` if not. This will set
  * the `stack` field in the error so we can read back the result there.
  */
 function prepareStackTrace(_error, stack) {
@@ -94,12 +94,21 @@ function prepareStackTrace(_error, stack) {
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
-    return (
-      funcName === "convertJsFunctionToWasm" &&
-      fileName === "pyodide-internal:generated/pyodide.asm"
-    );
+    if (fileName !== "pyodide-internal:generated/pyodide.asm") {
+      return false;
+    }
+    return ["loadModule", "convertJsFunctionToWasm"].includes(funcName);
   } catch (e) {
     console.warn(e);
     return false;
   }
+}
+
+export async function wasmInstantiate(module, imports) {
+  if (!(module instanceof WebAssembly.Module)) {
+    checkCallee();
+    module = UnsafeEval.newWasmModule(module);
+  }
+  const instance = new WebAssembly.Instance(module, imports);
+  return {module, instance};
 }
