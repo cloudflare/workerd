@@ -137,11 +137,6 @@ public:
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
-  // TODO(cleanup): This is currently used in exactly one place in the internal
-  // repo. Once that is updated to use workerd::WarnAboutIsolateLockScope directly
-  // this alias can be removed.
-  using WarnAboutIsolateLockScope = workerd::WarnAboutIsolateLockScope;
-
 private:
   kj::Own<const Script> script;
 
