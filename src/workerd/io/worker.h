@@ -27,14 +27,6 @@ namespace v8 { class Isolate; }
 
 namespace workerd {
 
-namespace jsg {
-  // TODO(cleanup): While this isn't used directly in worker.h or worker.c++, it is
-  // used transitively by internal repo source files. Those will need to be updated
-  // to import or define jsg::V8System where appropriate before we can remove this
-  // declaration.
-  class V8System;
-}
-
 namespace api {
   class DurableObjectState;
   class DurableObjectStorage;
@@ -144,11 +136,6 @@ public:
   typedef kj::Function<jsg::Ref<api::Socket>(jsg::Lock&)> ConnectFn;
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
-
-  // TODO(cleanup): This is currently used in exactly one place in the internal
-  // repo. Once that is updated to use workerd::WarnAboutIsolateLockScope directly
-  // this alias can be removed.
-  using WarnAboutIsolateLockScope = workerd::WarnAboutIsolateLockScope;
 
 private:
   kj::Own<const Script> script;
