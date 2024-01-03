@@ -27,14 +27,6 @@ namespace v8 { class Isolate; }
 
 namespace workerd {
 
-namespace jsg {
-  // TODO(cleanup): While this isn't used directly in worker.h or worker.c++, it is
-  // used transitively by internal repo source files. Those will need to be updated
-  // to import or define jsg::V8System where appropriate before we can remove this
-  // declaration.
-  class V8System;
-}
-
 namespace api {
   class DurableObjectState;
   class DurableObjectStorage;
