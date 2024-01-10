@@ -14,10 +14,6 @@
 #include <workerd/server/alarm-scheduler.h>
 #include <kj/compat/http.h>
 
-#if __aarch64__
-#error "Testing broken arm build"
-#endif
-
 namespace kj {
   class TlsContext;
 }
