@@ -21,7 +21,7 @@ jobs:
   coverage-linux:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04-16core
+      image: ubuntu-26.04
       os_name: linux
       arch_name: 'X64'
       suffix: 'coverage'
