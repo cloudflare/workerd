@@ -206,6 +206,10 @@ public:
   virtual void receivedWebSocketMessage(size_t bytes) {}
   virtual void sentWebSocketMessage(size_t bytes) {}
 
+  virtual void startStorageOperation() {}
+  virtual void failStorageOperation() {}
+  virtual void resolveStorageOperation() {}
+
   virtual void addCachedStorageReadUnits(uint32_t units) {}
   virtual void addUncachedStorageReadUnits(uint32_t units) {}
   virtual void addStorageWriteUnits(uint32_t units) {}

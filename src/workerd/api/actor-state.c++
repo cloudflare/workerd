@@ -43,10 +43,6 @@ jsg::JsValue deserializeMaybeV8Value(
   }
 }
 
-ActorObserver& currentActorMetrics() {
-  return IoContext::current().getActorOrThrow().getMetrics();
-}
-
 }  // namespace
 
 kj::Exception DurableObjectStorageOperations::coerceToTunneledException(kj::Exception e) {

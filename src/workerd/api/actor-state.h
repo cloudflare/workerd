@@ -169,16 +169,32 @@ protected:
   // Log the exception when relevant and rewrite its message as a jsg exception.
   static kj::Exception coerceToTunneledException(kj::Exception e);
 
+  static ActorObserver& currentActorMetrics() {
+    return IoContext::current().getActorOrThrow().getMetrics();
+  }
+
   // Wrap a synchronous function so that we coerce thrown exceptions appropriately.
-  template <typename Func>
-  [[nodiscard]] auto enforceStorageApiBoundary(Func&& func) try {
-    return kj::fwd<Func>(func)();
-  } catch (jsg::JsExceptionThrown&) {
-    // Rethrow any exceptions that originate from v8/js without coercing, it will be handled
-    // downstream.
-    throw;
-  } catch (...) {
-    kj::throwFatalException(coerceToTunneledException(kj::getCaughtExceptionAsKj()));
+  template <typename Func> [[nodiscard]] auto enforceStorageApiBoundary(Func&& func) {
+    auto& metrics = currentActorMetrics();
+    try {
+      metrics.startStorageOperation();
+      KJ_DEFER({
+        // If we're returning a promise from this function, then it's not really the end of a
+        // storage operation. Perhaps there is some way this could interact better with
+        // handleCachePromise to that end? It tends to work out since handleCachePromise still calls
+        // failStorageOperation().
+        metrics.resolveStorageOperation();
+      });
+      return kj::fwd<Func>(func)();
+    } catch (jsg::JsExceptionThrown&) {
+      // Rethrow any exceptions that originate from v8/js without coercing, it will be handled
+      // downstream.
+      metrics.failStorageOperation();
+      throw;
+    } catch (...) {
+      metrics.failStorageOperation();
+      kj::throwFatalException(coerceToTunneledException(kj::getCaughtExceptionAsKj()));
+    }
   }
 
   // Await a given io promise, optionally with the input lock, and run the given function upon
@@ -189,7 +205,10 @@ protected:
   auto handleCachePromise(
       jsg::Lock& js, bool allowConcurrency, kj::Promise<T> promise, Funcs&&... funcs) {
     auto& context = IoContext::current();
-    promise = promise.catch_([](kj::Exception e) -> kj::Promise<T> {
+    auto metrics = kj::addRef(context.getActorOrThrow().getMetrics());
+    promise = promise.catch_(
+        [metrics = kj::mv(metrics)](kj::Exception e) mutable -> kj::Promise<T> {
+      metrics->failStorageOperation();
       return coerceToTunneledException(kj::mv(e));
     });
 
