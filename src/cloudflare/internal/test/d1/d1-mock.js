@@ -6,38 +6,44 @@ export class D1MockDO {
   constructor(state, env) {
     this.state = state
     this.sql = this.state.storage.sql
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-          user_id INTEGER PRIMARY KEY,
-          name TEXT,
-          home TEXT,
-          features TEXT
-      );`)
-    this.sql.exec(`DELETE FROM users;`)
-    this.sql.exec(`INSERT INTO users (name, home, features) VALUES 
-      ('Albert Ross', 'sky', 'wingspan'),
-      ('Al Dente', 'bowl', 'mouthfeel');
-    `)
   }
 
   async fetch(request) {
-    const { pathname } = new URL(request.url)
-    if (request.method === 'POST' && pathname.match(/^\/(query|execute)$/)) {
+    const { pathname, searchParams } = new URL(request.url)
+    const is_query = pathname === '/query'
+    const is_execute = pathname === '/execute'
+    if (request.method === 'POST' && (is_query || is_execute)) {
       const body = await request.json()
+      const resultsFormat =
+        searchParams.get('resultsFormat') ??
+        (is_query ? 'ARRAY_OF_OBJECTS' : 'NONE')
       return Response.json(
         Array.isArray(body)
-          ? body.map((query) => this.runQuery(query))
-          : this.runQuery(body)
+          ? body.map((query) => this.runQuery(query, resultsFormat))
+          : this.runQuery(body, resultsFormat)
       )
     } else {
       return Response.json({ error: 'Not found' }, { status: 404 })
     }
   }
 
-  runQuery(query) {
+  runQuery(query, resultsFormat) {
     const { sql, params = [] } = query
-    const results = Array.from(this.sql.exec(sql, ...params))
+    const stmt = this.sql.prepare(sql)(...params)
+    const columnNames = stmt.columnNames
+    const rawResults = Array.from(stmt.raw())
+
+    const results =
+      resultsFormat === 'NONE'
+        ? undefined
+        : resultsFormat === 'ROWS_AND_COLUMNS'
+        ? { columns: columnNames, rows: rawResults }
+        : rawResults.map((row) =>
+            Object.fromEntries(columnNames.map((c, i) => [c, row[i]]))
+          )
+
     return {
+      success: true,
       results,
       meta: { duration: 0.001, served_by: 'd1-mock' },
     }

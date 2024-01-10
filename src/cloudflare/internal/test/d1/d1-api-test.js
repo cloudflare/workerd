@@ -4,132 +4,273 @@
 
 import * as assert from 'node:assert'
 
-// TODO: how to import this from d1-mock.js?
-const MOCK_USER_ROWS = {
-  1: { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
-  2: { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+// Test helpers, since I want everything to run in sequence but I don't
+// want to lose context about which assertion failed.
+const test = (fn) => ({
+  async test(ctr, env) {
+    await fn(env.d1)
+  },
+})
+
+// Recurse through nested objects/arrays looking for 'anything' and deleting that
+// key/value from both objects. Gives us a way to get expect.toMatchObject behaviour
+// with only deepEqual
+const anything = Symbol('anything')
+const deleteAnything = (expected, actual) => {
+  Object.entries(expected).forEach(([k, v]) => {
+    if (v === anything) {
+      delete actual[k]
+      delete expected[k]
+    } else if (typeof v === 'object' && typeof actual[k] === 'object') {
+      deleteAnything(expected[k], actual[k])
+    }
+  })
 }
 
-export const test_d1_select_1 = {
-  async test(ctr, env) {
-    const DB = env.d1
+const itShould = async (description, ...assertions) => {
+  if (assertions.length % 2 !== 0)
+    throw new Error('itShould takes pairs of cb, expected args')
 
-    const stmt = DB.prepare(`select 1;`)
-    assert.deepEqual(await stmt.all(), {
+  try {
+    for (let i = 0; i < assertions.length; i += 2) {
+      const cb = assertions[i]
+      const expected = assertions[i + 1]
+      const actual = await cb()
+      deleteAnything(expected, actual)
+      assert.deepEqual(actual, expected)
+    }
+  } catch (e) {
+    throw new Error(`TEST ERROR!\n❌ Failed to ${description}\n${e.message}`)
+  }
+}
+
+export const test_d1_api = test(async (DB) => {
+  await itShould(
+    'create a Users table',
+    () =>
+      DB.prepare(
+        ` CREATE TABLE users
+        (
+            user_id  INTEGER PRIMARY KEY,
+            name     TEXT,
+            home     TEXT,
+            features TEXT
+        );`
+      ).run(),
+    { success: true, meta: anything }
+  )
+
+  await itShould(
+    'select an empty set',
+    () => DB.prepare(`SELECT * FROM users;`).all(),
+    {
+      success: true,
+      results: [],
+      meta: anything,
+    }
+  )
+
+  await itShould(
+    'have no results for .run()',
+    () => DB.prepare(`SELECT * FROM users;`).run(),
+    { success: true, meta: anything }
+  )
+
+  await itShould(
+    'delete no rows ok',
+    () => DB.prepare(`DELETE FROM users;`).run(),
+    { success: true, meta: anything }
+  )
+
+  await itShould(
+    'insert a few rows with a returning statement',
+    () =>
+      DB.prepare(
+        `
+        INSERT INTO users (name, home, features) VALUES
+          ('Albert Ross', 'sky', 'wingspan'),
+          ('Al Dente', 'bowl', 'mouthfeel')
+        RETURNING *
+    `
+      ).all(),
+    {
+      success: true,
+      results: [
+        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+      ],
+      meta: anything,
+    }
+  )
+
+  await itShould(
+    'delete two rows ok',
+    () => DB.prepare(`DELETE FROM users;`).run(),
+    { success: true, meta: anything }
+  )
+
+  // In an earlier implementation, .run() called a different endpoint that threw on RETURNING clauses.
+  await itShould(
+    'insert a few rows with a returning statement, but ignore the result without erroring',
+    () =>
+      DB.prepare(
+        `
+        INSERT INTO users (name, home, features) VALUES
+          ('Albert Ross', 'sky', 'wingspan'),
+          ('Al Dente', 'bowl', 'mouthfeel')
+        RETURNING *
+    `
+      ).run(),
+    {
+      success: true,
+      meta: anything,
+    }
+  )
+
+  // Results format tests
+
+  const select_1 = DB.prepare(`select 1;`)
+  await itShould(
+    'return simple results for select 1',
+    () => select_1.all(),
+    {
       results: [{ 1: 1 }],
-      meta: { duration: 0.001, served_by: 'd1-mock' },
+      meta: anything,
       success: true,
-    })
+    },
+    () => select_1.raw(),
+    [[1]],
+    () => select_1.first(),
+    { 1: 1 },
+    () => select_1.first('1'),
+    1
+  )
 
-    const [raw, first, firstColumn] = await Promise.all([
-      stmt.raw(),
-      stmt.first(),
-      stmt.first('1'),
-    ])
-    assert.deepEqual(raw, [[1]])
-    assert.deepEqual(first, { 1: 1 })
-    assert.deepEqual(firstColumn, 1)
-  },
-}
-
-export const test_d1_select_all = {
-  async test(ctr, env) {
-    const DB = env.d1
-    const user_1 = MOCK_USER_ROWS[1]
-    const user_2 = MOCK_USER_ROWS[2]
-
-    const stmt = DB.prepare(`select * from users;`)
-    assert.deepEqual(await stmt.all(), {
-      results: [user_1, user_2],
-      meta: { duration: 0.001, served_by: 'd1-mock' },
+  const select_all = DB.prepare(`SELECT * FROM users;`)
+  await itShould(
+    'return all users',
+    () => select_all.all(),
+    {
+      results: [
+        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+      ],
+      meta: anything,
       success: true,
-    })
+    },
+    () => select_all.raw(),
+    [
+      [1, 'Albert Ross', 'sky', 'wingspan'],
+      [2, 'Al Dente', 'bowl', 'mouthfeel'],
+    ],
+    () => select_all.first(),
+    { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+    () => select_all.first('name'),
+    'Albert Ross'
+  )
 
-    const [raw, first, firstColumn] = await Promise.all([
-      stmt.raw(),
-      stmt.first(),
-      stmt.first('features'),
-    ])
-    assert.deepEqual(raw, [Object.values(user_1), Object.values(user_2)])
-    assert.deepEqual(first, user_1)
-    assert.deepEqual(firstColumn, user_1.features)
-  },
-}
+  const select_one = DB.prepare(`SELECT * FROM users WHERE user_id = ?;`)
 
-export const test_d1_select_one = {
-  async test(ctr, env) {
-    const DB = env.d1
-    const user_1 = MOCK_USER_ROWS[1]
-    const user_2 = MOCK_USER_ROWS[2]
-
-    const withParam = DB.prepare(`select * from users where user_id = ?;`)
+  await itShould(
+    'return the first user when bound with user_id = 1',
+    () => select_one.bind(1).all(),
     {
-      const stmt = withParam.bind(1)
-      assert.deepEqual(await stmt.all(), {
-        results: [user_1],
-        meta: { duration: 0.001, served_by: 'd1-mock' },
-        success: true,
-      })
+      results: [
+        { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+      ],
+      meta: anything,
+      success: true,
+    },
+    () => select_one.bind(1).raw(),
+    [[1, 'Albert Ross', 'sky', 'wingspan']],
+    () => select_one.bind(1).first(),
+    { user_id: 1, name: 'Albert Ross', home: 'sky', features: 'wingspan' },
+    () => select_one.bind(1).first('name'),
+    'Albert Ross'
+  )
 
-      const [raw, first, firstColumn] = await Promise.all([
-        stmt.raw(),
-        stmt.first(),
-        stmt.first('home'),
-      ])
-      assert.deepEqual(raw, [Object.values(user_1)])
-      assert.deepEqual(first, user_1)
-      assert.deepEqual(firstColumn, user_1.home)
-    }
+  await itShould(
+    'return the second user when bound with user_id = 2',
+    () => select_one.bind(2).all(),
     {
-      const stmt = withParam.bind(2)
-      assert.deepEqual(await stmt.all(), {
-        results: [user_2],
-        meta: { duration: 0.001, served_by: 'd1-mock' },
-        success: true,
-      })
+      results: [
+        { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+      ],
+      meta: anything,
+      success: true,
+    },
+    () => select_one.bind(2).raw(),
+    [[2, 'Al Dente', 'bowl', 'mouthfeel']],
+    () => select_one.bind(2).first(),
+    { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+    () => select_one.bind(2).first('name'),
+    'Al Dente'
+  )
 
-      const [raw, first, firstColumn] = await Promise.all([
-        stmt.raw(),
-        stmt.first(),
-        stmt.first('name'),
-      ])
-      assert.deepEqual(raw, [Object.values(user_2)])
-      assert.deepEqual(first, user_2)
-      assert.deepEqual(firstColumn, user_2.name)
-    }
-  },
-}
-
-export const test_d1_batch = {
-  async test(ctr, env) {
-    const DB = env.d1
-    const user_1 = MOCK_USER_ROWS[1]
-    const user_2 = MOCK_USER_ROWS[2]
-
-    const withParam = DB.prepare(`select * from users where user_id = ?;`)
-    const response = await DB.batch([withParam.bind(1), withParam.bind(2)])
-    assert.deepEqual(response, [
+  await itShould(
+    'return the results of two commands with batch',
+    () => DB.batch([select_one.bind(2), select_one.bind(1)]),
+    [
       {
-        results: [user_1],
-        meta: { duration: 0.001, served_by: 'd1-mock' },
+        results: [
+          { user_id: 2, name: 'Al Dente', home: 'bowl', features: 'mouthfeel' },
+        ],
+        meta: anything,
         success: true,
       },
       {
-        results: [user_2],
-        meta: { duration: 0.001, served_by: 'd1-mock' },
+        results: [
+          {
+            user_id: 1,
+            name: 'Albert Ross',
+            home: 'sky',
+            features: 'wingspan',
+          },
+        ],
+        meta: anything,
         success: true,
       },
-    ])
-  },
-}
+    ]
+  )
 
-export const test_d1_exec = {
-  async test(ctr, env) {
-    const DB = env.d1
-    const response = await DB.exec(`
-      select 1;
-      select * from users;
-    `)
-    assert.deepEqual(response, { count: 2, duration: 0.002 })
-  },
-}
+  await itShould(
+    'create two tables with overlapping column names',
+    () =>
+      DB.exec(`
+        CREATE TABLE abc (a INT, b INT, c INT);
+        CREATE TABLE cde (c INT, d INT, e INT);
+        INSERT INTO abc VALUES (1,2,3),(4,5,6);
+        INSERT INTO cde VALUES (7,8,9),(1,2,3);
+      `),
+    {
+      count: 4,
+      duration: anything,
+    }
+  )
+
+  await itShould(
+    'still sadly lose data for duplicate columns in a join',
+    () => DB.prepare(`SELECT * FROM abc, cde;`).all(),
+    {
+      success: true,
+      results: [
+        { a: 1, b: 2, c: 7, d: 8, e: 9 },
+        { a: 1, b: 2, c: 1, d: 2, e: 3 },
+        { a: 4, b: 5, c: 7, d: 8, e: 9 },
+        { a: 4, b: 5, c: 1, d: 2, e: 3 },
+      ],
+      meta: anything,
+    }
+  )
+
+  await itShould(
+    'not lose data for duplicate columns in a join using raw',
+    () => DB.prepare(`SELECT * FROM abc, cde;`).raw(),
+    [
+      [1, 2, 3, 7, 8, 9],
+      [1, 2, 3, 1, 2, 3],
+      [4, 5, 6, 7, 8, 9],
+      [4, 5, 6, 1, 2, 3],
+    ]
+  )
+})
